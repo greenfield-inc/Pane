@@ -14,6 +14,8 @@
 //   env NAME [NAME...]  replies with those environment variables as JSON
 //   caps                replies with the client capabilities, session _meta and mode
 //   steps N             N completed steps of mixed kinds, then a reply
+//   background          replies, then runs a turn of its own with no prompt open (as Claude does for a
+//                       finished background task), announced as an async task to a client that takes them
 //
 // SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired.
 import { agent, methods, ndJsonStream, RequestError } from '@agentclientprotocol/sdk';
@@ -27,6 +29,22 @@ mkdirSync(store, { recursive: true });
 const file = id => path.join(store, `${id}.json`);
 const sessions = new Map();
 let clientCapabilities = {};
+
+/** A turn the agent starts by itself: it works on after the prompt ended, like claude-agent-acp's autonomous turn. */
+async function ownTurn(session, send) {
+  const announced = clientCapabilities._meta?.jetbrains?.air?.capabilities?.includes('asyncTasks');
+  const asyncTaskId = `autonomous-turn-${randomUUID()}`;
+  await new Promise(resolve => setTimeout(resolve, 40));
+  if (announced) await send({ sessionUpdate: 'async_task_spawned', asyncTaskId, name: 'Claude is working', taskType: 'turn', description: 'A background task finished.', showInTranscript: false, canStop: true });
+  for (const title of ['Own step 1', 'Own step 2', 'Own step 3']) {
+    if (session.ownTurnStopped) break;
+    const toolCallId = `tool-${randomUUID()}`;
+    await send({ sessionUpdate: 'tool_call', toolCallId, title, kind: 'read', status: 'in_progress' });
+    await new Promise(resolve => setTimeout(resolve, 120));
+    await send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' });
+  }
+  if (announced) await send({ sessionUpdate: 'async_task_state_update', asyncTaskId, state: session.ownTurnStopped ? 'stopped' : 'completed' });
+}
 
 function persist(id) { writeFileSync(file(id), JSON.stringify(sessions.get(id))); }
 function configOptions(session) {
@@ -73,6 +91,7 @@ const app = agent()
     return {};
   })
   .onRequest(methods.agent.session.close, () => ({}))
+  .onRequest('_session/async_task/stop', { parse: value => value }, ({ params }) => { const session = sessions.get(params.sessionId); if (session) session.ownTurnStopped = true; return { stopped: true }; })
   .onNotification(methods.agent.session.cancel, ({ params }) => { const session = sessions.get(params.sessionId); if (session) session.cancelled = true; })
   .onRequest(methods.agent.session.prompt, async ({ params, client }) => {
     const id = params.sessionId;
@@ -121,6 +140,11 @@ const app = agent()
       await send({ sessionUpdate: 'tool_call', toolCallId, title: 'Edit notes.txt', kind: 'edit', status: 'in_progress', locations: [{ path: path.join(session.cwd, 'notes.txt') }] });
       await send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', content: [{ type: 'diff', path: path.join(session.cwd, 'notes.txt'), oldText: 'a\n', newText: 'b\n' }] });
       await say('Edited.');
+      return { stopReason: 'end_turn' };
+    }
+    if (word === 'background') {
+      void ownTurn(session, send);
+      await say('Started it.');
       return { stopReason: 'end_turn' };
     }
     if (word === 'env') { await say(JSON.stringify(Object.fromEntries(rest.map(name => [name, process.env[name] ?? null])))); return { stopReason: 'end_turn' }; }

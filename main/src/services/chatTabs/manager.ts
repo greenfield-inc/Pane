@@ -60,6 +60,8 @@ interface Tab {
   starting?: Promise<void>;
   loading: boolean;
   delivering: boolean;
+  /** When the agent began a turn of its own. */
+  ownTurnStartedAt?: string;
   notice?: string;
   published?: AgentState;
   launch?: ResolvedLaunch;
@@ -272,6 +274,7 @@ export class ChatTabManager {
         if (event && !tab.loading && tab.run === generation) this.options.send('chat-tab:event', event);
       },
       onState: () => { if (tab.run === generation && !tab.loading) this.publish(panelId); },
+      onOwnTurn: outcome => { if (tab.run === generation) this.ownTurn(panelId, tab, outcome); },
       onExit: exit => this.exited(panelId, generation, exit),
     });
     tab.runtime = runtime;
@@ -343,7 +346,7 @@ export class ChatTabManager {
     const tab = this.tab(panelId);
     const runtime = tab.runtime;
     const state = this.required(panelId);
-    if (!runtime?.isAlive() || runtime.isRunning() || tab.delivering || tab.loading || state.status === 'starting' || state.status === 'stopped') return;
+    if (!runtime?.isAlive() || runtime.isRunning() || runtime.isWorkingAlone() || tab.delivering || tab.loading || state.status === 'starting' || state.status === 'stopped') return;
     const next = state.queue?.[0];
     if (!next) return;
     const body = next.stored ? this.bodies.read(panelId, next.operationId) : { text: next.text, images: next.images };
@@ -385,6 +388,22 @@ export class ChatTabManager {
     };
     this.publish(panelId);
     void runtime.prompt(content).then(result => finish('completed', result.stopReason), error => { void runtime.exitsWithin(250).then(exited => finish('failed', exited ? 'exited' : 'error', chatFailure(error))); });
+  }
+
+  /**
+   * The agent started or ended a turn with no prompt open. What the person sends
+   * meanwhile waits in the queue, so it lands below everything that turn does (D-193).
+   */
+  private ownTurn(panelId: string, tab: Tab, outcome: 'started' | 'end_turn' | 'cancelled' | 'error'): void {
+    if (outcome === 'started') tab.ownTurnStartedAt = new Date().toISOString();
+    else if (tab.ownTurnStartedAt) {
+      const marker = tab.transcript?.endTurn({ type: 'pane_turn', stopReason: outcome, startedAt: tab.ownTurnStartedAt, endedAt: new Date().toISOString() });
+      tab.ownTurnStartedAt = undefined;
+      if (marker && !tab.loading) this.options.send('chat-tab:event', marker);
+    }
+    if (tab.loading) return;
+    this.publish(panelId);
+    if (outcome !== 'started') this.drain(panelId);
   }
 
   private exited(panelId: string, generation: number, exit: RuntimeExit): void {
@@ -448,7 +467,7 @@ export class ChatTabManager {
     if (state.status === 'stopped') return 'stopped';
     if (tab.starting || tab.loading || !tab.runtime) return tab.runtime || tab.starting ? 'starting' : state.status === 'starting' ? 'starting' : 'idle';
     if (tab.runtime.permissions().length || tab.runtime.questions().length) return 'blocked';
-    return tab.runtime.isRunning() || tab.delivering ? 'working' : 'idle';
+    return tab.runtime.isRunning() || tab.runtime.isWorkingAlone() || tab.delivering ? 'working' : 'idle';
   }
 
   private publish(panelId: string): void {

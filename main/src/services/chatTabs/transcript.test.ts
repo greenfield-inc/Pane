@@ -44,6 +44,30 @@ describe('chat tab transcript', () => {
     expect(transcript.snapshot(50).messages.map(message => message.role)).toEqual(['user', 'assistant']);
   });
 
+  it('keeps time order when an agent message continues after a step, as Claude\'s API messages do (D-193)', () => {
+    const transcript = new ChatTranscript('panel', 1, { spoolFile: spool() });
+    transcript.userMessage('op-1', [{ type: 'text', text: 'Go' }]);
+    transcript.accept({ sessionUpdate: 'agent_message_chunk', messageId: 'msg_1', content: { type: 'text', text: 'Before ' } });
+    transcript.accept({ sessionUpdate: 'agent_message_chunk', messageId: 'msg_1', content: { type: 'text', text: 'the step.' } });
+    transcript.accept({ sessionUpdate: 'tool_call', toolCallId: 't1', title: 'Read', kind: 'read', status: 'completed' });
+    transcript.accept({ sessionUpdate: 'agent_message_chunk', messageId: 'msg_1', content: { type: 'text', text: 'After ' } });
+    const later = transcript.accept({ sessionUpdate: 'agent_message_chunk', messageId: 'msg_1', content: { type: 'text', text: 'the step.' } });
+    expect(later?.index).toBe(3);
+    expect(transcript.snapshot(50).messages.map(message => message.parts[0].type === 'text' ? message.parts[0].text : message.parts[0].type)).toEqual(['Go', 'Before the step.', 'tool', 'After the step.']);
+  });
+
+  it('gives a new prompt its own to-do list, so an update never rewrites one above it (D-193)', () => {
+    const transcript = new ChatTranscript('panel', 1, { spoolFile: spool() });
+    const plan = (content: string) => ({ sessionUpdate: 'plan' as const, entries: [{ content, status: 'pending' as const, priority: 'high' as const }] });
+    transcript.accept({ sessionUpdate: 'user_message_chunk', messageId: 'u1', content: { type: 'text', text: 'Replayed' } });
+    transcript.accept(plan('first'));
+    transcript.accept(plan('first, updated'));
+    transcript.userMessage('op-1', [{ type: 'text', text: 'Next' }]);
+    transcript.accept(plan('second'));
+    const rows = transcript.snapshot(50).messages.map(message => message.role === 'user' ? 'user' : JSON.stringify(message.parts[0]).match(/"content":"([^"]+)"/)?.[1]);
+    expect(rows).toEqual(['user', 'first, updated', 'user', 'second']);
+  });
+
   it('keeps an unknown update as a plain row', () => {
     const transcript = new ChatTranscript('panel', 1, { spoolFile: spool() });
     // An update this Pane version has never seen, as it arrives off the wire.

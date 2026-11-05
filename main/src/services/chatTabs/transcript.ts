@@ -37,7 +37,7 @@ export class ChatTranscript {
   /** The spool file could not be repaired after a failed write; messages stay in memory until the next start. */
   private spoolBroken = false;
   private readonly indexes = new Map<string, number>();
-  private chunk?: { id: string; role: AgentChatMessage['role'] };
+  private chunk?: { id: string; role: AgentChatMessage['role']; agentId?: string };
   private echo?: { text: string; received: string };
   private sequence = 0;
   private readonly windowMessages: number;
@@ -98,6 +98,7 @@ export class ChatTranscript {
   /** The prompt as Pane sent it. An echo of the same text from the agent is folded into it. */
   userMessage(operationId: string, content: ContentBlock[]): ChatTabEvent[] {
     this.chunk = undefined;
+    this.sequence++; // The next to-do list is this prompt's own.
     const events: ChatTabEvent[] = [];
     const id = `user:${operationId}`;
     for (const block of content) {
@@ -120,8 +121,7 @@ export class ChatTranscript {
           if (this.echo.text.startsWith(received)) { this.echo.received = received; return undefined; }
         }
         if (role === 'assistant') this.echo = undefined;
-        const id = update.messageId ?? (this.chunk?.role === role ? this.chunk.id : `${role}:${this.generation}:${++this.sequence}`);
-        this.chunk = { id, role };
+        const id = this.chunkId(role, update.messageId ?? undefined);
         const part: AgentChatPart = update.content.type === 'text'
           ? { type: update.sessionUpdate === 'agent_thought_chunk' ? 'thought' : 'text', text: update.content.text }
           : { type: 'content', content: decodeBoundary(update.content, boundary.json) };
@@ -174,6 +174,19 @@ export class ChatTranscript {
         // Unknown or extension updates render as a plain row rather than breaking the tab.
         return this.commit({ type: 'replace', message: { id: `update:${this.generation}:${++this.sequence}`, role: 'assistant', parts: [{ type: 'content', content: decodeBoundary(update, boundary.json) }] } });
     }
+  }
+
+  /**
+   * The row a chunk belongs to. Chunks of the message being written join it. A message
+   * the agent returns to after a step gets a new row below that step: Claude's id is
+   * its API message's, which spans text and steps, and rows stay in the order things happened.
+   */
+  private chunkId(role: AgentChatMessage['role'], agentId: string | undefined): string {
+    if (this.chunk?.role === role && this.chunk.agentId === agentId) return this.chunk.id;
+    if (role === 'user') this.sequence++; // A replayed prompt starts a turn: the next to-do list is its own.
+    const id = agentId && !this.indexes.has(agentId) ? agentId : `${role}:${this.generation}:${++this.sequence}`;
+    this.chunk = { id, role, ...(agentId ? { agentId } : {}) };
+    return id;
   }
 
   private commit(change: ChatTabChange): ChatTabEvent | undefined {

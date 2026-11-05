@@ -1,12 +1,12 @@
 import {
   client, methods, RequestError, type ClientConnection, type ContentBlock, type CreateElicitationRequest, type CreateElicitationResponse,
   type InitializeResponse, type LoadSessionRequest, type LoadSessionResponse, type NewSessionRequest, type NewSessionResponse,
-  type PromptResponse, type RequestPermissionRequest, type SessionNotification, type RequestPermissionResponse, type SessionConfigOption, type SessionUpdate,
+  type PromptResponse, type AnyMessage, type Stream, type RequestPermissionRequest, type SessionNotification, type RequestPermissionResponse, type SessionConfigOption, type SessionUpdate,
 } from '@agentclientprotocol/sdk';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import type { ChatTabCommand } from '../../../../shared/types/chatTab';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { AgentProcess, type AgentCommand } from './agentProcess';
 
 export interface PendingPermission { id: string; request: RequestPermissionRequest }
@@ -19,6 +19,8 @@ export interface ChatTabRuntimeOptions {
   requestTimeoutMs?: number;
   onUpdate: (update: SessionUpdate) => void;
   onState: () => void;
+  /** The agent started or ended a turn of its own; ending says how. */
+  onOwnTurn?: (outcome: 'started' | 'end_turn' | 'cancelled' | 'error') => void;
   onExit: (exit: RuntimeExit) => void;
 }
 
@@ -40,6 +42,33 @@ export function chatFailure(cause: unknown, fallback: { code: string; next: stri
 
 export function isAuthRequired(error: PaneError): boolean { return error.code === 'CHAT_NOT_SIGNED_IN'; }
 
+/** claude-agent-acp's extension: stops a task; for the task of an agent's own turn, it interrupts the turn. */
+const ASYNC_TASK_STOP = '_session/async_task/stop';
+const OWN_TURN_ENDS = new Set(['completed', 'failed', 'stopped']);
+const asyncTaskUpdate = boundary.object({
+  sessionUpdate: boundary.union(boundary.literal('async_task_spawned'), boundary.literal('async_task_progress'), boundary.literal('async_task_state_update')),
+  asyncTaskId: boundary.string, taskType: boundary.optional(boundary.string), state: boundary.optional(boundary.string),
+});
+/**
+ * The SDK refuses session updates outside the ACP schema, and claude-agent-acp's async
+ * task updates are. They travel under a method of Pane's own, in place in the stream,
+ * so one still arrives in order with the updates around it.
+ */
+const ASYNC_TASK_NOTIFICATION = '_pane/async_task';
+const taskMessage = boundary.object({ method: boundary.literal('session/update'), params: boundary.object({ sessionId: boundary.string, update: asyncTaskUpdate }) });
+function withAsyncTasks(stream: Stream): Stream {
+  return {
+    writable: stream.writable,
+    readable: stream.readable.pipeThrough(new TransformStream<AnyMessage, AnyMessage>({
+      transform(message, controller) {
+        controller.enqueue(decodeOptionalBoundary(message, taskMessage) ? { ...message, method: ASYNC_TASK_NOTIFICATION } as AnyMessage : message);
+      },
+    })),
+  };
+}
+const decodeAsyncTask = { parse: (value: unknown) => decodeBoundary(value, boundary.object({ sessionId: boundary.string, update: asyncTaskUpdate })) };
+type AsyncTaskUpdate = { sessionUpdate: string; asyncTaskId: string; taskType?: string; state?: string };
+
 /**
  * One chat tab's ACP client connection to its adapter process. It never holds
  * a terminal and never hands its session to one (D-20).
@@ -54,6 +83,8 @@ export class ChatTabRuntime {
   private readonly permissionRequests = new Map<string, { permission: PendingPermission; resolve: (response: RequestPermissionResponse) => void }>();
   private readonly questionRequests = new Map<string, { question: PendingQuestion; resolve: (response: CreateElicitationResponse) => void }>();
   private running = false;
+  /** A turn the agent started by itself, with no prompt open (D-193). */
+  private ownTurn?: string;
   private creating = false;
   private early: SessionNotification[] = [];
   private stopping = false;
@@ -67,6 +98,8 @@ export class ChatTabRuntime {
   get pid(): number | undefined { return this.process.pid; }
   get session(): string | undefined { return this.sessionId; }
   isRunning(): boolean { return this.running; }
+  /** The agent is working on a turn of its own, for example after a background task finished. */
+  isWorkingAlone(): boolean { return this.ownTurn !== undefined; }
   isAlive(): boolean { return this.process.running && !this.stopping; }
   supportsImages(): boolean { return this.initialization?.agentCapabilities?.promptCapabilities?.image === true; }
   canLoad(): boolean { return this.initialization?.agentCapabilities?.loadSession === true; }
@@ -100,10 +133,12 @@ export class ChatTabRuntime {
           this.options.onState();
         });
       })
-      .connect(this.process.stream);
+      .onNotification(ASYNC_TASK_NOTIFICATION, decodeAsyncTask, ({ params }) => { if (params.sessionId === this.sessionId) this.asyncTask(params.update); })
+      .connect(withAsyncTasks(this.process.stream));
     void this.process.exited.then(exit => {
       this.withdraw();
       this.running = false;
+      this.ownTurn = undefined;
       const expected = this.stopping;
       const reason = exit.error ? exit.error.message : exit.signal ? `was stopped by ${exit.signal}` : `exited with code ${exit.code}`;
       this.options.onExit({ expected, message: `The agent ${reason}.`, stderr: this.process.stderrTail() });
@@ -114,7 +149,8 @@ export class ChatTabRuntime {
         clientInfo: { name: 'pane', version: '1' },
         // Form elicitation lets Claude ask AskUserQuestion and plan questions as cards.
         // terminal_output_delta: claude-agent-acp streams command output into the step's row.
-        clientCapabilities: { elicitation: { form: {} }, _meta: { terminal_output_delta: true } },
+        // asyncTasks: ACP has no session state, so this is the only sign that claude-agent-acp works on a turn of its own.
+        clientCapabilities: { elicitation: { form: {} }, _meta: { terminal_output_delta: true, jetbrains: { air: { version: 1, capabilities: ['asyncTasks'] } } } },
       }));
     } catch (error) {
       const stderr = this.process.stderrTail().split('\n').filter(Boolean).at(-1);
@@ -163,7 +199,9 @@ export class ChatTabRuntime {
 
   async cancel(): Promise<void> {
     this.withdraw();
-    if (this.sessionId && this.process.running) await this.agent().notify(methods.agent.session.cancel, { sessionId: this.sessionId });
+    if (!this.sessionId || !this.process.running) return;
+    if (this.ownTurn && !this.running) { await this.agent().request(ASYNC_TASK_STOP, { sessionId: this.sessionId, asyncTaskId: this.ownTurn }).catch(error => { throw chatFailure(error); }); return; }
+    await this.agent().notify(methods.agent.session.cancel, { sessionId: this.sessionId });
   }
 
   permissions(): PendingPermission[] { return [...this.permissionRequests.values()].map(entry => entry.permission); }
@@ -255,6 +293,17 @@ export class ChatTabRuntime {
       this.options.onState();
     }
     this.options.onUpdate(update);
+  }
+
+  /** Background work has its own lifecycle and no row in the conversation; only a turn of the agent's own matters here. */
+  private asyncTask(task: AsyncTaskUpdate): void {
+    if (task.sessionUpdate === 'async_task_spawned' && task.taskType === 'turn') {
+      this.ownTurn = task.asyncTaskId;
+      this.options.onOwnTurn?.('started');
+    } else if (task.sessionUpdate === 'async_task_state_update' && task.asyncTaskId === this.ownTurn && OWN_TURN_ENDS.has(task.state ?? '')) {
+      this.ownTurn = undefined;
+      this.options.onOwnTurn?.(task.state === 'completed' ? 'end_turn' : task.state === 'stopped' ? 'cancelled' : 'error');
+    }
   }
 
   private agent(): ClientConnection['agent'] {

@@ -95,6 +95,39 @@ describe('chat tab manager', () => {
     expect(manager.view('p1').queue).toEqual([]);
   });
 
+  it('keeps a message sent during the agent\'s own turn below everything that turn did (D-193)', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'background' });
+    await expect.poll(() => manager.receipt('p1', 'op-1')?.state).toBe('completed');
+    // The prompt has ended, but the agent is still at work on its own.
+    await expect.poll(() => manager.view('p1').transcript?.messages.some(message => message.parts.some(part => part.type === 'tool' && part.title === 'Own step 1'))).toBe(true);
+    expect(manager.view('p1').status).toBe('working');
+    manager.send('p1', { operationId: 'op-2', text: 'second' });
+    expect(manager.view('p1').queue.map(item => item.text)).toEqual(['second']);
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 5000 }).toBe('completed');
+    const order = manager.view('p1').transcript!.messages.flatMap(message => message.parts.flatMap(part => part.type === 'tool' ? [part.title] : message.role === 'user' && part.type === 'text' ? [part.text] : []));
+    expect(order).toEqual(['background', 'Own step 1', 'Own step 2', 'Own step 3', 'second', 'Read README.md']);
+    // The rows are not unknown updates, and the agent's turn is timed like any other.
+    const contents = manager.view('p1').transcript!.messages.flatMap(message => message.parts.flatMap(part => part.type === 'content' ? [part.content] : []));
+    expect(contents.filter(content => JSON.stringify(content).includes('async_task'))).toEqual([]);
+    expect(contents.filter(content => JSON.stringify(content).includes('pane_turn'))).toHaveLength(3);
+  });
+
+  it('Stop ends the agent\'s own turn and then sends what waited for it', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'background' });
+    await expect.poll(() => manager.view('p1').transcript?.messages.some(message => message.parts.some(part => part.type === 'tool' && part.title === 'Own step 1'))).toBe(true);
+    await expect.poll(() => manager.receipt('p1', 'op-1')?.state).toBe('completed');
+    manager.send('p1', { operationId: 'op-2', text: 'second' });
+    await manager.cancel('p1');
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 5000 }).toBe('completed');
+    expect(replyText(manager.view('p1'))).toContain('You said: second');
+  });
+
   it('comes back after Pane quits with its history, marks the interrupted turn and continues the same conversation', async () => {
     const store = new MemoryStore();
     const directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-manager-'));
