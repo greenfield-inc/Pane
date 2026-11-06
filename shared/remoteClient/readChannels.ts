@@ -67,12 +67,14 @@ export const REMOTE_READ_CHANNELS = new Set([
 export const REMOTE_DEDUPLICATED_CHANNELS = new Set(['agent-chat:send']);
 
 /**
- * Idempotent device bookkeeping a phone sends to every saved computer without opening its
- * workspace stream: push registration (an upsert per install) and shared-key sync (newest wins).
+ * Calls a device sends without opening the workspace stream: push registration (an upsert per
+ * install), shared-key sync (newest wins), and claiming a single-use code, which comes before
+ * the device has a token that opens the stream.
  */
 export const REMOTE_STREAMLESS_CHANNELS = new Set([
   'credentials:shared:get', 'credentials:shared:apply',
   'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke',
+  'remote:claim-code',
 ]);
 
 /** Idempotent viewer bookkeeping required to restore a connected workspace. */

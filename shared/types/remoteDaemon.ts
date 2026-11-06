@@ -51,6 +51,8 @@ export interface RemoteDaemonConnectedClient {
   remoteAddress: string | null;
   connectedAt: string;
   lastSeenAt: string;
+  /** Who the connection code was made for; null for a code made without a name or a codeless connection. */
+  person: string | null;
 }
 
 /** What Settings shows about this host's tailnet: a problem and its fix, or that the host moved. */
@@ -84,6 +86,13 @@ export interface RemoteDaemonClientRecord {
   kind?: 'glasses';
   /** Glasses only: the install id of the phone that paired them; pairing again from that phone replaces them. */
   phoneId?: string;
+  /** Who a single-use code was made for, shown wherever this client appears. */
+  person?: string;
+  /** Set while a single-use code is unclaimed: when it stops working. Cleared when a device claims it. */
+  claimBy?: string;
+  /** When a device claimed the code, and that device's name. */
+  claimedAt?: string;
+  claimedDevice?: string;
 }
 
 export interface RemotePaneConnectionProfile {
@@ -115,6 +124,8 @@ export interface PaneRemoteConnectionImportPayload {
   baseUrl: string;
   token: string;
   transport: RemoteDaemonTransport;
+  /** Set on a single-use code: `token` only claims this device's own token, once. */
+  claim?: true;
   tunnel?: {
     kind: 'ssh' | 'tailscale' | 'manual';
     command?: string;
@@ -196,7 +207,13 @@ export interface RemoteHostConnectionCodeResult {
   connectionCode: string;
   client: RemoteDaemonClientRecord;
   access: RemoteDaemonHostAccess;
+  /** Who the single-use code is for, and when it stops working if nobody claims it. */
+  person: string;
+  expiresAt: string;
 }
+
+/** How long a single-use code works before a device claims it. */
+export const CONNECTION_CODE_CLAIM_MS = 15 * 60_000;
 
 export interface RemoteDaemonImportResult {
   profile: RemotePaneConnectionProfile;
@@ -553,6 +570,10 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
   kind: boundary.optional(boundary.literal('glasses')),
   phoneId: boundary.optional(boundary.nonEmptyString),
+  person: boundary.optional(boundary.nonEmptyString),
+  claimBy: boundary.optional(boundary.nonEmptyString),
+  claimedAt: boundary.optional(boundary.nonEmptyString),
+  claimedDevice: boundary.optional(boundary.nonEmptyString),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({
   kind: boundary.enumeration('ssh', 'tailscale', 'manual'),
@@ -590,6 +611,7 @@ const remoteImportSchema = boundary.object({
   baseUrl: boundary.nonEmptyString,
   token: boundary.nonEmptyString,
   transport: boundary.literal('http+sse'),
+  claim: boundary.optional(boundary.literal(true)),
   tunnel: boundary.optional(remoteTunnelSchema),
 });
 
@@ -662,6 +684,7 @@ export function normalizePaneRemoteConnectionImportPayload(
     token: decoded.token.trim(),
     transport: decoded.transport,
   };
+  if (decoded.claim) payload.claim = true;
   if (tunnel) {
     payload.tunnel = tunnel;
   }

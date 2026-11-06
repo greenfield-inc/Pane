@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowLeft, Copy, Plus, Terminal, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../ui/Button';
 import { Checkbox, Input } from '../ui/Input';
@@ -9,7 +9,7 @@ import { SecretField } from './SecretField';
 import type { RemoteAccessSubviewId } from '../../types/settings';
 import type { RemoteAccessController } from './useRemoteAccessSettings';
 import type { RemoteSetupTunnelPreference } from '../../../../shared/types/remoteDaemon';
-import { getRemoteExecutableHealthPresentation } from '../../utils/remoteRuntimePresentation';
+import { describePairedClient, getRemoteExecutableHealthPresentation } from '../../utils/remoteRuntimePresentation';
 import { useCommittedRef } from '../../hooks/useCommittedRef';
 import { ChecklistRow } from '../ConnectionChecklist';
 import type { RemoteHostSetupProgress, RemoteHostSetupStep } from '../../../../shared/types/remoteDaemon';
@@ -88,8 +88,39 @@ function formatRemoteBaseUrl(host: string, port: number): string {
   return `http://${normalizedHost}:${port}`;
 }
 
+/** Asks who a new code is for; every code from here works once, for that person. */
+function NewCodeForm({ controller, onDone }: { controller: RemoteAccessController; onDone: () => void }) {
+  const [person, setPerson] = useState('');
+  return (
+    <form
+      className="flex flex-wrap items-end gap-2 py-3"
+      aria-label="New connection code"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void controller.createHostCode(person).then((created) => { if (created) onDone(); });
+      }}
+    >
+      <div className="min-w-0 flex-1">
+        <Input
+          label="Who is it for?"
+          value={person}
+          onChange={(event) => setPerson(event.target.value)}
+          placeholder="Ada"
+          maxLength={80}
+          helperText="The code works once, on their device, for 15 minutes."
+          fullWidth
+          autoFocus
+        />
+      </div>
+      <Button type="button" variant="ghost" size="sm" onClick={onDone}>Cancel</Button>
+      <Button type="submit" size="sm" loading={controller.busy} disabled={!person.trim()}>Create & Copy</Button>
+    </form>
+  );
+}
+
 function HostSetup({ controller }: { controller: RemoteAccessController }) {
   const activeCode = controller.setupResult?.connectionCode;
+  const [askingForPerson, setAskingForPerson] = useState(false);
   const executableHealth = getRemoteExecutableHealthPresentation(controller.hostState.executableHealth);
   const tailnetNotice = controller.hostState.tailnetNotice;
   return (
@@ -122,7 +153,7 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
         >
           <div className="flex flex-wrap justify-end gap-2">
             {(controller.hostState.status === 'live' || controller.config.host.config.enabled) && (
-              <Button type="button" variant="secondary" size="sm" onClick={controller.createHostCode} disabled={controller.busy}>Create & Copy Code</Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setAskingForPerson(true)} disabled={controller.busy || askingForPerson}>Create & Copy Code</Button>
             )}
             {controller.hostState.connectedClients.length > 0 && (
               <Button type="button" variant="secondary" size="sm" onClick={() => controller.disconnectClients()} disabled={controller.busy}>Disconnect Clients</Button>
@@ -135,19 +166,24 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
             )}
           </div>
         </SettingRow>
+        {askingForPerson && <NewCodeForm controller={controller} onDone={() => setAskingForPerson(false)} />}
         {/* Glasses are listed and revoked under Remote Access › Devices. */}
-        {controller.config.host.clients.map((client) => client.kind === 'glasses' ? null : (
-          <div key={client.id} className="flex items-center justify-between gap-3 py-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-text-primary">{client.label}</p>
-              <p className="text-xs text-text-tertiary">{client.lastUsedAt ? `Last used ${new Date(client.lastUsedAt).toLocaleString()}` : 'Never used'}</p>
+        {controller.config.host.clients.map((client) => {
+          if (client.kind === 'glasses') return null;
+          const { title, detail, connected } = describePairedClient(client, controller.hostState.connectedClients);
+          return (
+            <div key={client.id} className="flex items-center justify-between gap-3 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-text-primary">{title}</p>
+                <p className="text-xs text-text-tertiary">{detail}</p>
+              </div>
+              <div className="flex gap-1">
+                {connected && <Button type="button" variant="secondary" size="sm" onClick={() => controller.disconnectClients([client.id])}>Disconnect</Button>}
+                <IconButton type="button" variant="danger" size="sm" aria-label={`Revoke ${title}`} icon={<Trash2 className="h-4 w-4" />} onClick={() => controller.revokeClient(client.id)} />
+              </div>
             </div>
-            <div className="flex gap-1">
-              <Button type="button" variant="secondary" size="sm" onClick={() => controller.disconnectClients([client.id])}>Disconnect</Button>
-              <IconButton type="button" variant="danger" size="sm" aria-label={`Revoke ${client.label}`} icon={<Trash2 className="h-4 w-4" />} onClick={() => controller.revokeClient(client.id)} />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </SettingsSection>
 
       <SettingsSection title="Setup">

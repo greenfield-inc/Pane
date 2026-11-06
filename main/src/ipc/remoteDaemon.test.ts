@@ -108,15 +108,19 @@ function createClientDroppingConfigManagerStub(initialConfig: RemoteDaemonConfig
   };
 }
 
+/** The host saved this single-use code and is waiting for a device to claim it. */
 function expectConnectionCodeAuthenticates(configManager: ConfigManagerStub, connectionCode: string | undefined): void {
   const payload = decodePaneRemoteConnection(connectionCode ?? '');
   const clients = configManager.getConfig().remoteDaemon?.host.clients ?? [];
 
+  expect(payload.claim).toBe(true);
   expect(authenticateRemoteDaemonBearerToken(`Bearer ${payload.token}`, clients)).toMatchObject({
-    ok: true,
+    ok: false,
+    error: { code: 'ERR_REMOTE_DAEMON_CODE_UNCLAIMED' },
   });
 }
 
+/** The host no longer knows this code. */
 function expectConnectionCodeForbidden(configManager: ConfigManagerStub, connectionCode: string | undefined): void {
   const payload = decodePaneRemoteConnection(connectionCode ?? '');
   const clients = configManager.getConfig().remoteDaemon?.host.clients ?? [];
@@ -124,6 +128,7 @@ function expectConnectionCodeForbidden(configManager: ConfigManagerStub, connect
   expect(authenticateRemoteDaemonBearerToken(`Bearer ${payload.token}`, clients)).toMatchObject({
     ok: false,
     statusCode: 403,
+    error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID' },
   });
 }
 
@@ -897,7 +902,7 @@ describe('remote daemon IPC', () => {
 
     const createCode = ipcMain.handlers.get('remote-daemon:create-host-connection-code');
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-    const response = await createCode?.({}, { label: 'Office Mac mini' }) as {
+    const response = await createCode?.({}, { person: 'Ada', label: 'Office Mac mini' }) as {
       success?: boolean;
       data?: { connectionCode?: string };
     };
@@ -944,7 +949,7 @@ describe('remote daemon IPC', () => {
 
     registerTestRemoteDaemonHandlers(ipcMain, { configManager });
 
-    await expect(ipcMain.handlers.get('remote-daemon:create-host-connection-code')?.({}, {})).resolves.toEqual({
+    await expect(ipcMain.handlers.get('remote-daemon:create-host-connection-code')?.({}, { person: 'Ada' })).resolves.toEqual({
       success: false,
       error: 'Tailscale Serve couldn\'t forward port 443 to this Pane on tailnet bloomapi.org.github, so other devices can\'t connect. Tailscale said: serve config denied. To fix it: let Pane change Serve settings by running "sudo tailscale set --operator=$USER" once, then try again.',
     });
@@ -972,7 +977,7 @@ describe('remote daemon IPC', () => {
     registerTestRemoteDaemonHandlers(ipcMain, { configManager });
 
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-    const response = await ipcMain.handlers.get('remote-daemon:create-host-connection-code')?.({}, {}) as {
+    const response = await ipcMain.handlers.get('remote-daemon:create-host-connection-code')?.({}, { person: 'Ada' }) as {
       success?: boolean;
       data?: { connectionCode?: string };
     };
@@ -995,7 +1000,7 @@ describe('remote daemon IPC', () => {
 
     const createCode = ipcMain.handlers.get('remote-daemon:create-host-connection-code');
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-    const response = await createCode?.({}, {}) as {
+    const response = await createCode?.({}, { person: 'Ada' }) as {
       success?: boolean;
       data?: { connectionCode?: string };
     };
@@ -1021,7 +1026,7 @@ describe('remote daemon IPC', () => {
 
     const createCode = ipcMain.handlers.get('remote-daemon:create-host-connection-code');
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-    const firstResponse = await createCode?.({}, { label: 'Office Mac mini' }) as {
+    const firstResponse = await createCode?.({}, { person: 'Ada', label: 'Office Mac mini' }) as {
       success?: boolean;
       data?: { connectionCode?: string };
     };
@@ -1040,7 +1045,7 @@ describe('remote daemon IPC', () => {
     expectConnectionCodeForbidden(configManager, firstResponse.data?.connectionCode);
 
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-    const secondResponse = await createCode?.({}, { label: 'Office Mac mini' }) as {
+    const secondResponse = await createCode?.({}, { person: 'Ada', label: 'Office Mac mini' }) as {
       success?: boolean;
       data?: { connectionCode?: string };
     };
@@ -1068,7 +1073,7 @@ describe('remote daemon IPC', () => {
     registerTestRemoteDaemonHandlers(ipcMain, { configManager });
 
     const createCode = ipcMain.handlers.get('remote-daemon:create-host-connection-code');
-    await expect(createCode?.({}, { label: 'Office Mac mini' })).resolves.toEqual({
+    await expect(createCode?.({}, { person: 'Ada', label: 'Office Mac mini' })).resolves.toEqual({
       success: false,
       error: 'Created remote connection code was not saved. Try again before sharing this code.',
     });

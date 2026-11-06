@@ -267,11 +267,13 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     setResult(message);
   };
 
-  const createHostCode = () => runRemoteAction(async () => {
-    const response = await API.remoteDaemon.createHostConnectionCode({ label: setupLabel.trim() || undefined });
+  /** Makes a single-use code for one person and copies it. */
+  const createHostCode = (person: string) => runRemoteAction(async () => {
+    const response = await API.remoteDaemon.createHostConnectionCode({ person: person.trim(), label: setupLabel.trim() || undefined });
     if (!response.success || !response.data) throw new Error(response.error || 'Failed to create connection code');
     await navigator.clipboard.writeText(response.data.connectionCode);
-    return 'Created and copied connection code.';
+    const expires = new Date(response.data.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return `Copied a code for ${response.data.person} · works once · expires ${expires}`;
   });
 
   const stopHost = () => runRemoteAction(async () => {

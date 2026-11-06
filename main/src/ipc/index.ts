@@ -125,7 +125,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerNimbalystHandlers(ipcMain, services);
   registerSpotlightHandlers(ipcMain, services);
   registerJourneyTimingHandlers(ipcMain, services);
-  registerRemoteDaemonHandlers(ipcMain, services);
+  registerRemoteDaemonHandlers(ipcMain, services, commandRegistry);
   registerWorkspaceAccessHandlers(ipcMain, services, commandRegistry);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
   registerDesktopAlertHandlers(ipcMain, services);

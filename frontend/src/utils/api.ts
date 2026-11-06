@@ -750,7 +750,7 @@ export class API {
       return window.electronAPI.remoteDaemon.createConnectionPair(input);
     },
 
-    async createHostConnectionCode(input?: { label?: string }) {
+    async createHostConnectionCode(input: { person: string; label?: string }) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.remoteDaemon.createHostConnectionCode(input);
     },

@@ -13,7 +13,8 @@ import {
 } from '../services/remoteAnalytics';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { PaneCommandRegistry } from './commandRegistry';
-import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type WorkspaceAccessPolicy } from './auth';
+import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, extractBearerToken, type WorkspaceAccessPolicy } from './auth';
+import { CLAIM_CODE_CHANNEL } from '../../../shared/remoteClient/pairing';
 
 export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
@@ -73,6 +74,8 @@ interface ConnectedRemoteEventClient {
   deviceLabel: string | null;
   remoteRuntimeId: string | null;
   remoteAddress: string | null;
+  /** Who the connection code was made for, from the paired record. */
+  person: string | null;
   connectedAt: string;
   lastSeenAt: string;
   heartbeatTimer: NodeJS.Timeout;
@@ -784,6 +787,10 @@ export class PaneRemoteHttpApiServer {
       throw error;
     }
 
+    if (invokeRequest.channel === CLAIM_CODE_CHANNEL) {
+      await this.respondToClaim(request, response, invokeRequest);
+      return;
+    }
     // The header check only sizes the upload; access can change while the body arrives.
     const auth = this.authenticateRequest(request, headerAuth.ok ? undefined : invokeRequest.token);
     if (!auth.ok) {
@@ -984,6 +991,7 @@ export class PaneRemoteHttpApiServer {
       deviceLabel: getClientDeviceLabelFromHeaders(request),
       remoteRuntimeId: getRemoteRuntimeIdFromRequest(request, url.searchParams.get('runtime_id')),
       remoteAddress: getRemoteAddress(request),
+      person: this.personFor(auth.client?.id ?? null),
       connectedAt,
       lastSeenAt: connectedAt,
       heartbeatTimer,
@@ -1445,7 +1453,36 @@ export class PaneRemoteHttpApiServer {
       remoteAddress: client.remoteAddress,
       connectedAt: client.connectedAt,
       lastSeenAt: client.lastSeenAt,
+      person: client.person,
     }));
+  }
+
+  /** The person a paired client's code was made for. Codeless (workspace) clients have no record. */
+  private personFor(clientId: string | null): string | null {
+    if (!clientId || this.workspace) return null;
+    return this.getRemoteConfig().host.clients.find((client) => client.id === clientId)?.person ?? null;
+  }
+
+  /**
+   * Redeems a single-use code. Its token is no sign-in, so this runs before authentication; the
+   * claim checks the token against the code it belongs to. Transport-owned: the token and the
+   * device name are added here, never taken from the client's arguments.
+   */
+  private async respondToClaim(request: IncomingMessage, response: ServerResponse, invokeRequest: RemoteInvokeRequest): Promise<void> {
+    const token = extractBearerToken(getAuthorizationHeaderForRequest(request, invokeRequest.token));
+    if (!token) {
+      this.writeJson(response, 401, {
+        ok: false,
+        error: { message: 'A connection code is required to claim one.', code: 'ERR_REMOTE_DAEMON_AUTH_REQUIRED', next: 'Paste the whole pane-remote:// code again.' },
+      } satisfies RemoteInvokeErrorPayload);
+      return;
+    }
+    const named = decodeOptionalBoundary(invokeRequest.args[0], boundary.object({ device: boundary.optional(boundary.string) }))?.device?.trim();
+    const device = getClientDeviceLabelFromHeaders(request) ?? (named ? named.slice(0, 80) : null);
+    await this.respondToInvoke(request, response, undefined, 'claim', () => this.commandRegistry.invokeRemote(
+      CLAIM_CODE_CHANNEL,
+      [invokeRequest.args[0] ?? null, { token, device }],
+    ));
   }
 
   /**
@@ -1652,10 +1689,12 @@ async function answerInvoke(run: () => ReturnType<PaneCommandRegistry['invokeRem
 
 /** Notify refusals: the host checked the answer and ran nothing, so a client says "Not sent" instead of retrying. */
 const NOTIFY_REFUSAL_CODES = new Set(['ERR_NOTIFY_INVALID', 'ERR_NOTIFY_GONE', 'ERR_NOTIFY_EXPIRED', 'ERR_NOTIFY_ANSWERED', 'ERR_NOTIFY_NOT_SENT']);
+/** A single-use code that can't be claimed: the host checked it and changed nothing. */
+const CODE_REFUSAL_CODES = new Set(['ERR_REMOTE_DAEMON_CODE_USED', 'ERR_REMOTE_DAEMON_CODE_EXPIRED']);
 
 function invokeFailureStatus(code: string): number {
   if (code === 'ERR_UNKNOWN_CHANNEL') return 404;
-  return NOTIFY_REFUSAL_CODES.has(code) ? 409 : 500;
+  return NOTIFY_REFUSAL_CODES.has(code) || CODE_REFUSAL_CODES.has(code) ? 409 : 500;
 }
 
 function writeSseEvent(

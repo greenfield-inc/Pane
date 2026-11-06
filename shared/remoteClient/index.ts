@@ -21,7 +21,7 @@ export {
   type ConnectionPresence,
 } from './connectionPresence';
 export { createFetchEventStreamTransport } from './fetchEventStreamTransport';
-export { decodeRemoteConnectionCode } from './pairing';
+export { CLAIM_CODE_CHANNEL, claimConnectionCode, decodeRemoteConnectionCode, redeemRemoteConnectionCode, type ConnectionCodeInvoke } from './pairing';
 export {
   getOrCreateRuntimeId,
   loadRemoteProfiles,

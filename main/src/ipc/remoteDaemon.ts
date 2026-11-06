@@ -25,15 +25,20 @@ import {
   type RemoteSetupDataDirectoryMode,
   type RemoteSetupTunnelPreference,
 } from '../../../shared/types/remoteDaemon';
-import type { PaneCommandValue } from '../daemon/commandRegistry';
+import { teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
+import { PaneError, paneErrorText } from '../../../shared/paneError';
+import { CLAIM_CODE_CHANNEL, claimConnectionCode } from '../../../shared/remoteClient/pairing';
 import { boundary, decodeBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import os from 'os';
 import path from 'path';
 import type { AppServices } from './types';
-import { remotePaneClientController } from '../daemon/client/remotePaneClient';
+import { RemotePaneClient, remotePaneClientController } from '../daemon/client/remotePaneClient';
 import {
+  claimSingleUseCode,
   createPaneRemoteConnectionImportPayload,
   createRemoteDaemonConnectionPair,
+  createSingleUseConnectionPair,
+  withoutExpiredCodes,
 } from '../daemon/remotePairing';
 import { remoteHostRuntimeStateStore } from '../daemon/remoteHostRuntimeState';
 import {
@@ -98,8 +103,77 @@ export function registerRemoteDaemonHandlers(
     analyticsManager,
     dependencies = defaultRemoteDaemonHandlerDependencies,
   }: RemoteDaemonHandlerServices,
+  commandRegistry?: PaneCommandRegistry,
 ): void {
   attachRemoteHostStateForwarder(getMainWindow);
+
+  /** Makes a single-use code for one person and proves it was saved before anyone sees it. */
+  async function createConnectionCode(person: string, label = `${os.hostname()} Pane daemon`): Promise<RemoteHostConnectionCodeResult> {
+    const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
+    const access = await resolveCurrentHostAccess(current, dependencies.readConfiguredTailscaleServeAccess);
+    const pair = createSingleUseConnectionPair({ label, baseUrl: access.baseUrl, person });
+    const connectionCode = encodePaneRemoteConnection(
+      createPaneRemoteConnectionImportPayload(pair, access.tunnel),
+    );
+    const buildNextConfig = (config: RemoteDaemonConfig): RemoteDaemonConfig => normalizeRemoteDaemonConfig({
+      ...config,
+      host: {
+        ...config.host,
+        access,
+        clients: upsertById(withoutExpiredCodes(config.host.clients), pair.client),
+      },
+    });
+
+    await configManager.updateConfig({ remoteDaemon: buildNextConfig(current) });
+    let persisted = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
+
+    if (!hasPersistedRemoteHostClient(persisted, pair.client)) {
+      await configManager.updateConfig({ remoteDaemon: buildNextConfig(persisted) });
+      persisted = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
+    }
+
+    if (!hasPersistedRemoteHostClient(persisted, pair.client)) {
+      throw new Error('Created remote connection code was not saved. Try again before sharing this code.');
+    }
+
+    trackRemotePaneEvent(analyticsManager, 'remote_pane_connection_code_created', {
+      surface: 'desktop',
+      role: 'host',
+      flow: 'setup',
+      result: 'succeeded',
+      tunnel_kind: access.tunnel?.kind ?? 'unknown',
+    });
+    return { connectionCode, client: pair.client, access, person: pair.person, expiresAt: pair.expiresAt };
+  }
+
+  if (commandRegistry) {
+    // Codes are the owner's to hand out; a teammate the workspace lets in may not mint access for others.
+    commandRegistry.register('runpane:host:code', async (person: PaneCommandValue) => {
+      const teammate = teammatePaneCaller();
+      if (teammate) {
+        throw new PaneError('ERR_HOST_CODE_OWNER_ONLY', `Only this computer's owner can make connection codes; ${teammate} is a teammate here. No code was made.`, 'Ask the owner to run runpane host code.');
+      }
+      const { connectionCode, expiresAt, person: named } = await createConnectionCode(decodeBoundary(person, boundary.string));
+      return { connectionCode, person: named, expiresAt };
+    });
+    const claimsInFlight = new Set<string>();
+    commandRegistry.register(CLAIM_CODE_CHANNEL, async (_request: PaneCommandValue, transport: PaneCommandValue) => {
+      const { token, device } = decodeBoundary(transport, claimTransportSchema);
+      // Two devices claiming at once: the first holds the code until its write lands.
+      if (claimsInFlight.has(token)) {
+        throw new PaneError('ERR_REMOTE_DAEMON_CODE_USED', 'Another device is using this connection code right now. A code works for one device.', 'Ask the person who sent it for a new code.');
+      }
+      claimsInFlight.add(token);
+      try {
+        const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
+        const claim = claimSingleUseCode(current.host.clients, token, device);
+        await configManager.updateConfig({ remoteDaemon: normalizeRemoteDaemonConfig({ ...current, host: { ...current.host, clients: claim.clients } }) });
+        return { token: claim.token };
+      } finally {
+        claimsInFlight.delete(token);
+      }
+    });
+  }
 
   function requestRendererRemoteResync(): void {
     const mainWindow = getMainWindow?.();
@@ -310,55 +384,10 @@ export function registerRemoteDaemonHandlers(
 
   ipcMain.handle('remote-daemon:create-host-connection-code', async (_event, input: PaneCommandValue) => {
     try {
-      const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
-      const label = readOptionalConnectionCodeLabel(input) ?? `${os.hostname()} Pane daemon`;
-      const access = await resolveCurrentHostAccess(current, dependencies.readConfiguredTailscaleServeAccess);
-      const pair = createRemoteDaemonConnectionPair({
-        label,
-        baseUrl: access.baseUrl,
-      });
-      const connectionCode = encodePaneRemoteConnection(
-        createPaneRemoteConnectionImportPayload(pair, access.tunnel),
-      );
-      const buildNextConfig = (config: RemoteDaemonConfig): RemoteDaemonConfig => normalizeRemoteDaemonConfig({
-        ...config,
-        host: {
-          ...config.host,
-          access,
-          clients: upsertById(config.host.clients, pair.client),
-        },
-      });
-
-      await configManager.updateConfig({ remoteDaemon: buildNextConfig(current) });
-      let persisted = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
-
-      if (!hasPersistedRemoteHostClient(persisted, pair.client)) {
-        await configManager.updateConfig({ remoteDaemon: buildNextConfig(persisted) });
-        persisted = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
-      }
-
-      if (!hasPersistedRemoteHostClient(persisted, pair.client)) {
-        throw new Error('Created remote connection code was not saved. Try again before sharing this code.');
-      }
-
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_connection_code_created', {
-        surface: 'desktop',
-        role: 'host',
-        flow: 'setup',
-        result: 'succeeded',
-        tunnel_kind: access.tunnel?.kind ?? 'unknown',
-      });
-
-      return {
-        success: true,
-        data: {
-          connectionCode,
-          client: pair.client,
-          access,
-        } satisfies RemoteHostConnectionCodeResult,
-      };
+      const request = decodeBoundary(input, boundary.object({ person: boundary.string, label: boundary.optional(boundary.nullable(boundary.string)) }));
+      return { success: true, data: await createConnectionCode(request.person, request.label?.trim() || undefined) };
     } catch (error) {
-      return { success: false, error: getErrorMessage(error, 'Failed to create remote connection code') };
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : getErrorMessage(error, 'Failed to create remote connection code') };
     }
   });
 
@@ -375,7 +404,12 @@ export function registerRemoteDaemonHandlers(
       }
 
       const connect = requestInput.connect !== false;
-      const importPayload = decodePaneRemoteConnection(code);
+      // A single-use code is claimed before anything is saved; when that fails, the code stays unused.
+      const importPayload = await claimConnectionCode(
+        decodePaneRemoteConnection(code),
+        (claimProfile, channel, args) => new RemotePaneClient(claimProfile).invoke(channel, args),
+        os.hostname(),
+      );
       payload = importPayload;
       let profile = remoteImportPayloadToProfile(importPayload);
 
@@ -432,7 +466,7 @@ export function registerRemoteDaemonHandlers(
         failure_stage: 'import_connection_code',
         failure_category: getRemoteFailureCategory(error instanceof Error ? error.message : String(error)),
       });
-      return { success: false, error: getErrorMessage(error, 'Failed to import remote daemon connection code') };
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : getErrorMessage(error, 'Failed to import remote daemon connection code') };
     }
   });
 
@@ -696,19 +730,8 @@ function getRemoteDaemonConfig(value: PaneCommandValue): RemoteDaemonConfig {
   return normalizeRemoteDaemonConfig(value);
 }
 
-function readOptionalConnectionCodeLabel(input: PaneCommandValue): string | undefined {
-  if (input === undefined || input === null) {
-    return undefined;
-  }
-  const requestInput = decodeBoundary(input, boundary.object({
-    label: boundary.optional(boundary.nullable(boundary.string)),
-  }));
-  if (requestInput.label === undefined || requestInput.label === null) {
-    return undefined;
-  }
-  const label = requestInput.label.trim();
-  return label.length > 0 ? label : undefined;
-}
+/** What the HTTP transport adds to a claim: the code's token and the claiming device's name. */
+const claimTransportSchema = boundary.object({ token: boundary.string, device: boundary.nullable(boundary.string) });
 
 async function resolveCurrentHostAccess(
   current: RemoteDaemonConfig,

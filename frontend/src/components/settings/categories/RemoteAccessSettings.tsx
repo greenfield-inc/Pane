@@ -11,6 +11,7 @@ import { MachineMark } from '../../machines/MachineMark';
 import { useMachines } from '../../../hooks/useMachines';
 import { THIS_COMPUTER, type MachineEntry } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
+import { describePairedClient } from '../../../utils/remoteRuntimePresentation';
 import type { RemoteAccessSubviewId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
 
@@ -395,21 +396,20 @@ function PhoneRows({ controller }: { controller: RemoteAccessController }) {
   const paired = records.filter((client) => client.kind !== 'glasses');
   const recordIds = new Set(records.map((client) => client.id));
   const unpaired = live.filter((client) => !client.clientId || !recordIds.has(client.clientId));
-  const lastUsed = (at?: string) => (at ? `Last used ${new Date(at).toLocaleString()}` : 'Never used');
 
   return (
     <>
       {paired.map((client) => {
-        const connected = live.some((entry) => entry.clientId === client.id);
+        const { title, detail, connected } = describePairedClient(client, live);
         return (
-          <PhoneRow key={client.id} title={client.label} detail={connected ? 'Connected now' : lastUsed(client.lastUsedAt)}>
+          <PhoneRow key={client.id} title={title} detail={detail}>
             {connected && <Button type="button" variant="ghost" size="sm" disabled={controller.busy} onClick={() => controller.disconnectClients([client.id])}>Disconnect</Button>}
-            <Button type="button" variant="ghost" size="sm" aria-label={`Revoke ${client.label}`} disabled={controller.busy} onClick={() => controller.revokeClient(client.id)}>Revoke</Button>
+            <Button type="button" variant="ghost" size="sm" aria-label={`Revoke ${title}`} disabled={controller.busy} onClick={() => controller.revokeClient(client.id)}>Revoke</Button>
           </PhoneRow>
         );
       })}
-      {unpaired.map(({ id, clientId, deviceLabel, label, remoteAddress }) => (
-        <PhoneRow key={id} title={deviceLabel ?? label ?? remoteAddress ?? 'A device'} detail="Connected now">
+      {unpaired.map(({ id, clientId, deviceLabel, label, remoteAddress, person }) => (
+        <PhoneRow key={id} title={person ?? deviceLabel ?? label ?? remoteAddress ?? 'A device'} detail="Connected now">
           {clientId && (
             <Button type="button" variant="ghost" size="sm" disabled={controller.busy} onClick={() => controller.disconnectClients([clientId])}>Disconnect</Button>
           )}

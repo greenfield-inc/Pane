@@ -1,4 +1,5 @@
 import type {
+  RemoteDaemonClientRecord,
   RemoteDaemonConnectedClient,
   RemoteDaemonExecutableHealth,
   RemoteDaemonHostRuntimeState,
@@ -91,8 +92,46 @@ function formatRemoteLastSeen(lastSeenAt: string | null, style: 'sentence' | 'in
   return `${prefix} ${new Date(seenAtMs).toLocaleString()}${suffix}`;
 }
 
+const shortTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const shortDate = (iso: string) => new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+export interface PairedClientPresentation {
+  title: string;
+  detail: string;
+  connected: boolean;
+}
+
+/**
+ * How a paired device reads in the Devices list: titled by the person its code was made for,
+ * then whether the code is waiting, connected now, or where it was used.
+ */
+export function describePairedClient(
+  client: RemoteDaemonClientRecord,
+  live: readonly RemoteDaemonConnectedClient[],
+  now = Date.now(),
+): PairedClientPresentation {
+  const title = client.person ?? client.label;
+  const connection = live.find((entry) => entry.clientId === client.id);
+  if (client.claimBy) {
+    const waiting = Date.parse(client.claimBy) > now;
+    return {
+      title,
+      connected: false,
+      detail: waiting ? `Waiting for ${title} · expires ${shortTime(client.claimBy)}` : `Code expired at ${shortTime(client.claimBy)} · never used`,
+    };
+  }
+  if (connection) {
+    const device = connection.deviceLabel ?? client.claimedDevice;
+    return { title, connected: true, detail: device ? `Connected now · ${device}` : 'Connected now' };
+  }
+  if (client.claimedAt) {
+    return { title, connected: false, detail: `Used on ${client.claimedDevice ?? 'a device'}, ${shortDate(client.claimedAt)}` };
+  }
+  return { title, connected: false, detail: client.lastUsedAt ? `Last used ${new Date(client.lastUsedAt).toLocaleString()}` : 'Never used' };
+}
+
 function getRemoteClientDisplayLabel(client: RemoteDaemonConnectedClient): string | null {
-  return client.deviceLabel ?? client.remoteAddress;
+  return client.person ?? client.deviceLabel ?? client.remoteAddress;
 }
 
 function formatRemoteHostClients(state: RemoteDaemonHostRuntimeState): string {
