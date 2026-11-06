@@ -45,6 +45,7 @@ function setup() {
     projectExists: id => id === 1,
     prepareSession: async target => target,
     githubEvents: { poll: async () => candidates },
+    projectGithubRepo: async projectId => projectId === 1 ? 'acme/app' : null,
     runActive: sessionId => active.has(sessionId),
     now: () => nowMs,
   });
@@ -170,5 +171,10 @@ describe('LoopManager GitHub events', () => {
     await expect(t.manager.save({ ...reviewer, github: { repo: 'acme/app' } }))
       .rejects.toThrow('Choose at least one GitHub event, or remove the GitHub trigger. Nothing was saved.');
     await expect(t.manager.save({ ...reviewer, github: undefined })).rejects.toThrow(/cron/i);
+  });
+
+  it('reads the repository from the project\'s origin remote when the form leaves it empty', async () => {
+    const t = setup();
+    expect((await t.manager.save({ ...reviewer, github: { repo: '', commentPhrase: '/pane' } })).github).toEqual({ repo: 'acme/app', commentPhrase: '/pane' });
   });
 });

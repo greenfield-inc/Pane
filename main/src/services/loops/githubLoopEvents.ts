@@ -185,3 +185,9 @@ function clip(text: string): string {
   const trimmed = text.trim();
   return trimmed.length > TEXT_LIMIT ? `${trimmed.slice(0, TEXT_LIMIT)}…` : trimmed;
 }
+
+/** `owner/name` from a github.com remote URL (https, ssh or scp form), or null for any other host. */
+export function githubRepoFromRemote(remote: string): string | null {
+  const match = /^(?:https:\/\/github\.com\/|(?:ssh:\/\/)?git@github\.com[:/])([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/u.exec(remote.trim());
+  return match?.[1] ?? null;
+}

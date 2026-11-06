@@ -314,3 +314,72 @@ for (const theme of ['light-rounded', 'dark'] as const) {
     await expect(page.getByRole('button', { name: 'Hide details' })).toBeVisible();
   });
 }
+
+const prEvent = (key: string, number: number, minutesAgo: number, summary: string, author: string | null = 'maya') => ({
+  key, kind: 'comment' as const, repo: 'acme/app', number, isPr: true, url: `https://github.com/acme/app/pull/${number}`,
+  author, atMs: Date.now() - minutesAgo * 60_000, summary, headRef: `feature-${number}`, fork: false,
+});
+const githubLoop: Loop = {
+  id: 'loop-github',
+  name: 'PR helper',
+  projectId: 1,
+  cron: '',
+  agent: 'claude',
+  initialInput: 'Do what the comment asks on this PR, then push to its branch.',
+  enabled: true,
+  createdAtMs: Date.now() - DAY,
+  nextRunAtMs: null,
+  scheduleText: 'On GitHub events in acme/app',
+  github: { repo: 'acme/app', commentPhrase: '/pane', changesRequested: true, checkFailed: true, issueLabel: 'agent' },
+  runs: [
+    { id: 'g5', loopId: 'loop-github', slotAtMs: Date.now() - 2 * 60_000, trigger: 'github', status: 'skipped', sessionId: null,
+      error: 'A run is already active on this PR. Use Run now to start another.', event: prEvent('comment:105', 12, 2, 'Comment by @lee', 'lee') },
+    { id: 'g4', loopId: 'loop-github', slotAtMs: Date.now() - 4 * 60_000, trigger: 'github', status: 'skipped', sessionId: null,
+      error: '@stranger is not a collaborator on acme/app, so their comment starts nothing.', event: prEvent('comment:104', 14, 4, 'Comment by @stranger', 'stranger') },
+    { id: 'g3', loopId: 'loop-github', slotAtMs: Date.now() - 5 * 60_000, trigger: 'github', status: 'skipped', sessionId: null,
+      error: 'The comment does not contain "/pane".', event: prEvent('comment:103', 13, 5, 'Comment by @maya') },
+    { id: 'g2', loopId: 'loop-github', slotAtMs: Date.now() - 6 * 60_000, trigger: 'github', status: 'started', error: null, sessionId: 'sweep-run-24',
+      event: prEvent('comment:102', 12, 6, 'Comment by @maya') },
+    { id: 'g1', loopId: 'loop-github', slotAtMs: Date.now() - 9 * 60 * 60_000, trigger: 'github', status: 'skipped', sessionId: null,
+      error: 'Missed while Pane was not running or the computer was asleep. Use Run now to start it.', event: { ...prEvent('check:101', 11, 540, 'Check "test" failed', null), kind: 'check' } },
+  ],
+};
+
+for (const theme of ['light-rounded', 'dark'] as const) {
+  test(`shows why GitHub events started or skipped runs, and their triggers in the form (${theme})`, async ({ page }) => {
+    await open(page, {
+      initialSessions: seededSessions,
+      initialLoops: [githubLoop],
+      initialConfig: { theme, appearanceMode: 'fixed' },
+      initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
+    });
+    const prefix = theme === 'dark' ? 'dark-' : '';
+    await page.getByTestId('loops-nav').click();
+    const detail = page.getByTestId('loop-detail');
+    await expect(detail.getByRole('heading', { name: 'PR helper' })).toBeVisible();
+    await expect(detail).toContainText('On GitHub events in acme/app');
+    await expect(detail).toContainText('When GitHub events arrive');
+    await expect(detail).toContainText('4 skipped');
+    const rows = detail.getByRole('row');
+    await expect(rows.filter({ hasText: 'PR #12 · Comment by @lee' })).toContainText('A run is already active on this PR.');
+    await expect(rows.filter({ hasText: '@stranger' })).toContainText('is not a collaborator on acme/app');
+    await expect(rows.filter({ hasText: 'PR #11 · Check "test" failed' })).toContainText('Missed while Pane was not running');
+    await expect(detail.getByRole('button', { name: 'Run now: PR #11 · Check "test" failed' })).toBeVisible();
+    await shoot(page, `${prefix}10-github-runs`);
+
+    await detail.getByRole('button', { name: 'Edit' }).click();
+    const drawer = page.getByRole('dialog');
+    await expect(drawer.getByRole('radio', { name: 'GitHub events' })).toBeChecked();
+    const triggers = drawer.getByTestId('loop-github-triggers');
+    await expect(triggers.getByLabel('GitHub repository')).toHaveValue('acme/app');
+    await expect(triggers.getByLabel('Comment phrase')).toHaveValue('/pane');
+    await expect(triggers.getByRole('checkbox', { name: 'New PR' })).not.toBeChecked();
+    await expect(drawer.getByRole('combobox', { name: 'Repeat' })).toHaveCount(0);
+    await expect(triggers).toContainText('An always-on host (Pane Cloud, BYOC or a Remote Pane machine) gets events around the clock.');
+    await triggers.getByLabel('Hourly cap').scrollIntoViewIfNeeded();
+    await shoot(page, `${prefix}11-github-form`);
+    await drawer.getByRole('radio', { name: 'Both' }).click();
+    await expect(drawer.getByRole('combobox', { name: 'Repeat' })).toBeVisible();
+    await drawer.getByRole('button', { name: 'Cancel' }).click();
+  });
+}

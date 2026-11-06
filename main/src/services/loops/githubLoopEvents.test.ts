@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GithubLoopEventSource, type GithubRestRead } from './githubLoopEvents';
+import { GithubLoopEventSource, githubRepoFromRemote, type GithubRestRead } from './githubLoopEvents';
 
 const NOW = Date.parse('2026-11-06T12:00:00Z');
 const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
@@ -80,5 +80,18 @@ describe('GithubLoopEventSource', () => {
   it('ignores events older than a day', async () => {
     const github = fakeGithub({ '/repos/acme/app/issues/events': [{ id: 41, event: 'labeled', label: { name: 'agent' }, created_at: at(25 * 60), actor: { login: 'maya' }, issue: { number: 9, html_url: 'u', title: 't', body: null } }] });
     expect(await new GithubLoopEventSource(github.rest, () => NOW).poll('acme/app', { labels: true })).toEqual([]);
+  });
+});
+
+describe('githubRepoFromRemote', () => {
+  it.each([
+    ['git@github.com:acme/app.git', 'acme/app'],
+    ['https://github.com/acme/app', 'acme/app'],
+    ['https://github.com/acme/app.git', 'acme/app'],
+    ['ssh://git@github.com/acme/my.repo.git', 'acme/my.repo'],
+    ['https://gitlab.com/acme/app.git', null],
+    ['', null],
+  ])('%s → %s', (remote, repo) => {
+    expect(githubRepoFromRemote(remote)).toBe(repo);
   });
 });

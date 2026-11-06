@@ -50,6 +50,8 @@ export interface LoopManagerOptions {
   prepareSession: (target: string, loop: { name: string; agent: LoopAgent }) => Promise<string>;
   /** Polls a repo for recent events, with this host's own `gh` sign-in. Without it, GitHub triggers start nothing. */
   githubEvents?: { poll: (repo: string, wants: GithubEventWants) => Promise<GithubEventCandidate[]> };
+  /** A project's `owner/name` on github.com from its origin remote, for GitHub triggers saved without a repo. */
+  projectGithubRepo?: (projectId: number) => Promise<string | null>;
   /** Whether a run's Pane still has an agent at work, so a second event on the same PR waits. */
   runActive?: (sessionId: string) => boolean;
   /** Called after any loop or run changes, so clients refetch. */
@@ -123,7 +125,10 @@ export class LoopManager {
     if (sessionTarget && !initialInput) {
       throw new PaneError('ERR_LOOP_INVALID', 'A Session loop needs a prompt to send to the Session\'s agent. Nothing was saved.', 'Add the prompt (`--prompt`), then save again.');
     }
-    const github = input.github ? validGithubTriggers(input.github) : undefined;
+    const derivedRepo = input.github && !input.github.repo.trim() && input.projectId !== undefined
+      ? await this.options.projectGithubRepo?.(input.projectId) ?? null
+      : null;
+    const github = input.github ? validGithubTriggers(derivedRepo ? { ...input.github, repo: derivedRepo } : input.github) : undefined;
     if (github && sessionTarget) {
       throw new PaneError('ERR_LOOP_INVALID', 'GitHub events start runs in a project, so a Session loop cannot use them. Nothing was saved.', 'Target a project (`--repo`), or remove the GitHub trigger.');
     }
@@ -499,7 +504,9 @@ function wantsOf(triggers: LoopGithubTriggers[]): GithubEventWants {
 function validGithubTriggers(input: LoopGithubTriggers): LoopGithubTriggers {
   const repo = input.repo.trim().replace(/^https:\/\/github\.com\//u, '').replace(/\.git$/u, '').replace(/\/+$/u, '');
   if (!/^[\w.-]+\/[\w.-]+$/u.test(repo)) {
-    throw new PaneError('ERR_LOOP_INVALID', `"${input.repo}" is not a GitHub repository. Nothing was saved.`, 'Give the repository as owner/name, such as acme/app.');
+    throw new PaneError('ERR_LOOP_INVALID', input.repo.trim()
+      ? `"${input.repo}" is not a GitHub repository. Nothing was saved.`
+      : 'The project has no github.com origin remote to watch. Nothing was saved.', 'Give the repository as owner/name, such as acme/app.');
   }
   const commentPhrase = input.commentPhrase?.trim() || undefined;
   const issueLabel = input.issueLabel?.trim() || undefined;
