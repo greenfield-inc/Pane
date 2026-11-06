@@ -119,6 +119,8 @@ export interface HostWorkspacePlacement {
   wip: boolean;
   chats: Array<{ agent: 'claude' | 'codex'; sessionId: string; title?: string; files: PlacementFile[] }>;
   origin: { machine: string; folder: string };
+  /** The name the Mac saved this machine under, which every message here uses. */
+  machineLabel?: string;
 }
 
 export type HostPlacementStatus =

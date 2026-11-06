@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRightLeft, Loader2 } from 'lucide-react';
 import { API } from '../../utils/api';
+import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { cn } from '../../utils/cn';
 import { Button } from '../ui/Button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
@@ -41,7 +42,7 @@ function workspaceMeta(workspace: MovableWorkspace): string {
   const chats = workspace.chats.length > 0
     ? [...new Set(workspace.chats.map(chat => agentName(chat.agent)))].join(' and ') + (workspace.chats.length > 1 ? ` (${workspace.chats.length} chats)` : ' chat')
     : 'no chats';
-  return [workspace.branch, work || 'all pushed', chats].filter(Boolean).join(' · ');
+  return [workspace.branch, work || 'nothing unpushed', chats].filter(Boolean).join(' · ');
 }
 
 function moveHeadline(result: ConductorMoveResult): string {
@@ -49,7 +50,7 @@ function moveHeadline(result: ConductorMoveResult): string {
   const there = result.results.filter(entry => entry.outcome === 'already there').length;
   const parts = [
     moved > 0 && `Moved ${plural(moved, 'workspace')} to ${result.machine}.`,
-    there > 0 && `${plural(there, 'workspace')} ${there === 1 ? 'was' : 'were'} already there.`,
+    there > 0 && `${plural(there, 'workspace')} ${there === 1 ? 'was' : 'were'} already on ${result.machine}.`,
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(' ') : `Nothing was moved to ${result.machine}.`;
 }
@@ -100,7 +101,7 @@ export function ConductorMoveCard({ scan, machines, onClose, onRescanned, onBusy
     try {
       setResult(await API.conductorMove.run({ machineId, workspaces: [...selected] }));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(ipcErrorMessage(cause, 'Pane couldn\'t finish that. Try again.'));
     } finally {
       setProgress(undefined);
       onBusyChange?.(false);
@@ -115,7 +116,7 @@ export function ConductorMoveCard({ scan, machines, onClose, onRescanned, onBusy
       setSelected(previous => new Set(next.workspaces.filter(workspace => isMovable(workspace) && (previous.has(workspace.key) || !scan.workspaces.some(old => old.key === workspace.key))).map(workspace => workspace.key)));
       onRescanned(next);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(ipcErrorMessage(cause, 'Pane couldn\'t finish that. Try again.'));
     } finally {
       setChecking(false);
     }
@@ -171,6 +172,9 @@ export function ConductorMoveCard({ scan, machines, onClose, onRescanned, onBusy
               <span className="text-sm text-text-tertiary">No other machine yet. Add one under Settings → Remote Access.</span>
             )}
           </div>
+          {machine && machine.status !== 'online' && (
+            <p className="mt-2 text-xs text-status-warning">{machine.label} isn&apos;t connected. Reconnect it under Settings → Remote Access, then open Move from Conductor again.</p>
+          )}
           <div className="mt-3 max-h-80 overflow-y-auto rounded-lg border border-border-secondary bg-surface-secondary px-3 pb-2 pt-1">
             {groups.map(([repo, workspaces]) => (
               <div key={repo} className="mt-1.5">
@@ -209,7 +213,7 @@ export function ConductorMoveCard({ scan, machines, onClose, onRescanned, onBusy
             )}
             <div className="ml-auto flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={onClose} disabled={working}>Not now</Button>
-              <Button size="sm" onClick={() => void move()} disabled={working || selected.size === 0 || !machine} aria-busy={working}>
+              <Button size="sm" onClick={() => void move()} disabled={working || selected.size === 0 || machine?.status !== 'online'} aria-busy={working}>
                 {/* Both labels share one grid cell, so the button keeps the wider one's size in either state. */}
                 <span className="grid">
                   <span className={cn('[grid-area:1/1] inline-flex items-center justify-center whitespace-nowrap', working && 'invisible')}>

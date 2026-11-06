@@ -174,6 +174,7 @@ async function moveOne(workspace: InspectedWorkspace, options: MoveOptions): Pro
       wip: Boolean(wip),
       chats: [],
       origin: { machine: options.machineName, folder: view.key },
+      machineLabel: options.target.label,
     };
     const needsBundle = Boolean(wip) || !facts.upstreamHasHead;
     let thin = true;

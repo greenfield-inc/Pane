@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { API } from '../../utils/api';
+import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { Button } from '../ui/Button';
 import { Modal, ModalBody } from '../ui/Modal';
 import { SettingRow } from '../settings/SettingRow';
@@ -22,7 +23,7 @@ export function ConductorMoveSettingsRow() {
       const [scan, machines] = await Promise.all([API.conductorMove.scan(), window.electronAPI.machines.list()]);
       setOpen({ scan, machines });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(ipcErrorMessage(cause, 'Pane couldn\'t read Conductor\'s workspaces. Try again.'));
     } finally {
       setFinding(false);
     }
