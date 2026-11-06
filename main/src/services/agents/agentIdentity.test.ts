@@ -12,7 +12,7 @@ import {
 type CommandClassificationCase = {
   name: string;
   command: string | undefined;
-  expected: 'claude' | 'codex' | 'cursor' | 'opencode' | undefined;
+  expected: 'claude' | 'codex' | 'cursor' | 'opencode' | 'gemini' | undefined;
   platformHint?: NodeJS.Platform;
 };
 
@@ -22,6 +22,8 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
   { name: 'direct Cursor command', command: 'cursor-agent --force --trust', expected: 'cursor' },
   { name: 'direct OpenCode command', command: 'opencode --auto', expected: 'opencode' },
   { name: 'quoted OpenCode command', command: "'opencode' --auto", expected: 'opencode' },
+  { name: 'direct Gemini command', command: 'gemini --yolo', expected: 'gemini' },
+  { name: 'Gemini through env', command: 'env GEMINI_API_KEY=x /opt/homebrew/bin/gemini --yolo', expected: 'gemini' },
   {
     name: 'path-qualified OpenCode command',
     command: '/usr/local/bin/opencode --auto',
@@ -155,7 +157,7 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
 
 describe('CLI_AGENT_TYPES', () => {
   it('lists the supported agents', () => {
-    expect([...CLI_AGENT_TYPES].sort()).toEqual(['claude', 'codex', 'cursor', 'opencode']);
+    expect([...CLI_AGENT_TYPES].sort()).toEqual(['claude', 'codex', 'cursor', 'gemini', 'opencode']);
   });
 });
 

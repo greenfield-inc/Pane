@@ -4730,6 +4730,17 @@ describe('runpane IPC handlers', () => {
   it.each([
     ['claude', 'Quick safety check\nDo you trust this folder?\n❯ 1. Yes, I trust this folder\n  2. No, exit', '1'],
     ['codex', 'Cannot use the background server\n  1. Retry\n› 2. Run without daemon this time\n  3. Exit', '2'],
+    // Gemini CLI 0.67.0's startup dialog, still open at the bottom of the screen.
+    ['gemini', [
+      '╭──────────────────────────────────────────╮',
+      ' │ Do you trust the files in this folder?   │',
+      ' │                                          │',
+      ' │ ● 1. Trust folder (repo)                 │',
+      ' │   2. Trust parent folder (worktrees)     │',
+      " │   3. Don't trust                         │",
+      ' │                                          │',
+      ' ╰──────────────────────────────────────────╯',
+    ].join('\n'), '1'],
   ] as const)('identifies %s first-run choices from the live screen', async (agent, text, key) => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(text, 'idle', agent));
     expect(await createRegistry().invoke('runpane:panels:wait', [{ panelId: terminalPanel.id, timeoutMs: 10 }]))
@@ -6593,8 +6604,8 @@ describe('runpane IPC handlers', () => {
   it('routes every agent, readiness, and input case consistently', async () => {
     vi.useFakeTimers();
     const toolKinds = process.platform === 'win32'
-      ? (['claude', 'codex', 'opencode', 'custom'] as const)
-      : (['claude', 'codex', 'cursor', 'opencode', 'custom'] as const);
+      ? (['claude', 'codex', 'opencode', 'gemini', 'custom'] as const)
+      : (['claude', 'codex', 'cursor', 'opencode', 'gemini', 'custom'] as const);
     const inputCases = [
       { name: 'slash', input: '/do TM-x' },
       { name: 'prose', input: 'Please implement this' },

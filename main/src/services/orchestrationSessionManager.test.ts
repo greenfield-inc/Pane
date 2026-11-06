@@ -241,7 +241,7 @@ function orchestrationRecord(id: string, name: string): OrchestrationSessionReco
       claude: `${id}-claude`,
       codex: `${id}-codex`,
       cursor: `${id}-cursor`,
-      opencode: `${id}-opencode`,
+      opencode: `${id}-opencode`, gemini: `${id}-gemini`,
     },
     goal: 'Existing goal',
     context: 'Existing context',
@@ -641,6 +641,12 @@ describe('OrchestrationSessionManager', () => {
     expect(created.session).toMatchObject({ agent: 'opencode', launchCommand: '' });
     expect(created.session.customResume ?? null).toBeNull();
     expect(created.panel.state.customState).toMatchObject({ agentType: 'opencode', initialCommand: 'opencode --auto' });
+  });
+
+  it('lets Pane add its Gemini session and trust flags to a Gemini Session launch', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Gemini coordinator', agent: 'gemini' });
+    expect(created.panel.state.customState).toMatchObject({ agentType: 'gemini', initialCommand: 'gemini --yolo', preserveLaunchCommand: false });
   });
 
   it('accepts native OpenCode through default commands, default agents and updates', async () => {
@@ -1204,6 +1210,7 @@ describe('OrchestrationSessionManager', () => {
       codex: '__pane_chat_terminal_codex__',
       cursor: '__pane_chat_terminal_cursor__',
       opencode: '__pane_chat_terminal_opencode__',
+      gemini: '__pane_chat_terminal_gemini__',
     });
     expect(first.paneChatManager.getOrCreate).toHaveBeenCalledTimes(1);
 

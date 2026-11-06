@@ -2,13 +2,14 @@ import type { ToolPanel } from './panels';
 import { boundary, decodeBoundary } from '../validation/boundaryDecoder';
 import type { JsonValue } from '../validation/boundaryDecoder';
 
-export type PaneChatAgent = 'claude' | 'codex' | 'cursor' | 'opencode';
+export type PaneChatAgent = 'claude' | 'codex' | 'cursor' | 'opencode' | 'gemini';
 
 export const PANE_CHAT_AGENT_LABELS = {
   claude: 'Claude',
   codex: 'Codex',
   cursor: 'Cursor',
   opencode: 'OpenCode',
+  gemini: 'Gemini',
 } satisfies Record<PaneChatAgent, string>;
 
 export const DEFAULT_PANE_CHAT_AGENT: PaneChatAgent = 'claude';
@@ -17,6 +18,7 @@ export const PANE_CHAT_PANEL_ID = '__pane_chat_terminal__';
 export const PANE_CHAT_CODEX_PANEL_ID = '__pane_chat_terminal_codex__';
 export const PANE_CHAT_CURSOR_PANEL_ID = '__pane_chat_terminal_cursor__';
 export const PANE_CHAT_OPENCODE_PANEL_ID = '__pane_chat_terminal_opencode__';
+export const PANE_CHAT_GEMINI_PANEL_ID = '__pane_chat_terminal_gemini__';
 /**
  * How every one-time first prompt Pane gives a Session agent begins. Session
  * launches drop any saved first prompt, except an unsent one that begins with this.
@@ -36,6 +38,7 @@ const PANE_CHAT_PANEL_IDS = {
   codex: PANE_CHAT_CODEX_PANEL_ID,
   cursor: PANE_CHAT_CURSOR_PANEL_ID,
   opencode: PANE_CHAT_OPENCODE_PANEL_ID,
+  gemini: PANE_CHAT_GEMINI_PANEL_ID,
 } satisfies Record<PaneChatAgent, string>;
 
 export interface PaneChatState<TSession = unknown> {
@@ -49,7 +52,7 @@ export interface PaneChatState<TSession = unknown> {
 
 export function normalizePaneChatAgent(value: JsonValue | undefined): PaneChatAgent {
   try {
-    return decodeBoundary(value, boundary.enumeration('claude', 'codex', 'cursor', 'opencode'));
+    return decodeBoundary(value, boundary.enumeration('claude', 'codex', 'cursor', 'opencode', 'gemini'));
   } catch {
     return DEFAULT_PANE_CHAT_AGENT;
   }

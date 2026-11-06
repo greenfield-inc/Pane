@@ -24,15 +24,19 @@ describe('AGENT_LAUNCH_PRESETS', () => {
       hotkeyId: 'add-tool-terminal-opencode',
       hotkey: 'mod+alt+6',
     });
+    expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'gemini')).toMatchObject({
+      hotkeyId: 'add-tool-terminal-gemini',
+      hotkey: 'mod+alt+7',
+    });
   });
 
   it('supports cursor on POSIX hosts and WSL repos, but not native Windows', () => {
-    expect(agentPresetsForPlatform('win32').map(p => p.id)).toEqual(['claude', 'codex', 'opencode']);
-    expect(agentPresetsForPlatform('darwin').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
-    expect(agentPresetsForPlatform('linux').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
-    expect(agentPresetsForPlatform('windows').map(p => p.id)).toEqual(['claude', 'codex', 'opencode']);
-    expect(agentPresetsForPlatform('macos').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
-    expect(agentPresetsForPlatform('wsl').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
+    expect(agentPresetsForPlatform('win32').map(p => p.id)).toEqual(['claude', 'codex', 'opencode', 'gemini']);
+    expect(agentPresetsForPlatform('darwin').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'gemini']);
+    expect(agentPresetsForPlatform('linux').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'gemini']);
+    expect(agentPresetsForPlatform('windows').map(p => p.id)).toEqual(['claude', 'codex', 'opencode', 'gemini']);
+    expect(agentPresetsForPlatform('macos').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'gemini']);
+    expect(agentPresetsForPlatform('wsl').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'gemini']);
     expect(isAgentSupportedOnPlatform('cursor', 'windows')).toBe(false);
     expect(isAgentSupportedOnPlatform('cursor', 'wsl')).toBe(true);
     expect(isAgentSupportedOnPlatform('opencode', 'darwin')).toBe(true);

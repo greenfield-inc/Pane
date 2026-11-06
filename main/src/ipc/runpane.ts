@@ -41,7 +41,7 @@ import { presentStoppedPanel, projectWorkspaceEntry } from '../services/workspac
 import { SessionInbox } from '../services/sessionInbox';
 import { ExpectedReportTracker, MAX_MISSING_REPORT_OUTPUT_LENGTH, type PanelLastOutput } from '../services/expectedReports';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
-import { getManifestForAgent, CURSOR_MANIFEST } from '../services/agentStatus/manifests';
+import { getManifestForAgent, CURSOR_MANIFEST, GEMINI_TRUST_PROMPT_OPEN } from '../services/agentStatus/manifests';
 import { detectAgentBackgroundWork, detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
 import { agentTranscripts, type TranscriptLocator } from '../services/agentTranscript';
 import {
@@ -393,7 +393,7 @@ const orchestrationSessionCreateSchema = boundary.object({
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   name: boundary.nonEmptyString,
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode', 'gemini')),
   launchCommand: boundary.optional(orchestrationTextSchema),
   resume: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(orchestrationTextSchema),
@@ -409,7 +409,7 @@ const orchestrationSessionUpdateSchema = boundary.object({
   name: boundary.optional(orchestrationTextSchema),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode', 'gemini')),
   launchCommand: boundary.optional(orchestrationTextSchema),
   profile: boundary.optional(orchestrationTextSchema),
   goal: boundary.optional(orchestrationTextSchema),
@@ -3714,6 +3714,15 @@ function detectPanelBlocker(
     };
   }
 
+  // Gemini CLI boxes its question; `1` picks "Trust folder" and Gemini restarts into its composer.
+  if (GEMINI_TRUST_PROMPT_OPEN.test(text)) {
+    return {
+      kind: 'first-run-dialog',
+      message: text.trim(),
+      suggestedCommand: `runpane panels input --panel ${panelId} --keys 1,enter --yes --json`,
+    };
+  }
+
   // Agent Farm asks on stderr before it starts the agent; trust is the person's call.
   if (/Trust this repository workspace\?\s*\[y\/N\]\s*$/i.test(lastNonEmptyLine(text))) {
     return {
@@ -4509,7 +4518,7 @@ interface OrchestrationSessionAgentRequest {
 function parseOrchestrationSessionAgentRequest(value: PaneCommandValue): OrchestrationSessionAgentRequest {
   if (!isRecord(value)) throw new Error('Session agent request must be an object');
   const selector = parseOrchestrationSessionSelector(value.selector);
-  const agent = decodeBoundary(value.agent, boundary.enumeration('claude', 'codex', 'cursor', 'opencode'));
+  const agent = decodeBoundary(value.agent, boundary.enumeration('claude', 'codex', 'cursor', 'opencode', 'gemini'));
   return { selector, agent };
 }
 

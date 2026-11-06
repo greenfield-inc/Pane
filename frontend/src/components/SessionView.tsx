@@ -1434,8 +1434,9 @@ export const SessionView = memo(() => {
   }, [agentPresets, handlePanelCreateRef, isInSessionViewRef, registerHotkey, unregisterHotkey]);
 
   useEffect(() => {
-    const CUSTOM_CMD_START = 6; // mod+alt+3-5 stay reserved for built-in agents on every platform
-    const maxSlots = Math.min(customCommands.length, 10 - CUSTOM_CMD_START);
+    // mod+alt+3-7 belong to the built-in agents on every platform.
+    const CUSTOM_CMD_KEYS = ['8', '9', '0'];
+    const maxSlots = Math.min(customCommands.length, CUSTOM_CMD_KEYS.length);
     const ids: string[] = [];
 
     for (let i = 0; i < maxSlots; i++) {
@@ -1445,7 +1446,7 @@ export const SessionView = memo(() => {
       registerHotkey({
         id,
         label: `Add ${cmd.name}`,
-        keys: `mod+alt+${CUSTOM_CMD_START + i}`,
+        keys: `mod+alt+${CUSTOM_CMD_KEYS[i]}`,
         category: 'tools',
         enabled: () => isInSessionViewRef.current,
         action: () => handlePanelCreateRef.current('terminal', {

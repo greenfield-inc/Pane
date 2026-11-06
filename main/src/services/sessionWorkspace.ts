@@ -47,6 +47,9 @@ function writeManagedInstructions(filePath: string, content: string): void {
   if (next !== previous) fs.writeFileSync(filePath, next, { mode: 0o600 });
 }
 
+/** Instruction files that only import the Session's AGENTS.md. */
+const IMPORTING_INSTRUCTION_FILES: readonly string[] = ['CLAUDE.md', 'GEMINI.md'];
+
 export function prepareSessionWorkspace(
   sessionId: string,
   profile = DEFAULT_SESSION_PROFILE,
@@ -60,8 +63,8 @@ export function prepareSessionWorkspace(
   if (fs.existsSync(legacyProgressStatus) && fs.lstatSync(legacyProgressStatus).isFile()) fs.unlinkSync(legacyProgressStatus);
   const content = sessionInstructions(sessionId, profile, record);
   writeManagedInstructions(path.join(cwd, 'AGENTS.md'), content);
-  // Claude resolves imports before the first turn; Cursor also reads AGENTS.md.
-  writeManagedInstructions(path.join(cwd, 'CLAUDE.md'), '@AGENTS.md');
+  // Claude and Gemini resolve imports before the first turn; Cursor and OpenCode read AGENTS.md.
+  for (const name of IMPORTING_INSTRUCTION_FILES) writeManagedInstructions(path.join(cwd, name), '@AGENTS.md');
   if (record?.runtime === 'wsl') {
     const runtimeDirectory = path.join(cwd, '.pane-runtime');
     fs.mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 });
@@ -143,10 +146,10 @@ export function isPristineSessionWorkspace(record: OrchestrationSessionRecord): 
   return fs.readdirSync(cwd).every(name => {
     const file = path.join(cwd, name);
     if (!fs.lstatSync(file).isFile()) return false;
-    if (name !== 'AGENTS.md' && name !== 'CLAUDE.md' && name !== LEGACY_PROGRESS_STATUS) return false;
+    if (name !== 'AGENTS.md' && !IMPORTING_INSTRUCTION_FILES.includes(name) && name !== LEGACY_PROGRESS_STATUS) return false;
     const content = fs.readFileSync(file, 'utf8').trim();
     if (name === 'AGENTS.md') return content === expectedAgents;
-    if (name === 'CLAUDE.md') return content === `${START}\n@AGENTS.md\n${END}`;
+    if (IMPORTING_INSTRUCTION_FILES.includes(name)) return content === `${START}\n@AGENTS.md\n${END}`;
     return content === '{"enabled":true}' || content === '{"enabled":false}';
   });
 }
@@ -182,7 +185,7 @@ export function discardSessionScaffold(record: OrchestrationSessionRecord): bool
       if (content !== `${START}\n${escapeMarkers(wslRouting(record))}\n${END}`) return false;
       continue;
     }
-    if (name !== 'AGENTS.md' && name !== 'CLAUDE.md' && name !== LEGACY_PROGRESS_STATUS) return false;
+    if (name !== 'AGENTS.md' && !IMPORTING_INSTRUCTION_FILES.includes(name) && name !== LEGACY_PROGRESS_STATUS) return false;
     if (name === LEGACY_PROGRESS_STATUS) {
       if (content !== '{"enabled":true}' && content !== '{"enabled":false}') return false;
       continue;

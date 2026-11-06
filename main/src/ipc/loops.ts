@@ -4,7 +4,8 @@ import type { LoopManager } from '../services/loops/loopManager';
 import type { StoredLoop } from '../services/loops/loopRepository';
 import { previewLoopSchedule } from '../services/loops/loopSchedule';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { LOOP_AGENTS, LOOP_NEW_SESSION, loopInputSchema, loopSlug, type LoopAgent } from '../../../shared/types/loop';
+import { LOOP_AGENTS, LOOP_NEW_SESSION, isLoopAgent, loopInputSchema, loopSlug, type LoopAgent } from '../../../shared/types/loop';
+import { PANE_CHAT_AGENT_LABELS } from '../../../shared/types/paneChat';
 import { ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX } from '../../../shared/types/orchestrationSession';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type { RunpanePaneCreateRequest } from '../../../shared/types/runpaneOrchestration';
@@ -37,16 +38,16 @@ const paneCreateResultSchema = boundary.object({
     })),
   })),
 });
-/** The folder-trust prompts `detectPanelBlocker` recognises: Claude, Codex and Agent Farm. */
-const TRUST_PROMPT = /trust this folder|trust and continue|quick safety check|trust this repository workspace/i;
+/** The folder-trust prompts `detectPanelBlocker` recognises: Claude, Codex, Gemini and Agent Farm. */
+const TRUST_PROMPT = /trust this folder|trust and continue|quick safety check|trust this repository workspace|trust the files in this folder/i;
 
 const paneArchiveResultSchema = boundary.object({ blocked: failureSchema });
 const loopSessionSchema = boundary.object({
   session: boundary.object({
     id: boundary.string,
     name: boundary.string,
-    // Any Session agent, so an OpenCode Session gets its own refusal instead of a decode error.
-    agent: boundary.enumeration(...LOOP_AGENTS, 'opencode'),
+    // Any Session agent, so an OpenCode or Gemini Session gets its own refusal instead of a decode error.
+    agent: boundary.enumeration(...LOOP_AGENTS, 'opencode', 'gemini'),
     launchCommand: boundary.optional(boundary.string),
     archived: boundary.optional(boundary.boolean),
     panelIds: boundary.object({ claude: boundary.string, codex: boundary.string, cursor: boundary.string }),
@@ -189,7 +190,7 @@ const PRINTED = /It printed: "(.+?)"\./;
 async function sendSessionLoopRun(commandRegistry: PaneCommandRegistry, context: SessionRunContext, sessionId: string, prompt: string): Promise<{ sessionId: null; warning?: string }> {
   const session = await getLoopSession(commandRegistry, sessionId);
   if (session.archived) throw new Error(`Session ${session.name} is archived, so the prompt was not sent. Restore it, or point the loop at another Session.`);
-  if (session.agent === 'opencode') throw new Error(`Session ${session.name} runs OpenCode, which loops cannot run yet, so the prompt was not sent. Point the loop at a Claude, Codex or Cursor Session.`);
+  if (!isLoopAgent(session.agent)) throw new Error(`Session ${session.name} runs ${PANE_CHAT_AGENT_LABELS[session.agent]}, which loops cannot run yet, so the prompt was not sent. Point the loop at a Claude, Codex or Cursor Session.`);
   const panelId = session.panelIds[session.agent];
   const { readiness } = decodeBoundary(await commandRegistry.invoke('runpane:panels:resume', [{ panelId, waitReady: true }]), panelResumeResultSchema);
   // Each warning is read later, so it says what was true when this run started.
@@ -281,9 +282,9 @@ export async function prepareLoopSession(
   if (session.archived) {
     throw new PaneError('ERR_LOOP_INVALID', `Session ${session.name} is archived. Nothing was saved.`, 'Restore the Session first, or pick another one.');
   }
-  // Switching it to the loop's agent would drop its OpenCode launch command without asking.
-  if (session.agent === 'opencode') {
-    throw new PaneError('ERR_LOOP_INVALID', `Session ${session.name} runs OpenCode, which loops cannot run yet. Nothing was saved.`, 'Pick a Claude, Codex or Cursor Session, or a new Session for this loop.');
+  // Switching it to the loop's agent would drop its launch command without asking.
+  if (!isLoopAgent(session.agent)) {
+    throw new PaneError('ERR_LOOP_INVALID', `Session ${session.name} runs ${PANE_CHAT_AGENT_LABELS[session.agent]}, which loops cannot run yet. Nothing was saved.`, 'Pick a Claude, Codex or Cursor Session, or a new Session for this loop.');
   }
   // Changing the agent drops the old command, so the new agent launches its template.
   if (session.agent !== loop.agent) {

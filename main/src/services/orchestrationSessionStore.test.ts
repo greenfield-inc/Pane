@@ -37,6 +37,7 @@ function createRecord(overrides: Partial<OrchestrationSessionRecord> = {}): Orch
       codex: '__orchestration_panel_release_codex',
       cursor: '__orchestration_panel_release_cursor',
       opencode: '__orchestration_panel_release_opencode',
+      gemini: '__orchestration_panel_release_gemini',
     },
     goal: 'Review the release evidence.',
     context: 'Use the current branch and attached Panes.',
@@ -93,7 +94,8 @@ describe('OrchestrationSessionStore', () => {
     const data = createData();
     data.sessions.push(createRecord({ id: LEGACY_ORCHESTRATION_SESSION_ID, internalSessionId: PANE_CHAT_SESSION_ID }));
     data.sessions.push(createRecord({ id: `${LEGACY_ORCHESTRATION_SESSION_ID}-codex`, internalSessionId: PANE_CHAT_SESSION_ID }));
-    fs.writeFileSync(filePath, JSON.stringify(data, (key, value) => key === 'opencode' ? undefined : value));
+    // Sessions saved before OpenCode and Gemini joined have neither panel id.
+    fs.writeFileSync(filePath, JSON.stringify(data, (key, value) => key === 'opencode' || key === 'gemini' ? undefined : value));
     const before = fs.readFileSync(filePath, 'utf8');
 
     const loaded = new OrchestrationSessionStore(filePath).read();
@@ -104,8 +106,13 @@ describe('OrchestrationSessionStore', () => {
       '__pane_chat_terminal_opencode__',
       '__orchestration_panel_legacy-pane-chat-codex_opencode',
     ]);
-    expect(loaded.sessions.map(record => ({ ...record.panelIds, opencode: undefined })))
-      .toEqual(data.sessions.map(record => ({ ...record.panelIds, opencode: undefined })));
+    expect(loaded.sessions.map(record => record.panelIds.gemini)).toEqual([
+      '__orchestration_panel_session-1_gemini',
+      '__pane_chat_terminal_gemini__',
+      '__orchestration_panel_legacy-pane-chat-codex_gemini',
+    ]);
+    expect(loaded.sessions.map(record => ({ ...record.panelIds, opencode: undefined, gemini: undefined })))
+      .toEqual(data.sessions.map(record => ({ ...record.panelIds, opencode: undefined, gemini: undefined })));
     expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
 
     const store = new OrchestrationSessionStore(filePath);

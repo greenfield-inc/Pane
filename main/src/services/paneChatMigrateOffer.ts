@@ -19,7 +19,7 @@ import type { TerminalPanelState } from '../../../shared/types/panels';
  */
 export const MIGRATE_OFFER_PREFERENCE = 'pane_chat_migrate_offer_sent';
 
-const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor', 'opencode'];
+const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor', 'opencode', 'gemini'];
 
 /** Whether two paths name the same folder, ignoring case on Windows. */
 export function samePath(left: string, right: string): boolean {

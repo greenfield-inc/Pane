@@ -23,6 +23,8 @@ export function resolveResumeId(
       return state.agentSessionId ?? 'interactive';
     case 'cursor':
       return state.agentSessionId ?? 'latest';
+    case 'gemini':
+      return state.agentSessionId;
     case 'opencode':
       return state.agentSessionId && isValidOpenCodeSessionId(state.agentSessionId)
         ? state.agentSessionId

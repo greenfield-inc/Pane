@@ -62,7 +62,13 @@ OpenCode creates its own `ses_*` id on the first message and refuses `--session`
 for an id it did not create, so a new conversation starts bare. Pane saves the id
 from the line OpenCode prints after leaving its TUI (`Continue  opencode -s <id>`),
 persists it before the next spawn and resumes it with `--session`. Ids from Pane's
-earlier allocator (`ses_` + 32 lowercase hex) are dropped. Its idle composer gates readiness and
+earlier allocator (`ses_` + 32 lowercase hex) are dropped.
+
+Gemini takes an id Pane chooses: a fresh launch adds `--session-id <uuid>`, and
+once Gemini has saved that conversation (`~/.gemini/tmp/<project>/chats/session-*-<first 8>.jsonl`,
+written on the first message) the next launch uses `--resume <uuid>` instead.
+Gemini refuses `--resume` for an unsaved id and `--session-id` for a saved one, so
+`agents/geminiLaunch.ts` checks the file before choosing. Its idle composer gates readiness and
 once-only stdin prompt delivery; wrapped commands remain opaque. RunPane doctor
 checks the installed executable's session capability before reporting support.
 

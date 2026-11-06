@@ -91,7 +91,15 @@ command or custom resume that doesn't suit OpenCode is left out when a Session
 is created with the OpenCode agent. Pane resumes the conversation id OpenCode
 prints when it exits (`Continue  opencode -s <id>`); a conversation still open
 when Pane quits has no saved id yet and starts fresh. Loops run Claude, Codex or
-Cursor, so the Loop editor doesn't offer OpenCode Sessions.
+Cursor, so the Loop editor doesn't offer OpenCode or Gemini Sessions; a loop
+can still run either as a custom command.
+
+A Gemini Session folder also gets a managed `GEMINI.md` that imports
+`AGENTS.md`, because Gemini CLI reads `GEMINI.md`. Gemini ignores context files
+in a folder it hasn't been told to trust, so Session launches add `--skip-trust`,
+which trusts the Session folder for that run only. Pane starts each
+conversation with `--session-id <id>` and resumes it with `--resume <id>` once
+Gemini has saved it.
 
 Each Session owns a stable folder at `<PANE_DIR>/sessions/<session-id>/` for
 notes, plans, attachments, generated instructions, and artifacts. Renaming,
@@ -615,7 +623,7 @@ write it; the orchestrator is its only writer. What each built-in template gets:
 | --- | --- |
 | Claude Code (`claude --dangerously-skip-permissions`) | Pane adds `--settings '{"permissions":{"additionalDirectories":["<folder>"],"deny":["Edit(/<folder>/**)"]}}'`. `additionalDirectories` (like `--add-dir`) makes the folder a working directory, which grants read and write; an `allow` rule alone does not lift `blockReadsOutsideWorkingDirectories`. The `Edit` deny rule takes the file tools' write access back (it covers Write too; Claude ignores `Write(path)` rules). Under bypass permissions Bash can still write anywhere, so the read-only rule is a guard, not a sandbox. The folder's `CLAUDE.md` is not loaded. Not added on Windows. At launch Pane merges this value into the tab's one settings file ([Claude's own prompts](PANE_NOTIFY.md#claudes-own-prompts)). |
 | Codex (`codex --yolo`) | Nothing to add: `--yolo` runs without a sandbox, and every Codex sandbox mode reads the whole disk. Codex's `--add-dir` grants write access, so Pane does not pass it. |
-| Cursor, OpenCode | Only `PANE_SESSION_DIR`. |
+| Cursor, OpenCode, Gemini | Only `PANE_SESSION_DIR`. |
 | `--tool-command` wrappers (agent-farm) and custom commands | Only `PANE_SESSION_DIR`; the wrapper maps it to its harness's flag. |
 
 The flag is fixed when the tab is created: a tab opened before its Pane was
