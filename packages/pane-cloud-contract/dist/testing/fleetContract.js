@@ -24,8 +24,8 @@ function fleetContractCases(target) {
     const timeoutMs = target.timeoutMs ?? 120_000;
     const payload = (machineId, operation, extra = {}) => {
         const issuedAt = new Date();
-        const parameters = operation === 'bootstrap' || operation === 'update_pane' ? { release: target.release } : {};
-        // SAFETY: parameters match `operation` (a release for bootstrap and update_pane, none otherwise); signOperation parses it again.
+        const parameters = operation === 'bootstrap' || operation === 'update_pane' ? { release: target.release } : operation === 'stop' ? { cause: 'user' } : {};
+        // SAFETY: parameters match `operation` (a release for bootstrap and update_pane, a cause for stop, none otherwise); signOperation parses it again.
         return {
             requestId: (0, node_crypto_1.randomUUID)(),
             machineId,
@@ -60,7 +60,7 @@ function fleetContractCases(target) {
     };
     return [
         {
-            name: 'fleet: create, bootstrap, stop, resume and delete a machine, each as one signed operation',
+            name: 'fleet: create, bootstrap, stop, resume and delete a machine, each as one signed operation, and a stop records its cause',
             async run() {
                 const machineId = await newMachine();
                 await run(machineId, 'bootstrap');
@@ -71,6 +71,9 @@ function fleetContractCases(target) {
                 strict_1.default.equal((await machineIn(machineId, 'stopped')).stateReason, 'user');
                 await run(machineId, 'resume');
                 await machineIn(machineId, 'running');
+                const billingStop = await fleet.submitOperation(await (0, fleet_1.signOperation)({ ...payload(machineId, 'stop'), operation: 'stop', parameters: { cause: 'billing' } }, target.signer));
+                await (0, cases_1.waitFor)(() => fleet.getOperation(billingStop.requestId), (s) => s.status === 'succeeded', 'the billing stop', timeoutMs);
+                strict_1.default.equal((await machineIn(machineId, 'stopped')).stateReason, 'billing', 'a service stop records its cause');
                 await run(machineId, 'delete');
                 await machineIn(machineId, 'deleted');
             },

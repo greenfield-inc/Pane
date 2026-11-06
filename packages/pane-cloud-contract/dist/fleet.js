@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fleetRoutes = exports.FleetEvent = exports.MachineMetrics = exports.OperationStatus = exports.OperationError = exports.FleetMachine = exports.TailnetStatus = exports.StateReason = exports.FleetMachineState = exports.SubmittedEnvelope = exports.OperationEnvelope = exports.OperationSignature = exports.OperationPayload = exports.FleetOperationName = exports.FLEET_OPERATIONS = exports.PaneRelease = exports.MachineId = exports.CLOCK_SKEW_SECONDS = exports.MAX_OPERATION_LIFETIME_SECONDS = exports.DIAGNOSTIC_FILES = exports.MACHINE_LIMITS = void 0;
+exports.fleetRoutes = exports.FleetEvent = exports.MachineMetrics = exports.OperationStatus = exports.OperationError = exports.FleetMachine = exports.TailnetStatus = exports.StateReason = exports.FleetMachineState = exports.SubmittedEnvelope = exports.OperationEnvelope = exports.OperationSignature = exports.OperationPayload = exports.FleetOperationName = exports.FLEET_OPERATIONS = exports.StopCause = exports.PaneRelease = exports.MachineId = exports.CLOCK_SKEW_SECONDS = exports.MAX_OPERATION_LIFETIME_SECONDS = exports.DIAGNOSTIC_FILES = exports.MACHINE_LIMITS = void 0;
 exports.canonicalJson = canonicalJson;
 exports.operationSigningBytes = operationSigningBytes;
 exports.signOperation = signOperation;
@@ -53,13 +53,19 @@ exports.PaneRelease = zod_1.z
 const NoParameters = zod_1.z.object({}).strict();
 const ReleaseParameters = zod_1.z.object({ release: exports.PaneRelease }).strict();
 /**
+ * Why the service stops a machine; the fleet records it as the machine's stateReason. Stops the
+ * fleet makes on its own (idle, memory pressure, host maintenance, host loss) set their own reason.
+ */
+exports.StopCause = zod_1.z.enum(['user', 'billing', 'end_of_beta', 'abuse']);
+const StopParameters = zod_1.z.object({ cause: exports.StopCause }).strict();
+/**
  * The allow-list. Lifecycle operations run on the host; guest operations run inside the machine
  * through the guest agent. Nothing else exists: no shell command, no file write, no access grant.
  */
 exports.FLEET_OPERATIONS = {
     create: { runsOn: 'host', parameters: NoParameters },
     resume: { runsOn: 'host', parameters: NoParameters },
-    stop: { runsOn: 'host', parameters: NoParameters },
+    stop: { runsOn: 'host', parameters: StopParameters },
     delete: { runsOn: 'host', parameters: NoParameters },
     bootstrap: { runsOn: 'guest', parameters: ReleaseParameters },
     update_pane: { runsOn: 'guest', parameters: ReleaseParameters },
@@ -78,20 +84,18 @@ const payloadFields = {
     issuedAt: Timestamp,
     expiresAt: Timestamp,
 };
-function payloadFor(name) {
-    return zod_1.z
-        .object({ ...payloadFields, operation: zod_1.z.literal(name), parameters: exports.FLEET_OPERATIONS[name].parameters })
-        .strict();
+function payloadFor(name, parameters) {
+    return zod_1.z.object({ ...payloadFields, operation: zod_1.z.literal(name), parameters }).strict();
 }
 exports.OperationPayload = zod_1.z.discriminatedUnion('operation', [
-    payloadFor('create'),
-    payloadFor('resume'),
-    payloadFor('stop'),
-    payloadFor('delete'),
-    payloadFor('bootstrap'),
-    payloadFor('update_pane'),
-    payloadFor('prepare_to_stop'),
-    payloadFor('collect_diagnostics'),
+    payloadFor('create', exports.FLEET_OPERATIONS.create.parameters),
+    payloadFor('resume', exports.FLEET_OPERATIONS.resume.parameters),
+    payloadFor('stop', exports.FLEET_OPERATIONS.stop.parameters),
+    payloadFor('delete', exports.FLEET_OPERATIONS.delete.parameters),
+    payloadFor('bootstrap', exports.FLEET_OPERATIONS.bootstrap.parameters),
+    payloadFor('update_pane', exports.FLEET_OPERATIONS.update_pane.parameters),
+    payloadFor('prepare_to_stop', exports.FLEET_OPERATIONS.prepare_to_stop.parameters),
+    payloadFor('collect_diagnostics', exports.FLEET_OPERATIONS.collect_diagnostics.parameters),
 ]);
 exports.OperationSignature = zod_1.z
     .object({
