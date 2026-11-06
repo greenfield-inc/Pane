@@ -145,6 +145,20 @@ describe('buildMachineList', () => {
     expect(byName(list, 'cloud-vm').subtitle).toBe('Cloud sandbox');
   });
 
+  it('names a Pane Cloud machine by the name its owner gave it, listed or not', () => {
+    const paneCloud: RemotePaneConnectionProfile = {
+      id: 'pane-cloud-profile', label: 'dev', baseUrl: 'https://pane-m-4.tail1234.ts.net:8443', token: '', transport: 'http+sse',
+      tailnetMachine: 'pane-m-4', tailnetDomain: 'tail1234.ts.net', paneCloud: { machineId: 'm_4' },
+    };
+    const listed = buildMachineList(input({
+      profiles: [paneCloud],
+      tailnet: { ok: true, tailnet: 'demo.github', domain: 'tail1234.ts.net', machines: [tailnetMachine('pane-m-4', 'Linux', 'available', { profileId: paneCloud.id })] },
+    }));
+    expect(byName(listed, 'dev').tailnet?.name).toBe('pane-m-4');
+    const unlisted = buildMachineList(input({ profiles: [paneCloud], tailnet: null }));
+    expect(unlisted.map((machine) => machine.name)).toContain('dev');
+  });
+
   it('gives this computer and its Tailscale machines different colours', () => {
     const list = buildMachineList(input());
     const mine = ['studio-mac', 'build-box', 'office-pc', 'travel-laptop'].map((name) => byName(list, name).slot);

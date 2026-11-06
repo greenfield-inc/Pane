@@ -36,6 +36,7 @@ import type {
   CloudSandboxCreateRequest,
   CloudSandboxesSnapshot,
 } from '../../../shared/types/cloudSandboxes';
+import type { PaneCloudSnapshot } from '../../../shared/types/paneCloud';
 import type {
   PanePermissionRequest,
   PanePermissionResolvedEvent,
@@ -491,6 +492,15 @@ interface ElectronAPI {
     /** Main saved or forgot a host on its own (e.g. a cloud sandbox); refetch the config. */
     onProfilesChanged: (callback: () => void) => () => void;
     onCloudSandboxesChanged: (callback: (snapshot: CloudSandboxesSnapshot) => void) => () => void;
+    getPaneCloud: () => Promise<IPCResponse<PaneCloudSnapshot>>;
+    signInPaneCloud: () => Promise<IPCResponse<PaneCloudSnapshot>>;
+    signOutPaneCloud: () => Promise<IPCResponse<PaneCloudSnapshot>>;
+    createPaneCloudMachine: (name: string) => Promise<IPCResponse<PaneCloudSnapshot>>;
+    startPaneCloudMachine: () => Promise<IPCResponse<PaneCloudSnapshot>>;
+    stopPaneCloudMachine: () => Promise<IPCResponse<PaneCloudSnapshot>>;
+    updatePaneCloudMachine: () => Promise<IPCResponse<PaneCloudSnapshot>>;
+    deletePaneCloudMachine: () => Promise<IPCResponse<PaneCloudSnapshot>>;
+    onPaneCloudChanged: (callback: (snapshot: PaneCloudSnapshot) => void) => () => void;
   };
 
   // Prompts

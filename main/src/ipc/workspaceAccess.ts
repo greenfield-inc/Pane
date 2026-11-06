@@ -15,6 +15,7 @@ import {
   locateTailnetMachine,
   savedSecretKey,
   savedWorkspaceSecrets,
+  tailnetProfileId,
   type WorkspaceCall,
   type WorkspaceProbe,
 } from '../services/tailnetMachines';
@@ -43,11 +44,6 @@ const saveMachineSchema = boundary.object({
   name: boundary.nonEmptyString,
   password: boundary.optional(boundary.string),
 });
-
-/** The profile id of a machine's codeless connection; one per machine on each tailnet. */
-function tailnetProfileId(domain: string, name: string): string {
-  return `tailnet-${domain.toLowerCase()}-${name.toLowerCase()}`;
-}
 
 /**
  * Settings → Remote Access on this machine: who may connect to it (visibility and password), and

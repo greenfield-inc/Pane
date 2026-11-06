@@ -63,6 +63,7 @@ async function openRemoteAccess(page: Page) {
   await page.getByRole('button', { name: 'Settings' }).first().click();
   await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Cloud sandboxes (experimental)' })).toBeVisible();
+  await page.getByRole('radiogroup', { name: 'Provider' }).getByRole('radio', { name: 'boat.dev' }).click();
 }
 
 test('cloud credentials are saved once and only shown as set or not set', async ({ page }, testInfo) => {

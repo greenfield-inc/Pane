@@ -207,6 +207,28 @@ start, including after a daemon upgrade, and uses tokens and memory right away.
 Before relaunching an agent, the daemon stops anything an earlier daemon process
 left running for that panel, so a conversation never has two agents.
 
+## Pane Cloud (invite-only beta)
+
+Pane Cloud is an always-on machine that Greenfield runs for you, so agents keep working with your computer
+closed. In **Settings > Remote Access > Cloud sandboxes**, pick **Pane Cloud** under **Add cloud sandbox**:
+
+1. **Sign In with GitHub** shows a one-time code; enter it on GitHub. Sign-in proves your GitHub identity and
+   nothing more: Pane Cloud never receives your GitHub, Claude, Codex or Tailscale tokens. An account that is
+   not invited yet sees "You're on the list".
+2. **Create Machine** creates your seat's one machine (8 vCPU and 16 GiB bursts, 12 vCPU-hours a day, a 50 GB
+   disk). A second machine for the same seat is refused.
+3. **Open Tailscale Login** and sign in with your own Tailscale account. The machine joins your tailnet as a
+   device you own, and Pane saves it as a host it connects to over Tailscale, with no code or password.
+4. Sign in to GitHub and your agents on the machine itself, from its host terminal.
+
+The machine's page (its **Details**) shows today's CPU budget, its Pane version with **Update Pane**, and every
+operation Pane Cloud ran on it, with who asked and why. Pane Cloud can run only these named operations: create,
+start, stop, delete, install or update a published Pane release, prepare to stop, and collect diagnostics. It
+has no shell on the machine.
+
+`PANE_CLOUD_URL` points a build at another Pane Cloud service, such as a local stub from
+`packages/pane-cloud-contract`.
+
 ## Cloud sandbox (experimental)
 
 A cloud sandbox is a [boat.dev](https://boat.dev) sandbox that Pane creates for you, already set up as a

@@ -135,7 +135,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
         <AddMachine key={addCodeRequest} controller={controller} startAdding={addCodeRequest !== undefined} />
       </RemoteGroup>
 
-      <CloudSandboxesSettings onTerminalOpened={controller.closeSettings} />
+      <CloudSandboxesSettings onTerminalOpened={controller.closeSettings} onOpenMachine={onOpenMachine} />
 
       <RemoteGroup title="Access" scope={scope}>
         <CodelessAccessRows tailnetName={tailnetName} />

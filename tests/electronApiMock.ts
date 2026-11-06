@@ -23,6 +23,7 @@ import type {
   CloudSandboxProgressStep,
   CloudSandboxView,
 } from '../shared/types/cloudSandboxes';
+import type { PaneCloudAction, PaneCloudMachineView, PaneCloudSnapshot } from '../shared/types/paneCloud';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
@@ -139,6 +140,8 @@ export type ElectronApiMockOptions = {
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
   /** Seeds the mocked cloud provisioning library; absent means this build has none. */
+  /** Seeds Pane Cloud (shared/types/paneCloud.ts); absent: signed out. */
+  paneCloud?: PaneCloudSnapshot;
   cloudSandboxes?: Pick<CloudSandboxesSnapshot, 'credentials' | 'sandboxes'> & {
     /** Saved host profiles for the seeded sandboxes. */
     profiles?: RemotePaneConnectionProfile[];
@@ -561,6 +564,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       emit('remote-daemon:cloud-sandboxes-changed', cloudSnapshot());
       return success(cloudSnapshot());
     };
+
+    // Pane Cloud: a small stand-in for the service, driven by approvePaneCloud / joinPaneCloudTailnet.
+    let paneCloud: PaneCloudSnapshot = clone(mockOptions.paneCloud ?? { signIn: { state: 'signed-out' }, machine: null, busy: null, error: null });
+    const paneCloudAction = (operation: string, actor: PaneCloudAction['actor'], reason: string): PaneCloudAction => ({
+      id: `act_${Math.random().toString(36).slice(2, 10)}`, operation, actor, reason, status: 'succeeded', error: null, requestedAt: new Date().toISOString(),
+    });
+    const setPaneCloud = (changes: Partial<PaneCloudSnapshot>, machine?: Partial<PaneCloudMachineView>, actions: PaneCloudAction[] = []) => {
+      paneCloud = { ...paneCloud, busy: null, error: null, ...changes };
+      if (machine && paneCloud.machine) paneCloud.machine = { ...paneCloud.machine, ...machine, actions: [...actions, ...paneCloud.machine.actions] };
+      emit('pane-cloud:changed', clone(paneCloud));
+      return success(clone(paneCloud));
+    };
+    const paneCloudFails = (message: string, next: string) => setPaneCloud({ error: { message, next } });
     const findCloudSandbox = (id: string) => cloud.sandboxes.find((sandbox) => sandbox.id === id);
     const updateCloudSandbox = (id: string, updates: Partial<CloudSandboxView>) => {
       cloud.sandboxes = cloud.sandboxes.map((sandbox) => sandbox.id === id ? { ...sandbox, ...updates } : sandbox);
@@ -1982,6 +1998,37 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           subscribe('remote-daemon:profiles-changed', callback),
         onCloudSandboxesChanged: (callback: MockEventCallback) =>
           subscribe('remote-daemon:cloud-sandboxes-changed', callback),
+        getPaneCloud: () => success(clone(paneCloud)),
+        signInPaneCloud: () => setPaneCloud({
+          signIn: { state: 'pending', userCode: 'WDJB-MJHT', verificationUri: 'https://github.com/login/device', expiresAt: new Date(Date.now() + 900_000).toISOString() },
+        }),
+        signOutPaneCloud: () => setPaneCloud({ signIn: { state: 'signed-out' }, machine: null }),
+        createPaneCloudMachine: (name: string) => {
+          trackCall('pane-cloud:create', [name]);
+          if (paneCloud.signIn.state !== 'signed-in' || paneCloud.signIn.access !== 'invited') {
+            return paneCloudFails("You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite, or ask a team owner to invite your GitHub login.');
+          }
+          if (paneCloud.machine) return paneCloudFails('Your seat already has a machine.', 'Open your existing machine, or delete it before creating another.');
+          return setPaneCloud({ machine: {
+            id: 'mach_1', name, state: 'running', stateReason: null, paneVersion: '2.4.215',
+            tailnetLoginUrl: 'https://login.tailscale.com/a/synthetic', tailnetHostname: null, profileId: null,
+            usage: { cpuSecondsUsed: 0, dailyCpuSeconds: 43_200, throttled: false, resetsAt: new Date(Date.now() + 3_600_000).toISOString() },
+            actions: [
+              paneCloudAction('bootstrap', 'Pane Cloud', 'First boot: install Pane and wait for your tailnet login.'),
+              paneCloudAction('create', 'you', 'You created this machine.'),
+            ],
+          } });
+        },
+        startPaneCloudMachine: () => setPaneCloud({}, { state: 'running', stateReason: null }, [paneCloudAction('start', 'you', 'You started this machine.')]),
+        stopPaneCloudMachine: () => setPaneCloud({}, { state: 'stopped', stateReason: 'user' }, [paneCloudAction('stop', 'you', 'You stopped this machine.')]),
+        updatePaneCloudMachine: () => setPaneCloud({}, { paneVersion: '2.4.216' }, [paneCloudAction('update_pane', 'you', 'You asked for the latest Pane release.')]),
+        deletePaneCloudMachine: () => {
+          remoteDaemonConfig.client.profiles = remoteDaemonConfig.client.profiles.filter((profile) => !profile.paneCloud);
+          syncRemoteDaemonConfig();
+          emit('remote-daemon:profiles-changed');
+          return setPaneCloud({ machine: null });
+        },
+        onPaneCloudChanged: (callback: MockEventCallback) => subscribe('pane-cloud:changed', callback),
       }),
       uiState: namespace({
         getExpanded: () => {
@@ -2067,6 +2114,28 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       value: {
         getConfig() {
           return clone(configState);
+        },
+        /** The person approving the device code on GitHub. */
+        approvePaneCloud(githubLogin: string, access: 'invited' | 'waitlisted') {
+          setPaneCloud({ signIn: { state: 'signed-in', githubLogin, name: null, access } });
+        },
+        /** The machine joining the user's tailnet: main saves its codeless host. */
+        joinPaneCloudTailnet() {
+          const machine = paneCloud.machine;
+          if (!machine) return;
+          const profile: RemotePaneConnectionProfile = {
+            id: 'tailnet-tail1234.ts.net-pane-mach-1', label: machine.name, baseUrl: 'https://pane-mach-1.tail1234.ts.net:8443', token: '', transport: 'http+sse',
+            tailnetMachine: 'pane-mach-1', tailnetDomain: 'tail1234.ts.net', paneCloud: { machineId: machine.id }, hostKind: { label: 'Pane Cloud machine', icon: 'cloud' },
+          };
+          remoteDaemonConfig.client.profiles = [...remoteDaemonConfig.client.profiles.filter((existing) => existing.id !== profile.id), profile];
+          syncRemoteDaemonConfig();
+          emit('remote-daemon:profiles-changed');
+          setPaneCloud({}, { tailnetLoginUrl: null, tailnetHostname: 'pane-mach-1.tail1234.ts.net', profileId: profile.id });
+        },
+        /** The day's CPU use, as the fleet's metrics report it. */
+        setPaneCloudCpuUsed(seconds: number) {
+          const usage = paneCloud.machine?.usage;
+          if (usage) setPaneCloud({}, { usage: { ...usage, cpuSecondsUsed: seconds, throttled: seconds >= usage.dailyCpuSeconds } });
         },
         reportCloudStep(name: string, step: CloudSandboxProgressStep) {
           const id = `create:${name}`;

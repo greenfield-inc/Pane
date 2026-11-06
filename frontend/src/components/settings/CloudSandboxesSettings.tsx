@@ -9,6 +9,7 @@ import { SettingsSection } from '../ui/SettingsSection';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { SettingRow } from './SettingRow';
 import { CloudSandboxSetupWarning } from './CloudSandboxSetupWarning';
+import { PaneCloudSettings } from './PaneCloudSettings';
 import { SegmentedControl } from './SettingsControls';
 import { API, type IPCResponse } from '../../utils/api';
 import { useCloudSandboxes } from '../../hooks/useCloudSandboxes';
@@ -40,6 +41,12 @@ import {
 
 type SendCloudRequest = (send: () => Promise<IPCResponse<CloudSandboxesSnapshot>>) => Promise<boolean>;
 
+type CloudProviderChoice = 'pane-cloud' | 'boat';
+const PROVIDER_OPTIONS: Array<{ id: CloudProviderChoice; label: string }> = [
+  { id: 'pane-cloud', label: 'Pane Cloud' },
+  { id: 'boat', label: 'boat.dev' },
+];
+
 const SIZE_OPTIONS: Array<{ id: CloudSandboxSize; label: string }> = [
   { id: 'small', label: 'Small' },
   { id: 'default', label: 'Default' },
@@ -58,8 +65,15 @@ const ACTION_LABELS = new Map<CloudSandboxRowAction, string>([
 ]);
 
 /** Cloud sandboxes (experimental): Pane on a provider sandbox, joined to the user's tailnet. */
-export function CloudSandboxesSettings({ onTerminalOpened }: { onTerminalOpened: () => void }) {
+export function CloudSandboxesSettings({ onTerminalOpened, onOpenMachine }: {
+  onTerminalOpened: () => void;
+  /** Opens a saved host's machine page (Pane Cloud's Details). */
+  onOpenMachine?: (machineId: string) => void;
+}) {
   const { snapshot, loaded, request } = useCloudSandboxes();
+  // Pane Cloud first; someone who has set up boat.dev (its key or a sandbox) lands there.
+  const [provider, setProvider] = useState<CloudProviderChoice | null>(null);
+  const shownProvider = provider ?? (snapshot.credentials.boat || snapshot.sandboxes.length > 0 ? 'boat' : 'pane-cloud');
   const [requestError, setRequestError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<CloudSandboxView | null>(null);
   const [viewingLog, setViewingLog] = useState<CloudSandboxView | null>(null);
@@ -116,13 +130,19 @@ export function CloudSandboxesSettings({ onTerminalOpened }: { onTerminalOpened:
   return (
     <SettingsSection
       title="Cloud sandboxes (experimental)"
-      description="Run Pane on a boat.dev sandbox in your tailnet. Stop snapshots it so it costs nothing while stopped; Start resumes it."
+      description={shownProvider === 'pane-cloud'
+        ? 'Run Pane on an always-on machine in your tailnet, so agents keep working with this computer closed.'
+        : 'Run Pane on a boat.dev sandbox in your tailnet. Stop snapshots it so it costs nothing while stopped; Start resumes it.'}
     >
-      {!loaded && <p className="py-3 text-sm text-text-tertiary" aria-live="polite">Loading cloud sandboxes...</p>}
-      {loaded && !snapshot.available && (
+      <SettingRow settingId="remote-cloud-provider" label="Add cloud sandbox" description="Pane Cloud is run by Greenfield. boat.dev runs on your own boat.dev and Tailscale keys." align="start">
+        <SegmentedControl label="Provider" columns={2} value={shownProvider} options={PROVIDER_OPTIONS} onChange={setProvider} />
+      </SettingRow>
+      {shownProvider === 'pane-cloud' && <PaneCloudSettings onOpenMachine={onOpenMachine} />}
+      {shownProvider === 'boat' && !loaded && <p className="py-3 text-sm text-text-tertiary" aria-live="polite">Loading cloud sandboxes...</p>}
+      {shownProvider === 'boat' && loaded && !snapshot.available && (
         <p className="py-3 text-sm text-text-tertiary">Cloud sandboxes are not available in this build of Pane.</p>
       )}
-      {loaded && snapshot.available && (
+      {shownProvider === 'boat' && loaded && snapshot.available && (
         <>
           {snapshot.loadError && (
             <div className="my-2 flex items-center justify-between gap-3 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-status-error" role="alert">

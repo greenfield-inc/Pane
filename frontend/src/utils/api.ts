@@ -48,6 +48,7 @@ import type {
   CloudSandboxCreateRequest,
   CloudSandboxesSnapshot,
 } from '../../../shared/types/cloudSandboxes';
+import type { PaneCloudSnapshot } from '../../../shared/types/paneCloud';
 import type {
   PanePermissionResponse,
 } from '../../../shared/types/daemon';
@@ -1002,6 +1003,19 @@ export class API {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.remoteDaemon.onCloudSandboxesChanged(callback);
     },
+  };
+
+  /** Pane Cloud: sign-in, the seat's machine and its action log (shared/types/paneCloud.ts). */
+  static paneCloud = {
+    get: () => window.electronAPI.remoteDaemon.getPaneCloud(),
+    signIn: () => window.electronAPI.remoteDaemon.signInPaneCloud(),
+    signOut: () => window.electronAPI.remoteDaemon.signOutPaneCloud(),
+    create: (name: string) => window.electronAPI.remoteDaemon.createPaneCloudMachine(name),
+    start: () => window.electronAPI.remoteDaemon.startPaneCloudMachine(),
+    stop: () => window.electronAPI.remoteDaemon.stopPaneCloudMachine(),
+    updatePane: () => window.electronAPI.remoteDaemon.updatePaneCloudMachine(),
+    remove: () => window.electronAPI.remoteDaemon.deletePaneCloudMachine(),
+    onChanged: (callback: (snapshot: PaneCloudSnapshot) => void) => window.electronAPI.remoteDaemon.onPaneCloudChanged(callback),
   };
 
   // Prompts

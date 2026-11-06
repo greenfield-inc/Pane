@@ -382,6 +382,9 @@ importers:
       js-yaml:
         specifier: ^4.3.2
         version: 4.3.2
+      pane-cloud-contract:
+        specifier: workspace:*
+        version: link:../packages/pane-cloud-contract
       smol-toml:
         specifier: 1.7.1
         version: 1.7.1
@@ -610,6 +613,31 @@ importers:
       vitest:
         specifier: 3.2.6
         version: 3.2.6(@types/debug@4.1.12)(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.51.0)(terser@5.51.2)(yaml@2.9.0)
+
+  packages/pane-cloud-contract:
+    dependencies:
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@eslint/js':
+        specifier: ^9.17.0
+        version: 9.31.0
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.16.5
+      eslint:
+        specifier: ^9.17.0
+        version: 9.31.0(jiti@2.7.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      typescript-eslint:
+        specifier: ^8.19.0
+        version: 8.37.0(eslint@9.31.0(jiti@2.7.0))(typescript@5.9.3)
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.16.5)(lightningcss@1.33.0)(sass@1.51.0)(terser@5.51.2)
 
   packages/runpane:
     devDependencies:
@@ -7165,10 +7193,6 @@ packages:
   expand-template@2.0.3:
     resolution: {integrity: sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==}
     engines: {node: '>=6'}
-
-  expect-type@1.2.2:
-    resolution: {integrity: sha512-JhFGDVJ7tmDJItKhYgJCGLOWjuK9vPxiXoUFLwLDc99NlmklilbiQJwoctZtt13+xMw91MCk/REan6MWHqDjyA==}
-    engines: {node: '>=12.0.0'}
 
   expect-type@1.4.0:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
@@ -18795,8 +18819,6 @@ snapshots:
 
   expand-template@2.0.3: {}
 
-  expect-type@1.2.2: {}
-
   expect-type@1.4.0: {}
 
   expo-application@57.0.3(expo@57.0.23):
@@ -20128,7 +20150,7 @@ snapshots:
       tinyglobby: 0.2.17
       unbash: 4.0.10
       yaml: 2.9.0
-      zod: 4.4.3
+      zod: 4.6.7
 
   kolorist@1.8.0: {}
 
@@ -23780,9 +23802,9 @@ snapshots:
       '@vitest/spy': 2.1.9
       '@vitest/utils': 2.1.9
       chai: 5.2.1
-      debug: 4.4.1
-      expect-type: 1.2.2
-      magic-string: 0.30.17
+      debug: 4.4.3
+      expect-type: 1.4.0
+      magic-string: 0.30.21
       pathe: 1.1.2
       std-env: 3.9.0
       tinybench: 2.9.0

@@ -140,7 +140,8 @@ export function buildMachineList({ connectionState, profiles, tailnet, localName
     const reachable = machine.state === 'available' || machine.state === 'outdated';
     return remoteEntry({
       id: profile?.id ?? `tailnet:${machine.dnsName}`,
-      name: machine.name,
+      // A Pane Cloud machine keeps the name its owner gave it; its Tailscale name is the service's.
+      name: profile?.paneCloud ? profile.label : machine.name,
       os: machine.os,
       kind: 'tailnet',
       slot: slotFor(machine.name),
@@ -159,7 +160,7 @@ export function buildMachineList({ connectionState, profiles, tailnet, localName
     .filter((profile) => profile.tailnetMachine && !listedProfileIds.has(profile.id))
     .map((profile) => remoteEntry({
       id: profile.id,
-      name: profile.tailnetMachine ?? profile.label,
+      name: profile.paneCloud ? profile.label : profile.tailnetMachine ?? profile.label,
       os: null,
       kind: 'tailnet',
       slot: slotFor(profile.tailnetMachine ?? profile.label),
