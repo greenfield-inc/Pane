@@ -843,35 +843,12 @@ test('an observed active terminal resize debounces through the existing xterm re
   expect(resizeCalls[0].rows).toBeGreaterThanOrEqual(1);
 });
 
-test('worktree and main-repository inspectors restore separate v2 preferences', async ({ page }) => {
-  await installFixture(page, {
-    'pane-detail-panel-width:v2': '{"version":2,"preferredPx":440}',
-    'pane-project-detail-panel-width:v2': '{"version":2,"preferredPx":520}',
-  });
+test('a (Main) Pane uses the same inspector width as any other Pane', async ({ page }) => {
+  await installFixture(page, { 'pane-detail-panel-width:v2': '{"version":2,"preferredPx":440}' });
   await openWorktree(page);
   await expect(page.locator('.pane-detail-panel-vertical')).toHaveCSS('width', '440px');
 
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
-  const projectInspector = page.locator('.pane-detail-panel-vertical');
-  await expect(projectInspector).toHaveCSS('width', '520px');
-  const projectSeparator = page.getByRole('separator', { name: 'Resize main repository inspector' });
-  await expect(projectSeparator).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem('pane-detail-panel-width:v2'))).toBe('{"version":2,"preferredPx":440}');
-
-  const start = await projectSeparator.boundingBox();
-  await page.mouse.move(start!.x + start!.width / 2, start!.y + 100);
-  await page.mouse.down();
-  await page.mouse.move(start!.x + 40, start!.y + 100);
-  await page.mouse.up();
-  await expect.poll(async () => (await projectInspector.boundingBox())!.width).toBeLessThan(520);
-  const draggedProject = (await projectInspector.boundingBox())!.width;
-  expect(await page.evaluate(() => localStorage.getItem('pane-project-detail-panel-width:v2'))).toBe(`{"version":2,"preferredPx":${draggedProject}}`);
-  expect(await page.evaluate(() => localStorage.getItem('pane-detail-panel-width:v2'))).toBe('{"version":2,"preferredPx":440}');
-  await page.evaluate(() => localStorage.setItem('pane-project-detail-panel-width:v2', '{"version":2,"preferredPx":520}'));
-
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
-  await expect(page.locator('.pane-detail-panel-vertical')).toHaveCSS('width', '520px');
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
+  await expect(page.locator('.pane-detail-panel-vertical')).toHaveCSS('width', '440px');
 });

@@ -55,7 +55,7 @@ for (const surface of ['session', 'project', 'compact'] as const) {
     await page.getByRole('button', { name: 'Foreground', exact: true }).click();
     if (surface === 'project') {
       await page.getByRole('button', { name: 'Project actions for Render fixture', exact: true }).click();
-      await page.getByText('Open session on main', { exact: true }).click();
+      await page.getByText('Open (Main) Pane', { exact: true }).click();
     }
     // Force a sidebar render after instrumentation, including in expanded mode.
     await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
@@ -76,7 +76,7 @@ for (const surface of ['session', 'project', 'compact'] as const) {
       }
     }, '/src/stores/panelStore.ts');
     const badge = surface === 'compact'
-      ? page.getByRole('button', { name: 'Open main workspace for Render fixture', exact: true })
+      ? page.getByRole('button', { name: 'Open the (Main) Pane for Render fixture', exact: true })
       : page.getByRole('button', { name: 'Background', exact: true }).locator('..');
     await expect(badge.locator('[aria-label="Agent working"]')).toBeVisible();
     const counts = await page.evaluate(() => window.__statusRenderCounts);

@@ -41,3 +41,8 @@ export function generatePaneName(
   }
   return `${baseName}-${suffix}`;
 }
+
+/** A Pane working in the repository checkout, rather than its own worktree, is named "(Main) <name>". */
+export function mainPaneName(name: string): string {
+  return name.startsWith('(Main) ') ? name : `(Main) ${name}`;
+}

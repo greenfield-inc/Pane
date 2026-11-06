@@ -38,20 +38,19 @@ describe('session selection ordering', () => {
     useSessionStore.setState({
       sessions: [session({ id: 'a' }), session({ id: 'b' })],
       activeSessionId: null,
-      activeMainRepoSession: null,
     });
   });
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('keeps main-repository updates when switching away and back', async () => {
-    const main = session({ id: 'main', isMainRepo: true, name: 'Old name' });
-    useSessionStore.setState({ sessions: [main, session({ id: 'other' })], activeMainRepoSession: main, activeSessionId: 'main' });
-    useSessionStore.getState().updateSession({ ...main, name: 'Updated name' });
+  it('keeps a (Main) Pane in the ordinary list, with its updates, when switching away and back', async () => {
+    const main = session({ id: 'main', isMainRepo: true, name: '(Main) Old name' });
+    useSessionStore.setState({ sessions: [main, session({ id: 'other' })], activeSessionId: 'main' });
+    useSessionStore.getState().updateSession({ ...main, name: '(Main) Updated name' });
     await useSessionStore.getState().setActiveSession('other');
     await useSessionStore.getState().setActiveSession('main');
-    expect(useSessionStore.getState().activeMainRepoSession?.name).toBe('Updated name');
-    expect(useSessionStore.getState().sessions.find(pane => pane.id === 'main')?.name).toBe('Updated name');
+    expect(useSessionStore.getState().getActiveSession()?.name).toBe('(Main) Updated name');
+    expect(useSessionStore.getState().sessions.find(pane => pane.id === 'main')?.name).toBe('(Main) Updated name');
   });
 
   it('keeps the last selection when IPC replies arrive in reverse order', async () => {
@@ -80,7 +79,7 @@ describe('session selection ordering', () => {
     expect(useSessionStore.getState().activeSessionId).toBeNull();
   });
 
-  it.each(['b', null])('ignores an uncached main-repo fetch after selecting %s', async (next) => {
+  it.each(['b', null])('ignores an uncached fetch after selecting %s', async (next) => {
     const reply = deferred<{ success: boolean; data: Session }>();
     getSession.mockReturnValueOnce(reply.promise);
     const selecting = useSessionStore.getState().setActiveSession('missing');
@@ -88,7 +87,6 @@ describe('session selection ordering', () => {
     reply.resolve({ success: true, data: session({ id: 'missing', isMainRepo: true }) });
     await selecting;
     expect(useSessionStore.getState().activeSessionId).toBe(next);
-    expect(useSessionStore.getState().activeMainRepoSession).toBeNull();
     expect(useSessionStore.getState().sessions.map(item => item.id)).toEqual(['a', 'b']);
     expect(markViewed).not.toHaveBeenCalledWith('missing');
   });
@@ -150,7 +148,6 @@ describe('session selection ordering', () => {
       await useSessionStore.getState().setActiveSession('missing');
       expect(useSessionStore.getState().activeSessionId).toBe('missing');
       expect(useSessionStore.getState().selectionError).toBeTruthy();
-      expect(useSessionStore.getState().activeMainRepoSession).toBeNull();
       expect(markViewed).not.toHaveBeenCalled();
     } finally {
       error.mockRestore();
@@ -164,7 +161,6 @@ describe('sessionStore', () => {
     useSessionStore.setState({
       sessions: [],
       activeSessionId: null,
-      activeMainRepoSession: null,
       isLoaded: false,
       terminalOutput: {},
       deletingSessionIds: new Set(),
@@ -214,7 +210,7 @@ describe('sessionStore', () => {
   it('retains the latest output and JSON messages independently in chronological order', () => {
     const target = session();
     const other = session({ id: 'other' });
-    useSessionStore.setState({ sessions: [target, other], activeMainRepoSession: target });
+    useSessionStore.setState({ sessions: [target, other] });
     const outputs: SessionOutput[] = [];
     for (let i = 0; i < 1000; i++) {
       outputs.push({ sessionId: target.id, type: i % 2 ? 'stderr' : 'stdout', data: `line-${i}`, timestamp: '' });
@@ -229,15 +225,13 @@ describe('sessionStore', () => {
     expect(updated.output).toEqual(Array.from({ length: 300 }, (_, i) => `line-${i + 700}`));
     expect(updated.jsonMessages.map(message => message.text)).toEqual(Array.from({ length: 100 }, (_, i) => `message-${i + 900}`));
     expect(updated.jsonMessages[99].timestamp).toBe('2026-09-06T00:00:00.000Z');
-    expect(state.activeMainRepoSession?.output).toEqual(updated.output);
-    expect(state.activeMainRepoSession?.jsonMessages).toEqual(updated.jsonMessages);
     expect(state.sessions[1]).toBe(other);
     expect(target.output).toEqual([]);
     expect(outputs).toEqual(original);
   });
 
   it('keeps sparse message categories even when the other category fills first', () => {
-    useSessionStore.setState({ activeMainRepoSession: session() });
+    useSessionStore.setState({ sessions: [session()] });
     const outputs: SessionOutput[] = [{
       sessionId: 'session-new', type: 'json', data: { type: 'user', text: 'initial prompt', timestamp: '' }, timestamp: '',
     }];
@@ -247,12 +241,12 @@ describe('sessionStore', () => {
 
     useSessionStore.getState().setSessionOutputs('session-new', outputs);
 
-    const updated = useSessionStore.getState().activeMainRepoSession;
+    const updated = useSessionStore.getState().sessions[0];
     expect(updated?.output).toEqual(Array.from({ length: 300 }, (_, i) => `line-${i + 700}`));
     expect(updated?.jsonMessages.map(message => message.text)).toEqual(['initial prompt']);
     useSessionStore.getState().setSessionOutputs('session-new', []);
-    expect(useSessionStore.getState().activeMainRepoSession?.output).toEqual([]);
-    expect(useSessionStore.getState().activeMainRepoSession?.jsonMessages).toEqual([]);
+    expect(useSessionStore.getState().sessions[0].output).toEqual([]);
+    expect(useSessionStore.getState().sessions[0].jsonMessages).toEqual([]);
   });
 
   it('ignores history that arrives after its session has been deleted', () => {

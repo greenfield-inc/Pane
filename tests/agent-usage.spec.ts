@@ -293,52 +293,6 @@ test('Settings manual rescan waits for transcript indexing before reloading quot
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
-test('main-repository branch detection never renders the previous repository branch', async ({ page }) => {
-  await page.setViewportSize({ width: 1_600, height: 900 });
-  await installElectronApiMock(page, {
-    initialProjects: [project, secondProject],
-    initialSessions: [mainRepoSessionWithBranch, secondMainRepoSession],
-    initialPanels: [...mainRepoPanels, ...secondMainRepoPanels],
-    activeProjectId: project.id,
-    detectedBranchByPath: {
-      [project.path]: 'main-a',
-      [secondProject.path]: null,
-    },
-    mainRepoSessionDelayByProjectId: { [secondProject.id]: 500 },
-  });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
-  // The inspector is shown by default; open it only if it was hidden.
-  const showDetails = page.getByRole('button', { name: 'Show details', exact: true });
-  if (await showDetails.isVisible().catch(() => false)) await showDetails.click();
-  const detailPanel = page.locator('.pane-detail-panel-vertical');
-  await expect(detailPanel.getByText('main-a', { exact: true })).toBeVisible();
-
-  await page.getByRole('button', { name: `Project actions for ${secondProject.name}`, exact: true }).click();
-  const renderedPreviousBranch = await page.evaluate(async () => {
-    const openMainButton = Array.from(document.querySelectorAll('button')).find(
-      button => button.textContent?.trim() === 'Open session on main',
-    );
-    if (!openMainButton) throw new Error('Open session on main action not found');
-    openMainButton.click();
-    await Promise.resolve();
-    return document.querySelector('.pane-detail-panel-vertical')?.textContent?.includes('main-a') ?? false;
-  });
-
-  expect(renderedPreviousBranch).toBe(false);
-  const loadingSession = page.getByRole('status', { name: 'Loading main repository session' });
-  await expect(loadingSession).toBeVisible();
-  await expect(page.getByText('No session selected', { exact: true })).toHaveCount(0);
-  await page.waitForTimeout(250);
-  await expect(loadingSession).toBeVisible();
-  await expect(detailPanel.getByText('main-a', { exact: true })).toHaveCount(0);
-  await page.waitForTimeout(400);
-  await expect(loadingSession).toHaveCount(0);
-  await expect(detailPanel.getByText('main-b', { exact: true })).toBeVisible();
-  await expect(detailPanel.getByText('main-a', { exact: true })).toHaveCount(0);
-});
-
 test('latest main-repository lookup wins across A to delayed B to A', async ({ page }) => {
   await page.setViewportSize({ width: 1_600, height: 900 });
   await installElectronApiMock(page, {
@@ -350,7 +304,7 @@ test('latest main-repository lookup wins across A to delayed B to A', async ({ p
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   // The inspector is shown by default; open it only if it was hidden.
   const showDetails = page.getByRole('button', { name: 'Show details', exact: true });
   if (await showDetails.isVisible().catch(() => false)) await showDetails.click();
@@ -376,10 +330,10 @@ test('latest main-repository lookup wins across A to delayed B to A', async ({ p
   });
 
   await page.getByRole('button', { name: `Project actions for ${secondProject.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   await page.waitForTimeout(50);
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   await page.waitForTimeout(700);
 
   const noSessionSelectedSeen = await page.evaluate(() => {
@@ -397,7 +351,7 @@ test('latest main-repository lookup wins across A to delayed B to A', async ({ p
   await expect(detailPanel.getByText('main-b', { exact: true })).toHaveCount(0);
 });
 
-test('main-repository lookup failure clears the loading skeleton', async ({ page }) => {
+test('a failed (Main) Pane lookup replaces the opening status with what happened', async ({ page }) => {
   await page.setViewportSize({ width: 1_600, height: 900 });
   await installElectronApiMock(page, {
     initialProjects: [project],
@@ -409,11 +363,10 @@ test('main-repository lookup failure clears the loading skeleton', async ({ page
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
 
-  const loadingSession = page.getByRole('status', { name: 'Loading main repository session' });
-  await expect(loadingSession).toBeVisible();
-  await page.waitForTimeout(500);
-  await expect(loadingSession).toHaveCount(0);
-  await expect(page.getByText('No session selected', { exact: true })).toBeVisible();
+  const opening = page.getByRole('status', { name: 'Opening repository' });
+  await expect(opening).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Main repository session lookup failed');
+  await expect(opening).toHaveCount(0);
 });

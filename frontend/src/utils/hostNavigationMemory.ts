@@ -10,7 +10,7 @@ import type { Project } from '../types/project';
 
 /**
  * Remembers where the user was on each host so switching away and back lands on
- * the same Session, Pane and repository view instead of the home page. Pane,
+ * the same Session and Pane instead of the home page. Pane,
  * repository and Session ids are per host, so a memory is only read back for the
  * host it was written under, and every id in it is revalidated before use.
  *
@@ -216,7 +216,7 @@ export async function restoreHostNavigation(
   const { setActiveSession } = useSessionStore.getState();
 
   if (memory.view === 'project') {
-    // The repository view mounts the project's own main-repo Pane itself.
+    // Opening the repository selects its (Main) Pane.
     if (memory.projectId === null || !(await projectExists(memory.projectId)) || !ownsRuntime()) return;
     await setActiveSession(null);
     if (!ownsRuntime()) return;

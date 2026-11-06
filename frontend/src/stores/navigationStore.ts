@@ -62,6 +62,7 @@ interface NavigationState {
   // Actions
   setActiveView: (view: ActiveView) => void;
   setActiveProjectId: (projectId: number | null) => void;
+  /** Opens the repository's "(Main)" Pane; SessionView selects it and moves to the sessions view. */
   navigateToProject: (projectId: number) => void;
   navigateToSessions: () => void;
   navigateToPaneChat: () => void;
