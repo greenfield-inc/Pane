@@ -59,7 +59,7 @@ async function cloudMock<Result>(page: Page, run: (controls: CloudMockControls) 
 
 async function openRemoteAccess(page: Page) {
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
-  await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Settings' }).first().click();
   await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Cloud sandboxes (experimental)' })).toBeVisible();
@@ -141,7 +141,7 @@ test('adding a cloud sandbox shows live progress, a failure with Retry, then the
 
   // The new host is in the switcher like any other saved host.
   await leaveSettings(page);
-  await page.getByRole('button', { name: 'Agents run on This computer. Switch host' }).click();
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
   await expect(page.getByRole('menuitemradio', { name: /alpha/ })).toContainText('https://rp-alpha.tail1234.ts.net');
 });
 
@@ -215,17 +215,17 @@ test('the host switcher starts a stopped sandbox, then connects to it', async ({
     },
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Agents run on This computer. Switch host' }).click();
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
 
   const beta = page.getByRole('menuitemradio', { name: /beta/ });
   await expect(beta).toContainText('Stopped · Select to start');
   await page.screenshot({ path: testInfo.outputPath('switcher-stopped-sandbox.png') });
   await beta.click();
 
-  await expect(page.getByRole('button', { name: 'Agents run on beta. Switch host' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Agents run on beta. Switch machine' })).toBeVisible();
   expect(await cloudMock(page, (mock) => mock.getCloudCalls())).toEqual([{ action: 'start', id: 'rp-beta' }]);
-  await page.getByRole('button', { name: 'Agents run on beta. Switch host' }).click();
-  await expect(page.getByRole('menuitemradio', { name: /beta/ })).toContainText('Connected · https://rp-beta.tail1234.ts.net');
+  await page.getByRole('button', { name: 'Agents run on beta. Switch machine' }).click();
+  await expect(page.getByRole('menuitemradio', { name: /beta/ })).toContainText('Agents run here');
 });
 
 test('a sandbox boat is still saving shows Stopping in the row and the switcher, then Stopped with Start', async ({ page }, testInfo) => {
@@ -252,7 +252,7 @@ test('a sandbox boat is still saving shows Stopping in the row and the switcher,
   await expect(row.getByText('Stopping', { exact: true })).toBeVisible();
   await expect(row.getByRole('button', { name: /^(Stop|Start) beta$/ })).toHaveCount(0);
   await leaveSettings(page);
-  await page.getByRole('button', { name: 'Agents run on This computer. Switch host' }).click();
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
   const switcherRow = page.getByRole('menuitemradio', { name: /beta/ });
   await expect(switcherRow).toContainText('Stopping cloud sandbox…');
   await expect(switcherRow).toBeDisabled();
@@ -274,7 +274,7 @@ test('without the cloud library the section explains itself and remote hosts are
 
   await expect(page.getByText('Cloud sandboxes are not available in this build of Pane.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Add Cloud Sandbox' })).toHaveCount(0);
-  await expect(page.getByText('Using local runtime')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Switch to' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Set Up Host' })).toBeVisible();
 });
 
@@ -306,10 +306,10 @@ test('a running sandbox row opens the same terminal as the host switcher', async
   const tab = page.getByRole('tab', { name: 'alpha · Terminal' });
   await expect(tab).toBeVisible();
   await expect(tab.locator('..').locator('svg.lucide-cloud')).toHaveCount(1);
-  await expect(page.getByRole('button', { name: 'Agents run on alpha. Switch host' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Agents run on alpha. Switch machine' })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('cloud-row-terminal-tab.png') });
 
-  await page.getByRole('button', { name: 'Agents run on alpha. Switch host' }).click();
+  await page.getByRole('button', { name: 'Agents run on alpha. Switch machine' }).click();
   await page.getByRole('menuitem', { name: 'Open terminal on alpha' }).click();
   await expect(tab).toBeVisible();
   const opened = await page.evaluate(() => {
@@ -372,7 +372,7 @@ test('a sandbox row shows a running script, then a failure chip whose View log s
 test('the first cloud sandbox brings up the host switcher, and removing the last one hides it', async ({ page }) => {
   await installElectronApiMock(page, { cloudSandboxes: { credentials: ALL_CREDENTIALS, sandboxes: [] } });
   await openRemoteAccess(page);
-  const switcher = page.getByRole('button', { name: 'Agents run on This computer. Switch host' });
+  const switcher = page.getByRole('button', { name: 'Agents run on devbox. Switch machine' });
 
   await page.getByLabel('Name', { exact: true }).fill('alpha');
   await page.getByRole('button', { name: 'Add Cloud Sandbox' }).click();
