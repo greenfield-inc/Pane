@@ -5689,12 +5689,16 @@ async function pushUnpushedItem(services: AppServices, item: RunpaneHostUnpushed
     return { ...result, outcome: 'pushed', pushedTo: `${remote}/${saved}` };
   } catch (error) {
     const detail = reasonOf(error);
-    const next = /rejected|non-fast-forward|fetch first/i.test(detail)
-      ? `Pull in ${item.paneName} and push again.`
+    // git's own words, without the command echo, the destination and its hints.
+    const gitSays = detail.split('\n').map((line) => line.trim())
+      .find((line) => line && !/^(Command failed|To |hint:)/.test(line)) ?? detail;
+    const name = item.paneName;
+    const message = /rejected|non-fast-forward|fetch first/i.test(detail)
+      ? `The remote branch has commits ${name} does not, so the push was refused and nothing was forced. Pull in ${name} and push again.`
       : /auth|permission denied|could not read username|403/i.test(detail)
-        ? 'Sign in to GitHub on this machine: gh auth login'
-        : `Open ${item.paneName} and push it by hand.`;
-    return { ...result, outcome: 'failed', message: `Pushing ${item.paneName} failed: ${detail}. ${next}` };
+        ? `GitHub refused the push from ${name} (${gitSays}). Sign in to GitHub on this machine: gh auth login`
+        : `Pushing ${name} failed: ${gitSays}. Open ${name} and push it by hand.`;
+    return { ...result, outcome: 'failed', message };
   }
 }
 
