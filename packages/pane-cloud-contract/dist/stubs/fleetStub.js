@@ -71,7 +71,7 @@ async function startFleetStub(options) {
                 switch (payload.operation) {
                     case 'stop':
                         requireState(machine, 'running', 'stop');
-                        setState(machine, 'stopped', 'user', payload.requestId);
+                        setState(machine, 'stopped', payload.parameters.cause, payload.requestId);
                         break;
                     case 'resume':
                         requireState(machine, 'stopped', 'resume');

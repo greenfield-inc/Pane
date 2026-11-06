@@ -28,6 +28,16 @@ export declare const PaneRelease: z.ZodObject<{
 }, z.core.$strict>;
 export type PaneRelease = z.infer<typeof PaneRelease>;
 /**
+ * Why the service stops a machine; the fleet records it as the machine's stateReason. Stops the
+ * fleet makes on its own (idle, memory pressure, host maintenance, host loss) set their own reason.
+ */
+export declare const StopCause: z.ZodEnum<{
+    user: "user";
+    billing: "billing";
+    end_of_beta: "end_of_beta";
+    abuse: "abuse";
+}>;
+/**
  * The allow-list. Lifecycle operations run on the host; guest operations run inside the machine
  * through the guest agent. Nothing else exists: no shell command, no file write, no access grant.
  */
@@ -42,7 +52,14 @@ export declare const FLEET_OPERATIONS: {
     };
     readonly stop: {
         readonly runsOn: "host";
-        readonly parameters: z.ZodObject<{}, z.core.$strict>;
+        readonly parameters: z.ZodObject<{
+            cause: z.ZodEnum<{
+                user: "user";
+                billing: "billing";
+                end_of_beta: "end_of_beta";
+                abuse: "abuse";
+            }>;
+        }, z.core.$strict>;
     };
     readonly delete: {
         readonly runsOn: "host";
@@ -90,13 +107,7 @@ export declare const FleetOperationName: z.ZodEnum<{
 }>;
 export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     operation: z.ZodLiteral<"create">;
-    parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-        release: z.ZodObject<{
-            version: z.ZodString;
-            arch: z.ZodLiteral<"arm64">;
-            debSha256: z.ZodString;
-        }, z.core.$strict>;
-    }, z.core.$strict>;
+    parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
     machineId: z.ZodString;
     reason: z.ZodString;
@@ -104,13 +115,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     expiresAt: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
     operation: z.ZodLiteral<"resume">;
-    parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-        release: z.ZodObject<{
-            version: z.ZodString;
-            arch: z.ZodLiteral<"arm64">;
-            debSha256: z.ZodString;
-        }, z.core.$strict>;
-    }, z.core.$strict>;
+    parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
     machineId: z.ZodString;
     reason: z.ZodString;
@@ -118,12 +123,13 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     expiresAt: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
     operation: z.ZodLiteral<"stop">;
-    parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-        release: z.ZodObject<{
-            version: z.ZodString;
-            arch: z.ZodLiteral<"arm64">;
-            debSha256: z.ZodString;
-        }, z.core.$strict>;
+    parameters: z.ZodObject<{
+        cause: z.ZodEnum<{
+            user: "user";
+            billing: "billing";
+            end_of_beta: "end_of_beta";
+            abuse: "abuse";
+        }>;
     }, z.core.$strict>;
     requestId: z.ZodUUID;
     machineId: z.ZodString;
@@ -132,13 +138,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     expiresAt: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
     operation: z.ZodLiteral<"delete">;
-    parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-        release: z.ZodObject<{
-            version: z.ZodString;
-            arch: z.ZodLiteral<"arm64">;
-            debSha256: z.ZodString;
-        }, z.core.$strict>;
-    }, z.core.$strict>;
+    parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
     machineId: z.ZodString;
     reason: z.ZodString;
@@ -146,7 +146,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     expiresAt: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
     operation: z.ZodLiteral<"bootstrap">;
-    parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
+    parameters: z.ZodObject<{
         release: z.ZodObject<{
             version: z.ZodString;
             arch: z.ZodLiteral<"arm64">;
@@ -160,7 +160,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     expiresAt: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
     operation: z.ZodLiteral<"update_pane">;
-    parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
+    parameters: z.ZodObject<{
         release: z.ZodObject<{
             version: z.ZodString;
             arch: z.ZodLiteral<"arm64">;
@@ -174,13 +174,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     expiresAt: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
     operation: z.ZodLiteral<"prepare_to_stop">;
-    parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-        release: z.ZodObject<{
-            version: z.ZodString;
-            arch: z.ZodLiteral<"arm64">;
-            debSha256: z.ZodString;
-        }, z.core.$strict>;
-    }, z.core.$strict>;
+    parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
     machineId: z.ZodString;
     reason: z.ZodString;
@@ -188,13 +182,7 @@ export declare const OperationPayload: z.ZodDiscriminatedUnion<[z.ZodObject<{
     expiresAt: z.ZodISODateTime;
 }, z.core.$strict>, z.ZodObject<{
     operation: z.ZodLiteral<"collect_diagnostics">;
-    parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-        release: z.ZodObject<{
-            version: z.ZodString;
-            arch: z.ZodLiteral<"arm64">;
-            debSha256: z.ZodString;
-        }, z.core.$strict>;
-    }, z.core.$strict>;
+    parameters: z.ZodObject<{}, z.core.$strict>;
     requestId: z.ZodUUID;
     machineId: z.ZodString;
     reason: z.ZodString;
@@ -210,13 +198,7 @@ export declare const OperationSignature: z.ZodObject<{
 export declare const OperationEnvelope: z.ZodObject<{
     payload: z.ZodDiscriminatedUnion<[z.ZodObject<{
         operation: z.ZodLiteral<"create">;
-        parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-            release: z.ZodObject<{
-                version: z.ZodString;
-                arch: z.ZodLiteral<"arm64">;
-                debSha256: z.ZodString;
-            }, z.core.$strict>;
-        }, z.core.$strict>;
+        parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
         machineId: z.ZodString;
         reason: z.ZodString;
@@ -224,13 +206,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         expiresAt: z.ZodISODateTime;
     }, z.core.$strict>, z.ZodObject<{
         operation: z.ZodLiteral<"resume">;
-        parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-            release: z.ZodObject<{
-                version: z.ZodString;
-                arch: z.ZodLiteral<"arm64">;
-                debSha256: z.ZodString;
-            }, z.core.$strict>;
-        }, z.core.$strict>;
+        parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
         machineId: z.ZodString;
         reason: z.ZodString;
@@ -238,12 +214,13 @@ export declare const OperationEnvelope: z.ZodObject<{
         expiresAt: z.ZodISODateTime;
     }, z.core.$strict>, z.ZodObject<{
         operation: z.ZodLiteral<"stop">;
-        parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-            release: z.ZodObject<{
-                version: z.ZodString;
-                arch: z.ZodLiteral<"arm64">;
-                debSha256: z.ZodString;
-            }, z.core.$strict>;
+        parameters: z.ZodObject<{
+            cause: z.ZodEnum<{
+                user: "user";
+                billing: "billing";
+                end_of_beta: "end_of_beta";
+                abuse: "abuse";
+            }>;
         }, z.core.$strict>;
         requestId: z.ZodUUID;
         machineId: z.ZodString;
@@ -252,13 +229,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         expiresAt: z.ZodISODateTime;
     }, z.core.$strict>, z.ZodObject<{
         operation: z.ZodLiteral<"delete">;
-        parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-            release: z.ZodObject<{
-                version: z.ZodString;
-                arch: z.ZodLiteral<"arm64">;
-                debSha256: z.ZodString;
-            }, z.core.$strict>;
-        }, z.core.$strict>;
+        parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
         machineId: z.ZodString;
         reason: z.ZodString;
@@ -266,7 +237,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         expiresAt: z.ZodISODateTime;
     }, z.core.$strict>, z.ZodObject<{
         operation: z.ZodLiteral<"bootstrap">;
-        parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
+        parameters: z.ZodObject<{
             release: z.ZodObject<{
                 version: z.ZodString;
                 arch: z.ZodLiteral<"arm64">;
@@ -280,7 +251,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         expiresAt: z.ZodISODateTime;
     }, z.core.$strict>, z.ZodObject<{
         operation: z.ZodLiteral<"update_pane">;
-        parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
+        parameters: z.ZodObject<{
             release: z.ZodObject<{
                 version: z.ZodString;
                 arch: z.ZodLiteral<"arm64">;
@@ -294,13 +265,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         expiresAt: z.ZodISODateTime;
     }, z.core.$strict>, z.ZodObject<{
         operation: z.ZodLiteral<"prepare_to_stop">;
-        parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-            release: z.ZodObject<{
-                version: z.ZodString;
-                arch: z.ZodLiteral<"arm64">;
-                debSha256: z.ZodString;
-            }, z.core.$strict>;
-        }, z.core.$strict>;
+        parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
         machineId: z.ZodString;
         reason: z.ZodString;
@@ -308,13 +273,7 @@ export declare const OperationEnvelope: z.ZodObject<{
         expiresAt: z.ZodISODateTime;
     }, z.core.$strict>, z.ZodObject<{
         operation: z.ZodLiteral<"collect_diagnostics">;
-        parameters: z.ZodObject<{}, z.core.$strict> | z.ZodObject<{
-            release: z.ZodObject<{
-                version: z.ZodString;
-                arch: z.ZodLiteral<"arm64">;
-                debSha256: z.ZodString;
-            }, z.core.$strict>;
-        }, z.core.$strict>;
+        parameters: z.ZodObject<{}, z.core.$strict>;
         requestId: z.ZodUUID;
         machineId: z.ZodString;
         reason: z.ZodString;
@@ -375,13 +334,13 @@ export declare const FleetMachineState: z.ZodEnum<{
 /** Why a machine last stopped or failed; null while it runs normally. */
 export declare const StateReason: z.ZodEnum<{
     user: "user";
+    billing: "billing";
+    end_of_beta: "end_of_beta";
+    abuse: "abuse";
     idle: "idle";
     memory_pressure: "memory_pressure";
     host_maintenance: "host_maintenance";
     host_lost: "host_lost";
-    abuse: "abuse";
-    billing: "billing";
-    end_of_beta: "end_of_beta";
     failed: "failed";
 }>;
 /** The machine's place on the user's tailnet. It joins only from a login link its user opens. */
@@ -407,13 +366,13 @@ export declare const FleetMachine: z.ZodObject<{
     }>;
     stateReason: z.ZodNullable<z.ZodEnum<{
         user: "user";
+        billing: "billing";
+        end_of_beta: "end_of_beta";
+        abuse: "abuse";
         idle: "idle";
         memory_pressure: "memory_pressure";
         host_maintenance: "host_maintenance";
         host_lost: "host_lost";
-        abuse: "abuse";
-        billing: "billing";
-        end_of_beta: "end_of_beta";
         failed: "failed";
     }>>;
     hostId: z.ZodNullable<z.ZodString>;
@@ -503,13 +462,13 @@ export declare const FleetEvent: z.ZodObject<{
     }>>;
     reason: z.ZodNullable<z.ZodEnum<{
         user: "user";
+        billing: "billing";
+        end_of_beta: "end_of_beta";
+        abuse: "abuse";
         idle: "idle";
         memory_pressure: "memory_pressure";
         host_maintenance: "host_maintenance";
         host_lost: "host_lost";
-        abuse: "abuse";
-        billing: "billing";
-        end_of_beta: "end_of_beta";
         failed: "failed";
     }>>;
     requestId: z.ZodNullable<z.ZodUUID>;
@@ -604,13 +563,13 @@ export declare const fleetRoutes: {
         }>;
         stateReason: z.ZodNullable<z.ZodEnum<{
             user: "user";
+            billing: "billing";
+            end_of_beta: "end_of_beta";
+            abuse: "abuse";
             idle: "idle";
             memory_pressure: "memory_pressure";
             host_maintenance: "host_maintenance";
             host_lost: "host_lost";
-            abuse: "abuse";
-            billing: "billing";
-            end_of_beta: "end_of_beta";
             failed: "failed";
         }>>;
         hostId: z.ZodNullable<z.ZodString>;
@@ -663,13 +622,13 @@ export declare const fleetRoutes: {
             }>>;
             reason: z.ZodNullable<z.ZodEnum<{
                 user: "user";
+                billing: "billing";
+                end_of_beta: "end_of_beta";
+                abuse: "abuse";
                 idle: "idle";
                 memory_pressure: "memory_pressure";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                abuse: "abuse";
-                billing: "billing";
-                end_of_beta: "end_of_beta";
                 failed: "failed";
             }>>;
             requestId: z.ZodNullable<z.ZodUUID>;
@@ -723,7 +682,7 @@ export declare function createFleetClient(config: ClientConfig): {
     getMachine: (machineId: string) => Promise<{
         machineId: string;
         state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted";
-        stateReason: "user" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "abuse" | "billing" | "end_of_beta" | "failed" | null;
+        stateReason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
         hostId: string | null;
         paneVersion: string | null;
         tailnet: {
@@ -750,7 +709,7 @@ export declare function createFleetClient(config: ClientConfig): {
             machineId: string;
             kind: "state_changed" | "operation_finished" | "budget_exhausted" | "budget_reset";
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted" | null;
-            reason: "user" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "abuse" | "billing" | "end_of_beta" | "failed" | null;
+            reason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
             requestId: string | null;
             at: string;
         }[];

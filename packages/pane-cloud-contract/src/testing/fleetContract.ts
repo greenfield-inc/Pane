@@ -50,8 +50,8 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
 
   const payload = (machineId: string, operation: OperationPayload['operation'], extra: Partial<OperationPayload> = {}): OperationPayload => {
     const issuedAt = new Date();
-    const parameters = operation === 'bootstrap' || operation === 'update_pane' ? { release: target.release } : {};
-    // SAFETY: parameters match `operation` (a release for bootstrap and update_pane, none otherwise); signOperation parses it again.
+    const parameters = operation === 'bootstrap' || operation === 'update_pane' ? { release: target.release } : operation === 'stop' ? { cause: 'user' } : {};
+    // SAFETY: parameters match `operation` (a release for bootstrap and update_pane, a cause for stop, none otherwise); signOperation parses it again.
     return {
       requestId: randomUUID(),
       machineId,
@@ -88,7 +88,7 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
 
   return [
     {
-      name: 'fleet: create, bootstrap, stop, resume and delete a machine, each as one signed operation',
+      name: 'fleet: create, bootstrap, stop, resume and delete a machine, each as one signed operation, and a stop records its cause',
       async run() {
         const machineId = await newMachine();
         await run(machineId, 'bootstrap');
@@ -99,6 +99,9 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
         assert.equal((await machineIn(machineId, 'stopped')).stateReason, 'user');
         await run(machineId, 'resume');
         await machineIn(machineId, 'running');
+        const billingStop = await fleet.submitOperation(await signOperation({ ...payload(machineId, 'stop'), operation: 'stop', parameters: { cause: 'billing' } }, target.signer));
+        await waitFor(() => fleet.getOperation(billingStop.requestId), (s) => s.status === 'succeeded', 'the billing stop', timeoutMs);
+        assert.equal((await machineIn(machineId, 'stopped')).stateReason, 'billing', 'a service stop records its cause');
         await run(machineId, 'delete');
         await machineIn(machineId, 'deleted');
       },

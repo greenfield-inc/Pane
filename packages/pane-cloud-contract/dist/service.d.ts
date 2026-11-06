@@ -137,13 +137,13 @@ export declare const Machine: z.ZodObject<{
     }>;
     stateReason: z.ZodNullable<z.ZodEnum<{
         user: "user";
+        billing: "billing";
+        end_of_beta: "end_of_beta";
+        abuse: "abuse";
         idle: "idle";
         memory_pressure: "memory_pressure";
         host_maintenance: "host_maintenance";
         host_lost: "host_lost";
-        abuse: "abuse";
-        billing: "billing";
-        end_of_beta: "end_of_beta";
         failed: "failed";
     }>>;
     paneVersion: z.ZodNullable<z.ZodString>;
@@ -203,8 +203,8 @@ export declare const ActionLogEntry: z.ZodObject<{
     parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
     actor: z.ZodObject<{
         kind: z.ZodEnum<{
-            host: "host";
             user: "user";
+            host: "host";
             service: "service";
         }>;
         accountId: z.ZodNullable<z.ZodString>;
@@ -532,13 +532,13 @@ export declare const serviceRoutes: {
             }>;
             stateReason: z.ZodNullable<z.ZodEnum<{
                 user: "user";
+                billing: "billing";
+                end_of_beta: "end_of_beta";
+                abuse: "abuse";
                 idle: "idle";
                 memory_pressure: "memory_pressure";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                abuse: "abuse";
-                billing: "billing";
-                end_of_beta: "end_of_beta";
                 failed: "failed";
             }>>;
             paneVersion: z.ZodNullable<z.ZodString>;
@@ -592,13 +592,13 @@ export declare const serviceRoutes: {
             }>;
             stateReason: z.ZodNullable<z.ZodEnum<{
                 user: "user";
+                billing: "billing";
+                end_of_beta: "end_of_beta";
+                abuse: "abuse";
                 idle: "idle";
                 memory_pressure: "memory_pressure";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                abuse: "abuse";
-                billing: "billing";
-                end_of_beta: "end_of_beta";
                 failed: "failed";
             }>>;
             paneVersion: z.ZodNullable<z.ZodString>;
@@ -646,8 +646,8 @@ export declare const serviceRoutes: {
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
                 kind: z.ZodEnum<{
-                    host: "host";
                     user: "user";
+                    host: "host";
                     service: "service";
                 }>;
                 accountId: z.ZodNullable<z.ZodString>;
@@ -686,13 +686,13 @@ export declare const serviceRoutes: {
         }>;
         stateReason: z.ZodNullable<z.ZodEnum<{
             user: "user";
+            billing: "billing";
+            end_of_beta: "end_of_beta";
+            abuse: "abuse";
             idle: "idle";
             memory_pressure: "memory_pressure";
             host_maintenance: "host_maintenance";
             host_lost: "host_lost";
-            abuse: "abuse";
-            billing: "billing";
-            end_of_beta: "end_of_beta";
             failed: "failed";
         }>>;
         paneVersion: z.ZodNullable<z.ZodString>;
@@ -742,13 +742,13 @@ export declare const serviceRoutes: {
             }>;
             stateReason: z.ZodNullable<z.ZodEnum<{
                 user: "user";
+                billing: "billing";
+                end_of_beta: "end_of_beta";
+                abuse: "abuse";
                 idle: "idle";
                 memory_pressure: "memory_pressure";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                abuse: "abuse";
-                billing: "billing";
-                end_of_beta: "end_of_beta";
                 failed: "failed";
             }>>;
             paneVersion: z.ZodNullable<z.ZodString>;
@@ -796,8 +796,8 @@ export declare const serviceRoutes: {
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
                 kind: z.ZodEnum<{
-                    host: "host";
                     user: "user";
+                    host: "host";
                     service: "service";
                 }>;
                 accountId: z.ZodNullable<z.ZodString>;
@@ -837,13 +837,13 @@ export declare const serviceRoutes: {
             }>;
             stateReason: z.ZodNullable<z.ZodEnum<{
                 user: "user";
+                billing: "billing";
+                end_of_beta: "end_of_beta";
+                abuse: "abuse";
                 idle: "idle";
                 memory_pressure: "memory_pressure";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                abuse: "abuse";
-                billing: "billing";
-                end_of_beta: "end_of_beta";
                 failed: "failed";
             }>>;
             paneVersion: z.ZodNullable<z.ZodString>;
@@ -891,8 +891,8 @@ export declare const serviceRoutes: {
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
                 kind: z.ZodEnum<{
-                    host: "host";
                     user: "user";
+                    host: "host";
                     service: "service";
                 }>;
                 accountId: z.ZodNullable<z.ZodString>;
@@ -932,13 +932,13 @@ export declare const serviceRoutes: {
             }>;
             stateReason: z.ZodNullable<z.ZodEnum<{
                 user: "user";
+                billing: "billing";
+                end_of_beta: "end_of_beta";
+                abuse: "abuse";
                 idle: "idle";
                 memory_pressure: "memory_pressure";
                 host_maintenance: "host_maintenance";
                 host_lost: "host_lost";
-                abuse: "abuse";
-                billing: "billing";
-                end_of_beta: "end_of_beta";
                 failed: "failed";
             }>>;
             paneVersion: z.ZodNullable<z.ZodString>;
@@ -986,8 +986,8 @@ export declare const serviceRoutes: {
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
                 kind: z.ZodEnum<{
-                    host: "host";
                     user: "user";
+                    host: "host";
                     service: "service";
                 }>;
                 accountId: z.ZodNullable<z.ZodString>;
@@ -1028,8 +1028,8 @@ export declare const serviceRoutes: {
         parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
         actor: z.ZodObject<{
             kind: z.ZodEnum<{
-                host: "host";
                 user: "user";
+                host: "host";
                 service: "service";
             }>;
             accountId: z.ZodNullable<z.ZodString>;
@@ -1070,8 +1070,8 @@ export declare const serviceRoutes: {
             parameters: z.ZodRecord<z.ZodString, z.ZodUnknown>;
             actor: z.ZodObject<{
                 kind: z.ZodEnum<{
-                    host: "host";
                     user: "user";
+                    host: "host";
                     service: "service";
                 }>;
                 accountId: z.ZodNullable<z.ZodString>;
@@ -1113,13 +1113,13 @@ export declare const serviceRoutes: {
         }>;
         stateReason: z.ZodNullable<z.ZodEnum<{
             user: "user";
+            billing: "billing";
+            end_of_beta: "end_of_beta";
+            abuse: "abuse";
             idle: "idle";
             memory_pressure: "memory_pressure";
             host_maintenance: "host_maintenance";
             host_lost: "host_lost";
-            abuse: "abuse";
-            billing: "billing";
-            end_of_beta: "end_of_beta";
             failed: "failed";
         }>>;
         paneVersion: z.ZodNullable<z.ZodString>;
@@ -1444,7 +1444,7 @@ export declare function createServiceClient(config: ClientConfig): {
             name: string;
             ownerAccountId: string;
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted" | "suspended";
-            stateReason: "user" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "abuse" | "billing" | "end_of_beta" | "failed" | null;
+            stateReason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
             paneVersion: string | null;
             tailnet: {
                 status: "awaiting_login" | "joined";
@@ -1478,7 +1478,7 @@ export declare function createServiceClient(config: ClientConfig): {
             name: string;
             ownerAccountId: string;
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted" | "suspended";
-            stateReason: "user" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "abuse" | "billing" | "end_of_beta" | "failed" | null;
+            stateReason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
             paneVersion: string | null;
             tailnet: {
                 status: "awaiting_login" | "joined";
@@ -1511,7 +1511,7 @@ export declare function createServiceClient(config: ClientConfig): {
             operation: "create" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "start";
             parameters: Record<string, unknown>;
             actor: {
-                kind: "host" | "user" | "service";
+                kind: "user" | "host" | "service";
                 accountId: string | null;
                 githubLogin: string | null;
             };
@@ -1531,7 +1531,7 @@ export declare function createServiceClient(config: ClientConfig): {
         name: string;
         ownerAccountId: string;
         state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted" | "suspended";
-        stateReason: "user" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "abuse" | "billing" | "end_of_beta" | "failed" | null;
+        stateReason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
         paneVersion: string | null;
         tailnet: {
             status: "awaiting_login" | "joined";
@@ -1564,7 +1564,7 @@ export declare function createServiceClient(config: ClientConfig): {
             name: string;
             ownerAccountId: string;
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted" | "suspended";
-            stateReason: "user" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "abuse" | "billing" | "end_of_beta" | "failed" | null;
+            stateReason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
             paneVersion: string | null;
             tailnet: {
                 status: "awaiting_login" | "joined";
@@ -1597,7 +1597,7 @@ export declare function createServiceClient(config: ClientConfig): {
             operation: "create" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "start";
             parameters: Record<string, unknown>;
             actor: {
-                kind: "host" | "user" | "service";
+                kind: "user" | "host" | "service";
                 accountId: string | null;
                 githubLogin: string | null;
             };
@@ -1618,7 +1618,7 @@ export declare function createServiceClient(config: ClientConfig): {
             name: string;
             ownerAccountId: string;
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted" | "suspended";
-            stateReason: "user" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "abuse" | "billing" | "end_of_beta" | "failed" | null;
+            stateReason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
             paneVersion: string | null;
             tailnet: {
                 status: "awaiting_login" | "joined";
@@ -1651,7 +1651,7 @@ export declare function createServiceClient(config: ClientConfig): {
             operation: "create" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "start";
             parameters: Record<string, unknown>;
             actor: {
-                kind: "host" | "user" | "service";
+                kind: "user" | "host" | "service";
                 accountId: string | null;
                 githubLogin: string | null;
             };
@@ -1672,7 +1672,7 @@ export declare function createServiceClient(config: ClientConfig): {
             name: string;
             ownerAccountId: string;
             state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted" | "suspended";
-            stateReason: "user" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "abuse" | "billing" | "end_of_beta" | "failed" | null;
+            stateReason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
             paneVersion: string | null;
             tailnet: {
                 status: "awaiting_login" | "joined";
@@ -1705,7 +1705,7 @@ export declare function createServiceClient(config: ClientConfig): {
             operation: "create" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "start";
             parameters: Record<string, unknown>;
             actor: {
-                kind: "host" | "user" | "service";
+                kind: "user" | "host" | "service";
                 accountId: string | null;
                 githubLogin: string | null;
             };
@@ -1726,7 +1726,7 @@ export declare function createServiceClient(config: ClientConfig): {
         operation: "create" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "start";
         parameters: Record<string, unknown>;
         actor: {
-            kind: "host" | "user" | "service";
+            kind: "user" | "host" | "service";
             accountId: string | null;
             githubLogin: string | null;
         };
@@ -1750,7 +1750,7 @@ export declare function createServiceClient(config: ClientConfig): {
             operation: "create" | "stop" | "delete" | "bootstrap" | "update_pane" | "prepare_to_stop" | "collect_diagnostics" | "start";
             parameters: Record<string, unknown>;
             actor: {
-                kind: "host" | "user" | "service";
+                kind: "user" | "host" | "service";
                 accountId: string | null;
                 githubLogin: string | null;
             };
@@ -1771,7 +1771,7 @@ export declare function createServiceClient(config: ClientConfig): {
         name: string;
         ownerAccountId: string;
         state: "error" | "creating" | "running" | "stopping" | "stopped" | "resuming" | "deleting" | "deleted" | "suspended";
-        stateReason: "user" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "abuse" | "billing" | "end_of_beta" | "failed" | null;
+        stateReason: "user" | "billing" | "end_of_beta" | "abuse" | "idle" | "memory_pressure" | "host_maintenance" | "host_lost" | "failed" | null;
         paneVersion: string | null;
         tailnet: {
             status: "awaiting_login" | "joined";

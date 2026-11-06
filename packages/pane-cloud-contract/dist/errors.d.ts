@@ -6,6 +6,7 @@ export declare const ERROR_STATUS: {
     readonly unauthenticated: 401;
     readonly signature_invalid: 401;
     readonly operation_expired: 401;
+    readonly payment_required: 402;
     readonly not_invited: 403;
     readonly not_machine_owner: 403;
     readonly not_team_owner: 403;
@@ -32,6 +33,7 @@ export declare const ErrorBody: z.ZodObject<{
             unauthenticated: "unauthenticated";
             signature_invalid: "signature_invalid";
             operation_expired: "operation_expired";
+            payment_required: "payment_required";
             not_invited: "not_invited";
             not_machine_owner: "not_machine_owner";
             not_team_owner: "not_team_owner";

@@ -53,13 +53,20 @@ const NoParameters = z.object({}).strict();
 const ReleaseParameters = z.object({ release: PaneRelease }).strict();
 
 /**
+ * Why the service stops a machine; the fleet records it as the machine's stateReason. Stops the
+ * fleet makes on its own (idle, memory pressure, host maintenance, host loss) set their own reason.
+ */
+export const StopCause = z.enum(['user', 'billing', 'end_of_beta', 'abuse']);
+const StopParameters = z.object({ cause: StopCause }).strict();
+
+/**
  * The allow-list. Lifecycle operations run on the host; guest operations run inside the machine
  * through the guest agent. Nothing else exists: no shell command, no file write, no access grant.
  */
 export const FLEET_OPERATIONS = {
   create: { runsOn: 'host', parameters: NoParameters },
   resume: { runsOn: 'host', parameters: NoParameters },
-  stop: { runsOn: 'host', parameters: NoParameters },
+  stop: { runsOn: 'host', parameters: StopParameters },
   delete: { runsOn: 'host', parameters: NoParameters },
   bootstrap: { runsOn: 'guest', parameters: ReleaseParameters },
   update_pane: { runsOn: 'guest', parameters: ReleaseParameters },
@@ -82,21 +89,19 @@ const payloadFields = {
   expiresAt: Timestamp,
 };
 
-function payloadFor<N extends FleetOperationName>(name: N) {
-  return z
-    .object({ ...payloadFields, operation: z.literal(name), parameters: FLEET_OPERATIONS[name].parameters })
-    .strict();
+function payloadFor<N extends FleetOperationName, P extends (typeof FLEET_OPERATIONS)[N]['parameters']>(name: N, parameters: P) {
+  return z.object({ ...payloadFields, operation: z.literal(name), parameters }).strict();
 }
 
 export const OperationPayload = z.discriminatedUnion('operation', [
-  payloadFor('create'),
-  payloadFor('resume'),
-  payloadFor('stop'),
-  payloadFor('delete'),
-  payloadFor('bootstrap'),
-  payloadFor('update_pane'),
-  payloadFor('prepare_to_stop'),
-  payloadFor('collect_diagnostics'),
+  payloadFor('create', FLEET_OPERATIONS.create.parameters),
+  payloadFor('resume', FLEET_OPERATIONS.resume.parameters),
+  payloadFor('stop', FLEET_OPERATIONS.stop.parameters),
+  payloadFor('delete', FLEET_OPERATIONS.delete.parameters),
+  payloadFor('bootstrap', FLEET_OPERATIONS.bootstrap.parameters),
+  payloadFor('update_pane', FLEET_OPERATIONS.update_pane.parameters),
+  payloadFor('prepare_to_stop', FLEET_OPERATIONS.prepare_to_stop.parameters),
+  payloadFor('collect_diagnostics', FLEET_OPERATIONS.collect_diagnostics.parameters),
 ]);
 export type OperationPayload = z.infer<typeof OperationPayload>;
 
