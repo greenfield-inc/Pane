@@ -53,3 +53,5 @@ Otherwise the tool that owns the worktree remains responsible for its archive an
 ## Imports from other tools
 
 To bring sessions from Claude Code, Codex, Conductor, Paradev (formerly Superset), Herdr, Emdash, Orca or T3 Code in with their agents resumed, use Settings → AI & Agents → "Bring sessions into Pane" (see [Bring your existing sessions into Pane](SESSIONS.md#bring-your-existing-sessions-into-pane)). It adopts each idle checkout in place, as `panes adopt --resume` does. Pane already reads `conductor.json` for project scripts, but adoption deliberately does not run setup/build scripts.
+
+To move Conductor workspaces from this Mac to another machine, with their unpushed commits, uncommitted files and chats, use Settings → AI & Agents → "Move from Conductor" (see [Move Conductor workspaces to another machine](SESSIONS.md#move-conductor-workspaces-to-another-machine)). That move runs the repository's setup script once in each new worktree.
