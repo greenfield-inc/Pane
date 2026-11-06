@@ -30,11 +30,13 @@ export interface PaneCloudManagerOptions {
   hosts: PaneCloudHosts;
   onChange?: (snapshot: PaneCloudSnapshot) => void;
   fetch?: typeof fetch;
+  /** How often to re-read the machine: while it changes state or waits for its tailnet login, and otherwise. */
+  pollMs?: { waiting: number; steady: number };
 }
 
 const RECENT_ACTIONS = 20;
-/** While a machine changes state or waits for its tailnet login, the snapshot is refreshed this often. */
-const WATCH_INTERVAL_MS = 5_000;
+/** The fleet stops, resumes and throttles machines on its own, so a machine is re-read even when nothing is pending. */
+const POLL_MS = { waiting: 5_000, steady: 30_000 };
 const TRANSITIONAL = new Set<Machine['state']>(['creating', 'stopping', 'resuming', 'deleting']);
 
 interface StoredSession {
@@ -54,6 +56,7 @@ export class PaneCloudManager {
   private session: StoredSession | null | undefined;
   private signInAttempt = 0;
   private watchTimer: NodeJS.Timeout | null = null;
+  private watchWaiting = false;
   private disposed = false;
   /** The host last saved, so a refresh writes the config only when it changes. */
   private savedHost = '';
@@ -64,13 +67,16 @@ export class PaneCloudManager {
     return this.state;
   }
 
-  /** Reads the account and the machine again. Without a session it answers signed out. */
-  async refresh(): Promise<PaneCloudSnapshot> {
+  /**
+   * Reads the account and the machine again. Without a session it answers signed out. A background
+   * re-read keeps the last action's error on screen; a refresh the person asked for clears it.
+   */
+  async refresh({ background = false }: { background?: boolean } = {}): Promise<PaneCloudSnapshot> {
     const client = await this.signedInClient();
     if (!client) return this.update({ signIn: this.state.signIn.state === 'pending' ? this.state.signIn : { state: 'signed-out' }, machine: null });
     try {
       await this.load(client);
-      return this.update({ error: null });
+      return background ? this.state : this.update({ error: null });
     } catch (error) {
       return this.fail(error);
     }
@@ -200,15 +206,18 @@ export class PaneCloudManager {
     this.watchWhile(machine);
   }
 
-  /** Keeps the snapshot moving while the machine changes state or waits to join the tailnet. */
+  /** Keeps the snapshot moving while a machine exists: fast while it changes or waits to join, slower otherwise. */
   private watchWhile(machine: Machine | null): void {
-    const waiting = machine !== null && (TRANSITIONAL.has(machine.state) || machine.tailnet.status === 'awaiting_login');
-    if (!waiting || this.disposed) {
+    if (!machine || this.disposed) {
       this.stopWatching();
       return;
     }
-    if (this.watchTimer) return;
-    this.watchTimer = setInterval(() => { void this.refresh(); }, WATCH_INTERVAL_MS);
+    const waiting = TRANSITIONAL.has(machine.state) || machine.tailnet.status === 'awaiting_login';
+    if (this.watchTimer && waiting === this.watchWaiting) return;
+    this.stopWatching();
+    this.watchWaiting = waiting;
+    const poll = this.options.pollMs ?? POLL_MS;
+    this.watchTimer = setInterval(() => { void this.refresh({ background: true }); }, waiting ? poll.waiting : poll.steady);
     this.watchTimer.unref?.();
   }
 

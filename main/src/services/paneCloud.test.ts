@@ -17,8 +17,8 @@ const hosts: PaneCloudHosts = {
   forget: async (machineId) => { forgotten.push(machineId); },
 };
 
-function manager(): PaneCloudManager {
-  const created = new PaneCloudManager({ serviceUrl: service.url, tokenFile: path.join(dir, 'pane-cloud.json'), hosts });
+function manager(pollMs?: { waiting: number; steady: number }): PaneCloudManager {
+  const created = new PaneCloudManager({ serviceUrl: service.url, tokenFile: path.join(dir, 'pane-cloud.json'), hosts, pollMs });
   managers.push(created);
   return created;
 }
@@ -136,6 +136,20 @@ describe('a Pane Cloud machine', () => {
       ['create', 'you'],
     ]);
     expect(actions[0].reason).toBe('No agent ran and no one was connected for 30 minutes.');
+  });
+
+  it('follows what the fleet does on its own while the machine sits running, and keeps an action\'s error meanwhile', async () => {
+    const cloud = manager({ waiting: 50, steady: 50 });
+    await signIn(cloud, 'alice');
+    const id = (await cloud.createMachine('dev')).machine?.id ?? '';
+    service.joinTailnet(id);
+    await cloud.refresh();
+
+    const refused = await cloud.createMachine('dev-2');
+    expect(refused.error?.message).toBe('Your seat already has a machine.');
+    service.hostStop(id, 'idle');
+    await vi.waitFor(() => expect(cloud.snapshot().machine?.state).toBe('stopped'), { timeout: 3_000 });
+    expect(cloud.snapshot().error?.message).toBe('Your seat already has a machine.');
   });
 
   it('says when the daily CPU budget is used', async () => {
