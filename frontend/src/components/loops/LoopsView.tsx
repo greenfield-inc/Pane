@@ -9,7 +9,9 @@ import { LoopActions } from './LoopActions';
 import { LoopRunStrip } from './LoopRunStrip';
 import {
   RUN_DOT_CLASS,
+  canRunEvent,
   describeLoopCommand,
+  describeRunEvent,
   describeRun,
   formatDuration,
   formatNextRun,
@@ -72,15 +74,17 @@ function SummaryCard({ label, children }: { label: string; children: React.React
 }
 
 function LoopDetail({ loop, projectName }: { loop: Loop; projectName: string }) {
+  const runNow = useLoopsStore(state => state.runNow);
   const views = useLoopRunViews(loop);
   // The counts cover the strip's runs; older runs kept for their Panes are only in the table.
   const recent = views.slice(0, LOOP_KEPT_RUNS);
   const count = (outcome: LoopRunView['outcome']) => recent.filter(view => view.outcome === outcome).length;
-  const [okCount, warningCount, failedCount] = [count('ok'), count('warning'), count('failed')];
+  const [okCount, warningCount, failedCount, skippedCount] = [count('ok'), count('warning'), count('failed'), count('skipped')];
   const counts = [
     okCount > 0 && `${okCount} ok`,
     warningCount > 0 && `${warningCount} with a warning`,
     failedCount > 0 && `${failedCount} failed`,
+    skippedCount > 0 && `${skippedCount} skipped`,
   ].filter(Boolean).join(' · ') || 'No runs yet';
   const latestSessionId = views.find(view => view.session)?.session?.id;
   const sessionTarget = loop.orchestrationSessionId;
@@ -112,7 +116,7 @@ function LoopDetail({ loop, projectName }: { loop: Loop; projectName: string }) 
         </SummaryCard>
         <SummaryCard label="Next run">
           {loop.nextRunAtMs === null ? (
-            <p className="text-[13px] font-medium text-text-primary">Paused</p>
+            <p className="text-[13px] font-medium text-text-primary">{!loop.enabled ? 'Paused' : loop.github ? 'When GitHub events arrive' : 'None'}</p>
           ) : (
             <>
               <p className="truncate text-[13px] font-medium text-text-primary">{formatNextRun(loop.nextRunAtMs)}</p>
@@ -138,21 +142,23 @@ function LoopDetail({ loop, projectName }: { loop: Loop; projectName: string }) 
               key={view.run.id}
               role="row"
               className="grid grid-cols-[minmax(9rem,1.1fr)_minmax(6rem,1fr)_minmax(0,1.6fr)_auto] items-center gap-3 border-b border-border-primary py-1.5 text-[13px]"
-              title={runWarning(view) ?? view.run.error ?? undefined}
+              title={[describeRunEvent(view.run), runWarning(view) ?? view.run.error].filter(Boolean).join(' · ') || undefined}
             >
               <span role="cell" className="flex min-w-0 items-center gap-2 text-text-primary">
                 <span className={cn('h-2 w-2 flex-shrink-0 rounded-full', RUN_DOT_CLASS[view.outcome])} aria-hidden="true" />
                 <span className="truncate">{formatRunTime(view.run.slotAtMs, true)}</span>
               </span>
               <span role="cell" className="truncate text-text-secondary">{describeRun(view)}</span>
-              {/* Only a branch name is code; warnings and errors read as text. */}
-              <span role="cell" className={cn('truncate text-xs', view.outcome === 'warning' ? 'text-status-warning' : 'text-text-secondary', !runWarning(view) && view.branch && 'font-mono')}>
-                {runWarning(view) ?? view.branch ?? view.run.error ?? ''}
+              {/* Only a branch name is code; warnings and errors read as text. A GitHub event leads its row's detail. */}
+              <span role="cell" className={cn('truncate text-xs', view.outcome === 'warning' ? 'text-status-warning' : 'text-text-secondary', !runWarning(view) && view.branch && !view.run.event && 'font-mono')}>
+                {[describeRunEvent(view.run), runWarning(view) ?? view.branch ?? view.run.error].filter(Boolean).join(' · ')}
               </span>
-              <span role="cell" className="flex w-16 justify-end">
-                {view.session && (
+              <span role="cell" className="flex w-24 justify-end whitespace-nowrap">
+                {view.session ? (
                   <Button size="sm" variant="secondary" aria-label={`Open run ${formatRunTime(view.run.slotAtMs)}`} onClick={openLoopRun.bind(null, view.session.id)}>Open</Button>
-                )}
+                ) : canRunEvent(view) ? (
+                  <Button size="sm" variant="secondary" aria-label={`Run now: ${describeRunEvent(view.run)}`} onClick={() => void runNow(loop.id, view.run.id)}>Run now</Button>
+                ) : null}
               </span>
             </div>
           ))}

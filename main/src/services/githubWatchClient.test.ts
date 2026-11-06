@@ -219,3 +219,34 @@ describe('GitHub recovery policy', () => {
     await expect(client.fingerprints([target(1)])).rejects.toThrow('HTTP 503');
   });
 });
+
+describe('conditional REST reads', () => {
+  it('sends the last ETag and reports an unchanged list without a body', async () => {
+    const sent: Array<{ url: string; etag: string | null }> = [];
+    const client = new GithubWatchClient({ token: async () => 'secret', fetch: async (url, init) => {
+      const etag = new Headers(init.headers).get('if-none-match');
+      sent.push({ url, etag });
+      return etag === 'W/"v1"'
+        ? new Response(null, { status: 304 })
+        : new Response(JSON.stringify([{ id: 7 }]), { headers: { etag: 'W/"v1"' } });
+    } });
+
+    expect(await client.rest('github.com', '/repos/acme/app/issues/comments?per_page=50')).toEqual({ changed: true, etag: 'W/"v1"', body: [{ id: 7 }] });
+    expect(await client.rest('github.com', '/repos/acme/app/issues/comments?per_page=50', 'W/"v1"')).toEqual({ changed: false });
+    expect(sent).toEqual([
+      { url: 'https://api.github.com/repos/acme/app/issues/comments?per_page=50', etag: null },
+      { url: 'https://api.github.com/repos/acme/app/issues/comments?per_page=50', etag: 'W/"v1"' },
+    ]);
+  });
+
+  it('uses the enterprise API root and shares the quota reserve with PR watching', async () => {
+    const urls: string[] = [];
+    const client = new GithubWatchClient({ token: async () => 'secret', now: () => 0, fetch: async url => {
+      urls.push(url);
+      return new Response('[]', { headers: { 'x-ratelimit-limit': '5000', 'x-ratelimit-remaining': '10', 'x-ratelimit-reset': '3600' } });
+    } });
+    await client.rest('ghe.acme.dev', '/repos/acme/app/pulls');
+    expect(urls).toEqual(['https://ghe.acme.dev/api/v3/repos/acme/app/pulls']);
+    await expect(client.rest('ghe.acme.dev', '/repos/acme/app/pulls')).rejects.toMatchObject({ rateLimited: true, retryAt: 3_600_000 });
+  });
+});

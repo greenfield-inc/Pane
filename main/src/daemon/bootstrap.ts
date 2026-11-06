@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { installRunpaneShimBestEffort } from '../services/runpaneShim';
 import os from 'os';
 import path from 'path';
@@ -64,6 +66,8 @@ import { AutoPauser } from '../services/autoPause';
 import { pausePanes } from '../services/panePause';
 import { updateHoldIsLive } from '../services/updateRestoration';
 import { LoopRepository } from '../services/loops/loopRepository';
+import { GithubLoopEventSource, githubRepoFromRemote } from '../services/loops/githubLoopEvents';
+import { GithubWatchClient } from '../services/githubWatchClient';
 import { archiveLoopRun, prepareLoopSession, startLoopRun } from '../ipc/loops';
 import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
@@ -81,6 +85,8 @@ interface PaneDaemonHostOptions {
   restoreSpotlights?: boolean;
   startRemoteTransport?: boolean;
 }
+
+const execFileAsync = promisify(execFile);
 
 export interface PaneDaemonHost {
   services: AppServices;
@@ -332,7 +338,28 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   // Loop runs go through the registry's `runpane panes create`, which exists once handlers are registered.
   const loopManager = new LoopManager({
     repo: new LoopRepository(() => databaseService.getDb()),
-    startRun: (loop, slotAtMs) => startLoopRun(commandRegistry, loop, slotAtMs, { launchedCommand: panelId => terminalPanelManager.launchedCommand(panelId) }),
+    startRun: (loop, slotAtMs, event) => startLoopRun(commandRegistry, loop, slotAtMs, { launchedCommand: panelId => terminalPanelManager.launchedCommand(panelId) }, event),
+    // GitHub-triggered loops poll with this host's own gh sign-in; nothing passes through Greenfield.
+    githubEvents: (() => {
+      const client = new GithubWatchClient();
+      return new GithubLoopEventSource((host, path, etag) => client.rest(host, path, etag));
+    })(),
+    projectGithubRepo: async projectId => {
+      const project = databaseService.getProject(projectId);
+      if (!project) return null;
+      try {
+        const { stdout } = await execFileAsync('git', ['remote', 'get-url', 'origin'], { cwd: project.path, timeout: 10_000 });
+        return githubRepoFromRemote(stdout);
+      } catch {
+        return null;
+      }
+    },
+    // A run is active while its Pane is open and one of its agents is working or waiting on a question.
+    runActive: sessionId => !sessionManager.getDbSession(sessionId)?.archived
+      && panelManager.getPanelsForSession(sessionId).some(panel => {
+        const state = terminalPanelManager.getAgentStatus(panel.id);
+        return state === 'working' || state === 'blocked';
+      }),
     archiveRun: sessionId => archiveLoopRun(commandRegistry, sessionId),
     projectExists: projectId => Boolean(databaseService.getProject(projectId)),
     prepareSession: (target, loop) => prepareLoopSession(commandRegistry, target, loop),

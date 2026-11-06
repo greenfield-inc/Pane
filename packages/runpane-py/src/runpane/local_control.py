@@ -449,15 +449,23 @@ LOOP_AGENTS = ("claude", "codex", "cursor")
 
 
 LOOP_KEYS = ("id", "name", "cron", "enabled", "createdAtMs", "nextRunAtMs", "scheduleText", "runs")
-LOOP_OPTIONAL_KEYS = ("projectId", "orchestrationSessionId", "agent", "toolCommand", "initialInput", "worktreeTemplate")
+LOOP_OPTIONAL_KEYS = ("projectId", "orchestrationSessionId", "agent", "toolCommand", "initialInput", "worktreeTemplate", "github")
 LOOP_RUN_KEYS = ("id", "loopId", "slotAtMs", "trigger", "status", "error", "sessionId")
 
 
 def _loop_json(loop: Dict[str, Any]) -> Dict[str, Any]:
     """A loop in the npm CLI's field order, set optional fields last, so --json output matches it."""
     result = {key: loop.get(key) for key in LOOP_KEYS}
-    result["runs"] = [{key: run.get(key) for key in LOOP_RUN_KEYS} for run in loop.get("runs") or []]
+    result["runs"] = [_loop_run_json(run) for run in loop.get("runs") or []]
     result.update({key: loop[key] for key in LOOP_OPTIONAL_KEYS if loop.get(key)})
+    return result
+
+
+def _loop_run_json(run: Dict[str, Any]) -> Dict[str, Any]:
+    """A run in the npm CLI's field order; `event` only when the run has one."""
+    result = {key: run.get(key) for key in LOOP_RUN_KEYS}
+    if run.get("event"):
+        result["event"] = run["event"]
     return result
 
 
@@ -505,6 +513,14 @@ def _describe_loop_session(session_names: Dict[Any, Any], session_id: str) -> st
 
 def run_loops_save(parsed: Any) -> int:
     loop_input = merge_loop_update(parsed) if parsed.command == "loops update" else build_loop_create(parsed)
+    if parsed.dry_run and not loop_input["cron"] and loop_input.get("github"):
+        schedule_text = f"On GitHub events in {loop_input['github'].get('repo')}"
+        if parsed.json:
+            print_json({"ok": True, "dryRun": True, "input": loop_input, "scheduleText": schedule_text, "nextRunAtMs": None})
+        else:
+            paused = "" if loop_input["enabled"] else " (paused)"
+            print(f"Would save loop {loop_input['name']}: {schedule_text}{paused}.")
+        return 0
     if parsed.dry_run:
         preview = invoke_daemon("runpane:loops:preview", [{"cron": loop_input["cron"]}], pane_dir=parsed.pane_dir)
         if not preview.get("ok"):
@@ -537,7 +553,8 @@ def _describe_loop_run_status(run: Dict[str, Any]) -> str:
 def run_loops_run(parsed: Any) -> int:
     loop_id = _require_loop_id(parsed)
     confirm_mutation(parsed)
-    loop = _invoke_loop(parsed, "runpane:loops:run-now", {"loopId": loop_id})
+    run_id = (parsed.run_id or "").strip()
+    loop = _invoke_loop(parsed, "runpane:loops:run-now", {"loopId": loop_id, "runId": run_id} if run_id else {"loopId": loop_id})
     runs = loop.get("runs") or []
     run = runs[0] if runs else {}
     failed = run.get("status") == "failed"
@@ -607,8 +624,9 @@ def build_loop_create(parsed: Any) -> Dict[str, Any]:
     session = (parsed.session_id or "").strip()
     if parsed.repo and session:
         raise ValueError("runpane loops create takes either --repo or --session, not both.")
-    if (not parsed.repo and not session) or not name or not parsed.cron:
-        raise ValueError("runpane loops create requires --repo <selector> or --session <id|name|new>, --name <name>, and --cron <expr>.")
+    github = _loop_github_flag(parsed)
+    if (not parsed.repo and not session) or not name or (not parsed.cron and not github):
+        raise ValueError("runpane loops create requires --repo <selector> or --session <id|name|new>, --name <name>, and --cron <expr> or --github <json>.")
     agent = _loop_agent(parsed)
     if agent and parsed.tool_command:
         raise ValueError("runpane loops create takes either --agent or --tool-command, not both.")
@@ -618,13 +636,34 @@ def build_loop_create(parsed: Any) -> Dict[str, Any]:
         "name": name,
         "projectId": _resolve_loop_project_id(parsed, parsed.repo) if parsed.repo else None,
         "orchestrationSessionId": session,
-        "cron": parsed.cron,
+        "cron": parsed.cron or "",
         "agent": agent,
         "toolCommand": parsed.tool_command,
         "initialInput": resolve_initial_input(parsed),
         "worktreeTemplate": parsed.worktree_name,
         "enabled": not parsed.paused,
+        "github": github,
     })
+
+
+def _loop_github_flag(parsed: Any) -> Any:
+    """`--github <json>` as a dict, `--github none` as False (remove the triggers), or None when absent."""
+    if parsed.github is None:
+        return None
+    value = parsed.github.strip()
+    if value == "none":
+        return False
+    try:
+        decoded = json.loads(value)
+    except ValueError:
+        decoded = None
+    if not isinstance(decoded, dict):
+        raise PaneDaemonClientError(
+            "--github must be a JSON object. Nothing was saved.",
+            "ERR_RUNPANE_LOOP_GITHUB",
+            'Pass an object such as \'{"repo":"acme/app","commentPhrase":"/pane"}\', or none to remove the triggers.',
+        )
+    return decoded
 
 
 def merge_loop_update(parsed: Any) -> Dict[str, Any]:
@@ -646,6 +685,7 @@ def merge_loop_update(parsed: Any) -> Dict[str, Any]:
             "ERR_RUNPANE_LOOP_NOT_FOUND",
             "See loop ids with `runpane loops list`.",
         )
+    github = _loop_github_flag(parsed)
     replaces_tool = bool(agent or parsed.tool_command)
     replaces_target = bool(parsed.repo or session)
     initial_input = resolve_initial_input(parsed)
@@ -660,6 +700,7 @@ def merge_loop_update(parsed: Any) -> Dict[str, Any]:
         "initialInput": initial_input if initial_input is not None else loop.get("initialInput"),
         "worktreeTemplate": parsed.worktree_name if parsed.worktree_name is not None else loop.get("worktreeTemplate"),
         "enabled": loop.get("enabled"),
+        "github": loop.get("github") if github is None else github or None,
     })
 
 

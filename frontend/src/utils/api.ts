@@ -264,9 +264,9 @@ export class API {
       return window.electronAPI.loops.setEnabled(id, enabled);
     },
     /** Start one run now; the schedule is unchanged. */
-    async runNow(id: string) {
+    async runNow(id: string, runId?: string) {
       if (!isElectron()) throw new Error('Electron API not available');
-      return window.electronAPI.loops.runNow(id);
+      return window.electronAPI.loops.runNow(id, runId);
     },
     /** The cron as a sentence and its next run, or why it is rejected. */
     async preview(cron: string) {

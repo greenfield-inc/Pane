@@ -113,10 +113,22 @@ export function formatNextRun(ms: number, nowMs = Date.now()): string {
 /** A run's outcome in a few words: "running 12m", "ok · 41m", "needs attention", "failed", "skipped". */
 export function describeRun(view: LoopRunView): string {
   const duration = view.durationMs === null ? null : formatDuration(view.durationMs);
-  if (view.outcome === 'running') return duration ? `running ${duration}` : 'running';
-  if (view.outcome === 'ok') return duration ? `ok · ${duration}` : 'ok';
-  if (view.outcome === 'warning') return view.waitingForAnswer ? 'needs attention' : 'started with a warning';
-  return view.outcome;
+  const status = view.outcome === 'running' ? (duration ? `running ${duration}` : 'running')
+    : view.outcome === 'ok' ? (duration ? `ok · ${duration}` : 'ok')
+      : view.outcome === 'warning' ? (view.waitingForAnswer ? 'needs attention' : 'started with a warning')
+        : view.outcome;
+  return status;
+}
+
+/** The GitHub event a run came from, such as `PR #12 · Comment by @lee`, or null. */
+export function describeRunEvent(run: LoopRun): string | null {
+  const { event } = run;
+  return event ? `${event.isPr ? 'PR' : 'issue'} #${event.number} · ${event.summary}` : null;
+}
+
+/** A skipped run from a GitHub event can still be started by hand. */
+export function canRunEvent(view: LoopRunView): boolean {
+  return view.run.status === 'skipped' && view.run.event !== undefined;
 }
 
 /** Why a run needs a look, or null: its start-up warning, or the prompt its agent is waiting at now. */

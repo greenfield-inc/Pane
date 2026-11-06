@@ -1,6 +1,7 @@
 # Loops
 
-A loop runs an agent or command on a schedule. It runs in one of two places:
+A loop runs an agent or command on a schedule, when something happens on
+GitHub (see [GitHub events](#github-events)), or both. It runs in one of two places:
 
 - **A project.** Each run gets its own Pane (workspace) in a fresh worktree and
   branch, so the result of a nightly bug sweep or a weekly dependency check is
@@ -97,6 +98,61 @@ machine-readable output. The same commands are MCP tools: `loops_list`,
 `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume` and
 `loops_delete`, in the default `core` toolset and the `loops` toolset (see
 [Pane MCP Server](PANE_MCP.md#toolsets)).
+
+## GitHub events
+
+A project loop can also start a run when something happens on GitHub, beside
+its schedule or instead of it. In the drawer, set **Starts on** to **GitHub
+events** or **Both**, then choose what starts a run:
+
+- **PR comment or review containing** a phrase, `/pane` by default.
+- **Review requesting changes.**
+- **Failing check on a PR**: a GitHub Actions workflow run that fails on an open
+  PR's head commit.
+- **New PR.**
+- **Issue labeled** with a label, `agent` by default.
+
+The repository is the project's `origin` on github.com unless you name another
+as `owner/name`. From the CLI, pass the same settings as JSON:
+
+```bash
+runpane loops create --repo active --name pr-helper --agent claude \
+  --prompt "Do what the comment asks on this PR, then push to its branch." \
+  --github '{"repo":"acme/app","commentPhrase":"/pane","checkFailed":true}' --yes
+```
+
+`--github none` on `loops update` removes the triggers. A loop needs a cron,
+GitHub triggers, or both.
+
+How it works:
+
+- **Who can start a run.** Comments and reviews count only from the repo's
+  owner, organization members and collaborators. PRs from forks start nothing
+  unless you turn on **PRs from forks**.
+- **Polling, with your own sign-in.** The machine that owns the loop checks each
+  watched repo every 15 seconds with its own `gh` sign-in. Nothing passes
+  through a Pane server. A quiet poll is four conditional requests (comments,
+  open PRs, label events and Actions runs), and GitHub answers an unchanged list
+  with 304, which costs no rate limit. Only lists that changed count, plus one
+  review read for each PR that changed.
+- **The run.** A PR's run starts in a new worktree at the PR's head branch and
+  is told to push to that branch. An issue's run starts a new branch from the
+  default base. The run's prompt is the loop's prompt plus the event: repo,
+  number, link, author and the text written on GitHub, quoted and marked as
+  untrusted.
+- **Once per event.** Pane remembers every event a loop handled, so the same
+  comment never starts two runs.
+- **Hourly cap.** A loop starts at most 12 runs an hour from GitHub (change it
+  in the drawer, 1 to 60). Events over the cap are listed as skipped.
+- **One run per PR.** While a run on a PR still has an agent working or waiting
+  on a question, another event on that PR is listed as skipped ("A run is
+  already active on this PR") and does not interrupt it.
+- **Asleep.** Events reach a laptop only while it is awake and Pane is running.
+  An event older than 15 minutes when Pane sees it is listed as missed and never
+  starts on its own. An always-on host (Pane Cloud, BYOC or a Remote Pane
+  machine) gets events around the clock.
+- **Run now.** Every skipped event run has **Run now**, which starts it anyway.
+  From the CLI: `runpane loops run --loop <id> --run <run-id> --yes`.
 
 ## Session loops
 
@@ -197,4 +253,11 @@ runs happen in its Session; their `sessionId` is null.
 - `failed`: the Pane could not be created, or the Session could not be
   reached; `error` says why.
 - `skipped`: the run came and went while Pane was not running or the computer
-  was asleep.
+  was asleep. For a GitHub event, `error` says why it started nothing: the
+  author is not a collaborator, the comment lacks the phrase, the PR comes from
+  a fork, the hourly cap was reached, a run is already active on the PR, or the
+  event was missed.
+
+A run started by, or skipped for, a GitHub event has `trigger: "github"` and an
+`event` with the repo, the PR or issue `number`, `url`, `author`, GitHub's own
+timestamp (`atMs`) and a one-line `summary`.

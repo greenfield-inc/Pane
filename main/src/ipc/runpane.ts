@@ -453,6 +453,7 @@ const lockListRequestSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
 });
 const loopRequestSchema = boundary.object({ loopId: boundary.nonEmptyString });
+const loopRunNowRequestSchema = boundary.object({ loopId: boundary.nonEmptyString, runId: boundary.optional(boundary.nonEmptyString) });
 const loopSetEnabledRequestSchema = boundary.object({ loopId: boundary.nonEmptyString, enabled: boundary.boolean });
 const loopPreviewRequestSchema = boundary.object({ cron: boundary.string });
 
@@ -2097,8 +2098,8 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:loops:run-now', async (request: PaneCommandValue): Promise<RunpaneLoopResult> => {
     return withRunpaneAction(services, 'loops:run-now', {}, async () => {
-      const { loopId }: RunpaneLoopRequest = decodeBoundary(request, loopRequestSchema);
-      return { ok: true, loop: await requireLoopManager(services).runNow(loopId) };
+      const { loopId, runId } = decodeBoundary(request, loopRunNowRequestSchema);
+      return { ok: true, loop: await requireLoopManager(services).runNow(loopId, runId) };
     });
   });
 

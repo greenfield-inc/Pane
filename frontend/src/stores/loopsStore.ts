@@ -29,7 +29,8 @@ interface LoopsState {
   remove: (id: string) => Promise<string | null>;
   setEnabled: (id: string, enabled: boolean) => Promise<void>;
   /** Starts one run now; the schedule is unchanged. */
-  runNow: (id: string) => Promise<void>;
+  /** With `runId`, start the GitHub event a skipped run was for. */
+  runNow: (id: string, runId?: string) => Promise<void>;
   selectLoop: (id: string) => void;
   openDrawer: (loopId: string | null) => void;
   closeDrawer: () => void;
@@ -95,9 +96,9 @@ export const useLoopsStore = create<LoopsState>((set, get) => ({
     await get().refresh();
   },
 
-  runNow: async (id) => {
+  runNow: async (id, runId) => {
     try {
-      const response = await API.loops.runNow(id);
+      const response = await API.loops.runNow(id, runId);
       if (!response.success) showActionError('Could not start the run', response.error);
     } catch (error) {
       showActionError('Could not start the run', error);

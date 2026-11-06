@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
-import { LOOP_NAME_MAX_LENGTH, LOOP_NEW_SESSION, type Loop, type LoopAgent, type LoopInput, type LoopSchedulePreview } from '../../../../shared/types/loop';
+import { AlertTriangle, Github } from 'lucide-react';
+import { LOOP_DEFAULT_COMMENT_PHRASE, LOOP_DEFAULT_HOURLY_CAP, LOOP_NAME_MAX_LENGTH, LOOP_NEW_SESSION, type Loop, type LoopAgent, type LoopGithubTriggers, type LoopInput, type LoopSchedulePreview } from '../../../../shared/types/loop';
 import { useLoopsStore } from '../../stores/loopsStore';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { API } from '../../utils/api';
@@ -17,6 +17,72 @@ import { useProjectList } from './useProjectList';
 
 type Runner = LoopAgent | 'command';
 type Target = 'project' | 'session';
+type Starts = 'schedule' | 'github' | 'both';
+
+const STARTS = [
+  { id: 'schedule', label: 'Schedule' },
+  { id: 'github', label: 'GitHub events' },
+  { id: 'both', label: 'Both' },
+] as const satisfies ReadonlyArray<{ id: Starts; label: string }>;
+
+/** The GitHub trigger fields as the form edits them; switched-off fields keep their text. */
+interface GithubForm {
+  repo: string;
+  onComment: boolean;
+  commentPhrase: string;
+  changesRequested: boolean;
+  checkFailed: boolean;
+  prOpened: boolean;
+  onLabel: boolean;
+  issueLabel: string;
+  allowForks: boolean;
+  hourlyCap: number;
+}
+
+function githubFormFrom(github: LoopGithubTriggers | undefined): GithubForm {
+  return {
+    repo: github?.repo ?? '',
+    onComment: github ? Boolean(github.commentPhrase) : true,
+    commentPhrase: github?.commentPhrase ?? LOOP_DEFAULT_COMMENT_PHRASE,
+    changesRequested: github ? Boolean(github.changesRequested) : true,
+    checkFailed: github ? Boolean(github.checkFailed) : true,
+    prOpened: Boolean(github?.prOpened),
+    onLabel: Boolean(github?.issueLabel),
+    issueLabel: github?.issueLabel ?? 'agent',
+    allowForks: Boolean(github?.allowForks),
+    hourlyCap: github?.hourlyCap ?? LOOP_DEFAULT_HOURLY_CAP,
+  };
+}
+
+function githubTriggers(form: GithubForm): LoopGithubTriggers {
+  const triggers: LoopGithubTriggers = { repo: form.repo.trim() };
+  if (form.onComment && form.commentPhrase.trim()) triggers.commentPhrase = form.commentPhrase.trim();
+  if (form.changesRequested) triggers.changesRequested = true;
+  if (form.checkFailed) triggers.checkFailed = true;
+  if (form.prOpened) triggers.prOpened = true;
+  if (form.onLabel && form.issueLabel.trim()) triggers.issueLabel = form.issueLabel.trim();
+  if (form.allowForks) triggers.allowForks = true;
+  if (form.hourlyCap !== LOOP_DEFAULT_HOURLY_CAP) triggers.hourlyCap = form.hourlyCap;
+  return triggers;
+}
+
+/** A checkbox row in the form's own type scale. */
+function CheckRow({ checked, onChange, label, children }: { checked: boolean; onChange: (checked: boolean) => void; label: string; children?: React.ReactNode }) {
+  return (
+    <div className="flex min-h-8 items-center gap-2.5">
+      <label className="flex cursor-default items-center gap-2.5 text-sm text-text-primary">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={event => onChange(event.target.checked)}
+          className="rounded border-border-primary text-interactive focus:ring-interactive"
+        />
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
 
 const TARGETS = [
   { id: 'project', label: 'Project' },
@@ -48,6 +114,8 @@ interface LoopForm {
   toolCommand: string;
   initialInput: string;
   schedule: LoopSchedule;
+  starts: Starts;
+  github: GithubForm;
 }
 
 function formFrom(loop: Loop | undefined): LoopForm {
@@ -59,7 +127,9 @@ function formFrom(loop: Loop | undefined): LoopForm {
     runner: loop?.toolCommand ? 'command' : loop?.agent ?? 'claude',
     toolCommand: loop?.toolCommand ?? '',
     initialInput: loop?.initialInput ?? '',
-    schedule: scheduleFromCron(loop?.cron ?? '0 3 * * *'),
+    schedule: scheduleFromCron(loop?.cron || '0 3 * * *'),
+    starts: loop?.github ? (loop.cron ? 'both' : 'github') : 'schedule',
+    github: githubFormFrom(loop?.github),
   };
 }
 
@@ -99,21 +169,30 @@ function LoopDrawerForm({ loop, onClose }: { loop: Loop | undefined; onClose: ()
   const preview = useSchedulePreview(cron);
   const update = (fields: Partial<LoopForm>) => setForm(current => ({ ...current, ...fields }));
   const updateSchedule = (fields: Partial<LoopSchedule>) => setForm(current => ({ ...current, schedule: { ...current.schedule, ...fields } }));
-  const { schedule } = form;
+  const updateGithub = (fields: Partial<GithubForm>) => setForm(current => ({ ...current, github: { ...current.github, ...fields } }));
+  const { schedule, github } = form;
   const summary = describeSchedule(schedule);
   const time = `${String(schedule.hour).padStart(2, '0')}:${String(schedule.minute).padStart(2, '0')}`;
 
   // A new loop starts in the first project once the list arrives.
   const projectId = form.projectId ?? projects[0]?.id ?? null;
   const onSession = form.target === 'session';
+  // GitHub events start runs in a project; a Session loop runs on its schedule.
+  const starts: Starts = onSession ? 'schedule' : form.starts;
+  const onSchedule = starts !== 'github';
+  const onGithub = starts !== 'schedule';
+  const triggers = githubTriggers(github);
   const missing = useMemo(() => {
     if (!form.name.trim()) return 'Add a name.';
     if (onSession) return form.initialInput.trim() ? null : 'Add the message to send each run.';
     if (projectId === null) return 'Choose a project.';
     if (form.runner === 'command' && !form.toolCommand.trim()) return 'Add the command to run.';
+    if (onGithub && !triggers.commentPhrase && !triggers.changesRequested && !triggers.checkFailed && !triggers.prOpened && !triggers.issueLabel) {
+      return 'Choose at least one GitHub event.';
+    }
     return null;
-  }, [form.name, form.initialInput, form.runner, form.toolCommand, onSession, projectId]);
-  const canSave = !busy && !missing && preview?.ok === true;
+  }, [form.name, form.initialInput, form.runner, form.toolCommand, onSession, projectId, onGithub, triggers.commentPhrase, triggers.changesRequested, triggers.checkFailed, triggers.prOpened, triggers.issueLabel]);
+  const canSave = !busy && !missing && (!onSchedule || preview?.ok === true);
 
   const chooseTarget = (target: Target) => update(target === 'session' && form.runner === 'command' ? { target, runner: 'claude' } : { target });
   // An existing Session keeps its own agent unless the person picks another.
@@ -129,7 +208,7 @@ function LoopDrawerForm({ loop, onClose }: { loop: Loop | undefined; onClose: ()
     setError(null);
     const input: LoopInput = {
       name: form.name.trim(),
-      cron,
+      cron: onSchedule ? cron : '',
       // Editing keeps the loop paused or running as it was; a new loop starts on.
       enabled: loop?.enabled ?? true,
     };
@@ -139,6 +218,7 @@ function LoopDrawerForm({ loop, onClose }: { loop: Loop | undefined; onClose: ()
     if (form.runner === 'command' && !onSession) input.toolCommand = form.toolCommand.trim();
     else input.agent = form.runner === 'command' ? 'claude' : form.runner;
     if (form.initialInput.trim()) input.initialInput = form.initialInput.trim();
+    if (onGithub) input.github = triggers;
     // The branch template is set from the CLI or MCP only; saving keeps it.
     if (loop?.worktreeTemplate && !onSession) input.worktreeTemplate = loop.worktreeTemplate;
     const failure = await save(input);
@@ -228,7 +308,76 @@ function LoopDrawerForm({ loop, onClose }: { loop: Loop | undefined; onClose: ()
           />
         </div>
 
-        <div className="flex flex-col gap-1.5">
+        {!onSession && (
+          <div className="flex flex-col gap-2">
+            <p className="text-label font-medium text-text-primary">Starts on</p>
+            <SegmentedControl label="Starts on" value={starts} options={STARTS} columns={3} onChange={value => update({ starts: value })} />
+          </div>
+        )}
+
+        {onGithub && (
+          <div className="flex flex-col gap-1 rounded-md border border-border-secondary px-3 py-2.5" data-testid="loop-github-triggers">
+            <div className="mb-1 flex items-center gap-2">
+              <Github className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" />
+              <Input
+                aria-label="GitHub repository"
+                value={github.repo}
+                onChange={event => updateGithub({ repo: event.target.value })}
+                placeholder="owner/name (empty: the project's origin)"
+                className="font-mono text-sm"
+                spellCheck={false}
+                fullWidth
+              />
+            </div>
+            <CheckRow checked={github.onComment} onChange={onComment => updateGithub({ onComment })} label="PR comment or review containing">
+              <Input
+                aria-label="Comment phrase"
+                value={github.commentPhrase}
+                onChange={event => updateGithub({ commentPhrase: event.target.value })}
+                disabled={!github.onComment}
+                className="h-7 w-24 font-mono text-sm"
+                spellCheck={false}
+              />
+            </CheckRow>
+            <CheckRow checked={github.changesRequested} onChange={changesRequested => updateGithub({ changesRequested })} label="Review requesting changes" />
+            <CheckRow checked={github.checkFailed} onChange={checkFailed => updateGithub({ checkFailed })} label="Failing check on a PR" />
+            <CheckRow checked={github.prOpened} onChange={prOpened => updateGithub({ prOpened })} label="New PR" />
+            <CheckRow checked={github.onLabel} onChange={onLabel => updateGithub({ onLabel })} label="Issue labeled">
+              <Input
+                aria-label="Issue label"
+                value={github.issueLabel}
+                onChange={event => updateGithub({ issueLabel: event.target.value })}
+                disabled={!github.onLabel}
+                className="h-7 w-24 font-mono text-sm"
+                spellCheck={false}
+              />
+            </CheckRow>
+            <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border-secondary pt-2">
+              <CheckRow checked={github.allowForks} onChange={allowForks => updateGithub({ allowForks })} label="PRs from forks" />
+              <label className="flex items-center gap-2 text-sm text-text-primary">
+                At most
+                <Input
+                  aria-label="Hourly cap"
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={github.hourlyCap}
+                  onChange={event => {
+                    const hourlyCap = event.target.valueAsNumber;
+                    if (Number.isInteger(hourlyCap) && hourlyCap >= 1 && hourlyCap <= 60) updateGithub({ hourlyCap });
+                  }}
+                  className="h-7 w-16 text-sm"
+                />
+                runs an hour
+              </label>
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-text-tertiary">
+              Comments and reviews count only from the repo's collaborators, and their text reaches the agent quoted as untrusted. This computer checks GitHub every 15 seconds with your gh sign-in while Pane is awake; events from while it slept are listed as missed, with Run now. An always-on host (Pane Cloud, BYOC or a Remote Pane machine) gets events around the clock.
+            </p>
+          </div>
+        )}
+
+        {onSchedule && <div className="flex flex-col gap-1.5">
           <div className="grid grid-cols-[4rem_1fr] items-center gap-x-3 gap-y-2">
             <p className="text-label font-medium text-text-primary" id="loop-repeat-label">Repeat</p>
             <Select
@@ -354,11 +503,13 @@ function LoopDrawerForm({ loop, onClose }: { loop: Loop | undefined; onClose: ()
               </>
             )}
           </div>
-        </div>
+        </div>}
 
         <div className="flex gap-2 rounded-md border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs text-text-primary">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-status-warning" aria-hidden="true" />
-          <span>Runs unattended with permission prompts skipped. At most once an hour. Keeps the last 10 runs.</span>
+          <span>{onSchedule
+            ? 'Runs unattended with permission prompts skipped. The schedule runs at most once an hour. Keeps the last 10 runs.'
+            : 'Runs unattended with permission prompts skipped. Keeps the last 10 runs.'}</span>
         </div>
 
         {error && <p role="alert" className="text-sm text-status-error">{error}</p>}

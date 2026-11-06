@@ -135,6 +135,8 @@ CREATE TABLE IF NOT EXISTS loops (
   enabled INTEGER NOT NULL DEFAULT 1,
   schedule_from_ms INTEGER NOT NULL,
   created_at_ms INTEGER NOT NULL,
+  -- JSON LoopGithubTriggers: GitHub events that also start runs. An empty cron means events only.
+  github_triggers TEXT,
   CHECK ((project_id IS NULL) <> (orchestration_session_id IS NULL)),
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
@@ -148,6 +150,19 @@ CREATE TABLE IF NOT EXISTS loop_runs (
   status TEXT NOT NULL,
   error TEXT,
   session_id TEXT,
+  -- JSON LoopGithubEvent for a run a GitHub event started or skipped.
+  event TEXT,
+  FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE
+);
+
+-- Every GitHub event a loop has handled, so one event never starts two runs
+-- even after its run row is trimmed. started_at_ms counts runs toward the hourly cap.
+CREATE TABLE IF NOT EXISTS loop_github_events (
+  loop_id TEXT NOT NULL,
+  event_key TEXT NOT NULL,
+  at_ms INTEGER NOT NULL,
+  started_at_ms INTEGER,
+  PRIMARY KEY (loop_id, event_key),
   FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE
 );
 

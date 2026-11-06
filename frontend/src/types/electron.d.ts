@@ -266,7 +266,8 @@ interface ElectronAPI {
     save: (input: LoopInput) => Promise<IPCResponse<Loop>>;
     delete: (id: string) => Promise<IPCResponse<void>>;
     setEnabled: (id: string, enabled: boolean) => Promise<IPCResponse<Loop>>;
-    runNow: (id: string) => Promise<IPCResponse<Loop>>;
+    /** With `runId`, start the GitHub event a skipped run was for. */
+    runNow: (id: string, runId?: string) => Promise<IPCResponse<Loop>>;
     preview: (cron: string) => Promise<IPCResponse<LoopSchedulePreview>>;
   };
   // Mission Control — every agent pane across all sessions
