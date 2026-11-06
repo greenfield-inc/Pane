@@ -171,6 +171,7 @@ export declare const Machine: z.ZodObject<{
         diskUsedBytes: z.ZodNumber;
     }, z.core.$strict>>;
     shared: z.ZodBoolean;
+    pushWindowEndsAt: z.ZodNullable<z.ZodISODateTime>;
     createdAt: z.ZodISODateTime;
     updatedAt: z.ZodISODateTime;
 }, z.core.$strict>;
@@ -247,6 +248,33 @@ export declare const SubmittedOperation: z.ZodObject<{
     parameters: z.ZodRecord<z.ZodString, z.ZodJSONSchema>;
 }, z.core.$strict>;
 export type SubmittedOperation = z.infer<typeof SubmittedOperation>;
+/** Banners and email start this many days before the end date. */
+export declare const BETA_NOTICE_DAYS = 30;
+/** From this many days before the end date, machines start only for a push window. */
+export declare const BETA_PUSH_WINDOW_DAYS = 14;
+/** How long a machine runs when started inside the push-window phase. */
+export declare const BETA_PUSH_WINDOW_MINUTES = 60;
+/**
+ * The public end of the beta, as the service tells the app. Phases follow from `endsAt` and now:
+ * `open` (no date, or more than 30 days out), `notice` (banners and email), `push_windows` (no new
+ * machines; a start runs for one push window) and `ended` (machines don't start; disks are deleted
+ * only after Parsa approves, as a logged service action).
+ */
+export declare const BetaStatus: z.ZodObject<{
+    endsAt: z.ZodNullable<z.ZodISODateTime>;
+    noticeAt: z.ZodNullable<z.ZodISODateTime>;
+    pushWindowsFrom: z.ZodNullable<z.ZodISODateTime>;
+    phase: z.ZodEnum<{
+        open: "open";
+        notice: "notice";
+        push_windows: "push_windows";
+        ended: "ended";
+    }>;
+    pushWindowMinutes: z.ZodLiteral<60>;
+    announcementUrl: z.ZodNullable<z.ZodURL>;
+    ownAwsTemplateUrl: z.ZodNullable<z.ZodURL>;
+}, z.core.$strict>;
+export type BetaStatus = z.infer<typeof BetaStatus>;
 export declare const BillingStatus: z.ZodObject<{
     teamId: z.ZodString;
     plan: z.ZodEnum<{
@@ -538,6 +566,7 @@ export declare const serviceRoutes: {
                 diskUsedBytes: z.ZodNumber;
             }, z.core.$strict>>;
             shared: z.ZodBoolean;
+            pushWindowEndsAt: z.ZodNullable<z.ZodISODateTime>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>>;
@@ -597,6 +626,7 @@ export declare const serviceRoutes: {
                 diskUsedBytes: z.ZodNumber;
             }, z.core.$strict>>;
             shared: z.ZodBoolean;
+            pushWindowEndsAt: z.ZodNullable<z.ZodISODateTime>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -690,6 +720,7 @@ export declare const serviceRoutes: {
             diskUsedBytes: z.ZodNumber;
         }, z.core.$strict>>;
         shared: z.ZodBoolean;
+        pushWindowEndsAt: z.ZodNullable<z.ZodISODateTime>;
         createdAt: z.ZodISODateTime;
         updatedAt: z.ZodISODateTime;
     }, z.core.$strict>>;
@@ -745,6 +776,7 @@ export declare const serviceRoutes: {
                 diskUsedBytes: z.ZodNumber;
             }, z.core.$strict>>;
             shared: z.ZodBoolean;
+            pushWindowEndsAt: z.ZodNullable<z.ZodISODateTime>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -839,6 +871,7 @@ export declare const serviceRoutes: {
                 diskUsedBytes: z.ZodNumber;
             }, z.core.$strict>>;
             shared: z.ZodBoolean;
+            pushWindowEndsAt: z.ZodNullable<z.ZodISODateTime>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -933,6 +966,7 @@ export declare const serviceRoutes: {
                 diskUsedBytes: z.ZodNumber;
             }, z.core.$strict>>;
             shared: z.ZodBoolean;
+            pushWindowEndsAt: z.ZodNullable<z.ZodISODateTime>;
             createdAt: z.ZodISODateTime;
             updatedAt: z.ZodISODateTime;
         }, z.core.$strict>;
@@ -1113,6 +1147,7 @@ export declare const serviceRoutes: {
             diskUsedBytes: z.ZodNumber;
         }, z.core.$strict>>;
         shared: z.ZodBoolean;
+        pushWindowEndsAt: z.ZodNullable<z.ZodISODateTime>;
         createdAt: z.ZodISODateTime;
         updatedAt: z.ZodISODateTime;
     }, z.core.$strict>>;
@@ -1131,6 +1166,20 @@ export declare const serviceRoutes: {
         code: z.ZodString;
         tailnetHostname: z.ZodNullable<z.ZodString>;
         expiresAt: z.ZodISODateTime;
+    }, z.core.$strict>>;
+    getBeta: import("./http").Route<z.ZodUndefined, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
+        endsAt: z.ZodNullable<z.ZodISODateTime>;
+        noticeAt: z.ZodNullable<z.ZodISODateTime>;
+        pushWindowsFrom: z.ZodNullable<z.ZodISODateTime>;
+        phase: z.ZodEnum<{
+            open: "open";
+            notice: "notice";
+            push_windows: "push_windows";
+            ended: "ended";
+        }>;
+        pushWindowMinutes: z.ZodLiteral<60>;
+        announcementUrl: z.ZodNullable<z.ZodURL>;
+        ownAwsTemplateUrl: z.ZodNullable<z.ZodURL>;
     }, z.core.$strict>>;
     getBilling: import("./http").Route<z.ZodUndefined, z.ZodObject<Record<never, never>, z.core.$strip>, z.ZodObject<{
         teamId: z.ZodString;
@@ -1418,6 +1467,7 @@ export declare function createServiceClient(config: ClientConfig): {
                 diskUsedBytes: number;
             } | null;
             shared: boolean;
+            pushWindowEndsAt: string | null;
             createdAt: string;
             updatedAt: string;
         }[];
@@ -1451,6 +1501,7 @@ export declare function createServiceClient(config: ClientConfig): {
                 diskUsedBytes: number;
             } | null;
             shared: boolean;
+            pushWindowEndsAt: string | null;
             createdAt: string;
             updatedAt: string;
         };
@@ -1503,6 +1554,7 @@ export declare function createServiceClient(config: ClientConfig): {
             diskUsedBytes: number;
         } | null;
         shared: boolean;
+        pushWindowEndsAt: string | null;
         createdAt: string;
         updatedAt: string;
     }>;
@@ -1535,6 +1587,7 @@ export declare function createServiceClient(config: ClientConfig): {
                 diskUsedBytes: number;
             } | null;
             shared: boolean;
+            pushWindowEndsAt: string | null;
             createdAt: string;
             updatedAt: string;
         };
@@ -1588,6 +1641,7 @@ export declare function createServiceClient(config: ClientConfig): {
                 diskUsedBytes: number;
             } | null;
             shared: boolean;
+            pushWindowEndsAt: string | null;
             createdAt: string;
             updatedAt: string;
         };
@@ -1641,6 +1695,7 @@ export declare function createServiceClient(config: ClientConfig): {
                 diskUsedBytes: number;
             } | null;
             shared: boolean;
+            pushWindowEndsAt: string | null;
             createdAt: string;
             updatedAt: string;
         };
@@ -1739,6 +1794,7 @@ export declare function createServiceClient(config: ClientConfig): {
             diskUsedBytes: number;
         } | null;
         shared: boolean;
+        pushWindowEndsAt: string | null;
         createdAt: string;
         updatedAt: string;
     }>;
@@ -1757,6 +1813,15 @@ export declare function createServiceClient(config: ClientConfig): {
         code: string;
         tailnetHostname: string | null;
         expiresAt: string;
+    }>;
+    getBeta: () => Promise<{
+        endsAt: string | null;
+        noticeAt: string | null;
+        pushWindowsFrom: string | null;
+        phase: "open" | "notice" | "push_windows" | "ended";
+        pushWindowMinutes: 60;
+        announcementUrl: string | null;
+        ownAwsTemplateUrl: string | null;
     }>;
     getBilling: () => Promise<{
         teamId: string;

@@ -137,6 +137,21 @@ export function serviceContractCases(target: ServiceContractTarget): ContractCas
       },
     },
     {
+      name: 'service: the beta end date is public, and its notice dates follow from it',
+      async run() {
+        const beta = await createServiceClient({ baseUrl: target.baseUrl }).getBeta();
+        if (beta.endsAt === null) {
+          assert.equal(beta.noticeAt, null);
+          assert.equal(beta.pushWindowsFrom, null);
+          assert.equal(beta.phase, 'open');
+          return;
+        }
+        const ends = Date.parse(beta.endsAt);
+        assert.equal(Date.parse(beta.noticeAt ?? ''), ends - 30 * 86_400_000, 'notice starts 30 days before the end');
+        assert.equal(Date.parse(beta.pushWindowsFrom ?? ''), ends - 14 * 86_400_000, 'push windows start 14 days before the end');
+      },
+    },
+    {
       name: "service: billing status is the team's",
       async run() {
         const owner = await as('owner');

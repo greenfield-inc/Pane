@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { canonicalJson, ContractViolationError, createFleetClient, createServiceClient } from './index';
+import { canonicalJson, CloudApiError, ContractViolationError, createFleetClient, createServiceClient } from './index';
 import { type FleetStub, type ServiceStub, startFleetStub, startServiceStub } from './stubs';
 import { createLocalSigner, fleetContractCases, serviceContractCases } from './testing';
 
@@ -82,5 +82,44 @@ describe('clients reject a server that drifts from the contract', () => {
 describe('canonical JSON, the bytes operation signatures cover', () => {
   it('sorts keys at every level, keeps array order, and drops whitespace', () => {
     expect(canonicalJson({ b: 1, a: { d: [2, { f: 'x', e: null }], c: true }, B: 'upper' })).toBe('{"B":"upper","a":{"c":true,"d":[2,{"e":null,"f":"x"}]},"b":1}');
+  });
+});
+
+describe('the service stub follows the end-of-beta phases', () => {
+  it('notices at E-30, starts only 60-minute push windows from E-14, and starts nothing after E', async () => {
+    let clock = Date.parse('2027-01-01T00:00:00.000Z');
+    const stub = await startServiceStub({
+      accounts: [{ githubLogin: 'octo-owner', cohort: true }],
+      beta: { endsAt: '2027-03-01T00:00:00.000Z' },
+      now: () => new Date(clock),
+    });
+    try {
+      const anonymous = createServiceClient({ baseUrl: stub.url });
+      const { deviceCode, userCode } = await anonymous.startDeviceSignIn();
+      stub.approveDevice(userCode, 'octo-owner');
+      const signedIn = await anonymous.pollDeviceSignIn(deviceCode);
+      if (signedIn.status !== 'complete') throw new Error(signedIn.status);
+      const owner = createServiceClient({ baseUrl: stub.url, token: signedIn.token });
+
+      expect(await anonymous.getBeta()).toMatchObject({ phase: 'open', noticeAt: '2027-01-30T00:00:00.000Z', pushWindowsFrom: '2027-02-15T00:00:00.000Z' });
+      const { machine } = await owner.createMachine('beta', 'beta-key-0001');
+      await owner.stopMachine(machine.id);
+
+      clock = Date.parse('2027-02-01T00:00:00.000Z');
+      expect((await anonymous.getBeta()).phase).toBe('notice');
+
+      clock = Date.parse('2027-02-20T12:00:00.000Z');
+      expect((await anonymous.getBeta()).phase).toBe('push_windows');
+      const started = await owner.startMachine(machine.id);
+      expect(started.machine.pushWindowEndsAt).toBe('2027-02-20T13:00:00.000Z');
+      await owner.stopMachine(machine.id);
+
+      clock = Date.parse('2027-03-01T00:00:00.000Z');
+      expect((await anonymous.getBeta()).phase).toBe('ended');
+      await expect(owner.startMachine(machine.id)).rejects.toMatchObject({ code: 'invalid_state' });
+      await expect(owner.startMachine(machine.id)).rejects.toBeInstanceOf(CloudApiError);
+    } finally {
+      await stub.close();
+    }
   });
 });
