@@ -282,8 +282,8 @@ renderer), Overview shows that page under a header with the Session name, Rename
 **Open beside chat** (the page full-size in the split, in the tab already
 showing it) and **Show Session details** (the record described next). Pane checks for
 the page each time the Session refreshes. Links in the page to
-`pane://open?pane=<id>&panel=<id>` open that tab with its waiting Notify card
-docked; other links open as a browser tab beside chat. A client connected to
+`pane://open?pane=<id>&panel=<id>` open that tab and show its oldest waiting
+question in Approvals, as Open in Pane does; other links open as a browser tab beside chat. A client connected to
 a remote host shows the record only. Without a page, Overview shows the
 Session's blockers, goal, next step, and decisions when they are set, then its
 Panes and recent activity. Each Pane card lists the Session's tabs in that Pane

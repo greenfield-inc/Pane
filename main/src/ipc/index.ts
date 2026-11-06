@@ -133,7 +133,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   const notify = registerNotifyHandlers(ipcMain, services, commandRegistry);
   services.notifyService = notify;
   registerPaneLinkHandler(commandRegistry, {
-    dockWaitingCard: (paneId, panelId) => notify.queue.dockWaitingCard(paneId, panelId),
+    showWaitingCard: (paneId, panelId) => notify.showWaitingCard(paneId, panelId),
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
     navigate: (target) => {
       const window = services.getMainWindow();

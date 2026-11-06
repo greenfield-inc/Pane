@@ -199,8 +199,7 @@ export class NotifyQueue extends EventEmitter {
     | { type: 'remind'; id: string; after: NotifyRemindAfter }
     | { type: 'hover-info'; id: string; hovering: boolean }
     | { type: 'pause'; minutes: number }
-    | { type: 'resume' }
-    | { type: 'dock'; id: string | null }): void | Promise<void> {
+    | { type: 'resume' }): void | Promise<void> {
     switch (command.type) {
       case 'answer': return this.answer(command.id, command.answer);
       case 'undo': this.undo(command.id); break;
@@ -214,13 +213,12 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /**
-   * Docks the oldest question still waiting from this tab, as Open in Pane does; a question
-   * on a machine the app isn't on stays put.
+   * The oldest question still waiting from this tab, for a pane:// link to open as Open in Pane
+   * does; a question on a machine the app isn't on is left out.
    */
-  dockWaitingCard(paneId: string, panelId: string): void {
-    const item = this.snapshot().items.find(candidate => candidate.state === 'waiting' && !candidate.elsewhere
-      && candidate.source.paneId === paneId && candidate.source.panelId === panelId);
-    if (item) this.run({ type: 'dock', id: item.id });
+  waitingCardFrom(paneId: string, panelId: string): string | undefined {
+    return this.snapshot().items.find(candidate => candidate.state === 'waiting' && !candidate.elsewhere
+      && candidate.source.paneId === paneId && candidate.source.panelId === panelId)?.id;
   }
 
   /**

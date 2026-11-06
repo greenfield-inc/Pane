@@ -13,6 +13,7 @@ function setup() {
   const registry = new PaneCommandRegistry();
   const focused: PaneCommandValue[] = [];
   const navigated: PaneLinkNavigation[] = [];
+  const shown: string[] = [];
   const notify = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [] });
   registry.register('runpane:panes:focus', (request: PaneCommandValue) => {
     focused.push(request);
@@ -21,14 +22,17 @@ function setup() {
   registerPaneLinkHandler(registry, {
     repoExists: (repoId) => repoId === 7,
     navigate: (target) => { navigated.push(target); },
-    dockWaitingCard: (paneId, panelId) => notify.dockWaitingCard(paneId, panelId),
+    showWaitingCard: (paneId, panelId) => {
+      const itemId = notify.waitingCardFrom(paneId, panelId);
+      if (itemId) shown.push(itemId);
+    },
   });
   const open = (link: PaneCommandValue) => registry.invoke(OPEN_PANE_LINK_CHANNEL, [link]);
   const ask = (source: { paneId: string; panelId: string }, title: string) => {
     void notify.ask({ question: { ui: 'approve', title }, source: { ...source, name: 'auth-refactor', agent: 'Claude' } });
     return notify.snapshot().items.find((item) => item.title === title)?.id;
   };
-  return { focused, navigated, open, notify, ask };
+  return { focused, navigated, shown, open, ask };
 }
 
 describe('pane:// links', () => {
@@ -42,8 +46,8 @@ describe('pane:// links', () => {
     expect(navigated).toEqual([]);
   });
 
-  it("docks the linked tab's oldest waiting question", async () => {
-    const { open, notify, ask } = setup();
+  it("opens the linked tab's oldest waiting question in Approvals", async () => {
+    const { open, shown, ask } = setup();
     ask({ paneId: 'pane-2', panelId: 'panel_2' }, 'Another Pane asks first');
     const oldest = ask({ paneId: 'pane-1', panelId: 'panel_2' }, 'Apply migration 0042?');
     ask({ paneId: 'pane-1', panelId: 'panel_2' }, 'Ship it?');
@@ -51,11 +55,11 @@ describe('pane:// links', () => {
 
     await open('pane://open?pane=pane-1&panel=panel_2');
 
-    expect(notify.snapshot().dockedItemId).toBe(oldest);
+    expect(shown).toEqual([oldest]);
   });
 
-  it('docks nothing when the linked tab has no waiting question', async () => {
-    const { focused, open, notify, ask } = setup();
+  it('opens nothing when the linked tab has no waiting question', async () => {
+    const { focused, open, shown, ask } = setup();
     ask({ paneId: 'pane-1', panelId: 'panel_3' }, 'Another tab asks');
 
     const result = await open('pane://open?pane=pane-1&panel=panel_2');
@@ -63,7 +67,7 @@ describe('pane:// links', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(focused).toHaveLength(2);
-    expect(notify.snapshot().dockedItemId).toBeNull();
+    expect(shown).toEqual([]);
   });
 
   it('navigates to a saved repository or a Session', async () => {

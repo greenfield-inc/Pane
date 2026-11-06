@@ -343,6 +343,12 @@ export class NotifyService {
     this.windows.openRound(itemId);
   }
 
+  /** A pane:// link to a tab: Open in Pane for the tab's oldest waiting question, if one waits. */
+  async showWaitingCard(paneId: string, panelId: string): Promise<void> {
+    const itemId = this.queue.waitingCardFrom(paneId, panelId);
+    if (itemId) await this.openInPane(itemId);
+  }
+
   /** Open in Pane: Pane comes to the front on Approvals, with this item selected beside its Session or Pane. */
   private async openInPane(itemId: string): Promise<void> {
     if (!this.queue.snapshot().items.some(candidate => candidate.id === itemId)) return;
