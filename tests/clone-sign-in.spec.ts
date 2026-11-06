@@ -145,7 +145,7 @@ async function connectRemote(page: Page) {
     });
     await window.electronAPI.remoteDaemon.updateClientState({ mode: 'remote', activeProfileId: 'devbox' });
   });
-  await expect(page.getByRole('button', { name: 'Agents run on devbox. Switch host' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Agents run on devbox. Switch machine' })).toBeVisible();
 }
 
 /** A remote clone keeps its default destination, the host's home; this computer browses with the native dialog. */
@@ -218,7 +218,7 @@ test('this computer keeps the plain sign-in message', async ({ page }, testInfo)
 });
 
 test('a sign-in draft stays with its host when the user switches hosts', async ({ page }, testInfo) => {
-  await installElectronApiMock(page);
+  await installElectronApiMock(page, { workspaceAccess: { machineName: 'laptop' } });
   await page.goto('/');
   await connectRemote(page);
   await failClonesWithAuth(page, LOCAL_HTTPS_MESSAGE);
@@ -229,7 +229,7 @@ test('a sign-in draft stays with its host when the user switches hosts', async (
   await expect(dialog).toHaveCount(0);
 
   await page.evaluate(() => window.electronAPI.remoteDaemon.updateClientState({ mode: 'local', activeProfileId: null }));
-  await expect(page.getByRole('button', { name: 'Agents run on This computer. Switch host' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Agents run on laptop. Switch machine' })).toBeVisible();
   await goHome(page);
   await page.getByRole('button', { name: 'GitHub', exact: true }).click();
   const local = page.getByRole('dialog');

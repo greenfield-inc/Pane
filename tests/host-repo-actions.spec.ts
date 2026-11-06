@@ -32,7 +32,7 @@ async function connectTo(page: Page, host: 'sandbox' | 'self-hosted') {
     await window.electronAPI.remoteDaemon.updateClientState({ mode: 'remote', activeProfileId: profile.id });
   }, host);
   const name = host === 'sandbox' ? 'sandbox-1' : 'devbox';
-  await expect(page.getByRole('button', { name: `Agents run on ${name}. Switch host` })).toBeVisible();
+  await expect(page.getByRole('button', { name: `Agents run on ${name}. Switch machine` })).toBeVisible();
 }
 
 function invokeCalls(page: Page, channel: string): Promise<InvokeCall[]> {
@@ -164,7 +164,7 @@ test('Open Project on a remote picks an existing repo there and rejects a path f
 test('a typed path that is not a repo is rejected by Open on the host, inline', async ({ page }, testInfo) => {
   await boot(page);
   await connectTo(page, 'self-hosted');
-  await page.getByRole('button', { name: 'Add repository', exact: true }).click();
+  await page.getByRole('button', { name: 'New project', exact: true }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Open Repository' });
   await expect(dialog.getByText('On: devbox (remote host)', { exact: true })).toBeVisible();
@@ -210,6 +210,13 @@ test('New Project on a remote can create the folder in the browser and asks the 
 
 test('on this computer Browse stays the native dialog and requests carry no host label', async ({ page }, testInfo) => {
   await boot(page);
+  // Home offers its Get Started cards only until the first project exists.
+  await openHomeCard(page, 'GitHub');
+  const clone = page.getByRole('dialog', { name: 'Clone from GitHub' });
+  await expect(clone.getByText('On: This computer', { exact: true })).toBeVisible();
+  await expect(clone.getByRole('textbox', { name: 'Destination' })).toHaveValue('');
+  await clone.getByRole('button', { name: 'Cancel' }).click();
+
   await openHomeCard(page, 'New Project');
 
   const dialog = page.getByRole('dialog', { name: 'New Project' });
@@ -227,9 +234,4 @@ test('on this computer Browse stays the native dialog and requests carry no host
     channel: 'projects:create',
     args: [{ name: 'worktrees', path: '/tmp/pane-worktrees', buildScript: '', runScript: '', mode: 'new' }],
   }]);
-
-  await openHomeCard(page, 'GitHub');
-  const clone = page.getByRole('dialog', { name: 'Clone from GitHub' });
-  await expect(clone.getByText('On: This computer', { exact: true })).toBeVisible();
-  await expect(clone.getByRole('textbox', { name: 'Destination' })).toHaveValue('');
 });

@@ -90,11 +90,11 @@ test('the host terminal on a self-hosted remote is one plain shell at home', asy
     await dismissStartupDialogs(page);
 
     // A real user picks the host first; This computer offers no host terminal.
-    await page.getByRole('button', { name: 'Agents run on This computer. Switch host' }).click();
+    await page.getByRole('button', { name: 'Agents run on This computer. Switch machine' }).click();
     await expect(page.getByRole('menuitem', { name: /^Open terminal on/ })).toHaveCount(0);
     await shot(page, '01-switcher-local-no-terminal.png');
     await page.getByRole('menuitemradio', { name: new RegExp(HOST) }).click();
-    const chip = page.getByRole('button', { name: `Agents run on ${HOST}. Switch host` });
+    const chip = page.getByRole('button', { name: `Agents run on ${HOST}. Switch machine` });
     await expect(chip).toBeVisible({ timeout: 30_000 });
 
     await chip.click();

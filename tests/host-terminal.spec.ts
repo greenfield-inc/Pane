@@ -28,17 +28,17 @@ async function hostTerminalOpenCalls(page: Page) {
 }
 
 test('only the active remote host offers its terminal in the switcher', async ({ page }, testInfo) => {
-  await installElectronApiMock(page);
+  await installElectronApiMock(page, { workspaceAccess: { machineName: 'laptop' } });
   await page.goto('/');
   await saveHosts(page, null);
 
-  await page.getByRole('button', { name: 'Agents run on This computer. Switch host' }).click();
-  await expect(page.getByRole('menuitemradio', { name: /This computer/ })).toHaveAttribute('aria-checked', 'true');
+  await page.getByRole('button', { name: 'Agents run on laptop. Switch machine' }).click();
+  await expect(page.getByRole('menuitemradio', { name: /laptop/ })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('menuitem', { name: /^Open terminal on/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
 
   await saveHosts(page, 'devbox');
-  await page.getByRole('button', { name: 'Agents run on devbox. Switch host' }).click();
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
   await expect(page.getByRole('menuitem', { name: 'Open terminal on devbox' })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: 'Open terminal on spare' })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('switcher-terminal-button.png') });
@@ -63,7 +63,7 @@ test('a host saved with a cloud kind shows a cloud on its terminal tab', async (
   await page.goto('/');
   await saveHosts(page, 'devbox', { label: 'cloud sandbox', icon: 'cloud' });
 
-  await page.getByRole('button', { name: 'Agents run on devbox. Switch host' }).click();
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
   await page.getByRole('menuitem', { name: 'Open terminal on devbox' }).click();
 
   const tab = page.getByRole('tab', { name: 'devbox · Terminal' });
@@ -76,7 +76,7 @@ test('a host terminal that cannot open says why', async ({ page }) => {
   await page.goto('/');
   await saveHosts(page, 'devbox');
 
-  await page.getByRole('button', { name: 'Agents run on devbox. Switch host' }).click();
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
   await page.getByRole('menuitem', { name: 'Open terminal on devbox' }).click();
 
   await expect(page.getByText('Could not open the terminal on devbox')).toBeVisible();

@@ -1348,19 +1348,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         detectConfig: () => success(null),
         refreshGitStatus: () => success(),
-        create: (request: JsonObject) => {
-          const now = new Date().toISOString();
-          const project = {
-            id: mockProjects.reduce((max, existing) => Math.max(max, Number(existing.id)), 0) + 1,
-            name: request.name,
-            path: request.path,
-            active: false,
-            created_at: now,
-            updated_at: now,
-          };
-          mockProjects = [...mockProjects, project];
-          return success(clone(project));
-        },
       }),
       prompts: namespace({
         getAll: () => success([]),
