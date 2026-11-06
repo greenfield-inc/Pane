@@ -43,7 +43,6 @@ from .local_control import (
     run_panels_screen,
     run_panels_submit,
     run_panels_submit_composer,
-    run_panels_close,
     run_panels_wait,
     run_panes_adopt,
     run_panels_resume,
@@ -52,6 +51,7 @@ from .local_control import (
     run_panes_create,
     run_panes_focus,
     run_panels_open,
+    run_panels_close,
     run_panes_cost,
     run_panes_list,
     run_panes_pin,
@@ -77,7 +77,7 @@ from .local_control import (
     run_pr_watch_command,
     run_workspace_state,
 )
-from .notify import run_notify
+from .notify import RunpaneError, run_notify
 from .secrets import run_secrets_delete, run_secrets_exec, run_secrets_list, run_secrets_request, run_secrets_set
 from .platforms import detect_platform
 from .releases import resolve_release
@@ -221,6 +221,7 @@ class ParsedArgs:
     force: bool = False
     remove_worktree: bool = False
     merged: bool = False
+    closed: bool = False
     watch_as: Optional[str] = None
     watch_since: Optional[int] = None
     watch_epoch: Optional[str] = None
@@ -662,6 +663,12 @@ def validate_panes_archive_args(parsed: ParsedArgs) -> None:
         raise ValueError("runpane panes archive accepts either --pane or --session, not both.")
     if parsed.merged and not parsed.session_id:
         raise ValueError("--merged requires --session.")
+    if parsed.closed and not parsed.session_id:
+        raise RunpaneError(
+            "ERR_RUNPANE_INVALID_ARGUMENT",
+            "--closed requires --session: it adds Panes whose PR closed unmerged to a Session sweep. Nothing was archived.",
+            "Run `runpane panes archive --session <id|name> --merged --closed`, or archive one Pane with `runpane panes archive --pane <pane-id>`.",
+        )
     if parsed.session_id and not parsed.merged:
         raise ValueError("runpane panes archive --session requires --merged.")
     if parsed.session_id and parsed.force:
@@ -860,6 +867,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--merged":
         parsed.merged = True
+        return
+    if flag == "--closed":
+        parsed.closed = True
         return
     if flag == "--follow":
         parsed.follow = True
@@ -1542,12 +1552,12 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panels list": lambda parsed, context: run_panels_list(parsed),
     "panels create": lambda parsed, context: run_panels_create(parsed),
     "panels open": lambda parsed, context: run_panels_open(parsed),
+    "panels close": lambda parsed, context: run_panels_close(parsed),
     "panels output": lambda parsed, context: run_panels_output(parsed),
     "panels input": lambda parsed, context: run_panels_input(parsed),
     "panels screen": lambda parsed, context: run_panels_screen(parsed),
     "panels submit": lambda parsed, context: run_panels_submit(parsed),
     "panels submit-composer": lambda parsed, context: run_panels_submit_composer(parsed),
-    "panels close": lambda parsed, context: run_panels_close(parsed),
     "panels wait": lambda parsed, context: run_panels_wait(parsed),
     "panels resume": lambda parsed, context: run_panels_resume(parsed),
     "panels pause": lambda parsed, context: run_pause(parsed, "panel", "pause"),

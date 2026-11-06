@@ -1,5 +1,5 @@
 import type { ProjectEnvVar } from './projectEnvVars';
-import type { ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, TerminalExpectedReport, TerminalPausedMark, ToolPanelType } from './panels';
+import type { PanelOpener, ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, TerminalExpectedReport, TerminalPausedMark, ToolPanelType } from './panels';
 import type { RunpaneAgent } from './generatedRunpaneContract';
 import type { RemoteDaemonExecutableHealth } from './remoteDaemon';
 import type { TerminalGraphicsProtocol } from '../constants/terminalGraphics';
@@ -537,6 +537,8 @@ export interface RunpanePaneCreateRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;
+  /** The calling tab ($PANE_PANEL_ID), recorded as the opener of the tabs this creates. */
+  callerPanelId?: string;
   /** Session to associate each new Pane with (the calling orchestrator's PANE_ORCHESTRATION_SESSION_ID). */
   associateSession?: string;
   /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
@@ -879,8 +881,10 @@ export interface RunpanePaneArchiveRequest {
 /** Archives every Pane associated with a named Session whose work is safe to discard locally. */
 export interface RunpanePaneArchiveBulkRequest {
   sessionId: string;
-  /** The only bulk filter today: Panes whose PR merged and whose worktree has no unsaved work. */
+  /** Panes whose PR merged and whose worktree has no unsaved work. */
   merged: true;
+  /** Also Panes whose PR closed without merging (same unsaved-work checks). */
+  closed?: boolean;
   source?: RunpanePanelCreateSource;
   dryRun?: boolean;
   removeWorktree?: boolean;
@@ -1036,6 +1040,7 @@ export interface RunpanePaneArchiveBulkResult {
   ok: boolean;
   sessionId: string;
   merged: true;
+  closed?: true;
   dryRun?: true;
   removeWorktree: boolean;
   archived: number;
@@ -1075,6 +1080,8 @@ export interface RunpanePanelSummary {
    * capture). Omitted with `resumeId`.
    */
   resumeSource?: RunpanePanelResumeSource;
+  /** Who opened this tab through runpane; omitted for the person's tabs and tabs from before Pane recorded it. */
+  openedBy?: PanelOpener;
 }
 
 export type RunpanePanelResumeSource = 'agent-farm' | 'configured' | 'agent';
@@ -1201,6 +1208,8 @@ export interface RunpanePanelCreateRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;
+  /** The calling tab ($PANE_PANEL_ID), recorded as the opener of the tabs this creates. */
+  callerPanelId?: string;
   waitReady?: boolean;
   readyTimeoutMs?: number;
   /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
@@ -1246,6 +1255,8 @@ export interface RunpanePanelOpenRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;
+  /** The calling tab ($PANE_PANEL_ID), recorded as the opener of the tabs this creates. */
+  callerPanelId?: string;
 }
 
 export interface RunpanePanelOpenResult {
@@ -1259,6 +1270,55 @@ export interface RunpanePanelOpenResult {
   placement: RunpanePanelOpenPlacement;
   active: boolean;
   reused: boolean;
+}
+
+export interface RunpanePanelCloseRequest {
+  panelId: string;
+  /** Report whether the tab would close, and why not, without closing it. */
+  dryRun?: boolean;
+  /**
+   * Close it as the tab's close button does, skipping every check but `permanent`: for a stuck
+   * tab, or one the person opened. A busy agent's turn and unsent text are lost.
+   */
+  force?: boolean;
+  source?: RunpanePanelCreateSource;
+}
+
+/**
+ * Why `panels close` kept a tab open. Each guards something a close would lose:
+ * the person's own tab, a permanent tab, an agent's turn, or text not yet sent.
+ */
+export type RunpanePanelCloseRefusalCode =
+  | 'opened-by-user'
+  | 'permanent'
+  | 'agent-busy'
+  | 'unsent-input'
+  | 'input-unknown';
+
+export interface RunpanePanelCloseRefusal {
+  code: RunpanePanelCloseRefusalCode;
+  message: string;
+  next: string;
+}
+
+export interface RunpanePanelCloseResult {
+  ok: boolean;
+  generation?: number;
+  /** Omitted only when the tab was already gone. */
+  paneId?: string;
+  panelId: string;
+  /** The tab's panel type (`terminal`, `chat`, `browser`, ...). Omitted only when the tab was already gone. */
+  type?: string;
+  title?: string;
+  closed: boolean;
+  /** Closed with `force`, skipping the checks that would have kept it. */
+  forced?: boolean;
+  /** No tab has this id: it was closed already. */
+  alreadyClosed?: boolean;
+  dryRun?: boolean;
+  /** Dry run only: whether the close would go ahead. */
+  wouldClose?: boolean;
+  refused?: RunpanePanelCloseRefusal;
 }
 
 export interface RunpanePanelOutputRecord {
@@ -1438,15 +1498,6 @@ export interface RunpanePanelSubmitResult {
 }
 
 export type RunpanePanelSubmitComposerStrategy = 'auto' | 'codex-ctrl-enter' | 'enter' | 'tab';
-
-export interface RunpanePanelCloseResult {
-  ok: true;
-  generation?: number;
-  paneId: string;
-  panelId: string;
-  type: string;
-  title: string;
-}
 
 export interface RunpanePanelSubmitComposerRequest {
   panelId: string;

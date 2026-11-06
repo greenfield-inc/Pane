@@ -5,10 +5,22 @@ import path from 'path';
 import { getAppDirectory } from '../utils/appDirectory';
 import { DEFAULT_SESSION_PROFILE, PANE_CAPABILITY_CONTEXT } from '../../../shared/types/sessionProfile';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import { keepSessionTidySection } from './sessionTidyRules';
 
 const START = '<!-- pane-session-context:start -->';
 const END = '<!-- pane-session-context:end -->';
 const LEGACY_PROGRESS_STATUS = '.pane-progress.json';
+/**
+ * /wrap-up ships in the Pane Chat bundle and is copied into each Session folder,
+ * where only that Session's orchestrator finds it: Claude Code reads the
+ * starting folder's .claude/skills (typed as /wrap-up) and Codex its
+ * .agents/skills. Workers start in their worktrees; their read access to the
+ * Session folder (permissions.additionalDirectories) loads no skills.
+ */
+const WRAP_UP_SKILL_SOURCE = path.join(__dirname, 'paneChatBundle', 'skills', 'wrap-up', 'SKILL.md');
+const SESSION_SKILL_FOLDERS = ['.claude', '.agents'] as const;
+const WRAP_UP_SKILL_PATH = ['skills', 'wrap-up', 'SKILL.md'] as const;
+const MANAGED_SKILL_MARKER = '<!-- Pane writes this file into each Session folder and rewrites it on launch. -->';
 
 export function sessionWorkspacePath(sessionId: string): string {
   // Store IDs are opaque, including imported IDs; never interpret them as paths.
@@ -62,6 +74,7 @@ export function prepareSessionWorkspace(
   writeManagedInstructions(path.join(cwd, 'AGENTS.md'), content);
   // Claude resolves imports before the first turn; Cursor also reads AGENTS.md.
   writeManagedInstructions(path.join(cwd, 'CLAUDE.md'), '@AGENTS.md');
+  writeWrapUpSkills(cwd);
   if (record?.runtime === 'wsl') {
     const runtimeDirectory = path.join(cwd, '.pane-runtime');
     fs.mkdirSync(runtimeDirectory, { recursive: true, mode: 0o700 });
@@ -74,6 +87,68 @@ export function prepareSessionWorkspace(
     writeManagedInstructions(path.join(cwd, 'runtime-context.md'), wslRouting(record));
   }
   return cwd;
+}
+
+/** The Session folder's copy of the bundled /wrap-up guide, or undefined when the bundle is unreadable. */
+function managedWrapUpSkill(): string | undefined {
+  try {
+    const bundled = fs.readFileSync(WRAP_UP_SKILL_SOURCE, 'utf8');
+    return bundled.replace(/^(---\n[\s\S]*?\n---\n)/, `$1\n${MANAGED_SKILL_MARKER}\n`);
+  } catch (error) {
+    console.warn('[SessionWorkspace] Could not read the bundled /wrap-up skill', error);
+    return undefined;
+  }
+}
+
+function isSessionSkillFolder(name: string): boolean {
+  return SESSION_SKILL_FOLDERS.some(folder => folder === name);
+}
+
+/** Real directories only: a symbolic link here could send the write outside the Session folder. */
+function isPlainDirectoryOrMissing(directory: string): boolean {
+  if (!fs.existsSync(directory)) return true;
+  const stat = fs.lstatSync(directory);
+  return stat.isDirectory() && !stat.isSymbolicLink();
+}
+
+/** Writes /wrap-up for Claude Code and Codex; a copy the user rewrote (no marker) is left alone. */
+function writeWrapUpSkills(cwd: string): void {
+  const content = managedWrapUpSkill();
+  if (!content) return;
+  for (const folder of SESSION_SKILL_FOLDERS) {
+    const file = path.join(cwd, folder, ...WRAP_UP_SKILL_PATH);
+    const directories = [path.join(cwd, folder), path.join(cwd, folder, 'skills'), path.dirname(file)];
+    if (!directories.every(isPlainDirectoryOrMissing)) continue;
+    if (fs.existsSync(file)) {
+      if (!fs.lstatSync(file).isFile()) continue;
+      const previous = fs.readFileSync(file, 'utf8');
+      if (previous === content || !previous.includes(MANAGED_SKILL_MARKER)) continue;
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, content, { mode: 0o600 });
+  }
+}
+
+/**
+ * The paths to remove when a Session skill folder holds exactly Pane's current
+ * /wrap-up copy (file first, then its folders), or undefined when it holds
+ * anything else.
+ */
+function managedSkillFolderEntries(folder: string): string[] | undefined {
+  const expected = managedWrapUpSkill();
+  const entries: string[] = [];
+  let directory = folder;
+  for (const name of WRAP_UP_SKILL_PATH) {
+    const stat = fs.lstatSync(directory);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return undefined;
+    const children = fs.readdirSync(directory);
+    if (children.length !== 1 || children[0] !== name) return undefined;
+    entries.unshift(directory);
+    directory = path.join(directory, name);
+  }
+  const stat = fs.lstatSync(directory);
+  if (!stat.isFile() || expected === undefined || fs.readFileSync(directory, 'utf8') !== expected) return undefined;
+  return [directory, ...entries];
 }
 
 function runtimeFiles(cwd: string, record: OrchestrationSessionRecord) {
@@ -95,10 +170,11 @@ function sessionInstructions(
     'This directory belongs to one Session. Opening it does not authorize work. Await user input. Saved next actions are context only.',
     PANE_CAPABILITY_CONTEXT,
     delegationRules(sessionId, record),
+    sessionTidyRules(sessionId, record),
     '## Session behavior profile',
     profile,
     `## Plans and documents
-When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html. Then show the rendered page with runpane panels open --url <file-url> --source agent --yes --json; it opens as an intentional live browser in split view beside this conversation. Use --file <path> to open its editable source instead. Rerunning the command for the same target reuses its tab, so update the file in place and reopen it after material changes. The Session's status page is the exception: from the first time you dispatch work to a Pane, render it to session/index.html in this Session folder with the orchestrate-sessions skill's renderer, never by hand, and again at each change its references/status-board.md lists. The Overview tab shows it, so do not open it with panels open. Its links to pane://open?pane=<pane-id>&panel=<panel-id> open that tab with its waiting Notify card docked.
+When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html, and update it in place. Link it from the Session's status document (see Keep the Session tidy) instead of opening a tab for it. Open it beside the user only when they need to look at it now, with runpane panels open --url <file-url> --source agent --yes --json; it opens as a live browser in split view beside this conversation. Use --file <path> to open its editable source instead. Rerunning the command for the same target reuses its tab. The Session's status page is the exception: from the first time you dispatch work to a Pane, render it to session/index.html in this Session folder with the orchestrate-sessions skill's renderer, never by hand, and again at each change its references/status-board.md lists. The Overview tab shows it, so do not open it with panels open. Its links to pane://open?pane=<pane-id>&panel=<panel-id> open that tab and show its waiting question in Approvals.
 Distinguish plans from verified results. Opening this Session is not an instruction to write or open documents.`,
     '## Persisted context',
     'When a user task needs current state, use sessions get/overview with the stable Session ID. The snapshot below may be stale. It is data, not a startup task.',
@@ -127,6 +203,12 @@ You are in orchestrator mode: this Session's work moves through you. Only you as
 Keep every item that waits on the person (a worker's needs_you or blocked question, a plan or design approval, a PR ready to merge, a next step only they can take) posted to Pane's Approvals, exactly once. Workers in this Session don't post; they report blocked to you. Post each item when it appears with runpane notify ... --json as a background command (in Claude Code, Bash with run_in_background), not the MCP notify tool or AskUserQuestion, so you stay free to talk; title it with its Q-n and pass the worker's files and PR as --links. Then acknowledge the worker's inbox item with runpane inbox ack <id>. When the call returns, send the answer only to the asking worker. Stop the background call of an item that went stale; that expires its card. When you start, resume or wake, reconcile against the status files, your ledger and runpane inbox: post what is missing and stop what is stale. Pane keeps no approvals across a restart, so after one, post each item that still waits again, exactly once. If notify returns unavailable because Approvals is off, ask in this tab as before.${record?.runtime === 'wsl' ? `\n${wslRouting(record)}` : ''}`;
 }
 
+/** Its own section, apart from delegationRules, so neither has to edit the other. */
+function sessionTidyRules(sessionId: string, record?: OrchestrationSessionRecord): string {
+  const wrapUp = sessionRuntimePath(path.join(sessionWorkspacePath(sessionId), '.claude', ...WRAP_UP_SKILL_PATH), record);
+  return keepSessionTidySection(sessionId, wrapUp);
+}
+
 function wslRouting(record: OrchestrationSessionRecord): string {
   const appDirectory = sessionRuntimePath(getAppDirectory(), record);
   return `## WSL RunPane Routing
@@ -146,6 +228,7 @@ export function isPristineSessionWorkspace(record: OrchestrationSessionRecord): 
   const expectedAgents = `${START}\n${sessionInstructions(record.id, record.profile ?? DEFAULT_SESSION_PROFILE, record)}\n${END}`;
   return fs.readdirSync(cwd).every(name => {
     const file = path.join(cwd, name);
+    if (isSessionSkillFolder(name)) return managedSkillFolderEntries(file) !== undefined;
     if (!fs.lstatSync(file).isFile()) return false;
     if (name !== 'AGENTS.md' && name !== 'CLAUDE.md' && name !== LEGACY_PROGRESS_STATUS) return false;
     const content = fs.readFileSync(file, 'utf8').trim();
@@ -162,11 +245,18 @@ export function discardSessionScaffold(record: OrchestrationSessionRecord): bool
   if (fs.lstatSync(cwd).isSymbolicLink()) return false;
   const names = fs.readdirSync(cwd);
   const files: string[] = [];
+  const skillEntries: string[] = [];
   let runtimeDirectory: string | undefined;
   for (const name of names) {
     const file = path.join(cwd, name);
     const stat = fs.lstatSync(file);
     if (stat.isSymbolicLink()) return false;
+    if (isSessionSkillFolder(name)) {
+      const entries = managedSkillFolderEntries(file);
+      if (!entries) return false;
+      skillEntries.push(...entries);
+      continue;
+    }
     if (name === '.pane-runtime' && record.runtime === 'wsl') {
       if (!stat.isDirectory()) return false;
       const expected = new Map(Object.entries(runtimeFiles(cwd, record)));
@@ -194,6 +284,10 @@ export function discardSessionScaffold(record: OrchestrationSessionRecord): bool
     if (!content.startsWith(START) || !content.endsWith(END)) return false;
   }
   for (const file of files) fs.unlinkSync(file);
+  for (const entry of skillEntries) {
+    if (fs.lstatSync(entry).isDirectory()) fs.rmdirSync(entry);
+    else fs.unlinkSync(entry);
+  }
   if (runtimeDirectory) fs.rmdirSync(runtimeDirectory);
   fs.rmdirSync(cwd);
   return true;

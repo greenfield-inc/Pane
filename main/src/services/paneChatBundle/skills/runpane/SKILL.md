@@ -252,17 +252,27 @@ asks.
 
 ## Close out
 
-Archiving removes a Pane's worktree, so it needs the user's cleanup approval.
-Once PRs merge, preview with
-`runpane panes archive --session <id|name> --merged --dry-run --json`, then
-rerun with `--yes`. It archives only Panes whose PR is merged and whose
+As a Session orchestrator, archive a feature Pane of your own Session without
+asking once its PR merged or closed and no agent in it is working, including
+right after a merge the user asked for. Outside a Session, archiving removes a
+Pane's worktree, so it needs the user's cleanup approval: preview and offer.
+Preview with `runpane panes archive --pane <id> --dry-run --json`, or for
+several `runpane panes archive --session <id|name> --merged --closed --dry-run --json`,
+then rerun with `--yes` only when it is clean. It archives only Panes whose
 worktree has no uncommitted, untracked or unpushed work, no agent mid-turn
-(`agent-busy`) and no unsent draft or unsaved edits (`unsent-input`). It keeps a Pane with
-an open PR (`pr-open`), no PR or a closed unmerged one (`pr-not-merged`), or a
-PR state GitHub can't confirm (`pr-status-unknown`), and gives every other
-kept Pane a `skipped.code` with the next step. Adopted worktrees are kept unless
-you add `--remove-worktree`. Local branches are always kept. Never add
-`--force` to discard work without the user's approval.
+(`agent-busy`) and no unsent draft or unsaved edits (`unsent-input`). The sweep keeps a Pane with an open PR (`pr-open`), no PR, or
+without `--closed` a closed unmerged one (`pr-not-merged`), or a PR state
+GitHub can't confirm (`pr-status-unknown`), and gives every other kept Pane a
+`skipped.code` with the next step: keep that Pane and say why. Adopted
+worktrees are kept unless you add `--remove-worktree`. Local branches are
+always kept, and `runpane panes restore` brings a Pane back. Never pass
+`--force`.
+
+Close tabs you opened once they no longer matter with
+`runpane panels close --panel <id> --yes --json`; it refuses the user's tabs,
+an agent mid-turn and unsent text. Add `--force` only for a stuck tab or one
+the user asked you to close. A Session orchestrator follows the "Keep
+the Session tidy" rules in [pane-orchestration](../pane-orchestration/SKILL.md).
 
 ### Watching a PR from any Pane
 

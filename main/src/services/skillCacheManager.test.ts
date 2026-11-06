@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SkillCacheManager } from './skillCacheManager';
+import { buildPaneHomeSkill } from './paneHomeSkill';
 
 function normalizePathSeparators(value: string): string {
   return value.replace(/\\/g, '/');
@@ -483,6 +484,47 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
       expect(variant).toContain('app-compatible dev wrapper');
       expect(variant).toContain('If no verified wrapper is available, report one concise blocker and wait');
     }
+  });
+
+  it('tells every generated variant to keep the Session tidy and where /wrap-up lives', async () => {
+    const manager = new SkillCacheManager();
+
+    await manager.ensurePaneChatGuide();
+
+    const wrapUp = path.join(manager.paneChatSkillsRoot, 'wrap-up', 'SKILL.md');
+    await expect(fs.access(wrapUp)).resolves.toBeUndefined();
+    const variants = await Promise.all([
+      fs.readFile(manager.paneChatOrchestratorSkillPath, 'utf8'),
+      fs.readFile(manager.codexPaneOrchestratorSkillPath, 'utf8'),
+      fs.readFile(manager.claudePaneOrchestratorSkillPath, 'utf8'),
+      fs.readFile(manager.cursorPaneOrchestratorRulePath, 'utf8'),
+    ]);
+    for (const rawVariant of variants) {
+      const variant = rawVariant.replace(/\s+/g, ' ');
+      expect(variant).toContain('## Keep the Session tidy');
+      expect(variant).toContain('Clean up as you go, without asking.');
+      expect(variant).toContain('Keep one status document for this Session, in the Session folder, and update it in place.');
+    expect(variant).toContain('Open it beside the person when you first write it');
+    expect(variant).toContain('untracked file elsewhere in the worktree keeps its Pane from archiving');
+      expect(variant).toContain('runpane panels close --panel <id> --yes --json');
+      expect(variant).toContain('runpane panes archive --pane <id> --dry-run --json');
+      expect(variant).toContain('runpane panes archive --session "$PANE_ORCHESTRATION_SESSION_ID" --merged --closed --dry-run --json');
+      expect(variant).toContain('Never pass `--force`.');
+      expect(variant).toContain(`When the person types /wrap-up or asks to wrap up, follow ${wrapUp}`);
+      expect(variant).not.toContain('#654');
+      expect(variant).not.toMatch(/archiv[^.]*approv|approv[^.]*archiv/i);
+    }
+  });
+
+  it('installs the wrap-up skill only where Session orchestrators look, not in the home skill workers get', async () => {
+    const manager = new SkillCacheManager();
+
+    await manager.ensurePaneChatGuide();
+
+    for (const root of [manager.paneChatSkillsRoot, manager.claudeProjectSkillsRoot, manager.codexProjectSkillsRoot]) {
+      await expect(fs.access(path.join(root, 'wrap-up', 'SKILL.md'))).resolves.toBeUndefined();
+    }
+    expect(buildPaneHomeSkill()).not.toMatch(/wrap-up/i);
   });
 
   it('writes a project-scoped pane-orchestrator rule for Cursor', async () => {

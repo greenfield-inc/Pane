@@ -742,7 +742,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
-    'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
+    'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
   ]);
@@ -1009,11 +1009,15 @@ test('panels_resume restarts a stopped panel through the daemon and keeps the --
   }
 });
 
-test('panels_close closes a tab through the daemon and keeps the --yes rule', async () => {
+test('panels_close closes a tab through the daemon, keeps the --yes rule, and passes --force (D-209)', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   try {
     await withStubDaemon(paneDir, {
-      'runpane:panels:close': (args) => ({ ok: true, paneId: 'pane-1', panelId: args[0].panelId, type: 'terminal', title: 'Codex' }),
+      'runpane:panels:close': (args) => {
+        const result = { ok: true, paneId: 'pane-1', panelId: args[0].panelId, type: 'terminal', title: 'Codex', closed: true };
+        if (args[0].force) result.forced = true;
+        return result;
+      },
     }, async (requests) => {
       await withMcpClient(async (client) => {
         const tool = (await client.listTools()).tools.find((item) => item.name === 'panels_close');
@@ -1025,8 +1029,12 @@ test('panels_close closes a tab through the daemon and keeps the --yes rule', as
         assert.equal(closed.isError, undefined, closed.content[0].text);
         assertMatchesAdvertisedSchema(tool, closed.structuredContent);
         assert.equal(closed.structuredContent.panelId, 'panel-9');
+        const forced = await client.callTool({ name: 'panels_close', arguments: { panel: 'panel-9', force: true, yes: true, paneDir } });
+        assert.equal(forced.isError, undefined, forced.content[0].text);
+        assertMatchesAdvertisedSchema(tool, forced.structuredContent);
+        assert.equal(forced.structuredContent.forced, true);
       }, { args: ['--toolsets', 'panels'] });
-      assert.deepEqual(requests.map((request) => request.args[0]), [{ panelId: 'panel-9' }]);
+      assert.deepEqual(requests.map((request) => request.args[0]), [{ panelId: 'panel-9' }, { panelId: 'panel-9', force: true }]);
     });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });

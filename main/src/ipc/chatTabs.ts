@@ -3,7 +3,7 @@ import path from 'path';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type { ChatAgent, ChatPanelState, ChatTabAnswer, ChatTabCreate } from '../../../shared/types/chatTab';
-import type { ToolPanel } from '../../../shared/types/panels';
+import type { CreatePanelRequest, PanelOpener, ToolPanel } from '../../../shared/types/panels';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
 import { getRuntimeConfigManager } from '../core/runtime';
@@ -108,7 +108,8 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   for (const operation of CHAT_TAB_CHANNELS) registry.bindChannel(ipcMain, `chat-tab:${operation}`);
 }
 
-export async function createChatTab(services: AppServices, request: ChatTabCreate): Promise<{ panelId: string }> {
+/** `openedBy` is set only by runpane (`--source`), never from a renderer's request. */
+export async function createChatTab(services: AppServices, request: ChatTabCreate, openedBy?: PanelOpener): Promise<{ panelId: string }> {
   if (!chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine. No tab was created.', 'Turn on Chat tabs in Settings > Advanced > Experimental, or open a terminal agent tab.');
   const session = services.sessionManager.getSession(request.sessionId);
   if (!session?.worktreePath) throw new PaneError('CHAT_PANE_MISSING', 'That Pane was not found, so no chat tab was created.', 'Open the Pane first, then add the tab.');
@@ -124,7 +125,9 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   const state: ChatPanelState = { agent, launch, cwd: session.worktreePath, status: 'starting' };
   if (request.initialInput) state.initialInput = request.initialInput;
   const title = request.title ?? (launch.kind === 'profile' ? launch.profile.split('/').pop() ?? AGENT_TITLES[agent] : AGENT_TITLES[agent]);
-  const panel = await panelManager.createPanel({ sessionId: request.sessionId, type: 'chat', title, initialState: { customState: state }, activate: request.activate, announceActivation: request.activate !== false });
+  const create: CreatePanelRequest = { sessionId: request.sessionId, type: 'chat', title, initialState: { customState: state }, activate: request.activate, announceActivation: request.activate !== false };
+  if (openedBy) create.metadata = { openedBy };
+  const panel = await panelManager.createPanel(create);
   void getChatTabManager().ensure(panel.id).catch(error => console.warn(`[ChatTabs] ${panel.id} did not start: ${error instanceof Error ? error.message : String(error)}`));
   return { panelId: panel.id };
 }

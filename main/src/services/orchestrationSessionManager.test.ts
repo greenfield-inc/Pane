@@ -1790,6 +1790,21 @@ describe('OrchestrationSessionManager', () => {
     expect(fixture.sessionManager.createSessionWithId).toHaveBeenCalledTimes(1);
   });
 
+  it('reports an archived member Pane as archived when the database stores the flag as 1', async () => {
+    const fixture = createFixture();
+    const pane = paneFixture(fixture, 'archived-member');
+    const named = await fixture.manager.create({ name: 'Archived member', agent: 'claude' });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id });
+    // SQLite returns the archived column as 1; a Session built from a database row can carry it.
+    const stored = { ...pane };
+    Reflect.set(stored, 'archived', 1);
+    fixture.sessions.set(pane.id, stored);
+
+    const overview = await fixture.manager.overview({ sessionId: named.session.id });
+
+    expect(overview.panes[0]).toMatchObject({ paneId: pane.id, archived: true });
+  });
+
   it('includes an associated OpenCode terminal while allowing native Session orchestration', async () => {
     const fixture = createFixture();
     const pane = paneFixture(fixture, 'opencode-worker-pane');

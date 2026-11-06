@@ -561,15 +561,15 @@ create`, check the item's `association.ok` right away. Keep a Pane attached thro
 completion. Archiving preserves the association.
 
 To close out finished work, `runpane panes archive --session <id|name> --merged
-[--remove-worktree] [--dry-run] --yes --json` archives each associated Pane
-when both hold:
+[--closed] [--remove-worktree] [--dry-run] --yes --json` archives each
+associated Pane when all of these hold:
 
-- **Its PR is merged.** Pane looks the PR up by the Pane's branch on GitHub
-  (`pr`). An open PR is skipped as `pr-open`, because its review, fix and QA
-  tabs still need the worktree. No PR or a PR closed without merging is
-  skipped as `pr-not-merged`, so a worker that has pushed but not opened its
-  PR keeps its Pane. A PR state GitHub can't confirm is skipped as
-  `pr-status-unknown`.
+- **Its PR is merged** (or, with `--closed`, closed without merging). Pane
+  looks the PR up by the Pane's branch on GitHub (`pr`). An open PR is skipped
+  as `pr-open`, because its review, fix and QA tabs still need the worktree.
+  No PR, or without `--closed` a PR closed without merging, is skipped as
+  `pr-not-merged`, so a worker that has pushed but not opened its PR keeps its
+  Pane. A PR state GitHub can't confirm is skipped as `pr-status-unknown`.
 - **No agent in it is mid-turn.** A Pane with a working agent is kept as
   `agent-busy`; archiving would stop it. A Pane with a tab holding text typed
   but not sent, or an editor with unsaved edits, is kept as `unsent-input`;
@@ -583,6 +583,63 @@ when both hold:
 Every skipped Pane has a `skipped.code` and a message with the next step.
 `--remove-worktree` also removes adopted worktrees; local branches are always
 kept. Run it with `--dry-run` first.
+
+### Keeping a Session tidy
+
+The generated Session instructions have their own "Keep the Session tidy"
+section (`main/src/services/sessionTidyRules.ts`, used by the Session folder's
+`AGENTS.md` and the generated `pane-orchestrator` skill; the bundled
+`pane-orchestration` skill carries the same rules). The orchestrator cleans up
+as it goes without asking, and says in one line what it closed or archived:
+
+- It keeps one status document in the Session folder, updated in place, and
+  links plans, PRs, mock-ups and reports from it. It opens a page beside the
+  person only when they need to look at it now, and closes it once that's
+  done.
+- It closes tabs it opened once they no longer matter, with
+  `runpane panels close --panel <id> --yes --json`. Whether a tab still
+  matters is its judgment; Pane refuses only closes that could lose work: a
+  tab the person opened (any tab without an agent opener, including every tab
+  from before openers were recorded), a permanent tab, an agent mid-turn, and
+  unsent composer text. For a stuck worker, or a tab the person asks it to
+  close, `--force` closes it anyway, as the tab's close button does (D-209).
+- It archives a feature's Pane after a clean `panes archive --pane <id>
+  --dry-run --json` once its PR merged or closed, including right after a
+  merge the person asked for. It keeps a Pane with unsaved work or a busy
+  agent and says why. It never passes `--force` and never touches another
+  Session's Panes or tabs.
+
+`/wrap-up` wraps up a Session in one step. Pane ships it as the bundled `wrap-up`
+skill and writes a copy into each Session folder, at
+`.claude/skills/wrap-up/SKILL.md` (Claude Code, typed as `/wrap-up`) and
+`.agents/skills/wrap-up/SKILL.md` (Codex, as `$wrap-up` or from `/skills`).
+The Session's `AGENTS.md` points every orchestrator, Agent Farm's included, at
+it for "wrap up" in plain words. Workers in feature Panes start in their own
+worktree and don't get it. Pane rewrites the copies on launch unless you
+replaced one with your own (it has no Pane marker). It:
+
+1. Takes stock: the work list, `sessions overview`, and each PR's live state
+   from the archive sweep's dry run (the overview's PR state can lag a merge),
+   sorting the Session's Panes into finished, parked (PR open, all pushed,
+   nothing running), busy and unsafe (uncommitted or unpushed work).
+2. Tells you first, before archiving anything, about whatever needs your
+   attention: uncommitted or unpushed work, open PRs, commits no review
+   covered, agents still working and open work-list items. It posts this as
+   an info notification and writes it in the conversation; it doesn't ask or
+   wait.
+3. Stops its watchers, closes every tab it opened (the status document too),
+   archives every Pane whose dry run is clean (parked ones too; their PRs stay
+   open), keeps unsafe Panes, and marks the other open work-list items
+   dropped. A worker still working keeps its Pane; once it finishes, its Pane
+   is archived after a clean dry run.
+4. Ends with its report, always: what it archived, what it kept and why, the
+   PRs still open and how to restore a Pane, ending with "Nothing left to do
+   in this Session."
+
+It doesn't archive the Session: the Session stays open with the report in it,
+and you archive it from the sidebar when you're done. It never merges,
+commits or pushes for a worker, forces, deletes a branch, closes a tab the
+person opened, or touches anything outside the Session.
 
 Before mutating, use `runpane agent-context --command 'sessions associate'
 --json` to confirm the wrapper supports the command. If an older global CLI
@@ -1297,7 +1354,9 @@ See [PANE_NOTIFY.md](PANE_NOTIFY.md) for the Approvals screen itself.
 subagents in `.claude/agents/` and `.codex/agents/`. A manifest
 (`skills/pane-chat/installed.json`) records what it installed and a hash of the
 bundle: startup skips the install when the hash is unchanged, and later installs
-replace only the recorded entries.
+replace only the recorded entries. The bundled `wrap-up` skill is also copied
+into each Session folder when it is prepared (see
+[Keeping a Session tidy](#keeping-a-session-tidy)).
 
 To change Pane Chat behavior, edit the bundle or `buildPaneOrchestratorSkill()`
 in `skillCacheManager.ts`, then run `paneChatBundle.test.ts`.
@@ -1342,8 +1401,10 @@ conversation's group moves to the side group. This works the same in Sessions
 and in worktree Panes.
 
 Generated Session instructions ask the orchestrator to write plans, reports, and
-other documents as self-contained HTML files in its Session folder and open them
-with `--url` when rendered HTML is intended, or `--file` to inspect the source.
+other documents as self-contained HTML files in its Session folder and link them
+from one status document. It opens one with `--url` (rendered) or `--file`
+(source) only when the person needs to look at it now; see
+[Keeping a Session tidy](#keeping-a-session-tidy).
 Opening a Session never submits a prompt or starts work just to write
 a document.
 

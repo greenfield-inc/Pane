@@ -303,6 +303,8 @@ interface PaneCreateRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: 'user' | 'agent';
+  /** The calling tab ($PANE_PANEL_ID); Pane records it as the opener of the tabs this creates. */
+  callerPanelId?: string;
   associateSession?: string;
   expectReport?: boolean;
 }
@@ -518,6 +520,8 @@ interface PaneArchiveRequest {
 interface PaneArchiveBulkRequest {
   sessionId: string;
   merged: true;
+  /** Also Panes whose PR closed without merging. */
+  closed?: true;
   source?: 'user' | 'agent';
   dryRun?: boolean;
   removeWorktree?: boolean;
@@ -573,15 +577,7 @@ interface PanelOpenRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: 'user' | 'agent';
-}
-
-interface PanelCloseResult {
-  ok: true;
-  generation?: number;
-  paneId: string;
-  panelId: string;
-  type: string;
-  title: string;
+  callerPanelId?: string;
 }
 
 interface PanelOpenResult {
@@ -595,6 +591,31 @@ interface PanelOpenResult {
   placement: 'split' | 'tab';
   active: boolean;
   reused: boolean;
+}
+
+interface PanelCloseRequest {
+  panelId: string;
+  dryRun?: boolean;
+  force?: boolean;
+  source?: 'user' | 'agent';
+}
+
+type PanelCloseRefusalCode = 'opened-by-user' | 'permanent' | 'agent-busy' | 'unsent-input' | 'input-unknown';
+
+interface PanelCloseResult {
+  ok: boolean;
+  generation?: number;
+  /** Omitted only when the tab was already gone. */
+  paneId?: string;
+  panelId: string;
+  type?: string;
+  title?: string;
+  closed: boolean;
+  forced?: boolean;
+  alreadyClosed?: boolean;
+  dryRun?: boolean;
+  wouldClose?: boolean;
+  refused?: { code: PanelCloseRefusalCode; message: string; next: string };
 }
 
 /** An agent mid-turn (`working`) or waiting for an answer (`blocked`); archiving would stop it. */
@@ -668,6 +689,7 @@ interface PaneArchiveBulkResult {
   ok: boolean;
   sessionId: string;
   merged: true;
+  closed?: true;
   dryRun?: true;
   removeWorktree: boolean;
   archived: number;
@@ -753,6 +775,8 @@ interface PanelSummary {
   resumeId?: string;
   /** Which rule resumes with resumeId: derived Agent Farm, the panel's configured command, or built-in agent capture. */
   resumeSource?: 'agent-farm' | 'configured' | 'agent';
+  /** Who opened the tab through runpane; omitted for the person's tabs and tabs from before Pane recorded it. */
+  openedBy?: { source: 'agent' | 'user'; panelId?: string };
 }
 
 interface PanelListResult {
@@ -809,6 +833,7 @@ interface PanelCreateRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: 'user' | 'agent';
+  callerPanelId?: string;
   waitReady?: boolean;
   readyTimeoutMs?: number;
   expectReport?: boolean;
@@ -1352,6 +1377,10 @@ const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   paused: boundary.optional(pausedMarkSchema),
   resumeId: boundary.optional(boundary.string),
   resumeSource: boundary.optional(boundary.enumeration('agent-farm', 'configured', 'agent')),
+  openedBy: boundary.optional(boundary.object({
+    source: boundary.enumeration('agent', 'user'),
+    panelId: boundary.optional(boundary.string),
+  })),
 });
 
 export const repoListResultSchema: BoundarySchema<RepoListResult> = boundary.object({
@@ -1771,6 +1800,7 @@ const paneArchiveBulkResultSchema: BoundarySchema<PaneArchiveBulkResult> = bound
   ok: boundary.boolean,
   sessionId: boundary.string,
   merged: boundary.literal(true),
+  closed: boundary.optional(boundary.literal(true)),
   dryRun: boundary.optional(boundary.literal(true)),
   removeWorktree: boundary.boolean,
   archived: boundary.number,
@@ -1842,12 +1872,22 @@ const panelOpenResultSchema: BoundarySchema<PanelOpenResult> = boundary.object({
   reused: boundary.boolean,
 });
 const panelCloseResultSchema: BoundarySchema<PanelCloseResult> = boundary.object({
-  ok: boundary.literal(true),
+  ok: boundary.boolean,
   generation: boundary.optional(boundary.number),
-  paneId: boundary.string,
+  paneId: boundary.optional(boundary.string),
   panelId: boundary.string,
-  type: boundary.string,
-  title: boundary.string,
+  type: boundary.optional(boundary.string),
+  title: boundary.optional(boundary.string),
+  closed: boundary.boolean,
+  forced: boundary.optional(boundary.boolean),
+  alreadyClosed: boundary.optional(boundary.boolean),
+  dryRun: boundary.optional(boundary.boolean),
+  wouldClose: boundary.optional(boundary.boolean),
+  refused: boundary.optional(boundary.object({
+    code: boundary.enumeration('opened-by-user', 'permanent', 'agent-busy', 'unsent-input', 'input-unknown'),
+    message: boundary.string,
+    next: boundary.string,
+  })),
 });
 export const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.object({
   ok: boundary.literal(true),
@@ -3340,11 +3380,12 @@ async function runPanesArchiveSession(parsed: ParsedArgs, sessionId: string): Pr
     throw new Error('runpane panes archive --session requires --merged.');
   }
   const request: PaneArchiveBulkRequest = { sessionId, merged: true };
+  if (parsed.closed) request.closed = true;
   if (parsed.source === 'user' || parsed.source === 'agent') request.source = parsed.source;
   if (parsed.dryRun) request.dryRun = true;
   if (parsed.removeWorktree) request.removeWorktree = true;
 
-  await confirmPaneArchive(parsed, `Archive every Pane in Session ${sessionId} whose work is pushed and whose PR is not still open`);
+  await confirmPaneArchive(parsed, `Archive every Pane in Session ${sessionId} whose work is pushed and whose PR ${request.closed ? 'merged or closed' : 'merged'}`);
 
   const result = await invokeDaemon('runpane:panes:archive', [request], paneArchiveBulkResultSchema, {
     paneDir: parsed.paneDir,
@@ -3505,6 +3546,7 @@ export async function runPanelsOpen(parsed: ParsedArgs): Promise<number> {
     noFocus: parsed.noFocus || undefined,
     focus: parsed.focus || undefined,
     source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
+    callerPanelId: resolveCallerPanelId(),
   };
 
   await confirmPanelOpen(parsed, request);
@@ -3521,6 +3563,49 @@ export async function runPanelsOpen(parsed: ParsedArgs): Promise<number> {
   }
 
   return 0;
+}
+
+export async function runPanelsClose(parsed: ParsedArgs): Promise<number> {
+  const panelId = parsed.panelId?.trim();
+  if (!panelId) {
+    throw new RunpaneError(
+      'ERR_RUNPANE_INVALID_ARGUMENT',
+      'runpane panels close requires --panel. Nothing was closed.',
+      'Find the tab id with `runpane panels list --pane <pane-id> --json`, then pass it with --panel.',
+    );
+  }
+  const request: PanelCloseRequest = { panelId };
+  if (parsed.dryRun) request.dryRun = true;
+  if (parsed.force) request.force = true;
+  if (parsed.source === 'user' || parsed.source === 'agent') request.source = parsed.source;
+  await confirmPanelClose(parsed, request);
+
+  const result = await invokeDaemon('runpane:panels:close', [request], panelCloseResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    console.log(describePanelClose(result));
+  }
+  return result.ok ? 0 : 1;
+}
+
+/** One line: closed, already closed, would close, or refused with its message and next step. */
+function describePanelClose(result: PanelCloseResult): string {
+  const label = result.title ? `panel ${result.panelId} (${result.title})` : `panel ${result.panelId}`;
+  if (result.refused) {
+    return `${result.dryRun ? 'Would refuse' : 'Refused'} to close ${label}: ${result.refused.message} Next: ${result.refused.next}`;
+  }
+  if (result.alreadyClosed) return `Panel ${result.panelId} is already closed.`;
+  if (result.dryRun) return `Would close ${label}.`;
+  return result.forced ? `Closed ${label} with --force.` : `Closed ${label}.`;
+}
+
+/** The tab this CLI runs in ($PANE_PANEL_ID), sent so Pane records it as the opener of new tabs. */
+function resolveCallerPanelId(): string | undefined {
+  return process.env.PANE_PANEL_ID?.trim() || undefined;
 }
 
 export async function runPanelsOutput(parsed: ParsedArgs): Promise<number> {
@@ -4003,24 +4088,6 @@ export async function runPanelsSubmitComposer(parsed: ParsedArgs): Promise<numbe
   return result.ok ? 0 : 1;
 }
 
-export async function runPanelsClose(parsed: ParsedArgs): Promise<number> {
-  if (!parsed.panelId) {
-    throw new Error('runpane panels close requires --panel.');
-  }
-  await confirmMutation(parsed);
-
-  const result = await invokeDaemon('runpane:panels:close', [{ panelId: parsed.panelId }], panelCloseResultSchema, {
-    paneDir: parsed.paneDir,
-  });
-
-  if (parsed.json) {
-    printJson(result);
-  } else {
-    console.log(`Closed ${result.type} tab "${result.title}" (${result.panelId}) in pane ${result.paneId}.`);
-  }
-  return 0;
-}
-
 export async function runPanelsWait(parsed: ParsedArgs): Promise<number> {
   if (!parsed.panelId) {
     throw new Error('runpane panels wait requires --panel.');
@@ -4204,6 +4271,7 @@ export async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<Panel
       noFocus: !parsed.focus && (parsed.noFocus || source === 'agent') ? true : undefined,
       focus: parsed.focus || undefined,
       source,
+      callerPanelId: resolveCallerPanelId(),
       waitReady: parsed.waitReady || undefined,
       readyTimeoutMs: parsed.readyTimeoutMs,
     };
@@ -4216,6 +4284,7 @@ export async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<Panel
     noFocus: !parsed.focus && (parsed.noFocus || source === 'agent' || Boolean(parsed.agent)) ? true : undefined,
     focus: parsed.focus || undefined,
     source,
+    callerPanelId: resolveCallerPanelId(),
     waitReady: parsed.waitReady || undefined,
     readyTimeoutMs: parsed.readyTimeoutMs,
   };
@@ -4256,6 +4325,7 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
     }));
     applyPaneFocusOptions(parsed, request);
     request.associateSession = parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? request.associateSession;
+    request.callerPanelId = resolveCallerPanelId();
     return request;
   }
 
@@ -4289,6 +4359,7 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
     noFocus: !parsed.focus && (parsed.noFocus || source === 'agent' || Boolean(parsed.agent)) ? true : undefined,
     focus: parsed.focus || undefined,
     source,
+    callerPanelId: resolveCallerPanelId(),
     associateSession: resolveAssociateSession(parsed),
   };
 
@@ -4553,6 +4624,30 @@ async function confirmPanelOpen(parsed: ParsedArgs, request: PanelOpenRequest): 
   const rl = createInterface({ input, output });
   try {
     const answer = (await rl.question(`Open ${request.url ?? request.filePath} in pane ${request.paneId}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function confirmPanelClose(parsed: ParsedArgs, request: PanelCloseRequest): Promise<void> {
+  if (parsed.yes || request.dryRun) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new RunpaneError(
+      'ERR_RUNPANE_CONFIRMATION_REQUIRED',
+      `runpane panels close closes panel ${request.panelId} and needs confirmation, but this shell is not interactive. Nothing was closed.`,
+      'Rerun with --yes, or with --dry-run to check without closing.',
+    );
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question(`Close panel ${request.panelId}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }

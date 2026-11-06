@@ -7,6 +7,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import type { AppConfig } from '../types/config';
 import type { Project } from '../database/models';
 import { syncPaneHomeSkill } from './paneHomeSkill';
+import { keepSessionTidySection } from './sessionTidyRules';
 
 // Every skill Pane installs for its agents ships with Pane.
 const PANE_CHAT_BUNDLE_ROOT = path.join(__dirname, 'paneChatBundle');
@@ -104,8 +105,8 @@ For a new Pane, work starts only after the association exists:
 - For an exact new branch, use \`panes create --base <ref> --branch <name>\`
   instead of \`git worktree add\` plus \`panes adopt\`.
 
-The association lasts through working, idle, and completed states. Archiving
-is a separate follow-up (#654).
+The association lasts through working, idle, and completed states. Keep the
+Session tidy, below, says when to archive a Pane.
 
 Before any association change, check that the wrapper supports Sessions with
 \`runpane agent-context --command 'sessions associate' --json\`. If it reports
@@ -629,7 +630,10 @@ When a pane finishes something a human will read, have it run the
    folder; name files in it by absolute path, not \`$PANE_SESSION_DIR\`.
    End every worker prompt with: "When finished or blocked, run
    \`runpane report --state <ready|blocked|failed|done> --pr <number> --head <sha> --summary-file <path>\`
-   (add \`--question "<question>"\` when blocked)."
+   (add \`--question "<question>"\` when blocked)." Have workers keep any
+   status file in their worktree's \`.pane/prompts/\` folder (git-ignored once a
+   brief arrives there with \`--as-file-pointer\`); an
+   untracked file elsewhere in the worktree keeps its Pane from archiving.
 5. Keep the Session's own agent, profile, and tool configuration as they are.
 
 Never edit project implementation files from the Session. A Session can stay
@@ -803,7 +807,8 @@ What each line means under follow (the JSON \`kind\` is in parentheses):
   workers too, so resume single panels when only some should continue.
   To drop a worker tab you no longer need, finished or stuck, close it with
   \`runpane panels close --panel <panel-id> --yes --json\`, which stops its
-  process as closing the tab in the app does.
+  process as closing the tab in the app does. It refuses a worker still
+  mid-turn; when that worker is stuck, add \`--force\`.
 - PAUSED (\`panel.paused\`): the person, or auto-pause after hours without
   use, paused the worker. Its panel and conversation are intact. Leave it
   paused unless the person asks you to resume it; then run \`runpane panels
@@ -871,6 +876,8 @@ and tell the human.
 ${APPROVALS_SECTION}
 
 ${UNATTENDED_RESILIENCE_SECTION}
+
+${keepSessionTidySection('"$PANE_ORCHESTRATION_SESSION_ID"', skill('wrap-up'))}
 
 ## Hard stops
 

@@ -529,6 +529,7 @@
         "panels",
         "panels create",
         "panels open",
+        "panels close",
         "panels list",
         "panels output",
         "panels input",
@@ -726,6 +727,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panels open": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels close": {
           "$ref": "#/$defs/helpLines"
         },
         "panels list": {

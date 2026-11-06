@@ -148,9 +148,9 @@ runpane agents status --pane <pane-id> --json
 runpane agents send --pane <pane-id> --text "Also add a test" --yes --json
 runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json
 runpane panels last-message --panel <panel-id> --json
+runpane panels close --panel <panel-id> --yes --json
 runpane panels resume --panel <panel-id> --wait-ready --yes --json
 runpane panels resume --session <id|name> --wait-ready --yes --json
-runpane panels close --panel <panel-id> --yes --json
 runpane panes pause --pane <pane-id> --yes --json
 runpane panes resume --pane <pane-id> --yes --json
 runpane docs search --query "archive a pane" --json
@@ -211,13 +211,15 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 For `panes create --wait-ready` (and `panels create`, `panes adopt --launch`), ready means an identified agent at its own input box: declared with `--agent`, or detected from the command, its foreground process or its screen. A `--tool-command` that never shows a supported agent is not ready: `readiness.ok` is false with `readiness.reason.code` `no-agent-detected` after the timeout, or `command-exited` as soon as the command exits back to the shell, and nothing is typed into it. `agent-not-ready` means the agent was detected but its input box was not ready in time. CLI readiness is confirmed on consecutive polls. Codex also requires a recognized configured model or context footer below its live composer; its provisional startup composer is not ready. Hidden or unrecognized Codex status lines conservatively time out rather than prove readiness. Startup prompts return blocked with the prompt's own text in blocked.message and a suggestedCommand, and Pane never answers them, apart from Claude's folder trust for a Session's own folder: first-run trust and daemon dialogs and Agent Farm's `Trust this repository workspace? [y/N]` as blocked.kind=first-run-dialog; Codex's security setup banner and any other prompt, including a wrapper's or shell's `[y/N]` before the agent appears, as agent-prompt. A starting message blocked this way is held and sent once the prompt is answered and the agent's input box is ready. Every create with a starting message returns `initialInput`. Pane stages the text in the composer, presses the agent's submit key separately (Ctrl+Enter for Codex, declared or detected), and checks where it went: `initialInput.delivery` is `taken` or `queued` (from the agent's transcript or its screen), `in-composer`, or `unknown` (`argv` means a prompt was routed at launch; Pane gives the transcript up to 10 seconds before settling on unknown). `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`, and the create's `ok` is false unless a Claude or Codex starting message is verified. Cursor and OpenCode have no acceptance probe: their delivery stays `unknown` with a delivery.message saying so, `verification: unverifiable`, and `ok` follows readiness. Without `--wait-ready` the create returns at once with `initialInput.verifiedSubmitted: false`, a delivery.message saying the call did not wait, and a `panels wait` nextCommand; Pane still sends the message once the agent is identified and at its input box, and gives up without typing it if no supported agent appears within 30 seconds.
 
-`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane. Archive refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless `--force` is used, and the Session sweep skips it.
+`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane. Archive refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless `--force` is used, and the Session sweep skips it. Add `--closed` to the sweep to also archive Panes whose PR closed without merging.
 
 `runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.
 
 `runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.
 
 `runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. Files open in an editor tab with read-only previews for supported formats, and HTML opens as editable source; an existing tab showing the same target is reused. It brings the tab forward for clients already showing that Pane, and never raises or focuses the Pane window or switches anyone's Pane.
+
+`runpane panels close --panel <panel-id>` closes a tab exactly like closing it in Pane (a terminal tab's process stops) and never archives the Pane or touches its worktree. Only a tab an agent opened with `--source agent` can close; Pane records that opener, and `panels list` shows it as `openedBy`. It refuses, without closing, the person's tabs and every tab from before Pane recorded openers (`opened-by-user`), permanent tabs (`permanent`), an agent mid-turn or waiting for an answer (`agent-busy`), unsent composer text or unsaved editor edits (`unsent-input`), and a live tab whose input Pane cannot read, such as agents other than Claude and Codex or chat tabs (`input-unknown`). A refusal prints `{ ok: false, closed: false, refused: { code, message, next } }` and exits 1. A tab id that no longer exists returns `alreadyClosed: true`. `--dry-run` reports `wouldClose` and any refusal without closing. `--force` closes the tab anyway, as its close button does, for a stuck tab or one the person asked to close (`forced: true`); only a permanent tab still stays.
 
 `runpane panels list` lists tool panels inside one Pane session. Each panel with a saved agent session ID reports it as `resumeId`, with `resumeSource` (`agent-farm`, `configured`, or `agent`) naming the rule that reopens the conversation.
 
@@ -341,6 +343,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panes focus`: Raise the Pane window and select a Pane (and optionally one of its panels) on explicit user request.
 - `panels create`: Open a new agent or terminal tab inside an existing Pane, sharing its worktree. The default for review, QA, fixes and any other agent on work that already has a Pane.
 - `panels open`: Open a URL or file as a browser/editor tab in a Pane, in split view beside the agent by default.
+- `panels close`: Close a tab an agent opened, exactly like closing it in Pane; refuses the person's tabs, busy agents and unsent input unless --force.
 - `panels list`: List tool panels inside a Pane session.
 - `panels output`: Read recent terminal output from a panel.
 - `panels screen`: Read a compact current-screen view from a terminal panel.
@@ -349,7 +352,6 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panels submit-composer`: Submit an agent composer using the panel-appropriate key sequence.
 - `panels wait`: Wait for a terminal panel to initialize, become ready/idle, or contain text.
 - `panels resume`: Restart a stopped terminal panel in place, resuming its agent's conversation.
-- `panels close`: Close a tab in a Pane, stopping its process, as closing the tab in the app does.
 - `panels pause`: Pause a terminal tab: stop its process and keep its agent's conversation until it is resumed.
 - `panels last-message`: Read an agent's last reply from its transcript, without scraping the screen.
 - `panes git-status`: Read the git status of a Pane worktree: uncommitted, unpushed, and behind-main counts.
@@ -449,7 +451,7 @@ runpane panes create --from-json <path|-> [--yes] [--json] [--pane-dir <path>]
 runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [--resume <id>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]
 runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]
 runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json] [--pane-dir <path>]
-runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json] [--pane-dir <path>]
+runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json] [--pane-dir <path>]
 runpane panes pin --pane <pane-id> --yes [--dry-run] [--json] [--pane-dir <path>]
 runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json] [--pane-dir <path>]
 runpane panes pause --pane <pane-id> --yes [--json] [--pane-dir <path>]
@@ -459,6 +461,7 @@ runpane panes focus --pane <pane-id> [--panel <panel-id>] --source user|agent --
 runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]
 runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor>] [--title <title>] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]
 runpane panels open [--pane <pane-id>] (--url <url>|--file <path>) [--title <title>] [--split|--tab] [--focus|--no-focus] [--source user|agent] --yes [--json]
+runpane panels close --panel <panel-id> [--dry-run] [--force] [--source user|agent] --yes [--json] [--pane-dir <path>]
 runpane panels list --pane <pane-id> [--json] [--pane-dir <path>]
 runpane panels output --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panels screen --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
@@ -468,7 +471,6 @@ runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-en
 runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--contains <text>] [--timeout-ms <ms>] [--interval-ms <ms>] [--json] [--pane-dir <path>]
 runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]
 runpane panels resume (--session <id|name>|--all-stopped) [--wait-ready] [--ready-timeout-ms <ms>] [--concurrency <count>] --yes [--json] [--pane-dir <path>]
-runpane panels close --panel <panel-id> --yes [--json] [--pane-dir <path>]
 runpane panels pause --panel <panel-id> --yes [--json] [--pane-dir <path>]
 runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]
@@ -575,6 +577,7 @@ Brief tools:
 - `panes focus`: Raise the Pane window and select a Pane (and optionally a panel) on explicit user request.
 - `panels create`: Open reviewer, QA, fix or helper agent tabs inside an existing Pane; they share that Pane's worktree. The default for any later agent on existing work.
 - `panels open`: Show the user an HTML page, plan, report, dev server URL, or file as a tab in split view beside the agent.
+- `panels close`: Close a tab an agent opened once it no longer matters; refuses the person's tabs, busy agents and unsent input.
 - `panels list`: List tool panels inside a Pane session.
 - `panels output`: Read recent terminal output from a panel.
 - `panels screen`: Read a compact current-screen view from a terminal panel.
@@ -583,7 +586,6 @@ Brief tools:
 - `panels submit-composer`: Submit an agent composer with the key for its current state.
 - `panels wait`: Wait for terminal initialized, ready, idle, or text state with compact output.
 - `panels resume`: Restart a stopped terminal panel in place (same panel id), resuming its agent's conversation.
-- `panels close`: Close a tab, stopping its process, as the app's close button does.
 - `watch`: Wait for workspace events from the durable daemon journal; follow uses conservative cadence and quiet expiry by default.
 - `notify`: Ask the person a question wherever they are and wait for the answer; prefer it to asking in the terminal.
 
@@ -727,6 +729,7 @@ These flags are consumed by local daemon-control commands:
 --force
 --remove-worktree
 --merged
+--closed
 --launch
 --as-file-pointer
 --follow

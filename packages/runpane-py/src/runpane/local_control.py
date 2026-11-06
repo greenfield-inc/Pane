@@ -1196,12 +1196,14 @@ def run_panes_archive_session(parsed: Any, session_id: str) -> int:
     request: Dict[str, Any] = {
         "sessionId": session_id,
         "merged": True,
+        **optional_value("closed", True if parsed.closed else None),
         **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
         **optional_value("dryRun", True if parsed.dry_run else None),
         **optional_value("removeWorktree", True if parsed.remove_worktree else None),
     }
 
-    confirm_pane_archive(parsed, f"Archive every merged or pushed Pane in Session {session_id}")
+    which = "merged or closed" if request.get("closed") else "merged"
+    confirm_pane_archive(parsed, f"Archive every Pane in Session {session_id} whose work is pushed and whose PR {which}")
 
     result = invoke_daemon(
         "runpane:panes:archive",
@@ -1354,6 +1356,7 @@ def run_panels_open(parsed: Any) -> int:
         **optional_value("noFocus", True if parsed.no_focus else None),
         **optional_value("focus", True if parsed.focus else None),
         **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
+        **optional_value("callerPanelId", resolve_caller_panel_id()),
     }
     confirm_panel_open(parsed, request)
     result = invoke_daemon("runpane:panels:open", [request], pane_dir=parsed.pane_dir)
@@ -1365,6 +1368,50 @@ def run_panels_open(parsed: Any) -> int:
         action = "Reused" if result.get("reused") else "Opened"
         print(f"{action} {result.get('type')} panel {result.get('panelId')} in pane {result.get('paneId')} ({result.get('placement')}): {target}")
     return 0
+
+
+def run_panels_close(parsed: Any) -> int:
+    panel_id = (parsed.panel_id or "").strip()
+    if not panel_id:
+        raise RunpaneError(
+            "ERR_RUNPANE_INVALID_ARGUMENT",
+            "runpane panels close requires --panel. Nothing was closed.",
+            "Find the tab id with `runpane panels list --pane <pane-id> --json`, then pass it with --panel.",
+        )
+    request: Dict[str, Any] = {
+        "panelId": panel_id,
+        **optional_value("dryRun", True if parsed.dry_run else None),
+        **optional_value("force", True if parsed.force else None),
+        **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
+    }
+    confirm_panel_close(parsed, request)
+    result = invoke_daemon("runpane:panels:close", [request], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        print(describe_panel_close(result))
+    return 0 if result.get("ok") else 1
+
+
+def describe_panel_close(result: Dict[str, Any]) -> str:
+    """One line: closed, already closed, would close, or refused with its message and next step."""
+    title = result.get("title")
+    label = f"panel {result.get('panelId')} ({title})" if title else f"panel {result.get('panelId')}"
+    refused = result.get("refused")
+    if refused:
+        verb = "Would refuse" if result.get("dryRun") else "Refused"
+        return f"{verb} to close {label}: {refused.get('message')} Next: {refused.get('next')}"
+    if result.get("alreadyClosed"):
+        return f"Panel {result.get('panelId')} is already closed."
+    if result.get("dryRun"):
+        return f"Would close {label}."
+    return f"Closed {label} with --force." if result.get("forced") else f"Closed {label}."
+
+
+def resolve_caller_panel_id() -> Optional[str]:
+    """The tab this CLI runs in ($PANE_PANEL_ID), sent so Pane records it as the opener of new tabs."""
+    return (os.environ.get("PANE_PANEL_ID") or "").strip() or None
 
 
 def run_panels_output(parsed: Any) -> int:
@@ -1726,20 +1773,6 @@ def print_prompt_notes(result: Dict[str, Any], prefix: str = "") -> None:
         print(f"{prefix}Warning ({warning.get('code')}): {warning.get('message')}")
 
 
-def run_panels_close(parsed: Any) -> int:
-    if not parsed.panel_id:
-        raise ValueError("runpane panels close requires --panel.")
-    confirm_mutation(parsed)
-
-    result = invoke_daemon("runpane:panels:close", [{"panelId": parsed.panel_id}], pane_dir=parsed.pane_dir)
-
-    if parsed.json:
-        print_json(result)
-    else:
-        print(f"Closed {result.get('type')} tab \"{result.get('title')}\" ({result.get('panelId')}) in pane {result.get('paneId')}.")
-    return 0
-
-
 def run_panels_submit_composer(parsed: Any) -> int:
     if not parsed.panel_id:
         raise ValueError("runpane panels submit-composer requires --panel.")
@@ -1973,6 +2006,7 @@ def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
             **optional_value("noFocus", True if not parsed.focus and (parsed.no_focus or parsed.source == "agent") else None),
             **optional_value("focus", True if parsed.focus else None),
             **optional_value("source", parsed.source),
+            **optional_value("callerPanelId", resolve_caller_panel_id()),
             **optional_value("waitReady", True if parsed.wait_ready else None),
             **optional_value("readyTimeoutMs", parsed.ready_timeout_ms),
         }
@@ -1984,6 +2018,7 @@ def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
         **optional_value("noFocus", True if not parsed.focus and (parsed.no_focus or parsed.source == "agent" or bool(parsed.agent)) else None),
         **optional_value("focus", True if parsed.focus else None),
         **optional_value("source", parsed.source),
+        **optional_value("callerPanelId", resolve_caller_panel_id()),
         **optional_value("waitReady", True if parsed.wait_ready else None),
         **optional_value("readyTimeoutMs", parsed.ready_timeout_ms),
     }
@@ -2023,6 +2058,8 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
             payload.pop("associateSession", None)
         else:
             payload.update(optional_value("associateSession", resolve_associate_session(parsed)))
+        payload.pop("callerPanelId", None)
+        payload.update(optional_value("callerPanelId", resolve_caller_panel_id()))
         return payload
 
     if not parsed.repo:
@@ -2053,6 +2090,7 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         **optional_value("noFocus", True if not parsed.focus and (parsed.no_focus or parsed.source == "agent" or bool(parsed.agent)) else None),
         **optional_value("focus", True if parsed.focus else None),
         **optional_value("source", parsed.source),
+        **optional_value("callerPanelId", resolve_caller_panel_id()),
         **optional_value("associateSession", resolve_associate_session(parsed)),
     }
 
@@ -2237,6 +2275,21 @@ def confirm_panel_open(parsed: Any, request: Dict[str, Any]) -> None:
 
     target = request.get("url") or request.get("filePath")
     answer = input(f"Open {target} in pane {request.get('paneId')}? [y/N] ").strip().lower()
+    if answer not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
+
+
+def confirm_panel_close(parsed: Any, request: Dict[str, Any]) -> None:
+    if parsed.yes or request.get("dryRun"):
+        return
+    if not is_interactive_shell():
+        raise RunpaneError(
+            "ERR_RUNPANE_CONFIRMATION_REQUIRED",
+            f"runpane panels close closes panel {request.get('panelId')} and needs confirmation, but this shell is not interactive. Nothing was closed.",
+            "Rerun with --yes, or with --dry-run to check without closing.",
+        )
+
+    answer = input(f"Close panel {request.get('panelId')}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 

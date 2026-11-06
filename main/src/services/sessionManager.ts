@@ -371,7 +371,7 @@ export class SessionManager extends EventEmitter {
       favoritePinnedAt: dbSession.favorite_pinned_at ?? undefined,
       // Model is now managed at panel level
       toolType: normalizedToolType,
-      archived: dbSession.archived || false,
+      archived: Boolean(dbSession.archived),
       paused: (pausedMarks ?? this.pausedMarks(dbSession.id)).get(dbSession.id) ?? undefined,
       isHidden: !!dbSession.is_hidden,
       baseCommit: dbSession.base_commit,

@@ -1334,7 +1334,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       name: pane.name,
       worktreePath: pane.worktreePath,
       branch,
-      archived: pane.archived === true,
+      archived: Boolean(pane.archived),
       missing: false,
       panels,
       git: cachedGit ? {
