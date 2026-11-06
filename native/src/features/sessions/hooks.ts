@@ -37,9 +37,12 @@ export function sessionsUnavailable(error: Error | null): boolean {
   return error?.message.includes('No Pane daemon command registered') ?? false;
 }
 
+/** The get channel's arguments; `chatTabs` tells the host this app can open a chat orchestrator (D-203). */
+export const sessionViewArgs = (sessionId: string) => [{ sessionId }, { chatTabs: true }];
+
 /** A Session with its workspace Pane and agent chat. Never selects it on the host, so the desktop stays put. */
 export function useSessionView(sessionId: string) {
-  return useInvokeQuery<SessionView>(GET, [{ sessionId }]);
+  return useInvokeQuery<SessionView>(GET, sessionViewArgs(sessionId));
 }
 
 /** Pins, unpins, archives or restores a Session, updating the list before the host confirms. */
@@ -72,5 +75,7 @@ export function useSetSessionPaused() {
     });
     const result = await (paused ? pause : resume).mutateAsync([{ sessionId }]);
     if (!result.ok) throw new Error(result.message);
+    // Chat tabs can't pause yet (D-187): what the person must know, for the caller to show.
+    return result.chatTabsNotPaused ? result.message : undefined;
   };
 }

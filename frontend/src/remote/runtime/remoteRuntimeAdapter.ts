@@ -1,12 +1,17 @@
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import type { ChatTabClient, ChatTabCreate } from '../../../../shared/types/chatTab';
+import { decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
+  OrchestrationSessionOverview,
   OrchestrationSessionRecord,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../../shared/types/orchestrationSession';
 import type { ToolPanel } from '../../../../shared/types/panels';
+import type { FileDiffRequest } from '../../../../shared/types/gitDiff';
+import { BRANCH_SCOPE, decodeFileDiff, decodeManifest, type ChangeList } from '../../../../shared/gitDiffClient';
 import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import type { RemoteDaemonEventEnvelope, RemotePaneConnectionProfile, RemotePwaAffordances } from '../../../../shared/types/remoteDaemon';
 import type { RunpanePanelScreenResult, RunpanePauseResult } from '../../../../shared/types/runpaneOrchestration';
@@ -17,6 +22,8 @@ import type {
   VoiceTranscriptionResult,
 } from '../../../../shared/types/voiceTranscription';
 import type { Project } from '../../types/project';
+import type { SessionWorkerSource } from '../../components/chatTab/sessionWorkers';
+import { savedFilePath } from '../../components/chatTab/chatAttachments';
 import type { CreateSessionRequest, Session, SessionOutput } from '../../types/session';
 import { RemoteDaemonBrowserClient, type RemoteBrowserConnectionState } from './remoteDaemonBrowserClient';
 
@@ -110,6 +117,41 @@ export class RemoteRuntimeAdapter {
     return response as T;
   }
 
+  /** Chat tabs on the connected host: the agent runs there, under that machine's own sign-in. */
+  readonly chatTab: ChatTabClient & { create(request: ChatTabCreate): Promise<{ panelId: string }> } = {
+    create: request => this.invoke('chat-tab:create', [request]),
+    get: async (panelId, limit) => decodeChatTabView(await this.invoke('chat-tab:get', limit === undefined ? [panelId] : [panelId, limit])),
+    history: async (panelId, before, limit) => decodeChatMessages(await this.invoke('chat-tab:history', [panelId, before, limit])),
+    send: async (panelId, request) => {
+      const receipt = decodeChatReceipt(await this.invoke('chat-tab:send', [panelId, request]));
+      if (!receipt) throw new Error('The host did not confirm the message. Check delivery before sending again.');
+      return receipt;
+    },
+    receipt: async (panelId, operationId) => decodeChatReceipt(await this.invoke('chat-tab:receipt', [panelId, operationId])),
+    unqueue: (panelId, operationId) => this.invoke('chat-tab:unqueue', [panelId, operationId]),
+    configure: (panelId, configId, value) => this.invoke('chat-tab:configure', [panelId, configId, value]),
+    cancel: panelId => this.invoke('chat-tab:cancel', [panelId]),
+    permission: (panelId, requestId, optionId) => this.invoke('chat-tab:permission', [panelId, requestId, optionId]),
+    answer: (panelId, questionId, response) => this.invoke('chat-tab:answer', [panelId, questionId, response]),
+    restart: panelId => this.invoke('chat-tab:restart', [panelId]),
+    signIn: panelId => this.invoke('chat-tab:sign-in', [panelId]),
+    onEvent: callback => this.onEvent(event => { if (event.channel === 'chat-tab:event') callback(decodeChatTabEvent(event.args[0])); }),
+    onState: callback => this.onEvent(event => { if (event.channel === 'chat-tab:state') callback(decodeChatTabView(event.args[0])); }),
+    onReconnect: callback => this.onStatus(state => { if (state.status === 'connected') callback(); }),
+  };
+
+  /** A Session's overview on the host, read again when its Panes, states or reports change or the connection returns. */
+  readonly sessionWorkers: SessionWorkerSource = {
+    overview: sessionId => this.invoke<OrchestrationSessionOverview>('orchestration-sessions:overview', [{ sessionId }]),
+    onChange: callback => {
+      const stopEvents = this.onEvent(event => {
+        if (event.channel === 'orchestration-sessions:overview-updated' || event.channel === 'orchestration-sessions:changed') callback();
+      });
+      const stopStatus = this.onStatus(state => { if (state.status === 'connected') callback(); });
+      return () => { stopEvents(); stopStatus(); };
+    },
+  };
+
   getProjectsWithSessions(): Promise<RemoteProjectWithSessions[]> {
     return this.invoke<RemoteProjectWithSessions[]>('sessions:get-all-with-projects');
   }
@@ -119,7 +161,7 @@ export class RemoteRuntimeAdapter {
   }
 
   getPanels(sessionId: string): Promise<ToolPanel[]> {
-    return this.invoke<ToolPanel[]>('panels:list', [sessionId]);
+    return this.invoke<ToolPanel[]>('panels:list', [sessionId, { chatTabs: true }]);
   }
 
   getActivePanel(sessionId: string): Promise<ToolPanel | null> {
@@ -158,13 +200,17 @@ export class RemoteRuntimeAdapter {
     return this.invoke<void>('sessions:delete', [sessionId]);
   }
 
-  /** Pauses or resumes every terminal tab of a Pane, or a Session's chat and Panes. */
-  async setPaused(target: { kind: 'pane' | 'session'; id: string }, paused: boolean): Promise<void> {
+  /**
+   * Pauses or resumes every terminal tab of a Pane, or of a Session's chat and Panes.
+   * Returns what the person must know when chat tabs kept running (D-187).
+   */
+  async setPaused(target: { kind: 'pane' | 'session'; id: string }, paused: boolean): Promise<string | undefined> {
     const noun = target.kind === 'pane' ? 'panes' : 'sessions';
     const key = target.kind === 'pane' ? 'paneId' : 'sessionId';
     const result = await this.invoke<RunpanePauseResult>(`runpane:${noun}:${paused ? 'pause' : 'resume'}`, [{ [key]: target.id }]);
     // A resume that left some tabs stopped answers `ok: false` with why.
     if (!result.ok) throw new Error(result.message);
+    return result.chatTabsNotPaused ? result.message : undefined;
   }
 
   /** Resumes one paused tab through the host's usual restart. */
@@ -194,7 +240,7 @@ export class RemoteRuntimeAdapter {
    * leaves the host's selected Session alone so a phone never moves the desktop.
    */
   openOrchestrationSession(sessionId: string): Promise<OrchestrationSessionView<Session>> {
-    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:get', [{ sessionId }]);
+    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:get', [{ sessionId }, { chatTabs: true }]);
   }
 
   createOrchestrationSession(input: OrchestrationSessionCreateInput): Promise<OrchestrationSessionView<Session>> {
@@ -255,6 +301,17 @@ export class RemoteRuntimeAdapter {
   async listFiles(sessionId: string, path: string): Promise<RemoteFileEntry[]> {
     return (await this.invokeFileCommand<{ files: RemoteFileEntry[] }>('file:list', [{ sessionId, path }])).files;
   }
+
+  /** Copies a file dropped or pasted into a chat to the Pane's machine, as the terminal's upload does (D-139). */
+  async saveFile(sessionId: string, file: { name: string; dataUrl: string }): Promise<string> {
+    return savedFilePath(await this.invoke('terminal:paste-file', [sessionId, file.dataUrl, file.name, { keepName: true }]));
+  }
+
+  /** The branch's changes, read-only, as the phone's Diff tab reads them. */
+  readonly diff = {
+    manifest: async (sessionId: string): Promise<ChangeList> => decodeManifest(await this.client.invoke('sessions:get-diff-manifest', [sessionId, BRANCH_SCOPE])),
+    file: async (sessionId: string, request: FileDiffRequest) => decodeFileDiff(await this.client.invoke('sessions:get-file-diff', [sessionId, BRANCH_SCOPE, request])),
+  };
 
   /** A worktree file's text, or null when the host finds it binary. */
   async readTextFile(sessionId: string, filePath: string): Promise<string | null> {

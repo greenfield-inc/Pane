@@ -1,0 +1,82 @@
+# Chat tabs on the phone (J17): start a Claude chat, send a 500-character
+# message, approve a command from the docked card, and see a long turn's steps.
+# Needs a dev host with chat tabs on that runs the scripted ACP agent instead
+# of a real account (docs/CHAT_TABS.md, "Testing"), and PANE_ID, a Pane on it:
+#   maestro test -e CONNECTION_CODE=... -e PANE_ID=<pane id> .maestro/chat-tabs.yaml
+appId: com.dcouple.pane.mobile
+name: Chat tabs
+---
+- runFlow: subflows/signed-in.yaml
+- tapOn:
+    id: "pane-row-${PANE_ID}"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: terminal-panel-tabs
+    timeout: 20000
+
+# + lists the chats first, then the terminal agents.
+- tapOn:
+    id: panel-tab-add
+- extendedWaitUntil:
+    visible:
+      id: new-panel-sheet
+    timeout: 10000
+- waitForAnimationToEnd
+- assertVisible:
+    id: new-panel-chat-codex
+- assertVisible: "Claude Code in Terminal.*"
+- tapOn:
+    id: new-panel-chat-claude
+- extendedWaitUntil:
+    visible:
+      id: chat-input
+    timeout: 60000
+
+# A 500-character message arrives as one prompt and the reply streams back.
+- evalScript: ${output.long = 'Fix the export. ' + 'x'.repeat(484)}
+- tapOn:
+    id: chat-input
+- inputText: ${output.long}
+- tapOn:
+    id: chat-send
+- extendedWaitUntil:
+    visible: "You said: Fix the export.*"
+    timeout: 30000
+
+# The approval docks above the composer with the adapter's choices.
+- tapOn:
+    id: chat-input
+- inputText: permission
+- tapOn:
+    id: chat-send
+- extendedWaitUntil:
+    visible:
+      id: chat-approval
+    timeout: 30000
+- assertVisible: "Claude wants to run a command"
+- tapOn:
+    id: chat-approval-0
+- extendedWaitUntil:
+    visible: "Permission: allow"
+    timeout: 30000
+- assertNotVisible:
+    id: chat-approval
+
+# A question docks as a form; the answer reaches the agent.
+- tapOn:
+    id: chat-input
+- inputText: question
+- tapOn:
+    id: chat-send
+- extendedWaitUntil:
+    visible:
+      id: chat-question
+    timeout: 30000
+- tapOn:
+    id: chat-choice-Blue
+- tapOn:
+    id: chat-question-answer
+- extendedWaitUntil:
+    visible: ".*question_0.*Blue.*"
+    timeout: 30000

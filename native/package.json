@@ -13,6 +13,7 @@
     "build:terminal-web": "node scripts/build-terminal-web.mjs"
   },
   "dependencies": {
+    "@assistant-ui/react-native": "0.1.50",
     "@legendapp/list": "~3.3.11",
     "@tanstack/react-query": "^5.90.0",
     "expo": "~57.0.23",

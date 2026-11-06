@@ -193,6 +193,13 @@ jobs:
     - name: Verify sandboxed Electron preload
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
+    # Launches Electron from the build above with a scripted ACP agent; never a real account.
+    # It runs before the smoke suite, whose electron-dev (tsc -w) overwrites the bundled preload in main/dist.
+    - name: Run chat tab journeys
+      run: xvfb-run -a pnpm test:chat-tabs
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+
     - name: Run maintained functional smoke tests
       run: xvfb-run -a pnpm test:ci:minimal
       env:

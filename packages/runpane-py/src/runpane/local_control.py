@@ -1947,6 +1947,35 @@ def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
         raise ValueError("runpane panels create requires --pane.")
     if parsed.no_focus and parsed.focus:
         raise ValueError("Use either --focus or --no-focus, not both.")
+    if parsed.launch_args and not parsed.agent_farm:
+        raise ValueError("--arg is a launch argument for --agent-farm; pass --agent-farm <profile> too.")
+    if parsed.chat or parsed.agent_farm:
+        if parsed.tool_command:
+            raise ValueError("A chat tab runs its agent over ACP, so it takes --agent or --agent-farm, not --tool-command.")
+        if parsed.agent_farm and parsed.agent and parsed.agent not in ("claude", "codex"):
+            raise ValueError("An Agent Farm profile chooses its own agent; drop --agent.")
+        if not parsed.agent_farm and parsed.agent not in ("claude", "codex"):
+            raise ValueError("--chat opens Claude or Codex: pass --agent claude or --agent codex, or --agent-farm <profile>.")
+        if parsed.as_file_pointer or parsed.attachments:
+            raise ValueError("--as-file-pointer and --attach are for terminal tabs; send the first prompt with --initial-input.")
+        initial_input = read_input_source(parsed.initial_input_file) if parsed.initial_input_file else parsed.initial_input
+        chat: Dict[str, Any] = {
+            **optional_value("agent", parsed.agent if parsed.agent in ("claude", "codex") else None),
+            **optional_value("profile", parsed.agent_farm),
+            **optional_value("args", parsed.launch_args or None),
+            **optional_value("initialInput", initial_input or None),
+            **optional_value("title", parsed.title),
+        }
+        return {
+            "paneId": parsed.pane_id,
+            "type": "chat",
+            "chat": chat,
+            **optional_value("noFocus", True if not parsed.focus and (parsed.no_focus or parsed.source == "agent") else None),
+            **optional_value("focus", True if parsed.focus else None),
+            **optional_value("source", parsed.source),
+            **optional_value("waitReady", True if parsed.wait_ready else None),
+            **optional_value("readyTimeoutMs", parsed.ready_timeout_ms),
+        }
 
     return {
         "paneId": parsed.pane_id,
@@ -2219,8 +2248,10 @@ def confirm_panel_create(parsed: Any, request: Dict[str, Any]) -> None:
         raise ValueError("runpane panels create mutates Pane state. Rerun with --yes in non-interactive shells.")
 
     tool = request.get("tool") or {}
-    label = tool.get("agent") or tool.get("command")
-    answer = input(f"Create a terminal panel for {label} in pane {request.get('paneId')}? [y/N] ").strip().lower()
+    chat = request.get("chat") or {}
+    label = chat.get("profile") or chat.get("agent") or tool.get("agent") or tool.get("command")
+    kind = "chat tab" if request.get("type") == "chat" else "terminal panel"
+    answer = input(f"Create a {kind} for {label} in pane {request.get('paneId')}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 

@@ -8,7 +8,7 @@ import type {
   OrchestrationSessionArchiveResult,
   OrchestrationSessionSelector,
 } from '../../../shared/types/orchestrationSession';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { previewOrchestrationSessionArchive, updateOrchestrationSession } from './runpane';
 import {
@@ -122,8 +122,17 @@ export function registerOrchestrationSessionHandlers(
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:create');
 
-  commandRegistry.register('orchestration-sessions:get', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().getView(decodeSelector(value)));
+  // Phone apps released before chat tabs crash on a tab kind they do not know and send
+  // no options (D-100, D-203). A Session whose orchestrator is a chat tells them to update instead.
+  commandRegistry.register('orchestration-sessions:get', async (value: PaneCommandValue, options?: PaneCommandValue) => {
+    return invokeSafely(async () => {
+      const view = await requireManager().getView(decodeSelector(value));
+      const chatTabs = decodeOptionalBoundary(options, boundary.object({ chatTabs: boundary.optional(boundary.boolean) }))?.chatTabs === true;
+      if (view.panel.type === 'chat' && !chatTabs) {
+        throw new PaneError('CHAT_TAB_CLIENT_OUTDATED', 'This Session runs as a chat, which this version of Pane on your phone can\'t open. Nothing changed.', 'Update Pane on your phone, then open the Session again.');
+      }
+      return view;
+    });
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:get');
 

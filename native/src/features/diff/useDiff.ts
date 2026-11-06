@@ -1,13 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { BRANCH_SCOPE } from '@shared/gitDiffClient';
 import type { DiffScope, FileDiffRequest } from '@shared/types/gitDiff';
 
 import { useDaemon, useDaemonEvent, useDaemonQueryKey } from '@/daemon';
 
 import { decodeFileDiff, decodeManifest, refreshChanges } from './diff';
 
-/** The branch's changes, as the desktop's Changes panel shows them by default. */
-export const BRANCH_SCOPE: DiffScope = { kind: 'session' };
+export { BRANCH_SCOPE };
+
 /** A list fetched for Explorer serves the Diff tab too, and the other way round, for this long. */
 const MANIFEST_FRESH_MS = 30_000;
 

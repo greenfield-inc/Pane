@@ -277,7 +277,7 @@ The orchestrator guide prescribes submit without `--wait`, followed by its named
 
 `runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`, Agent Farm `agent-farm run <profile> --resume <id>` with the ID Agent Farm printed; the result's `agentSessionId` names it), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: "already-running"`); one whose agent exited back to its shell is stopped, and resume runs its saved command again in that shell (`action: "resumed"`). If that command exits at once, `--wait-ready` returns `ok: false` with `reason.code: "command-exited"` and the error line it printed. `--panel` also resumes a paused tab. `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope and skips paused ones, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, or once an agent exits back to its shell, stopped panels report `running: false` (`initialized` stays true while the shell lives) in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.
 
-`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does, without asking, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: "manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal output or input in its tabs or the last time the person selected it; `panels list` reports each tab's `paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.
+`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does (a chat tab can't pause yet: its agent keeps running, and the result says so in `chatTabsNotPaused` and its message), without asking, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: "manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal output or input in its tabs or the last time the person selected it; `panels list` reports each tab's `paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.
 
 `runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: "transcript-unavailable" }` and exits 1.
 
@@ -392,7 +392,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock list`: List held named locks, optionally only one Session's.
 - `sessions unpin`: Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.
 - `sessions pin`: Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.
-- `sessions pause`: Pause a Session: stop its chat and the tabs of every Pane in it, keeping their conversations.
+- `sessions pause`: Pause a Session: stop the terminal tabs of its chat and every Pane in it, keeping their conversations. Chat tabs keep running.
 - `sessions resume`: Resume a paused Session: restart its chat and the paused tabs of its Panes.
 - `pr watch`: Register durable GitHub PR monitoring for a Pane.
 - `pr unwatch`: Remove a Pane’s explicit PR registration.
@@ -712,6 +712,8 @@ These flags are consumed by local daemon-control commands:
 --suggestions <json>
 --action <json>
 --content <text>
+--agent-farm <profile>
+--arg <key=value>
 --json
 --wait-ready
 --no-focus
@@ -745,6 +747,7 @@ These flags are consumed by local daemon-control commands:
 --no-expect-report
 --all
 --paused
+--chat
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, use Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane`), which reaches the Windows named-pipe daemon through WSL interop; older Pane builds need `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'`.

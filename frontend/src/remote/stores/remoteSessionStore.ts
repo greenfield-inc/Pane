@@ -191,7 +191,7 @@ function findRememberedPaneId(hostId: string | null, projects: Array<{ sessions?
 
 /** Panel types the phone renders; other types open a card pointing to desktop Pane. */
 export function phoneShows(panel: ToolPanel): boolean {
-  return panel.type === 'terminal' || panel.type === 'browser' || panel.type === 'explorer';
+  return panel.type === 'terminal' || panel.type === 'chat' || panel.type === 'browser' || panel.type === 'explorer' || panel.type === 'diff';
 }
 
 /** The tabs a client shows for a Pane: a Session's workspace hides other agents' chats. */

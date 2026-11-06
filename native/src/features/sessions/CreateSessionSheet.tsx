@@ -17,7 +17,7 @@ import { Notice } from '@/features/panes/PaneKit';
 import { useTheme } from '@/theme';
 import { Button, Icon, Text } from '@/ui';
 
-import { sessionsUnavailable } from './hooks';
+import { sessionsUnavailable, sessionViewArgs } from './hooks';
 
 /** Older hosts do not report their agents; the host still rejects one it cannot run. */
 const ALL_AGENTS: RemotePwaSessionAgents = { agents: ['claude', 'codex', 'cursor'], defaultAgent: DEFAULT_PANE_CHAT_AGENT };
@@ -44,7 +44,7 @@ export function CreateSessionForm({ machine, onCreated }: { machine: RemotePaneC
     ),
     onSuccess: view => {
       // The Session opens without another fetch on the machine the phone is on.
-      if (machine.id === current.id) queryClient.setQueryData([machine.id, 'orchestration-sessions:get', { sessionId: view.session.id }], view);
+      if (machine.id === current.id) queryClient.setQueryData([machine.id, 'orchestration-sessions:get', ...sessionViewArgs(view.session.id)], view);
       onCreated(view.session.id);
     },
     // Created, refused or unconfirmed: read that machine again, so its lists show whether the Session exists.

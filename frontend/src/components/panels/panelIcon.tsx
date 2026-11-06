@@ -1,7 +1,8 @@
 import type React from 'react';
-import { Terminal, GitBranch, FileCode, FileDiff, FileText, FolderTree, BarChart3, Globe } from 'lucide-react';
+import { MessageSquare, Terminal, GitBranch, FileCode, FileDiff, FileText, FolderTree, BarChart3, Globe } from 'lucide-react';
 import type { EditorPanelState, ToolPanel, ToolPanelType } from '../../../../shared/types/panels';
 import { getCliBrandIcon } from '../ui/brandIconRegistry';
+import type { ChatPanelState } from '../../../../shared/types/chatTab';
 
 /** The tab icon for a panel type; an agent terminal gets its CLI's brand icon. Shared by desktop and the Remote Pane PWA. */
 export function getPanelIcon(type: ToolPanelType, panel?: Pick<ToolPanel, 'title'> & Partial<Pick<ToolPanel, 'state'>>, iconClass = 'w-4 h-4'): React.ReactNode {
@@ -12,6 +13,11 @@ export function getPanelIcon(type: ToolPanelType, panel?: Pick<ToolPanel, 'title
         if (brandIcon) return brandIcon;
       }
       return <Terminal className={iconClass} />;
+    }
+    case 'chat': {
+      // SAFETY: The panel type discriminator determines the custom-state shape.
+      const agent = (panel?.state?.customState as ChatPanelState | undefined)?.agent;
+      return getCliBrandIcon(agent ?? panel?.title ?? 'claude', iconClass) ?? <MessageSquare className={iconClass} />;
     }
     case 'diff':
       return <GitBranch className={iconClass} />;

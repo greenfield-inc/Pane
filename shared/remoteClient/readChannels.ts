@@ -3,6 +3,10 @@
 export const REMOTE_READ_CHANNELS = new Set([
   'agent-chat:get',
   'agent-chat:receipt',
+  'chat-tab:get',
+  'chat-tab:history',
+  'chat-tab:receipt',
+  'chat-tab:keys',
   'runpane:update:progress',
   'config:get',
   'config:get-session-preferences',
@@ -60,11 +64,14 @@ export const REMOTE_READ_CHANNELS = new Set([
   // Read a worktree folder or text file; nothing on the host changes.
   'file:list',
   'file:read',
+  // Read a branch's changes; the phone's and the PWA's Diff tabs.
+  'sessions:get-diff-manifest',
+  'sessions:get-file-diff',
 ]);
 
 
 /** Mutations the host de-duplicates by the operation ID they carry, so a retry cannot apply twice. */
-export const REMOTE_DEDUPLICATED_CHANNELS = new Set(['agent-chat:send']);
+export const REMOTE_DEDUPLICATED_CHANNELS = new Set(['agent-chat:send', 'chat-tab:send']);
 
 /**
  * Idempotent device bookkeeping a phone sends to every saved computer without opening its

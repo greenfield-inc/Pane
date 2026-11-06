@@ -36,6 +36,7 @@ const liveStates = new Map<string, AgentState>();
 
 const temporaryDirectories: string[] = [];
 
+
 function createSession(
   id: string,
   name: string,
@@ -281,6 +282,104 @@ afterEach(() => {
 });
 
 describe('OrchestrationSessionManager', () => {
+  it('opens a new Claude Session as a chat tab with its opening prompt when chat tabs are on (D-16)', async () => {
+    const fixture = createFixture();
+    const chatEnsure = vi.fn(async () => undefined);
+    fixture.manager.attachChatTabs({ ensure: chatEnsure, isRunning: () => false, agentState: () => 'unknown' });
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+    try {
+      const created = await fixture.manager.create({ name: 'Chat orchestrator', agent: 'claude', openingPrompt: 'Pane sent this once, to start. Plan the work.' });
+      expect(created.panel.type).toBe('chat');
+      expect(created.panel.state.customState).toMatchObject({
+        agent: 'claude', launch: { kind: 'agent', mode: 'bypassPermissions' }, orchestrationSessionId: created.session.id,
+        initialInput: 'Pane sent this once, to start. Plan the work.',
+      });
+      expect(chatEnsure).toHaveBeenCalledWith(created.panel.id);
+      const resumed = await fixture.manager.create({ name: 'Resumed stays a terminal', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+      expect(resumed.panel.type).toBe('terminal');
+    } finally {
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+    }
+  });
+
+  // D-185: every real Agent Farm Session carries the dialog's standard resume template.
+  it('opens an Agent Farm Session as a chat, whatever the standard resume template says', async () => {
+    const fixture = createFixture();
+    const chatEnsure = vi.fn(async () => undefined);
+    fixture.manager.attachChatTabs({ ensure: chatEnsure, isRunning: () => false, agentState: () => 'unknown' });
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+    try {
+      const created = await fixture.manager.create({
+        name: 'Agent Farm Session', agent: 'claude', launchCommand: 'agent-farm run greenfield/orchestrator',
+        customResume: { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' },
+      });
+      expect(created.panel.type).toBe('chat');
+      expect(created.panel.state.customState).toMatchObject({ agent: 'claude', launch: { kind: 'profile', profile: 'greenfield/orchestrator' }, orchestrationSessionId: created.session.id });
+      expect(chatEnsure).toHaveBeenCalledWith(created.panel.id);
+      expect((await fixture.manager.overview({ sessionId: created.session.id })).terminalReason).toBeUndefined();
+    } finally {
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+    }
+  });
+
+  it('leaves a chat orchestrator\'s state alone when Pane restarts', async () => {
+    const fixture = createFixture();
+    fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+    try {
+      const created = await fixture.manager.create({ name: 'Survives restart', agent: 'claude', launchCommand: 'agent-farm run greenfield/orchestrator', customResume: { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' } });
+      const before = structuredClone(panelManager.getPanel(created.panel.id)?.state.customState);
+      const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager, fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+      restarted.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+      await restarted.initialize();
+      expect(panelManager.getPanel(created.panel.id)?.type).toBe('chat');
+      expect(panelManager.getPanel(created.panel.id)?.state.customState).toEqual(before);
+    } finally {
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+    }
+  });
+
+  it('keeps a truly custom resume or a wrapper in a terminal, and the overview says why', async () => {
+    const fixture = createFixture();
+    fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+    try {
+      const custom = await fixture.manager.create({
+        name: 'Custom resume', agent: 'claude', launchCommand: 'agent-farm run greenfield/orchestrator',
+        customResume: { mode: 'reported', initialTemplate: '{command}', resumeTemplate: 'resume-it {sessionId}' },
+      });
+      expect(custom.panel.type).toBe('terminal');
+      expect((await fixture.manager.overview({ sessionId: custom.session.id })).terminalReason).toContain('custom resume command');
+      const wrapper = await fixture.manager.create({ name: 'Wrapper', agent: 'claude', launchCommand: 'my-wrapper claude' });
+      expect(wrapper.panel.type).toBe('terminal');
+      expect((await fixture.manager.overview({ sessionId: wrapper.session.id })).terminalReason).toContain('my-wrapper claude');
+    } finally {
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+    }
+    // With chat tabs off, a terminal needs no explaining.
+    const off = await fixture.manager.create({ name: 'Chat tabs off', agent: 'claude', launchCommand: 'my-wrapper claude' });
+    expect((await fixture.manager.overview({ sessionId: off.session.id })).terminalReason).toBeUndefined();
+  });
+
+  // Cursor runs no Session on Windows, so there is nothing to check there.
+  it.skipIf(process.platform === 'win32')('keeps a Cursor Session orchestrator in a terminal when chat tabs are on', async () => {
+    const fixture = createFixture();
+    fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+    try {
+      const cursor = await fixture.manager.create({ name: 'Cursor stays a terminal', agent: 'cursor' });
+      expect(cursor.panel.type).toBe('terminal');
+    } finally {
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+    }
+  });
+
+  it('keeps Session orchestrators in terminals while chat tabs are off', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Terminal orchestrator', agent: 'claude' });
+    expect(created.panel.type).toBe('terminal');
+  });
+
   it('opens a Session view as a client-local read that asks no client to move', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Quiet open' });

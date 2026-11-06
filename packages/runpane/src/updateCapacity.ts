@@ -23,6 +23,9 @@ export const PANE_STATE_FOLDERS = [
 export const PANE_UNSNAPSHOTTED_FOLDERS = [
   // Rebuilt by Pane at startup or on demand.
   '.claude', '.codex', '.cursor', 'agent-adapters', 'bin', 'claude-prompts', 'shell', 'tools',
+  // Chat tab transcript pages, rebuilt from the agent's own session at every start;
+  // the scripted test agent's store exists only in development builds.
+  'chat-tabs', 'scripted-agent',
   // Live IPC endpoints, and the update operations themselves.
   'sockets', 'updates',
   // Repositories Pane clones for the person; no update migrates them.

@@ -43,6 +43,7 @@ export function registerConfigHandlers(
         })),
         voiceTranscription: buildRemotePwaVoiceAffordance(config),
         sessionAgents: buildRemotePwaSessionAgents(config.defaultOrchestratorAgent),
+        chatTabsEnabled: config.chatTabsEnabled === true,
         os: machineOs(process.platform),
         resumePausedOnOpen: config.resumePausedOnOpen === true,
       };

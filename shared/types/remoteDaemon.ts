@@ -325,6 +325,8 @@ export interface RemotePwaAffordances {
   voiceTranscription: RemotePwaVoiceTranscriptionAffordance;
   /** Hosts older than the PWA's Sessions support omit this. */
   sessionAgents?: RemotePwaSessionAgents;
+  /** The host offers chat tabs (Claude and Codex over ACP) in its + menu. */
+  chatTabsEnabled?: boolean;
   /** The host's operating system, for its OS logo on the glasses. Older hosts omit this. */
   os?: 'macOS' | 'Windows' | 'Linux';
   /** Opening a paused Pane or tab resumes it (Settings). Older hosts omit this: opening starts nothing. */

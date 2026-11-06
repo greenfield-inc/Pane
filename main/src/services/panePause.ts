@@ -10,6 +10,18 @@ export function terminalPanelIdsOf(paneIds: readonly string[]): string[] {
   return paneIds.flatMap(paneId => panelManager.getPanelsForSession(paneId).filter(panel => panel.type === 'terminal').map(panel => panel.id));
 }
 
+/** The chat tabs of a Pane. Pause doesn't stop them yet (D-187), so a pause has to say so. */
+export function chatPanelIdsOf(paneIds: readonly string[]): string[] {
+  return paneIds.flatMap(paneId => panelManager.getPanelsForSession(paneId).filter(panel => panel.type === 'chat').map(panel => panel.id));
+}
+
+/** What a pause says about the chat tabs in its scope, which keep running. */
+export function chatTabsNotPausedNote(count: number): string {
+  if (count === 0) return '';
+  const tabs = count === 1 ? '1 chat tab was' : `${count} chat tabs were`;
+  return ` ${tabs} not paused: chat tabs can't pause yet, so their agents keep running. To stop one, press Stop in the tab or close it.`;
+}
+
 /**
  * Pauses whole Panes: their terminal tabs and their run script (the Logs panel process). The tabs are
  * marked first, and the script stops only once a mark records it, so Resume runs it again even after

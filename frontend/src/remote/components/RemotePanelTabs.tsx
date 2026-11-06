@@ -1,4 +1,4 @@
-import { ChevronDown, Globe, Plus, TerminalSquare } from 'lucide-react';
+import { ChevronDown, Globe, Plus, Sprout, TerminalSquare, MessageSquare } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { RemotePwaCustomCommand } from '../../../../shared/types/remoteDaemon';
@@ -14,6 +14,7 @@ import { phoneShows } from '../stores/remoteSessionStore';
 // The remote host executes these commands. Until its platform capabilities are
 // exposed here, the viewer's browser platform must not hide valid host tools.
 const agentPresets = AGENT_LAUNCH_PRESETS;
+const CHAT_AGENTS = [{ id: 'claude', title: 'Claude' }, { id: 'codex', title: 'Codex' }] as const;
 
 export interface RemoteTerminalCreateOptions {
   title?: string;
@@ -28,6 +29,10 @@ interface RemotePanelTabsProps {
   onSelectPanel: (panelId: string) => void;
   onCreateTerminal: (options?: RemoteTerminalCreateOptions) => void;
   onCreateBrowser: () => void;
+  /** Set when the host offers chat tabs (D-15): Claude and Codex chats come first. */
+  onCreateChat?: (agent: 'claude' | 'codex') => void;
+  /** Set with `onCreateChat`: asks for an Agent Farm profile and opens a chat tab running it. */
+  onCreateProfileChat?: () => void;
 }
 
 export function RemotePanelTabs({
@@ -38,7 +43,11 @@ export function RemotePanelTabs({
   onSelectPanel,
   onCreateTerminal,
   onCreateBrowser,
+  onCreateChat,
+  onCreateProfileChat,
 }: RemotePanelTabsProps) {
+  const chatAgents = onCreateChat ? CHAT_AGENTS : [];
+  const offset = chatAgents.length + (onCreateProfileChat ? 1 : 0);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const addTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -145,7 +154,7 @@ export function RemotePanelTabs({
                 : `border-border-secondary bg-surface-primary ${paused ? 'font-normal text-text-muted' : 'text-text-secondary'} hover:border-border-primary hover:bg-surface-hover hover:text-text-primary`
             }`}
           >
-            {paused ? <PausedGlyph size="sm" className="shrink-0" /> : panel.type === 'terminal' && <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} />}
+            {paused ? <PausedGlyph size="sm" className="shrink-0" /> : (panel.type === 'terminal' || panel.type === 'chat') && <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} />}
             <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden="true">{getPanelIcon(panel.type, panel, 'h-4 w-4')}</span>
             <span className="truncate">{panel.title}</span>
           </button>
@@ -178,15 +187,34 @@ export function RemotePanelTabs({
             aria-label="Add tool"
             onKeyDown={handleMenuKeyDown}
           >
+            {chatAgents.map((agent, index) => (
+              <AddToolMenuItem
+                key={`chat-${agent.id}`}
+                buttonRef={(element) => { menuItemRefs.current[index] = element; }}
+                icon={getCliBrandIcon(agent.id, 'h-4 w-4') ?? <MessageSquare className="h-4 w-4" />}
+                title={agent.title}
+                description={`Chat with ${agent.title} on the remote host`}
+                onClick={() => { onCreateChat?.(agent.id); setShowAddMenu(false); }}
+              />
+            ))}
+            {onCreateProfileChat && (
+              <AddToolMenuItem
+                buttonRef={(element) => { menuItemRefs.current[chatAgents.length] = element; }}
+                icon={<Sprout className="h-4 w-4" />}
+                title="Agent Farm profile…"
+                description="Chat with an Agent Farm profile on the remote host"
+                onClick={() => { onCreateProfileChat(); setShowAddMenu(false); }}
+              />
+            )}
             <AddToolMenuItem
-              buttonRef={(element) => { menuItemRefs.current[0] = element; }}
+              buttonRef={(element) => { menuItemRefs.current[offset] = element; }}
               icon={<TerminalSquare className="h-4 w-4" />}
               title="Terminal"
               description="Start a shell on the remote host"
               onClick={() => addTerminal()}
             />
             <AddToolMenuItem
-              buttonRef={(element) => { menuItemRefs.current[1] = element; }}
+              buttonRef={(element) => { menuItemRefs.current[offset + 1] = element; }}
               icon={<Globe className="h-4 w-4" />}
               title="Browser"
               description="Open the host's dev servers and pages"
@@ -198,9 +226,9 @@ export function RemotePanelTabs({
             {agentPresets.map((preset, presetIndex) => (
               <AddToolMenuItem
                 key={preset.id}
-                buttonRef={(element) => { menuItemRefs.current[presetIndex + 2] = element; }}
+                buttonRef={(element) => { menuItemRefs.current[offset + presetIndex + 2] = element; }}
                 icon={getCliBrandIcon(preset.iconKey, 'h-4 w-4') ?? <TerminalSquare className="h-4 w-4" />}
-                title={preset.title}
+                title={onCreateChat ? `${preset.title} in Terminal` : preset.title}
                 description={`Run ${preset.command}`}
                 onClick={() => addTerminal({
                   title: preset.title,
@@ -211,7 +239,7 @@ export function RemotePanelTabs({
             {customCommands.map((command, index) => (
               <AddToolMenuItem
                 key={`${command.name}-${index}`}
-                buttonRef={(element) => { menuItemRefs.current[index + 2 + agentPresets.length] = element; }}
+                buttonRef={(element) => { menuItemRefs.current[offset + index + 2 + agentPresets.length] = element; }}
                 icon={getCliBrandIcon(command.command, 'h-4 w-4') ?? <TerminalSquare className="h-4 w-4" />}
                 title={command.name}
                 description={command.command}

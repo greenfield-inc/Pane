@@ -1,0 +1,229 @@
+# Chat tabs
+
+A chat tab runs Claude or Codex as a conversation, with no terminal. Pane is an
+[Agent Client Protocol](https://agentclientprotocol.com) (ACP) client; the agent
+runs through its ACP adapter, `@agentclientprotocol/claude-agent-acp` or
+`@agentclientprotocol/codex-acp`. A chat tab stays a chat: there is no
+Chat/Terminal switch and no move into a terminal. "Claude in Terminal" and
+"Codex in Terminal" in the + menu open terminal agent tabs, as before.
+
+Chat tabs are experimental. Turn them on in **Settings → Advanced → Chat tabs**.
+While they are off, the + menu has no chat entries and new Sessions open their
+orchestrator in a terminal. Open chat tabs keep working.
+
+## Opening one
+
+- **Desktop**: the + menu lists **Claude**, **Codex** and **Agent Farm
+  profile…** under *New tab*, then *In a terminal*: the terminal agents and a
+  plain Terminal. The empty Pane screen offers the same.
+- **Remote PWA** and **phone**: *Add Tool* lists the same three chats first
+  when the host has chat tabs on.
+- **Agent Farm profile…** asks for a profile name and optional arguments, one
+  `key=value` per line, and opens the chat tab on the Pane's machine exactly as
+  `--agent-farm <profile> --arg key=value` does. The name is typed, not picked:
+  `agent-farm profiles list` prints no machine-readable list. An unknown profile
+  shows Agent Farm's error in the dialog and opens nothing.
+- **runpane**: `runpane panels create --pane <id> --chat --agent claude|codex`,
+  or `--agent-farm <profile> [--arg key=value …]` for an Agent Farm profile.
+  `--initial-input` is the first prompt, sent once.
+- **Sessions**: with chat tabs on, a new Claude or Codex Session runs its
+  orchestrator in a chat tab (see [SESSIONS.md](SESSIONS.md)).
+
+## Where the agent runs, and sign-in
+
+The agent runs on the tab's host: this computer for a local Pane, the other
+machine for a Pane on a connected machine. Clients (desktop, PWA, phone) only
+show the conversation and send messages.
+
+A Claude chat tab always runs the person's installed, unmodified `claude`
+(the adapter gets `CLAUDE_CODE_EXECUTABLE`); a Codex chat tab runs the installed
+`codex` (`CODEX_PATH`). Pane never uses a bundled copy, never reads, stores or
+relays a Claude or ChatGPT login, and never copies one between machines.
+
+- **Not signed in**: the tab stops and says so, with **Sign in in Terminal**,
+  which opens a terminal tab running `claude auth login` or `codex login` on
+  that machine. Press **Retry** after signing in. The tab never retries alone.
+- **Not installed**: the tab says so and links the install page.
+- **API key (optional)**: Settings → AI & Agents → *Chat tab sign-in* keeps an
+  Anthropic or OpenAI key in the OS secure store on that machine (Electron
+  `safeStorage`) and passes it only as env (`ANTHROPIC_API_KEY`;
+  `OPENAI_API_KEY` and `CODEX_API_KEY`). It is never synced or sent to clients.
+
+Chat tabs don't run in WSL projects or on SSH hosts.
+
+## Adapters
+
+The adapters ship inside Pane as pinned dependencies: `claude-agent-acp` 0.100.0
+and `codex-acp` 2.5.0 (`main/src/services/agentChat/adapterSetup.ts`). Nothing is
+downloaded. Before a chat tab starts, Pane checks that the installed CLI it will
+run, in the tab's folder and environment, is at least the version the adapter
+needs (Claude Code 2.1.316, Codex 0.165.0); an older one stops the tab with the
+command that updates it. A build missing its adapter says to reinstall Pane.
+Change a pin only with its minimum version, as the comment in `adapterSetup.ts`
+says, and after running the chat tab suites against it.
+
+## What the chat shows
+
+- Replies stream as markdown; thinking is collapsed.
+- The agent's steps are grouped by kind: *Explored 2 files, 1 search*,
+  *Edit file +18 −4* with **View diff** (which opens Pane's diff view; a diff
+  never renders in the thread by itself; the PWA and the phone bring the Pane's
+  Diff tab forward, which shows the branch's changes read-only), *Run* with the command's output
+  streaming in its own row, *Ran 9 commands*.
+- To-do lists from the agent's plan updates.
+- **Approvals** dock above the composer with exactly the choices the adapter
+  sent; keys 1 to 9 answer while the composer is empty. Typing a message
+  instead declines the request and sends the message. ExitPlanMode shows the
+  plan itself.
+- **Questions** (ACP form elicitation, such as Claude's AskUserQuestion) dock
+  as a form. Pane declares `elicitation.form`; without it Claude turns
+  AskUserQuestion off.
+- The composer is the input over one row of controls: attach image, the
+  permission mode chip, then one menu showing model and effort together
+  ("Opus 5.5 · Medium"; a trailing "(recommended)" and an effort of "Default"
+  are left off the button, never from the menu). The row never overflows a
+  narrow column: the model label truncates and the mode chip drops to its icon
+  first, while attach and send keep their size. In a window dragged very
+  narrow the row drops the model button, then attach, and keeps send. That menu also holds every other setting the adapter
+  offers (such as Claude's Fast mode, Ultracode and Agent), each under its own
+  name. Pane places a setting by its ACP category (`mode`, `model`,
+  `thought_level`), or by its id when the adapter sends none. At phone width
+  (the phone app, and the PWA when the composer is under 480px) the row is
+  sparer: **+**, then the model as plain text with its effort muted ("Opus 5.5
+  Medium"), then send. The permission mode moves into that button's sheet as
+  **Permissions**, below Model, Effort and the other settings; each choice shows
+  a check and On/Off settings are switches. A mode that never asks (Bypass)
+  leaves a small shield on the row. The `/` menu lists
+  the agent's own commands and skills; **Stop** cancels the turn. A message sent
+  while the agent works is queued and sent next; **Remove** takes it out of the
+  queue.
+- **Copying**: message text can be selected and copied like any page. Each
+  message and each finished response has a copy button (on hover with a mouse,
+  always on touch) that copies what was written, as Markdown, without the
+  agent's activity. **Copy conversation** above the thread copies the loaded
+  conversation under **You:** and the agent's name, with each tool step as one
+  short line and no raw output. Code blocks have their own copy button. On the
+  phone app, each message has a copy action, and a long press on a reply copies
+  it.
+- **Attachments** (desktop and PWA): drop photos and files anywhere on the chat,
+  paste them into the composer, or pick them with **+**. An image the agent
+  takes (PNG, JPEG, WebP or GIF up to 5 MB) is sent as an image. Any other file,
+  up to 10 MB, is copied to the Pane's folder on the chat's machine under its own
+  name (in a folder of its own, so two files with one name never collide), the same
+  way a terminal tab's upload works (`terminal:paste-file`, so a remote host
+  receives it too), and its path is sent with the message. Each attachment is a
+  chip that can be removed before sending, and sending waits until every file
+  has finished copying. Every refusal says why, and nothing is attached for it.
+  The phone app keeps its **+** photo picker.
+- The composer does not show the machine: the window's machine picker does, and
+  an approval from a remote machine names it.
+
+A chat shows the agent's text and pictures; what it did in between stays out of
+the way (D-192). While a turn runs, one quiet line says what it's doing now
+("Running pnpm test", "Thinking"). When it ends, its steps, thinking, to-do lists
+and notices fold into one row, "Worked for 27s", that opens to them.
+
+The latest turn says when it finished (D-202): "Worked for 27s · 2:04 PM", or
+"2:04 PM" alone when it did nothing but answer. An older time reads "Yesterday
+4:12 PM" or "Nov 3, 4:12 PM", in the person's locale. Every other message shows
+its time on hover; on the phone, a long press shows it. A conversation reopened
+after a restart has no times for its earlier turns.
+
+The conversation stays in the order things happened (D-193). Claude can start a
+turn by itself, for example when a background command finishes. Pane sees that
+through the adapter's `asyncTasks` capability: the tab shows as working, the turn
+gets its own row, and a message sent meanwhile waits in the queue until the turn
+ends, like one sent during any other turn. Stop ends it.
+
+In a Session orchestrator's chat, a worker appears only when the latest turn has
+news of it (D-201): one line, "approvals-global finished · **Open**" when it
+finished or reported, or "switch-to-chat is asking you · **Open**" when it waits
+on the person. Idle, running and unchanged workers stay out of the chat; the
+sidebar lists every Pane. This comes from Pane's own Session state (its Panes,
+their agent states and `runpane report`s), never from what the agent wrote.
+
+Approvals and questions are also asked in Notify and on the phone (see
+[PANE_NOTIFY.md](PANE_NOTIFY.md)), a question form one field at a time. The
+first answer wins everywhere.
+
+## Restart and resume
+
+A chat tab saves its agent, its launch (plain agent with an optional session
+mode, or an Agent Farm profile and its args), its working folder and the ACP
+session ID. It saves no env and no secret: env is rebuilt at every start, and an
+Agent Farm profile is printed again.
+
+After Pane restarts, a chat tab starts again when you open it (or on
+`runpane panels resume` / `resume-many`), loads its conversation (the adapter
+replays the history) and shows it. A turn that was running when Pane closed is
+marked *Stopped when Pane closed*; a message sent then continues the same
+conversation. If the agent exits, the tab shows why with **Restart**, which
+loads the same conversation.
+
+## Cost
+
+- No process polling: Pane learns about the adapter's exit from its own events,
+  and stops the adapter's whole process group when the tab closes.
+- No cap stops a conversation: the newest messages stay in memory (up to 1,000
+  or 24 MiB per tab) and older ones go to a per-tab file under `chat-tabs/` in
+  Pane's data folder, rebuilt at every start. Viewers keep a window of at most
+  about 700 messages: **Earlier messages** pages older ones in
+  (`chat-tab:history`) and drops the newest, **Newer messages** pages back
+  down, and the jump-to-latest arrow returns to the live end.
+- A queued message keeps only a preview in the tab's saved state; its full text
+  and images wait in a file beside it until they are sent.
+- A tool step's update sends only the fields that changed; command output is sent
+  as appends.
+
+## runpane on chat tabs
+
+`panels submit` sends an ACP prompt and returns an `acp-receipt` (queued while
+the agent works). `panels wait` is ready when a turn ended and nothing is queued,
+and returns at once as blocked while an approval or question waits. `screen`
+and `output` read the transcript (`source: acpTranscript`), `last-message` the
+newest reply, `report` is kept in the tab's state, and `resume` restarts the
+agent and loads the conversation. `panels input` and `submit-composer` fail with
+`CHAT_TAB_NO_TERMINAL`: a chat tab has no terminal. The agent gets the same
+`PANE_*` env as a terminal agent tab, so `runpane report` and `notify` work from
+inside it.
+
+## Agent Farm profiles
+
+For `--agent-farm`, Pane runs `agent-farm run <profile> --print-acp --acp-adapter
+<pinned adapter> [--arg key=value …]` at every start, spawns the printed `argv`
+with the printed `env` added, sends the printed `session` on `session/new` and
+`session/load`, and selects the printed `mode` with `session/set_mode` after each.
+The profile's model, effort, instructions with LAUNCH CONTEXT, skills,
+subagents, MCP servers and telemetry come with it. The contract is Agent Farm's
+CONFIGURATION.md, *ACP sessions*.
+
+## Older clients
+
+Phone apps released before chat tabs would crash on a tab kind they don't know,
+and send no version. `panels:list` lists chat tabs only to clients that pass
+`{ chatTabs: true }` (this desktop, the PWA and the current phone app), so older
+apps don't show chat tabs at all; to use them, update Pane on the phone (D-100).
+Released apps have no channel that could say so: their "Update Pane" notices
+are about an older computer, and Notify `info` items are not pushed.
+
+## Code
+
+| Part | Where |
+| --- | --- |
+| Host runtime, transcript, launcher, Agent Farm profiles, Notify bridge | `main/src/services/chatTabs/` |
+| Commands (`chat-tab:*`) | `main/src/ipc/chatTabs.ts` |
+| runpane | `main/src/ipc/runpaneChatTabs.ts`, `main/src/ipc/runpane.ts` |
+| Shared types, presentation, decoders | `shared/types/chatTab.ts`, `shared/chatTabPresentation.ts`, `shared/chatTabPermissions.ts`, `shared/chatTabQuestions.ts`, `shared/types/chatTabDecoders.ts` |
+| Viewer (window, paging, catch-up), shared by every client | `shared/chatTabViewer.ts` |
+| Desktop and PWA UI | `frontend/src/components/chatTab/`, `frontend/src/remote/components/RemoteChatTab.tsx` |
+| Phone UI | `native/src/features/chatTab/` |
+
+## Testing
+
+Tests never touch a real Claude or Codex account. `main/src/services/chatTabs/testing/scriptedAgent.mjs`
+is a scripted ACP agent (each prompt's first word picks a behaviour: `permission`,
+`question`, `slow`, `crash`, `steps 6`, `edit`, `plan`, …), and `fakeAgentFarm.mjs`
+prints a `--print-acp` launch for it. An unpackaged Pane started with
+`PANE_CHAT_TEST_AGENT=<path to scriptedAgent.mjs>` runs it in every chat tab;
+`tests/chat-tabs.spec.ts` uses that for journeys J1 and J5: run it with
+`pnpm build:main && pnpm test:chat-tabs` (CI runs it in Functional Smoke).

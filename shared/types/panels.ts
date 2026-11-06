@@ -1,3 +1,4 @@
+import type { ChatPanelState } from './chatTab';
 import type { CustomCommandResume } from './customCommandResume';
 import type { DiffScope } from './gitDiff';
 import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
@@ -19,7 +20,8 @@ export interface ToolPanel {
   metadata: ToolPanelMetadata;   // Creation time, position, etc.
 }
 
-export type ToolPanelType = 'terminal' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser' | 'notes';
+/** `chat`: an agent tab that runs Claude or Codex over ACP, with no terminal (see chatTab.ts). */
+export type ToolPanelType = 'terminal' | 'chat' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser' | 'notes';
 
 export interface ToolPanelState {
   isActive: boolean;
@@ -343,7 +345,7 @@ export interface CreatePanelRequest {
   sessionId: string;
   type: ToolPanelType;
   title?: string;                // Optional custom title
-  initialState?: TerminalPanelState | DiffPanelState | ExplorerPanelState | EditorPanelState | LogsPanelState | DashboardPanelState | SetupTasksPanelState | BrowserPanelState | { customState?: unknown };
+  initialState?: TerminalPanelState | ChatPanelState | DiffPanelState | ExplorerPanelState | EditorPanelState | LogsPanelState | DashboardPanelState | SetupTasksPanelState | BrowserPanelState | { customState?: unknown };
   metadata?: Partial<ToolPanelMetadata>; // Optional metadata overrides
   activate?: boolean;            // Defaults to true; false creates the panel in the background.
   announceActivation?: boolean;  // Host-initiated: also ask clients on this Pane to show it (panel:activeChanged).
@@ -413,6 +415,7 @@ export interface PanelCapabilities {
 
 interface PanelCapabilityRegistry {
   terminal: PanelCapabilities;
+  chat: PanelCapabilities;
   diff: PanelCapabilities;
   explorer: PanelCapabilities;
   editor: PanelCapabilities;
@@ -433,6 +436,14 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
     singleton: false,
     canAppearInProjects: true,       // Terminal can appear in projects
     canAppearInWorktrees: true       // Terminal can appear in worktrees
+  },
+  chat: {
+    canEmit: [],
+    canConsume: [],
+    requiresProcess: true,           // The host runs the agent's ACP adapter
+    singleton: false,
+    canAppearInProjects: true,
+    canAppearInWorktrees: true,
   },
   diff: {
     canEmit: ['diff:refreshed'],

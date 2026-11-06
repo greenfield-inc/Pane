@@ -186,11 +186,13 @@ export function Dropdown({
   }, [isOpen, items.length]);
 
   // Roving tabindex: DOM focus follows the active item. If there are no regular
-  // items, focus the first footer control so footer-only menus remain usable.
+  // items, focus the footer control marked data-autofocus (such as the current choice), else the
+  // first one, so footer-only menus remain usable.
   useLayoutEffect(() => {
     if (!isOpen) return;
     const controls = getMenuControls(contentRef.current);
-    const target = controls.find(control => control.dataset.dropdownItemIndex === String(activeIndex)) ?? controls[0];
+    const target = controls.find(control => control.dataset.dropdownItemIndex === String(activeIndex))
+      ?? controls.find(control => control.hasAttribute('data-autofocus')) ?? controls[0];
     target?.focus();
   }, [isOpen, activeIndex, formLabel]);
 

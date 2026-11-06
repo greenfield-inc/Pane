@@ -231,6 +231,7 @@ Notes tab.
 | --- | --- | --- |
 | Adding an agent CLI | `main/src/services/agents/` | [ADDING_NEW_CLI_TOOLS.md](ADDING_NEW_CLI_TOOLS.md) |
 | Panels | `panelManager.ts`, `shared/types/panels.ts` | [TOOL_PANEL_SYSTEM.md](TOOL_PANEL_SYSTEM.md) |
+| Chat tabs (ACP agents without a terminal) | `main/src/services/chatTabs/`, `main/src/ipc/chatTabs.ts`, `frontend/src/components/chatTab/` | [CHAT_TABS.md](CHAT_TABS.md) |
 | Renderer updates | IPC events in `main/src/events.ts` | [STATE_MANAGEMENT.md](STATE_MANAGEMENT.md) |
 | Timestamps | `main/src/utils/timestampUtils.ts` | [TIMESTAMP_HANDLING.md](TIMESTAMP_HANDLING.md) |
 | Pane Chat and orchestration sessions | `paneChatManager.ts`, `skillCacheManager.ts`, `paneChatBundle/` | [SESSIONS.md](SESSIONS.md) |
@@ -256,4 +257,14 @@ Notes tab.
   `\\wsl$`.
 - Production builds must never include React Scan (`pnpm perf:scan` is dev
   only).
+
+### Chat tabs
+
+[Chat tabs](CHAT_TABS.md) are a panel kind (`chat`) whose agent runs through its
+ACP adapter in a host-owned process (`main/src/services/chatTabs/`). The host
+saves a secret-free launch and the ACP session ID, reloads the conversation on
+restart, keeps a bounded transcript window with older messages paged from disk,
+and publishes `chat-tab:state` and `chat-tab:event` to every client. Clients
+send `chat-tab:*` commands through the shared registry; none of them owns the
+process.
 

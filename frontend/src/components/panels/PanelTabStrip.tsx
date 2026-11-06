@@ -438,7 +438,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                 compact ? "gap-1" : "gap-2",
                 isPaused && !isActive && "opacity-60",
               )}>
-                {panel.type === 'terminal' && (
+                {(panel.type === 'terminal' || panel.type === 'chat') && (
                   <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} paused={isPaused} />
                 )}
                 {getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5 flex-shrink-0' : 'w-4 h-4 flex-shrink-0')}

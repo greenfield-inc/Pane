@@ -18,10 +18,16 @@ export function NotifyInPaneStrip({ left }: { left: number }) {
   const onInbox = activeView === 'notify';
   // The docked card shows only in the asking terminal, so it stands in for the strip only while that terminal is in view.
   const dockInView = activeView === 'sessions' && activePaneId === dockedSource?.paneId && activePanelId === dockedSource?.panelId;
+  const stripSource = notifyItem(snapshot, snapshot?.strip?.itemId)?.source;
+  const stripPanelId = usePanelStore((state) => (stripSource?.paneId ? state.activePanels[stripSource.paneId] : undefined));
+  const stripPanelIsChat = usePanelStore((state) => !!stripSource?.paneId && !!state.panels[stripSource.paneId]?.some(panel => panel.id === stripSource.panelId && panel.type === 'chat'));
+  // A chat tab docks its own approval and question cards above its composer, so the strip would only cover them.
+  const chatInView = activeView === 'sessions' && stripPanelIsChat && activePaneId === stripSource?.paneId && stripPanelId === stripSource?.panelId;
   if (!snapshot || snapshot.stripSurface !== 'pane' || !snapshot.strip) return null;
   // The inbox already lists every waiting question with the same answers.
   if (onInbox && snapshot.strip.kind === 'question') return null;
   if (dockInView && snapshot.strip.itemId === snapshot.dockedItemId) return null;
+  if (chatInView) return null;
   return (
     <div
       className="pointer-events-none absolute bottom-[18px] right-0 z-30 flex justify-center px-4"

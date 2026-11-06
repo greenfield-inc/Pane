@@ -2,6 +2,7 @@
 import './versionQuery';
 // Load ReadableStream polyfill before any other imports
 import './polyfills/readablestream';
+import { getChatTabManager } from './services/chatTabs';
 import { acknowledgeUpdateQuiescence } from './services/updateShutdown';
 
 import { registerStartupNotice } from './ipc/startup-notice';
@@ -1616,6 +1617,9 @@ if (launchRemoteSetup) {
     // Terminals exiting because Pane is quitting are not owners releasing their
     // named locks; resumed agents still hold them after the restart.
     paneDaemonHost?.services.namedLockService?.suspendAutoRelease();
+
+    // Chat tabs keep their saved state, so each comes back on the next launch.
+    await getChatTabManager().stopAll().catch(error => console.error('[Main] Chat tabs could not all stop; continuing shutdown:', error));
 
     // Phase 1: Send Ctrl+C to all terminals to gracefully exit Claude instances
     // Claude needs to exit cleanly so it releases the session ID lock, allowing

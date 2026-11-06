@@ -561,6 +561,12 @@ async function installRemoteHostRoute(
         result = { success: true };
         break;
       }
+      case 'sessions:get-diff-manifest':
+        result = { success: true, data: MOCK_DIFF.manifest };
+        break;
+      case 'sessions:get-file-diff':
+        result = { success: true, data: { patch: MOCK_DIFF.patch, status: 'changed' } };
+        break;
       case 'panels:checkInitialized':
         result = true;
         break;
@@ -581,6 +587,16 @@ async function installRemoteHostRoute(
     });
   });
 }
+
+/** The branch's changes, the way `sessions:get-diff-manifest` and `sessions:get-file-diff` answer. */
+const MOCK_DIFF = {
+  manifest: {
+    files: [{ path: 'src/app.ts', kind: 'modified', additions: 1, deletions: 1, isBinary: false }],
+    resolvedBase: { kind: 'comparison-base', ref: 'refs/remotes/origin/main' },
+    stats: { additions: 1, deletions: 1, filesChanged: 1 },
+  },
+  patch: 'diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1,2 +1,2 @@\n keep\n-const answer = 41;\n+const answer = 42;\n',
+};
 
 /** One folder of the mock worktree, folders first, the way `file:list` answers. */
 function listMockFolder(files: Record<string, string | null>, folder: string) {

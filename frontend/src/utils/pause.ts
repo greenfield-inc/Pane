@@ -1,11 +1,11 @@
 import type { TerminalPausedMark } from '../../../shared/types/panels';
 import { DEFAULT_AUTO_PAUSE_HOURS } from '../../../shared/types/autoPause';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
-import { showActionError } from '../stores/errorStore';
+import { showActionError, useErrorStore } from '../stores/errorStore';
 import { useConfigStore } from '../stores/configStore';
 import { formatDistanceToNow } from './timestampUtils';
 
-/** What Pause and Resume act on: one tab, a Pane (all its tabs), or a Session (its chat and Panes). */
+/** What Pause and Resume act on: one tab, a Pane (its terminal tabs), or a Session (the terminal tabs of its chat and Panes). */
 export type PauseTarget = { kind: 'panel' | 'pane' | 'session'; id: string };
 
 /** "Paused 2 days ago". */
@@ -27,7 +27,7 @@ const CHANNELS = {
 const NOUN = { panel: 'tab', pane: 'Pane', session: 'Session' } as const;
 
 /** A pause or resume that ran but left some tabs stopped answers `ok: false` with a message. */
-const resultSchema = boundary.object({ ok: boundary.boolean, message: boundary.optional(boundary.string) });
+const resultSchema = boundary.object({ ok: boundary.boolean, message: boundary.optional(boundary.string), chatTabsNotPaused: boundary.optional(boundary.number) });
 
 /** Pauses or resumes on this computer's host. Throws what the host said when it fails. */
 async function setPaused(target: PauseTarget, paused: boolean): Promise<void> {
@@ -37,6 +37,8 @@ async function setPaused(target: PauseTarget, paused: boolean): Promise<void> {
     resultSchema,
   );
   if (result?.ok === false) throw new Error(result.message ?? 'Some tabs did not start.');
+  // Not a failure, but the person must know these agents are still running (D-187).
+  if (result?.chatTabsNotPaused && result.message) useErrorStore.getState().showError({ title: 'Chat tabs keep running', error: result.message });
 }
 
 /** Runs Pause or Resume from a menu or banner and shows why when it fails. */

@@ -2,7 +2,7 @@ import type { JsonValue } from '../validation/boundaryDecoder';
 
 export type AgentChatPart =
   | { type: 'text' | 'thought'; text: string }
-  | { type: 'tool'; id: string; title: string; status: 'pending' | 'in_progress' | 'completed' | 'failed'; input?: JsonValue; output?: JsonValue; content?: JsonValue[] }
+  | { type: 'tool'; id: string; title: string; status: 'pending' | 'in_progress' | 'completed' | 'failed'; input?: JsonValue; output?: JsonValue; content?: JsonValue[]; kind?: string; locations?: JsonValue; terminal?: string }
   | { type: 'content'; content: JsonValue };
 
 export interface AgentChatMessage {
@@ -72,7 +72,8 @@ export interface AgentChatPermission {
   options: Array<{ optionId: string; name: string; kind: string }>;
 }
 
-export interface AgentChatConfigOption { id: string; name: string; currentValue: string; options: Array<{ value: string; name: string }> }
+/** An agent setting (an ACP select config option). `category` is ACP's hint: mode, model, thought_level, model_config or the adapter's own. */
+export interface AgentChatConfigOption { id: string; name: string; category?: string; currentValue: string; options: Array<{ value: string; name: string }> }
 
 export interface AgentChatView {
   panelId: string;

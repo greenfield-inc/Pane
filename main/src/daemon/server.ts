@@ -16,6 +16,7 @@ import { toPaneDaemonError } from '../../../shared/paneError';
 
 const DAEMON_EVENT_PREFIXES = [
   'agent-chat:',
+  'chat-tab:',
   'archive:',
   'folder:',
   'loops:',

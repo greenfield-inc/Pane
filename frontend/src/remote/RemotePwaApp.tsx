@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
 import { pausedMarkOf, type PanelActivationRequest, type ToolPanel, type ToolPanelType } from '../../../shared/types/panels';
@@ -21,6 +21,10 @@ import { RemoteStatusBar } from './components/RemoteStatusBar';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
 import { RemoteBrowserPanel } from './components/RemoteBrowserPanel';
 import { RemoteExplorerPanel } from './components/RemoteExplorerPanel';
+import { RemoteDiffPanel } from './components/RemoteDiffPanel';
+import { RemoteChatTab } from './components/RemoteChatTab';
+import { AgentFarmProfileDialog } from '../components/chatTab/AgentFarmProfileDialog';
+import type { ChatTabCreate } from '../../../shared/types/chatTab';
 import { useRemoteListeningPorts } from './hooks/useRemoteListeningPorts';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
@@ -116,6 +120,7 @@ export function RemotePwaApp() {
   const [sidebarActionId, setSidebarActionId] = useState<string | null>(null);
   const [createSessionProject, setCreateSessionProject] = useState<RemoteProjectWithSessions | null>(null);
   const [createOrchestrationOpen, setCreateOrchestrationOpen] = useState(false);
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [creationFailure, setCreationFailure] = useState<{ name: string; error: string } | null>(null);
   const [mountedTerminalPanelIds, setMountedTerminalPanelIds] = useState<string[]>([]);
   /** The sidebar row the open Pane was tapped in, so only that copy is highlighted. */
@@ -653,6 +658,32 @@ export function RemotePwaApp() {
     }
   }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
 
+  /** Opens a chat tab on the host: a plain agent, or an Agent Farm profile (`launch`). Rejects with the host's reason. */
+  const createChat = useCallback(async (request: Pick<ChatTabCreate, 'agent' | 'launch'>) => {
+    if (!adapter || !selectedSessionId) return;
+    setCreatingTerminal(true);
+    const runtime = adapter;
+    const sessionId = selectedSessionId;
+    const requestedFrom = useRemoteSessionStore.getState().selectedPanelId;
+    const drops = dropsRef.current;
+    try {
+      const { panelId } = await runtime.chatTab.create({ sessionId, ...request });
+      if (runtime !== activeRuntimeRef.current) return;
+      const panels = await runtime.getPanels(sessionId);
+      const panel = panels.find(entry => entry.id === panelId);
+      if (panel) upsertPanel(panel);
+      if (drops !== dropsRef.current || !stillOn(sessionId, requestedFrom)) return;
+      setSelectedPanel(panelId);
+      await runtime.setActivePanel(sessionId, panelId);
+    } catch (error) {
+      // The profile dialog shows the reason itself and stays open.
+      if (request.launch?.kind === 'profile') throw error;
+      if (runtime === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : 'Failed to open a chat tab');
+    } finally {
+      setCreatingTerminal(false);
+    }
+  }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
+
   const createBrowser = useCallback(async () => {
     if (!adapter || !selectedSessionId) return;
     setCreatingTerminal(true);
@@ -709,6 +740,11 @@ export function RemotePwaApp() {
     setSidebarOpen(false);
   }, [requestView, selectSession]);
 
+  /** A worker line's Open in the Session orchestrator's chat: that worker's Pane, as its row under the Session. */
+  const openWorkerPane = useCallback((paneId: string, orchestrationSessionId: string) => {
+    selectRemoteSession(paneId, `sessions:${orchestrationSessionId}`);
+  }, [selectRemoteSession]);
+
   /** Runs one pin, archive or restore at a time, marking its row busy. */
   const runSidebarAction = useCallback(async (id: string, failure: string, action: (runtime: RemoteRuntimeAdapter) => Promise<void>) => {
     if (!adapter || sidebarActionId) return;
@@ -747,8 +783,10 @@ export function RemotePwaApp() {
       });
     },
     setPanePaused: (paneId, paused) => void runSidebarAction(paneId, paused ? 'Failed to pause pane' : 'Failed to resume pane', async (runtime) => {
-      await runtime.setPaused({ kind: 'pane', id: paneId }, paused);
+      const note = await runtime.setPaused({ kind: 'pane', id: paneId }, paused);
       await refreshProjects(runtime);
+      // Shown where the sidebar shows what it needs the person to read.
+      if (note) throw new Error(note);
     }),
     restorePane: (paneId) => void runSidebarAction(paneId, 'Failed to restore pane', async (runtime) => {
       await runtime.restoreSession(paneId);
@@ -771,8 +809,9 @@ export function RemotePwaApp() {
       await refreshOrchestrationSessions(runtime);
     }),
     setSessionPaused: (session, paused) => void runSidebarAction(session.id, paused ? 'Failed to pause Session' : 'Failed to resume Session', async (runtime) => {
-      await runtime.setPaused({ kind: 'session', id: session.id }, paused);
+      const note = await runtime.setPaused({ kind: 'session', id: session.id }, paused);
       await Promise.all([refreshOrchestrationSessions(runtime), refreshProjects(runtime)]);
+      if (note) throw new Error(note);
     }),
     reloadSessions: () => void refreshOrchestrationSessions(adapter),
     loadArchived: () => void loadArchived(adapter),
@@ -1050,7 +1089,13 @@ export function RemotePwaApp() {
           onSelectPanel={selectPanel}
           onCreateTerminal={createTerminal}
           onCreateBrowser={createBrowser}
+          onCreateChat={affordances.chatTabsEnabled && adapter ? agent => void createChat({ agent }) : undefined}
+          onCreateProfileChat={affordances.chatTabsEnabled && adapter ? () => setProfileDialogOpen(true) : undefined}
         />
+
+        {profileDialogOpen && (
+          <AgentFarmProfileDialog onClose={() => setProfileDialogOpen(false)} onCreate={launch => createChat({ launch })} />
+        )}
 
         <RemoteSessionList
           session={selectedSession}
@@ -1100,7 +1145,16 @@ export function RemotePwaApp() {
             {selectedPanel.type === 'explorer' && adapter && (
               <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} panelId={selectedPanel.id} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />
             )}
-            {selectedPanel.type !== 'browser' && selectedPanel.type !== 'explorer' && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
+            {selectedPanel.type === 'chat' && adapter && (
+              <Suspense fallback={null}>
+                <RemoteChatTab key={selectedPanel.id} adapter={adapter} panel={selectedPanel} panels={selectedPanels} connected={connectionStatus === 'connected'}
+                  onOpenWorker={openWorkerPane} onSelectPanel={selectPanel} />
+              </Suspense>
+            )}
+            {selectedPanel.type === 'diff' && adapter && (
+              <RemoteDiffPanel key={selectedPanel.id} adapter={adapter} sessionId={selectedPanel.sessionId} />
+            )}
+            {!phoneShows(selectedPanel) && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
           </div>
         )}
       </section>
@@ -1144,6 +1198,7 @@ const PANEL_TYPE_LABELS = {
   'setup-tasks': 'Setup task',
   browser: 'Browser',
   notes: 'Notes',
+  chat: 'Chat',
 } satisfies Record<ToolPanelType, string>;
 
 /** The open Session's recorded blockers, from the latest Session list. */
@@ -1166,7 +1221,7 @@ function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPan
       <div className="max-w-md rounded-lg border border-border-primary bg-surface-primary p-6">
         <p className="text-sm font-semibold text-text-primary">{panel.title}</p>
         <p className="mt-2 text-sm text-text-secondary">
-          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA shows terminal, browser and explorer tabs for {session.name}.
+          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA shows terminal, chat, browser, explorer and diff tabs for {session.name}.
         </p>
       </div>
     </div>

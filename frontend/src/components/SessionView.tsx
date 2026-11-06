@@ -61,17 +61,18 @@ import {
   mergeAllGroups,
   type DropZone,
 } from '../utils/panelLayout';
-import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2 } from 'lucide-react';
+import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, Sprout } from 'lucide-react';
+import { AgentFarmProfileDialog } from './chatTab/AgentFarmProfileDialog';
 import { getCliBrandIcon } from './ui/brandIconRegistry';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
-import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { cycleIndex } from '../utils/arrayUtils';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { Kbd } from './ui/Kbd';
 import { OPEN_INSPECTOR_EVENT, type InspectorRequest, type InspectorTab } from './InspectorTabs';
-import { useErrorStore } from '../stores/errorStore';
+import { showActionError, useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 import { LoopsView } from './loops/LoopsView';
 import { LivePreviewPrompt } from './LivePreviewPrompt';
@@ -1332,12 +1333,14 @@ export const SessionView = memo(() => {
     setDropZones(new Map());
   }, [primaryGroupId, primaryGroupNode, activeSession, isSplitLayout, topBarPanels, applyLayout]);
 
+  const chatTabs = useConfigStore((s) => isChatTabsEnabled(s.config));
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
     return keys ? formatKeyDisplay(keys) : null;
   }, [hotkeys]);
 
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   // The empty stage is the "+" menu laid out inline: one click (or the
   // shortcut beside it) from a running tool, instead of a placeholder.
   const emptyStage = useMemo(() => (
@@ -1345,10 +1348,19 @@ export const SessionView = memo(() => {
       <div className="w-64">
         <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Open</div>
         {[
+          // Chat tabs on (D-15): agents open as chats first; their terminal versions follow.
+          ...(chatTabs && activeSession ? (['claude', 'codex'] as const).map(agent => ({
+            key: `chat-${agent}`,
+            label: agent === 'claude' ? 'Claude' : 'Codex',
+            icon: getCliBrandIcon(agent, 'h-3.5 w-3.5'),
+            hotkeyId: '',
+            onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent }).catch(error => showActionError(`Could not open a ${agent === 'claude' ? 'Claude' : 'Codex'} chat`, error)); },
+          })) : []),
+          ...(chatTabs && activeSession ? [{ key: 'chat-profile', label: 'Agent Farm profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) }] : []),
           { key: 'terminal', label: 'Terminal', icon: <Terminal className="h-3.5 w-3.5" />, hotkeyId: 'add-tool-terminal', onClick: () => handlePanelCreate('terminal') },
           ...agentPresets.map(preset => ({
             key: preset.id,
-            label: preset.title,
+            label: chatTabs ? `${preset.title} in Terminal` : preset.title,
             icon: getCliBrandIcon(preset.iconKey, 'h-3.5 w-3.5'),
             hotkeyId: preset.hotkeyId,
             onClick: () => handlePanelCreate('terminal', { initialCommand: preset.command, title: preset.title }),
@@ -1373,8 +1385,15 @@ export const SessionView = memo(() => {
           </button>
         ))}
       </div>
+      {profileDialogOpen && activeSession && (
+        <AgentFarmProfileDialog
+          onClose={() => setProfileDialogOpen(false)}
+          // The new tab replaces this empty stage, so the parent closes the dialog itself.
+          onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: activeSession.id, launch }); setProfileDialogOpen(false); }}
+        />
+      )}
     </div>
-  ), [agentPresets, customCommands, handlePanelCreate, hotkeyDisplay]);
+  ), [activeSession, agentPresets, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
@@ -1664,8 +1683,8 @@ export const SessionView = memo(() => {
   // Unless the user has explicitly closed it previously
   const hasTriedCreatingTerminal = useRef(false);
   useEffect(() => {
-    // Any terminal counts, so an agent-only pane gains no shell.
-    if (!ownsPanelLoad || panelLoad?.error || !activeSession?.id || sessionPanels.some(p => p.type === 'terminal') || hasTriedCreatingTerminal.current) return;
+    // Any terminal or chat tab counts, so an agent-only pane gains no shell.
+    if (!ownsPanelLoad || panelLoad?.error || !activeSession?.id || sessionPanels.some(p => p.type === 'terminal' || p.type === 'chat') || hasTriedCreatingTerminal.current) return;
     // Only attempt once per session to avoid loops
     hasTriedCreatingTerminal.current = true;
 

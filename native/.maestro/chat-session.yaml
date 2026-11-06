@@ -1,0 +1,37 @@
+# The Session orchestrator as a chat on the phone (J17): quiet turns fold to one
+# line that opens to its steps, and each worker is one line whose Open goes to
+# its Pane. Needs the chat-tabs dev host (chat-tabs.yaml) and SESSION_ID, a
+# Claude Session created there with chat tabs on and one associated Pane.
+appId: com.dcouple.pane.mobile
+name: Session chat
+---
+- runFlow: subflows/signed-in.yaml
+- tapOn:
+    id: "session-row-.*${SESSION_ID}.*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: chat-tab
+    timeout: 60000
+- tapOn:
+    id: chat-input
+- inputText: steps 12
+- tapOn:
+    id: chat-send
+# A finished turn is one line; tapping it shows the steps grouped by kind.
+- extendedWaitUntil:
+    visible: "Worked .* · 12 steps.*"
+    timeout: 30000
+- assertNotVisible: "Step 1"
+- tapOn:
+    id: chat-fold
+- assertVisible:
+    id: chat-step-explore
+- assertVisible:
+    id: "chat-worker-.*"
+- tapOn:
+    id: "chat-worker-open-.*"
+- extendedWaitUntil:
+    visible:
+      id: pane-detail-screen
+    timeout: 20000

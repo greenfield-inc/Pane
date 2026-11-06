@@ -9,6 +9,7 @@ import { renderLog } from '../../utils/console';
 
 // Lazy load panel components for better performance
 const TerminalPanel = lazy(() => import('./TerminalPanel'));
+const ChatTabRoute = lazy(() => import('../chatTab/ChatTabRoute').then(module => ({ default: module.ChatTabRoute })));
 const DiffPanel = lazy(() => import('./diff/DiffPanel'));
 const FileEditorTabPanel = React.lazy(() => import('./editor/FileEditorTabPanel'));
 const ExplorerPanel = lazy(() => import('./editor/EditorPanel'));
@@ -103,6 +104,8 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
         const paused = pausedMarkOf(panel);
         return paused ? <PausedTerminalView panel={panel} mark={paused} /> : <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
       }
+      case 'chat':
+        return <ChatTabRoute panel={panel} />;
       case 'diff':
         return <DiffPanel panel={panel} isActive={isActive} sessionId={panel.sessionId} isMainRepo={isMainRepo} />;
       case 'explorer':

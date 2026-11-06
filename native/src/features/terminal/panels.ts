@@ -4,11 +4,12 @@ import type { EditorPanelState, ToolPanel, ToolPanelType } from '@shared/types/p
 import type { RemotePwaCustomCommand } from '@shared/types/remoteDaemon';
 
 /** How the phone draws a tab. A placeholder names the computer, where the tab opens. */
-export type TabView = 'terminal' | 'browser' | 'explorer' | 'diff' | 'editor' | 'file-diff' | 'logs' | 'placeholder';
+export type TabView = 'terminal' | 'chat' | 'browser' | 'explorer' | 'diff' | 'editor' | 'file-diff' | 'logs' | 'placeholder';
 
 export function tabView(panel: ToolPanel): TabView {
   switch (panel.type) {
     case 'terminal':
+    case 'chat':
     case 'browser':
     case 'explorer':
     case 'diff':
@@ -24,6 +25,7 @@ export function tabView(panel: ToolPanel): TabView {
 /** Strip groups, as the web phone app sorts them: agents and terminals, pages, Explorer and Diff, other tabs, desktop-only tabs. */
 const STRIP_GROUP: Record<ToolPanelType, number> = {
   terminal: 0,
+  chat: 0,
   browser: 1,
   explorer: 2,
   diff: 2,
@@ -83,15 +85,26 @@ export interface NewPanelOption {
   description: string;
   /** Command the host runs when the panel starts; none opens a shell. */
   initialCommand?: string;
+  /** A chat tab for this agent instead of a terminal. */
+  chat?: 'claude' | 'codex';
+  /** A chat tab running an Agent Farm profile, asked for before it opens. */
+  chatProfile?: true;
 }
 
 /** The web app's Add tool menu: a shell, the agent presets, then the host's custom commands. */
-export function newPanelOptions(customCommands: readonly RemotePwaCustomCommand[]): NewPanelOption[] {
+export function newPanelOptions(customCommands: readonly RemotePwaCustomCommand[], chatTabs = false): NewPanelOption[] {
+  // With chat tabs on (D-15), agents open as chats first; their terminal versions follow.
+  const chats: NewPanelOption[] = chatTabs ? [
+    { id: 'chat-claude', title: 'Claude', description: 'Chat with Claude on the computer', chat: 'claude' },
+    { id: 'chat-codex', title: 'Codex', description: 'Chat with Codex on the computer', chat: 'codex' },
+    { id: 'chat-profile', title: 'Agent Farm profile…', description: 'Chat with an Agent Farm profile on the computer', chatProfile: true },
+  ] : [];
   return [
+    ...chats,
     { id: 'terminal', title: 'Terminal', description: 'Start a shell on the remote host' },
     ...AGENT_LAUNCH_PRESETS.map(preset => ({
       id: preset.id,
-      title: preset.title,
+      title: chatTabs ? `${preset.title} in Terminal` : preset.title,
       description: `Run ${preset.command}`,
       initialCommand: preset.command,
     })),

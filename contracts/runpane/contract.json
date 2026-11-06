@@ -1709,7 +1709,7 @@
     },
     {
       "name": "sessions pause",
-      "summary": "Pause a Session: stop its chat and the tabs of every Pane in it, keeping their conversations.",
+      "summary": "Pause a Session: stop the terminal tabs of its chat and every Pane in it, keeping their conversations. Chat tabs keep running.",
       "usage": [
         "runpane sessions pause --session <id|name> [--json] [--pane-dir <path>]"
       ],
@@ -2442,6 +2442,16 @@
         "name": "--content",
         "value": "<text>",
         "description": "Text that workspace write writes instead of stdin."
+      },
+      {
+        "name": "--agent-farm",
+        "value": "<profile>",
+        "description": "Start an Agent Farm profile (such as greenfield/implementer:opus) in a chat tab."
+      },
+      {
+        "name": "--arg",
+        "value": "<key=value>",
+        "description": "A launch argument for --agent-farm, shown to the agent in its LAUNCH CONTEXT; repeatable."
       }
     ],
     "localBoolean": [
@@ -2576,6 +2586,10 @@
       {
         "name": "--paused",
         "description": "loops create only: create the loop paused."
+      },
+      {
+        "name": "--chat",
+        "description": "Open the agent as a chat tab (Claude or Codex over ACP, no terminal) instead of a terminal tab."
       }
     ]
   },
@@ -4339,7 +4353,7 @@
         "Usage:",
         "  runpane sessions pause --session <id|name> [--json] [--pane-dir <path>]",
         "",
-        "Pauses a Session's chat and the terminal tabs of every Pane in it that is not archived,",
+        "Pauses the terminal tabs of a Session's chat and of every Pane in it that is not archived (a chat tab can't pause yet: its agent keeps running, and the result says so),",
         "until `runpane sessions resume` resumes them.",
         "Stopping works the way quitting Pane does, without asking, even while an agent is working.",
         "Each agent's conversation is kept. A paused tab stays stopped through clicks, app restarts",
@@ -6017,7 +6031,7 @@
         "Usage:",
         "  runpane sessions pause --session <id|name> [--json] [--pane-dir <path>]",
         "",
-        "Pauses a Session's chat and the terminal tabs of every Pane in it that is not archived,",
+        "Pauses the terminal tabs of a Session's chat and of every Pane in it that is not archived (a chat tab can't pause yet: its agent keeps running, and the result says so),",
         "until `runpane sessions resume` resumes them.",
         "Stopping works the way quitting Pane does, without asking, even while an agent is working.",
         "Each agent's conversation is kept. A paused tab stays stopped through clicks, app restarts",
@@ -6228,7 +6242,7 @@
       "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. A send with --no-expect-report is a reply (an answer, or an addition to the current work): it is delivered while a report is outstanding and leaves that expectation in place. Then watch for the original result.",
       "`runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on). `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.",
       "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`, Agent Farm `agent-farm run <profile> --resume <id>` with the ID Agent Farm printed; the result's `agentSessionId` names it), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`); one whose agent exited back to its shell is stopped, and resume runs its saved command again in that shell (`action: \"resumed\"`). If that command exits at once, `--wait-ready` returns `ok: false` with `reason.code: \"command-exited\"` and the error line it printed. `--panel` also resumes a paused tab. `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope and skips paused ones, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, or once an agent exits back to its shell, stopped panels report `running: false` (`initialized` stays true while the shell lives) in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
-      "`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does, without asking, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: \"manual\" | \"auto\", idleHours? }`) and `inactiveSince`, the latest terminal output or input in its tabs or the last time the person selected it; `panels list` reports each tab's `paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.",
+      "`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does (a chat tab can't pause yet: its agent keeps running, and the result says so in `chatTabsNotPaused` and its message), without asking, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: \"manual\" | \"auto\", idleHours? }`) and `inactiveSince`, the latest terminal output or input in its tabs or the last time the person selected it; `panels list` reports each tab's `paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.",
       "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
@@ -11463,7 +11477,8 @@
             "alternateScreen",
             "scrollback",
             "persistedOutput",
-            "empty"
+            "empty",
+            "acpTranscript"
           ]
         },
         "limit": {
@@ -15050,6 +15065,10 @@
           },
           "description": "Tabs this call paused or resumed."
         },
+        "chatTabsNotPaused": {
+          "type": "number",
+          "description": "On a pause: chat tabs in scope, which can't pause yet, so their agents keep running."
+        },
         "unchanged": {
           "type": "number",
           "description": "Terminal tabs in scope that were already paused (for pause) or not paused (for resume)."
@@ -17242,7 +17261,7 @@
       "panels input": {
         "name": "panels input",
         "summary": "Send input bytes to a terminal panel.",
-        "details": "Use this to answer prompts or continue an agent inside an existing Pane terminal panel. Input is byte-oriented; choose --input-file for exact control over newlines and control characters.",
+        "details": "Use this to answer prompts or continue an agent inside an existing Pane terminal panel. Input is byte-oriented; choose --input-file for exact control over newlines and control characters. A chat tab has no terminal: input fails with CHAT_TAB_NO_TERMINAL; use panels submit.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -17352,7 +17371,7 @@
       "panels screen": {
         "name": "panels screen",
         "summary": "Read a compact current-screen view from a terminal panel.",
-        "details": "Use this for token-safe current terminal state. It prefers active alternate-screen/TUI output, then live scrollback, then persisted output. Default output is bounded to 80 lines.",
+        "details": "Use this for token-safe current terminal state. It prefers active alternate-screen/TUI output, then live scrollback, then persisted output. On a chat tab it returns the newest transcript lines with source acpTranscript. Default output is bounded to 80 lines.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -17490,7 +17509,8 @@
           "For Claude, text starting with `!`, `#`, `/` or `@` is sent unchanged and the result carries a `warnings` entry (for example `leading-bang-runs-shell`), because Claude Code gives those characters a meaning of its own.",
           "`--as-file-pointer` writes the text to a prompt file readable only by you, inside the Pane's git worktree at `.pane/prompts/` (hidden by the repository's `.git/info/exclude`, never committed) when it has one, otherwise under `<pane-dir>/prompts/<pane-id>/`, so an agent limited to its working directories reads it without a permission prompt, and sends the one line `Read and follow <path>`, with the path relative to the worktree (where the agent starts) when the file is inside it; the result's `promptFile` is always absolute. Prefer it for long prompts.",
           "`--attach <file>` (repeatable, with `--as-file-pointer`) copies each file into a folder beside the prompt file and sends `Read and follow <path> (attached: <copy>, ...)`; the result lists the copies in `attachments`.",
-          "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing."
+          "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing.",
+          "On a chat tab, submit sends an ACP prompt and returns sequenceName=acp, enter=none, operationId and acp-receipt delivery evidence; a prompt sent while the agent works is queued and sent next. Do not blindly resend after a lost response."
         ]
       },
       "panels resume": {
@@ -17707,7 +17727,8 @@
         "notes": [
           "If blocked is present, do not assume success. Use blocked.suggestedCommand or inspect `panels screen`.",
           "If stopped is true, the panel's terminal is not running (for example after a Pane restart); run nextCommand (`panels resume`) instead of waiting again.",
-          "The default timeout and screen are intentionally small for agent context safety."
+          "The default timeout and screen are intentionally small for agent context safety.",
+          "On a chat tab, status comes from the host ACP session (a turn that ended is ready, a pending approval or question is blocked) and the screen field has source=acpTranscript: transcript text, not a terminal screen."
         ]
       },
       "panels last-message": {
@@ -17776,6 +17797,23 @@
             "value": "<command>",
             "required": false,
             "description": "Custom terminal command to launch instead of a built-in agent."
+          },
+          {
+            "name": "--chat",
+            "required": false,
+            "description": "Open --agent claude or codex as a chat tab (ACP, no terminal) instead of a terminal tab. Needs chat tabs on in Settings > Advanced."
+          },
+          {
+            "name": "--agent-farm",
+            "value": "<profile>",
+            "required": false,
+            "description": "Start this Agent Farm profile in a chat tab; Agent Farm prints its ACP launch (agent-farm run --print-acp)."
+          },
+          {
+            "name": "--arg",
+            "value": "<key=value>",
+            "required": false,
+            "description": "A launch argument for --agent-farm; repeatable."
           },
           {
             "name": "--title",
@@ -17885,7 +17923,8 @@
           "Panels share the existing Pane's worktree and branch.",
           "`panels create` is for visible helper/reviewer tabs, not the agent's default private delegation mechanism.",
           "For agent-created panels, prefer --source agent or --no-focus to avoid stealing focus from the user or implementation tab.",
-          "With --tool-command, --agent names the agent the command runs (a wrapper such as `agent-farm run`): Pane launches the command unchanged and treats the panel as that agent. Without --agent, Pane detects Claude Code, Codex and Cursor from the foreground process or the agent's screen, and --wait-ready waits for the detected agent's input box; a command that never shows a supported agent is not ready and nothing is typed into it."
+          "With --tool-command, --agent names the agent the command runs (a wrapper such as `agent-farm run`): Pane launches the command unchanged and treats the panel as that agent. Without --agent, Pane detects Claude Code, Codex and Cursor from the foreground process or the agent's screen, and --wait-ready waits for the detected agent's input box; a command that never shows a supported agent is not ready and nothing is typed into it.",
+          "`--chat` or `--agent-farm` creates a chat tab: --initial-input is its first prompt, sent once when the conversation starts; --wait-ready waits for the agent to start. `panels submit`, `wait`, `screen`, `output`, `last-message`, `report` and `resume` work on chat tabs; `panels input` and `submit-composer` do not."
         ]
       },
       "panels open": {
@@ -17975,7 +18014,7 @@
       "panels submit-composer": {
         "name": "panels submit-composer",
         "summary": "Submit an agent composer using the panel-appropriate key sequence.",
-        "details": "Use this after sending text into an agent composer. Auto uses Tab to queue while Codex is working and Enter when ready; Pane verifies that the text left the composer.",
+        "details": "Use this after sending text into an agent composer. Auto uses Tab to queue while Codex is working and Enter when ready; Pane verifies that the text left the composer. A chat tab has no composer to submit: it fails with CHAT_TAB_NO_TERMINAL; use panels submit.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -20059,8 +20098,8 @@
       },
       "sessions pause": {
         "name": "sessions pause",
-        "summary": "Pause a Session: stop its chat and the tabs of every Pane in it, keeping their conversations.",
-        "details": "Pauses a Session's chat and the terminal tabs of every Pane in it that is not archived, until `sessions resume` resumes them. A Session reads as paused (`sessions get` `session.paused`) while its chat and all of its Panes are. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
+        "summary": "Pause a Session: stop the terminal tabs of its chat and every Pane in it, keeping their conversations. Chat tabs keep running.",
+        "details": "Pauses the terminal tabs of a Session's chat and of every Pane in it that is not archived; a chat tab can't pause yet, so its agent keeps running and the result counts it in `chatTabsNotPaused`, until `sessions resume` resumes them. A Session reads as paused (`sessions get` `session.paused`) while its chat and all of its Panes are. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [

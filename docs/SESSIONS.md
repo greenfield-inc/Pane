@@ -15,6 +15,19 @@ agent; a name you type or set later is kept. Each new Session opens as one Pane
 Chat and can be renamed later from the optional read-only overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
+With [chat tabs](CHAT_TABS.md) on (Settings → Advanced → Chat tabs), a new Claude
+or Codex Session runs its orchestrator in a chat tab instead of a terminal, from
+the plain agent or the Session's `agent-farm run <profile>` launch, and sends its
+opening prompt once. Like every chat, finished turns fold to one row. A worker
+Pane shows up as one line with **Open** only when it finished, reported or is
+asking the person in the latest turn; the sidebar lists the rest. Workers the orchestrator
+starts stay terminal tabs. Agent Farm's standard resume template
+(`{command} --resume {sessionId}`, which the dialog saves) doesn't stop a chat,
+since a chat reopens through ACP. Sessions that resume or promote a terminal
+conversation, run in WSL, use a truly custom resume command or a wrapper launch,
+and Cursor Sessions, keep their terminal, and the Session's overview says why. A
+Session keeps the kind of tab it started with.
+
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
 a **Machine** picker sits between them. It starts on the machine you last
@@ -656,7 +669,13 @@ The daemon and Electron IPC channels are:
 `orchestration-sessions:associate`, `orchestration-sessions:detach`, and
 `orchestration-sessions:overview`.
 
-Selectors accept a stable Session ID or an exact Session name. The existing
+Selectors accept a stable Session ID or an exact Session name. Phone apps
+released before chat tabs crash on a tab kind they don't know, so
+`orchestration-sessions:get` returns a Session whose orchestrator is a chat tab
+only to a client that passes `{ chatTabs: true }` as a second argument (desktop,
+the PWA and current phone apps do). Any other client gets
+`CHAT_TAB_CLIENT_OUTDATED`, which says to update Pane on the phone; `panels:list`
+leaves chat tabs out for those clients in the same way. The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy
 conversation.
 
@@ -859,8 +878,11 @@ bulk forms skip paused tabs.
 Pause stops a tab's process the way quitting Pane does, without asking, and
 keeps its panel and conversation: `runpane panels pause --panel <panel-id>
 --yes`, `runpane panes pause --pane <pane-id> --yes`, or `runpane sessions
-pause --session <session-id>` for the Session's chat and every Pane in it. A
-paused tab stays stopped through clicks, app restarts and updates until
+pause --session <session-id>` for the terminal tabs of the Session's chat and
+every Pane in it. A chat tab can't pause yet: its agent keeps running, the
+result counts it in `chatTabsNotPaused` and says so, and `panels pause` refuses
+one. A Session whose orchestrator is a chat tab therefore never reads as paused.
+A paused tab stays stopped through clicks, app restarts and updates until
 `runpane panels resume --panel <panel-id>`, `runpane panes resume --pane
 <pane-id> --yes` or `runpane sessions resume --session <session-id>` restarts
 it in its conversation. The watch reports each paused tab once as
