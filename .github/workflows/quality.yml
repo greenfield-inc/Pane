@@ -82,6 +82,9 @@ jobs:
     - name: Run frontend unit tests
       run: CI=1 pnpm --filter frontend test
 
+    - name: Run Pane Cloud contract tests
+      run: pnpm --filter pane-cloud-contract test
+
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
     # failed so it never hides behind them.
