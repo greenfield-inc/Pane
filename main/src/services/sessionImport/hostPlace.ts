@@ -89,7 +89,7 @@ export function registerHostPlacementCommands(
     const chunk = decodeBoundary({ uploadId, offset, base64 }, uploadChunkSchema);
     return uploads.append(chunk.uploadId, chunk.offset, chunk.base64);
   });
-  registry.register(HOST_PLACEMENT_CHANNELS.place, (request: PaneCommandValue): { jobId: string } => {
+  registry.register(HOST_PLACEMENT_CHANNELS.place, (request: PaneCommandValue) => {
     const placement = decodeBoundary(request, placementSchema);
     const jobId = randomUUID();
     const landed: string[] = [];
@@ -130,8 +130,9 @@ export function registerHostPlacementCommands(
  * files put back, the repository's setup script run once, and its chats resumed by id as tabs of
  * one adopted Pane. Nothing is pushed anywhere. A branch already checked out here is left alone.
  */
-export async function placeMovedWorkspace(placement: HostWorkspacePlacement, port: HostPlacementPort): Promise<HostPlacementResult> {
-  const base = { name: placement.name, chats: [] as ImportSessionResult[] };
+async function placeMovedWorkspace(placement: HostWorkspacePlacement, port: HostPlacementPort): Promise<HostPlacementResult> {
+  const chats: ImportSessionResult[] = [];
+  const base = { name: placement.name, chats };
   try {
     const step = (text: string) => port.onStep?.(text);
     await checkBranchName(placement.branch);
@@ -194,7 +195,7 @@ export async function placeMovedWorkspace(placement: HostWorkspacePlacement, por
     }
 
     step('Running the setup script');
-    const setup = await runSetup(repo, worktree, placement, port);
+    const setup = await runSetup(repo, worktree, placement);
 
     step('Resuming the chats');
     const staging = fs.mkdtempSync(path.join(port.paneDir, 'session-import-staging-'));
@@ -253,7 +254,7 @@ async function findOrCloneRepo(placement: HostWorkspacePlacement, port: HostPlac
 }
 
 /** `host/owner/name`, lowercased, for comparing remote URLs written different ways. */
-export function repoIdentity(url: string): string | undefined {
+function repoIdentity(url: string): string | undefined {
   const trimmed = url.trim().replace(/\/+$/u, '').replace(/\.git$/u, '');
   const scp = /^[^@/]+@([^:/]+):(.+)$/u.exec(trimmed);
   if (scp) return `${scp[1]}/${scp[2]}`.toLowerCase();
@@ -308,19 +309,20 @@ async function placeBranch(repoPath: string, branch: string, tip: string, machin
   return false;
 }
 
-async function runSetup(repo: HostRepo, worktree: string, placement: HostWorkspacePlacement, port: HostPlacementPort): Promise<HostPlacementResult['setup']> {
+async function runSetup(repo: HostRepo, worktree: string, placement: HostWorkspacePlacement): Promise<HostPlacementResult['setup']> {
   const detected = repo.buildScript ? undefined : await detectProjectConfig(worktree, process.platform === 'darwin' ? 'macos' : 'linux');
   const script = repo.buildScript || detected?.setup;
   if (!script?.trim()) return undefined;
   const source = repo.buildScript ? 'Project Settings' : detected?.source ?? 'config';
-  const env = {
+  // Conductor's own variables, which its setup scripts read.
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     PANE_WORKSPACE_PATH: worktree,
     CONDUCTOR_WORKSPACE_NAME: placement.name,
     CONDUCTOR_WORKSPACE_PATH: worktree,
     CONDUCTOR_ROOT_PATH: repo.path,
-    ...(placement.defaultBranch ? { CONDUCTOR_DEFAULT_BRANCH: placement.defaultBranch } : {}),
   };
+  if (placement.defaultBranch) env.CONDUCTOR_DEFAULT_BRANCH = placement.defaultBranch;
   const shell = process.env.SHELL || '/bin/sh';
   return new Promise(resolve => {
     execFile(shell, ['-c', script], { cwd: worktree, env, timeout: SETUP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {

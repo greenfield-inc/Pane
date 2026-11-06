@@ -35,7 +35,7 @@ import { posixJoin } from '../utils/wslUtils';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { ProjectEnvironment } from '../utils/pathResolver';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 
 // Internal schema interfaces — NOT exported
 interface PaneJsonSchema {
@@ -83,7 +83,7 @@ const conductorSettingsSchema = boundary.object({
   scripts: boundary.optional(boundary.object({
     setup: boundary.optional(boundary.string),
     archive: boundary.optional(boundary.string),
-    run: boundary.optional(boundary.union(boundary.string, boundary.record(conductorActionSchema))),
+    run: boundary.optional(boundary.json),
     run_mode: boundary.optional(boundary.enumeration('concurrent', 'nonconcurrent')),
   })),
 });
@@ -205,11 +205,10 @@ function parseConductorJson(content: string, source: string): DetectedProjectCon
  */
 function parseConductorSettings(content: string, source: string): DetectedProjectConfig | null {
   const scripts = decodeBoundary(parseToml(content), conductorSettingsSchema).scripts;
-  let run: string | undefined;
-  if (typeof scripts?.run === 'string') {
-    run = scripts.run;
-  } else if (scripts?.run) {
-    const actions = Object.values(scripts.run).filter(action => action.command && !action.hide);
+  let run = decodeOptionalBoundary(scripts?.run, boundary.string);
+  const named = run === undefined ? decodeOptionalBoundary(scripts?.run, boundary.record(conductorActionSchema)) : undefined;
+  if (named) {
+    const actions = Object.values(named).filter(action => action.command && !action.hide);
     const chosen = actions.find(action => action.default) ?? actions[0];
     if (chosen?.command) run = [chosen.command, ...(chosen.args ?? [])].join(' ');
   }

@@ -16,7 +16,7 @@ import {
   type PlacementFile,
 } from '../../../../shared/types/conductorMove';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { locateNativeSession } from '../../../../packages/runpane/src/nativeSession';
 import { readConductorWorkspaces, type ConductorWorkspace } from './sources/conductor';
 import type { ReaderContext } from './sources/types';
@@ -32,7 +32,7 @@ const WIP_REF = 'refs/pane-import/wip';
 /** The chosen machine, reached through its saved connection. */
 export interface MoveTarget {
   label: string;
-  invoke(channel: string, args: unknown[]): Promise<unknown>;
+  invoke(channel: string, args: unknown[]): Promise<JsonValue | undefined>;
 }
 
 /** A workspace with what packing it needs, beyond what the dialog shows. */
@@ -192,8 +192,17 @@ async function moveOne(workspace: InspectedWorkspace, options: MoveOptions): Pro
         thin = false;
         continue;
       }
-      const { needsFullBundle: _full, ...rest } = result;
-      return { key: view.key, ...rest, chats: [...rest.chats, ...chats.flatMap(chat => chat.skipped ? [chat.skipped] : [])] };
+      return {
+        key: view.key,
+        name: result.name,
+        outcome: result.outcome,
+        paneId: result.paneId,
+        paneName: result.paneName,
+        worktreePath: result.worktreePath,
+        reason: result.reason,
+        setup: result.setup,
+        chats: [...result.chats, ...chats.flatMap(chat => chat.skipped ? [chat.skipped] : [])],
+      };
     }
   } catch (error) {
     return failed(`Pane couldn't send it to ${options.target.label}: ${reasonOf(error)}. Nothing on this Mac changed. Press Move to try again.`);

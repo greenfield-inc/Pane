@@ -78,6 +78,7 @@ import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgr
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
+import type { ConductorMoveProgress, ConductorMoveRequest, ConductorMoveResult, ConductorMoveScan } from '../../../shared/types/conductorMove';
 import type {
   ProjectDashboardData,
   ProjectDashboardSessionUpdateEvent,
@@ -232,6 +233,13 @@ interface ElectronAPI {
     scan: () => Promise<SessionImportScan>;
     run: (keys: string[]) => Promise<SessionImportRunResult>;
     progress: () => Promise<SessionImportProgress>;
+  };
+
+  // Move Conductor workspaces from this computer to a saved machine; always runs on this computer
+  conductorMove: {
+    scan: () => Promise<ConductorMoveScan>;
+    run: (request: ConductorMoveRequest) => Promise<ConductorMoveResult>;
+    progress: () => Promise<ConductorMoveProgress>;
   };
 
   // Leaderboard opt-in and submission

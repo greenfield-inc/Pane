@@ -153,6 +153,9 @@ async function move(target: MoveTarget) {
   return moveWorkspaces({ workspaces: [...scan.workspaces.values()], target, machineName: 'macbook', paneDir: path.join(macHome, '.pane'), env: { HOME: macHome }, tempDir: root });
 }
 
+// Real git on both sides, and the Mac polls each placement once a second.
+const MOVE_TIMEOUT_MS = 30_000;
+
 describe('moving Conductor workspaces to another machine', () => {
   it('lands each workspace as a Pane with its unpushed commit, uncommitted files and chats, and a second run adds nothing', async () => {
     const warsaw = workspace('warsaw', 'me/warsaw');
@@ -206,7 +209,7 @@ describe('moving Conductor workspaces to another machine', () => {
 
     expect(again.results.map(entry => [entry.name, entry.outcome])).toEqual([['warsaw', 'already there'], ['tokyo', 'already there']]);
     expect(host.tabs).toHaveLength(2);
-  });
+  }, MOVE_TIMEOUT_MS);
 
   it('sends the whole branch when the machine lacks commits the Mac thinks the remote has', async () => {
     const folder = workspace('lisbon', 'me/lisbon');
@@ -229,5 +232,5 @@ describe('moving Conductor workspaces to another machine', () => {
     expect(fs.readFileSync(path.join(placed, 'base.txt'), 'utf8')).toBe('on a branch the remote later deleted\n');
     // A workspace with no chats still becomes a Pane, with an agent tab that isn't started.
     expect(host.tabs.map(tab => [tab.checkout, tab.resume])).toEqual([[placed, undefined]]);
-  });
+  }, MOVE_TIMEOUT_MS);
 });

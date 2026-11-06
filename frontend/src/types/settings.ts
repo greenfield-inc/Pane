@@ -52,6 +52,7 @@ export type SettingsSettingId =
   | 'session-defaults'
   | 'claude-executable'
   | 'session-import'
+  | 'conductor-move'
   | 'commit-footer'
   | 'git-attribution'
   | 'auto-rename-pr'
