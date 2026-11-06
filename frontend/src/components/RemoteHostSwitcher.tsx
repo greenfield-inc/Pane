@@ -1,8 +1,9 @@
 import type { ReactElement } from 'react';
-import { Plus, Radio, Settings } from 'lucide-react';
+import { Plus, Radio, Settings, SquareTerminal } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { showActionError } from '../stores/errorStore';
+import { getHostTerminalPresentation, openHostTerminal } from '../utils/hostTerminal';
 import type { MachineEntry } from '../utils/machineList';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
 
@@ -50,15 +51,30 @@ export function RemoteHostSwitcher({
     else showActionError(`Could not switch to ${machine.name}`, outcome.error);
   };
 
-  const items: DropdownItem[] = machines.map((machine) => ({
-    id: machine.id,
-    label: <span className="font-medium">{machine.name}</span>,
-    description: machine.subtitle,
-    // A disabled row is dimmed as a whole, so its mark stays solid inside it.
-    leading: <MachineMark os={machine.os} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
-    disabled: switching || unpickable(machine),
-    onClick: () => void pick(machine),
-  }));
+  const openTerminal = async (hostName: string) => {
+    try {
+      await openHostTerminal();
+    } catch (error) {
+      showActionError(`Could not open the terminal on ${hostName}`, error);
+    }
+  };
+
+  const items: DropdownItem[] = machines.map((machine) => {
+    // Only the active host's terminal can open: the window talks to one host at a time.
+    const terminal = machine.active && machine.kind !== 'local'
+      ? getHostTerminalPresentation(machine.profile ?? { label: machine.name })
+      : null;
+    return {
+      id: machine.id,
+      label: <span className="font-medium">{machine.name}</span>,
+      description: machine.subtitle,
+      // A disabled row is dimmed as a whole, so its mark stays solid inside it.
+      leading: <MachineMark os={machine.os} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
+      disabled: switching || unpickable(machine),
+      onClick: () => void pick(machine),
+      action: terminal ? { label: terminal.openLabel, icon: SquareTerminal, onClick: () => void openTerminal(terminal.hostName) } : undefined,
+    };
+  });
   if (allMachines) {
     items.unshift({
       id: ALL_MACHINES_ID,

@@ -1445,6 +1445,31 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     });
   });
 
+  it('starts the shell with the panel\'s own environment variables last, so they win', async () => {
+    vi.stubEnv('BROWSER', 'xdg-open');
+    try {
+      const panel = makePanel('host-shell-env');
+      panel.state.customState = { environmentVars: { BROWSER: 'false', GH_BROWSER: 'false' } };
+      await startTerminal(panel);
+      expect(ptyHost.spawnOptions.at(-1)?.env).toMatchObject({ BROWSER: 'false', GH_BROWSER: 'false', PANE_PANEL_ID: 'host-shell-env' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('reports the shell a terminal runs, and the one a terminal not started yet would run', async () => {
+    const { manager } = await startTerminal(makePanel('shell-report'));
+    const spawnedShell = ptyHost.spawnOptions.at(-1)?.shell;
+    // The default changes later (e.g. the user picks another shell); a running shell stays what it is.
+    const changed = vi.spyOn(ShellDetector, 'getDefaultShell').mockReturnValue({ path: '/usr/bin/fish', name: 'fish', args: [] });
+    try {
+      expect(manager.getShellPath('shell-report')).toBe(spawnedShell);
+      expect(manager.getShellPath('never-started')).toBe('/usr/bin/fish');
+    } finally {
+      changed.mockRestore();
+    }
+  });
+
   it('passes an explicit Claude id literally instead of selecting a different conversation', async () => {
     vi.useFakeTimers();
     try {

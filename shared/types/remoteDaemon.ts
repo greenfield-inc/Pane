@@ -86,6 +86,24 @@ export interface RemoteDaemonClientRecord {
   phoneId?: string;
 }
 
+export type RemoteHostKindIcon = 'server' | 'cloud';
+
+/**
+ * How the app names and draws a saved host, set by whatever created the
+ * profile. Profiles without one are self-hosted remotes.
+ */
+export interface RemoteHostKind {
+  /** Lowercase noun shown after the host name, e.g. "remote host". */
+  label: string;
+  icon: RemoteHostKindIcon;
+}
+
+/** One variable a host's terminal starts with, e.g. BROWSER=false where no browser should open. */
+export interface HostTerminalEnvVar {
+  name: string;
+  value: string;
+}
+
 export interface RemotePaneConnectionProfile {
   id: string;
   label: string;
@@ -101,6 +119,20 @@ export interface RemotePaneConnectionProfile {
    */
   tailnetMachine?: string;
   tailnetDomain?: string;
+  hostKind?: RemoteHostKind;
+  /** Environment the host terminal's shell starts with on this host. Saved unencrypted with the profile: not for secrets. */
+  hostTerminalEnv?: HostTerminalEnvVar[];
+  /**
+   * When Pane signs gh in on this host, keep the token in ~/.config/gh/hosts.yml (owner-only)
+   * instead of the keyring (`gh auth login --insecure-storage`), for a host whose keyring can't be
+   * used without someone at its screen. Absent means gh's default, the keyring.
+   */
+  ghInsecureStorage?: boolean;
+  /**
+   * Where the user signs this host in to GitHub. 'settings': its credentials are managed in this app's
+   * Settings, so a clone that needs a sign-in points there. Absent: sign in on the host itself.
+   */
+  githubSignIn?: 'settings';
 }
 
 export interface RemoteDaemonHostAccess {
@@ -561,6 +593,14 @@ const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportP
   selected: boundary.boolean,
   tailscaleIp: boundary.optional(boundary.nonEmptyString),
 });
+const remoteHostKindSchema: BoundarySchema<RemoteHostKind> = boundary.object({
+  label: boundary.nonEmptyString,
+  icon: boundary.enumeration('server', 'cloud'),
+});
+export const hostTerminalEnvVarSchema: BoundarySchema<HostTerminalEnvVar> = boundary.object({
+  name: boundary.nonEmptyString,
+  value: boundary.string,
+});
 const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
@@ -570,6 +610,10 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
   tunnel: boundary.optional(remoteTunnelSchema),
   tailnetMachine: boundary.optional(boundary.nonEmptyString),
   tailnetDomain: boundary.optional(boundary.nonEmptyString),
+  hostKind: boundary.optional(remoteHostKindSchema),
+  hostTerminalEnv: boundary.optional(boundary.array(hostTerminalEnvVarSchema)),
+  ghInsecureStorage: boundary.optional(boundary.boolean),
+  githubSignIn: boundary.optional(boundary.literal('settings')),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {

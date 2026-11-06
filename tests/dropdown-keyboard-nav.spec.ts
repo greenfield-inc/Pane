@@ -39,7 +39,7 @@ test.describe('Dropdown keyboard navigation', () => {
     await expect(footerAction).toBeFocused();
     await page.keyboard.press('Enter');
 
-    await expect(page.getByText('Add New Repository')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Open Repository' })).toBeVisible();
     await expect(page.getByRole('menu')).toHaveCount(0);
   });
 

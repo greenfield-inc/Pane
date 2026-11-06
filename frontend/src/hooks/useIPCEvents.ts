@@ -4,6 +4,8 @@ import { useErrorStore } from '../stores/errorStore';
 import { usePanelStore } from '../stores/panelStore';
 import { useConfigStore } from '../stores/configStore';
 import { useNavigationStore } from '../stores/navigationStore';
+import { useHostTerminalStore } from '../stores/hostTerminalStore';
+import { getActiveHostId } from '../utils/hostTerminal';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayoutStore';
 import { panelApi } from '../services/panelApi';
@@ -66,6 +68,13 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     useNavigationStore.getState().navigateToSessions();
     await useSessionStore.getState().setActiveSession(null);
     if (!ownsRuntime()) return;
+  }
+  // A terminal opened on the previous host is not this host's. One opened right
+  // after switching (e.g. a sandbox row's Open terminal) already is.
+  if (hostChanged && useHostTerminalStore.getState().hostId !== await getActiveHostId()) {
+    // Leave the view first: with no terminal it would reopen one on the new host.
+    if (useNavigationStore.getState().activeView === 'host-terminal') useNavigationStore.getState().navigateToSessions();
+    useHostTerminalStore.getState().setTerminal(null, null);
   }
   await useConfigStore.getState().fetchConfig(ownsRuntime);
   if (!ownsRuntime()) return;

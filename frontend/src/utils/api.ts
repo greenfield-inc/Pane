@@ -1,12 +1,20 @@
 // Utility for making API calls using Electron IPC
 import type { CreateSessionRequest, Session } from '../types/session';
-import type { Project } from '../types/project';
+import type { CreateProjectRequest, Project } from '../types/project';
+import type {
+  BrowseDirectoriesRequest,
+  BrowseDirectoriesResult,
+  CreateDirectoryRequest,
+  ValidateProjectPathRequest,
+  ValidateProjectPathResult,
+} from '../../../shared/types/hostPaths';
 import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
 import type { LoopInput } from '../../../shared/types/loop';
 import { startOwnPaneCreation } from './ownPaneCreations';
 import type { MissionControlSnapshotRequest } from '../../../shared/types/missionControl';
+import type { HostTerminalOpenRequest, HostTerminalState } from '../../../shared/types/hostTerminal';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -40,6 +48,7 @@ import type {
 import type { ProjectDashboardSessionUpdateEvent, ProjectDashboardUpdateEvent } from '../types/projectDashboard';
 import type { DiffScope, FileDiffRequest } from '../../../shared/types/gitDiff';
 import type { SetupFile, SetupSectionId } from '../../../shared/types/setupTransfer';
+import type { GitHubDeviceLoginStartRequest, GitHubDeviceLoginState } from '../../../shared/types/githubDeviceLogin';
 
 // Type for IPC response
 // oxlint-disable-next-line typescript/no-explicit-any -- Generic type parameter default for flexible API responses
@@ -86,6 +95,13 @@ export class API {
     },
     async set(key: string, value: string): Promise<void> {
       return window.electronAPI.preferences.set(key, value);
+    },
+  };
+
+  static hostTerminal = {
+    async open(request?: HostTerminalOpenRequest): Promise<IPCResponse<HostTerminalState<Session>>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.hostTerminal.open(request);
     },
   };
 
@@ -609,9 +625,15 @@ export class API {
       return window.electronAPI.projects.getActive();
     },
 
-    async create(projectData: Omit<Project, 'id' | 'created_at' | 'updated_at'>) {
+    async create(projectData: CreateProjectRequest) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.projects.create(projectData);
+    },
+
+    /** Checks a typed path on the active host without creating anything. */
+    async validatePath(request: ValidateProjectPathRequest): Promise<IPCResponse<ValidateProjectPathResult>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('projects:validate-path', request);
     },
 
     async activate(projectId: string) {
@@ -647,9 +669,40 @@ export class API {
 
   // Git operations
   static git = {
-    async cloneRepo(url: string, destDir: string) {
+    async cloneRepo(url: string, destDir: string, options?: { hostLabel?: string }) {
       if (!isElectron()) throw new Error('Electron API not available');
-      return window.electronAPI.git.cloneRepo(url, destDir);
+      return window.electronAPI.git.cloneRepo(url, destDir, options);
+    },
+  };
+
+  // Folders on the active host (the daemon's filesystem, not this computer's)
+  static hostFs = {
+    async browseDirectories(request: BrowseDirectoriesRequest): Promise<IPCResponse<BrowseDirectoriesResult>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('fs:browse-directories', request);
+    },
+
+    async createDirectory(request: CreateDirectoryRequest): Promise<IPCResponse<{ path: string }>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('fs:create-directory', request);
+    },
+  };
+
+  // Signing the active host in to GitHub with gh's device flow (runs on the host's daemon)
+  static githubDeviceLogin = {
+    async start(request: GitHubDeviceLoginStartRequest): Promise<IPCResponse<GitHubDeviceLoginState>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('github:device-login-start', request);
+    },
+
+    async status(): Promise<IPCResponse<GitHubDeviceLoginState>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('github:device-login-status');
+    },
+
+    async cancel(): Promise<IPCResponse<GitHubDeviceLoginState>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.invoke('github:device-login-cancel');
     },
   };
 
