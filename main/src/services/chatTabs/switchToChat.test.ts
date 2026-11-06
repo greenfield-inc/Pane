@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ToolPanel, TerminalPanelState } from '../../../../shared/types/panels';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
-import { switchToChat, terminalRestored, type SessionAdoption, type SwitchToChatPorts } from './switchToChat';
+import { switchToChat, terminalConversation, terminalRestored, type SessionAdoption, type SwitchToChatPorts } from './switchToChat';
 import { withSessionFolderAccess } from '../agents/sessionFolderAccess';
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 
@@ -207,5 +207,17 @@ describe('whether the terminal came back after a failed switch', () => {
     expect(terminalRestored({ ok: false, reason: { code: 'agent-not-ready', message: 'not ready' }, state: { running: false } })).toBe(false);
     expect(terminalRestored({ ok: false, reason: { code: 'command-exited', message: 'exited' }, state: { running: true } })).toBe(false);
     expect(terminalRestored({ ok: false })).toBe(false);
+  });
+});
+
+describe('which conversation a terminal is running (review F-9)', () => {
+  it('is the ID Pane started or resumed it with, or the one its launch reported', () => {
+    expect(terminalConversation({ agentType: 'claude', agentSessionId: 'conv-a' }, 'reported')).toEqual({ id: 'conv-a' });
+    expect(terminalConversation({ agentType: 'claude' }, 'agent-farm-id')).toEqual({ id: 'agent-farm-id' });
+  });
+
+  it('is never guessed for a Codex terminal that has reported none, even when another conversation is active in its folder', () => {
+    expect(terminalConversation({ agentType: 'codex' }, undefined)).toEqual({ problem: expect.stringContaining('Codex reports its conversation ID only when it exits') });
+    expect(terminalConversation({ agentType: 'claude' }, undefined)).toEqual({ problem: 'this terminal has no saved conversation ID' });
   });
 });

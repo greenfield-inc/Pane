@@ -27,6 +27,17 @@ export function terminalRestored(readiness: TerminalReadiness | undefined): bool
   return readiness.reason?.code === 'agent-not-ready' && readiness.state?.running === true;
 }
 
+/**
+ * The conversation a terminal is running, only from an ID tied to that terminal: the one Pane
+ * started or resumed it with, or the one its launch reported (Agent Farm). Pane never infers it
+ * from the folder, since another terminal there can be writing a different conversation.
+ */
+export function terminalConversation(state: Pick<TerminalPanelState, 'agentType' | 'agentSessionId'>, reportedId: string | undefined): { id: string } | { problem: string } {
+  const id = state.agentSessionId ?? reportedId;
+  if (id) return { id };
+  return { problem: state.agentType === 'codex' ? 'Codex reports its conversation ID only when it exits, and this terminal has not reported one yet' : 'this terminal has no saved conversation ID' };
+}
+
 /** What a switch needs from the rest of Pane; ipc/chatTabs.ts wires the real ones. */
 export interface SwitchToChatPorts {
   chatTabsEnabled(): boolean;

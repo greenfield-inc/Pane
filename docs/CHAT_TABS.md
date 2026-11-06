@@ -46,10 +46,12 @@ Nothing is touched when:
   Session's Pane keeps its read-only Session folder access (`--settings` there,
   `claudeCode.options.settings` here). Any other flag or a wrapper command is
   refused by name;
-- Pane can't tell which conversation the terminal is running. A Codex terminal
-  usually has no saved ID, because Codex prints it only on exit, so Pane reads it
-  from Codex's records: the one interactive thread in this folder active since
-  the terminal started. With two in one folder, Pane won't guess.
+- Pane can't tell which conversation the terminal is running. It uses only an
+  ID tied to that terminal: the one Pane started or resumed it with, or the one
+  its launch reported (Agent Farm). It never guesses from the folder, since
+  another terminal there can be writing a different conversation. A running Codex
+  reports its ID only when it exits, so a Codex terminal Pane didn't start with
+  an ID usually can't switch.
 
 Otherwise Pane stops the terminal agent, opens the chat tab and loads the
 conversation with ACP `session/load`, so the history shows, then closes the

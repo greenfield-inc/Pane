@@ -3000,12 +3000,6 @@ export class TerminalPanelManager extends EventEmitter {
     this.serializedBuffers.delete(panelId);
   }
 
-  /** Where and when the panel's current launch started; undefined when no terminal is live. */
-  getLaunchInfo(panelId: string): { cwd: string; startedAt: number } | undefined {
-    const terminal = this.terminals.get(panelId);
-    return terminal?.launchCommandWrittenAt ? { cwd: terminal.launchCwd, startedAt: terminal.launchCommandWrittenAt } : undefined;
-  }
-
   /** Whether the panel's agent is mid-turn, read from its screen first (the sidebar holds "working" after output). */
   async isAgentMidTurn(panelId: string): Promise<boolean> {
     const terminal = this.terminals.get(panelId);

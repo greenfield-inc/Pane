@@ -15,8 +15,7 @@ import { chatTabEnv } from '../services/chatTabs/launch';
 import { adapterEntry, adapterFileForPlainNode, installAdapter } from '../services/agentChat/adapterSetup';
 import { findExecutableInPath } from '../utils/shellPath';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import { switchToChat, terminalRestored, type SwitchToChatPorts } from '../services/chatTabs/switchToChat';
-import { findCodexThread } from '../services/agents/codexThreads';
+import { switchToChat, terminalConversation, terminalRestored, type SwitchToChatPorts } from '../services/chatTabs/switchToChat';
 import { getAppDirectory } from '../utils/appDirectory';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 
@@ -149,17 +148,9 @@ function switchPorts(services: AppServices, registry: PaneCommandRegistry): Swit
     terminal: {
       busy: id => terminalPanelManager.isAgentMidTurn(id),
       conversationId: async id => {
-        const panel = panelManager.getPanel(id);
         // SAFETY: Switch to chat only asks this of terminal panels, which persist TerminalPanelState.
-        const state = panel?.state.customState as TerminalPanelState | undefined;
-        const known = state?.agentSessionId ?? terminalPanelManager.getLaunchSessionId(id);
-        if (known) return { id: known };
-        const launch = terminalPanelManager.getLaunchInfo(id);
-        if (!panel || !state || state.agentType !== 'codex' || !launch) return { problem: 'this terminal has no saved conversation' };
-        const found = await findCodexThread(launch.cwd, launch.startedAt);
-        // Saved, so a restart of this terminal resumes this conversation instead of opening Codex's picker.
-        if ('id' in found) await panelManager.updatePanel(id, { state: { ...panel.state, customState: { ...state, agentSessionId: found.id } } });
-        return found;
+        const state = (panelManager.getPanel(id)?.state.customState ?? {}) as TerminalPanelState;
+        return terminalConversation(state, terminalPanelManager.getLaunchSessionId(id));
       },
       stop: id => terminalPanelManager.stopForPromotion(id),
       restart: async id => {
