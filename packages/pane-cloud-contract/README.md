@@ -98,6 +98,7 @@ Bearer token from device sign-in on every route except the two sign-in calls.
 | Share with team | `PUT /v1/machines/:machineId/sharing` | Lists the machine in the team directory; admits nobody |
 | Leave a connection code | `POST /v1/machines/:machineId/connection-codes` | Owner only, shared machines only, for one teammate, expires within 15 minutes |
 | Claim a connection code | `POST /v1/machines/:machineId/connection-codes/claim` | The named teammate, once |
+| Beta end date | `GET /v1/beta` | Public, no token. The end date E, notice from E−30 days, push windows from E−14, the phase, the announcement link and the own-AWS template link. From E−14 no machine can be created and a start runs for one 60-minute push window (`pushWindowEndsAt`); from E nothing starts |
 | Billing | `GET /v1/billing` | The team's plan, seat price, founding-price lock, status and dates |
 | Team | `GET /v1/team` | Members (each a seat) and pending invites |
 | Invite | `POST /v1/team/invites` | Owner only, by GitHub login |

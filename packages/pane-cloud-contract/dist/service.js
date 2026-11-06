@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.serviceRoutes = exports.ClaimedConnectionCode = exports.ConnectionCodeHandoff = exports.CONNECTION_CODE_MAX_SECONDS = exports.SharedMachine = exports.Team = exports.TeamMember = exports.BillingStatus = exports.SubmittedOperation = exports.USER_OPERATIONS = exports.UserOperationRequest = exports.ActionLogEntry = exports.LoggedOperation = exports.Machine = exports.MachineUsage = exports.MachineState = exports.DeviceTokenResult = exports.Account = exports.Invite = exports.DeviceCode = void 0;
+exports.serviceRoutes = exports.ClaimedConnectionCode = exports.ConnectionCodeHandoff = exports.CONNECTION_CODE_MAX_SECONDS = exports.SharedMachine = exports.Team = exports.TeamMember = exports.BillingStatus = exports.BetaStatus = exports.BETA_PUSH_WINDOW_MINUTES = exports.BETA_PUSH_WINDOW_DAYS = exports.BETA_NOTICE_DAYS = exports.SubmittedOperation = exports.USER_OPERATIONS = exports.UserOperationRequest = exports.ActionLogEntry = exports.LoggedOperation = exports.Machine = exports.MachineUsage = exports.MachineState = exports.DeviceTokenResult = exports.Account = exports.Invite = exports.DeviceCode = void 0;
 exports.createServiceClient = createServiceClient;
 exports.parseUserOperation = parseUserOperation;
 /**
@@ -99,6 +99,8 @@ exports.Machine = zod_1.z
     usage: exports.MachineUsage.nullable(),
     /** Listed in the team's shared-machine directory. Listing admits nobody by itself. */
     shared: zod_1.z.boolean(),
+    /** In the beta's push-window phase, when this start's window ends and the machine stops; null otherwise. */
+    pushWindowEndsAt: Timestamp.nullable(),
     createdAt: Timestamp,
     updatedAt: Timestamp,
 })
@@ -141,6 +143,34 @@ exports.USER_OPERATIONS = ['update_pane', 'collect_diagnostics'];
 const UserOperationName = zod_1.z.enum(exports.USER_OPERATIONS);
 /** What requestOperation accepts before parseUserOperation checks it. */
 exports.SubmittedOperation = zod_1.z.object({ operation: zod_1.z.string(), parameters: zod_1.z.record(zod_1.z.string(), zod_1.z.json()) }).strict();
+// ---------- End of beta (D-7, T2) ----------
+/** Banners and email start this many days before the end date. */
+exports.BETA_NOTICE_DAYS = 30;
+/** From this many days before the end date, machines start only for a push window. */
+exports.BETA_PUSH_WINDOW_DAYS = 14;
+/** How long a machine runs when started inside the push-window phase. */
+exports.BETA_PUSH_WINDOW_MINUTES = 60;
+/**
+ * The public end of the beta, as the service tells the app. Phases follow from `endsAt` and now:
+ * `open` (no date, or more than 30 days out), `notice` (banners and email), `push_windows` (no new
+ * machines; a start runs for one push window) and `ended` (machines don't start; disks are deleted
+ * only after Parsa approves, as a logged service action).
+ */
+exports.BetaStatus = zod_1.z
+    .object({
+    endsAt: Timestamp.nullable(),
+    /** endsAt minus 30 days; null while no end date is set. */
+    noticeAt: Timestamp.nullable(),
+    /** endsAt minus 14 days; null while no end date is set. */
+    pushWindowsFrom: Timestamp.nullable(),
+    phase: zod_1.z.enum(['open', 'notice', 'push_windows', 'ended']),
+    pushWindowMinutes: zod_1.z.literal(exports.BETA_PUSH_WINDOW_MINUTES),
+    /** The public notice of the end date. */
+    announcementUrl: zod_1.z.url().nullable(),
+    /** The one-click template that runs the same machine in the user's own AWS account (T1). */
+    ownAwsTemplateUrl: zod_1.z.url().nullable(),
+})
+    .strict();
 // ---------- Billing ----------
 exports.BillingStatus = zod_1.z
     .object({
@@ -252,6 +282,7 @@ exports.serviceRoutes = {
         status: 201,
     }),
     claimConnectionCode: (0, http_1.route)({ id: 'service.claimConnectionCode', method: 'POST', path: '/v1/machines/:machineId/connection-codes/claim', auth: true, body: zod_1.z.object({}).strict(), response: exports.ClaimedConnectionCode }),
+    getBeta: (0, http_1.route)({ id: 'service.getBeta', method: 'GET', path: '/v1/beta', auth: false, response: exports.BetaStatus }),
     getBilling: (0, http_1.route)({ id: 'service.getBilling', method: 'GET', path: '/v1/billing', auth: true, response: exports.BillingStatus }),
     getTeam: (0, http_1.route)({ id: 'service.getTeam', method: 'GET', path: '/v1/team', auth: true, response: exports.Team }),
     createInvite: (0, http_1.route)({ id: 'service.createInvite', method: 'POST', path: '/v1/team/invites', auth: true, body: zod_1.z.object({ githubLogin: GithubLogin }).strict(), response: exports.Invite, status: 201 }),
@@ -280,6 +311,7 @@ function createServiceClient(config) {
         setSharing: (machineId, shared) => (0, http_1.callRoute)(config, r.setSharing, { params: { machineId }, body: { shared } }),
         leaveConnectionCode: (machineId, handoff) => (0, http_1.callRoute)(config, r.leaveConnectionCode, { params: { machineId }, body: handoff }),
         claimConnectionCode: (machineId) => (0, http_1.callRoute)(config, r.claimConnectionCode, { params: { machineId }, body: {} }),
+        getBeta: () => (0, http_1.callRoute)(config, r.getBeta),
         getBilling: () => (0, http_1.callRoute)(config, r.getBilling),
         getTeam: () => (0, http_1.callRoute)(config, r.getTeam),
         createInvite: (githubLogin) => (0, http_1.callRoute)(config, r.createInvite, { body: { githubLogin } }),

@@ -46,6 +46,32 @@ async function startServiceStub(options) {
             if (match(key))
                 codes.delete(key);
     };
+    const DAY = 86_400_000;
+    const beta = () => {
+        const ends = options.beta ? Date.parse(options.beta.endsAt) : null;
+        const nowMs = now().getTime();
+        const at = (ms) => (ms === null ? null : new Date(ms).toISOString());
+        const noticeAt = ends === null ? null : ends - service_1.BETA_NOTICE_DAYS * DAY;
+        const pushFrom = ends === null ? null : ends - service_1.BETA_PUSH_WINDOW_DAYS * DAY;
+        let phase = 'open';
+        if (ends !== null && noticeAt !== null && pushFrom !== null) {
+            if (nowMs >= ends)
+                phase = 'ended';
+            else if (nowMs >= pushFrom)
+                phase = 'push_windows';
+            else if (nowMs >= noticeAt)
+                phase = 'notice';
+        }
+        return {
+            endsAt: at(ends),
+            noticeAt: at(noticeAt),
+            pushWindowsFrom: at(pushFrom),
+            phase,
+            pushWindowMinutes: service_1.BETA_PUSH_WINDOW_MINUTES,
+            announcementUrl: options.beta?.announcementUrl ?? null,
+            ownAwsTemplateUrl: options.beta?.ownAwsTemplateUrl ?? null,
+        };
+    };
     const byId = (accountId) => [...accounts.values()].find((r) => r.account.id === accountId);
     const view = (record) => ({
         ...record.account,
@@ -193,6 +219,10 @@ async function startServiceStub(options) {
             if (record.account.access !== 'invited' || !record.account.teamId) {
                 throw new errors_1.CloudApiError('not_invited', "You're on the list. Pane Cloud is invite-only for now.", 'Wait for your invite, or ask a team owner to invite your GitHub login.');
             }
+            const { phase } = beta();
+            if (phase === 'push_windows' || phase === 'ended') {
+                throw new errors_1.CloudApiError('invalid_state', 'The Pane Cloud beta is ending, so no new machines can be created.', 'Use the own-AWS template from GET /v1/beta to run a machine in your own account.');
+            }
             if ([...machines.values()].some((m) => m.ownerAccountId === record.account.id && m.state !== 'deleted')) {
                 throw new errors_1.CloudApiError('seat_has_machine', 'Your seat already has a machine.', 'Open your existing machine, or delete it before creating another.');
             }
@@ -208,6 +238,7 @@ async function startServiceStub(options) {
                 limits: { vcpu: fleet_1.MACHINE_LIMITS.vcpu, memoryMiB: fleet_1.MACHINE_LIMITS.memoryMiB, diskGiB: fleet_1.MACHINE_LIMITS.diskGiB, dailyCpuSeconds: fleet_1.MACHINE_LIMITS.dailyCpuSeconds, monthlyEgressBytes: fleet_1.MACHINE_LIMITS.monthlyEgressBytes },
                 usage: null,
                 shared: false,
+                pushWindowEndsAt: null,
                 createdAt: iso(),
                 updatedAt: iso(),
                 cpuSecondsUsed: 0,
@@ -224,7 +255,14 @@ async function startServiceStub(options) {
             const record = caller(token);
             const machine = ownMachine(record, params.machineId ?? '');
             requireState(machine, 'stopped', 'Start');
+            const { phase } = beta();
+            if (phase === 'ended')
+                throw new errors_1.CloudApiError('invalid_state', 'The Pane Cloud beta has ended, so machines no longer start.', 'Contact support if you still need work from this machine.');
             setState(machine, 'running', null);
+            if (phase === 'push_windows') {
+                machine.pushWindowEndsAt = new Date(now().getTime() + service_1.BETA_PUSH_WINDOW_MINUTES * 60_000).toISOString();
+                return { machine: publicMachine(machine), operation: log(machine, 'start', record, `You started this machine for a ${service_1.BETA_PUSH_WINDOW_MINUTES}-minute push window before the beta ends.`) };
+            }
             return { machine: publicMachine(machine), operation: log(machine, 'start', record, 'You started this machine.') };
         }),
         (0, server_1.bind)(r.stopMachine, ({ token, params }) => {
@@ -233,6 +271,7 @@ async function startServiceStub(options) {
             requireState(machine, 'running', 'Stop');
             log(machine, 'prepare_to_stop', 'service', 'Let Pane finish writing before the stop.');
             setState(machine, 'stopped', 'user');
+            machine.pushWindowEndsAt = null;
             return { machine: publicMachine(machine), operation: log(machine, 'stop', record, 'You stopped this machine.') };
         }),
         (0, server_1.bind)(r.deleteMachine, ({ token, params }) => {
@@ -310,6 +349,7 @@ async function startServiceStub(options) {
             }
             return { machineId: machine.id, code: handoff.code, tailnetHostname: machine.tailnet.hostname, expiresAt: handoff.expiresAt };
         }),
+        (0, server_1.bind)(r.getBeta, () => beta()),
         (0, server_1.bind)(r.getBilling, ({ token }) => {
             const record = caller(token);
             const t = teamOf(record);

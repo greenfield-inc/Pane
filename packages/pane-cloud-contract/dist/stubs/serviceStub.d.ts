@@ -9,6 +9,12 @@ export interface ServiceStubOptions {
     accounts: StubAccount[];
     /** Published Pane versions, oldest first; the last is what create and update_pane install by default. */
     paneVersions?: string[];
+    /** The beta's public end date and its links; omitted, no end date is set. */
+    beta?: {
+        endsAt: string;
+        announcementUrl?: string;
+        ownAwsTemplateUrl?: string;
+    };
     now?: () => Date;
 }
 export interface ServiceStub extends RunningStub {

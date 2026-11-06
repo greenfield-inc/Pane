@@ -107,6 +107,8 @@ export const Machine = z
     usage: MachineUsage.nullable(),
     /** Listed in the team's shared-machine directory. Listing admits nobody by itself. */
     shared: z.boolean(),
+    /** In the beta's push-window phase, when this start's window ends and the machine stops; null otherwise. */
+    pushWindowEndsAt: Timestamp.nullable(),
     createdAt: Timestamp,
     updatedAt: Timestamp,
   })
@@ -159,6 +161,38 @@ const UserOperationName = z.enum(USER_OPERATIONS);
 /** What requestOperation accepts before parseUserOperation checks it. */
 export const SubmittedOperation = z.object({ operation: z.string(), parameters: z.record(z.string(), z.json()) }).strict();
 export type SubmittedOperation = z.infer<typeof SubmittedOperation>;
+
+// ---------- End of beta (D-7, T2) ----------
+
+/** Banners and email start this many days before the end date. */
+export const BETA_NOTICE_DAYS = 30;
+/** From this many days before the end date, machines start only for a push window. */
+export const BETA_PUSH_WINDOW_DAYS = 14;
+/** How long a machine runs when started inside the push-window phase. */
+export const BETA_PUSH_WINDOW_MINUTES = 60;
+
+/**
+ * The public end of the beta, as the service tells the app. Phases follow from `endsAt` and now:
+ * `open` (no date, or more than 30 days out), `notice` (banners and email), `push_windows` (no new
+ * machines; a start runs for one push window) and `ended` (machines don't start; disks are deleted
+ * only after Parsa approves, as a logged service action).
+ */
+export const BetaStatus = z
+  .object({
+    endsAt: Timestamp.nullable(),
+    /** endsAt minus 30 days; null while no end date is set. */
+    noticeAt: Timestamp.nullable(),
+    /** endsAt minus 14 days; null while no end date is set. */
+    pushWindowsFrom: Timestamp.nullable(),
+    phase: z.enum(['open', 'notice', 'push_windows', 'ended']),
+    pushWindowMinutes: z.literal(BETA_PUSH_WINDOW_MINUTES),
+    /** The public notice of the end date. */
+    announcementUrl: z.url().nullable(),
+    /** The one-click template that runs the same machine in the user's own AWS account (T1). */
+    ownAwsTemplateUrl: z.url().nullable(),
+  })
+  .strict();
+export type BetaStatus = z.infer<typeof BetaStatus>;
 
 // ---------- Billing ----------
 
@@ -287,6 +321,7 @@ export const serviceRoutes = {
   }),
   claimConnectionCode: route({ id: 'service.claimConnectionCode', method: 'POST', path: '/v1/machines/:machineId/connection-codes/claim', auth: true, body: z.object({}).strict(), response: ClaimedConnectionCode }),
 
+  getBeta: route({ id: 'service.getBeta', method: 'GET', path: '/v1/beta', auth: false, response: BetaStatus }),
   getBilling: route({ id: 'service.getBilling', method: 'GET', path: '/v1/billing', auth: true, response: BillingStatus }),
 
   getTeam: route({ id: 'service.getTeam', method: 'GET', path: '/v1/team', auth: true, response: Team }),
@@ -318,6 +353,7 @@ export function createServiceClient(config: ClientConfig) {
     leaveConnectionCode: (machineId: string, handoff: { forAccountId: string; code: string; expiresAt: string }) =>
       callRoute(config, r.leaveConnectionCode, { params: { machineId }, body: handoff }),
     claimConnectionCode: (machineId: string) => callRoute(config, r.claimConnectionCode, { params: { machineId }, body: {} }),
+    getBeta: () => callRoute(config, r.getBeta),
     getBilling: () => callRoute(config, r.getBilling),
     getTeam: () => callRoute(config, r.getTeam),
     createInvite: (githubLogin: string) => callRoute(config, r.createInvite, { body: { githubLogin } }),
