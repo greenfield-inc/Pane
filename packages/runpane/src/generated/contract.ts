@@ -1351,6 +1351,106 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "host status",
+      "summary": "Say whether this machine can stop now: safeToStop, what blocks it (a working agent, a connected person or device, work in flight), and who is connected.",
+      "usage": [
+        "runpane host status [--json] [--pane-dir <path>]"
+      ],
+      "daemonAction": {
+        "channel": "runpane:host:status",
+        "args": []
+      },
+      "toolsets": [
+        "core"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "host prepare-stop",
+      "summary": "Let Pane finish running work and save terminal state before this machine stops; new work waits for one minute.",
+      "usage": [
+        "runpane host prepare-stop --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "daemonAction": {
+        "channel": "runpane:host:prepare-stop",
+        "args": []
+      },
+      "toolsets": [
+        "admin"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "host unpushed",
+      "summary": "List every open Pane on this machine whose work is not on its remote: uncommitted files and unpushed commits.",
+      "usage": [
+        "runpane host unpushed [--json] [--pane-dir <path>]"
+      ],
+      "daemonAction": {
+        "channel": "runpane:host:unpushed",
+        "args": []
+      },
+      "toolsets": [
+        "git"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "host push-all",
+      "summary": "Commit each listed Pane's loose files as WIP and push them all, never forcing. A Pane on its base branch goes to pane/saved/<name>.",
+      "usage": [
+        "runpane host push-all --yes [--json] [--pane-dir <path>]"
+      ],
+      "openWorld": true,
+      "mutates": true,
+      "additive": true,
+      "idempotent": true,
+      "daemonAction": {
+        "channel": "runpane:host:push-all",
+        "args": []
+      },
+      "toolsets": [
+        "git"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "host code",
+      "summary": "Make a connection code for one person: it works once, on their device, for 15 minutes. Prints the code, the person and when it expires.",
+      "usage": [
+        "runpane host code --name <person> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "daemonAction": {
+        "channel": "runpane:host:code",
+        "args": [
+          "--name"
+        ]
+      },
+      "toolsets": [
+        "admin"
+      ],
+      "jsonSchemas": [
+        "daemonActionResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "docs search",
       "summary": "Search Pane's docs, runpane help, and the Pane Chat skills.",
       "usage": [
@@ -3754,6 +3854,60 @@ export const RUNPANE_CONTRACT = {
         "  --json                          Print machine-readable output.",
         "  --pane-dir <path>               Connect to a specific Pane data directory."
       ],
+      "host status": [
+        "Usage:",
+        "  runpane host status [--json] [--pane-dir <path>]",
+        "",
+        "Say whether this machine can stop now: safeToStop, what blocks it (a working agent, a connected person or device, work in flight), and who is connected.",
+        "",
+        "Options:",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "host prepare-stop": [
+        "Usage:",
+        "  runpane host prepare-stop --yes [--json] [--pane-dir <path>]",
+        "",
+        "Let Pane finish running work and save terminal state before this machine stops; new work waits for one minute.",
+        "",
+        "Options:",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "host unpushed": [
+        "Usage:",
+        "  runpane host unpushed [--json] [--pane-dir <path>]",
+        "",
+        "List every open Pane on this machine whose work is not on its remote: uncommitted files and unpushed commits.",
+        "",
+        "Options:",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "host push-all": [
+        "Usage:",
+        "  runpane host push-all --yes [--json] [--pane-dir <path>]",
+        "",
+        "Commit each listed Pane's loose files as WIP and push them all, never forcing. A Pane on its base branch goes to pane/saved/<name>.",
+        "",
+        "Options:",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "host code": [
+        "Usage:",
+        "  runpane host code --name <person> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Make a connection code for one person: it works once, on their device, for 15 minutes. Prints the code, the person and when it expires.",
+        "",
+        "Options:",
+        "  --name <person>                 Who the code is for; shown on this machine while they are connected.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
       "docs search": [
         "Usage:",
         "  runpane docs search --query <text> [--limit <count>] [--json]",
@@ -5506,6 +5660,60 @@ export const RUNPANE_CONTRACT = {
         "",
         "Options:",
         "  --url <pane-url>                A pane://open link from links create.",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "host status": [
+        "Usage:",
+        "  runpane host status [--json] [--pane-dir <path>]",
+        "",
+        "Say whether this machine can stop now: safeToStop, what blocks it (a working agent, a connected person or device, work in flight), and who is connected.",
+        "",
+        "Options:",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "host prepare-stop": [
+        "Usage:",
+        "  runpane host prepare-stop --yes [--json] [--pane-dir <path>]",
+        "",
+        "Let Pane finish running work and save terminal state before this machine stops; new work waits for one minute.",
+        "",
+        "Options:",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "host unpushed": [
+        "Usage:",
+        "  runpane host unpushed [--json] [--pane-dir <path>]",
+        "",
+        "List every open Pane on this machine whose work is not on its remote: uncommitted files and unpushed commits.",
+        "",
+        "Options:",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "host push-all": [
+        "Usage:",
+        "  runpane host push-all --yes [--json] [--pane-dir <path>]",
+        "",
+        "Commit each listed Pane's loose files as WIP and push them all, never forcing. A Pane on its base branch goes to pane/saved/<name>.",
+        "",
+        "Options:",
+        "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "host code": [
+        "Usage:",
+        "  runpane host code --name <person> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Make a connection code for one person: it works once, on their device, for 15 minutes. Prints the code, the person and when it expires.",
+        "",
+        "Options:",
+        "  --name <person>                 Who the code is for; shown on this machine while they are connected.",
         "  --yes                           Confirm this change; required in non-interactive shells.",
         "  --json                          Print machine-readable output.",
         "  --pane-dir <path>               Connect to a specific Pane data directory."
@@ -19011,6 +19219,180 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Opening a link never changes Pane state; it selects what the link names."
+        ]
+      },
+      "host status": {
+        "name": "host status",
+        "summary": "Say whether this machine can stop now: safeToStop, what blocks it (a working agent, a connected person or device, work in flight), and who is connected.",
+        "details": "Use this before stopping or deleting a machine. `data.safeToStop` is true when no agent is working, nobody is connected and no work is in flight; `data.blockers` says what keeps it running and `data.clients` lists who is connected, by `person`.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane host status --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "An agent waiting for an answer does not block a stop: it is still waiting after the machine resumes.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "host prepare-stop": {
+        "name": "host prepare-stop",
+        "summary": "Let Pane finish running work and save terminal state before this machine stops; new work waits for one minute.",
+        "details": "Use this right before the machine stops. It waits up to 10 seconds for running work, saves terminal state, and holds new work back for one minute.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane host prepare-stop --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Run it on the machine itself; a remote caller is refused.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "host unpushed": {
+        "name": "host unpushed",
+        "summary": "List every open Pane on this machine whose work is not on its remote: uncommitted files and unpushed commits.",
+        "details": "Use this before a machine is deleted or handed back. Each item names the Pane, its branch, and the archive safety check: uncommitted or untracked files and commits not on any remote branch.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane host unpushed --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "Archived Panes are left out: their worktrees are already removed.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "host push-all": {
+        "name": "host push-all",
+        "summary": "Commit each listed Pane's loose files as WIP and push them all, never forcing. A Pane on its base branch goes to pane/saved/<name>.",
+        "details": "Use this to get every listed Pane's work onto its remote in one step. Loose files are committed as `WIP: saved by Pane before <machine> stops` without running hooks, then pushed without forcing.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane host push-all --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "A Pane with a working agent is skipped; a rejected push is reported with the next step and nothing is forced.",
+          "A Pane on its base branch or a detached HEAD pushes to `pane/saved/<name>`, never to the base branch.",
+          "`data.remaining` counts the Panes still listed afterward.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
+        ]
+      },
+      "host code": {
+        "name": "host code",
+        "summary": "Make a connection code for one person: it works once, on their device, for 15 minutes. Prints the code, the person and when it expires.",
+        "details": "Use this to let one person connect a phone, browser or computer to this machine. Send them the code; it stops working once a device uses it or after 15 minutes.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--name",
+            "value": "<person>",
+            "required": true,
+            "description": "Who the code is for; shown on this machine while they are connected."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Confirm this change; required in non-interactive shells."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane host code --name Ada --yes --json"
+        ],
+        "jsonSchemas": [
+          "daemonActionResult"
+        ],
+        "notes": [
+          "A teammate let in by the workspace is refused; only the owner makes codes.",
+          "`pane --remote-setup` still prints a reusable code for setting up your own devices.",
+          "Output is `{ ok, data, error }`; `ok: false` exits non-zero with the error message."
         ]
       },
       "docs search": {

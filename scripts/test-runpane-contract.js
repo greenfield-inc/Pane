@@ -510,6 +510,35 @@ async function checkPanesAdoptCliParity() {
   assert.deepStrictEqual(frames.pip, frames.npm, 'Python and Node panes adopt sent different daemon requests');
 }
 
+/** The host commands map onto their daemon channels the same way from npm and pip. */
+async function checkHostCommandsParity() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-host-'));
+  const cases = [
+    [['host', 'status', '--json'], 'runpane:host:status', []],
+    [['host', 'prepare-stop', '--yes', '--json'], 'runpane:host:prepare-stop', []],
+    [['host', 'unpushed', '--json'], 'runpane:host:unpushed', []],
+    [['host', 'push-all', '--yes', '--json'], 'runpane:host:push-all', []],
+    [['host', 'code', '--name', 'Ada', '--yes', '--json'], 'runpane:host:code', ['Ada']],
+  ];
+  const daemonResult = { safeToStop: true, blockers: [] };
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      for (const [args, channel, daemonArgs] of cases) {
+        let frame;
+        const run = await withFakeDaemon(paneDir, (request) => { frame = request; return { result: daemonResult }; }, () => runCliOnce(runtime, args, paneDir));
+        assert.strictEqual(run.code, 0, `${runtime} ${args.join(' ')} exited ${run.code}. stdout=${run.stdout} stderr=${run.stderr}`);
+        assert.strictEqual(frame.channel, channel, `${runtime} ${args.join(' ')} sent the wrong channel`);
+        assert.deepStrictEqual(frame.args, daemonArgs, `${runtime} ${args.join(' ')} sent the wrong arguments`);
+        assert.deepStrictEqual(JSON.parse(run.stdout), { ok: true, data: daemonResult }, `${runtime} ${args.join(' ')} printed the wrong result`);
+      }
+      const missingName = await runCliOnce(runtime, ['host', 'code', '--yes', '--json'], paneDir);
+      assert.notStrictEqual(missingName.code, 0, `${runtime} host code without --name must fail`);
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
 async function checkPanesCreateBaseNotice() {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-create-base-'));
   const notice = 'Could not refresh origin/main before creating this Pane (git fetch timed out after 10s). '
@@ -5784,6 +5813,7 @@ async function runChecks() {
   await checkPaneRenameParity();
   await checkRepoSettingsParity();
   await checkSecretsParity();
+  await checkHostCommandsParity();
   await checkLockParity();
   await checkLoopsParity();
   await checkOverviewReportsAndLocks();

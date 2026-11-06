@@ -420,7 +420,13 @@
               "minLength": 1
             },
             "args": {
-              "$ref": "#/$defs/stringList"
+              "description": "Flags whose values are passed in order; empty for a channel that takes none.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
             }
           },
           "additionalProperties": false
@@ -560,6 +566,11 @@
         "folders create",
         "links create",
         "links open",
+        "host status",
+        "host prepare-stop",
+        "host unpushed",
+        "host push-all",
+        "host code",
         "docs search",
         "docs read",
         "agents start",
@@ -819,6 +830,21 @@
           "$ref": "#/$defs/helpLines"
         },
         "links open": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "host status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "host prepare-stop": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "host unpushed": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "host push-all": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "host code": {
           "$ref": "#/$defs/helpLines"
         },
         "docs search": {
