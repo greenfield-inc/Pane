@@ -306,6 +306,31 @@ describe('chat tab manager', () => {
     expect(manager.view('p1').queue).toEqual([]);
   });
 
+  it('shows a saved notice once, when the tab finishes starting', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', { ...newTab(directory), notice: 'Switched from a terminal tab.' });
+    await manager.ensure('p1');
+    expect(manager.view('p1').notice).toBe('Switched from a terminal tab.');
+    expect(store.state('p1')?.notice).toBeUndefined();
+    await manager.restart('p1');
+    expect(manager.view('p1').notice).toBeUndefined();
+  });
+
+  it('closes a tab whose agent never answers the load, without waiting for it (review F-10)', async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_HANG_LOAD: '1' });
+    store.add('p1', { ...newTab(directory), acpSessionId: 'never-answers' });
+    const starting = manager.ensure('p1').catch(error => error);
+    await expect.poll(() => manager.processId('p1')).toBeTruthy();
+    const pid = manager.processId('p1')!;
+    const started = Date.now();
+    await manager.close('p1');
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(manager.isRunning('p1')).toBe(false);
+    await expect.poll(() => { try { process.kill(pid, 0); return true; } catch { return false; } }).toBe(false);
+    await starting;
+    expect(manager.isRunning('p1')).toBe(false);
+  });
+
   it('keeps chosen settings across a restart', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));

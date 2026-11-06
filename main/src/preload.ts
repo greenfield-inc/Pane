@@ -451,6 +451,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('remote-daemon:connection-state-changed', listener);
     },
     create: (request: ChatTabCreate) => invokeIpc('chat-tab:create', request),
+    switch: (panelId: string) => invokeIpc('chat-tab:switch', panelId),
     get: (panelId: string, limit?: number) => invokeIpc('chat-tab:get', panelId, limit),
     history: (panelId: string, before: number, limit: number) => invokeIpc('chat-tab:history', panelId, before, limit),
     send: (panelId: string, request: ChatTabSend) => invokeIpc('chat-tab:send', panelId, request),

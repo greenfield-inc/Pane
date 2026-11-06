@@ -47,7 +47,8 @@ import {
   movePanel as movePanelInLayout,
   removePanelFromLayout,
   addPanelToGroup,
-  placePanelInSplit,
+  applyPanelReplacements,
+  placeCreatedPanel,
   showPanelInSplit,
   findGroup,
   primaryGroup,
@@ -376,7 +377,7 @@ export const SessionView = memo(() => {
         // Treat unknown future layout versions as no stored layout rather
         // than reconciling a shape this build doesn't understand.
         const versionOk = stored?.version === 1;
-        const base = (versionOk ? stored : null) ?? createSingleGroupLayout(
+        const base = (versionOk ? { ...stored, root: applyPanelReplacements(stored.root, sortedLive) } : null) ?? createSingleGroupLayout(
           sortedLive.filter(p => !splitIdsNow.has(p.id)).map(p => p.id),
           fallbackActiveId,
         );
@@ -445,9 +446,7 @@ export const SessionView = memo(() => {
             const group = (focusedGid && findGroup(currentLayout.root, focusedGid))
               || primaryGroup(currentLayout.root);
             // Agents open pages and files beside their conversation.
-            const nextRoot = panel.metadata?.openPlacement === 'split'
-              ? placePanelInSplit(currentLayout.root, panel.id, false)
-              : addPanelToGroup(currentLayout.root, group.id, panel.id, { activate: false });
+            const nextRoot = placeCreatedPanel(currentLayout.root, group.id, panel);
             if (nextRoot !== currentLayout.root) {
               applyLayout(sid, { ...currentLayout, root: nextRoot });
             }

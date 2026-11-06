@@ -15,6 +15,8 @@ import { adapterEntry, installAdapter } from '../agentChat/adapterSetup';
 import { providerScript } from '../agentChat/hostCommand';
 import { panePortFor } from '../panePort';
 import type { ChatTabLauncher, ResolvedLaunch } from './manager';
+import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { claudeSessionFolderSettings, isSessionFolderSettings } from '../agents/sessionFolderAccess';
 
 /** API keys a person may set for chat tabs on this machine, kept in the OS secure store. */
 export interface ChatTabSecrets { apiKey(agent: ChatAgent): string | undefined }
@@ -88,6 +90,8 @@ export class AgentChatLauncher implements ChatTabLauncher {
     if (!entry) throw new PaneError('CHAT_ADAPTER_MISSING', `This Pane build is missing its bundled ${AGENT_NAMES[state.agent]} chat adapter.`, 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
     const launch: ResolvedLaunch = { command: { executable: process.execPath, args: [entry], cwd: state.cwd, env: { ...env, ELECTRON_RUN_AS_NODE: '1' } } };
     if (state.launch.mode) launch.mode = state.launch.mode;
+    const meta = sessionFolderMeta(state);
+    if (meta) launch.meta = meta;
     return launch;
   }
 }
@@ -146,4 +150,50 @@ export function sessionChatLaunch(input: SessionChatInput): { launch: ChatTabLau
   const command = input.launchCommand?.trim();
   const launch = chatLaunchFromCommand(command, agent);
   return launch ? { launch } : { terminalReason: `A chat can't run its launch command the same way: ${command}.` };
+}
+
+/**
+ * The chat launch for a terminal agent tab being switched to chat: its own launch when a
+ * chat tab can run it, with a `--model` flag carried over as the model setting. Anything a
+ * chat tab cannot run faithfully (another flag, a wrapper) comes back as `unsupported`, naming
+ * the first such token, so the switch keeps the terminal instead of changing the launch.
+ */
+export function chatLaunchForTerminal(command: string | undefined, agent: ChatAgent, context: { sessionFolder?: string } = {}): { launch: ChatTabLaunch; settings?: Record<string, string> } | { unsupported: string } {
+  if (!command?.trim()) return { launch: { kind: 'agent' } };
+  const tokens = tokenizeShellCommand(command.trim(), process.platform) ?? [];
+  let model: string | undefined;
+  const rest: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (tokens[0] === agent && token === '--model' && tokens[index + 1]) { model = tokens[index + 1]; index += 1; }
+    else if (tokens[0] === agent && token.startsWith('--model=')) model = token.slice('--model='.length);
+    // Pane's own Session folder access for a Session's Pane; the chat gets the same (sessionFolderMeta).
+    else if (agent === 'claude' && tokens[0] === agent && token === '--settings' && context.sessionFolder && isSessionFolderSettings(tokens[index + 1] ?? '', context.sessionFolder)) index += 1;
+    else rest.push(token);
+  }
+  const launch = chatLaunchFromCommand(rest.map(quoteToken).join(' '), agent);
+  if (!launch) return { unsupported: firstUnsupported(rest, agent) };
+  return model ? { launch, settings: { model } } : { launch };
+}
+
+/** The first token chatLaunchFromCommand cannot represent, for the switch's refusal. */
+function firstUnsupported(tokens: string[], agent: ChatAgent): string {
+  if (tokens[0] === agent) return tokens.slice(1).find(token => token !== (agent === 'claude' ? '--dangerously-skip-permissions' : '--yolo')) ?? tokens[0];
+  if (tokens[0] === 'agent-farm' && tokens[1] === 'run') {
+    for (let index = 3; index < tokens.length; index += 2) if (tokens[index] !== '--arg' || !tokens[index + 1]?.includes('=')) return tokens[index];
+  }
+  return tokens[0] ?? agent;
+}
+
+function quoteToken(token: string): string { return /^[\w@%+=:,./-]+$/.test(token) ? token : `'${token.replace(/'/g, `'\\''`)}'`; }
+
+/**
+ * The chat-tab form of the Session folder access Pane gives Claude in a Session's Pane
+ * (sessionFolderAccess.ts): the same settings, sent as `claudeCode.options.settings` on
+ * session/new and session/load. A Session orchestrator works in its own folder, so it gets
+ * none; Codex and Windows get none, as in terminals.
+ */
+export function sessionFolderMeta(state: Pick<ChatPanelState, 'agent' | 'cwd' | 'sessionFolder'>, platform: NodeJS.Platform = process.platform): JsonObject | undefined {
+  if (state.agent !== 'claude' || platform === 'win32' || !state.sessionFolder || path.resolve(state.sessionFolder) === path.resolve(state.cwd)) return undefined;
+  return { claudeCode: { options: { settings: claudeSessionFolderSettings(state.sessionFolder) } } };
 }

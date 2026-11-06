@@ -374,6 +374,100 @@ describe('OrchestrationSessionManager', () => {
     }
   });
 
+  it('hands a Session to the chat tab its terminal orchestrator switched to (D-129)', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Switched orchestrator', agent: 'claude' });
+    expect(created.panel.metadata.permanent).toBe(true);
+    const chat = await panelManager.createPanel({ sessionId: created.internalSession.id, type: 'chat', title: created.panel.title, initialState: { customState: { agent: 'claude', launch: { kind: 'agent' }, cwd: created.cwd, status: 'starting' } }, activate: false });
+    fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+
+    await fixture.manager.adoptAgentPanel(created.panel.id, chat.id);
+
+    const view = await fixture.manager.getView({ sessionId: created.session.id });
+    expect(view.panel.id).toBe(chat.id);
+    expect(view.panel.metadata.permanent).toBe(true);
+    expect(panelManager.getPanel(created.panel.id)?.metadata.permanent).toBe(false);
+    await fixture.manager.adoptAgentPanel('some-other-tab', 'another-chat');
+    expect((await fixture.manager.getView({ sessionId: created.session.id })).panel.id).toBe(chat.id);
+  });
+
+  describe('when handing a Session to its chat fails part way (D-129, review F-8)', () => {
+    const prepare = async () => {
+      const fixture = createFixture();
+      const created = await fixture.manager.create({ name: 'Half switched', agent: 'claude', launchCommand: 'agent-farm run greenfield/orchestrator --arg docs=grain' });
+      const chat = await panelManager.createPanel({ sessionId: created.internalSession.id, type: 'chat', title: created.panel.title, initialState: { customState: { agent: 'claude', launch: { kind: 'agent' }, cwd: created.cwd, status: 'starting' } }, activate: false });
+      fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+      const owner = async () => (await fixture.manager.getView({ sessionId: created.session.id })).panel.id;
+      return { fixture, created, chat, owner };
+    };
+    afterEach(() => { vi.restoreAllMocks(); });
+
+    it('reads the Session\'s saved launch', async () => {
+      const { fixture, created } = await prepare();
+      expect(fixture.manager.agentLaunchCommand(created.panel.id)).toBe('agent-farm run greenfield/orchestrator --arg docs=grain');
+    });
+
+    it('confirms the terminal still owns the Session when the chat cannot be made permanent and is released', async () => {
+      const { fixture, created, chat, owner } = await prepare();
+      vi.spyOn(panelManager, 'updatePanel').mockRejectedValueOnce(new Error('disk full'));
+      await expect(fixture.manager.adoptAgentPanel(created.panel.id, chat.id)).resolves.toEqual({ owner: 'terminal', chatReleased: true, reason: 'disk full' });
+      expect(await owner()).toBe(created.panel.id);
+      expect(panelManager.getPanel(created.panel.id)?.metadata.permanent).toBe(true);
+      expect(panelManager.getPanel(chat.id)?.metadata.permanent).toBeFalsy();
+    });
+
+    it('treats a silently refused metadata write as a failure', async () => {
+      const { fixture, created, chat, owner } = await prepare();
+      vi.spyOn(panelManager, 'updatePanel').mockResolvedValueOnce(undefined);
+      await expect(fixture.manager.adoptAgentPanel(created.panel.id, chat.id)).resolves.toMatchObject({ owner: 'terminal', chatReleased: true });
+      expect(await owner()).toBe(created.panel.id);
+    });
+
+    it('withholds Switch back when both the metadata write and its compensation fail, and the Session never names the chat', async () => {
+      const { fixture, created, chat, owner } = await prepare();
+      vi.spyOn(panelManager, 'updatePanel').mockRejectedValueOnce(new Error('disk full')).mockRejectedValueOnce(new Error('still full'));
+      await expect(fixture.manager.adoptAgentPanel(created.panel.id, chat.id)).resolves.toMatchObject({ owner: 'terminal', chatReleased: false, reason: expect.stringContaining('disk full') });
+      expect(await owner()).toBe(created.panel.id);
+      expect(panelManager.getPanel(created.panel.id)?.metadata.permanent).toBe(true);
+    });
+
+    it('keeps the chat protected when the record cannot be saved and the chat cannot be released', async () => {
+      const { fixture, created, chat, owner } = await prepare();
+      vi.spyOn(fixture.store, 'write').mockImplementationOnce(() => { throw new Error('store is read-only'); });
+      const real = panelManager.updatePanel.bind(panelManager);
+      let writes = 0;
+      vi.spyOn(panelManager, 'updatePanel').mockImplementation(async (id, updates) => {
+        writes += 1;
+        if (writes === 2) throw new Error('still full');
+        await real(id, updates);
+      });
+      await expect(fixture.manager.adoptAgentPanel(created.panel.id, chat.id)).resolves.toMatchObject({ owner: 'terminal', chatReleased: false, reason: expect.stringContaining('store is read-only') });
+      expect(await owner()).toBe(created.panel.id);
+      expect(panelManager.getPanel(chat.id)?.metadata.permanent).toBe(true);
+    });
+
+    it('releases the chat when only the record could not be saved', async () => {
+      const { fixture, created, chat, owner } = await prepare();
+      vi.spyOn(fixture.store, 'write').mockImplementationOnce(() => { throw new Error('store is read-only'); });
+      await expect(fixture.manager.adoptAgentPanel(created.panel.id, chat.id)).resolves.toMatchObject({ owner: 'terminal', chatReleased: true });
+      expect(await owner()).toBe(created.panel.id);
+      expect(panelManager.getPanel(chat.id)?.metadata.permanent).toBeFalsy();
+    });
+
+    it('the chat owns the Session once the record is saved, even if the terminal keeps its permanent mark', async () => {
+      const { fixture, created, chat, owner } = await prepare();
+      const real = panelManager.updatePanel.bind(panelManager);
+      vi.spyOn(panelManager, 'updatePanel').mockImplementation(async (id, updates) => {
+        if (id === created.panel.id) throw new Error('terminal row locked');
+        await real(id, updates);
+      });
+      await expect(fixture.manager.adoptAgentPanel(created.panel.id, chat.id)).resolves.toEqual({ owner: 'chat' });
+      vi.restoreAllMocks();
+      expect(await owner()).toBe(chat.id);
+      expect(panelManager.getPanel(chat.id)?.metadata.permanent).toBe(true);
+    });
+  });
+
   it('keeps Session orchestrators in terminals while chat tabs are off', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Terminal orchestrator', agent: 'claude' });

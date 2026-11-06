@@ -324,6 +324,8 @@ export interface ToolPanelMetadata {
    * start without secret variables, also after a respawn or restart.
    */
   teammate?: string;
+  /** The tab this one takes over from (Switch to chat), so it opens in that tab's slot. */
+  replacesPanelId?: string;
 }
 
 export type PanelOpenPlacement = 'split' | 'tab';

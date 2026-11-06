@@ -3,9 +3,10 @@
 A chat tab runs Claude or Codex as a conversation, with no terminal. Pane is an
 [Agent Client Protocol](https://agentclientprotocol.com) (ACP) client; the agent
 runs through its ACP adapter, `@agentclientprotocol/claude-agent-acp` or
-`@agentclientprotocol/codex-acp`. A chat tab stays a chat: there is no
-Chat/Terminal switch and no move into a terminal. "Claude in Terminal" and
-"Codex in Terminal" in the + menu open terminal agent tabs, as before.
+`@agentclientprotocol/codex-acp`. A chat tab stays a chat: there is no move
+back into a terminal. A terminal Claude or Codex tab can move the other way
+with **Switch to chat** (below). "Claude in Terminal" and "Codex in Terminal"
+in the + menu open terminal agent tabs, as before.
 
 Chat tabs are experimental. Turn them on in **Settings → Advanced → Chat tabs**.
 While they are off, the + menu has no chat entries and new Sessions open their
@@ -28,6 +29,48 @@ orchestrator in a terminal. Open chat tabs keep working.
   `--initial-input` is the first prompt, sent once.
 - **Sessions**: with chat tabs on, a new Claude or Codex Session runs its
   orchestrator in a chat tab (see [SESSIONS.md](SESSIONS.md)).
+
+## Switching a terminal tab to chat
+
+**Switch to chat** (the speech-bubble button beside a terminal Claude or Codex
+tab's actions, the same button in a Session's toolbar, or the command palette)
+reopens the same conversation in a chat tab, or fails cleanly (D-129, D-184). It
+shows only with chat tabs on, and it never sends anything to your agent.
+
+Nothing is touched when:
+
+- a turn is in progress: Pane asks you to wait or stop it;
+- the launch can't be kept: the chat gets the plain agent and its skip-approvals
+  mode, or the Agent Farm profile and its args (a Session's own saved launch for
+  its orchestrator). A `--model` flag becomes the chat's model, and Claude in a
+  Session's Pane keeps its read-only Session folder access (`--settings` there,
+  `claudeCode.options.settings` here). Any other flag or a wrapper command is
+  refused by name;
+- Pane can't tell which conversation the terminal is running. It uses only an
+  ID tied to that terminal: the one Pane started or resumed it with, or the one
+  its launch reported (Agent Farm). It never guesses from the folder, since
+  another terminal there can be writing a different conversation. A running Codex
+  reports its ID only when it exits, so a Codex terminal Pane didn't start with
+  an ID usually can't switch.
+
+Otherwise Pane stops the terminal agent, opens the chat tab and loads the
+conversation with ACP `session/load`, so the history shows, then closes the
+terminal tab. The chat takes the terminal's exact place in the tab order and is
+selected. A Session's orchestrator becomes its chat tab.
+
+Two Codex cases fail cleanly today. A terminal Codex that runs through Codex's
+shared background service (`codex app-server daemon`) stays that thread's writer
+after the terminal stops, so chat is refused with "in use by another Codex
+client". A Codex conversation started by Agent Farm can't be reopened because its
+saved ID is Agent Farm's own.
+
+If the conversation doesn't reopen within three minutes, or at all, the dialog
+gives the reason (also in Pane's log, as `[ChatTabs]`), the chat tab is removed,
+and the terminal comes back running the same conversation. In the rare case that
+the chat has the conversation but the Session could not move to it, or the
+terminal tab could not be closed, the dialog says so and both tabs stay, since
+removing either could lose the Session's tab. Pane rebuilds no telemetry for the
+switch.
 
 ## Where the agent runs, and sign-in
 
@@ -190,9 +233,12 @@ inside it.
 ## Agent Farm profiles
 
 For `--agent-farm`, Pane runs `agent-farm run <profile> --print-acp --acp-adapter
-<pinned adapter> [--arg key=value …]` at every start, spawns the printed `argv`
+<bundled adapter> [--arg key=value …]` at every start, spawns the printed `argv`
 with the printed `env` added, sends the printed `session` on `session/new` and
 `session/load`, and selects the printed `mode` with `session/set_mode` after each.
+Agent Farm runs the adapter with plain Node, which can't read inside `app.asar`,
+so a packaged Pane passes a small launcher from `agent-adapters/` in its data
+folder that starts the bundled adapter with Pane's Electron.
 The profile's model, effort, instructions with LAUNCH CONTEXT, skills,
 subagents, MCP servers and telemetry come with it. The contract is Agent Farm's
 CONFIGURATION.md, *ACP sessions*.
@@ -210,7 +256,7 @@ are about an older computer, and Notify `info` items are not pushed.
 
 | Part | Where |
 | --- | --- |
-| Host runtime, transcript, launcher, Agent Farm profiles, Notify bridge | `main/src/services/chatTabs/` |
+| Host runtime, transcript, launcher, Agent Farm profiles, Notify bridge, Switch to chat | `main/src/services/chatTabs/` |
 | Commands (`chat-tab:*`) | `main/src/ipc/chatTabs.ts` |
 | runpane | `main/src/ipc/runpaneChatTabs.ts`, `main/src/ipc/runpane.ts` |
 | Shared types, presentation, decoders | `shared/types/chatTab.ts`, `shared/chatTabPresentation.ts`, `shared/chatTabPermissions.ts`, `shared/chatTabQuestions.ts`, `shared/types/chatTabDecoders.ts` |

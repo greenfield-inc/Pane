@@ -24,8 +24,9 @@ import {
   findGroup,
   findGroupContainingPanel,
   movePanel,
-  placePanelInSplit,
   primaryGroup,
+  applyPanelReplacements,
+  placeCreatedPanel,
   reconcile,
   removePanelFromLayout,
   showPanelInSplit,
@@ -64,6 +65,9 @@ function layoutPanelIds(layout: SessionPanelLayout | null | undefined): Set<stri
  */
 function isStagePanel(panel: ToolPanel, agentPanelIds: ReadonlySet<string>, inLayout: ReadonlySet<string>): boolean {
   if (STAGE_PANEL_TYPES.has(panel.type)) return true;
+  // A chat taking over a terminal tab (Switch to chat) holds its slot until it becomes the agent tab.
+  const replaced = panel.metadata?.replacesPanelId;
+  if (replaced && !agentPanelIds.has(panel.id) && (inLayout.has(panel.id) || inLayout.has(replaced))) return true;
   if (panel.type !== 'terminal' || agentPanelIds.has(panel.id)) return false;
   return inLayout.has(panel.id) || launchesCommand(panel);
 }
@@ -190,9 +194,14 @@ export function SessionWorkspacePanels({
       const remembered = await readPaneLayout(hostIdRef.current, sessionId);
       const stored = remembered ?? await panelApi.getLayout(sessionId);
       if (cancelled) return;
-      const base = stored?.version === 1 ? stored : createSingleGroupLayout([agentPanelId], agentPanelId);
+      const live = usePanelStore.getState().panels[sessionId] ?? saved;
+      // The Session moves to its chat a moment before the terminal closes; that terminal's slot is already the chat's.
+      const replaced = live.find(panel => panel.id === agentPanelId)?.metadata?.replacesPanelId;
+      const base = stored?.version === 1
+        ? { ...stored, root: applyPanelReplacements(stored.root, live.filter(panel => panel.id !== replaced)) }
+        : createSingleGroupLayout([agentPanelId], agentPanelId);
       const storedIds = layoutPanelIds(base);
-      const stage = (usePanelStore.getState().panels[sessionId] ?? saved)
+      const stage = live
         .filter(panel => isStagePanel(panel, agentPanelIdsRef.current, storedIds));
       // Agent pages this desktop has never placed (opened while it showed
       // something else) go beside the conversation, inactive. Tabs already in
@@ -214,9 +223,7 @@ export function SessionWorkspacePanels({
       const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
       // Agents open pages and files beside the conversation by default.
       // Another client's new tab never moves this one; activation requests do.
-      const root = panel.metadata?.openPlacement === 'split'
-        ? placePanelInSplit(current.root, panel.id, false)
-        : addPanelToGroup(current.root, focused.id, panel.id, { activate: false });
+      const root = placeCreatedPanel(current.root, focused.id, panel);
       if (root !== current.root) applyLayout({ ...current, root });
     });
     const updated = events.onPanelUpdated(panel => {

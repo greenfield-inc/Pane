@@ -69,6 +69,8 @@ const app = agent()
   })
   .onRequest(methods.agent.session.load, async ({ params, client }) => {
     if (process.env.SCRIPTED_AGENT_SIGNED_OUT === '1') throw RequestError.authRequired();
+    // A live adapter that never answers the load.
+    if (process.env.SCRIPTED_AGENT_HANG_LOAD === '1') return new Promise(() => {});
     if (!existsSync(file(params.sessionId))) throw RequestError.resourceNotFound(params.sessionId);
     const session = JSON.parse(readFileSync(file(params.sessionId), 'utf8'));
     sessions.set(params.sessionId, session);

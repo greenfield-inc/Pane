@@ -223,7 +223,11 @@ export class ChatTabManager {
   async close(panelId: string): Promise<void> {
     const tab = this.tabs.get(panelId);
     if (!tab) return;
-    await tab.starting?.catch(() => undefined);
+    // Stop the agent first: a start waiting on an agent that never answers settles once it is gone.
+    const starting = tab.starting;
+    await this.release(tab);
+    await starting?.catch(() => undefined);
+    // A start that was still resolving its launch may have started a runtime after the release.
     await this.release(tab);
     tab.transcript?.dispose();
     this.bodies.clear(panelId);
@@ -257,6 +261,8 @@ export class ChatTabManager {
       this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent));
       throw failure;
     }
+    // Closed or restarted while the launch resolved: start nothing.
+    if (tab.run !== generation) return;
     tab.launch = launch;
     const transcript = tab.transcript;
     const runtime = new ChatTabRuntime({
@@ -301,7 +307,9 @@ export class ChatTabManager {
           receipts: current.receipts?.map(receipt => receipt.operationId === interrupted.operationId && receipt.state === 'accepted' ? { ...receipt, state: 'failed', error: 'Pane closed before the turn finished.' } : receipt),
         }));
       }
-      this.update(panelId, current => ({ ...current, status: 'idle' }));
+      const { notice } = this.required(panelId);
+      if (notice) tab.notice = notice;
+      this.update(panelId, current => ({ ...current, status: 'idle', notice: undefined }));
       this.publish(panelId);
       this.sendInitialInput(panelId);
       this.drain(panelId);
