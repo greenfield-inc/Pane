@@ -87,6 +87,9 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
   const idempotent = new Map<string, { machineId: string; entryId: string }>();
   const codes = new Map<string, { id: string; code: string; expiresAt: string }>();
 
+  const dropCodes = (match: (key: string) => boolean) => {
+    for (const key of [...codes.keys()]) if (match(key)) codes.delete(key);
+  };
   const byId = (accountId: string) => [...accounts.values()].find((r) => r.account.id === accountId);
   const view = (record: AccountRecord): Account => ({
     ...record.account,
@@ -281,6 +284,7 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       if (machine.state === 'deleted') throw new CloudApiError('invalid_state', 'This machine is already deleted.', 'Nothing to do.');
       setState(machine, 'deleted', 'user');
       machine.shared = false;
+      dropCodes((key) => key.startsWith(`${machine.id}:`));
       return { machine: publicMachine(machine), operation: log(machine, 'delete', record, 'You deleted this machine and its disk.') };
     }),
     bind(r.requestOperation, ({ token, params, body }) => {
@@ -299,7 +303,9 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
     bind(r.listActionLog, ({ token, params, query }) => {
       const machine = ownMachine(caller(token), params.machineId ?? '');
       const all = logs.get(machine.id) ?? [];
-      const start = query.before ? all.findIndex((e) => e.id === query.before) + 1 : 0;
+      const cursorAt = query.before ? all.findIndex((e) => e.id === query.before) : -1;
+      if (query.before && cursorAt < 0) throw new CloudApiError('invalid_request', `Unknown cursor ${query.before}.`, 'Pass a nextCursor from an earlier page, or no cursor for the newest entries.');
+      const start = cursorAt + 1;
       const entries = all.slice(start, start + (query.limit ?? 50));
       const last = entries.at(-1);
       return { entries, nextCursor: last && start + entries.length < all.length ? last.id : null };
@@ -309,6 +315,7 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       teamOf(record);
       const machine = ownMachine(record, params.machineId ?? '');
       machine.shared = body.shared;
+      if (!body.shared) dropCodes((key) => key.startsWith(`${machine.id}:`));
       machine.updatedAt = iso();
       return publicMachine(machine);
     }),
@@ -334,7 +341,9 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       const handoff = codes.get(key);
       codes.delete(key);
       const machine = machines.get(params.machineId ?? '');
-      if (!handoff || !machine || Date.parse(handoff.expiresAt) <= now().getTime()) {
+      const owner = machine ? byId(machine.ownerAccountId) : undefined;
+      const stillAllowed = machine && machine.shared && machine.state !== 'deleted' && record.account.teamId !== null && owner?.account.teamId === record.account.teamId;
+      if (!handoff || !machine || !stillAllowed || Date.parse(handoff.expiresAt) <= now().getTime()) {
         throw new CloudApiError('connection_code_not_found', 'No connection code is waiting for you on this machine.', 'Ask the machine owner to approve you from their Pane.');
       }
       return { machineId: machine.id, code: handoff.code, tailnetHostname: machine.tailnet.hostname, expiresAt: handoff.expiresAt };
@@ -378,10 +387,10 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
     bind(r.acceptInvite, ({ token, params }) => {
       const record = caller(token);
       const invite = invites.get(params.inviteId ?? '');
-      if (!invite || invite.status !== 'pending' || invite.githubLogin.toLowerCase() !== record.account.githubLogin.toLowerCase()) {
+      if (!invite || invite.status !== 'pending' || Date.parse(invite.expiresAt) <= now().getTime() || invite.githubLogin.toLowerCase() !== record.account.githubLogin.toLowerCase()) {
         throw new CloudApiError('invite_not_found', 'No pending invite for you with that id.', 'Ask the team owner to invite your GitHub login.');
       }
-      if (record.account.teamId) throw new CloudApiError('already_member', 'You are already on a team.', 'Leave your current team first.');
+      if (record.account.teamId) throw new CloudApiError('already_member', 'You are already on a team.', 'Ask your current team owner to remove you, then accept again.');
       invite.status = 'accepted';
       record.account.teamId = byId(invite.invitedByAccountId)?.account.teamId ?? null;
       record.account.role = 'member';
@@ -397,6 +406,7 @@ export async function startServiceStub(options: ServiceStubOptions): Promise<Ser
       member.account.teamId = null;
       member.account.role = null;
       for (const machine of machines.values()) if (machine.ownerAccountId === member.account.id) machine.shared = false;
+      dropCodes((key) => key.endsWith(`:${member.account.id}`) || [...machines.values()].some((m) => m.ownerAccountId === member.account.id && key.startsWith(`${m.id}:`)));
       return team(t.id);
     }),
     bind(r.listSharedMachines, ({ token }) => {

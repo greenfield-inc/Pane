@@ -126,12 +126,18 @@ export function fleetContractCases(target: FleetContractTarget): ContractCase[] 
       },
     },
     {
-      name: 'fleet: refuses an expired operation',
+      name: 'fleet: refuses an operation outside its time window: expired, too long-lived, or issued in the future',
       async run() {
         const machineId = `contract-${randomUUID().slice(0, 8)}`;
         const past = Date.now() - 600_000;
         const stale = payload(machineId, 'create', { issuedAt: new Date(past).toISOString(), expiresAt: new Date(past + 120_000).toISOString() });
         await expectError('operation_expired', async () => fleet.submitOperation(await signOperation(stale, target.signer)));
+        const nowMs = Date.now();
+        const tooLong = payload(machineId, 'create', { issuedAt: new Date(nowMs).toISOString(), expiresAt: new Date(nowMs + 600_000).toISOString() });
+        await expectError('operation_expired', async () => fleet.submitOperation(await signOperation(tooLong, target.signer)));
+        const future = payload(machineId, 'create', { issuedAt: new Date(nowMs + 120_000).toISOString(), expiresAt: new Date(nowMs + 240_000).toISOString() });
+        await expectError('operation_expired', async () => fleet.submitOperation(await signOperation(future, target.signer)));
+        await expectError('machine_not_found', () => fleet.getMachine(machineId));
       },
     },
     {
