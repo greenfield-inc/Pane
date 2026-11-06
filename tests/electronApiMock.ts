@@ -11,6 +11,7 @@ import type {
   RemotePaneConnectionState,
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
+import type { RunpaneHostPushAllResult, RunpaneHostUnpushedResult } from '../shared/types/runpaneOrchestration';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../shared/types/glasses';
@@ -119,6 +120,11 @@ export type ElectronApiMockOptions = {
   glassesRevokeEverywhereError?: string;
   /** Devices connected to this computer's host right now. */
   hostConnectedClients?: RemoteDaemonConnectedClient[];
+  /** Paired client records this host starts with; the host listener is on when any are given. */
+  hostClients?: RemoteDaemonClientRecord[];
+  /** What `runpane:host:unpushed` answers, and what `runpane:host:push-all` answers. */
+  hostUnpushed?: RunpaneHostUnpushedResult;
+  hostPushAll?: RunpaneHostPushAllResult;
   /** setup:choose-import fails with this PaneError text instead of previewing. */
   setupImportError?: string;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
@@ -182,13 +188,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const remoteDaemonConfig: RemoteDaemonConfig = {
       host: {
         config: {
-          enabled: false,
+          enabled: Boolean(mockOptions.hostClients?.length),
           listenHost: '127.0.0.1',
           listenPort: 42137,
           pairingRequired: true,
           allowInsecureHttpOnLoopback: true,
         },
-        clients: [],
+        clients: clone(mockOptions.hostClients ?? []),
       },
       client: {
         profiles: [],
@@ -215,8 +221,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       lastSeenAt: null,
     };
     const remoteHostState = {
-      enabled: false,
-      status: 'inactive' as const,
+      enabled: Boolean(mockOptions.hostClients?.length),
+      status: mockOptions.hostClients?.length ? 'live' as const : 'inactive' as const,
       listenHost: null,
       listenPort: null,
       lastError: null,
@@ -1394,7 +1400,27 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success();
         },
       }),
+      host: namespace({
+        unpushed: () => {
+          trackCall('runpane:host:unpushed', []);
+          return Promise.resolve(clone(mockOptions.hostUnpushed ?? { items: [], checkedPanes: 0, checkedAt: new Date().toISOString() }));
+        },
+        pushAll: () => {
+          trackCall('runpane:host:push-all', []);
+          return Promise.resolve(clone(mockOptions.hostPushAll ?? { results: [], remaining: 0 }));
+        },
+      }),
       remoteDaemon: namespace({
+        createHostConnectionCode: (input: { person: string; label?: string }) => {
+          trackCall('remote-daemon:create-host-connection-code', [input]);
+          const id = `code-${nextRemoteConnectionId++}`;
+          const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+          const client = { id, label: input.label ?? 'devbox Pane daemon', createdAt: new Date().toISOString(), tokenHash: `hash-${id}`, person: input.person, claimBy: expiresAt };
+          remoteDaemonConfig.host.clients.push(client);
+          syncRemoteDaemonConfig();
+          const access = { baseUrl: 'https://devbox.tail1234.ts.net', updatedAt: new Date().toISOString() };
+          return success({ connectionCode: `pane-remote://mock-${id}`, client, access, person: input.person, expiresAt });
+        },
         getConfig: () => success(clone(remoteDaemonConfig)),
         getConnectionState: () => success(clone(remoteConnectionState)),
         getHostState: () => success(clone(remoteHostState)),

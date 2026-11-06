@@ -410,6 +410,11 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'folders list': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
   'folders create': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
   'links open': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
+  'host status': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
+  'host prepare-stop': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
+  'host unpushed': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
+  'host push-all': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
+  'host code': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
 } satisfies Record<RunpaneCommand, CommandHandler>));
 
 const contractCommands = new Set<string>(RUNPANE_CONTRACT.commands.map(command => command.name));

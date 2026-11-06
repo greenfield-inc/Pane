@@ -22,7 +22,7 @@ import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
 import { RemoteBrowserPanel } from './components/RemoteBrowserPanel';
 import { RemoteExplorerPanel } from './components/RemoteExplorerPanel';
 import { useRemoteListeningPorts } from './hooks/useRemoteListeningPorts';
-import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
+import { redeemRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
@@ -31,7 +31,7 @@ import { findFirstSessionId, phoneShows, useRemoteSessionStore, visibleTabs } fr
 import { readRemoteView } from './stores/remoteViewMemory';
 import { useRemoteBrowserHistory, type RemoteHistoryView } from './remoteBrowserHistory';
 import { subscribeRemotePanelStatus } from './runtime/remotePanelStatus';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { ErrorDialog } from '../components/ErrorDialog';
 import { UndoToast } from '../components/ui/UndoToast';
 import { PortalContainerProvider } from '../contexts/PortalContainerContext';
@@ -584,7 +584,15 @@ export function RemotePwaApp() {
     updateConnection({ connectionErrorKind: null });
     let profile: RemotePaneConnectionProfile;
     try {
-      profile = decodeRemoteConnectionCode(code);
+      // A single-use code is claimed first; the browser keeps only the token the claim returns.
+      profile = await redeemRemoteConnectionCode(code, async (claimProfile, channel, args) => {
+        const claimRuntime = new RemoteRuntimeAdapter(claimProfile);
+        try {
+          return await claimRuntime.invoke<JsonValue>(channel, args);
+        } finally {
+          claimRuntime.disconnect();
+        }
+      });
     } catch (error) {
       setLastError(error instanceof Error ? error.message : 'Invalid remote Pane connection code');
       updateConnection({ connectionErrorKind: 'connection-code' });

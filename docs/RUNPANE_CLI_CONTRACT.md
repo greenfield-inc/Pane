@@ -370,6 +370,11 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `folders create`: Create a sidebar folder in a repository.
 - `links create`: Build a pane:// link that opens a Pane, panel, repository, or Session in the Pane app.
 - `links open`: Open a pane:// link in the running Pane app.
+- `host status`: Say whether this machine can stop now: safeToStop, what blocks it (a working agent, a connected person or device, work in flight), and who is connected.
+- `host prepare-stop`: Let Pane finish running work and save terminal state before this machine stops; new work waits for one minute.
+- `host unpushed`: List every open Pane on this machine whose work is not on its remote: uncommitted files and unpushed commits.
+- `host push-all`: Commit each listed Pane's loose files as WIP and push them all, never forcing. A Pane on its base branch goes to pane/saved/<name>.
+- `host code`: Make a connection code for one person: it works once, on their device, for 15 minutes. Prints the code, the person and when it expires.
 - `docs search`: Search Pane's docs, runpane help, and the Pane Chat skills.
 - `docs read`: Read one Pane doc, help topic, or skill in full.
 - `agents start`: Start an agent on a task and wait until it is ready: as a new tab in an existing Pane with --pane <id> (review, audit, fix, QA), or in a new Pane with --repo and --name for new work.
@@ -491,6 +496,11 @@ runpane links create --pane <pane-id> [--panel <panel-id>] [--json]
 runpane links create --repo <repo-id> [--json]
 runpane links create --session <session-id> [--json]
 runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]
+runpane host status [--json] [--pane-dir <path>]
+runpane host prepare-stop --yes [--json] [--pane-dir <path>]
+runpane host unpushed [--json] [--pane-dir <path>]
+runpane host push-all --yes [--json] [--pane-dir <path>]
+runpane host code --name <person> --yes [--json] [--pane-dir <path>]
 runpane docs search --query <text> [--limit <count>] [--json]
 runpane docs read --doc <path> [--json]
 runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]

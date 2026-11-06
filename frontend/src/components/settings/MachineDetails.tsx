@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, ChevronLeft, Copy } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { RemoteGroup } from './RemoteGroup';
+import { UnpushedWorkGroup } from './UnpushedWorkGroup';
 import { CARD_ROW, errorMessage, phoneAddress } from './CodelessRemoteSettings';
 import { MachineMark, machineColorVar } from '../machines/MachineMark';
 import { useMachines } from '../../hooks/useMachines';
@@ -17,7 +18,7 @@ interface MachineDetailsProps {
   onNeedsPassword: (machineName: string) => void;
 }
 
-/** One machine's address, state, Pane version, owner and colour, with switch and forget. */
+/** One machine's address, state, Pane version, owner, unpushed work and colour, with switch and forget. */
 export function MachineDetails({ machineId, controller, onBack, onNeedsPassword }: MachineDetailsProps) {
   const { machines, select, switchingId } = useMachines({ connectionState: controller.connectionState, wrapConnect: controller.showChecklist });
   const [error, setError] = useState<string | null>(null);
@@ -106,6 +107,9 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
           <DetailRow label="Owner" detail="Tailscale login"><Value>{machine.tailnet.ownerLogin}</Value></DetailRow>
         )}
       </RemoteGroup>
+
+      {/* Its checks run on the active machine, so only that machine's page shows them. */}
+      {machine.active && <UnpushedWorkGroup />}
 
       <RemoteGroup title="Colour">
         <div className={`flex items-center gap-3 ${CARD_ROW}`}>

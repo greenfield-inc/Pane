@@ -245,6 +245,18 @@ export class API {
     },
   };
 
+  // The active host's work that is not on its remote
+  static host = {
+    async unpushed() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.host.unpushed();
+    },
+    async pushAll() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.host.pushAll();
+    },
+  };
+
   // Loops (scheduled tasks)
   static loops = {
     async list() {
@@ -750,7 +762,7 @@ export class API {
       return window.electronAPI.remoteDaemon.createConnectionPair(input);
     },
 
-    async createHostConnectionCode(input?: { label?: string }) {
+    async createHostConnectionCode(input: { person: string; label?: string }) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.remoteDaemon.createHostConnectionCode(input);
     },

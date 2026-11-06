@@ -9915,3 +9915,116 @@ describe('runpane loops', () => {
     await expect(createRegistry().invoke('runpane:loops:list')).rejects.toMatchObject({ code: 'ERR_LOOPS_UNAVAILABLE' });
   });
 });
+
+describe('runpane host unpushed and push-all', () => {
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+
+  /**
+   * A machine with four open Panes on one repository whose main is on a bare remote: A has a
+   * commit it never pushed, B a file it never committed, C nothing, and D is the main-repo Pane
+   * with a commit on main.
+   */
+  function createMachine() {
+    const repoPath = createTempGitRepo('host-repo');
+    const remotePath = path.join(path.dirname(repoPath), 'host-remote.git');
+    execFileSync('git', ['init', '--bare', '-q', remotePath]);
+    git(repoPath, 'commit', '--allow-empty', '-m', 'init');
+    git(repoPath, 'remote', 'add', 'origin', remotePath);
+    git(repoPath, 'push', '-q', '-u', 'origin', 'main');
+    const pane = (id: string, name: string, setup: (worktreePath: string) => void): Session => {
+      const worktreePath = path.join(path.dirname(repoPath), id);
+      git(repoPath, 'worktree', 'add', '-q', '-b', id, worktreePath);
+      git(worktreePath, 'commit', '--allow-empty', '-m', `${id} work`);
+      git(worktreePath, 'push', '-q', '-u', 'origin', id);
+      setup(worktreePath);
+      return { ...session, id, name, worktreePath, baseBranch: 'main' };
+    };
+    const panes = [
+      pane('pane-a', 'A', worktreePath => git(worktreePath, 'commit', '--allow-empty', '-m', 'local only')),
+      pane('pane-b', 'B', worktreePath => fs.writeFileSync(path.join(worktreePath, 'draft.txt'), 'unsaved work')),
+      pane('pane-c', 'C', () => {}),
+    ];
+    git(repoPath, 'commit', '--allow-empty', '-m', 'on main, never pushed');
+    panes.push({ ...session, id: 'pane-d', name: 'Main Repo', worktreePath: repoPath, baseBranch: 'main', isMainRepo: true });
+    const byId = new Map(panes.map(pane => [pane.id, pane]));
+    const commandRunner = new CommandRunner({ path: repoPath });
+    // SAFETY: This test fixture supplies the session surface the host commands read; git and the worktree manager are real.
+    const services = createServices({
+      sessionManager: {
+        ...createServices().sessionManager,
+        getAllSessions: vi.fn(() => panes),
+        getSession: vi.fn((paneId: string) => byId.get(paneId)),
+        getProjectContext: vi.fn(() => ({ project: { ...project, name: 'host-repo', path: repoPath }, commandRunner })),
+      } as never,
+      worktreeManager: new WorktreeManager(),
+    } as never);
+    const remoteRef = (ref: string) => git(remotePath, 'rev-parse', '--verify', '--quiet', ref);
+    return { registry: createRegistry(services), repoPath, remotePath, remoteRef, byId };
+  }
+
+  beforeEach(() => {
+    vi.mocked(panelManager.getPanelsForSession).mockReset().mockReturnValue([]);
+    vi.mocked(terminalPanelManager.getAgentStatus).mockReset().mockReturnValue('idle');
+  });
+
+  it('lists every open Pane with work off its remote, then pushes them all without touching main', async () => {
+    const { registry, repoPath, remotePath, remoteRef } = createMachine();
+    const mainBefore = remoteRef('refs/heads/main');
+
+    const listed = await registry.invoke('runpane:host:unpushed');
+    expect(listed).toMatchObject({
+      checkedPanes: 4,
+      items: [
+        { paneId: 'pane-a', paneName: 'A', repoName: 'host-repo', branch: 'pane-a', safetyCheck: { unpushedCommits: 1 } },
+        { paneId: 'pane-b', branch: 'pane-b', safetyCheck: { hasUntrackedFiles: true, unpushedCommits: 0 } },
+        { paneId: 'pane-d', branch: 'main', safetyCheck: { unpushedCommits: 1 } },
+      ],
+    });
+
+    const pushed = await registry.invoke('runpane:host:push-all');
+
+    expect(pushed).toEqual({
+      remaining: 0,
+      results: [
+        { paneId: 'pane-a', paneName: 'A', outcome: 'pushed', committedWip: false, pushedTo: 'origin/pane-a' },
+        { paneId: 'pane-b', paneName: 'B', outcome: 'pushed', committedWip: true, pushedTo: 'origin/pane-b' },
+        { paneId: 'pane-d', paneName: 'Main Repo', outcome: 'pushed', committedWip: false, pushedTo: 'origin/pane/saved/main-repo' },
+      ],
+    });
+    expect(git(remotePath, 'log', '-1', '--format=%s', 'pane-b')).toMatch(/^WIP: saved by Pane before .+ stops$/);
+    expect(git(remotePath, 'ls-tree', '--name-only', 'pane-b')).toContain('draft.txt');
+    expect(remoteRef('refs/heads/main')).toBe(mainBefore);
+    expect(remoteRef('refs/heads/pane/saved/main-repo')).toBe(git(repoPath, 'rev-parse', 'HEAD'));
+    await expect(registry.invoke('runpane:host:unpushed')).resolves.toMatchObject({ items: [] });
+  }, 60_000);
+
+  it('never forces: a branch that moved ahead on the remote fails with the next step', async () => {
+    const { registry, remotePath, remoteRef } = createMachine();
+    const elsewhere = path.join(path.dirname(remotePath), 'elsewhere');
+    execFileSync('git', ['clone', '-q', '-b', 'pane-a', remotePath, elsewhere]);
+    git(elsewhere, '-c', 'user.name=Other', '-c', 'user.email=other@example.invalid', 'commit', '--allow-empty', '-m', 'pushed from another computer');
+    git(elsewhere, 'push', '-q', 'origin', 'pane-a');
+    const movedAhead = remoteRef('refs/heads/pane-a');
+
+    const pushed = await registry.invoke('runpane:host:push-all');
+
+    expect(pushed).toMatchObject({
+      remaining: 1,
+      results: [{ paneId: 'pane-a', outcome: 'failed', message: expect.stringContaining('Pull in A and push again') }, { outcome: 'pushed' }, { outcome: 'pushed' }],
+    });
+    expect(remoteRef('refs/heads/pane-a')).toBe(movedAhead);
+  }, 60_000);
+
+  it('skips a Pane whose agent is working', async () => {
+    const { registry } = createMachine();
+    vi.mocked(panelManager.getPanelsForSession).mockImplementation(paneId => paneId === 'pane-b' ? [{ ...terminalPanel, sessionId: 'pane-b' }] : []);
+    vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('working');
+
+    const pushed = await registry.invoke('runpane:host:push-all');
+
+    expect(pushed).toMatchObject({
+      remaining: 1,
+      results: [{ paneId: 'pane-a', outcome: 'pushed' }, { paneId: 'pane-b', outcome: 'skipped', committedWip: false, message: expect.stringContaining('Stop the agent in B') }, { paneId: 'pane-d', outcome: 'pushed' }],
+    });
+  }, 60_000);
+});

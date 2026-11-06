@@ -29,6 +29,7 @@ import { OrchestrationSessionManager } from '../services/orchestrationSessionMan
 import { TaskQueue } from '../services/taskQueue';
 import { registerIpcHandlers } from '../ipc';
 import { isLockOwnerLive } from '../ipc/runpane';
+import { registerHostStopCommands } from '../ipc/hostStop';
 import { PaneDaemonServer } from './server';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
@@ -459,6 +460,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   let paneDaemonServer: PaneDaemonServer | null = null;
   const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort, options.app.getVersion());
+  registerHostStopCommands(commandRegistry, services, () => [
+    ...(remoteTransportController.getServer()?.getConnectedClients() ?? []).map(client => ({ listener: 'paired' as const, client })),
+    ...workspaceHost.connectedClients().map(client => ({ listener: 'workspace' as const, client })),
+  ]);
   const remoteHostTailnetMonitor = new RemoteHostTailnetMonitor(configManager);
   try {
     paneDaemonServer = new PaneDaemonServer(commandRegistry, getAppDirectory());

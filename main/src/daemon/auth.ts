@@ -12,6 +12,7 @@ interface RemoteDaemonAuthFailure {
   error: {
     message: string;
     code: string;
+    next?: string;
   };
 }
 
@@ -53,6 +54,18 @@ export function authenticateRemoteDaemonBearerToken(
       },
     };
   }
+  if (client.claimBy) {
+    // A single-use code's token only claims a device's own token; Pane before named codes sends it as a bearer.
+    return {
+      ok: false,
+      statusCode: 403,
+      error: {
+        message: 'This connection code is single-use and needs a newer Pane to redeem it.',
+        code: 'ERR_REMOTE_DAEMON_CODE_UNCLAIMED',
+        next: 'Update Pane or the Pane app, then paste the code again.',
+      },
+    };
+  }
 
   return {
     ok: true,
@@ -60,7 +73,7 @@ export function authenticateRemoteDaemonBearerToken(
   };
 }
 
-function extractBearerToken(authorizationHeader: string | string[] | undefined): string | null {
+export function extractBearerToken(authorizationHeader: string | string[] | undefined): string | null {
   if (Array.isArray(authorizationHeader)) {
     return authorizationHeader.length === 1
       ? extractBearerToken(authorizationHeader[0])

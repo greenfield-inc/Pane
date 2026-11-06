@@ -31,6 +31,26 @@ This is the implementation checklist for Remote Pane setup, teardown, and runtim
 | Stop host | Save disabled host config, transport controller stops server | Host-state event updates UI |
 | Disconnect host clients | Drop matching SSE clients | Host-state event updates client count |
 | Revoke host client | Remove saved client record, drop matching SSE clients | Host-state event updates client count |
+| Claim a single-use code (`remote:claim-code`) | Replace the record's claim token with the device's own, record when and on which device, clear its expiry | Host-state event shows the person as connected once the device opens its stream |
+
+## Stopping a host
+
+`runpane host status` reads whether the machine can stop now: `safeToStop` is true when
+`blockers` is empty. These block a stop:
+
+- `agent-working`: an agent tab is mid-turn. An agent waiting for an answer (`blocked`) does not block: a stop that snapshots memory resumes it still waiting.
+- `client-connected`: a paired or workspace client has its event stream open, with its `person` when its code named one.
+- `work-in-flight`: daemon commands that change the workspace are still running.
+- `worktree-removal`: an archive is still removing a worktree.
+- `update-in-progress`: new work is held back for an update or a prepared stop.
+
+The daemon answers for now and stores nothing; a caller that needs a quiet period polls it.
+`runpane host prepare-stop --yes` (local callers only) waits up to 10 seconds for running
+work, saves terminal state, and holds new work back for one minute.
+
+`runpane host unpushed` lists every open Pane whose work is not on any remote branch, and
+`runpane host push-all --yes` commits loose files as WIP without hooks and pushes each one,
+never forcing; a Pane on its base branch or a detached HEAD goes to `pane/saved/<name>`.
 
 ## Guardrails
 

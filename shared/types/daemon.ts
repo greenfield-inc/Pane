@@ -121,6 +121,7 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'git:get-github-remote',
   'git:identity',
   'git:set-identity',
+  'remote:claim-code',
   'remote:pwa-affordances',
   'remote:settings:update',
   'credentials:shared:get',
