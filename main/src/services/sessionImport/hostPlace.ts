@@ -48,6 +48,7 @@ const placementSchema: BoundarySchema<HostWorkspacePlacement> = boundary.object(
     files: boundary.array(placementFileSchema),
   })),
   origin: boundary.object({ machine: boundary.string, folder: boundary.string }),
+  machineLabel: boundary.optional(boundary.nonEmptyString),
 });
 
 
@@ -130,7 +131,9 @@ export function registerHostPlacementCommands(
  * files put back, the repository's setup script run once, and its chats resumed by id as tabs of
  * one adopted Pane. Nothing is pushed anywhere. A branch already checked out here is left alone.
  */
-async function placeMovedWorkspace(placement: HostWorkspacePlacement, port: HostPlacementPort): Promise<HostPlacementResult> {
+async function placeMovedWorkspace(placement: HostWorkspacePlacement, hostPort: HostPlacementPort): Promise<HostPlacementResult> {
+  // Messages name this machine as the person saved it, not by its system hostname.
+  const port: HostPlacementPort = { ...hostPort, machineName: placement.machineLabel ?? hostPort.machineName };
   const chats: ImportSessionResult[] = [];
   const base = { name: placement.name, chats };
   try {
@@ -198,7 +201,9 @@ async function placeMovedWorkspace(placement: HostWorkspacePlacement, port: Host
     const setup = await runSetup(repo, worktree, placement);
 
     step('Resuming the chats');
-    const staging = fs.mkdtempSync(path.join(port.paneDir, 'session-import-staging-'));
+    // Under Pane's uploads folder, which update snapshots already account for.
+    fs.mkdirSync(path.join(port.paneDir, 'uploads'), { recursive: true });
+    const staging = fs.mkdtempSync(path.join(port.paneDir, 'uploads', 'session-import-staging-'));
     try {
       const sessions = await stageChats(placement, staging, worktree, repo.path, port);
       const placed = await placeSessions({

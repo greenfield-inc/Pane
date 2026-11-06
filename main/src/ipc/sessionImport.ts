@@ -118,7 +118,7 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
   };
 
   // A workspace moved here from another computer ("Move from Conductor"). See hostPlace.ts.
-  registerHostPlacementCommands(commandRegistry, getAppSubdirectory('session-import-uploads'), {
+  registerHostPlacementCommands(commandRegistry, getAppSubdirectory('uploads', 'session-import'), {
     ...port,
     home: os.homedir(),
     machineName: os.hostname(),
