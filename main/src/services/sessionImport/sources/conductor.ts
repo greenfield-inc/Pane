@@ -1,6 +1,6 @@
 import path from 'path';
 import type { ImportRunning } from '../../../../../shared/types/sessionImport';
-import type { FoundSession, SourceReader } from './types';
+import type { FoundSession, ReaderContext, SourceReader } from './types';
 import { absent, appDataDir, claudeConfigDir, codexHome, exists, findClaudeTranscript, tableColumns, toMs, unreadable, withSqliteCopy } from './common';
 import { claudeRunning, liveClaudeSessions } from './claudeCode';
 import { codexRunning, listCodexSessions } from './codex';
@@ -19,17 +19,32 @@ const SESSION_COLUMNS = ['id', 'workspace_id', 'agent_type', 'claude_session_id'
 const WORKSPACE_COLUMNS = ['workspace_path', 'branch', 'state', 'directory_name'] as const;
 const BUSY_STATUSES = new Set(['working', 'waiting']);
 
-interface ConductorRow {
+interface WorkspaceRow {
+  workspacePath: string | null;
+  branch: string | null;
+  workspaceName: string | null;
+}
+
+interface ConductorRow extends WorkspaceRow {
   agentType: string | null;
   claudeSessionId: string | null;
   title: string | null;
   status: string | null;
   updatedAt: string | null;
   lastUserMessageAt: string | null;
-  workspacePath: string | null;
-  branch: string | null;
-  workspaceName: string | null;
 }
+
+/** A Conductor workspace that isn't archived, with every chat Pane can resume from it. */
+export interface ConductorWorkspace {
+  name: string;
+  folder: string;
+  branch?: string;
+  chats: FoundSession[];
+}
+
+export type ConductorWorkspaceRead =
+  | { status: 'ok'; storePaths: string[]; workspaces: ConductorWorkspace[] }
+  | { status: 'absent' | 'unreadable'; reason?: string; version?: string; storePaths: string[] };
 
 /** Conductor writes sqlite `datetime('now')`: UTC without a zone. */
 function conductorTimeMs(value: string | null): number | undefined {
@@ -41,11 +56,50 @@ function sessionTitle(row: ConductorRow): string | undefined {
   return row.title && row.title !== 'Untitled' ? row.title : row.workspaceName ?? undefined;
 }
 
+function lastActive(row: ConductorRow): number {
+  return Math.max(conductorTimeMs(row.updatedAt) ?? 0, conductorTimeMs(row.lastUserMessageAt) ?? 0);
+}
+
+/** Every workspace Conductor hasn't archived, each with all of its chats, whatever their age. */
+export async function readConductorWorkspaces(context: ReaderContext): Promise<ConductorWorkspaceRead> {
+  const read = await readStore(context);
+  if (read.status !== 'ok') return read;
+  const byFolder = new Map<string, ConductorWorkspace>();
+  for (const row of read.workspaceRows) {
+    if (!row.workspacePath) continue;
+    const folder = path.resolve(row.workspacePath);
+    if (!byFolder.has(folder)) {
+      byFolder.set(folder, { name: row.workspaceName ?? path.basename(folder), folder: row.workspacePath, branch: row.branch ?? undefined, chats: [] });
+    }
+  }
+  for (const session of read.sessions) {
+    if (session.folder) byFolder.get(path.resolve(session.folder))?.chats.push(session);
+  }
+  return { status: 'ok', storePaths: read.storePaths, workspaces: [...byFolder.values()] };
+}
+
 export const readConductor: SourceReader = async context => {
-  if (context.platform !== 'darwin') return absent('conductor');
+  const read = await readStore(context);
+  if (read.status === 'absent') return absent('conductor', read.storePaths);
+  if (read.status !== 'ok') return unreadable('conductor', read.reason ?? 'Conductor\'s database couldn\'t be read', read.storePaths, read.version);
+  return {
+    source: 'conductor',
+    status: 'ok',
+    version: read.version,
+    storePaths: read.storePaths,
+    sessions: read.sessions.filter(session => session.lastActiveMs >= context.sinceMs),
+  };
+};
+
+type StoreRead =
+  | { status: 'ok'; version: string; storePaths: string[]; workspaceRows: WorkspaceRow[]; sessions: FoundSession[] }
+  | Exclude<ConductorWorkspaceRead, { status: 'ok' }>;
+
+async function readStore(context: ReaderContext): Promise<StoreRead> {
+  if (context.platform !== 'darwin') return { status: 'absent', storePaths: [] };
   const dbPath = path.join(appDataDir(context, 'com.conductor.app'), 'conductor.db');
   const storePaths = [dbPath];
-  if (!exists(dbPath)) return absent('conductor', storePaths);
+  if (!exists(dbPath)) return { status: 'absent', storePaths };
 
   const read = withSqliteCopy(context, dbPath, db => {
     // SAFETY: PRAGMA user_version returns one integer.
@@ -60,6 +114,11 @@ export const readConductor: SourceReader = async context => {
     }
     const lastUserMessage = sessionColumns.has('last_user_message_at') ? 's.last_user_message_at' : 'NULL';
     const hidden = sessionColumns.has('is_hidden') ? 'AND COALESCE(s.is_hidden, 0) = 0' : '';
+    // SAFETY: the selected columns are checked above and aliased to WorkspaceRow's fields.
+    const workspaceRows = db.prepare(`
+      SELECT workspace_path AS workspacePath, branch AS branch, directory_name AS workspaceName
+      FROM workspaces WHERE COALESCE(state, '') <> 'archived'
+    `).all() as WorkspaceRow[];
     // SAFETY: the selected columns are checked above and aliased to ConductorRow's fields.
     const rows = db.prepare(`
       SELECT s.agent_type AS agentType, s.claude_session_id AS claudeSessionId, s.title AS title,
@@ -69,22 +128,21 @@ export const readConductor: SourceReader = async context => {
       JOIN workspaces w ON s.workspace_id IN (${workspaceKeys.map(key => `w.${key}`).join(', ')})
       WHERE COALESCE(w.state, '') <> 'archived' ${hidden}
     `).all() as ConductorRow[];
-    return { version, rows };
+    return { version, rows, workspaceRows };
   });
-  if (!read.rows) return unreadable('conductor', 'Conductor\'s database has tables Pane doesn\'t recognise', storePaths, read.version);
+  if (!read.rows || !read.workspaceRows) {
+    return { status: 'unreadable', reason: 'Conductor\'s database has tables Pane doesn\'t recognise', storePaths, version: read.version };
+  }
 
   const executables = await context.processCommands();
   const conductorAlive = executables.some(executable => executable.includes('/Conductor.app/'));
   const busyInConductor = (row: ConductorRow): boolean => conductorAlive && BUSY_STATUSES.has(row.status ?? '');
   const settle = (fromAgent: ImportRunning, busy: boolean): ImportRunning => (fromAgent === 'yes' ? 'yes' : busy ? 'unknown' : fromAgent);
 
-  const recent = read.rows.filter(row => {
-    const lastActive = Math.max(conductorTimeMs(row.updatedAt) ?? 0, conductorTimeMs(row.lastUserMessageAt) ?? 0);
-    return row.workspacePath && lastActive >= context.sinceMs;
-  });
+  const withFolder = read.rows.filter(row => row.workspacePath);
   const sessions: FoundSession[] = [];
 
-  const claudeRows = recent.filter(row => (!row.agentType || row.agentType === 'claude') && row.claudeSessionId);
+  const claudeRows = withFolder.filter(row => (!row.agentType || row.agentType === 'claude') && row.claudeSessionId);
   if (claudeRows.length > 0) {
     const configDir = claudeConfigDir(context);
     storePaths.push(path.join(configDir, 'projects'), path.join(configDir, 'sessions'));
@@ -100,14 +158,14 @@ export const readConductor: SourceReader = async context => {
         folder,
         branch: row.branch ?? undefined,
         title: sessionTitle(row),
-        lastActiveMs: Math.max(conductorTimeMs(row.updatedAt) ?? 0, conductorTimeMs(row.lastUserMessageAt) ?? 0),
+        lastActiveMs: lastActive(row),
         running: settle(claudeRunning(live, sessionId, folder), busyInConductor(row)),
         unavailable: transcript ? undefined : 'its Claude Code transcript isn\'t on this computer',
       });
     }
   }
 
-  const codexRows = recent.filter(row => row.agentType === 'codex');
+  const codexRows = withFolder.filter(row => row.agentType === 'codex');
   if (codexRows.length > 0) {
     const home = codexHome(context);
     const store = listCodexSessions(context, home);
@@ -135,5 +193,5 @@ export const readConductor: SourceReader = async context => {
     }
   }
 
-  return { source: 'conductor', status: 'ok', version: read.version, storePaths, sessions };
-};
+  return { status: 'ok', version: read.version, storePaths, workspaceRows: read.workspaceRows, sessions };
+}

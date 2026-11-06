@@ -3,7 +3,8 @@ import path from 'path';
 import type { IpcMain } from 'electron';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
-import { getAppDirectory } from '../utils/appDirectory';
+import { getAppDirectory, getAppSubdirectory } from '../utils/appDirectory';
+import { registerHostPlacementCommands } from '../services/sessionImport/hostPlace';
 import { panelManager } from '../services/panelManager';
 import { isProcessAlive, readProcessTable } from '../utils/processTree';
 import { scanSessions, isSelectable, type ScanOutcome } from '../services/sessionImport/scan';
@@ -31,7 +32,6 @@ import type {
 const SESSION_IMPORT_CHANNELS = ['session-import:scan', 'session-import:run', 'session-import:progress'] as const;
 const LISTED_MS = 30 * 24 * 60 * 60 * 1000;
 const READY_TIMEOUT_MS = 90_000;
-
 /**
  * "Bring your sessions into Pane": scans other agent tools' stores on the
  * computer that runs the agents and brings chosen sessions in as Panes.
@@ -61,25 +61,7 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
   };
 
   const scan = (): Promise<ScanOutcome> => {
-    const now = Date.now();
-    let processes: Promise<string[]> | undefined;
-    const context: ReaderContext = {
-      env: process.env,
-      home: os.homedir(),
-      platform: process.platform,
-      now,
-      sinceMs: now - LISTED_MS,
-      tempDir: os.tmpdir(),
-      isPidAlive: isProcessAlive,
-      processCommands: () => (processes ??= readProcessTable().then(rows => {
-        // The table always holds Pane itself, so an empty one means it couldn't be read.
-        if (rows.length === 0) {
-          throw new PaneError('ERR_SESSION_IMPORT_PROCESSES', "Pane couldn't list running processes, so it can't tell which sessions are still running", 'Press Check again.');
-        }
-        return rows.map(row => row.executable);
-      })),
-    };
-    const outcome = scanSessions({ context, readers: SOURCE_READERS, alreadyInPane: alreadyInPane(), excludedRoots: excludedRoots() });
+    const outcome = scanSessions({ context: localReaderContext(), readers: SOURCE_READERS, alreadyInPane: alreadyInPane(), excludedRoots: excludedRoots() });
     outcome.catch(error => console.error('[SessionImport] Scan failed:', error));
     return outcome;
   };
@@ -135,6 +117,32 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
     },
   };
 
+  // A workspace moved here from another computer ("Move from Conductor"). See hostPlace.ts.
+  registerHostPlacementCommands(commandRegistry, getAppSubdirectory('session-import-uploads'), {
+    ...port,
+    home: os.homedir(),
+    machineName: os.hostname(),
+    stores: { claudeConfigDir: claudeConfigDir({ env: process.env, home: os.homedir() }), codexHome: codexHome({ env: process.env, home: os.homedir() }) },
+    paneDir: getAppDirectory(),
+    repos: () => databaseService.getAllProjects().map(project => ({ id: project.id, path: project.path, buildScript: project.build_script })),
+    async cloneRepo(url, destDir) {
+      // SAFETY: the git:clone-repo handler answers with { success, data, error }.
+      const result = await commandRegistry.invoke('git:clone-repo', [url, destDir]) as { success: boolean; data?: { clonedPath: string }; error?: string };
+      if (!result.success || !result.data) throw new Error(result.error ?? 'the clone failed');
+      return result.data.clonedPath;
+    },
+    async adoptWithoutChat(repoId, checkout, name) {
+      // SAFETY: the registered runpane handler returns RunpanePaneAdoptResult.
+      const result = await commandRegistry.invoke('runpane:panes:adopt', [{
+        repo: { id: repoId }, noFocus: true, source: 'agent',
+        panes: [{ path: checkout, name, tool: { agent: 'claude' }, launch: false }],
+      }]) as RunpanePaneAdoptResult;
+      const item = result.items[0];
+      if (!item || 'error' in item || !item.paneId) throw new Error(item && 'error' in item ? item.error.message : 'Pane could not adopt the checkout');
+      return { paneId: item.paneId };
+    },
+  });
+
   commandRegistry.register('session-import:scan', async (): Promise<SessionImportScan> => (await scan()).scan);
 
   commandRegistry.register('session-import:progress', (): SessionImportProgress => progress);
@@ -175,6 +183,28 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
   });
 
   commandRegistry.bindChannels(ipcMain, SESSION_IMPORT_CHANNELS);
+}
+
+/** What the readers see on this computer: its own stores, processes and clock. */
+export function localReaderContext(): ReaderContext {
+  const now = Date.now();
+  let processes: Promise<string[]> | undefined;
+  return {
+    env: process.env,
+    home: os.homedir(),
+    platform: process.platform,
+    now,
+    sinceMs: now - LISTED_MS,
+    tempDir: os.tmpdir(),
+    isPidAlive: isProcessAlive,
+    processCommands: () => (processes ??= readProcessTable().then(rows => {
+      // The table always holds Pane itself, so an empty one means it couldn't be read.
+      if (rows.length === 0) {
+        throw new PaneError('ERR_SESSION_IMPORT_PROCESSES', "Pane couldn't list running processes, so it can't tell which sessions are still running", 'Press Check again.');
+      }
+      return rows.map(row => row.executable);
+    })),
+  };
 }
 
 function toTabCheck(result: RunpanePanelWaitResult): TabCheck {

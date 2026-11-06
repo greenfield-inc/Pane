@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-/** Same cap as `terminal:paste-file` and desktop's upload button. */
+/** The default cap: the same as `terminal:paste-file` and desktop's upload button. */
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 /** Partial uploads untouched this long are deleted. */
 const ABANDONED_UPLOAD_MS = 24 * 60 * 60 * 1000;
@@ -32,18 +32,20 @@ const UPLOAD_ID = /^[A-Za-z0-9_-]{8,64}$/;
 export class ChunkedUploadStore {
   private readonly dir: string;
   private readonly now: () => number;
+  private readonly maxBytes: number;
   private readonly locks = new Map<string, Promise<unknown>>();
 
-  constructor({ dir, now = Date.now }: { dir: string; now?: () => number }) {
+  constructor({ dir, now = Date.now, maxBytes = MAX_UPLOAD_BYTES }: { dir: string; now?: () => number; maxBytes?: number }) {
     this.dir = dir;
     this.now = now;
+    this.maxBytes = maxBytes;
   }
 
   async start(input: UploadStart): Promise<{ receivedBytes: number }> {
     assertUploadId(input.uploadId);
     if (!Number.isSafeInteger(input.size) || input.size < 0) throw new Error('Invalid upload size');
-    if (input.size > MAX_UPLOAD_BYTES) {
-      throw new Error(`File too large (${formatMegabytes(input.size)} MB, max ${formatMegabytes(MAX_UPLOAD_BYTES)} MB)`);
+    if (input.size > this.maxBytes) {
+      throw new Error(`File too large (${formatMegabytes(input.size)} MB, max ${formatMegabytes(this.maxBytes)} MB)`);
     }
     await fs.mkdir(this.dir, { recursive: true });
     await this.sweep();
