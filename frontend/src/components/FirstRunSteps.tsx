@@ -13,6 +13,7 @@ const INSTALL_URLS = {
   codex: 'https://github.com/openai/codex',
   cursor: 'https://cursor.com/docs/cli/installation',
   opencode: 'https://opencode.ai/docs',
+  gemini: 'https://geminicli.com/docs/get-started/installation/',
 } satisfies Record<PaneChatAgent, string>;
 
 /** The Yes button and the scanning indicator share this box, so the footer never shifts. */

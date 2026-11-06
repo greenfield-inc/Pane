@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TerminalStateEmulator } from '../terminalStateEmulator';
 import { AgentStatusMonitor } from './agentStatusMonitor';
 import { detectAgentState } from './manifestEngine';
-import { CLAUDE_MANIFEST, CURSOR_MANIFEST, OPENCODE_MANIFEST } from './manifests';
+import { CLAUDE_MANIFEST, CURSOR_MANIFEST, GEMINI_MANIFEST, OPENCODE_MANIFEST } from './manifests';
 import type { AgentManifest } from './manifestEngine';
 
 /**
@@ -114,6 +114,41 @@ describe('agent status pipeline (emulator -> detect -> monitor)', () => {
     emulator.write('  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\r\n');
     emulator.write('  [project]         shift+tab agents  ctrl+p commands\r\n');
     expect(await classify(emulator, monitor, 15_010, OPENCODE_MANIFEST)).toBe('idle');
+  });
+
+  it('classifies distilled Gemini CLI 0.67.0 bytes: trust dialog -> ready -> working -> approval -> ready', async () => {
+    const emulator = new TerminalStateEmulator(80, 24);
+    const monitor = new AgentStatusMonitor({ idleSettleMs: 10_000, startupGraceMs: 3000 });
+    monitor.register('p', 0);
+    const rule = '─'.repeat(78);
+    const composer = ` ${rule}\r\n YOLO Ctrl+Y\r\n${'▄'.repeat(80)}\r\n *   Type your message or @path/to/file\r\n${'▀'.repeat(80)}\r\n`;
+
+    // Gemini sets its Ready title before drawing the startup folder-trust dialog.
+    emulator.write('\x1b]0;◇  Ready (repo)                                                                 \x07');
+    emulator.write(' ▝▜▄     Gemini CLI v0.67.0\r\n\r\n');
+    emulator.write(` ╭${'─'.repeat(60)}╮\r\n │ Do you trust the files in this folder?${' '.repeat(20)} │\r\n`);
+    emulator.write(` │ ● 1. Trust folder (repo)${' '.repeat(34)} │\r\n │   3. Don't trust${' '.repeat(42)} │\r\n`);
+    emulator.write(` ╰${'─'.repeat(60)}╯\r\n`);
+    expect(await classify(emulator, monitor, 4000, GEMINI_MANIFEST)).toBe('blocked');
+
+    emulator.write(' Gemini CLI is restarting to apply the trust changes...\r\n ▝▜▄     Gemini CLI v0.67.0\r\n');
+    emulator.write(composer);
+    expect(await classify(emulator, monitor, 5000, GEMINI_MANIFEST)).toBe('idle');
+
+    emulator.write('\x1b]0;✦  Working… (repo)                                                              \x07');
+    emulator.write(' ⠹ Thinking... (esc to cancel, 1s)\r\n');
+    monitor.noteActivity('p', 6000);
+    expect(await classify(emulator, monitor, 6010, GEMINI_MANIFEST)).toBe('working');
+
+    emulator.write('\x1b]0;✋  Action Required (repo)                                                       \x07');
+    emulator.write(`╭${'─'.repeat(60)}╮\r\n│ Allow execution of [Shell]?${' '.repeat(32)}│\r\n│ ● 1. Allow once${' '.repeat(44)}│\r\n`);
+    emulator.write(`│   3. No, suggest changes (esc)${' '.repeat(29)}│\r\n╰${'─'.repeat(60)}╯\r\n`);
+    expect(await classify(emulator, monitor, 7000, GEMINI_MANIFEST)).toBe('blocked');
+
+    emulator.write('\x1b]0;◇  Ready (repo)                                                                 \x07');
+    emulator.write('✦ Hello from the mock.\r\n');
+    emulator.write(composer);
+    expect(await classify(emulator, monitor, 18_000, GEMINI_MANIFEST)).toBe('idle');
   });
 
   it('stays working across 5.03s high-effort redraw gaps', async () => {

@@ -4,6 +4,7 @@ import {
   CLAUDE_MANIFEST,
   CODEX_MANIFEST,
   CURSOR_MANIFEST,
+  GEMINI_MANIFEST,
   GENERIC_MANIFEST,
   OPENCODE_MANIFEST,
   getManifestForAgent,
@@ -18,6 +19,7 @@ describe('getManifestForAgent', () => {
     expect(getManifestForAgent('codex')).toBe(CODEX_MANIFEST);
     expect(getManifestForAgent('cursor')).toBe(CURSOR_MANIFEST);
     expect(getManifestForAgent('opencode')).toBe(OPENCODE_MANIFEST);
+    expect(getManifestForAgent('gemini')).toBe(GEMINI_MANIFEST);
     expect(getManifestForAgent('aider')).toBe(GENERIC_MANIFEST);
     expect(getManifestForAgent(undefined)).toBe(GENERIC_MANIFEST);
     expect(getManifestForAgent(null)).toBe(GENERIC_MANIFEST);
@@ -769,5 +771,75 @@ describe('CLAUDE_MANIFEST API errors seen in Claude Code 2.1.302', () => {
         expect(detectAgentState(CLAUDE_MANIFEST, screen(s, title))).toMatchObject({ state: 'idle', matchedRuleId: 'live_prompt_box' });
       }
     }
+  });
+});
+
+describe('GEMINI_MANIFEST', () => {
+  // Screens and titles captured from Gemini CLI 0.67.0 in a 120x40 PTY.
+  const box = (rows: string[]) => [
+    ` ╭${'─'.repeat(60)}╮`,
+    ...rows.map(row => ` │ ${row.padEnd(58)} │`),
+    ` ╰${'─'.repeat(60)}╯`,
+  ].join('\n');
+  const composer = [
+    '                                                         ? for shortcuts',
+    '─'.repeat(72),
+    ' YOLO Ctrl+Y',
+    '▄'.repeat(72),
+    ' *   Type your message or @path/to/file',
+    '▀'.repeat(72),
+    ' workspace (/directory)                          sandbox             /model',
+    ' ~/repo                                          no sandbox            Auto',
+  ].join('\n');
+  const trustDialog = box([
+    '',
+    'Do you trust the files in this folder?',
+    '',
+    'Trusting a folder allows Gemini CLI to load its local configurations.',
+    '',
+    '● 1. Trust folder (repo)',
+    '  2. Trust parent folder (worktrees)',
+    "  3. Don't trust",
+    '',
+  ]);
+  const banner = ' ▝▜▄     Gemini CLI v0.67.0\n\nTips for getting started:\n1. Create GEMINI.md files to customize your interactions';
+
+  it('reads the dynamic window title: ready, working, thinking, action required', () => {
+    expect(detectAgentState(GEMINI_MANIFEST, screen(composer, '◇  Ready (repo)'))).toMatchObject({ state: 'idle', visibleIdle: true });
+    expect(detectAgentState(GEMINI_MANIFEST, screen(composer, '✦  Working… (repo)'))).toMatchObject({ state: 'working', visibleWorking: true });
+    expect(detectAgentState(GEMINI_MANIFEST, screen(composer, '✦  Planning the refactor (repo)'))).toMatchObject({ state: 'working' });
+    expect(detectAgentState(GEMINI_MANIFEST, screen(composer, '⏲  Working… (repo)'))).toMatchObject({ state: 'working' });
+    expect(detectAgentState(GEMINI_MANIFEST, screen(composer, '✋  Action Required (repo)'))).toMatchObject({ state: 'blocked', visibleBlocker: true });
+  });
+
+  it('is blocked on the folder-trust dialog although the title already says Ready', () => {
+    const r = detectAgentState(GEMINI_MANIFEST, screen(`${banner}\n\n${trustDialog}`, '◇  Ready (repo)'));
+    expect(r).toMatchObject({ state: 'blocked', visibleBlocker: true, matchedRuleId: 'folder_trust_prompt' });
+  });
+
+  it('is idle once the answered trust dialog is only scrollback above a restarted composer', () => {
+    const s = `${trustDialog}\n Gemini CLI is restarting to apply the trust changes...\n${banner}\n${composer}`;
+    expect(detectAgentState(GEMINI_MANIFEST, screen(s, '◇  Ready (repo)'))).toMatchObject({ state: 'idle' });
+  });
+
+  it('is working from the spinner line when the window title is turned off', () => {
+    const s = ` > say hello\n ⠹ Thinking... (esc to cancel, 1s)                                ? for shortcuts\n${composer}`;
+    expect(detectAgentState(GEMINI_MANIFEST, screen(s, 'Gemini CLI (repo)'))).toMatchObject({ state: 'working', visibleWorking: true });
+  });
+
+  it('is blocked on a tool approval when the window title is turned off', () => {
+    const s = ` > RUNTOOL please\n${box([
+      '? Shell  rm -f probe.txt',
+      'Allow execution of [Shell]?',
+      '',
+      '● 1. Allow once',
+      '  2. Allow for this session',
+      '  3. No, suggest changes (esc)',
+    ])}`;
+    expect(detectAgentState(GEMINI_MANIFEST, screen(s, 'Gemini CLI (repo)'))).toMatchObject({ state: 'blocked', visibleBlocker: true });
+  });
+
+  it('is idle at the composer when the window title is turned off', () => {
+    expect(detectAgentState(GEMINI_MANIFEST, screen(composer, 'Gemini CLI (repo)'))).toMatchObject({ state: 'idle', visibleIdle: true });
   });
 });

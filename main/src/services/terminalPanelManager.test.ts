@@ -1,6 +1,9 @@
 import * as claudeTranscripts from './claudeSessionTranscript';
 import * as pty from '@lydell/node-pty';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
 import { resetPaneRuntimeForTests, setPaneRuntime, type PtyHostRuntime } from '../core/runtime';
@@ -1750,6 +1753,98 @@ describe('TerminalPanelManager hidden output delivery', () => {
       'claude --dangerously-skip-permissions --resume "22222222-2222-4222-8222-222222222222"',
     );
     expect(result.customState).not.toHaveProperty('initialInputSentAt');
+  });
+
+  describe('Gemini launches', () => {
+    let geminiHome: string;
+    const sessionId = '7403f755-6758-40d3-bb69-2cd356dd9bf0';
+    const saveGeminiSession = (id: string) => {
+      const chats = path.join(geminiHome, '.gemini', 'tmp', 'repo', 'chats');
+      mkdirSync(chats, { recursive: true });
+      // The name and first line Gemini CLI 0.67.0 writes after the first message.
+      writeFileSync(path.join(chats, `session-2026-11-06T05-41-${id.slice(0, 8)}.jsonl`), `{"sessionId":"${id}","kind":"main"}\n`);
+    };
+
+    beforeEach(() => {
+      geminiHome = mkdtempSync(path.join(tmpdir(), 'pane-gemini-home-'));
+      mkdirSync(path.join(geminiHome, '.gemini', 'tmp'), { recursive: true });
+      vi.stubEnv('GEMINI_CLI_HOME', geminiHome);
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      rmSync(geminiHome, { recursive: true, force: true });
+    });
+
+    it('starts a fresh Gemini panel with a session id Pane can resume', () => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+      const result = manager.resolveCliLaunchCommand('panel-1', 'gemini --yolo', { agentType: 'gemini' });
+
+      expect(result.commandToRun).toMatch(/^gemini --yolo --session-id [0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect(result.customState).toMatchObject({ agentType: 'gemini', isCliPanel: true, isCliReady: false });
+      expect(result.commandToRun).toBe(`gemini --yolo --session-id ${result.customState.agentSessionId}`);
+    });
+
+    it('passes fresh Gemini initial input as the interactive startup prompt', () => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+      const result = manager.resolveCliLaunchCommand('panel-1', 'gemini --yolo', {
+        agentType: 'gemini',
+        agentSessionId: sessionId,
+        initialInputMode: 'argument',
+        initialInput: 'Read "the guide" and initialize `Pane Chat`.',
+      });
+
+      expect(result.commandToRun).toBe(`gemini --yolo --session-id ${sessionId} "Read \\"the guide\\" and initialize \\\`Pane Chat\\\`."`);
+      expect(result.customState).toMatchObject({ initialInputSentAt: expect.any(String), initialInputError: undefined });
+    });
+
+    it('resumes the conversation once Gemini has saved it', () => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+      saveGeminiSession(sessionId);
+
+      const result = manager.resolveCliLaunchCommand('panel-1', 'gemini --yolo', {
+        agentType: 'gemini',
+        agentSessionId: sessionId,
+        wasInterrupted: true,
+      });
+
+      expect(result.commandToRun).toBe(`gemini --yolo --resume "${sessionId}"`);
+      expect(result.customState).toMatchObject({ agentSessionId: sessionId, wasInterrupted: undefined });
+    });
+
+    it('reuses an unsaved session id, because Gemini saves nothing before the first message', () => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+      saveGeminiSession('99999999-2222-4333-8444-555555555555');
+
+      const result = manager.resolveCliLaunchCommand('panel-1', 'gemini --yolo', {
+        agentType: 'gemini',
+        agentSessionId: sessionId,
+        wasInterrupted: true,
+      });
+
+      expect(result.commandToRun).toBe(`gemini --yolo --session-id ${sessionId}`);
+    });
+
+    it('trusts the Session folder Pane wrote, so Gemini reads its GEMINI.md', () => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+      const result = manager.resolveCliLaunchCommand('panel-1', 'gemini --yolo', {
+        agentType: 'gemini',
+        agentSessionId: sessionId,
+        orchestrationSessionId: 'session-1',
+      });
+
+      expect(result.commandToRun).toBe(`gemini --yolo --skip-trust --session-id ${sessionId}`);
+    });
+
+    it('leaves a command that already picks its Gemini session alone', () => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+      const result = manager.resolveCliLaunchCommand('panel-1', 'gemini --yolo --resume latest', { agentType: 'gemini' });
+
+      expect(result.commandToRun).toBe('gemini --yolo --resume latest');
+    });
   });
 
   it('launches a fresh Cursor panel through the create-chat compound', () => {

@@ -4,7 +4,7 @@ import type { ToolPanel } from '../../../shared/types/panels';
 import { isCliAgentType, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 
 const shutdownResumeStateSchema = boundary.object({
-  agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode', 'gemini')),
   initialCommand: boundary.optional(boundary.string),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
 });

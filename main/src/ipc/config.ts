@@ -340,7 +340,7 @@ const remoteSettingsFields = {
 function buildRemotePwaSessionAgents(configuredAgent: PaneChatAgent | undefined): RemotePwaSessionAgents {
   const agents = agentPresetsForPlatform(process.platform)
     .map(preset => preset.id)
-    .filter((agent): agent is PaneChatAgent => agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode');
+    .filter((agent): agent is PaneChatAgent => agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode' || agent === 'gemini');
   const preferred = normalizePaneChatAgent(configuredAgent);
   return { agents, defaultAgent: agents.includes(preferred) ? preferred : agents[0] ?? preferred };
 }

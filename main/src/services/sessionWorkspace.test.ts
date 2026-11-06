@@ -49,7 +49,7 @@ describe('Session workspace instructions', () => {
     await expect(fs.access(path.join(cwd, 'AGENTS.md'))).resolves.toBeUndefined();
   });
 
-  it.each(['AGENTS.md', 'CLAUDE.md', 'progress.html', 'notes.txt'])('preserves imports with user content in %s', async fileName => {
+  it.each(['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', 'progress.html', 'notes.txt'])('preserves imports with user content in %s', async fileName => {
     const record: OrchestrationSessionRecord = {
       id: 'imported', name: 'Pane Chat · Codex', agent: 'codex', internalSessionId: 'owner',
       panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor', opencode: 'opencode' },
@@ -106,6 +106,8 @@ describe('Session workspace instructions', () => {
     expect(claude).toContain('@AGENTS.md');
     expect(claude).toContain('User Claude instructions.');
     expect(claude.match(/pane-session-context:start/g)).toHaveLength(1);
+    // Gemini CLI 0.67 reads GEMINI.md, not AGENTS.md, and expands `@file` imports.
+    await expect(fs.readFile(path.join(cwd, 'GEMINI.md'), 'utf8')).resolves.toContain('@AGENTS.md');
   });
 
   it('refuses to overwrite instructions with incomplete managed markers', async () => {

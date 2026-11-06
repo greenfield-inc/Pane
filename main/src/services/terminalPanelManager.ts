@@ -21,6 +21,7 @@ import { resolveTerminalPanelKind } from './terminalPanelKind';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
+import { GEMINI_SESSION_SELECTOR, canReadGeminiSessions, hasGeminiSession } from './agents/geminiLaunch';
 import { getShellPath, warmShellPath } from '../utils/shellPath';
 import { terminalTiming } from '../utils/terminalTiming';
 import { trimAnsiSafe } from '../utils/ansiTrim';
@@ -616,7 +617,9 @@ export class TerminalPanelManager extends EventEmitter {
           ? this.resolveCursorLaunch(panelId, initialCommand, customState, nextState, shellType)
           : agentType === 'opencode'
             ? this.resolveOpenCodeLaunch(initialCommand, customState, nextState, isWSL ? 'bash' : shellType)
-          : undefined;
+            : agentType === 'gemini'
+              ? this.resolveGeminiLaunch(initialCommand, customState, nextState, isWSL, isWSL ? 'bash' : shellType)
+              : undefined;
 
     return resolution ?? { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
   }
@@ -650,6 +653,44 @@ export class TerminalPanelManager extends EventEmitter {
       if (customState.orchestrationSessionId) throw openCodeSessionLaunchError(cause);
       throw cause;
     }
+  }
+
+  /**
+   * Pane names each Gemini conversation itself: `--session-id <uuid>` until Gemini saves it on the
+   * first message, then `--resume <uuid>`. Where Pane can't see Gemini's saved sessions, a recorded
+   * id is trusted to have a conversation.
+   */
+  private resolveGeminiLaunch(
+    initialCommand: string,
+    customState: TerminalPanelState,
+    nextState: TerminalPanelState,
+    isWSL: boolean,
+    shellType?: string,
+  ): CliLaunchResolution | undefined {
+    if (GEMINI_SESSION_SELECTOR.test(initialCommand)) return undefined;
+    const recordedId = isValidUuid(customState.agentSessionId) ? customState.agentSessionId : undefined;
+    const sessionId = recordedId ?? randomUUID();
+    const canCheck = !isWSL && !customState.sshHost && canReadGeminiSessions();
+    const resume = Boolean(recordedId) && (canCheck ? hasGeminiSession(sessionId) : true);
+    nextState.agentSessionId = sessionId;
+    nextState.wasInterrupted = undefined;
+    // Gemini ignores GEMINI.md in an untrusted folder; a Session folder is Pane's own.
+    if (customState.orchestrationSessionId && !/(?:^|\s)--skip-trust(?:\s|$)/.test(initialCommand)) initialCommand = `${initialCommand} --skip-trust`;
+    if (resume) {
+      return { commandToRun: `${initialCommand} --resume ${this.quoteCommandArgument(sessionId)}`, customState: nextState, isCliCommand: true };
+    }
+    const promptWord = this.hasUnsentArgumentPrompt(customState) ? this.initialPromptWord(customState, shellType) : undefined;
+    if (promptWord) {
+      nextState.initialInputSentAt = new Date().toISOString();
+      nextState.initialInputError = undefined;
+    } else if (this.hasUnsentArgumentPrompt(customState)) {
+      this.dropUnplaceablePrompt(nextState, shellType);
+    }
+    return {
+      commandToRun: `${initialCommand} --session-id ${sessionId}${promptWord ? ` ${promptWord}` : ''}`,
+      customState: nextState,
+      isCliCommand: true,
+    };
   }
 
   private resolveClaudeLaunch(

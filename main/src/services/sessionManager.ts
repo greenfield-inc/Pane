@@ -100,7 +100,7 @@ const terminalResumeStateSchema = boundary.object({
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   wasInterrupted: boundary.optional(boundary.boolean),
   initialCommand: boundary.optional(boundary.string),
-  agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode', 'gemini')),
   agentSessionId: boundary.optional(boundary.string),
   hasClaudeSessionId: boundary.optional(boundary.boolean),
 });
@@ -109,7 +109,7 @@ function parseTerminalResumeState(value: ToolPanelState['customState']): {
   customResume?: CustomCommandResume | null;
   wasInterrupted?: boolean;
   initialCommand?: string;
-  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode';
+  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode' | 'gemini';
   agentSessionId?: string;
   hasClaudeSessionId?: boolean;
 } | undefined {

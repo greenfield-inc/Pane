@@ -87,7 +87,7 @@ describe('buildAllMachinesTree', () => {
   it('leaves out archived Sessions and lists each Session\'s Panes from its own machine', () => {
     const record = (id: string, name: string, paneIds: string[], archived = false): OrchestrationSessionRecord => ({
       id, name, archived, agent: 'claude', internalSessionId: `internal-${id}`,
-      panelIds: { claude: `${id}-claude`, codex: `${id}-codex`, cursor: `${id}-cursor`, opencode: `${id}-opencode` },
+      panelIds: { claude: `${id}-claude`, codex: `${id}-codex`, cursor: `${id}-cursor`, opencode: `${id}-opencode`, gemini: `${id}-gemini` },
       goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
       associations: paneIds.map(paneId => ({ paneId, panelIds: [], attachedAt: '2026-10-30T09:00:00Z' })),
       activity: [], revision: 1, createdAt: '2026-10-30T09:00:00Z', updatedAt: '2026-10-30T09:00:00Z',

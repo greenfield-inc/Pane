@@ -1,4 +1,4 @@
-export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor' | 'opencode';
+export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor' | 'opencode' | 'gemini';
 
 export interface AgentLaunchPreset {
   id: AgentLaunchPresetId;
@@ -48,6 +48,14 @@ export const AGENT_LAUNCH_PRESETS: readonly AgentLaunchPreset[] = [
     iconKey: 'opencode',
     hotkeyId: 'add-tool-terminal-opencode',
     hotkey: 'mod+alt+6',
+  },
+  {
+    id: 'gemini',
+    title: 'Gemini',
+    command: 'gemini --yolo',
+    iconKey: 'gemini',
+    hotkeyId: 'add-tool-terminal-gemini',
+    hotkey: 'mod+alt+7',
   },
 ];
 

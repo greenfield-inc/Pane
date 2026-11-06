@@ -66,7 +66,7 @@ import type { MobileAlertSubject } from '../daemon/mobilePushSender';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
-const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor', 'opencode'];
+const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor', 'opencode', 'gemini'];
 
 const ORCHESTRATION_SESSION_TITLE = 'Session';
 const ORCHESTRATION_BOOTSTRAP_VERSION = 2;
@@ -76,7 +76,7 @@ function getOrchestrationPanelId(sessionId: string, agent: PaneChatAgent): strin
 }
 
 function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
-  return agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode';
+  return agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode' || agent === 'gemini';
 }
 
 export class OrchestrationSessionManager extends EventEmitter {
@@ -269,6 +269,7 @@ export class OrchestrationSessionManager extends EventEmitter {
           codex: sourceState?.agentType === 'codex' && sourcePanel ? sourcePanel.id : getOrchestrationPanelId(id, 'codex'),
           cursor: getOrchestrationPanelId(id, 'cursor'),
           opencode: getOrchestrationPanelId(id, 'opencode'),
+          gemini: getOrchestrationPanelId(id, 'gemini'),
         },
         goal: input.goal?.trim() ?? '',
         context: input.context?.trim() ?? (sourcePane ? `Conversation promoted from Pane ${sourcePane.id}. Project files remain at ${sourcePane.worktreePath}. Continue project work there; this Session folder holds coordination artifacts.` : ''),
@@ -892,6 +893,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         codex: getPaneChatPanelId('codex'),
         cursor: getPaneChatPanelId('cursor'),
         opencode: getPaneChatPanelId('opencode'),
+        gemini: getPaneChatPanelId('gemini'),
       },
       goal: '',
       context: '',
@@ -1062,7 +1064,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       ? resolveSessionAgent(record.agent, initialCommand, record.customResume)
       : launchAgent(command, record.customResume);
     const nativeCommand = resolvedAgent === 'opencode'
-      || /^(?:claude|codex|cursor-agent)(?:\s|$)/.test(command) && !/[;&|\n]/.test(command);
+      || /^(?:claude|codex|cursor-agent|gemini)(?:\s|$)/.test(command) && !/[;&|\n]/.test(command);
     // A resumed conversation is created with its id, so even a tab repaired at startup resumes it.
     const resumed: TerminalPanelState = {};
     if (record.resume) resumed.agentSessionId = record.resume;

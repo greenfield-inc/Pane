@@ -506,6 +506,82 @@ export const OPENCODE_MANIFEST: AgentManifest = {
   ],
 };
 
+/** A Gemini dialog box still open at the bottom of the screen: its `│` rows, then the `╰` that closes it last. */
+const GEMINI_OPEN_BOX_END = String.raw`[^\n]*(?:\n[^\S\n]*│[^\n]*)*\n[^\S\n]*╰[─\n]*╯?\s*$`;
+
+/** Gemini's startup folder-trust dialog while it is still the last thing on screen. */
+export const GEMINI_TRUST_PROMPT_OPEN = new RegExp(`Do you trust the files in this folder\\?[\\s\\S]*Don't trust${GEMINI_OPEN_BOX_END}`, 'iu');
+
+/*
+ * Distilled from Gemini CLI 0.67.0 PTY frames. Gemini renders inline (no
+ * alternate screen) and names its state in the OSC 0 title it sets by
+ * default: `◇  Ready`, `✦  Working…` or `✦  <thought>`, `⏲  Working…` for
+ * quiet tool runs, and `✋  Action Required` for approvals. The title still
+ * says Ready under the startup folder-trust dialog, so that dialog has its own
+ * rule; the screen rules below also cover people who turn the title off.
+ */
+export const GEMINI_MANIFEST: AgentManifest = {
+  id: 'gemini',
+  rules: [
+    {
+      id: 'folder_trust_prompt',
+      state: 'blocked',
+      priority: 1200,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      regex: [GEMINI_TRUST_PROMPT_OPEN],
+    },
+    {
+      id: 'osc_title_blocked',
+      state: 'blocked',
+      priority: 1100,
+      region: 'osc_title',
+      visibleBlocker: true,
+      contains: ['Action Required'],
+    },
+    {
+      id: 'osc_title_working',
+      state: 'working',
+      priority: 1050,
+      region: 'osc_title',
+      visibleWorking: true,
+      regex: [/^[✦⏲]\s/u],
+    },
+    {
+      id: 'live_approval_prompt',
+      state: 'blocked',
+      priority: 900,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      regex: [new RegExp(`No, suggest changes \\(esc\\)${GEMINI_OPEN_BOX_END}`, 'u')],
+    },
+    {
+      id: 'spinner_status_line',
+      state: 'working',
+      priority: 500,
+      region: 'bottom_non_empty_lines(10)',
+      visibleWorking: true,
+      lineRegex: [/^\s*[⠀-⣿]\s.*\(esc to cancel\b/u],
+    },
+    {
+      id: 'idle_composer',
+      state: 'idle',
+      priority: 300,
+      region: 'bottom_non_empty_lines(6)',
+      visibleIdle: true,
+      contains: ['type your message or @path/to/file'],
+    },
+    {
+      id: 'osc_title_idle',
+      state: 'idle',
+      priority: 100,
+      region: 'osc_title',
+      visibleIdle: true,
+      regex: [/^◇\s/u],
+    },
+  ],
+};
+
 interface AgentManifestLookup {
   [agent: string]: AgentManifest;
 }
@@ -515,6 +591,7 @@ const MANIFESTS_BY_AGENT: AgentManifestLookup = {
   codex: CODEX_MANIFEST,
   cursor: CURSOR_MANIFEST,
   opencode: OPENCODE_MANIFEST,
+  gemini: GEMINI_MANIFEST,
 };
 
 /**

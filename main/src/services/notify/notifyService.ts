@@ -23,7 +23,7 @@ import { NotifyTray } from './notifyTray';
 import { syncNotifyInstructions, syncWslNotifyInstructions } from './notifyInstructions';
 import { isPaneHomeSkillEnabled } from '../paneHomeSkill';
 
-const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
+const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode'], ['gemini', 'Gemini']]);
 
 export interface NotifyServiceDependencies {
   configManager: ConfigManager;

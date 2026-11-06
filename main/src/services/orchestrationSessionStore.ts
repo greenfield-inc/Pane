@@ -21,9 +21,13 @@ import {
   type OrchestrationSessionRecord,
   type OrchestrationSessionStoreData,
 } from '../../../shared/types/orchestrationSession';
-import { getPaneChatPanelId } from '../../../shared/types/paneChat';
+import { PANE_CHAT_AGENT_LABELS, getPaneChatPanelId } from '../../../shared/types/paneChat';
 
-const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor', 'opencode');
+/** Agents added after Sessions were first saved; older records lack their panel ids. */
+const LATER_SESSION_AGENTS = ['opencode', 'gemini'] as const;
+type LaterSessionAgent = typeof LATER_SESSION_AGENTS[number];
+
+const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor', 'opencode', 'gemini');
 const sourceSchema = boundary.enumeration('user', 'agent', 'system');
 const activityKindSchema = boundary.enumeration(
   'created',
@@ -96,6 +100,7 @@ const sessionSchema = boundary.object({
     codex: boundary.nonEmptyString,
     cursor: boundary.nonEmptyString,
     opencode: boundary.optional(boundary.nonEmptyString),
+    gemini: boundary.optional(boundary.nonEmptyString),
   }),
   goal: boundary.string,
   context: boundary.string,
@@ -255,11 +260,13 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
     delete fields.reportActivityId;
     delete fields.reportAcceptedAt;
   }
-  // A bad OpenCode panel id is replaced by the derived one rather than dropping the Session.
+  // A bad panel id for an agent added later is replaced by the derived one rather than dropping the Session.
   const panelIds = decodeOptionalBoundary(fields.panelIds, boundary.jsonObject);
-  if (panelIds?.opencode !== undefined && decodeOptionalBoundary(panelIds.opencode, boundary.nonEmptyString) === undefined) {
-    problems.push(`${label}: replaced an invalid OpenCode panel id`);
-    fields.panelIds = Object.fromEntries(Object.entries(panelIds).filter(([agent]) => agent !== 'opencode'));
+  for (const agent of LATER_SESSION_AGENTS) {
+    if (panelIds?.[agent] !== undefined && decodeOptionalBoundary(panelIds[agent], boundary.nonEmptyString) === undefined) {
+      problems.push(`${label}: replaced an invalid ${PANE_CHAT_AGENT_LABELS[agent]} panel id`);
+      fields.panelIds = Object.fromEntries(Object.entries(decodeOptionalBoundary(fields.panelIds, boundary.jsonObject) ?? {}).filter(([key]) => key !== agent));
+    }
   }
   if (fields.runtime === 'wsl' && decodeOptionalBoundary(fields.wslDistribution, boundary.nonEmptyString) === undefined) {
     problems.push(`dropped ${label}: a WSL Session requires a distribution`);
@@ -273,10 +280,10 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
   }
   try {
     const session = decodeBoundary(fields, sessionSchema);
-    // Sessions saved before OpenCode joined get its derived panel id.
-    const opencode = session.panelIds.opencode ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID
-      ? getPaneChatPanelId('opencode') : `__orchestration_panel_${session.id}_opencode`);
-    return { ...session, panelIds: { ...session.panelIds, opencode } };
+    // Sessions saved before OpenCode or Gemini joined get the derived panel id.
+    const derived = (agent: LaterSessionAgent) => session.panelIds[agent] ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID
+      ? getPaneChatPanelId(agent) : `__orchestration_panel_${session.id}_${agent}`);
+    return { ...session, panelIds: { ...session.panelIds, opencode: derived('opencode'), gemini: derived('gemini') } };
   } catch (error) {
     if (!(error instanceof BoundaryDecodeError)) throw error;
     problems.push(`dropped ${label}: ${error.message}`);

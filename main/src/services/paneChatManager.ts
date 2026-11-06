@@ -29,7 +29,7 @@ function isValidUuid(value: string | undefined): value is string {
 }
 
 function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
-  return agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode';
+  return agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode' || agent === 'gemini';
 }
 
 export class PaneChatManager {
