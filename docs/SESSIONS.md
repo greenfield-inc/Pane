@@ -440,6 +440,34 @@ anything similar) into Pane tabs:
   again lists what is already in Pane and creates nothing twice. Archiving an
   adopted Pane keeps your checkout.
 
+### Move Conductor workspaces to another machine
+
+Settings → AI & Agents → "Move from Conductor" → **Find workspaces** moves
+Conductor workspaces from this Mac to a machine saved under Settings → Remote
+Access, such as a cloud machine or any Remote Pane host:
+
+- Pane lists every Conductor workspace that isn't archived, with its branch,
+  unpushed commits, uncommitted files and chats. A workspace with a running
+  chat can't be chosen; quit it in Conductor and press **Check again**.
+- The machine reuses the repository when its Pane already has one with the
+  same remote, or clones it into `~/pane/repos/<repo>`. Sign in to GitHub on
+  that machine first for a private repository.
+- The branch and its unpushed commits travel as a git bundle over the Pane
+  connection; nothing is pushed to GitHub. The worktree is
+  `~/pane/workspaces/<repo>/<workspace>`, with the uncommitted files put back
+  as unstaged changes. Ignored files, such as `.env`, stay on the Mac.
+- The repository's setup script (Project Settings, else its
+  [config file](CONFIG_FILES.md), `.conductor/settings.toml` included) runs once
+  in the new worktree, with `CONDUCTOR_WORKSPACE_PATH`, `CONDUCTOR_ROOT_PATH`,
+  `CONDUCTOR_WORKSPACE_NAME` and `CONDUCTOR_DEFAULT_BRANCH` set.
+- Claude Code and Codex chats are copied into the machine's own `~/.claude`
+  and `~/.codex` and resumed by id as tabs of one Pane, as "Bring sessions
+  into Pane" does. A chat the machine already has keeps its own copy.
+- Nothing on this Mac changes. Moving again skips workspaces whose branch
+  already has a Pane on that machine, and the shared import record keeps
+  moved chats out of "Bring sessions into Pane".
+- A machine on an older Pane is reported with "Update Pane on <machine>".
+
 ## Session startup
 
 Creating, opening, restoring, restarting, or switching the agent in a Session

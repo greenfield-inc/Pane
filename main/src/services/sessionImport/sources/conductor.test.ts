@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readConductor } from './conductor';
+import { readConductor, readConductorWorkspaces } from './conductor';
 import type { ReaderContext } from './types';
 
 const NOW = Date.parse('2026-10-26T12:00:00Z');
@@ -199,5 +199,27 @@ describe('readConductor', () => {
     expect([fs.readFileSync(dbPath()), fs.statSync(dbPath()).mtimeMs]).toEqual(before);
     expect(fs.readdirSync(path.dirname(dbPath()))).toEqual(['conductor.db']);
     expect(fs.readdirSync(root).filter(name => name.startsWith('store-'))).toEqual([]);
+  });
+});
+
+describe('readConductorWorkspaces', () => {
+  it('lists every workspace that is not archived, with all of its chats whatever their age', async () => {
+    const BERLIN = { key: 'ws-3', name: 'berlin', branch: 'me/berlin', path: '/Users/me/conductor/workspaces/app/berlin', state: 'archived' };
+    writeDb([WARSAW, TOKYO, BERLIN], [
+      { id: 's-1', workspace: 'ws-1', agent: 'claude', claudeId: CLAUDE_A, title: 'Fix checkout', updatedAt: '2025-01-02 09:00:00' },
+      { id: 's-2', workspace: 'ws-1', agent: 'codex', title: 'Port the API', updatedAt: '2026-10-25 09:30:00' },
+      { id: 's-3', workspace: 'ws-3', agent: 'claude', claudeId: CLAUDE_B, updatedAt: '2026-10-26 09:00:00' },
+    ]);
+    writeClaudeTranscript('-Users-me-conductor-workspaces-app-warsaw', CLAUDE_A);
+    writeCodexRollout(CODEX_THREAD, WARSAW.path, 'exec', 'codex_sdk_ts');
+
+    const result = await readConductorWorkspaces(context());
+
+    expect(result.status).toBe('ok');
+    const workspaces = result.status === 'ok' ? result.workspaces : [];
+    expect(workspaces.map(workspace => [workspace.name, workspace.folder, workspace.branch, workspace.chats.map(chat => `${chat.agent}:${chat.sessionId}`)])).toEqual([
+      ['warsaw', WARSAW.path, 'me/warsaw', [`claude:${CLAUDE_A}`, `codex:${CODEX_THREAD}`]],
+      ['tokyo', TOKYO.path, 'me/tokyo', []],
+    ]);
   });
 });

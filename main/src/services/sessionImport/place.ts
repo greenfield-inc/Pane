@@ -49,6 +49,8 @@ export interface PlacementOptions {
   paneDir: string;
   now?: () => Date;
   onProgress?: (session: ScannedSession) => void;
+  /** The next step a session that wasn't continued names; defaults to asking Pane Chat. */
+  retryNext?: string;
 }
 
 interface Placed {
@@ -70,6 +72,7 @@ const RERUN_NEXT = "Say 'migrate to Pane' in Pane Chat to try it another way.";
 export async function placeSessions(options: PlacementOptions): Promise<SessionImportRunResult> {
   const { port, stores, paneDir } = options;
   const now = options.now ?? (() => new Date());
+  const retryNext = options.retryNext ?? RERUN_NEXT;
   const results = new Map<string, ImportSessionResult>();
   const placed: Placed[] = [];
   const createdPanes = new Set<string>();
@@ -95,7 +98,7 @@ export async function placeSessions(options: PlacementOptions): Promise<SessionI
   for (const session of options.sessions) {
     const missing = transcriptProblem(session, stores);
     if (missing || !session.checkout || !session.repoRoot) {
-      finish(session, { outcome: 'not continued', reason: missing ?? `Its folder isn't in a git checkout. ${RERUN_NEXT}` });
+      finish(session, { outcome: 'not continued', reason: missing ?? `Its folder isn't in a git checkout. ${retryNext}` });
       record(session, 'not continued', null, null);
       continue;
     }
@@ -125,7 +128,7 @@ export async function placeSessions(options: PlacementOptions): Promise<SessionI
       }
     } catch (error) {
       for (const session of group) {
-        finish(session, { outcome: 'not continued', reason: `Pane couldn't open ${checkout}: ${reasonOf(error)}. ${RERUN_NEXT}` });
+        finish(session, { outcome: 'not continued', reason: `Pane couldn't open ${checkout}: ${reasonOf(error)}. ${retryNext}` });
         record(session, 'not continued', null, null);
       }
       continue;
@@ -137,7 +140,7 @@ export async function placeSessions(options: PlacementOptions): Promise<SessionI
         placed.push({ session, paneId: pane.paneId, paneName: pane.name, panelId, newPane: createdPanes.has(pane.paneId) });
         record(session, 'pending', pane.paneId, panelId);
       } catch (error) {
-        finish(session, { outcome: 'not continued', reason: `Pane couldn't open a tab for it: ${reasonOf(error)}. ${RERUN_NEXT}` });
+        finish(session, { outcome: 'not continued', reason: `Pane couldn't open a tab for it: ${reasonOf(error)}. ${retryNext}` });
         record(session, 'not continued', null, null);
       }
     }
@@ -165,10 +168,10 @@ export async function placeSessions(options: PlacementOptions): Promise<SessionI
       const failure = `${agentLabel(item.session)} didn't resume it: ${check.reason}.`;
       if (closeError) {
         // The tab is still there: keep its identity so the person can find and close it.
-        finish(item.session, { ...base, outcome: 'not continued', reason: `${failure} Pane couldn't close its tab (${closeError}), so close it yourself. ${RERUN_NEXT}` });
+        finish(item.session, { ...base, outcome: 'not continued', reason: `${failure} Pane couldn't close its tab (${closeError}), so close it yourself. ${retryNext}` });
         record(item.session, 'not continued', item.paneId, item.panelId);
       } else {
-        finish(item.session, { outcome: 'not continued', reason: `${failure} ${RERUN_NEXT}` });
+        finish(item.session, { outcome: 'not continued', reason: `${failure} ${retryNext}` });
         record(item.session, 'not continued', null, null);
       }
       continue;

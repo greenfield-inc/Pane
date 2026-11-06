@@ -5,6 +5,7 @@ import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
 import type { LoopInput } from '../../../shared/types/loop';
+import type { ConductorMoveRequest } from '../../../shared/types/conductorMove';
 import { startOwnPaneCreation } from './ownPaneCreations';
 import type { MissionControlSnapshotRequest } from '../../../shared/types/missionControl';
 import type {
@@ -218,6 +219,22 @@ export class API {
     async progress() {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.sessionImport.progress();
+    },
+  };
+
+  // Move Conductor workspaces to another machine
+  static conductorMove = {
+    async scan() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.conductorMove.scan();
+    },
+    async run(request: ConductorMoveRequest) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.conductorMove.run(request);
+    },
+    async progress() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.conductorMove.progress();
     },
   };
 

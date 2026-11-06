@@ -9,9 +9,10 @@ Pane checks for these files in priority order. The first file found with at leas
 | Priority | File | Format | Origin |
 |----------|------|--------|--------|
 | 1 | `pane.json` | JSON | Pane's native format |
-| 2 | `conductor.json` | JSON | [Conductor.build](https://conductor.build) |
-| 3 | `.gitpod.yml` | YAML | [Gitpod](https://gitpod.io) |
-| 4 | `.devcontainer/devcontainer.json` | JSON | [Dev Containers](https://containers.dev) |
+| 2 | `.conductor/settings.toml` | TOML | [Conductor.build](https://conductor.build) |
+| 3 | `conductor.json` | JSON | Conductor's legacy format; ignored when `.conductor/settings.toml` exists, as Conductor does |
+| 4 | `.gitpod.yml` | YAML | [Gitpod](https://gitpod.io) |
+| 5 | `.devcontainer/devcontainer.json` | JSON | [Dev Containers](https://containers.dev) |
 
 If none of these exist, Pane falls back to checking for `scripts/pane-run-script.js` in the worktree (the legacy auto-generated script).
 
@@ -243,3 +244,5 @@ The Play button tooltip shows exactly what will run and where it came from:
 ### Migrating from Conductor
 
 If you already have a `conductor.json`, it works as-is — the schema is identical. You can optionally rename it to `pane.json`. If both files exist, `pane.json` wins.
+
+Pane also reads Conductor's `.conductor/settings.toml`: `scripts.setup`, `scripts.archive` and `scripts.run_mode` as above. `scripts.run` is either one command or named actions under `[scripts.run.<id>]`; Pane's single run script takes the action marked `default = true`, else the first one not hidden, with its `args` appended. `.conductor/settings.local.toml` and your user settings in `~/.conductor` are not read.

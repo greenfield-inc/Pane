@@ -7,9 +7,10 @@
  *
  * Detection priority (first file with at least one script wins):
  *   1. pane.json         — Pane's native format (matches conductor.json schema)
- *   2. conductor.json    — Conductor.build workspace config
- *   3. .gitpod.yml       — Gitpod workspace config (first task's init/command)
- *   4. .devcontainer/devcontainer.json — Dev Containers (postCreateCommand/postStartCommand)
+ *   2. .conductor/settings.toml — Conductor's current repository settings
+ *   3. conductor.json    — Conductor's legacy config, ignored when settings.toml exists (as Conductor does)
+ *   4. .gitpod.yml       — Gitpod workspace config (first task's init/command)
+ *   5. .devcontainer/devcontainer.json — Dev Containers (postCreateCommand/postStartCommand)
  *
  * The returned {@link DetectedProjectConfig} maps to Pane's project settings:
  *   - setup  → build_script  (runs on worktree creation)
@@ -29,11 +30,12 @@
 import path from 'path';
 import fs from 'fs';
 import yaml from 'js-yaml';
+import { parse as parseToml } from 'smol-toml';
 import { posixJoin } from '../utils/wslUtils';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { ProjectEnvironment } from '../utils/pathResolver';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 
 // Internal schema interfaces — NOT exported
 interface PaneJsonSchema {
@@ -70,6 +72,20 @@ const gitpodYmlSchema = boundary.object({
     init: boundary.optional(boundary.string),
     command: boundary.optional(boundary.string),
   }))),
+});
+const conductorActionSchema = boundary.object({
+  command: boundary.optional(boundary.string),
+  args: boundary.optional(boundary.array(boundary.string)),
+  default: boundary.optional(boundary.boolean),
+  hide: boundary.optional(boundary.boolean),
+});
+const conductorSettingsSchema = boundary.object({
+  scripts: boundary.optional(boundary.object({
+    setup: boundary.optional(boundary.string),
+    archive: boundary.optional(boundary.string),
+    run: boundary.optional(boundary.json),
+    run_mode: boundary.optional(boundary.enumeration('concurrent', 'nonconcurrent')),
+  })),
 });
 const commandSchema = boundary.union(boundary.string, boundary.array(boundary.string));
 const devcontainerJsonSchema = boundary.object({
@@ -119,8 +135,9 @@ async function readFile(
 
 type ConfigParser = (content: string, source: string) => DetectedProjectConfig | null;
 
-const CONFIG_FILES: Array<{ file: string; parser: ConfigParser }> = [
+const CONFIG_FILES: Array<{ file: string; parser: ConfigParser; supersedes?: string }> = [
   { file: 'pane.json', parser: parsePaneJson },
+  { file: '.conductor/settings.toml', parser: parseConductorSettings, supersedes: 'conductor.json' },
   { file: 'conductor.json', parser: parseConductorJson },
   { file: '.gitpod.yml', parser: parseGitpodYml },
   { file: '.devcontainer/devcontainer.json', parser: parseDevcontainerJson },
@@ -129,7 +146,7 @@ const CONFIG_FILES: Array<{ file: string; parser: ConfigParser }> = [
 /**
  * Detects and parses the highest-priority config file at the given path.
  *
- * Checks pane.json → conductor.json → .gitpod.yml → devcontainer.json in order.
+ * Checks pane.json → .conductor/settings.toml → conductor.json → .gitpod.yml → devcontainer.json in order.
  * Returns the first config that defines at least one script (setup/run/archive).
  * If a file exists but has no scripts, falls through to the next file.
  *
@@ -143,10 +160,13 @@ export async function detectProjectConfig(
   environment: ProjectEnvironment,
   commandRunner?: CommandRunner,
 ): Promise<DetectedProjectConfig | null> {
-  for (const { file, parser } of CONFIG_FILES) {
-    const filePath = envJoin(environment, projectPath, file);
+  const superseded = new Set<string>();
+  for (const { file, parser, supersedes } of CONFIG_FILES) {
+    if (superseded.has(file)) continue;
+    const filePath = envJoin(environment, projectPath, ...file.split('/'));
     const exists = await fileExists(filePath, environment, commandRunner, projectPath);
     if (exists) {
+      if (supersedes) superseded.add(supersedes);
       try {
         const content = await readFile(filePath, environment, commandRunner, projectPath);
         const result = parser(content, file);
@@ -177,6 +197,22 @@ function parsePaneJson(content: string, source: string): DetectedProjectConfig |
 
 function parseConductorJson(content: string, source: string): DetectedProjectConfig | null {
   return parsePaneJson(content, source);
+}
+
+/**
+ * Conductor's `[scripts]` table. `run` is one command, or named actions under
+ * `[scripts.run.<id>]`; Pane's single run script takes the default action, else the first shown one.
+ */
+function parseConductorSettings(content: string, source: string): DetectedProjectConfig | null {
+  const scripts = decodeBoundary(parseToml(content), conductorSettingsSchema).scripts;
+  let run = decodeOptionalBoundary(scripts?.run, boundary.string);
+  const named = run === undefined ? decodeOptionalBoundary(scripts?.run, boundary.record(conductorActionSchema)) : undefined;
+  if (named) {
+    const actions = Object.values(named).filter(action => action.command && !action.hide);
+    const chosen = actions.find(action => action.default) ?? actions[0];
+    if (chosen?.command) run = [chosen.command, ...(chosen.args ?? [])].join(' ');
+  }
+  return { setup: scripts?.setup, run, archive: scripts?.archive, runScriptMode: scripts?.run_mode, source };
 }
 
 function parseGitpodYml(content: string, source: string): DetectedProjectConfig | null {

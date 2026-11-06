@@ -6,7 +6,7 @@
  * hasn't configured scripts in the UI.
  *
  * Supported source files (checked in this priority order):
- *   pane.json → conductor.json → .gitpod.yml → devcontainer.json
+ *   pane.json → .conductor/settings.toml → conductor.json → .gitpod.yml → devcontainer.json
  */
 export interface DetectedProjectConfig {
   /** Setup/install command — maps to Project.build_script. Runs on worktree creation. */
@@ -15,7 +15,7 @@ export interface DetectedProjectConfig {
   run?: string;
   /** Cleanup command — maps to Project.archive_script. Runs before worktree deletion. */
   archive?: string;
-  /** Script concurrency mode from pane.json/conductor.json. Future use — not yet enforced. */
+  /** Script concurrency mode from pane.json or Conductor's config. Future use — not yet enforced. */
   runScriptMode?: 'concurrent' | 'nonconcurrent';
   /** The filename this config was detected from (e.g. 'pane.json', '.gitpod.yml'). */
   source: string;

@@ -125,6 +125,7 @@ import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
 import { MachineConnections } from './services/machineConnections';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
+import { registerConductorMoveHandlers } from './ipc/conductorMove';
 import { followSavedMachines } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
@@ -1179,6 +1180,7 @@ async function initializeServices() {
     invokeLocal: (channel, args) => commandRegistry.invoke(channel, args),
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
+  registerConductorMoveHandlers(ipcMain, machineConnections);
   // The Notify inbox, badge and tray count cover every saved machine, in any mode.
   followSavedMachines(machineConnections);
 

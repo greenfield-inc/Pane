@@ -19,6 +19,8 @@ export type MigrationRecordEntry = {
   result: 'pending' | 'continued' | 'continued as a fork' | 'not continued';
   at: string;
   source: SessionImportSource;
+  /** The machine it now runs on, when it was moved to another one; absent for this computer. */
+  host?: string;
 };
 
 function migrationRecordPath(paneDir: string): string {

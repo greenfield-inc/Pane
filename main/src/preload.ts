@@ -2,6 +2,7 @@ import type { LoopInput } from '../../shared/types/loop';
 import type { TestNotificationResult } from '../../shared/types/notifications';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
+import type { ConductorMoveProgress, ConductorMoveRequest, ConductorMoveResult, ConductorMoveScan } from '../../shared/types/conductorMove';
 import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
@@ -473,6 +474,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     scan: (): Promise<SessionImportScan> => invokeIpc('session-import:scan'),
     run: (keys: string[]): Promise<SessionImportRunResult> => invokeIpc('session-import:run', keys),
     progress: (): Promise<SessionImportProgress> => invokeIpc('session-import:progress'),
+  },
+
+  // Move Conductor workspaces from this computer to a saved machine; always runs on this computer
+  conductorMove: {
+    scan: (): Promise<ConductorMoveScan> => ipcRenderer.invoke('conductor-move:scan'),
+    run: (request: ConductorMoveRequest): Promise<ConductorMoveResult> => ipcRenderer.invoke('conductor-move:run', request),
+    progress: (): Promise<ConductorMoveProgress> => ipcRenderer.invoke('conductor-move:progress'),
   },
 
   // Leaderboard opt-in and submission
