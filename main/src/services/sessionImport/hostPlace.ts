@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { execFile, spawn } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
 import { HOST_PLACEMENT_CHANNELS, type HostPlacementResult, type HostPlacementStatus, type HostWorkspacePlacement } from '../../../../shared/types/conductorMove';
 import type { ImportSessionResult } from '../../../../shared/types/sessionImport';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
@@ -326,9 +326,9 @@ async function runSetup(repo: HostRepo, worktree: string, placement: HostWorkspa
     CONDUCTOR_ROOT_PATH: repo.path,
   };
   if (placement.defaultBranch) env.CONDUCTOR_DEFAULT_BRANCH = placement.defaultBranch;
-  const shell = process.env.SHELL || '/bin/sh';
   return new Promise(resolve => {
-    execFile(shell, ['-c', script], { cwd: worktree, env, timeout: SETUP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+    // The whole script in the person's shell, as Conductor runs it.
+    exec(script, { cwd: worktree, env, shell: process.env.SHELL || undefined, timeout: SETUP_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
       const tail = `${stdout}${stderr}`.trim().split('\n').slice(-5).join('\n');
       resolve(error ? { source, ok: false, detail: tail || reasonOf(error) } : { source, ok: true });
     });

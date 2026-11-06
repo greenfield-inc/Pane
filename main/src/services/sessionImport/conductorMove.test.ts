@@ -156,7 +156,8 @@ async function move(target: MoveTarget) {
 // Real git on both sides, and the Mac polls each placement once a second.
 const MOVE_TIMEOUT_MS = 30_000;
 
-describe('moving Conductor workspaces to another machine', () => {
+// Conductor runs only on macOS, and the fixture's setup script is POSIX sh.
+describe.skipIf(process.platform === 'win32')('moving Conductor workspaces to another machine', () => {
   it('lands each workspace as a Pane with its unpushed commit, uncommitted files and chats, and a second run adds nothing', async () => {
     const warsaw = workspace('warsaw', 'me/warsaw');
     write(path.join(warsaw, 'feature.txt'), 'committed but not pushed\n');
