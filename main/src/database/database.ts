@@ -2578,6 +2578,18 @@ export class DatabaseService {
     ensureUsageRollup(this.db);
     ensureArchiveCleanup(this.db);
 
+    // Loops started from GitHub events (additive).
+    // SAFETY: SQLite PRAGMA table_info returns the SqliteTableInfo projection.
+    const loopColumns = this.db.prepare("PRAGMA table_info(loops)").all() as SqliteTableInfo[];
+    if (loopColumns.length > 0 && !loopColumns.some(column => column.name === "github_triggers")) {
+      this.db.prepare("ALTER TABLE loops ADD COLUMN github_triggers TEXT").run();
+    }
+    // SAFETY: SQLite PRAGMA table_info returns the SqliteTableInfo projection.
+    const loopRunColumns = this.db.prepare("PRAGMA table_info(loop_runs)").all() as SqliteTableInfo[];
+    if (loopRunColumns.length > 0 && !loopRunColumns.some(column => column.name === "event")) {
+      this.db.prepare("ALTER TABLE loop_runs ADD COLUMN event TEXT").run();
+    }
+
     // Keep this ownership migration after legacy table-rebuild migrations above,
     // since those intentionally reconstruct sessions from an older column set.
     // SAFETY: SQLite PRAGMA table_info returns the SqliteTableInfo projection.

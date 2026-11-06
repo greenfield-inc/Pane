@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { boundary, decodeBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 export interface GithubPrTarget { host: string; owner: string; repo: string; number: number }
 const execFileAsync = promisify(execFile);
@@ -127,12 +127,56 @@ export class GithubWatchClient {
   }
 
   private query(host: string, query: string, partial = false): Promise<JsonObject> {
-    const work = this.lane.then(() => this.request(host, query, false, partial));
-    this.lane = work.catch(() => undefined);
-    return work;
+    return this.queue(() => this.graphql(host, query, partial));
   }
 
-  private async request(host: string, query: string, refreshed = false, partial = false): Promise<JsonObject> {
+  /**
+   * A REST read that sends the ETag from the last read. GitHub answers an
+   * unchanged resource with 304, which does not count against the rate limit.
+   */
+  rest(host: string, path: string, etag?: string): Promise<{ changed: false } | { changed: true; etag: string | null; body: JsonValue }> {
+    return this.queue(async () => {
+      const root = host === 'github.com' ? 'https://api.github.com' : `https://${host}/api/v3`;
+      const response = await this.send(host, `${root}${path}`, token => ({
+        method: 'GET',
+        headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', ...(etag ? { 'if-none-match': etag } : {}) },
+      }));
+      if (response.status === 304) return { changed: false };
+      try { return { changed: true, etag: response.headers.get('etag'), body: decodeBoundary(await response.json(), boundary.json) }; }
+      catch { throw new GithubWatchError('GitHub returned an invalid response; watching will retry.'); }
+    });
+  }
+
+  private queue<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.lane.then(work);
+    this.lane = run.catch(() => undefined);
+    return run;
+  }
+
+  private async graphql(host: string, query: string, partial: boolean): Promise<JsonObject> {
+    const url = host === 'github.com' ? 'https://api.github.com/graphql' : `https://${host}/api/graphql`;
+    const response = await this.send(host, url, token => ({
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ query }),
+    }));
+    const wait = this.waitAfter(response);
+    let payload: ReturnType<typeof envelope.decode>;
+    try { payload = decodeBoundary(await response.json(), envelope); }
+    catch { throw new GithubWatchError('GitHub returned an invalid response; watching will retry.'); }
+    if (payload.errors?.length) {
+      if (payload.errors.some(error => error.type === 'RATE_LIMITED' || /rate limit/iu.test(error.message))) {
+        this.waits.set(host, wait);
+        throw new GithubWatchError('GitHub GraphQL rate limit reached; watching resumes after reset.', true, wait);
+      }
+      if (partial && payload.data) return payload.data;
+      // Never include server text: it can echo request details or private repository contents.
+      throw new GithubWatchError('GitHub GraphQL could not complete the read. Check repository access; watching will retry.');
+    }
+    if (!payload.data) throw new GithubWatchError('GitHub returned no data; watching will retry.');
+    return payload.data;
+  }
+
+  /** One authenticated request with the shared credential cache, a single 401 retry, and the quota reserve. */
+  private async send(host: string, url: string, init: (token: string) => RequestInit, refreshed = false): Promise<Response> {
     const retryAt = this.waits.get(host) ?? 0;
     if (retryAt > this.now()) throw new GithubWatchError('GitHub quota reserved for interactive use; watching resumes after reset.', true, retryAt);
     let credential = this.credentials.get(host);
@@ -150,45 +194,34 @@ export class GithubWatchClient {
         throw new GithubWatchError(`Could not read GitHub CLI credentials for ${host} from the Pane daemon. Run gh auth status --hostname ${host} in the daemon's environment to check config or keyring access; watching will retry.`);
       }
     }
-    const url = host === 'github.com' ? 'https://api.github.com/graphql' : `https://${host}/api/graphql`;
     let response: Response;
     try {
-      response = await (this.options.fetch ?? fetch)(url, {
-        method: 'POST', headers: { authorization: `Bearer ${credential.value}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ query }), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), redirect: 'error',
-      });
+      response = await (this.options.fetch ?? fetch)(url, { ...init(credential.value), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), redirect: 'error' });
     } catch { throw new GithubWatchError(`GitHub request to ${host} failed or exceeded 30 seconds; watching will retry.`); }
     if (response.status === 401) {
       this.credentials.delete(host);
-      if (!refreshed) return this.request(host, query, true, partial);
+      if (!refreshed) return this.send(host, url, init, true);
       throw new GithubWatchError(`GitHub rejected authentication for ${host}. Run gh auth login --hostname ${host}.`);
     }
-    const reset = Number(response.headers.get('x-ratelimit-reset')) * 1000;
     const remaining = Number(response.headers.get('x-ratelimit-remaining'));
     const limit = Number(response.headers.get('x-ratelimit-limit'));
     const retry = response.headers.get('retry-after');
-    const retryTime = retry ? (/^\d+$/u.test(retry) ? this.now() + Number(retry) * 1000 : Date.parse(retry)) : 0;
     const reserve = limit > 0 && remaining <= Math.ceil(limit * 0.1);
-    const wait = Math.max(this.now() + 60_000, Number.isFinite(reset) ? reset : 0, Number.isFinite(retryTime) ? retryTime : 0);
+    const wait = this.waitAfter(response);
     if (reserve || retry || response.status === 429) this.waits.set(host, wait);
     if (response.status === 429 || (response.status === 403 && (reserve || retry))) {
       throw new GithubWatchError(`GitHub rate limited ${host}; watching resumes after the server's wait.`, true, wait);
     }
-    if (!response.ok) throw new GithubWatchError(`GitHub returned HTTP ${response.status} for ${host}; watching will retry.`);
-    let payload: ReturnType<typeof envelope.decode>;
-    try { payload = decodeBoundary(await response.json(), envelope); }
-    catch { throw new GithubWatchError('GitHub returned an invalid response; watching will retry.'); }
-    if (payload.errors?.length) {
-      if (payload.errors.some(error => error.type === 'RATE_LIMITED' || /rate limit/iu.test(error.message))) {
-        this.waits.set(host, wait);
-        throw new GithubWatchError('GitHub GraphQL rate limit reached; watching resumes after reset.', true, wait);
-      }
-      if (partial && payload.data) return payload.data;
-      // Never include server text: it can echo request details or private repository contents.
-      throw new GithubWatchError('GitHub GraphQL could not complete the read. Check repository access; watching will retry.');
-    }
-    if (!payload.data) throw new GithubWatchError('GitHub returned no data; watching will retry.');
-    return payload.data;
+    if (!response.ok && response.status !== 304) throw new GithubWatchError(`GitHub returned HTTP ${response.status} for ${host}; watching will retry.`);
+    return response;
+  }
+
+  /** When to try again after this response's quota headers: the reset, the server's wait, or a minute. */
+  private waitAfter(response: Response): number {
+    const reset = Number(response.headers.get('x-ratelimit-reset')) * 1000;
+    const retry = response.headers.get('retry-after');
+    const retryTime = retry ? (/^\d+$/u.test(retry) ? this.now() + Number(retry) * 1000 : Date.parse(retry)) : 0;
+    return Math.max(this.now() + 60_000, Number.isFinite(reset) ? reset : 0, Number.isFinite(retryTime) ? retryTime : 0);
   }
 }
 
