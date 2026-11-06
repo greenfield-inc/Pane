@@ -46,10 +46,11 @@ const reviewSchema = boundary.object({
   submitted_at: boundary.optional(boundary.nullable(boundary.string)), user: login, author_association: boundary.optional(boundary.string),
   html_url: boundary.optional(boundary.string),
 });
-const checkRunsSchema = boundary.object({ check_runs: boundary.array(boundary.json) });
-const checkRunSchema = boundary.object({
-  id: boundary.number, name: boundary.string, status: boundary.string, conclusion: boundary.optional(boundary.nullable(boundary.string)),
-  completed_at: boundary.optional(boundary.nullable(boundary.string)), html_url: boundary.optional(boundary.nullable(boundary.string)),
+const workflowRunsSchema = boundary.object({ workflow_runs: boundary.array(boundary.json) });
+const workflowRunSchema = boundary.object({
+  id: boundary.number, run_attempt: boundary.optional(boundary.number), name: boundary.optional(boundary.nullable(boundary.string)),
+  status: boundary.string, conclusion: boundary.optional(boundary.nullable(boundary.string)),
+  updated_at: boundary.string, head_sha: boundary.string, html_url: boundary.string,
 });
 const issueEventSchema = boundary.object({
   id: boundary.number, event: boundary.string, created_at: boundary.string, actor: login,
@@ -70,6 +71,8 @@ type Pull = ReturnType<typeof pullSchema.decode>;
  */
 export class GithubLoopEventSource {
   private readonly cache = new Map<string, { etag: string | null; body: JsonValue }>();
+  /** Each PR's reviews as of its `updated_at`; a review updates the PR, so an unchanged PR keeps them. */
+  private readonly reviews = new Map<string, { updatedAt: string; candidates: GithubEventCandidate[] }>();
 
   constructor(private readonly rest: GithubRestRead, private readonly now: () => number = Date.now) {}
 
@@ -104,30 +107,21 @@ export class GithubLoopEventSource {
         });
       }
     }
-    for (const pull of recentPulls) {
-      if (wants.reviews || wants.comments) {
-        for (const review of items(await this.read(`/repos/${repo}/pulls/${pull.number}/reviews?per_page=${PAGE}`), reviewSchema)) {
-          if (!review.submitted_at) continue;
-          const reviewer = review.user?.login ?? 'ghost';
-          candidates.push({
-            event: { ...prContext(repo, pull), key: `review:${review.id}`, kind: 'review', number: pull.number, isPr: true, url: review.html_url ?? pull.html_url,
-              author: review.user?.login ?? null, atMs: Date.parse(review.submitted_at),
-              summary: review.state === 'CHANGES_REQUESTED' ? `@${reviewer} requested changes` : `Review by @${reviewer}`, text: clip(review.body ?? '') },
-            collaborator: COLLABORATOR_ASSOCIATIONS.has(review.author_association ?? ''),
-            reviewState: review.state,
-          });
-        }
-      }
-      if (wants.checks) {
-        const runs = decodeOr(await this.read(`/repos/${repo}/commits/${pull.head.sha}/check-runs?filter=latest&per_page=${PAGE}`), checkRunsSchema)?.check_runs ?? [];
-        for (const run of items(runs, checkRunSchema)) {
-          if (run.status !== 'completed' || !FAILED_CONCLUSIONS.has(run.conclusion ?? '') || !run.completed_at) continue;
-          candidates.push({
-            event: { ...prContext(repo, pull), key: `check:${run.id}`, kind: 'check', number: pull.number, isPr: true, url: run.html_url ?? pull.html_url,
-              author: null, atMs: Date.parse(run.completed_at), summary: `Check "${run.name}" failed` },
-            collaborator: true,
-          });
-        }
+    if (wants.reviews || wants.comments) {
+      for (const pull of recentPulls) candidates.push(...await this.pullReviews(repo, pull));
+    }
+    if (wants.checks) {
+      // One repo-wide read of finished GitHub Actions runs, matched to open PRs by head commit.
+      const pullBySha = new Map(pulls.map(pull => [pull.head.sha, pull]));
+      const runs = decodeOr(await this.read(`/repos/${repo}/actions/runs?status=completed&per_page=${PAGE}`), workflowRunsSchema)?.workflow_runs ?? [];
+      for (const run of items(runs, workflowRunSchema)) {
+        const pull = pullBySha.get(run.head_sha);
+        if (!pull || !FAILED_CONCLUSIONS.has(run.conclusion ?? '')) continue;
+        candidates.push({
+          event: { ...prContext(repo, pull), key: `check:${run.id}:${run.run_attempt ?? 1}`, kind: 'check', number: pull.number, isPr: true, url: run.html_url,
+            author: null, atMs: Date.parse(run.updated_at), summary: `Workflow "${run.name ?? 'CI'}" failed` },
+          collaborator: true,
+        });
       }
     }
     if (wants.labels) {
@@ -148,6 +142,26 @@ export class GithubLoopEventSource {
     return candidates
       .filter(candidate => Number.isFinite(candidate.event.atMs) && candidate.event.atMs >= since)
       .sort((a, b) => a.event.atMs - b.event.atMs);
+  }
+
+  private async pullReviews(repo: string, pull: Pull): Promise<GithubEventCandidate[]> {
+    const key = `${repo}#${pull.number}`;
+    const known = this.reviews.get(key);
+    if (known?.updatedAt === pull.updated_at) return known.candidates;
+    const candidates: GithubEventCandidate[] = [];
+    for (const review of items(await this.read(`/repos/${repo}/pulls/${pull.number}/reviews?per_page=${PAGE}`), reviewSchema)) {
+      if (!review.submitted_at) continue;
+      const reviewer = review.user?.login ?? 'ghost';
+      candidates.push({
+        event: { ...prContext(repo, pull), key: `review:${review.id}`, kind: 'review', number: pull.number, isPr: true, url: review.html_url ?? pull.html_url,
+          author: review.user?.login ?? null, atMs: Date.parse(review.submitted_at),
+          summary: review.state === 'CHANGES_REQUESTED' ? `@${reviewer} requested changes` : `Review by @${reviewer}`, text: clip(review.body ?? '') },
+        collaborator: COLLABORATOR_ASSOCIATIONS.has(review.author_association ?? ''),
+        reviewState: review.state,
+      });
+    }
+    this.reviews.set(key, { updatedAt: pull.updated_at, candidates });
+    return candidates;
   }
 
   private async read(path: string): Promise<JsonValue> {

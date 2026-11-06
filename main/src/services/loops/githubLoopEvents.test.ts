@@ -35,8 +35,11 @@ describe('GithubLoopEventSource', () => {
       '/repos/acme/app/pulls?': [pull(4), pull(5, { head: { ref: 'patch-1', sha: 'sha5', repo: { full_name: 'stranger/app' } }, author_association: 'NONE', user: { login: 'stranger' } })],
       '/repos/acme/app/pulls/4/reviews': [{ id: 21, state: 'CHANGES_REQUESTED', body: 'Please split this', submitted_at: at(3), user: { login: 'lee' }, author_association: 'MEMBER' }],
       '/repos/acme/app/pulls/5/reviews': [],
-      '/repos/acme/app/commits/sha4/check-runs': { check_runs: [{ id: 31, name: 'test', status: 'completed', conclusion: 'failure', completed_at: at(4), html_url: 'https://github.com/acme/app/runs/31' }, { id: 32, name: 'lint', status: 'completed', conclusion: 'success', completed_at: at(4) }] },
-      '/repos/acme/app/commits/sha5/check-runs': { check_runs: [] },
+      '/repos/acme/app/actions/runs': { workflow_runs: [
+        { id: 31, run_attempt: 1, name: 'test', status: 'completed', conclusion: 'failure', updated_at: at(4), head_sha: 'sha4', html_url: 'https://github.com/acme/app/actions/runs/31' },
+        { id: 32, run_attempt: 1, name: 'lint', status: 'completed', conclusion: 'success', updated_at: at(4), head_sha: 'sha4', html_url: 'u' },
+        { id: 33, run_attempt: 2, name: 'test', status: 'completed', conclusion: 'failure', updated_at: at(4), head_sha: 'merged-elsewhere', html_url: 'u' },
+      ] },
       '/repos/acme/app/issues/events': [{ id: 41, event: 'labeled', label: { name: 'agent' }, created_at: at(6), actor: { login: 'maya' }, issue: { number: 9, html_url: 'https://github.com/acme/app/issues/9', title: 'Crash on save', body: 'Steps to reproduce' } }],
     });
     const source = new GithubLoopEventSource(github.rest, () => NOW);
@@ -47,7 +50,7 @@ describe('GithubLoopEventSource', () => {
       ['label:41', 'label', 9, NOW - 6 * 60_000, 'maya', true],
       ['pr:4', 'pr', 4, NOW - 5 * 60_000, 'maya', true],
       ['pr:5', 'pr', 5, NOW - 5 * 60_000, 'stranger', false],
-      ['check:31', 'check', 4, NOW - 4 * 60_000, null, true],
+      ['check:31:1', 'check', 4, NOW - 4 * 60_000, null, true],
       ['review:21', 'review', 4, NOW - 3 * 60_000, 'lee', true],
       ['comment:11', 'comment', 4, NOW - 2 * 60_000, 'maya', true],
     ]);
@@ -55,7 +58,7 @@ describe('GithubLoopEventSource', () => {
     expect(byKey.get('comment:11')).toMatchObject({ isPr: true, text: '/pane fix the flaky test', headRef: 'feature-4', fork: false, url: 'https://github.com/acme/app/pull/4#issuecomment-11' });
     expect(byKey.get('pr:5')).toMatchObject({ fork: true });
     expect(byKey.get('pr:5')?.headRef).toBeUndefined();
-    expect(byKey.get('check:31')).toMatchObject({ summary: 'Check "test" failed', headRef: 'feature-4' });
+    expect(byKey.get('check:31:1')).toMatchObject({ summary: 'Workflow "test" failed', headRef: 'feature-4', url: 'https://github.com/acme/app/actions/runs/31' });
     expect(byKey.get('review:21')).toMatchObject({ summary: '@lee requested changes', text: 'Please split this' });
     expect(byKey.get('label:41')).toMatchObject({ isPr: false, summary: 'Labeled agent', text: 'Crash on save\n\nSteps to reproduce' });
   });
@@ -70,6 +73,8 @@ describe('GithubLoopEventSource', () => {
     const first = await source.poll('acme/app', { comments: true });
     const second = await source.poll('acme/app', { comments: true });
     expect(second).toEqual(first);
+    // The PR has not changed, so its reviews are not read again.
+    expect(github.reads.filter(path => path.includes('/reviews'))).toHaveLength(1);
   });
 
   it('reads only what the loops on a repo ask for', async () => {

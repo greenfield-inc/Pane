@@ -107,7 +107,8 @@ events** or **Both**, then choose what starts a run:
 
 - **PR comment or review containing** a phrase, `/pane` by default.
 - **Review requesting changes.**
-- **Failing check on a PR.**
+- **Failing check on a PR**: a GitHub Actions workflow run that fails on an open
+  PR's head commit.
 - **New PR.**
 - **Issue labeled** with a label, `agent` by default.
 
@@ -130,8 +131,10 @@ How it works:
   unless you turn on **PRs from forks**.
 - **Polling, with your own sign-in.** The machine that owns the loop checks each
   watched repo every 15 seconds with its own `gh` sign-in. Nothing passes
-  through a Pane server. It asks GitHub with conditional requests, so an
-  unchanged repo costs no rate limit.
+  through a Pane server. A quiet poll is four conditional requests (comments,
+  open PRs, label events and Actions runs), and GitHub answers an unchanged list
+  with 304, which costs no rate limit. Only lists that changed count, plus one
+  review read for each PR that changed.
 - **The run.** A PR's run starts in a new worktree at the PR's head branch and
   is told to push to that branch. An issue's run starts a new branch from the
   default base. The run's prompt is the loop's prompt plus the event: repo,
