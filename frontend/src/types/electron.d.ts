@@ -72,7 +72,7 @@ import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import type { ProjectEnvVar, ProjectEnvVarInput } from '../../../shared/types/projectEnvVars';
 import type { PaneSecretStorage, PaneSecretSummary } from '../../../shared/types/paneSecrets';
-import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
+import type { RunpaneHostPushAllResult, RunpaneHostUnpushedResult, RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
@@ -261,6 +261,10 @@ interface ElectronAPI {
   };
 
   // Loops (scheduled tasks)
+  host: {
+    unpushed: () => Promise<RunpaneHostUnpushedResult>;
+    pushAll: () => Promise<RunpaneHostPushAllResult>;
+  };
   loops: {
     list: () => Promise<IPCResponse<Loop[]>>;
     save: (input: LoopInput) => Promise<IPCResponse<Loop>>;

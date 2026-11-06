@@ -51,7 +51,7 @@ import type {
 import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
 import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
-import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
+import type { RunpaneHostPushAllResult, RunpaneHostUnpushedResult, RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
 import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
@@ -501,6 +501,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Loops (scheduled tasks)
+  /** The active host's Panes whose work is not on their remote, and pushing them all. */
+  host: {
+    unpushed: (): Promise<RunpaneHostUnpushedResult> => invokeIpc('runpane:host:unpushed'),
+    pushAll: (): Promise<RunpaneHostPushAllResult> => invokeIpc('runpane:host:push-all'),
+  },
   loops: {
     list: (): Promise<IPCResponse> => invokeIpc('loops:list'),
     save: (input: LoopInput): Promise<IPCResponse> => invokeIpc('loops:save', input),

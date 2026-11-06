@@ -93,27 +93,21 @@ function NewCodeForm({ controller, onDone }: { controller: RemoteAccessControlle
   const [person, setPerson] = useState('');
   return (
     <form
-      className="flex flex-wrap items-end gap-2 py-3"
+      className="space-y-1 py-3"
       aria-label="New connection code"
       onSubmit={(event) => {
         event.preventDefault();
         void controller.createHostCode(person).then((created) => { if (created) onDone(); });
       }}
     >
-      <div className="min-w-0 flex-1">
-        <Input
-          label="Who is it for?"
-          value={person}
-          onChange={(event) => setPerson(event.target.value)}
-          placeholder="Ada"
-          maxLength={80}
-          helperText="The code works once, on their device, for 15 minutes."
-          fullWidth
-          autoFocus
-        />
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <Input label="Who is it for?" value={person} onChange={(event) => setPerson(event.target.value)} placeholder="Ada" maxLength={80} fullWidth autoFocus />
+        </div>
+        <Button type="button" variant="ghost" size="sm" onClick={onDone}>Cancel</Button>
+        <Button type="submit" size="sm" loading={controller.busy} disabled={!person.trim()}>Create & Copy</Button>
       </div>
-      <Button type="button" variant="ghost" size="sm" onClick={onDone}>Cancel</Button>
-      <Button type="submit" size="sm" loading={controller.busy} disabled={!person.trim()}>Create & Copy</Button>
+      <p className="text-xs text-text-tertiary">The code works once, on their device, for 15 minutes.</p>
     </form>
   );
 }
