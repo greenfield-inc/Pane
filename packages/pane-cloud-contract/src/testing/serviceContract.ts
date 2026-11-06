@@ -147,7 +147,7 @@ export function serviceContractCases(target: ServiceContractTarget): ContractCas
       },
     },
     {
-      name: 'service: invite a teammate, list the roster and shared machines, hand over a connection code, then remove them',
+      name: 'service: invite a teammate, list the roster and shared machines, relay a connection code once, and withdraw it on unshare or removal',
       async run() {
         const owner = await as('owner');
         const teammate = await as('teammate');
@@ -177,9 +177,17 @@ export function serviceContractCases(target: ServiceContractTarget): ContractCas
             await expectError('connection_code_not_found', async () => (await as('outsider')).claimConnectionCode(machine.id));
             assert.equal((await teammate.claimConnectionCode(machine.id)).code, code);
             await expectError('connection_code_not_found', () => teammate.claimConnectionCode(machine.id));
+            const soon = () => new Date(Date.now() + 300_000).toISOString();
+            await ownerClient.leaveConnectionCode(machine.id, { forAccountId: joined.id, code: `${code}-2`, expiresAt: soon() });
+            await ownerClient.setSharing(machine.id, false);
+            await expectError('connection_code_not_found', () => teammate.claimConnectionCode(machine.id));
+            await ownerClient.setSharing(machine.id, true);
+            await ownerClient.leaveConnectionCode(machine.id, { forAccountId: joined.id, code: `${code}-3`, expiresAt: soon() });
+            await owner.removeMember(joined.id);
+            await expectError('connection_code_not_found', () => teammate.claimConnectionCode(machine.id));
           });
         } finally {
-          await owner.removeMember(joined.id);
+          if ((await owner.getTeam()).members.some((m) => m.accountId === joined.id)) await owner.removeMember(joined.id);
         }
         await expectError('not_team_member', () => teammate.listSharedMachines());
         assert.ok(!(await owner.getTeam()).members.some((m) => m.accountId === joined.id));

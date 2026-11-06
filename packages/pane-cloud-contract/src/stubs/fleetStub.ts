@@ -44,11 +44,11 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
   const events: FleetEvent[] = [];
 
   const record = (event: Omit<FleetEvent, 'id' | 'at'>) => events.push({ ...event, id: String(events.length + 1), at: iso() });
-  const setState = (machine: FleetMachine, state: FleetMachine['state'], reason: FleetMachine['stateReason']) => {
+  const setState = (machine: FleetMachine, state: FleetMachine['state'], reason: FleetMachine['stateReason'], requestId: string | null = null) => {
     machine.state = state;
     machine.stateReason = reason;
     machine.updatedAt = iso();
-    record({ machineId: machine.machineId, kind: 'state_changed', state, reason, requestId: null });
+    record({ machineId: machine.machineId, kind: 'state_changed', state, reason, requestId });
   };
   const requireMachine = (machineId: string) => {
     const machine = machines.get(machineId);
@@ -94,14 +94,14 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
         switch (payload.operation) {
           case 'stop':
             requireState(machine, 'running', 'stop');
-            setState(machine, 'stopped', 'user');
+            setState(machine, 'stopped', 'user', payload.requestId);
             break;
           case 'resume':
             requireState(machine, 'stopped', 'resume');
-            setState(machine, 'running', null);
+            setState(machine, 'running', null, payload.requestId);
             break;
           case 'delete':
-            setState(machine, 'deleted', 'user');
+            setState(machine, 'deleted', 'user', payload.requestId);
             break;
           case 'bootstrap':
           case 'update_pane':
@@ -164,6 +164,7 @@ export async function startFleetStub(options: FleetStubOptions): Promise<FleetSt
     }),
     bind(fleetRoutes.listEvents, ({ query }) => {
       const start = query.after ? Number(query.after) : 0;
+      if (!Number.isInteger(start) || start < 0 || start > events.length) throw new CloudApiError('invalid_request', `Unknown cursor ${query.after}.`, 'Pass a nextCursor from an earlier page, or no cursor to start from the beginning.');
       const page = events.slice(start, start + (query.limit ?? 100));
       const last = page.at(-1);
       return { events: page, nextCursor: last ? last.id : (query.after ?? null) };

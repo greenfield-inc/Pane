@@ -30,8 +30,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "prepare": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check:dist": "pnpm run build && git diff --exit-code -- dist && test -z \"$(git status --porcelain -- dist)\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "pnpm run lint:eslint",

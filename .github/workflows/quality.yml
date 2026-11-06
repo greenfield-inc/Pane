@@ -85,6 +85,14 @@ jobs:
     - name: Run Pane Cloud contract tests
       run: pnpm --filter pane-cloud-contract test
 
+    - name: Check Pane Cloud contract build is committed
+      if: ${{ !cancelled() }}
+      run: |
+        pnpm --filter pane-cloud-contract run check:dist || {
+          echo "::error title=pane-cloud-contract dist drift::packages/pane-cloud-contract/dist differs from its source. Run: pnpm --filter pane-cloud-contract build and commit dist."
+          exit 1
+        }
+
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
     # failed so it never hides behind them.
