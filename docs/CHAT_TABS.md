@@ -185,7 +185,7 @@ on the person. Idle, running and unchanged workers stay out of the chat; the
 sidebar lists every Pane. This comes from Pane's own Session state (its Panes,
 their agent states and `runpane report`s), never from what the agent wrote.
 
-Approvals and questions are also asked in Notify and on the phone (see
+Approvals and questions are also asked in Pane's Approvals and on the phone (see
 [PANE_NOTIFY.md](PANE_NOTIFY.md)), a question form one field at a time. The
 first answer wins everywhere.
 

@@ -8,16 +8,23 @@ name: Try the demo
     id: demo-badge
 - assertNotVisible: "Allow.*Notifications.*"
 
-# A waiting question: pick a choice; it leaves the list once the agent has it.
+# A waiting question: pick a choice on its approval screen; once the agent has it, the screen
+# steps to the next one and the question leaves home's Approvals.
 - tapOn: "add-dark-mode.*Which colors.*"
 - extendedWaitUntil:
     visible:
-      id: notify-sheet
+      id: approval-card
     timeout: 10000
+- assertVisible: "2 of 2"
 - tapOn:
     id: notify-choice-0
 - assertVisible:
     id: notify-sent
+- extendedWaitUntil:
+    visible: "1 of 1"
+    timeout: 15000
+- tapOn:
+    id: approval-back
 - extendedWaitUntil:
     notVisible: "add-dark-mode.*Which colors.*"
     timeout: 15000

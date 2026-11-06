@@ -392,6 +392,19 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
       expect(variant).toContain("STUCK lines (held input) go through the Liveness Contract's resubmit rule");
       expect(variant).toContain('Re-run `runpane watch --self-test`');
       expect(variant).toContain('## Hard stops');
+      expect(variant).toContain('## Approvals: what waits on the person (while Approvals is on)');
+      expect(variant).toContain("Keep every item that waits on the person posted to Pane's Approvals, exactly once.");
+      expect(variant).toContain('You are in orchestrator mode');
+      expect(variant).toContain('Be proactive.');
+      expect(variant).toContain('either have an approval waiting for the person');
+      expect(variant).toContain('titled with its Q-n, with the files it is about');
+      expect(variant).toContain('Post with the CLI as a background command, one per item, so you stay free to talk: in Claude Code, Bash with `run_in_background`');
+      expect(variant).toContain("--links '[{\"label\":\"Plan\",\"path\":\"<absolute file>\"}");
+      expect(variant).toContain('acknowledge its inbox item (`runpane inbox ack <id>`)');
+      expect(variant).toContain('stop its background command (TaskStop in Claude Code), which expires the card');
+      expect(variant).toContain('When you start, resume or wake, reconcile your open background calls');
+      expect(variant).toContain('Pane keeps no approvals across a restart, so after one, post each item that still waits again, exactly once.');
+      expect(variant).toContain('If notify returns `unavailable` because Approvals is off ("Approvals are off in Pane."), ask in this tab as before.');
     }
 
     // The shared contract is present in every generated form and the startup

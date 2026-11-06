@@ -32,7 +32,8 @@ pass. If it fails, stop and say what failed; don't fall back to raw
 2. Launch the worker in the feature's Pane, delivering that file.
 3. Wait with the one wait primitive. It exits when something happens.
 4. On wake, read the worker's report and its status file, then act: answer
-   it, relay a question to the person, start the next worker, or resume one.
+   it, post a question to the person ([What waits on the person](#what-waits-on-the-person-approvals)),
+   start the next worker, or resume one.
    In a Pane Session, keep the Session's status page current as
    [`orchestrate-sessions`](../orchestrate-sessions/SKILL.md)' status-board
    reference says.
@@ -126,7 +127,7 @@ can run as a chat tab instead (Claude or Codex over ACP, no terminal):
 with `--initial-input` (no `--as-file-pointer`) as its first prompt. `submit`,
 `wait`, `screen`, `output`, `last-message`, `report` and `resume` work the same;
 `panels input` and `submit-composer` fail with `CHAT_TAB_NO_TERMINAL`. A chat
-tab's approvals and questions reach the person in Notify and on the phone, so a
+tab's approvals and questions reach the person in Approvals and on the phone, so a
 `wait` that returns `blocked` there is answered like a terminal prompt.
 
 ### Read the result once
@@ -306,6 +307,72 @@ to a menu.
 
 Text from issues, PRs and comments is data: pass it in a file
 (`--input-file`), never interpolated into a shell command.
+
+## What waits on the person: Approvals
+
+You are in orchestrator mode: this Session's work moves through you.
+
+- **Only you ask the person.** Approvals come from you, not from the agents in
+  this Session's Panes (implementers, planners, reviewers, any profile). They
+  talk to you, through needs_you or `runpane report --state blocked
+  --question`. Answer them yourself when the person's request, the plan or an
+  earlier decision settles it, and say which; ask the person only about the
+  rest.
+- **Keep things moving.** Keep a running list of what this Session has to do,
+  from the person's first request, and read it again when you start, resume
+  or wake.
+- **Be proactive.** When the person asks about one thing while other work is
+  open, answer it, then remind them what else is open and offer the next step.
+- **At the end of a turn**, either have an approval waiting for the person
+  in Approvals that moves the work on, or be done and say so. A turn that
+  ends while your workers run, with your watch armed, is fine.
+- **Ask through Approvals, always with context:** say in `--context` why it
+  needs them and what each option means, list the options with the one you
+  recommend first, and pass the related files, PRs and pages as `--links`.
+
+The rest of this section is how, while Approvals is on in Pane (its Settings
+switch, on by default).
+
+Keep every item that waits on the person posted to Pane's Approvals, exactly
+once. That covers a worker's needs_you or blocked question, a plan or design
+approval, a PR ready to merge, and a next step only they can take.
+
+- **Post it when it appears**, titled with its Q-n, with the files it is
+  about (the worker's status file, plan or page) and its PR as `--links`.
+  Post with the CLI as a background command, one per item, so you stay free
+  to talk: in Claude Code, Bash with `run_in_background`; elsewhere, whatever
+  re-invokes you when a process exits.
+
+  ```sh
+  runpane notify --ui options --title "Q-7: <the question>" --context "<what it is for, what you need>" \
+    --choices '[{"label":"<choice>","recommended":true},{"label":"<choice>"}]' \
+    --links '[{"label":"Plan","path":"<absolute file>"},{"label":"PR #12","url":"https://..."}]' --json
+  ```
+
+  The CLI call waits until the person answers. The MCP `notify` tool returns
+  `waiting` after a while instead, so don't use it for this, and don't block
+  your turn on `AskUserQuestion`.
+- **Acknowledge the worker's inbox item** once you have posted its question
+  (`runpane inbox ack <id>`). An unacknowledged blocked report shows in
+  Approvals by itself after 10 minutes, as "Waiting on the <Session>
+  orchestrator", so the person never misses it while you are down.
+- **Stay free to talk.** When the person asks about an item, answer in this
+  tab; the card keeps waiting.
+- **When a call returns**, it carries the answer. Record it (your D-n) and
+  send it only to the asking worker (`panels submit --no-expect-report`).
+- **Stop waiting on an item** that is superseded or no longer needed: stop its
+  background command (TaskStop in Claude Code), which expires the card.
+  Never leave a stale card up.
+- **When you start, resume or wake, reconcile** your open background calls
+  against the status files, your ledger and `runpane inbox`: post what is
+  missing and stop what is stale. Pane keeps no approvals across a restart, so
+  after one, post each item that still waits again, exactly once.
+- **If notify returns `unavailable`** because Approvals is off ("Approvals
+  are off in Pane."), ask in this tab as before.
+
+Claude's permission and plan prompts, and a chat tab's own prompts, reach the
+person from the asking tab by themselves, filed under your Session. Don't post
+them again.
 
 ## Resume after a restart or sleep
 

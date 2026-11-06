@@ -9749,6 +9749,23 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({ type: 'editor', filePath: 'src/app.ts', placement: 'tab', active: false });
     });
 
+    it('opens a file given by its real path when the Pane knows its worktree through a symlink', async () => {
+      // macOS: /tmp is a symlink to /private/tmp, and an agent's cwd is the real path.
+      const linked = `${worktree}-link`;
+      fs.symlinkSync(worktree, linked, 'dir');
+      try {
+        const registry = createRegistry(openServices({ ...session, worktreePath: linked }));
+
+        const result = await registry.invoke('runpane:panels:open', [{
+          paneId: session.id, filePath: path.join(fs.realpathSync(worktree), 'src', 'app.ts'), placement: 'tab',
+        }]);
+
+        expect(result).toMatchObject({ type: 'editor', filePath: 'src/app.ts' });
+      } finally {
+        fs.rmSync(linked, { force: true });
+      }
+    });
+
     it('opens URLs and reuses a tab already showing the same URL', async () => {
       const existing: ToolPanel = {
         id: 'existing-browser',

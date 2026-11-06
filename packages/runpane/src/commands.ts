@@ -166,6 +166,7 @@ export interface ParsedArgs {
   notifyDetailLabel?: string;
   notifySuggestions?: string;
   notifyAction?: string;
+  notifyLinks?: string;
   /** loops: the loop id, its cron, and create's --paused. */
   loopId?: string;
   cron?: string;
@@ -1227,6 +1228,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--action') {
     parsed.notifyAction = value;
+    return;
+  }
+  if (flag === '--links') {
+    parsed.notifyLinks = value;
     return;
   }
   if (flag === '--cron') {

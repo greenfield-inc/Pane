@@ -50,6 +50,22 @@ describe('SessionInbox', () => {
     expect(reopened.list('session-b')).toEqual([]);
   });
 
+  it('lists every Session’s items and tells listeners when a report arrives or is acknowledged', () => {
+    const inbox = open();
+    let heard = 0;
+    const stop = inbox.subscribe(() => { heard += 1; });
+    journal.append(entry('agent.report', 'pane-2', { report: { state: 'blocked', question: 'Invoice id or number?', reportedAt: '2026-10-15T10:00:00.000Z' } }));
+    expect(heard).toBe(1);
+    expect(inbox.all().map(item => [item.sessionId, item.report?.question])).toEqual([['session-a', 'Invoice id or number?'], ['session-b', 'Invoice id or number?']]);
+
+    inbox.ackAll('session-a');
+    expect(heard).toBe(2);
+    expect(inbox.all().map(item => item.sessionId)).toEqual(['session-b']);
+    stop();
+    inbox.ackAll('session-b');
+    expect(heard).toBe(2);
+  });
+
   it('replays committed events after a failed inbox write without resurrecting acknowledgements', () => {
     const journalPath = path.join(directory, 'journal.json');
     journal = new WorkspaceJournal({ filePath: journalPath });

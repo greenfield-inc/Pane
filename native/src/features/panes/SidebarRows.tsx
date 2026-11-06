@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { WaitingCount } from '@/features/approvals/WaitingCount';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
@@ -36,11 +37,13 @@ export function SidebarSectionHeader({ item, first, onToggle }: {
 
 /**
  * A Session row: a chevron showing its panes (or a chat icon when it has none),
- * then the name and pane count; a paused Session is grayed out behind a pause glyph.
- * Swipe right pins; swipe left pauses or resumes, and archives.
+ * then the name, pane count and the amber count of approvals waiting from it; a paused Session is
+ * grayed out behind a pause glyph. Swipe right pins; swipe left pauses or resumes, and archives.
  */
-export function SessionRow({ item, onOpen, onToggleNested, onTogglePinned, onArchive, onTogglePaused }: {
+export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinned, onArchive, onTogglePaused }: {
   item: Extract<SidebarItem, { type: 'session' }>;
+  /** Approvals waiting from this Session; none at zero. */
+  waiting: number;
   onOpen: () => void;
   onToggleNested: () => void;
   onTogglePinned: () => void;
@@ -71,7 +74,7 @@ export function SessionRow({ item, onOpen, onToggleNested, onTogglePinned, onArc
         <Pressable
           testID={`session-row-${nestedKey}`}
           accessibilityRole="button"
-          accessibilityLabel={`Open Session ${label}${paused ? ', Paused' : ''}`}
+          accessibilityLabel={`Open Session ${label}${paused ? ', Paused' : ''}${waiting > 0 ? `, ${waiting} waiting` : ''}`}
           {...swipeRowAccessibility(actions)}
           onPress={onOpen}
           onPressIn={() => setPressed(true)}
@@ -81,6 +84,7 @@ export function SessionRow({ item, onOpen, onToggleNested, onTogglePinned, onArc
           {paused ? <PausedBadge /> : null}
           <Text variant="callout" numberOfLines={1} style={[styles.name, { color: pressed ? theme.colors.text : paused ? theme.colors.textMuted : theme.colors.textSecondary }]}>{label}</Text>
           {paneCount > 0 ? <Text variant="caption" tone="muted" style={styles.count}>{paneCount}</Text> : null}
+          <WaitingCount testID={`session-waiting-${nestedKey}`} count={waiting} />
         </Pressable>
       </View>
     </SwipeRow>

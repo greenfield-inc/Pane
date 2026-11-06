@@ -395,6 +395,18 @@ interface SessionTileProps {
   onDropSession: (tileId: string, sessionId: string, zone: DropZone) => void;
   /** Absent while the window shows a single Session: the last tile never closes. */
   onClose?: (tileId: string) => void;
+  inline?: boolean;
+}
+
+const ignoreTileEvent = () => undefined;
+
+/**
+ * One Session shown live beside something else (Approvals' right side): the same workspace as
+ * its tile, with its orchestrator tab, chat or terminal, and its tab controls kept inside it.
+ */
+export function SessionBeside({ sessionId }: { sessionId: string }) {
+  const tile = useMemo((): SessionTileNode => ({ type: 'session', id: `beside-${sessionId}`, sessionId }), [sessionId]);
+  return <SessionTile tile={tile} isFocused tiled={false} inline draggedSessionId={null} onFocus={ignoreTileEvent} onDropSession={ignoreTileEvent} />;
 }
 
 /**
@@ -409,6 +421,7 @@ function SessionTile({
   onFocus,
   onDropSession,
   onClose,
+  inline,
 }: SessionTileProps) {
   const sessionId = tile.sessionId;
   const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
@@ -499,10 +512,11 @@ function SessionTile({
 
   const chrome: SessionTileChrome = useMemo(() => ({
     tiled,
+    inline,
     isFocused,
     onDragStart: handleDragStart,
     onClose: onClose ? () => onClose(tile.id) : undefined,
-  }), [handleDragStart, isFocused, onClose, tile.id, tiled]);
+  }), [handleDragStart, inline, isFocused, onClose, tile.id, tiled]);
 
   // A tile already showing the dragged Session has nothing to offer it.
   const isDragSource = draggedSessionId === sessionId;
@@ -589,6 +603,8 @@ function SessionTileFallback({ name, error, isLoading, chrome, onRetry }: {
 interface SessionTileChrome {
   /** False while the window shows a single Session. */
   tiled: boolean;
+  /** Shown beside something else (Approvals): its tab controls stay inside it, with no tile header. */
+  inline?: boolean;
   isFocused: boolean;
   onDragStart: (event: React.DragEvent) => void;
   /** Absent for the last tile. */
@@ -842,7 +858,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
           <SessionWorkspacePanels agentPanel={view.panel} agentPanelIds={Object.values(view.session.panelIds)}
             toolbarActions={sessionControls}
             stageNotice={showsTrustPrompt && <FolderTrustNotice />}
-            chromeInline={chrome.tiled}
+            chromeInline={chrome.tiled || chrome.inline}
             focusWithin={chrome.isFocused}
             overviewContent={<SessionOverviewPanel
             record={view.session}

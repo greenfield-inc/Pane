@@ -15,6 +15,7 @@ import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
 import type { SessionAdoption } from './chatTabs/switchToChat';
 import type { ChatPanelState, ChatTabLaunch } from '../../../shared/types/chatTab';
+import type { NotifySession } from '../../../shared/types/notify';
 
 /** What a Session needs from the host's chat tabs. */
 export interface SessionChatTabs {
@@ -634,6 +635,28 @@ export class OrchestrationSessionManager extends EventEmitter {
     const parent = sessions.find(session => session.associations.some(association => association.paneId === paneId));
     if (!parent) return { title: paneName, groupPaneId: paneId };
     return { title: paneName ? `${parent.name} › ${paneName}` : parent.name, groupPaneId: parent.internalSessionId };
+  }
+
+  /**
+   * The Session an Approvals item from this Pane (and tab) belongs to: the Session whose
+   * workspace Pane it is, which makes it the orchestrator's, or the Session it is associated
+   * with. Archived Sessions don't count. Reads the in-memory store, like `alertSubject`.
+   */
+  approvalSession(paneId: string, panelId?: string): NotifySession | undefined {
+    const sessions = this.store.memberships().filter(session => !session.archived);
+    const own = sessions.find(session => session.internalSessionId === paneId
+      || (panelId !== undefined && session.panelIds.includes(panelId)));
+    if (own) return { id: own.id, name: own.name, paneId: own.internalSessionId, orchestrator: true };
+    const parent = sessions.find(session => session.associations.some(association => association.paneId === paneId
+      && (association.panelIds.length === 0 || panelId === undefined || association.panelIds.includes(panelId))));
+    return parent ? { id: parent.id, name: parent.name, paneId: parent.internalSessionId } : undefined;
+  }
+
+  /** Every open Session for Approvals, by id, from one read: a fallback item keeps the Session its report was filed in. */
+  approvalSessionsById(): Map<string, NotifySession> {
+    return new Map(this.store.memberships()
+      .filter(session => !session.archived)
+      .map(session => [session.id, { id: session.id, name: session.name, paneId: session.internalSessionId }]));
   }
 
   /**

@@ -1,15 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcMain } from 'electron';
+import path from 'path';
+import { pathToFileURL } from 'url';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { followSavedMachines, registerNotifyHandlers, type NotifyMachines } from './notify';
 import { PaneError } from '../../../shared/paneError';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ConfigManager } from '../services/configManager';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { NotifyItem, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
 import type { MachineConnectionsEvent, MachineState } from '../../../shared/types/machineConnections';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
+import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 
 /** A Pane's Notify handlers, registered the way the app registers them; no window or phone. */
 async function startPane() {
@@ -272,5 +276,233 @@ describe('Notify across machines, through the registered handlers', () => {
     await answering;
     expect(saved.sent).toEqual([['studio', { type: 'notify', command: { type: 'answer', id: 'q-1', answer: { approved: true } } }]]);
     pane.notify.dispose();
+  });
+});
+
+describe('Approvals items, through the registered handlers', () => {
+  beforeEach(() => vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1'));
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  const panes = new Map([
+    ['session-pane', { id: 'session-pane', name: 'Launch' }],
+    ['worker', { id: 'worker', name: 'api-fix' }],
+    ['loose', { id: 'loose', name: 'docs' }],
+  ]);
+  const launch = { id: 'session-1', name: 'Launch', paneId: 'session-pane' };
+  const later = { id: 'session-2', name: 'Later', paneId: 'later-pane' };
+  let openSessions = [launch, later];
+  const sessionListeners = new Set<() => void>();
+  const sessions = {
+    approvalSession: (paneId: string) => paneId === 'session-pane' ? { ...launch, orchestrator: true } : paneId === 'worker' ? launch : undefined,
+    approvalSessionsById: () => new Map(openSessions.map(session => [session.id, session])),
+    on: (_event: 'changed', listener: () => void) => { sessionListeners.add(listener); },
+    off: (_event: 'changed', listener: () => void) => { sessionListeners.delete(listener); },
+  };
+  /** Archives a Session the way the manager reports it: the list changes, then 'changed'. */
+  const archive = (sessionId: string) => {
+    openSessions = openSessions.filter(session => session.id !== sessionId);
+    for (const listener of sessionListeners) listener();
+  };
+  afterEach(() => { openSessions = [launch, later]; });
+
+  /** A Pane with Sessions and, optionally, a Session inbox. */
+  async function startWithSessions(inbox?: ReturnType<typeof inboxOf>) {
+    const registry = new PaneCommandRegistry();
+    const configManager = new ConfigManager();
+    await configManager.initialize();
+    await configManager.updateConfig({ notify: { showOutsidePane: false, enabled: true } });
+    const services = {
+      configManager,
+      sessionManager: { getSession: (id: string) => panes.get(id) },
+      getMainWindow: () => null,
+      orchestrationSessionManager: sessions,
+      sessionInbox: inbox,
+    };
+    return { configManager, registry, notify: registerNotifyHandlers(ipcMain, services, registry) };
+  }
+
+  /** A Session inbox stand-in: its items, and a way to change them as an ack or a new report would. */
+  function inboxOf(items: RunpaneInboxItem[]) {
+    const listeners = new Set<() => void>();
+    let current = items;
+    return {
+      all: () => current,
+      subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+      set: (next: RunpaneInboxItem[]) => { current = next; for (const listener of listeners) listener(); },
+    };
+  }
+  const blocked = (at: number): RunpaneInboxItem => ({
+    id: 'in-1', sessionId: 'session-1', kind: 'report', at: new Date(at).toISOString(), paneId: 'worker', paneName: 'api-fix', panelId: 'worker-panel',
+    report: { state: 'blocked', question: 'Use the invoice id or number in the PDF filename?', summaryPath: '/work/api-fix/status.json', reportedAt: new Date(at).toISOString() },
+  });
+
+  it("files the orchestrator's question under its Session, and a standalone Pane's under none", async () => {
+    const pane = await startWithSessions();
+    void pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Post Q-3?', caller: { paneId: 'session-pane', panelId: 'orchestrator-panel' } }]);
+    void pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Rename the guide?', caller: { paneId: 'loose' } }]);
+    await flush();
+
+    const sources = (await pane.registry.invoke<NotifySharedState>('notify:remote-snapshot', [])).items.map(item => [item.title, item.source.session]);
+    expect(sources).toEqual([
+      ['Post Q-3?', { ...launch, orchestrator: true }],
+      ['Rename the guide?', undefined],
+    ]);
+    pane.notify.dispose();
+  });
+
+  it("sends a Session worker's notify back to its orchestrator instead of showing it", async () => {
+    const pane = await startWithSessions();
+    const result = await pane.registry.invoke<NotifyResult>('runpane:notify', [{ ui: 'approve', title: 'Run the migration?', caller: { paneId: 'worker', panelId: 'worker-panel' } }]);
+
+    expect(result).toEqual({
+      unavailable: 'Not shown to the person: in a Pane Session, only the orchestrator asks the person.',
+      next: 'Ask the Launch orchestrator instead: run runpane report --state blocked --question "<your question>", then wait for its answer or carry on with anything that doesn\'t depend on it.',
+    });
+    expect(pane.notify.snapshot().items).toEqual([]);
+    pane.notify.dispose();
+  });
+
+  it("keeps another machine's Session and links on its cards", async () => {
+    const pane = await startWithSessions();
+    const remote = { ...question('q-1', 'Ship it?', 1_000), source: { name: 'api', agent: 'Claude', session: launch }, links: [{ label: 'Plan', path: '/repo/plan.md' }] };
+    followSavedMachines(savedMachines({ studio: stateOf('mac-studio', remote) }).machines);
+    await flush();
+    expect(pane.notify.snapshot().items).toMatchObject([{ id: 'studio:q-1', source: { session: launch }, links: [{ label: 'Plan', path: '/repo/plan.md' }] }]);
+    pane.notify.dispose();
+  });
+
+  it('keeps related links, resolving a file against the asking folder, and refuses a bad one', async () => {
+    const pane = await startWithSessions();
+    void pane.registry.invoke('runpane:notify', [{
+      ui: 'approve', title: 'Ship the notes?', caller: { cwd: '/repo/api' },
+      links: [{ label: 'Notes', path: 'docs/RELEASE.md' }, { label: 'Plan', path: '/tmp/plan.html' }, { label: 'PR #812', url: 'https://github.com/org/repo/pull/812' }],
+    }]);
+    await flush();
+    // Resolved the way the host's platform resolves paths (a drive letter on Windows).
+    expect(pane.notify.snapshot().items[0].links).toEqual([
+      { label: 'Notes', path: path.resolve('/repo/api', 'docs/RELEASE.md') },
+      { label: 'Plan', path: '/tmp/plan.html' },
+      { label: 'PR #812', url: 'https://github.com/org/repo/pull/812' },
+    ]);
+
+    const call = (links: PaneCommandValue) => pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Ship?', caller: { cwd: '/repo' }, links }]);
+    await expect(call([{ label: 'Site', url: 'file:///etc/passwd' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
+    await expect(call([{ label: 'Both', url: 'https://a.example', path: '/a' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
+    await expect(call(Array.from({ length: 7 }, (_, index) => ({ label: `L${index}`, url: 'https://a.example' })))).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
+    await expect(call([{ label: 'x'.repeat(81), url: 'https://a.example' }])).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
+    pane.notify.dispose();
+  });
+
+  it("shows a worker's unacknowledged blocked question after the wait, read-only, until the orchestrator acknowledges it", async () => {
+    vi.stubEnv('PANE_APPROVALS_RELAY_AFTER_MS', '60');
+    const inbox = inboxOf([blocked(Date.now())]);
+    const pane = await startWithSessions(inbox);
+    expect(pane.notify.snapshot().items).toEqual([]);
+
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const [relay] = pane.notify.snapshot().items;
+    expect(relay).toMatchObject({
+      state: 'waiting',
+      title: 'Use the invoice id or number in the PDF filename?',
+      source: { paneId: 'worker', panelId: 'worker-panel', name: 'api-fix', session: launch },
+      relay: { inboxItemId: 'in-1', worker: 'api-fix', question: 'Use the invoice id or number in the PDF filename?' },
+      // The worker's status file, which its report named, opens beside the card.
+      links: [{ label: 'api-fix status', path: '/work/api-fix/status.json' }],
+    });
+    expect(relay.choices).toBeUndefined();
+    expect(pane.notify.snapshot().queue).toEqual([]);
+    expect((await pane.registry.invoke<NotifySharedState>('notify:remote-snapshot', [])).items).toMatchObject([{ relay: { inboxItemId: 'in-1' } }]);
+    await pane.notify.run({ type: 'answer', id: relay.id, answer: { text: 'id' } });
+    expect(pane.notify.snapshot().items).toMatchObject([{ state: 'waiting', relay: { inboxItemId: 'in-1' } }]);
+
+    inbox.set([]);
+    await flush();
+    expect(pane.notify.snapshot().items).toEqual([]);
+    pane.notify.dispose();
+  });
+
+  it('files a fallback under the Session the worker reported to, even after the worker moved, and under none once that Session is gone', async () => {
+    const moved = { ...blocked(Date.now() - 11 * 60_000), sessionId: 'session-2' };
+    const gone = { ...blocked(Date.now() - 11 * 60_000), id: 'in-2', sessionId: 'session-archived' };
+    const pane = await startWithSessions(inboxOf([moved, gone]));
+    expect(pane.notify.snapshot().items.map(item => [item.relay?.inboxItemId, item.source.session?.id])).toEqual([['in-1', 'session-2'], ['in-2', undefined]]);
+    const orphan = pane.notify.snapshot().items[1];
+    expect(orphan.context).toBe("Its Session is closed: api-fix asked this and nobody picked it up. Answer in api-fix's tab on the right.");
+
+    // Archiving a Session moves its fallback items at once, not at the next inbox change.
+    archive('session-2');
+    expect(pane.notify.snapshot().items.map(item => item.source.session?.id)).toEqual([undefined, undefined]);
+    pane.notify.dispose();
+  });
+
+  it('never shows the fallback while Approvals is off', async () => {
+    const inbox = inboxOf([blocked(Date.now() - 11 * 60_000)]);
+    const pane = await startWithSessions(inbox);
+    expect(pane.notify.snapshot().items).toHaveLength(1);
+    await pane.configManager.updateConfig({ notify: { enabled: false } });
+    await flush();
+    expect(pane.notify.snapshot().items).toEqual([]);
+    pane.notify.dispose();
+  });
+});
+
+describe('Approvals related links, through the registered handlers', () => {
+  beforeEach(() => vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1'));
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('opens a file link as a tab of the Pane shown beside it, as a file page when it is outside that worktree, and a URL as a browser tab', async () => {
+    const registry = new PaneCommandRegistry();
+    const configManager = new ConfigManager();
+    await configManager.initialize();
+    await configManager.updateConfig({ notify: { showOutsidePane: false, enabled: true } });
+    const opened: PaneCommandValue[] = [];
+    let pageRefused = false;
+    registry.register('runpane:panels:open', async (request: PaneCommandValue) => {
+      opened.push(request);
+      const { paneId, filePath } = decodeBoundary(request, boundary.object({ paneId: boundary.string, filePath: boundary.optional(boundary.string) }));
+      if (paneId === 'session-pane' && filePath) throw new Error('File path must be inside the Pane worktree: /work/api/plan.md');
+      if (paneId === 'session-pane' && pageRefused) throw new Error('Pane could not open that page.');
+      return { ok: true };
+    });
+    const worker = { id: 'worker', name: 'api-fix' };
+    const notify = registerNotifyHandlers(ipcMain, { configManager, sessionManager: { getSession: (id: string) => id === 'worker' ? worker : undefined }, getMainWindow: () => null }, registry);
+    void registry.invoke('runpane:notify', [{
+      ui: 'approve', title: 'Ship?', caller: { paneId: 'worker', cwd: '/work/api' },
+      links: [{ label: 'Plan', path: 'plan.md' }, { label: 'PR', url: 'https://github.com/org/repo/pull/1' }],
+    }]);
+    await flush();
+    const id = notify.snapshot().items[0].id;
+    const planPath = path.resolve('/work/api', 'plan.md');
+
+    await notify.run({ type: 'open-link', id, index: 0, paneId: 'session-pane' });
+    await notify.run({ type: 'open-link', id, index: 1, paneId: 'session-pane' });
+    expect(opened).toEqual([
+      { paneId: 'session-pane', filePath: planPath, placement: 'tab', source: 'user' },
+      { paneId: 'session-pane', url: pathToFileURL(planPath).href, title: 'Plan', placement: 'tab', source: 'user' },
+      { paneId: 'session-pane', url: 'https://github.com/org/repo/pull/1', placement: 'tab', source: 'user' },
+    ]);
+
+    // When the shown Pane can't take it at all, the asking Pane opens it.
+    opened.length = 0;
+    pageRefused = true;
+    await notify.run({ type: 'open-link', id, index: 0, paneId: 'session-pane' });
+    expect(opened.map(request => decodeBoundary(request, boundary.object({ paneId: boundary.string })).paneId)).toEqual(['session-pane', 'session-pane', 'worker']);
+    await expect(notify.run({ type: 'open-link', id, index: 5, paneId: 'session-pane' })).rejects.toMatchObject({ code: 'ERR_APPROVALS_LINK_GONE' });
+
+    // A phone opens a link the same way, through the remote command, so it gets the same fallback.
+    opened.length = 0;
+    pageRefused = false;
+    await registry.invoke('notify:remote-command', [{ type: 'open-link', id, index: 0, paneId: 'session-pane' }, { device: 'iPhone' }]);
+    expect(opened).toEqual([
+      { paneId: 'session-pane', filePath: planPath, placement: 'tab', source: 'user' },
+      { paneId: 'session-pane', url: pathToFileURL(planPath).href, title: 'Plan', placement: 'tab', source: 'user' },
+    ]);
+    notify.dispose();
   });
 });

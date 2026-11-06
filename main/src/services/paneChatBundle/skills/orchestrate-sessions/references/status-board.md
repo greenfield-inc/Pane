@@ -63,7 +63,7 @@ Keep the JSON at `<Session folder>/.agent/status.json` and update it in place, s
 
 **Needs you.** One entry per open question, approval or finding waiting on the person, newest blocking first; `[]` when there are none.
 
-- A worker's question asked through Notify (its card is live): `id` is `null`, since it is numbered once answered, and `link` is `pane://open?pane=<pane id>&panel=<panel id>`, the item's Pane id and the asking worker's panel id from your per-worker record (`pane-orchestration`'s Record what came back). The person clicks it to open that tab with its card docked.
+- A worker's question asked through Notify (its card is live): `id` is `null`, since it is numbered once answered, and `link` is `pane://open?pane=<pane id>&panel=<panel id>`, the item's Pane id and the asking worker's panel id from your per-worker record (`pane-orchestration`'s Record what came back). The person clicks it to open that tab and its question in Approvals.
 - A question you relay yourself: its Q-n and no `link`, since the person answers it in your conversation. Link its files in `files`.
 - Review findings waiting on the person: the F-n, with no `link`.
 

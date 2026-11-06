@@ -45,7 +45,7 @@ import type {
 } from '../../../shared/types/panels';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
-import type { NotifyCommand, NotifySharedState, NotifySnapshot, NotifyWindowSize } from '../../../shared/types/notify';
+import type { NotifyCommand, NotifyNavigateTarget, NotifySharedState, NotifySnapshot, NotifyWindowSize } from '../../../shared/types/notify';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -752,7 +752,7 @@ interface ElectronAPI {
     /** A new question arrived and Sound is on; the main window plays the beep. */
     onChime: (callback: () => void) => () => void;
     /** Main asks the main window to show the Notify inbox or Settings → Notify. */
-    onNavigate: (callback: (target: 'inbox' | 'settings') => void) => () => void;
+    onNavigate: (callback: (target: NotifyNavigateTarget) => void) => () => void;
     /** Floating windows only: fit the window to its card. */
     resizeWindow: (size: NotifyWindowSize) => void;
     /** Floating strip only: take key focus so a text or note field can be typed in. */

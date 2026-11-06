@@ -75,6 +75,24 @@ describe('Pane Chat skill bundle', () => {
     }
   });
 
+  it('teaches every orchestrator to keep what waits on the person posted to Approvals', async () => {
+    const guide = (await fs.readFile(path.join(bundleRoot, 'skills', 'pane-orchestration', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
+    expect(guide).toContain('## What waits on the person: Approvals');
+    expect(guide).toContain("Keep every item that waits on the person posted to Pane's Approvals, exactly once.");
+    expect(guide).toContain('You are in orchestrator mode');
+    expect(guide).toContain('Approvals come from you, not from the agents in');
+    expect(guide).toContain('either have an approval waiting for the person');
+    expect(guide).toContain('or be done and say so.');
+    expect(guide).toContain('pass the related files, PRs and pages as `--links`.');
+    expect(guide).not.toMatch(/never (be )?stalled|Nothing left to do in this Session/i);
+    expect(guide).toContain('Post with the CLI as a background command, one per item, so you stay free to talk');
+    expect(guide).toContain('runpane notify --ui options --title "Q-7: <the question>"');
+    expect(guide).toContain('(`runpane inbox ack <id>`)');
+    expect(guide).toContain('stop its background command (TaskStop in Claude Code), which expires the card');
+    expect(guide).toContain('Pane keeps no approvals across a restart, so after one, post each item that still waits again, exactly once.');
+    expect(guide).toContain('ask in this tab as before');
+  });
+
   it('gives each helper subagent a bundled skill', async () => {
     for (const agent of await fs.readdir(path.join(bundleRoot, 'agents'))) {
       const text = await fs.readFile(path.join(bundleRoot, 'agents', agent), 'utf8');

@@ -87,6 +87,26 @@ describe('buildAllMachinesList', () => {
     ]);
   });
 
+  it('counts each Session row\'s waiting approvals on its own machine, even when another machine has a Session with the same id', () => {
+    const inSession = (id: string, createdAt: number, extra: Partial<NotifyItem> = {}): NotifyItem => ({
+      id, createdAt, title: id, ui: 'approve', state: 'waiting',
+      source: { name: 'orchestrator', agent: 'Claude', session: { id: 's-1', name: 'Spring sale launch', paneId: 'pane-1' } }, ...extra,
+    });
+    const studioNotify: NotifySharedState = { ...studio.snapshot!.notify!, items: [
+      inSession('a', 10),
+      inSession('fallback', 20, { ui: 'info', relay: { inboxItemId: 'i1', worker: 'api-fix', question: 'Retry?' } }),
+      inSession('held', 30, { state: 'sent' }),
+    ] };
+    const buildNotify: NotifySharedState = { ...studio.snapshot!.notify!, items: [inSession('b', 40)] };
+    const { recent } = buildAllMachinesList([
+      { ...studio, snapshot: { ...studio.snapshot!, notify: studioNotify } },
+      { ...build, snapshot: { ...build.snapshot!, notify: buildNotify, sessions: [session('s-1', 'Spring sale launch', [], '2026-10-30T09:10:00Z')] } },
+    ], '');
+    const waitingOf = (key: string) => recent.flatMap(row => (row.key === key && row.type === 'session' ? [row.waiting] : []));
+    expect(waitingOf('profile-studio:session:s-1')).toEqual([2]);
+    expect(waitingOf('profile-build:session:s-1')).toEqual([1]);
+  });
+
   it('lists a machine that has not answered yet as nothing', () => {
     expect(buildAllMachinesList([{ key: 'profile-new', name: 'new-box', snapshot: undefined }], '')).toEqual({ waiting: [], recent: [] });
   });

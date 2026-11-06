@@ -462,6 +462,8 @@ export class DemoWorkspace {
   }
 
   private notifyCommand(command: NotifyRemoteCommand): JsonValue {
+    // The demo has no files or pages behind its cards to open.
+    if (command.type === 'open-link') throw new Error(`Opening related files ${NEEDS_COMPUTER}`);
     const item = this.notify.find(candidate => candidate.id === command.id);
     if (!item) throw new Error('This question is no longer waiting.');
     if (command.type === 'answer' && item.state === 'waiting') {

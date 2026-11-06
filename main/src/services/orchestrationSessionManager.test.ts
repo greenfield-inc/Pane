@@ -1250,6 +1250,33 @@ describe('OrchestrationSessionManager', () => {
     expect(fixture.manager.alertSubject('loose')).toEqual({ title: 'docs', groupPaneId: 'loose' });
   });
 
+  it('files Approvals under the Session a Pane works in, marking its orchestrator tabs', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Launch' });
+    const worker = paneFixture(fixture, 'worker', { name: 'api-fix' });
+    paneFixture(fixture, 'loose', { name: 'docs' });
+    await fixture.manager.associate({ sessionId: created.session.id }, { paneId: worker.id });
+    const sessionPane = created.session.internalSessionId;
+    const orchestratorPanel = Object.values(created.session.panelIds)[0];
+    const session = { id: created.session.id, name: 'Launch', paneId: sessionPane };
+
+    expect(fixture.manager.approvalSession(sessionPane, orchestratorPanel)).toEqual({ ...session, orchestrator: true });
+    expect(fixture.manager.approvalSession(sessionPane)).toEqual({ ...session, orchestrator: true });
+    expect(fixture.manager.approvalSession('worker', 'worker-panel')).toEqual(session);
+    expect(fixture.manager.approvalSession('loose', 'loose-panel')).toBeUndefined();
+  });
+
+  it('lists open Sessions for Approvals by id in one read, leaving archived ones out', async () => {
+    const fixture = createFixture();
+    const kept = await fixture.manager.create({ name: 'Launch' });
+    const gone = await fixture.manager.create({ name: 'Old' });
+    await fixture.manager.update({ sessionId: gone.session.id }, { archived: true, expectedRevision: gone.session.revision });
+
+    const byId = fixture.manager.approvalSessionsById();
+    expect(byId.get(kept.session.id)).toEqual({ id: kept.session.id, name: 'Launch', paneId: kept.session.internalSessionId });
+    expect(byId.has(gone.session.id)).toBe(false);
+  });
+
   it('unpins first-time Session children and preserves later manual pins', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Coordinator' });

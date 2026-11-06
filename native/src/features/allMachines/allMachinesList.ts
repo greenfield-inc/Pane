@@ -4,7 +4,7 @@ import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSess
 import type { TerminalPausedMark } from '@shared/types/panels';
 import type { PanePermissionRequest } from '@shared/types/permissions';
 
-import { waitingQuestions } from '@/features/notify/notifyQuestions';
+import { approvalItems, sessionKey, waitingCounts } from '@/features/approvals/approvals';
 import { paneAgent, paneDisplayStatus, type AgentStatusSnapshot } from '@/features/panes/agentStatus';
 import type { ProjectWithPanes } from '@/features/panes/paneList';
 
@@ -37,9 +37,17 @@ interface RowBase {
   stale: boolean;
 }
 
+/** What Approvals groups by: the Session a question or request belongs to, and when it was asked. */
+interface WaitingBase extends RowBase {
+  session?: { id: string; name: string };
+  at: number;
+  /** False for an answer held for Undo: it shows, but doesn't count. */
+  waiting: boolean;
+}
+
 export type WaitingRow =
-  | RowBase & { type: 'question'; item: NotifyItem }
-  | RowBase & { type: 'permission'; request: PanePermissionRequest; paneName: string };
+  | WaitingBase & { type: 'question'; item: NotifyItem }
+  | WaitingBase & { type: 'permission'; request: PanePermissionRequest; paneName: string };
 
 export interface AllPane {
   id: string;
@@ -57,10 +65,17 @@ export interface AllPane {
 
 export type RecentRow =
   | RowBase & { type: 'pane'; pane: AllPane }
-  | RowBase & { type: 'session'; session: OrchestrationSessionRecord; paneCount: number; activeAt: number };
+  | RowBase & {
+    type: 'session';
+    session: OrchestrationSessionRecord;
+    paneCount: number;
+    activeAt: number;
+    /** The approvals waiting from this Session on its machine: the row's amber count. */
+    waiting: number;
+  };
 
 export interface AllMachinesList {
-  /** Every machine's questions, oldest first, then its permission requests. */
+  /** Every machine's questions (with answers held for Undo), oldest first, then its permission requests. */
   waiting: WaitingRow[];
   /** Every Pane and Session, newest activity first. */
   recent: RecentRow[];
@@ -86,17 +101,17 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
     if (!snapshot) continue;
     const base = (kind: string, id: string): RowBase => ({ key: `${machine.key}:${kind}:${id}`, machineKey: machine.key, stale: machine.offlineSince !== undefined });
     const pending = snapshot.permissions ?? [];
-    const asked = waitingQuestions(snapshot.notify);
-    const blocked = new Set([...pending.map(request => request.sessionId), ...asked.flatMap(item => item.source.paneId ?? [])]);
+    const asked = approvalItems(snapshot.notify);
+    const blocked = new Set([...pending.map(request => request.sessionId), ...asked.flatMap(item => (item.state === 'waiting' && item.source.paneId) || [])]);
     const sessions = (snapshot.sessions ?? []).filter(session => !session.archived);
-    const sessionOf = new Map(sessions.flatMap(session => session.associations.map(association => [association.paneId, session.name] as const)));
+    const sessionOf = new Map(sessions.flatMap(session => session.associations.map(association => [association.paneId, { id: session.id, name: session.name }] as const)));
     const paneNames = new Map<string, string>();
 
     for (const project of snapshot.projects) {
       for (const pane of project.sessions ?? []) {
         paneNames.set(pane.id, pane.name);
         if (pane.archived || pane.isHidden) continue;
-        const session = sessionOf.get(pane.id);
+        const session = sessionOf.get(pane.id)?.name;
         if (!matches(pane.name, project.name, session, machine.name)) continue;
         recent.push({
           ...base('pane', pane.id),
@@ -118,22 +133,35 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
     for (const session of sessions) {
       if (!matches(session.name, machine.name)) continue;
       const paneCount = session.associations.filter(association => paneNames.has(association.paneId)).length;
-      recent.push({ ...base('session', session.id), type: 'session', session, paneCount, activeAt: timeOf(session.updatedAt) ?? 0 });
+      recent.push({ ...base('session', session.id), type: 'session', session, paneCount, activeAt: timeOf(session.updatedAt) ?? 0, waiting: 0 });
     }
-    questions.push(...asked.map(item => ({ ...base('question', item.id), type: 'question' as const, item })));
-    permissions.push(...pending.map(request => ({
-      ...base('permission', request.id),
-      type: 'permission' as const,
-      request,
-      paneName: paneNames.get(request.sessionId) ?? 'Pane',
-    })));
+    questions.push(...asked.map(item => {
+      const session = item.source.session;
+      return { ...base('question', item.id), type: 'question' as const, item, at: item.createdAt, waiting: item.state === 'waiting', ...(session ? { session: { id: session.id, name: session.name } } : {}) };
+    }));
+    permissions.push(...pending.map(request => {
+      const session = sessionOf.get(request.sessionId);
+      return {
+        ...base('permission', request.id),
+        type: 'permission' as const,
+        request,
+        paneName: paneNames.get(request.sessionId) ?? 'Pane',
+        at: request.timestamp,
+        waiting: true,
+        ...(session ? { session } : {}),
+      };
+    }));
   }
 
   const questionTime = (row: WaitingRow) => (row.type === 'question' ? row.item.createdAt : 0);
   const recentTime = (row: RecentRow) => (row.type === 'pane' ? row.pane.activeAt : row.activeAt);
+  const waiting = [...questions.sort((a, b) => questionTime(a) - questionTime(b)), ...permissions];
+  const counts = waitingCounts(waiting).bySession;
   return {
-    waiting: [...questions.sort((a, b) => questionTime(a) - questionTime(b)), ...permissions],
-    recent: recent.sort((a, b) => recentTime(b) - recentTime(a)),
+    waiting,
+    recent: recent
+      .map(row => (row.type === 'session' ? { ...row, waiting: counts.get(sessionKey(row.machineKey, row.session.id)) ?? 0 } : row))
+      .sort((a, b) => recentTime(b) - recentTime(a)),
   };
 }
 

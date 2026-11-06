@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -61,9 +61,19 @@ const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:
  * A pane's tabs, laid out like the web app on a phone: the host bar and tabs
  * on top, then the open tab. A terminal shows xterm with the composer box
  * below; other tabs get a view for their type. With a `session`, it shows
- * that Session's workspace pane, its agent chat first.
+ * that Session's workspace pane, its agent chat first. The approval screen
+ * passes its own `topBar` and puts its card `above` the tabs.
  */
-export function TerminalScreen({ paneId, session }: { paneId: string; session?: OrchestrationSessionView }) {
+export function TerminalScreen({ paneId, session, topBar, above, initialPanelId }: {
+  paneId: string;
+  session?: OrchestrationSessionView;
+  /** The tab to open on until the person picks one (an approval's asking tab). */
+  initialPanelId?: string;
+  /** Replaces the host bar. */
+  topBar?: ReactNode;
+  /** Sits between the bar and the tabs. */
+  above?: ReactNode;
+}) {
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -113,7 +123,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
 
   const strip = stripPanels(panelList.data ?? []);
   const panels = session ? sessionWorkspacePanels(session, strip) : strip;
-  const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id);
+  const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id, initialPanelId);
   const view = panel ? tabView(panel) : null;
   const paused = panel ? pausedMarkOf(panel) : undefined;
   const followed = follow ? panels.find(candidate => candidate.id === follow) : undefined;
@@ -182,7 +192,8 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
       behavior="padding"
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
-      <TerminalTopBar paneName={title} onClearScrollback={terminalActive ? () => terminalActions.current?.clearScrollback() : undefined} />
+      {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive ? () => terminalActions.current?.clearScrollback() : undefined} />}
+      {above}
       <PanelTabs
         panels={panels}
         chatId={session?.panel.id}

@@ -62,11 +62,11 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   },
   {
     id: 'notify',
-    label: 'Notify',
-    description: 'Questions and updates from agents, answered from any app.',
+    label: 'Approvals',
+    description: 'What agents are waiting on you for, answered from any app.',
     icon: Bell,
     settingIds: ['notify-enabled', 'notify-show-outside', 'notify-position', 'notify-shortcut', 'notify-updates-hide-after', 'notify-sound', 'notify-show-details'],
-    aliases: ['questions', 'approve', 'answer', 'ask', 'strip', 'answer all', 'shortcut', 'updates', 'sound', 'details', 'inbox'],
+    aliases: ['notify', 'approvals', 'questions', 'approve', 'answer', 'ask', 'strip', 'answer all', 'shortcut', 'updates', 'sound', 'details', 'inbox'],
   },
   {
     id: 'usage',

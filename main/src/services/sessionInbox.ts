@@ -91,6 +91,7 @@ export class SessionInbox {
   private epoch?: string;
   private generation = 0;
   private unsubscribe?: () => void;
+  private readonly listeners = new Set<() => void>();
 
   constructor(
     private readonly filePath: string,
@@ -127,6 +128,18 @@ export class SessionInbox {
   list(sessionId: string): RunpaneInboxItem[] {
     this.ensureLoaded();
     return this.items.filter(item => item.sessionId === sessionId).map(item => structuredClone(item));
+  }
+
+  /** Every Session's unacknowledged items, oldest first (Approvals' fallback reads them). */
+  all(): RunpaneInboxItem[] {
+    this.ensureLoaded();
+    return this.items.map(item => structuredClone(item));
+  }
+
+  /** Hears every change to the items: a new item, an ack, or a panel that stopped waiting. */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
   /** Clears the items with these ids, limited to one Session when `sessionId` is given. */
@@ -207,6 +220,7 @@ export class SessionInbox {
       }
       console.warn('[SessionInbox] Could not save the inbox; it stays in memory:', error);
     }
+    if (items !== previous) for (const listener of [...this.listeners]) listener();
   }
 
   private ensureLoaded(): void {

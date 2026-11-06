@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
-import { isPushForPane, openHref, parseIncomingLink, parseNotifyPush, parsePushTarget, resolveOpenTarget } from './links';
+import { isPushForPane, openHref, openRoute, parseIncomingLink, parseNotifyPush, parsePushTarget, resolveOpenTarget } from './links';
 
 const work: RemotePaneConnectionProfile = { id: 'Work Mac:http://127.0.0.1:42157:abcd1234', label: 'Work Mac', baseUrl: 'http://127.0.0.1:42157', token: 't', transport: 'http+sse' };
 const home: RemotePaneConnectionProfile = { id: 'Home:https://home.tail.ts.net:efgh5678', label: 'Home', baseUrl: 'https://home.tail.ts.net', token: 't', transport: 'http+sse' };
@@ -44,12 +44,12 @@ describe('parsePushTarget', () => {
     expect(parsePushTarget(null)).toBeNull();
   });
 
-  it('carries a Notify question id so the tap opens its sheet', () => {
+  it('carries a Notify question id and its Session workspace Pane so the tap opens its approval screen', () => {
     const request = {
       content: { title: 'api-fix', data: null },
       trigger: { type: 'push', payload: { eventId: 'notify:q1:ask:1', hostProfileId: work.id, notifyId: 'q1', paneId: 's1', sessionPaneId: 's1', panelId: 'p1', notifyUi: 'approve', aps: {} } },
     };
-    expect(parsePushTarget(request)).toEqual({ host: work.id, notifyId: 'q1', paneId: 's1', panelId: 'p1' });
+    expect(parsePushTarget(request)).toEqual({ host: work.id, notifyId: 'q1', sessionPaneId: 's1', paneId: 's1', panelId: 'p1' });
   });
 
   it('opens the host when the notification names no pane', () => {
@@ -192,5 +192,28 @@ describe('openHref', () => {
       .toBe('/open?host=Work%20Mac%3Ahttp%3A%2F%2F127.0.0.1%3A42157%3Aabcd1234&paneId=s1&panelId=p1');
     expect(openHref({ host: home.id })).toBe('/open?host=Home%3Ahttps%3A%2F%2Fhome.tail.ts.net%3Aefgh5678');
     expect(openHref({ host: home.id, notifyId: 'q1' })).toBe('/open?host=Home%3Ahttps%3A%2F%2Fhome.tail.ts.net%3Aefgh5678&notifyId=q1');
+  });
+});
+
+describe('a push tap', () => {
+  it('opens a Notify alert\'s approval screen with the Session workspace Pane it carries', () => {
+    const tap = { trigger: { type: 'push', payload: { hostProfileId: work.id, notifyId: 'q1', paneId: 'worker', sessionPaneId: 'session-ws', panelId: 'p1', aps: {} } } };
+    const target = parsePushTarget(tap);
+    expect(target).toEqual({ host: work.id, notifyId: 'q1', sessionPaneId: 'session-ws', paneId: 'worker', panelId: 'p1' });
+    expect(openHref(target!)).toBe(`/open?host=${encodeURIComponent(work.id)}&paneId=worker&panelId=p1&notifyId=q1&sessionPaneId=session-ws`);
+    expect(openRoute(target!)).toEqual({ pathname: '/approval/[notifyId]', params: { notifyId: 'q1', paneId: 'session-ws' } });
+  });
+
+  it('falls back to the asking Pane without a Session Pane, and opens Panes and Sessions as before', () => {
+    expect(openRoute({ notifyId: 'q1', paneId: 'worker' })).toEqual({ pathname: '/approval/[notifyId]', params: { notifyId: 'q1', paneId: 'worker' } });
+    expect(openRoute({ notifyId: 'q1' })).toEqual({ pathname: '/approval/[notifyId]', params: { notifyId: 'q1' } });
+    expect(openRoute({ sessionId: 's1' })).toEqual({ pathname: '/session/[sessionId]', params: { sessionId: 's1' } });
+    expect(openRoute({ paneId: 'p', panelId: 'x' })).toEqual({ pathname: '/pane/[paneId]', params: { paneId: 'p', panelId: 'x' } });
+    expect(openRoute({})).toBeNull();
+  });
+
+  it('ignores a Session Pane on an alert that names no question (a Pane\'s attention alert)', () => {
+    const tap = { trigger: { type: 'push', payload: { hostProfileId: work.id, paneId: 'worker', sessionPaneId: 'session-ws', aps: {} } } };
+    expect(parsePushTarget(tap)).toEqual({ host: work.id, paneId: 'worker' });
   });
 });

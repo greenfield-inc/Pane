@@ -1,6 +1,6 @@
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { Bell, Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat, Inbox } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -26,12 +26,14 @@ import type { AgentDisplayStatus } from '../../../shared/types/agentStatus';
 import type { Project } from '../types/project';
 import { usePanelStore } from '../stores/panelStore';
 import { useAttentionInboxStore } from '../stores/attentionInboxStore';
-import { paneHasWaitingQuestion, useNotifyStore, waitingCount } from '../stores/notifyStore';
+import { paneHasWaitingQuestion, useNotifyStore } from '../stores/notifyStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
+import { useApprovalsNav } from './approvals/useApprovalsNav';
+import { toggleApprovals } from './approvals/approvalsNavigation';
 import { SSH_HOSTS_SESSION_ID } from '../../../shared/types/sshHosts';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 import {
@@ -416,7 +418,6 @@ export function ProjectSessionList({
   return (
     <>
       <div className="flex flex-col pb-2">
-        <NotifyNavRow active={activeView === 'notify'} />
 
         {orchestrationAvailability === 'unavailable' || orchestrationAvailability === 'idle' ? (
           <button
@@ -443,6 +444,7 @@ export function ProjectSessionList({
         ) : null}
 
         <LoopsNavRow active={activeView === 'loops'} />
+        <ApprovalsNavRow />
 
         {missionControlEnabled && (
           <button
@@ -712,47 +714,6 @@ export function ProjectSessionList({
   );
 }
 
-
-
-// --- Notify nav entry ---
-
-/** Opens the Notify inbox; the count is waiting questions only, never updates. */
-export function NotifyNavRow({ active }: { active: boolean }) {
-  const available = useNotifyStore(s => s.snapshot !== null);
-  const count = useNotifyStore(s => waitingCount(s.snapshot));
-  const navigateToNotify = useNavigationStore(s => s.navigateToNotify);
-  const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
-  if (!available) return null;
-  return (
-    <button
-      type="button"
-      data-testid="notify-nav"
-      onClick={() => {
-        setSidebarNavigationScope('repositories');
-        navigateToNotify();
-      }}
-      className={cn(
-        SIDEBAR_ROW_BASE,
-        SIDEBAR_ROW_GAP,
-        SIDEBAR_ROW_PADDING,
-        'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
-        active ? 'bg-surface-hover text-text-primary' : 'text-text-secondary',
-      )}
-    >
-      <Bell className="h-3.5 w-3.5" />
-      <span>Notify</span>
-      {count > 0 && (
-        <span
-          className="ml-auto inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-text-primary px-[5px] text-[11px] font-semibold tabular-nums text-bg-primary"
-          aria-label={`${count} ${count === 1 ? 'question' : 'questions'} waiting`}
-        >
-          {count}
-        </span>
-      )}
-    </button>
-  );
-}
-
 // --- Loops nav entry ---
 
 /** Opens the Loops page; shows how many loops exist and a blue dot while any run is working. */
@@ -781,6 +742,42 @@ export function LoopsNavRow({ active }: { active: boolean }) {
             <span className={cn('h-1.5 w-1.5 rounded-full bg-status-info', !running && 'invisible')} />
           </span>
           <span aria-label={running ? `${loops.length} loops, a run in progress` : `${loops.length} loops`}>{loops.length}</span>
+        </span>
+      )}
+    </button>
+  );
+}
+
+// --- Approvals nav entry ---
+
+/**
+ * Opens Approvals, and clicked again returns to the view you left. Its amber count is
+ * everything waiting on you; at zero it shows none.
+ */
+export function ApprovalsNavRow() {
+  const nav = useApprovalsNav();
+  if (!nav.enabled) return null;
+  return (
+    <button
+      type="button"
+      data-testid="approvals-nav"
+      aria-pressed={nav.open}
+      aria-label={nav.label}
+      title={nav.title}
+      onClick={toggleApprovals}
+      className={cn(
+        SIDEBAR_ROW_BASE,
+        SIDEBAR_ROW_GAP,
+        SIDEBAR_ROW_PADDING,
+        'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
+        nav.open ? 'bg-surface-hover text-text-primary' : 'text-text-secondary',
+      )}
+    >
+      <Inbox className="h-3.5 w-3.5" aria-hidden="true" />
+      <span>Approvals</span>
+      {nav.count > 0 && (
+        <span className="ml-auto inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-status-warning px-[5px] text-[11px] font-semibold tabular-nums text-text-on-status-warning" aria-hidden="true">
+          {nav.count}
         </span>
       )}
     </button>

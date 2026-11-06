@@ -40,7 +40,7 @@ import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../.
 import type { PaneChatAgent } from '../../shared/types/paneChat';
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
-import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
+import type { NotifyCommand, NotifyNavigateTarget, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
 import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
 import type {
   OrchestrationAssociationInput,
@@ -1309,8 +1309,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('notify:chime', listener);
     },
     /** Main asks the main window to show the Notify inbox or Settings → Notify. */
-    onNavigate: (callback: (target: 'inbox' | 'settings') => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, target: 'inbox' | 'settings') => callback(target);
+    onNavigate: (callback: (target: NotifyNavigateTarget) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, target: NotifyNavigateTarget) => callback(target);
       ipcRenderer.on('notify:navigate', listener);
       return () => ipcRenderer.removeListener('notify:navigate', listener);
     },

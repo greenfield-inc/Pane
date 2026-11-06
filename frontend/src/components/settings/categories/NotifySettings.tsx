@@ -115,15 +115,15 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
 
   const shortcutText = shortcutLabel(settings.shortcut, isMac());
   return (
-    <SettingsPage title="Notify" description="Agents can ask you questions and tell you things. Answers go straight back to the agent.">
+    <SettingsPage title="Approvals" description="Agents can ask you questions and tell you things. Answers go straight back to the agent.">
       <div className={SETTINGS_GROUP}>
         <SettingRow
           settingId="notify-enabled"
-          label="Notify"
+          label="Approvals"
           description="Let agents in Pane ask you questions and send updates."
           saveState={persistence.saveStates['notify-enabled']}
         >
-          <ImmediateToggle label="Notify" value={settings.enabled} onSave={(enabled) => save('notify-enabled', 'enabled', enabled)} />
+          <ImmediateToggle label="Approvals" value={settings.enabled} onSave={(enabled) => save('notify-enabled', 'enabled', enabled)} />
         </SettingRow>
         <SettingRow
           settingId="notify-show-outside"
@@ -226,7 +226,7 @@ function AgentInstructions({ files }: { files: NotifyInstructionsFile[] }) {
     <section className="rounded-2xl bg-surface-primary p-4 shadow-card ring-1 ring-border-secondary" aria-labelledby="notify-agent-instructions">
       <h3 id="notify-agent-instructions" className="text-sm font-medium text-text-primary">Agent instructions</h3>
       <p className="mt-1 max-w-2xl text-xs leading-relaxed text-text-tertiary">
-        While Notify is on, Pane keeps a few lines in these files that tell agents Pane is there and to ask you here. Turning Notify off removes them.
+        While Approvals are on, Pane keeps a few lines in these files that tell agents Pane is there and to ask you here. Turning Approvals off removes them.
       </p>
       <ul className="mt-3 space-y-2">
         {files.map((file) => (

@@ -92,7 +92,7 @@ install's data:
   ```
   `NODE_ENV=production` loads the built renderer from `frontend/dist`, so no
   Vite server is needed. Rebuild after changes.
-- **Agent instruction files** are not covered by `PANE_DIR`. While Notify is
+- **Agent instruction files** are not covered by `PANE_DIR`. While Approvals is
   on, the dev build keeps Pane's Notify block in `~/.claude/CLAUDE.md` and
   `~/.codex/AGENTS.md`, as the installed app does. Point `CLAUDE_CONFIG_DIR`
   and `CODEX_HOME` at temporary folders, or set

@@ -5605,6 +5605,8 @@ async function checkNotifyParity() {
     [{ status: 'declined' }, 'Declined'],
     [{ waiting: true, id: 'n-1', next: 'Call `runpane notify --resume n-1` now.' }, 'Still waiting (id n-1). Call `runpane notify --resume n-1` now.'],
   ];
+  const links = [{ label: 'Notes', path: 'docs/RELEASE.md' }, { label: 'PR #812', url: 'https://github.com/org/repo/pull/812' }];
+  const notifyLinks = JSON.stringify(links);
   const frames = { npm: [], pip: [] };
   try {
     for (const runtime of ['npm', 'pip']) {
@@ -5619,6 +5621,12 @@ async function checkNotifyParity() {
           else assert.strictEqual(run.stdout.trim(), line, `${runtime} notify printed the wrong line`);
         }
       }
+      // links go with any ui, and reach Pane as given.
+      const linked = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { delivered: 'screen' } };
+      }, () => runCliOnce(runtime, ['notify', '--ui', 'info', '--title', 'Notes are ready', '--links', notifyLinks, '--json'], paneDir, 20_000, outsidePane));
+      assert.deepStrictEqual(JSON.parse(linked.stdout), { delivered: 'screen' }, `${runtime} notify --links: ${linked.stderr}`);
       const approval = await withFakeDaemon(paneDir, (frame) => {
         frames[runtime].push(frame);
         return { result: { approved: true } };
@@ -5646,8 +5654,9 @@ async function checkNotifyParity() {
     returnAfterMs: 50000,
     caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
   };
-  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 2).fill('runpane:notify'));
+  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 3).fill('runpane:notify'));
   assert.deepStrictEqual(frames.npm[0].args, [question]);
+  assert.deepStrictEqual(frames.npm.at(-3).args, [{ ui: 'info', title: 'Notes are ready', links, caller: { cwd: rootDir } }]);
   assert.deepStrictEqual(frames.npm.at(-2).args, [{
     ui: 'approve', title: 'Drop the table?', detail: 'DROP TABLE t;', detailLabel: 'Show the SQL', caller: { cwd: rootDir },
   }]);
@@ -5655,6 +5664,7 @@ async function checkNotifyParity() {
   assert.deepStrictEqual(frames.pip.map((frame) => frame.args), frames.npm.map((frame) => frame.args), 'Python and Node notify sent different requests');
 
   // Invalid input fails before any request, naming the field, the same way in both wrappers.
+  const sevenLinks = JSON.stringify(Array.from({ length: 7 }, (_, index) => ({ label: `l${index}`, path: `f${index}.md` })));
   const tenChoices = JSON.stringify(Array.from({ length: 10 }, (_, index) => ({ label: `c${index}` })));
   const invalid = [
     ['ui', ['--title', 'x'], 'ui is required: options, approve, ask, or info.'],
@@ -5676,6 +5686,15 @@ async function checkNotifyParity() {
     ['suggestions', ['--ui', 'ask', '--title', 'x', '--suggestions', '["main",""]'], 'suggestions[1] must be non-empty text.'],
     ['action', ['--ui', 'info', '--title', 'x', '--action', '{"label":"Open"}'], undefined],
     ['resume', ['--resume', 'n-1', '--ui', 'ask'], 'resume keeps waiting on an earlier question, so it takes no other fields; remove ui.'],
+    ['resume', ['--resume', 'n-1', '--links', '[{"label":"Notes","path":"a.md"}]'], 'resume keeps waiting on an earlier question, so it takes no other fields; remove links.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '{"label":"Notes","path":"a.md"}'], undefined],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', sevenLinks], 'links takes up to 6 links; got 7.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":"a.md","url":"https://example.com"}]'], 'links[0] has both "path" and "url"; give one.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes"}]'], 'links[0] needs one of "path" (a file) or "url" (a web page).'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":" "}]'], 'links[0] path must be non-empty text.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"PR","url":"https://example.com"},{"label":"Files","url":"file:///etc/hosts"}]'], 'links[1] url must start with http:// or https://.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"","url":"https://example.com"}]'], 'links[0] must be an object with a non-empty "label" and one of "path" or "url".'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', `[{"label":"${'x'.repeat(81)}","path":"a.md"}]`], 'links[0] label takes up to 80 characters; got 81.'],
   ];
   const { main } = require(npmCli);
   const nodeFailures = [];

@@ -108,6 +108,8 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}
         />
         <Stack.Screen name="session/[sessionId]" options={{ headerShown: false }} />
+        {/* The card above its Session's tabs; draws its own bar. */}
+        <Stack.Screen name="approval/[notifyId]" options={{ headerShown: false }} />
         <Stack.Screen
           name="new"
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.8, 1], sheetGrabberVisible: true, headerShown: false }}

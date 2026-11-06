@@ -8,6 +8,7 @@ import type {
   NotifyRemindAfter,
   NotifyRemoteCommand,
   NotifyResult,
+  NotifySession,
   NotifySettings,
   NotifySharedState,
   NotifySnapshot,
@@ -75,6 +76,8 @@ export interface NotifyQueueEnvironment {
     exists(project: string, name: string): boolean;
     save(project: string, name: string, value: string): Promise<void>;
   };
+  /** The Session a Pane (and tab) works in, filed on each new item; Approvals groups by it. */
+  sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
 }
 
 /**
@@ -118,7 +121,6 @@ export class NotifyQueue extends EventEmitter {
   private roundOpen = false;
   private pausedUntil: number | null = null;
   private pauseTimer?: Timer;
-  private dockedItemId: string | null = null;
   /** The first question ever on a strip carries the "Click to answer" hint for as long as it shows. */
   private hintItemId: string | undefined;
   private midnightTimer?: Timer;
@@ -133,6 +135,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly answeredHere = new Set<string>();
   /** Other machines' questions reminded "when I switch to Pane", by key: hidden on this screen only. */
   private readonly remindedHere = new Set<string>();
+  /** Approvals' fallback: workers' blocked questions their orchestrator hasn't picked up. Read-only, never queued. */
+  private relays: NotifyItem[] = [];
 
   constructor(private readonly env: NotifyQueueEnvironment) {
     super();
@@ -147,7 +151,7 @@ export class NotifyQueue extends EventEmitter {
 
   private askOnce(request: { question?: NotifyQuestion; resume?: string; returnAfterMs?: number; source: NotifySource; id?: string }, signal?: AbortSignal): Promise<NotifyResult> {
     if (!this.env.settings().enabled) {
-      return Promise.resolve(unavailable('Notify is off in Pane.'));
+      return Promise.resolve(unavailable('Approvals are off in Pane.'));
     }
     if (request.resume) return this.resume(request.resume, request.returnAfterMs, signal);
     const question = request.question;
@@ -159,7 +163,7 @@ export class NotifyQueue extends EventEmitter {
     const item: NotifyItem = {
       ...question,
       id: request.id ?? randomUUID(),
-      source: request.source,
+      source: this.withSession(request.source),
       state: question.ui === 'info' ? 'info' : 'waiting',
       createdAt: Date.now(),
     };
@@ -195,8 +199,7 @@ export class NotifyQueue extends EventEmitter {
     | { type: 'remind'; id: string; after: NotifyRemindAfter }
     | { type: 'hover-info'; id: string; hovering: boolean }
     | { type: 'pause'; minutes: number }
-    | { type: 'resume' }
-    | { type: 'dock'; id: string | null }): void | Promise<void> {
+    | { type: 'resume' }): void | Promise<void> {
     switch (command.type) {
       case 'answer': return this.answer(command.id, command.answer);
       case 'undo': this.undo(command.id); break;
@@ -206,18 +209,16 @@ export class NotifyQueue extends EventEmitter {
       case 'hover-info': this.hoverInfo(command.id, command.hovering); break;
       case 'pause': this.pause(command.minutes); break;
       case 'resume': this.unpause(); break;
-      case 'dock': this.dockedItemId = command.id; this.changed(); break;
     }
   }
 
   /**
-   * Docks the oldest question still waiting from this tab, as Open in Pane does; a question
-   * on a machine the app isn't on stays put.
+   * The oldest question still waiting from this tab, for a pane:// link to open as Open in Pane
+   * does; a question on a machine the app isn't on is left out.
    */
-  dockWaitingCard(paneId: string, panelId: string): void {
-    const item = this.snapshot().items.find(candidate => candidate.state === 'waiting' && !candidate.elsewhere
-      && candidate.source.paneId === paneId && candidate.source.panelId === panelId);
-    if (item) this.run({ type: 'dock', id: item.id });
+  waitingCardFrom(paneId: string, panelId: string): string | undefined {
+    return this.snapshot().items.find(candidate => candidate.state === 'waiting' && !candidate.elsewhere
+      && candidate.source.paneId === paneId && candidate.source.panelId === panelId)?.id;
   }
 
   /**
@@ -225,7 +226,7 @@ export class NotifyQueue extends EventEmitter {
    * name for the sender, and `teammate` the login of a sender who is not this computer's owner.
    * Refuses a command for a question no longer in the state it needs.
    */
-  runRemote(command: NotifyRemoteCommand, device: string, teammate: string | null): void | Promise<void> {
+  runRemote(command: Exclude<NotifyRemoteCommand, { type: 'open-link' }>, device: string, teammate: string | null): void | Promise<void> {
     const entry = this.entries.get(command.id);
     if (!entry) {
       throw new PaneError('ERR_NOTIFY_GONE', `That question is no longer on ${this.machine()}: it finished earlier, or Pane restarted there. Nothing was sent.`, 'Nothing to do: the agent is no longer waiting on it.');
@@ -258,6 +259,17 @@ export class NotifyQueue extends EventEmitter {
     this.run(command);
   }
 
+  /**
+   * Approvals' fallback items (see NotifyRelay), replacing the last set. The caller decides
+   * which are due and drops them all while Approvals is off.
+   */
+  setRelays(relays: NotifyItem[]): void {
+    const key = (items: NotifyItem[]) => JSON.stringify(items);
+    if (key(relays) === key(this.relays)) return;
+    this.relays = relays.map(item => ({ ...item }));
+    this.changed();
+  }
+
   /** What every connected screen and phone shares: the questions, their order and who answered. */
   sharedState(): NotifySharedState {
     this.pruneBeforeToday();
@@ -269,9 +281,9 @@ export class NotifyQueue extends EventEmitter {
       enabled: this.env.settings().enabled,
       // A secret card is shared only while it waits: Pane versions before secrets can't read one,
       // so a finished card left in today's history would keep them from showing this machine's cards.
-      items: [...this.entries.values()].filter(({ item }) => item.ui !== 'secret' || item.state === 'waiting').map(({ item }) => (
+      items: [...[...this.entries.values()].filter(({ item }) => item.ui !== 'secret' || item.state === 'waiting').map(({ item }) => (
         item.state === 'sent' || item.state === 'answered' ? { ...item, answeredOn: item.answeredOn ?? machine } : { ...item }
-      )),
+      )), ...this.relays.map(item => ({ ...item }))],
       queue: [...this.queue],
       // "When I switch to Pane" waits for this Pane only; other screens keep showing the question.
       hidden: [...this.hidden].filter(id => !this.entries.get(id)?.remindOnPaneFocus),
@@ -450,7 +462,7 @@ export class NotifyQueue extends EventEmitter {
   /** Notify was turned off: every waiting agent gets `unavailable` and every surface clears. */
   turnOff(): void {
     for (const entry of [...this.entries.values()]) {
-      if (isOpen(entry.item)) this.expire(entry.item.id, unavailable('Notify was turned off in Pane.'), false);
+      if (isOpen(entry.item)) this.expire(entry.item.id, unavailable('Approvals were turned off in Pane.'), false);
     }
     this.clearTransient();
     this.changed();
@@ -504,7 +516,7 @@ export class NotifyQueue extends EventEmitter {
     this.pruneBeforeToday();
     const strip = this.strip();
     const remotes = [...this.remotes.values()];
-    const local = [...this.entries.values()].map(entry => entry.item);
+    const local = [...[...this.entries.values()].map(entry => entry.item), ...this.relays];
     return {
       settings: this.env.settings(),
       items: remotes.length > 0
@@ -522,7 +534,6 @@ export class NotifyQueue extends EventEmitter {
       hidden: [...this.allHidden()],
       strip,
       stripSurface: this.stripSurface(strip),
-      dockedItemId: this.dockedItemId && this.find(this.dockedItemId)?.state === 'waiting' ? this.dockedItemId : null,
       pausedUntil: this.isPaused() ? this.pausedUntil : null,
       shortcutRegistered: this.env.shortcutRegistered(),
       showOutsideSupported: this.env.showOutsideSupported,
@@ -800,6 +811,13 @@ export class NotifyQueue extends EventEmitter {
     const hidden = this.allHidden();
     const id = this.allQueued().find(other => !hidden.has(other));
     return id ? { kind: 'question', itemId: id } : null;
+  }
+
+  /** Files the item under its Pane's Session, unless the asker already named one. */
+  private withSession(source: NotifySource): NotifySource {
+    if (source.session || !source.paneId) return source;
+    const session = this.env.sessionOf?.(source.paneId, source.panelId);
+    return session ? { ...source, session } : source;
   }
 
   private find(id: string): NotifyItem | undefined {

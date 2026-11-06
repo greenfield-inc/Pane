@@ -5115,9 +5115,15 @@ async function resolvePanelOpenFile(services: AppServices, pane: Session, rawPat
   const { pathResolver, toFileSystem } = await browserFileContext(services, pane);
 
   const basePath = toFileSystem(pane.worktreePath);
-  const requested = path.isAbsolute(rawPath)
+  let requested = path.isAbsolute(rawPath)
     ? path.relative(basePath, toFileSystem(rawPath))
     : rawPath;
+  // An agent's cwd is the real path; the Pane may know its worktree through a symlink
+  // (macOS /tmp is /private/tmp). Compare real paths before calling it outside.
+  if (path.isAbsolute(rawPath) && requested.startsWith('..')) {
+    const real = (target: string) => fs.promises.realpath(target).catch(() => target);
+    requested = path.relative(await real(basePath), await real(toFileSystem(rawPath)));
+  }
   const relativePath = path.normalize(requested);
   if (!relativePath || relativePath === '.' || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
     throw new Error(`File path must be inside the Pane worktree: ${rawPath}`);

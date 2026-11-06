@@ -2,7 +2,10 @@ import { DEFAULT_NOTIFY_SETTINGS, type NotifySnapshot } from '../../shared/types
 
 const MINUTE = 60_000;
 
-/** Three waiting questions (one of each look), one update and today's history, as main would send them. */
+/**
+ * Three waiting questions (one of each look, the first from a worker in the Launch Session, with
+ * related links), one update and today's history, as main would send them.
+ */
 export function notifyFixture(now = Date.now()): NotifySnapshot {
   return {
     settings: { ...DEFAULT_NOTIFY_SETTINGS },
@@ -17,7 +20,8 @@ export function notifyFixture(now = Date.now()): NotifySnapshot {
           { label: 'Keep Redis', detail: 'Persistence in each environment.' },
           { label: 'Stateless JWT', detail: 'No server-side sign-out.' },
         ],
-        source: { paneId: 'pane-auth', panelId: 'panel-auth', name: 'auth-refactor', agent: 'Claude' },
+        links: [{ label: 'plan.html', path: '/tmp/auth-refactor/plan.html' }, { label: 'PR #812', url: 'https://github.com/example/repo/pull/812' }],
+        source: { paneId: 'pane-auth', panelId: 'panel-auth', name: 'auth-refactor', agent: 'Claude', session: { id: 'session-launch', name: 'Launch', paneId: 'session-launch-pane' } },
         state: 'waiting',
         createdAt: now - 2 * MINUTE,
       },
@@ -84,7 +88,6 @@ export function notifyFixture(now = Date.now()): NotifySnapshot {
     hidden: [],
     strip: { kind: 'question', itemId: 'q-options' },
     stripSurface: 'pane',
-    dockedItemId: null,
     pausedUntil: null,
     shortcutRegistered: true,
     showOutsideSupported: true,
@@ -93,7 +96,6 @@ export function notifyFixture(now = Date.now()): NotifySnapshot {
       { agent: 'Codex', file: '~/.codex/AGENTS.md', state: 'not-found' },
     ],
     firstRun: true,
-    remote: null,
   };
 }
 

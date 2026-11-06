@@ -41,7 +41,7 @@ export class NotifyTray {
     if (!this.tray) {
       this.tray = new Tray(image(false));
       this.dotted = false;
-      this.tray.setToolTip('Pane Notify');
+      this.tray.setToolTip('Pane Approvals');
     }
     const dotted = state.waiting.length > 0;
     if (dotted !== this.dotted) {
@@ -64,7 +64,7 @@ export class NotifyTray {
       click: () => this.actions.openRound(item.id),
     }));
     return [
-      { label: 'Pane Notify', enabled: false },
+      { label: 'Pane Approvals', enabled: false },
       count > 0
         ? { label: `${count} ${count === 1 ? 'question' : 'questions'} waiting`, accelerator: settings.shortcut, registerAccelerator: false, click: () => this.actions.openRound() }
         : { label: 'Nothing waiting', enabled: false },
@@ -77,9 +77,9 @@ export class NotifyTray {
       paused
         ? { label: 'Resume notifications', click: () => this.actions.resume() }
         : { label: 'Pause for 1 hour', click: () => this.actions.pause() },
-      { label: 'Open Notify inbox', click: () => this.actions.openInbox() },
+      { label: 'Open Approvals', click: () => this.actions.openInbox() },
       { type: 'separator' },
-      { label: 'Notify settings…', click: () => this.actions.openSettings() },
+      { label: 'Approvals settings…', click: () => this.actions.openSettings() },
     ];
   }
 }

@@ -107,7 +107,7 @@ A quiet worker or a long-running step is normal. On a reported failure, explicit
 
 ## Questions and resumption
 
-Answer from an existing approved source when you can, and cite where. Leave routine in-scope technical decisions to the assigned worker. For a bounded, unresolved technical question that merits a second opinion, ask one fresh-context subagent. Send product and architecture changes, and ask-first actions, to the user.
+Answer from an existing approved source when you can, and cite where. Leave routine in-scope technical decisions to the assigned worker. For a bounded, unresolved technical question that merits a second opinion, ask one fresh-context subagent. Send product and architecture changes, and ask-first actions, to the user. In Pane, while Approvals is on, post each one to Approvals as `pane-orchestration` says ("What waits on the person"), so you stay free to talk.
 
 ## Presenting decisions
 

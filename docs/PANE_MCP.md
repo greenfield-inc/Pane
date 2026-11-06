@@ -58,7 +58,7 @@ The core set is built around the three jobs agents most often need, each finishe
 
 ## Asking the person: notify
 
-`notify` asks the person a question, or tells them something, on screen wherever they are, and returns their answer as the tool result. `ui` picks the look: `options` (1 to 9 `choices`; returns `{answer, note?}` with the chosen label), `approve` (returns `{approved, note?}`), `ask` (returns `{answer}`), or `info` (returns `{delivered}` at once). `choices`, `suggestions` and `action` are typed arrays and objects in the input schema. It needs no `yes`. When Pane is not running, Notify is off, or the Pane is too old to have notify, it returns `{unavailable, next}` and the agent asks in its terminal instead.
+`notify` asks the person a question, or tells them something, on screen wherever they are, and returns their answer as the tool result. `ui` picks the look: `options` (1 to 9 `choices`; returns `{answer, note?}` with the chosen label), `approve` (returns `{approved, note?}`), `ask` (returns `{answer}`), or `info` (returns `{delivered}` at once). `choices`, `suggestions` and `action` are typed arrays and objects in the input schema. It needs no `yes`. When Pane is not running, Approvals is off, or the Pane is too old to have notify, it returns `{unavailable, next}` and the agent asks in its terminal instead.
 
 For an API key, token or password, agents call `secrets_request`, never `notify` with `ask`. The person enters the value on a secret card, Pane saves it as a [Pane secret](PANE_SECRETS.md), and the result is only `{status: "saved", project, name}` or `{status: "declined"}`. When it returns `unavailable`, the agent asks the person to save the secret in Pane under Settings > Secrets.
 

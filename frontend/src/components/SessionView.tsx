@@ -77,7 +77,7 @@ import { showActionError, useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 import { LoopsView } from './loops/LoopsView';
 import { LivePreviewPrompt } from './LivePreviewPrompt';
-import { NotifyInbox } from './notify/NotifyInbox';
+import { ApprovalsView } from './approvals/ApprovalsView';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
 import { useLoopsStore } from '../stores/loopsStore';
 
@@ -1988,23 +1988,19 @@ export const SessionView = memo(() => {
     return <LoopsView />;
   }
 
-  if (activeView === 'notify') {
-    return <NotifyInbox />;
-  }
-
   const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);
-  if (selectedPaneId && (!activeSession || !ownsPanelLoad || loadError)) {
-    return <div className="flex flex-1 flex-col bg-bg-primary">
+  const paneLoading = selectedPaneId && (!activeSession || !ownsPanelLoad || loadError)
+    ? <div className="flex flex-1 flex-col bg-bg-primary">
       {loadError ? <div className="p-6 text-text-secondary"><p role="alert">{loadError}</p>
         <button type="button" className="mt-3 rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => {
           if (selectionError) void useSessionStore.getState().setActiveSession(selectedPaneId);
           else { setPanelLoad(null); setPanelRetry(value => value + 1); }
         }}>Retry</button></div> : <SelectionLoading name={activeSession?.name ?? selectedPaneId} />}
-    </div>;
-  }
-  if (!activeSession) return <HomePage />;
-  
-  return (
+    </div>
+    : null;
+
+  // The Pane's own shell: the main area, or Approvals' right side beside a worker's or a standalone Pane's item.
+  const paneShell = activeSession && !paneLoading ? (
     <div className="pane-session-shell flex-1 flex flex-col overflow-hidden bg-bg-primary">
       <LiveRegion mode={activeSession.status === 'error' ? 'assertive' : 'polite'}>
         {sessionStatusAnnouncement}
@@ -2342,7 +2338,12 @@ export const SessionView = memo(() => {
       )}
 
     </div>
-  );
+  ) : null;
+
+  if (activeView === 'notify') return <ApprovalsView paneView={paneLoading ?? paneShell} />;
+  if (paneLoading) return paneLoading;
+  if (!paneShell) return <HomePage />;
+  return paneShell;
 });
 
 SessionView.displayName = 'SessionView';

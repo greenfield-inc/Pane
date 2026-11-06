@@ -209,7 +209,7 @@ test('a new contract command becomes a tool with inputs from its usage and agent
 test('notify types its inputs, so a model passes choices as objects, and needs no yes', () => {
   const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
   const notify = buildMcpTools().find((tool) => tool.name === 'notify');
-  const { ui, choices, detailLabel, suggestions, action } = notify.inputSchema.properties;
+  const { ui, choices, detailLabel, suggestions, action, links } = notify.inputSchema.properties;
 
   assert.deepEqual(ui.enum, ['options', 'approve', 'ask', 'info']);
   assert.equal(choices.type, 'array');
@@ -222,6 +222,11 @@ test('notify types its inputs, so a model passes choices as objects, and needs n
   assert.equal(detailLabel.maxLength, 40);
   assert.equal(suggestions.items.type, 'string');
   assert.deepEqual(action.required, ['label', 'url']);
+  assert.equal(links.type, 'array');
+  assert.equal(links.maxItems, 6);
+  assert.deepEqual(links.items.required, ['label']);
+  assert.deepEqual(Object.keys(links.items.properties).sort(), ['label', 'path', 'url']);
+  assert.equal(links.items.properties.label.maxLength, 80);
   assert.ok(!('yes' in notify.inputSchema.properties), 'notify must run without yes');
   assert.deepEqual(
     buildToolArgv(notify, { ui: 'options', title: 'Ship?', choices: [{ label: 'Yes', recommended: true }, { label: 'No' }] }),
@@ -230,6 +235,10 @@ test('notify types its inputs, so a model passes choices as objects, and needs n
   assert.deepEqual(
     buildToolArgv(notify, { ui: 'approve', title: 'Drop it?', detail: 'DROP TABLE t;', detailLabel: 'Show the SQL' }),
     ['notify', '--ui=approve', '--title=Drop it?', '--detail=DROP TABLE t;', '--detail-label=Show the SQL', '--json'],
+  );
+  assert.deepEqual(
+    buildToolArgv(notify, { ui: 'ask', title: 'Which?', links: [{ label: 'Notes', path: 'docs/RELEASE.md' }, { label: 'PR', url: 'https://example.com/pr/1' }] }),
+    ['notify', '--ui=ask', '--title=Which?', '--links=[{"label":"Notes","path":"docs/RELEASE.md"},{"label":"PR","url":"https://example.com/pr/1"}]', '--json'],
   );
 });
 

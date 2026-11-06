@@ -282,8 +282,8 @@ renderer), Overview shows that page under a header with the Session name, Rename
 **Open beside chat** (the page full-size in the split, in the tab already
 showing it) and **Show Session details** (the record described next). Pane checks for
 the page each time the Session refreshes. Links in the page to
-`pane://open?pane=<id>&panel=<id>` open that tab with its waiting Notify card
-docked; other links open as a browser tab beside chat. A client connected to
+`pane://open?pane=<id>&panel=<id>` open that tab and show its oldest waiting
+question in Approvals, as Open in Pane does; other links open as a browser tab beside chat. A client connected to
 a remote host shows the record only. Without a page, Overview shows the
 Session's blockers, goal, next step, and decisions when they are set, then its
 Panes and recent activity. Each Pane card lists the Session's tabs in that Pane
@@ -1230,6 +1230,61 @@ runpane inbox ack --all --session <id|name>
 An orchestrator runs `runpane inbox` when it starts or resumes, to catch what
 finished while it was down. Pane never adds the inbox to the orchestrator's
 turns: worker output reaches it only as the result of a tool call it made.
+
+### What waits on the person: Approvals
+
+While Approvals is on (Settings → Approvals, saved as `notify.enabled`, on by
+default), a Session has one voice to the person: its orchestrator.
+
+- **Workers don't call `notify`.** Approvals come from the orchestrator, not
+  from the agents in the Session's Panes. A worker in a Session's Pane gets
+  `PANE_SESSION_DIR` and no `PANE_ORCHESTRATION_SESSION_ID`; Pane's
+  instructions (the user-level Notify block, the MCP server instructions and
+  the `pane` home skill) tell such a worker to report blocked with
+  `runpane report --state blocked --question "<question>"` instead. A
+  worker's `notify` call isn't shown to the person; it returns `unavailable`
+  with a `next` that says to report blocked.
+- **Orchestrator mode.** The generated orchestrator skill, the Session's
+  `AGENTS.md` and the orchestrator guide
+  (`paneChatBundle/skills/pane-orchestration/SKILL.md`, "What waits on the
+  person") tell the orchestrator that only it asks the person; to keep a
+  running list and keep the work moving; when the person asks about one
+  thing while other work is open, to remind them and offer the next step; at
+  the end of a turn, to have an approval waiting or be done; and to ask
+  through Approvals with context (why, the options with the recommended one
+  first, related files and links). These are instructions; Pane doesn't
+  check turns.
+- **The orchestrator posts.** The same three carry the posting rule: keep every item that waits on the person (a
+  worker's needs_you or blocked question, a plan or design approval, a PR
+  ready to merge, a next step only they can take) posted to Approvals exactly
+  once, titled with its Q-n and with the worker's files and PR as `--links`.
+  Post each one with `runpane notify ... --json` as a background command (in
+  Claude Code, Bash with `run_in_background`), not the MCP `notify` tool,
+  which returns `waiting` after a while, and not a blocking
+  `AskUserQuestion`. The orchestrator stays free to talk about the item in its
+  tab while the card waits, and the background call returns the answer, which
+  it sends only to the asking worker. After posting a worker's question it
+  acknowledges the inbox item. Stopping an item's background call expires the
+  card, which is how a stale item is dropped. On start, resume or wake it
+  reconciles against the status files, its ledger and `runpane inbox`; Pane
+  keeps no approvals across a restart, so it posts what still waits again,
+  exactly once. When `notify` returns `unavailable` because Approvals is off,
+  it asks in its own tab as before.
+- **Filing.** Pane files each item under the Session its Pane belongs to, and
+  marks items from the orchestrator's own tabs. Claude permission prompts and
+  chat tab prompts still come straight from the asking tab and are filed under
+  its Session.
+- **Fallback.** A worker's blocked report with a question that stays
+  unacknowledged in the Session inbox for 10 minutes shows in Approvals
+  read-only: "Waiting on the <Session> orchestrator: <worker> asked this and
+  it hasn't been picked up. Answer in the orchestrator's tab." It clears when
+  the orchestrator acknowledges the item (`runpane inbox ack`) or the worker
+  reports again, and never shows while Approvals is off. So a worker's
+  question is never invisible while its orchestrator is down or follows an
+  older rule set. The code is `refreshRelays` in
+  `main/src/services/notify/notifyService.ts`.
+
+See [PANE_NOTIFY.md](PANE_NOTIFY.md) for the Approvals screen itself.
 
 ## Skill contract
 

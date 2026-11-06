@@ -80,6 +80,15 @@ describe('Pane home skill', () => {
     expect(skill).toContain('runpane workspace <machine> exec');
   });
 
+  it('tells a Session worker to report blocked and an orchestrator to post in the background', () => {
+    const skill = buildPaneHomeSkill().replace(/\s+/g, ' ');
+    expect(PANE_MANAGED_SKILL_MARKER).toBe('<!-- pane-managed-skill v3 -->');
+    expect(skill).toContain("A worker in a Session** (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't");
+    expect(skill).toContain("doesn't call `notify`. Run `runpane report --state blocked --question \"<question>\"`");
+    expect(skill).toContain('A Session orchestrator** (`PANE_ORCHESTRATION_SESSION_ID` is set) keeps each item that waits on the person posted once, as a background `runpane notify');
+    expect(skill).toContain('Any other agent** calls `notify` as above.');
+  });
+
   it('upgrades a copy an older Pane marked and leaves a newer one alone', async () => {
     await installPaneHomeSkill(dirs);
     const v1 = `---\nname: pane\n---\n<!-- pane-managed-skill v1 -->\nold text\n`;
