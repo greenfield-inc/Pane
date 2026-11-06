@@ -1248,6 +1248,31 @@ Like
 Session scope alone does not deliver it), and it skips the `--min-interval`
 batch. The tracker is `main/src/services/expectedReports.ts`.
 
+### Autopilot's kinds
+
+Autopilot (experimental) waits with `runpane watch --as autopilot --kinds
+item.created,item.answered,session.created,session.archived,orchestrator.turn_ended
+--until-event --json`. These kinds reach only watchers that list them in
+`--kinds` (a Session scope alone does not deliver them), so orchestrators'
+watches never see them. `item.created` and `item.answered` (ITEM / ANSWERED)
+mark an approval or question starting or stopping waiting on the person; the
+entry carries `itemId` and the title in `reason` (for an item whose asker
+stopped before anyone answered, `reason` starts with "No answer (the asker
+stopped waiting): "), and its `paneId` is the
+asking Pane. `session.created` and `session.archived` (SESSION NEW / SESSION
+ARCHIVED) carry the Session and its own workspace Pane as `paneId`.
+`orchestrator.turn_ended` (TURN ENDED) marks a Session orchestrator going from
+working to idle, chat tabs included. They come from
+`main/src/services/autopilot/autopilotEvents.ts`.
+
+Every Session's fixed capability text has one rule for Autopilot: a message
+that starts with `[From the person, via Autopilot]` carries the person's own
+question or instruction (a `/wrap-up` request included), and is never an
+answer to an approval or a worker's question. A message that starts with
+`[From Autopilot]` is Autopilot's own; the orchestrator replies to whoever
+asked ("To Autopilot:"), and anything the person must decide still goes to
+them as an approval. See [AUTOPILOT.md](AUTOPILOT.md).
+
 ### Questions on screen
 
 Pane's status detection (`main/src/services/agentStatus/manifests.ts`)

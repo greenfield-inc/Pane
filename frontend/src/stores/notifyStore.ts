@@ -12,6 +12,13 @@ interface NotifyState {
 
 export const useNotifyStore = create<NotifyState>(() => ({ snapshot: null }));
 
+const NO_ITEMS: readonly NotifyItem[] = [];
+
+/** Every item, or one shared empty list before the first snapshot: a fresh `[]` per read would re-render forever. */
+export function selectNotifyItems(state: NotifyState): readonly NotifyItem[] {
+  return state.snapshot?.items ?? NO_ITEMS;
+}
+
 /** Keeps the store in step with main. Returns the unsubscribe. */
 export function subscribeNotify(): () => void {
   const api = window.electronAPI?.notify;

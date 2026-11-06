@@ -42,6 +42,8 @@ export function chatTabEnv(panel: ToolPanel, state: ChatPanelState): ChatAgentEn
   const inherited = interactiveTerminalEnv();
   delete inherited.PANE_ORCHESTRATION_SESSION_ID;
   delete inherited.PANE_SESSION_DIR;
+  delete inherited.PANE_AUTOPILOT_RUN_ID;
+  delete inherited.PANE_AUTOPILOT_DIR;
   const config = getRuntimeConfigManager().getConfig();
   const env = {
     ...inherited,
@@ -59,6 +61,8 @@ export function chatTabEnv(panel: ToolPanel, state: ChatPanelState): ChatAgentEn
   const session: ChatAgentEnv = {};
   if (state.orchestrationSessionId) session.PANE_ORCHESTRATION_SESSION_ID = state.orchestrationSessionId;
   if (state.sessionFolder) session.PANE_SESSION_DIR = state.sessionFolder;
+  // Autopilot's tab: its run folder, for its documents (D-67). Never a Session (D-69).
+  if (state.autopilotRunId) { session.PANE_AUTOPILOT_RUN_ID = state.autopilotRunId; session.PANE_AUTOPILOT_DIR = state.cwd; }
   return withRunpaneBinOnPath({ ...env, ...session });
 }
 

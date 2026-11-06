@@ -232,6 +232,7 @@ Notes tab.
 | Adding an agent CLI | `main/src/services/agents/` | [ADDING_NEW_CLI_TOOLS.md](ADDING_NEW_CLI_TOOLS.md) |
 | Panels | `panelManager.ts`, `shared/types/panels.ts` | [TOOL_PANEL_SYSTEM.md](TOOL_PANEL_SYSTEM.md) |
 | Chat tabs (ACP agents without a terminal) | `main/src/services/chatTabs/`, `main/src/ipc/chatTabs.ts`, `frontend/src/components/chatTab/` | [CHAT_TABS.md](CHAT_TABS.md) |
+| Autopilot (experimental agent above every Session) | `main/src/services/autopilot/`, `main/src/ipc/autopilot.ts`, `frontend/src/components/autopilot/` | [AUTOPILOT.md](AUTOPILOT.md) |
 | Renderer updates | IPC events in `main/src/events.ts` | [STATE_MANAGEMENT.md](STATE_MANAGEMENT.md) |
 | Timestamps | `main/src/utils/timestampUtils.ts` | [TIMESTAMP_HANDLING.md](TIMESTAMP_HANDLING.md) |
 | Pane Chat and orchestration sessions | `paneChatManager.ts`, `skillCacheManager.ts`, `paneChatBundle/` | [SESSIONS.md](SESSIONS.md) |

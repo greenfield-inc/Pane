@@ -140,6 +140,13 @@ const config = {
           'info-on-tint': 'var(--color-status-info-on-tint)',
           'neutral': 'var(--color-status-neutral)',
         },
+        // Autopilot's accent (violet)
+        'autopilot': {
+          'DEFAULT': 'var(--color-autopilot)',
+          'subtle': 'var(--color-autopilot-subtle)',
+          'border': 'var(--color-autopilot-border)',
+          'on-tint': 'var(--color-autopilot-on-tint)',
+        },
         // Brand colors
         'discord': {
           'DEFAULT': 'var(--discord-primary, #5865F2)',

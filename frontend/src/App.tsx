@@ -38,6 +38,7 @@ import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
 import { runNotify, subscribeNotify, useNotifyStore } from './stores/notifyStore';
+import { subscribeAutopilot } from './stores/autopilotStore';
 import { acceleratorFromKeys } from './components/notify/notifyFormat';
 import { openApprovals } from './components/approvals/approvalsNavigation';
 import { useConfigStore } from './stores/configStore';
@@ -183,6 +184,8 @@ function App() {
 
   // Pane Notify: keep the queue's snapshot, and open the inbox or its settings when main asks.
   useEffect(() => subscribeNotify(), []);
+  // Autopilot (experimental): its snapshot drives the sidebar row and its view.
+  useEffect(() => subscribeAutopilot(), []);
   // Native Wayland may never deliver the answer-all shortcut to Pane, even while it is in front
   // (GNOME 46 has no global-shortcut portal), so the window answers it itself there.
   useEffect(() => {

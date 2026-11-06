@@ -1147,3 +1147,44 @@ test('destructive pane actions return a review link, and folder actions pass the
     fs.rmSync(paneDir, { recursive: true, force: true });
   }
 });
+
+test('the autopilot toolset serves Autopilot\'s reads and stack push, whose results match their schemas', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const entry = { id: 'e-1', ref: { kind: 'item', notifyId: 'n-1' }, title: 'Ship it?', tabs: [{ kind: 'item', label: 'Approval', notifyId: 'n-1' }], addedAt: 1 };
+  const waiting = { ok: true, items: [{ id: 'n-1', title: 'Ship it?', kind: 'approval', sessionId: 's-1', sessionName: 'Release', agent: 'Claude', pane: 'Worker', links: [], createdAt: 1, ageMs: 2, machine: 'This Mac', machineId: 'local', onStack: false }] };
+  const pushed = { ok: true, entry, shown: true, position: 1, total: 1 };
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:autopilot:waiting': waiting,
+      'runpane:autopilot:stack': { ok: true, entries: [entry], shownId: 'e-1' },
+      'runpane:autopilot:stack-push': pushed,
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const tools = (await client.listTools()).tools;
+        assert.deepEqual(tools.map((tool) => tool.name).sort(), ['autopilot_stack', 'autopilot_stack_push', 'autopilot_status', 'autopilot_waiting']);
+        const byName = new Map(tools.map((tool) => [tool.name, tool]));
+        assert.ok(['autopilot_status', 'autopilot_waiting', 'autopilot_stack'].every((name) => byName.get(name).annotations.readOnlyHint));
+        const push = byName.get('autopilot_stack_push');
+        assert.equal(push.annotations.destructiveHint, false);
+        assert.deepEqual(Object.keys(push.inputSchema.properties).sort(), ['file', 'item', 'next', 'note', 'paneDir', 'session', 'tab', 'title', 'url']);
+
+        const listed = await client.callTool({ name: 'autopilot_waiting', arguments: { paneDir } });
+        assert.deepEqual(listed.structuredContent, waiting);
+        assertMatchesAdvertisedSchema(byName.get('autopilot_waiting'), listed.structuredContent);
+        const stack = await client.callTool({ name: 'autopilot_stack', arguments: { paneDir } });
+        assertMatchesAdvertisedSchema(byName.get('autopilot_stack'), stack.structuredContent);
+        const result = await client.callTool({ name: 'autopilot_stack_push', arguments: { item: 'n-1', note: 'Needs a go', next: true, paneDir } });
+        assert.notEqual(result.isError, true, result.content[0].text);
+        assert.deepEqual(result.structuredContent, pushed);
+        assertMatchesAdvertisedSchema(push, result.structuredContent);
+      }, { args: ['--toolsets', 'autopilot'] });
+      assert.deepEqual(requests.map(({ channel, args }) => ({ channel, args })), [
+        { channel: 'runpane:autopilot:waiting', args: [] },
+        { channel: 'runpane:autopilot:stack', args: [] },
+        { channel: 'runpane:autopilot:stack-push', args: [{ item: 'n-1', note: 'Needs a go', next: true }] },
+      ]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});

@@ -7,11 +7,23 @@ export type {
   PanePermissionResolvedEvent,
 } from './permissions';
 
+/**
+ * The Pane and tab whose agent sent a request, as runpane reads them from its environment
+ * (PANE_SESSION_ID, PANE_PANEL_ID). Absent for Pane's own UI. Used to refuse what an agent
+ * may not do, such as Autopilot answering an approval (D-66); never to grant anything.
+ */
+export interface PaneDaemonCaller {
+  paneId?: string;
+  panelId?: string;
+}
+
 export interface PaneDaemonRequestFrame {
   type: 'request';
   id: number;
   channel: string;
   args: JsonValue[];
+  /** Older runpane builds leave it out. */
+  caller?: PaneDaemonCaller;
 }
 
 export interface PaneDaemonSuccessResponseFrame {
@@ -55,6 +67,10 @@ const requestFrameSchema: BoundarySchema<PaneDaemonRequestFrame> = boundary.obje
   id: boundary.number,
   channel: boundary.string,
   args: boundary.array(boundary.json),
+  caller: boundary.optional(boundary.object({
+    paneId: boundary.optional(boundary.string),
+    panelId: boundary.optional(boundary.string),
+  })),
 });
 const responseFrameSchema: BoundarySchema<PaneDaemonResponseFrame> = boundary.union(
   boundary.object({
@@ -87,6 +103,7 @@ const daemonFrameSchema: BoundarySchema<PaneDaemonFrame> = boundary.union(
 
 export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'agent-usage:',
+  'autopilot:',
   'folders:',
   'logs:',
   'loops:',

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RemoteDaemonClient, type RemoteDaemonClientEvent } from '@shared/remoteClient';
+import type { AutopilotDocument, AutopilotSnapshot } from '@shared/types/autopilot';
+import type { ChatTabView } from '@shared/types/chatTab';
 import type { NotifySharedState } from '@shared/types/notify';
 import type { OrchestrationSessionListResult } from '@shared/types/orchestrationSession';
 import { pausedMarkOf, type ToolPanel } from '@shared/types/panels';
@@ -201,4 +203,31 @@ describe('demo host', () => {
     expect(await state()).toBe('sent');
     client.disconnect();
   }, 10_000);
+
+  it('walks Autopilot: Start names the first item, answering it brings the next', async () => {
+    const { client, events } = connectDemo();
+    await connected(client);
+    const before = await invokeChannel<AutopilotSnapshot>(client, 'autopilot:snapshot');
+    expect(before).toMatchObject({ enabled: true, state: 'stopped' });
+    const panelId = before.panelId!;
+    // Opening it never starts a turn: the chat is empty until Start.
+    expect((await invokeChannel<ChatTabView>(client, 'chat-tab:get', [panelId])).transcript?.messages).toEqual([]);
+    const started = await invokeChannel<AutopilotSnapshot>(client, 'autopilot:start');
+    expect(started.state).toBe('running');
+    expect(started.stack.entries.map(entry => entry.ref)).toEqual([
+      { kind: 'item', notifyId: 'demo-ap-q14' }, { kind: 'item', notifyId: 'demo-ap-q5' }, { kind: 'item', notifyId: 'demo-ap-own' },
+    ]);
+    const text = (view: ChatTabView) => view.transcript?.messages.flatMap(message => message.parts.flatMap(part => part.type === 'text' ? [part.text] : [])) ?? [];
+    expect(text(await invokeChannel<ChatTabView>(client, 'chat-tab:get', [panelId])).join('\n')).toContain('```autopilot-items\ndemo-ap-q14\n```');
+    expect(channelEvents(events, 'autopilot:changed').length).toBeGreaterThan(0);
+
+    await invokeChannel(client, 'notify:remote-command', [{ type: 'answer', id: 'demo-ap-q14', answer: { choice: 'Approve' } }]);
+    await vi.waitFor(async () => {
+      expect(text(await invokeChannel<ChatTabView>(client, 'chat-tab:get', [panelId])).at(-1)).toContain('demo-ap-q5');
+    }, { timeout: 5_000 });
+    const page = await invokeChannel<AutopilotDocument>(client, 'autopilot:read-doc', ['/Users/you/code/storefront/tmp/plans/dark-mode/cover-sheet.html', { inline: true }]);
+    expect(page).toMatchObject({ kind: 'html', html: expect.stringContaining('Dark mode for the storefront') });
+    client.disconnect();
+  }, 10_000);
 });
+

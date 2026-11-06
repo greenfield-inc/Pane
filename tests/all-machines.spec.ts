@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { TailnetMachineList } from '../shared/types/workspaceAccess';
-import type { JsonValue } from '../shared/validation/boundaryDecoder';
+import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
+import { notifyFixture } from './fixtures/notifySnapshot';
 
 type MachinesMock = {
   getMachineRuns: () => Array<{ machineId: string; command: MachineCommand }>;
@@ -76,7 +77,7 @@ const tailnetMachines: TailnetMachineList = {
   ],
 };
 
-async function openAllMachines(page: Page, colorScheme: 'light' | 'dark' = 'light') {
+async function openAllMachines(page: Page, colorScheme: 'light' | 'dark' = 'light', extra: Partial<Parameters<typeof installElectronApiMock>[1]> = {}) {
   await page.emulateMedia({ colorScheme });
   await installElectronApiMock(page, {
     // The mock serves one set of Panes whichever machine the app is on: build-box's, once it switches there.
@@ -87,6 +88,7 @@ async function openAllMachines(page: Page, colorScheme: 'light' | 'dark' = 'ligh
     tailnetMachines,
     machineConnections: { machines, reads },
     initialConfig: { appearanceMode: 'system' },
+    ...extra,
   });
   await page.goto('/');
   await page.evaluate(async (saved) => {
@@ -221,4 +223,20 @@ for (const scheme of ['light', 'dark'] as const) test(`the machine menu marks Al
   await page.getByRole('button', { name: 'Showing all machines. Switch machine' }).click();
   await expect(page.getByRole('menuitemradio', { name: /All machines/ })).toHaveAttribute('aria-checked', 'true');
   await page.screenshot({ path: testInfo.outputPath(`all-machines-menu-${scheme}.png`) });
+});
+
+// D-198: All machines has the same top list as one machine: Loops, Autopilot, then Approvals (D-117).
+const autopilotSnapshot: JsonObject = {
+  enabled: true, chatTabsEnabled: true, entitlement: { entitled: true }, run: null, panelId: null, ownerPaneId: null,
+  state: 'stopped', sentinel: false, stack: { entries: [], shownId: null }, walk: { sessions: [] },
+};
+for (const scheme of ['light', 'dark'] as const) test(`All machines shows the Autopilot row between Loops and Approvals, and it opens Autopilot (${scheme})`, async ({ page }, testInfo) => {
+  await openAllMachines(page, scheme, { autopilotSnapshot, notifySnapshot: notifyFixture() });
+  const sidebar = page.getByTestId('all-machines-sidebar');
+  await expect(sidebar.locator('[data-testid="loops-nav"] + [data-testid="autopilot-nav"] + [data-testid="approvals-nav"]')).toHaveCount(1);
+  await expect(sidebar.getByTestId('autopilot-nav-state')).toHaveText('start');
+  await page.screenshot({ path: testInfo.outputPath(`all-machines-autopilot-row-${scheme}.png`) });
+  await sidebar.getByTestId('autopilot-nav').click();
+  await expect(sidebar.getByTestId('autopilot-nav')).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('all-machines-sidebar')).toBeVisible();
 });

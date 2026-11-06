@@ -25,6 +25,7 @@ interface WatchEntry {
   idleMs?: number;
   idleCount?: number;
   report?: WatchReport;
+  itemId?: string;
 }
 
 /** The fields of a worker report a REPORT line shows. */
@@ -92,6 +93,11 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
     case 'github.recovered': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} GITHUB RECOVERED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
     case 'agent.report': return `REPORT ${name} ${pane}${panel} ${entry.report ? describeReport(entry.report) : 'unknown'}`;
     case 'agent.report.missing': return `MISSING REPORT ${name} ${pane}${panel} ${sanitizeName(entry.reason ?? 'ready')}`;
+    case 'item.created': return `ITEM ${name} ${pane}${panel} ${sanitizeName(entry.itemId ?? '?')}${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'item.answered': return `ANSWERED ${name} ${pane}${panel} ${sanitizeName(entry.itemId ?? '?')}${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'session.created': return `SESSION NEW ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
+    case 'session.archived': return `SESSION ARCHIVED ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
+    case 'orchestrator.turn_ended': return `TURN ENDED ${name} ${pane}${panel} session ${sanitizeName(entry.sessionId ?? '')}`;
     default: return `UNKNOWN ${name} ${pane}${panel}`;
   }
 }

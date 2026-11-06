@@ -1062,7 +1062,12 @@ type WorkspaceEntryKind =
   | 'pr.comment'
   | 'pr.stopped'
   | 'github.unavailable'
-  | 'github.recovered';
+  | 'github.recovered'
+  | 'item.created'
+  | 'item.answered'
+  | 'session.created'
+  | 'session.archived'
+  | 'orchestrator.turn_ended';
 
 interface WorkspacePanelSummary {
   panelId: string;
@@ -1110,6 +1115,7 @@ interface WorkspaceEntry {
   lastOutputSource?: 'transcript' | 'screen';
   expectedSince?: string;
   screenLines?: string[];
+  itemId?: string;
 }
 
 interface WorkspaceStateResult {
@@ -2094,6 +2100,11 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'github.recovered',
   'agent.report',
   'agent.report.missing',
+  'item.created',
+  'item.answered',
+  'session.created',
+  'session.archived',
+  'orchestrator.turn_ended',
 );
 const agentStateSchema = boundary.enumeration('blocked', 'working', 'idle', 'unknown');
 const workspacePanelSummarySchema: BoundarySchema<WorkspacePanelSummary> = boundary.object({
@@ -2141,6 +2152,7 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   lastOutputSource: boundary.optional(boundary.enumeration('transcript', 'screen')),
   expectedSince: boundary.optional(boundary.string),
   screenLines: boundary.optional(boundary.array(boundary.string)),
+  itemId: boundary.optional(boundary.string),
 });
 export const workspaceStateResultSchema: BoundarySchema<WorkspaceStateResult> = boundary.object({
   ok: boundary.literal(true),
@@ -4824,6 +4836,11 @@ function workspaceLabel(kind: WorkspaceEntryKind): string {
     'github.recovered': 'GITHUB.RECOVERED',
     'agent.report': 'REPORT',
     'agent.report.missing': 'MISSING REPORT',
+    'item.created': 'ITEM',
+    'item.answered': 'ANSWERED',
+    'session.created': 'SESSION NEW',
+    'session.archived': 'SESSION ARCHIVED',
+    'orchestrator.turn_ended': 'TURN ENDED',
   } satisfies Record<WorkspaceEntryKind, string>;
   return labels[kind];
 }

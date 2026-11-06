@@ -53,6 +53,8 @@ export interface AppConfig {
   // Experimental: open Claude and Codex agent tabs as Chat (off by default).
   // Experimental: chat tabs (Claude and Codex over ACP, no terminal). Off until they ship on desktop and mobile.
   chatTabsEnabled?: boolean;
+  /** Experimental: Autopilot, one always-running agent above every Session (needs chat tabs). */
+  autopilotEnabled?: boolean;
   verbose?: boolean;
   anthropicApiKey?: string;
   openaiApiKey?: string;

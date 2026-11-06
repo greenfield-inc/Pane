@@ -44,7 +44,8 @@ runpane notify --ui options --title "Which session store should the refactor use
 
 Pane files each item under the Session its Pane belongs to (a Session's own
 orchestrator tab is marked as the orchestrator). Items from a Pane in no
-Session go under "Not in a Session".
+Session go under "Not in a Session". Items Autopilot asks itself go under
+"Autopilot", marked "written by Autopilot" ([AUTOPILOT.md](AUTOPILOT.md)).
 
 - **Workers in a Session don't call `notify`.** Approvals come from the
   Session's orchestrator, not from the agents in its Panes. A worker reports
@@ -158,7 +159,7 @@ Codex panel also expires when that panel sits idle at its prompt for 10 seconds.
 ## Where questions show
 
 - **Inside Pane: Approvals.** An **Approvals** row in the sidebar's top list,
-  below Loops, shows an amber count of the items waiting (none at zero);
+  below Loops (directly below Autopilot when Autopilot is on), shows an amber count of the items waiting (none at zero);
   clicking it, or pressing ⌃⇧Space while Pane is in front, opens the Approvals
   screen in the main area, and clicking the row again returns you to the view
   you left. The sidebar keeps the Sessions list,

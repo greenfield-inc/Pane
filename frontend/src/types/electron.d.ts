@@ -190,6 +190,23 @@ interface ElectronAPI {
     rendererFatal: (payload: RendererDiagnosticPayload) => Promise<IPCResponse>;
   };
 
+  autopilot: {
+    snapshot(): Promise<import('../../../shared/types/autopilot').AutopilotSnapshot>;
+    setEnabled(enabled: boolean): Promise<import('../../../shared/types/autopilot').AutopilotSnapshot>;
+    start(): Promise<import('../../../shared/types/autopilot').AutopilotSnapshot>;
+    pause(): Promise<import('../../../shared/types/autopilot').AutopilotSnapshot>;
+    goOn(): Promise<import('../../../shared/types/autopilot').AutopilotSnapshot>;
+    setSentinel(on: boolean): Promise<import('../../../shared/types/autopilot').AutopilotSnapshot>;
+    newRun(): Promise<import('../../../shared/types/autopilot').AutopilotSnapshot>;
+    instructions(): Promise<import('../../../shared/types/autopilot').AutopilotInstructionsView>;
+    setInstructions(text: string): Promise<import('../../../shared/types/autopilot').AutopilotInstructionsView>;
+    /** Autopilot's view opened: with Sentinel on, the person may be back for the While you were away card. */
+    opened(): Promise<import('../../../shared/types/autopilot').AutopilotSnapshot>;
+    stack(command: import('../../../shared/types/autopilot').AutopilotStackCommand): Promise<import('../../../shared/types/autopilot').AutopilotSnapshot>;
+    push(request: import('../../../shared/types/autopilot').AutopilotStackPushRequest): Promise<import('../../../shared/types/autopilot').AutopilotSnapshot>;
+    readDoc(file: string): Promise<import('../../../shared/types/autopilot').AutopilotDocument>;
+    onChanged(callback: (snapshot: import('../../../shared/types/autopilot').AutopilotSnapshot) => void): () => void;
+  };
   chatTab: import('../../../shared/types/chatTab').ChatTabClient & {
     create(request: import('../../../shared/types/chatTab').ChatTabCreate): Promise<{ panelId: string }>;
     /** Switch to chat: moves a terminal Claude or Codex tab into a chat tab. */

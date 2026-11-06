@@ -11,7 +11,25 @@ interface PaneDaemonRequestFrame {
   id: number;
   channel: string;
   args: unknown[];
+  caller?: { paneId?: string; panelId?: string };
 }
+
+/**
+ * The Pane and tab this runpane runs in, from the environment Pane gives its agents. Pane uses it
+ * only to refuse what an agent may not do (Autopilot answering an approval), never to grant.
+ */
+function daemonCaller(env: NodeJS.ProcessEnv = process.env): PaneDaemonRequestFrame['caller'] {
+  const paneId = env.PANE_SESSION_ID?.trim();
+  const panelId = env.PANE_PANEL_ID?.trim();
+  if (!paneId && !panelId) return undefined;
+  const caller: NonNullable<PaneDaemonRequestFrame['caller']> = {};
+  if (paneId) caller.paneId = paneId;
+  if (panelId) caller.panelId = panelId;
+  return caller;
+}
+
+/** What `/invoke` on another machine takes from runpane. */
+interface RemoteInvokeBody { channel: string; args: unknown[]; caller?: PaneDaemonRequestFrame['caller'] }
 
 interface PaneDaemonSuccessResponseFrame {
   type: 'response';
@@ -191,12 +209,16 @@ export async function invokeRemoteDaemon<T>(
       ? 'Check whether the command took effect there before running it again; see the machine\'s status with `runpane workspace list`.'
       : 'Check the machine with `runpane workspace list`.',
   );
+  // The caller goes to other machines too, so their guard refuses what this tab may not do (D-66).
+  const body: RemoteInvokeBody = { channel, args };
+  const caller = daemonCaller();
+  if (caller) body.caller = caller;
   let response: Response;
   try {
     response = await fetch(`${target.baseUrl}/invoke`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel, args }),
+      body: JSON.stringify(body),
       signal: Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined,
     });
   } catch (error) {
@@ -240,12 +262,14 @@ export async function invokeDaemon<T>(
   }
   const appDirectory = resolvePaneDirectory(options.paneDir);
   const endpoint = getPaneDaemonEndpoint(appDirectory);
+  const caller = daemonCaller();
   const request: PaneDaemonRequestFrame = {
     type: 'request',
     id: 1,
     channel,
     args,
   };
+  if (caller) request.caller = caller;
   const eventFilterRequest: PaneDaemonRequestFrame = {
     type: 'request', id: 0, channel: 'daemon:events', args: [{ include: options.eventInclude ?? [] }],
   };

@@ -297,6 +297,8 @@ Commands with a contract `daemonAction` (the `panes` git, script, restore, and m
 
 `runpane pr list`: List PR registrations and stopped watches.
 
+`runpane autopilot status|waiting|stack` read Autopilot (experimental): its switch, run and stack, and every approval or question waiting on the person grouped by Session. `runpane autopilot stack push (--item <id>|--file <path>|--url <url>|--session <id|name>) [--title <text>] [--note <text>] [--tab <path-or-url>]... [--next]` puts one entry on its stack; relative paths resolve against the caller's directory, and a new entry never replaces the one on screen. Approvals stay the person's: Pane refuses every answer that comes from Autopilot's panel with AUTOPILOT_CANNOT_ANSWER.
+
 ## Command reference
 
 Every command and its options, from `commands` in `contracts/runpane/contract.json`.
@@ -381,6 +383,10 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `notify`: Ask the person a question, or tell them something, wherever they are, and get their answer back.
 - `inbox`: List the reports, missing reports, and on-screen questions a Session's orchestrator has not acknowledged.
 - `inbox ack`: Clear Session inbox items once they are handled.
+- `autopilot status`: Show Autopilot (experimental): whether it is on and running, whether Sentinel is on, its run, its stack, and what waits in each Session.
+- `autopilot waiting`: List every approval and question waiting on the person, grouped by Session, for Autopilot's walk.
+- `autopilot stack`: List the entries on Autopilot's stack in order, and which one is on screen.
+- `autopilot stack push`: Put a waiting item, a document, a URL, or a Session on Autopilot's stack for the person to look at.
 - `sessions list`: List durable named orchestration Sessions.
 - `sessions create`: Create a durable named orchestration Session and its hidden terminal owner; JSON isPinned sets the pin star (default false).
 - `sessions get`: Read one durable named orchestration Session.
@@ -504,6 +510,10 @@ runpane notify --resume <id> [--json] [--pane-dir <path>]
 runpane inbox [--session <id|name>] [--json] [--pane-dir <path>]
 runpane inbox ack <item-id>... [--session <id|name>] [--json] [--pane-dir <path>]
 runpane inbox ack --all --session <id|name> [--json] [--pane-dir <path>]
+runpane autopilot status [--json] [--pane-dir <path>]
+runpane autopilot waiting [--json] [--pane-dir <path>]
+runpane autopilot stack [--json] [--pane-dir <path>]
+runpane autopilot stack push (--item <id> | --file <path> | --url <url> | --session <id|name>) [--title <text>] [--note <text>] [--tab <path-or-url>]... [--next] [--json] [--pane-dir <path>]
 runpane sessions list [--json] [--pane-dir <path>]
 runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]
 runpane sessions get --session <id|name> [--json] [--pane-dir <path>]
@@ -717,6 +727,7 @@ These flags are consumed by local daemon-control commands:
 --content <text>
 --agent-farm <profile>
 --arg <key=value>
+--item <id>
 --json
 --wait-ready
 --no-focus
@@ -752,6 +763,7 @@ These flags are consumed by local daemon-control commands:
 --all
 --paused
 --chat
+--next
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, use Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane`), which reaches the Windows named-pipe daemon through WSL interop; older Pane builds need `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'`.

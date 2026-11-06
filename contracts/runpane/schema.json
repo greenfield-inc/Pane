@@ -570,6 +570,11 @@
         "notify",
         "inbox",
         "inbox ack",
+        "autopilot",
+        "autopilot status",
+        "autopilot waiting",
+        "autopilot stack",
+        "autopilot stack push",
         "sessions",
         "sessions list",
         "sessions create",
@@ -850,6 +855,21 @@
           "$ref": "#/$defs/helpLines"
         },
         "inbox ack": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "autopilot": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "autopilot status": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "autopilot waiting": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "autopilot stack": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "autopilot stack push": {
           "$ref": "#/$defs/helpLines"
         },
         "sessions": {

@@ -585,7 +585,8 @@ function QuestionCard({
     }
     return false;
   });
-  const openInPane = item.source.paneId && !item.elsewhere && form === 'strip'
+  // Autopilot's own items live in its hidden owner Pane; only a surface that knows where Autopilot is offers to open it.
+  const openInPane = item.source.paneId && !item.elsewhere && !item.source.autopilot && form === 'strip'
     ? () => onCommand({ type: 'open-in-pane', id: item.id })
     : undefined;
 
@@ -833,7 +834,7 @@ function QuestionCard({
         <div className="flex items-center gap-3 px-3.5 pb-3 text-[12.5px] text-text-tertiary">
           {item.snoozedUntil !== undefined && <span className="min-w-0 truncate">{snoozedLabel(item.snoozedUntil)}</span>}
           <div className="ml-auto flex shrink-0 items-center gap-3">
-            {item.source.paneId && !item.elsewhere && (
+            {item.source.paneId && !item.elsewhere && (!item.source.autopilot || onOpenInPane) && (
               <FooterLink onClick={onOpenInPane ?? (() => onCommand({ type: 'open-in-pane', id: item.id }))}>
                 <ExternalLink className="h-3.5 w-3.5" /> Open in Pane
               </FooterLink>

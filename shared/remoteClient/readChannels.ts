@@ -7,6 +7,9 @@ export const REMOTE_READ_CHANNELS = new Set([
   'chat-tab:history',
   'chat-tab:receipt',
   'chat-tab:keys',
+  // Autopilot's state and its documents; nothing on the host changes.
+  'autopilot:snapshot',
+  'autopilot:read-doc',
   'runpane:update:progress',
   'config:get',
   'config:get-session-preferences',

@@ -151,6 +151,8 @@ export interface NotifySource {
   agent: string;
   /** The Session the asking Pane works in, resolved by the host when the item is made. Absent: "Not in a Session". */
   session?: NotifySession;
+  /** Autopilot asked (its own approval, D-60): Approvals files it under "Autopilot", shown violet. */
+  autopilot?: boolean;
 }
 
 /** The Session an item belongs to (Approvals groups by it). */

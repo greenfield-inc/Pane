@@ -559,6 +559,14 @@
   --color-status-info: rgb(88 166 255);
   --color-status-neutral: rgb(110 118 129);
 
+  /* Autopilot's own accent (violet): its row, its items and "written by Autopilot".
+     Mixed toward each theme's text colour, so it lightens on dark themes and
+     darkens on light ones; tints and on-tint text derive from it. */
+  --color-autopilot: color-mix(in oklch, rgb(139 92 246) 78%, var(--color-text-primary));
+  --color-autopilot-subtle: color-mix(in srgb, var(--color-autopilot) 16%, transparent);
+  --color-autopilot-border: color-mix(in srgb, var(--color-autopilot) 45%, transparent);
+  --color-autopilot-on-tint: color-mix(in oklch, var(--color-autopilot) 75%, var(--color-text-primary));
+
   /* Context-Aware Text Tokens - Dark Mode */
   --color-text-on-primary: rgb(230 237 243);
   --color-text-on-secondary: rgb(200 208 217);

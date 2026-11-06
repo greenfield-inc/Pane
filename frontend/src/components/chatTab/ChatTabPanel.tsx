@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
   useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
@@ -16,6 +16,7 @@ import { ChatProblem } from './ChatProblem';
 import { ChatQuestionCard } from './ChatQuestionCard';
 import { ChatPermissionCard } from './ChatPermissionCard';
 import { ChatTurnView, WorkerNoteLine, type ChatTurnActions } from './ChatTurns';
+import { ChatBlocksContext, type ChatRendering } from './chatRendering';
 import { ChatCommandMenu } from './ChatCommandMenu';
 import { matchingCommands } from './chatCommands';
 import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
@@ -138,12 +139,22 @@ export interface ChatTabPanelProps {
   workers?: ChatWorkerLine[];
   /** Copies a dropped, pasted or picked file to the chat's machine (D-139); without it only images attach. */
   saveFile?: SaveChatFile;
+  /** Fenced blocks rendered as UI instead of code (Autopilot's item rows), and person's messages shown another way. */
+  rendering?: ChatRendering;
+  /**
+   * Shown instead of the stopped notice when the tab was stopped on purpose (no action to take), such as Autopilot's Start.
+   * With one set, a stopped tab's own Restart is hidden too: its owner restarts it (the reason still shows).
+   */
+  stoppedNotice?: ReactNode;
+  /** Above the composer, below the conversation: such as Autopilot's answer receipts. */
+  dock?: ReactNode;
 }
 
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
 const NO_ACTIONS: ChatTurnActions = {};
+const NO_RENDERING: ChatRendering = {};
 
-export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
@@ -308,7 +319,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             : `PNG, JPEG, WebP or GIF images up to ${megabytes(MAX_IMAGE_BYTES)}.`}</p>
         </div>
       </div>}
-      {view?.problem && <ChatProblem problem={view.problem} agent={agentName} busy={busy || !connected}
+      {view?.problem && stoppedNotice && stopped && !view.problem.action ? stoppedNotice : view?.problem && <ChatProblem problem={view.problem} agent={agentName} busy={busy || !connected}
+        restart={!(stoppedNotice && stopped)}
         onRestart={() => void act(() => client.restart(panelId))}
         onSignIn={() => void act(() => client.signIn(panelId))}
         onInstall={url => void window.electronAPI?.openExternal(url)} />}
@@ -326,7 +338,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
-          {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} permissions={view?.permissions ?? []} actions={actions} />)}
+          <ChatBlocksContext.Provider value={rendering}>
+            {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} permissions={view?.permissions ?? []} actions={actions} />)}
+          </ChatBlocksContext.Provider>
           {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}
           {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
             {snapshot.loadingNewer ? 'Loading…' : 'Newer messages'}
@@ -336,6 +350,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       </ThreadPrimitive.Viewport>
       <div className="chat-composer-footer">
         <ScrollToLatest viewer={viewer} hasNewer={snapshot.hasNewer} follow={followLiveEnd} />
+        {dock}
         {snapshot.pendingDelivery && <div className="chat-dock" role="status">
           <span>Delivery is unconfirmed.</span>
           <button type="button" className="chat-button chat-button-outline" disabled={!connected} onClick={() => void deliver(snapshot.pendingDelivery!, false)}>Check delivery</button>
@@ -346,7 +361,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           disabled={disabled || busy} composerEmpty={!snapshot.draft.trim()} onAnswer={answerPermission} />)}
         {!!view?.queue.length && <ul className="chat-queue" aria-label="Queued messages">
           {view.queue.map((item, index) => <li key={item.operationId}>
-            <span className="chat-queue-text">{item.text || 'Image'}</span>
+            <span className="chat-queue-text">{rendering.queued?.(item.text) ?? (item.text || 'Image')}</span>
             <span className="chat-queue-label">{index === 0 ? 'Sends next' : 'Queued'}</span>
             <button type="button" className="chat-icon" aria-label="Remove from queue" title="Remove from queue" onClick={() => void act(() => client.unqueue(panelId, item.operationId))}><X className="h-3.5 w-3.5" /></button>
           </li>)}

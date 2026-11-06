@@ -1,4 +1,5 @@
-import { memo, useState } from 'react';
+import { memo, useContext, useMemo, useState, type ComponentProps } from 'react';
+import { ChatBlocksContext } from './chatRendering';
 import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Terminal, Wrench, XCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -25,7 +26,29 @@ function CodeBlock({ children, ...props }: React.ComponentProps<'pre'>) {
   </div>;
 }
 
-const Markdown = memo(({ text }: { text: string }) => <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a>, pre: CodeBlock }}>{text}</ReactMarkdown></div>);
+/** A hast node, as react-markdown hands it to a component: only what reading a code block needs. */
+interface HastNode { type?: string; tagName?: string; value?: string; properties?: { className?: string[] | string }; children?: HastNode[] }
+const hastText = (node: HastNode | undefined): string => node?.type === 'text' ? node.value ?? '' : (node?.children ?? []).map(hastText).join('');
+function blockLanguage(node: HastNode | undefined): string | undefined {
+  const code = node?.children?.find(child => child.tagName === 'code');
+  const className = code?.properties?.className;
+  const classes = Array.isArray(className) ? className : className ? [className] : [];
+  const language = classes.find(name => name.startsWith('language-'));
+  return language?.slice('language-'.length);
+}
+
+const Markdown = memo(({ text }: { text: string }) => {
+  const { blocks } = useContext(ChatBlocksContext);
+  const components = useMemo(() => ({
+    a: ({ children, ...props }: ComponentProps<'a'>) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a>,
+    pre: ({ node, children, ...props }: ComponentProps<'pre'> & { node?: HastNode }) => {
+      const language = blockLanguage(node);
+      const render = language ? blocks?.[language] : undefined;
+      return render ? <>{render(hastText(node).replace(/\n$/, ''))}</> : <CodeBlock {...props}>{children}</CodeBlock>;
+    },
+  }), [blocks]);
+  return <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown></div>;
+});
 Markdown.displayName = 'Markdown';
 
 const VERBS = { explore: ['Exploring', 'Explored'], edit: ['Edit', 'Edited'], run: ['Run', 'Ran'], think: ['Thinking', 'Thought'], other: ['Using', 'Used'] } satisfies Record<ChatStep['kind'], [string, string]>;
@@ -114,7 +137,10 @@ function UserImage({ content }: { content: JsonValue }) {
 }
 
 function UserMessage({ turn }: { turn: ChatTurn }) {
+  const { userMessage } = useContext(ChatBlocksContext);
   if (!turn.user) return null;
+  const custom = userMessage?.(turn.user.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'));
+  if (custom !== undefined) return <>{custom}</>;
   return <div className="chat-user-row" title={messageTime(turn.startedAt)?.full}>
     <div className="chat-user" data-anchor-id={turn.user.id}>{turn.user.parts.map((part, index) => part.type === 'text'
       ? <span key={`${turn.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>

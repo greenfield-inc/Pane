@@ -54,6 +54,8 @@ export interface ChatPanelState {
   /** Orchestration identity, as on terminal agent tabs. */
   orchestrationSessionId?: string;
   sessionFolder?: string;
+  /** Set on Autopilot's own chat tab (its run id): the control plane refuses its answers (D-66). */
+  autopilotRunId?: string;
   agentReport?: TerminalAgentReport;
 }
 

@@ -68,6 +68,8 @@ interface NavigationState {
   navigateToMissionControl: () => void;
   navigateToSsh: () => void;
   navigateToLoops: () => void;
+  /** Autopilot spans every Session, so it clears the project scope. */
+  navigateToAutopilot: () => void;
   /**
    * Opens Approvals (the `notify` view), on `itemId` when given. The first entry remembers the
    * view and Pane you left (`returnPaneId`), which `leaveApprovals` hands back.
@@ -205,6 +207,11 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   // Loops span every project, so the page clears the project scope.
   navigateToLoops: () => set({
     activeView: 'loops',
+    activeProjectId: null
+  }),
+
+  navigateToAutopilot: () => set({
+    activeView: 'autopilot',
     activeProjectId: null
   }),
 

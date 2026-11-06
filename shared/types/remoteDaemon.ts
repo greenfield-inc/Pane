@@ -422,6 +422,11 @@ export interface RemoteInvokeRequest {
    * ready event runs a write once per id and answers a repeat with the first answer.
    */
   requestId?: string;
+  /**
+   * The Pane and tab whose agent sent it, as runpane reads them from its environment. Used only
+   * to refuse (Autopilot answering, D-66), never to grant; Pane's own clients leave it out.
+   */
+  caller?: { paneId?: string; panelId?: string };
 }
 
 export interface RemoteDaemonHeartbeatPayload {

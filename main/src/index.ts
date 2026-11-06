@@ -97,6 +97,7 @@ import {
   ensureNativeThemeForwarding,
   resolveOsPrefersDark,
 } from './services/appearanceService';
+import { setGuestColorScheme } from './services/webviewColorScheme';
 import type { AppConfig } from './types/config';
 import { normalizeAppearance } from '../../shared/types/appearance';
 import type { WorktreeManager } from './services/worktreeManager';
@@ -713,6 +714,16 @@ async function createWindow() {
       return { success: true };
     } catch (error) {
       console.error('[IPC] Failed to open inline devtools:', error);
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  // D-163: Autopilot's documents (and any page in a <webview>) take Pane's theme, not the Mac's.
+  ipcMain.handle('webview:color-scheme', async (event, guestId: number, scheme: 'light' | 'dark') => {
+    try {
+      await setGuestColorScheme(event.sender, webContents.fromId(guestId), scheme === 'dark' ? 'dark' : 'light');
+      return { success: true };
+    } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });

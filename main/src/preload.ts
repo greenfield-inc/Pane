@@ -41,6 +41,7 @@ import type { PaneChatAgent } from '../../shared/types/paneChat';
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
 import type { NotifyCommand, NotifyNavigateTarget, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
+import type { AutopilotDocument, AutopilotInstructionsView, AutopilotSnapshot, AutopilotStackCommand, AutopilotStackPushRequest } from '../../shared/types/autopilot';
 import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
 import type {
   OrchestrationAssociationInput,
@@ -442,6 +443,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
       line?: number;
       column?: number;
     }): Promise<IPCResponse> => invokeIpc('diagnostics:renderer-fatal', payload),
+  },
+
+  // Autopilot (experimental): its switch, Start/Pause/Go on, runs, stack and documents
+  autopilot: {
+    snapshot: (): Promise<AutopilotSnapshot> => invokeIpc('autopilot:snapshot'),
+    setEnabled: (enabled: boolean): Promise<AutopilotSnapshot> => invokeIpc('autopilot:set-enabled', enabled),
+    start: (): Promise<AutopilotSnapshot> => invokeIpc('autopilot:start'),
+    pause: (): Promise<AutopilotSnapshot> => invokeIpc('autopilot:pause'),
+    goOn: (): Promise<AutopilotSnapshot> => invokeIpc('autopilot:go-on'),
+    setSentinel: (on: boolean): Promise<AutopilotSnapshot> => invokeIpc('autopilot:sentinel', on),
+    newRun: (): Promise<AutopilotSnapshot> => invokeIpc('autopilot:new-run'),
+    instructions: (): Promise<AutopilotInstructionsView> => invokeIpc('autopilot:instructions'),
+    setInstructions: (text: string): Promise<AutopilotInstructionsView> => invokeIpc('autopilot:set-instructions', text),
+    opened: (): Promise<AutopilotSnapshot> => invokeIpc('autopilot:opened'),
+    stack: (command: AutopilotStackCommand): Promise<AutopilotSnapshot> => invokeIpc('autopilot:stack', command),
+    push: (request: AutopilotStackPushRequest): Promise<AutopilotSnapshot> => invokeIpc('autopilot:push', request),
+    readDoc: (file: string): Promise<AutopilotDocument> => invokeIpc('autopilot:read-doc', file),
+    onChanged: (callback: (snapshot: AutopilotSnapshot) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: AutopilotSnapshot) => callback(snapshot);
+      ipcRenderer.on('autopilot:changed', listener);
+      return () => ipcRenderer.removeListener('autopilot:changed', listener);
+    },
   },
 
   chatTab: {

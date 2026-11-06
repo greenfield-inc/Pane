@@ -9,15 +9,12 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionWorkers, type SessionWorkerSource } from './sessionWorkers';
 import { savedFilePath } from './chatAttachments';
+import { onSessionOverviewChange } from '../../utils/sessionOverviewEvents';
 
 /** The desktop reads the Session overview over IPC and hears its updates as window events. */
 const DESKTOP_WORKERS: SessionWorkerSource = {
   overview: sessionId => API.orchestrationSessions.overview({ sessionId }).then(response => response.success ? response.data : undefined),
-  onChange: callback => {
-    window.addEventListener('orchestration-sessions-overview-updated', callback);
-    window.addEventListener('orchestration-sessions-changed', callback);
-    return () => { window.removeEventListener('orchestration-sessions-overview-updated', callback); window.removeEventListener('orchestration-sessions-changed', callback); };
-  },
+  onChange: callback => onSessionOverviewChange(callback),
 };
 
 const ChatTabPanel = lazy(() => import('./ChatTabPanel'));

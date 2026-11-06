@@ -234,6 +234,11 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
     ['agent.report', 'REPORT Issue 538 pane pane-1 panel panel-1 done', { source: 'agent', report: { state: 'done', reportedAt: 'T' } }],
     ['agent.report.missing', 'MISSING REPORT Issue 538 pane pane-1 panel panel-1 ready', { source: 'agent', reason: 'ready', lastOutput: 'Done.' }],
     ['agent.report.missing', 'MISSING REPORT Issue 538 pane pane-1 panel panel-1 exited', { source: 'agent', reason: 'exited' }],
+    ['item.created', 'ITEM Issue 538 pane pane-1 panel panel-1 n-1: Ship it?', { source: 'agent', itemId: 'n-1', reason: 'Ship\nit?' }],
+    ['item.answered', 'ANSWERED Issue 538 pane pane-1 n-1: Ship it?', { panelId: undefined, source: 'session', itemId: 'n-1', reason: 'Ship it?' }],
+    ['session.created', 'SESSION NEW Issue 538 pane pane-1 session session-9', { panelId: undefined, source: 'session', sessionId: 'session-9' }],
+    ['session.archived', 'SESSION ARCHIVED Issue 538 pane pane-1 session session-9', { panelId: undefined, source: 'session', sessionId: 'session-9' }],
+    ['orchestrator.turn_ended', 'TURN ENDED Issue 538 pane pane-1 panel panel-1 session session-9', { source: 'agent', sessionId: 'session-9', from: 'working', to: 'idle' }],
   ];
   for (const [kind, line, extra = {}] of expected) {
     assert.deepStrictEqual(
@@ -354,7 +359,10 @@ async function withFakeDaemon(paneDir, onRequest, action, onFrame = () => {}) {
           timers?.delete(timer);
           if (timers?.size === 0) pendingResponseTimers.delete(socket);
           if (!socket.destroyed) {
-            socket.end(`${JSON.stringify({ type: 'response', id: 1, ok: true, result: response.result })}\n`, (error) => {
+            const reply = response.error
+              ? { type: 'response', id: 1, ok: false, error: response.error }
+              : { type: 'response', id: 1, ok: true, result: response.result };
+            socket.end(`${JSON.stringify(reply)}\n`, (error) => {
               if (error) rememberSocketError(error, socket);
             });
           }
@@ -1197,7 +1205,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [], attachments: [],
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false, closed: false,
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
-  all: false, inboxIds: [], waitForResult: false, paused: false,
+  all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
 };
 
 function normalizeParsedArgs(value) {
@@ -6082,6 +6090,161 @@ async function checkPaneCreateResultFields() {
   }
 }
 
+/** `runpane autopilot status|waiting|stack|stack push` and Autopilot's watch: npm and pip send and print the same. */
+async function checkAutopilotParity() {
+  const entry = {
+    id: 'e-1', ref: { kind: 'item', notifyId: 'n-1' }, title: 'Ship it?', sessionId: 's-1', sessionName: 'Release',
+    tabs: [{ kind: 'item', label: 'Approval', notifyId: 'n-1' }], note: 'Needs a go', addedAt: 1,
+  };
+  const done = { id: 'e-2', ref: { kind: 'file', path: '/tmp/plan.html' }, title: 'Plan', tabs: [{ kind: 'file', label: 'Plan', path: '/tmp/plan.html' }], addedAt: 2, doneAt: 3 };
+  const stack = { entries: [entry, done], shownId: 'e-1' };
+  const snapshot = {
+    ok: true, enabled: true, chatTabsEnabled: true, entitlement: { entitled: true },
+    run: { id: 'run-1', folder: '/pane/autopilot/run-1', docsFolder: '/pane/autopilot/run-1/docs', createdAt: '2026-11-03T00:00:00.000Z' },
+    panelId: '__autopilot_panel_run-1', ownerPaneId: '__autopilot_owner_run-1', state: 'running', sentinel: true, sentinelSince: 1_700_000_000_000, stack,
+    walk: { sessionId: 's-1', sessions: [{ id: 's-1', name: 'Release', waiting: 2 }, { id: 's-2', name: 'Docs', waiting: 0 }] },
+  };
+  // The status fixture is a whole manager snapshot (Sentinel included) and the published, closed schema accepts it.
+  const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
+  const ajv = new Ajv({ allErrors: true });
+  const { $schema: _metaSchema, ...contractDocument } = contract;
+  ajv.addSchema(contractDocument, 'contract');
+  const validStatus = ajv.compile({ $ref: 'contract#/jsonSchemas/autopilotStatusResult' });
+  const { sentinelSince: _since, ...sentinelOff } = { ...snapshot, sentinel: false };
+  for (const status of [snapshot, sentinelOff]) assert.ok(validStatus(status), `autopilot status fixture matches the contract schema: ${ajv.errorsText(validStatus.errors)}`);
+  assert.ok(!validStatus({ ...snapshot, extra: true }), 'the status schema stays closed');
+  const waitingItem = (id, extra) => ({
+    id, title: `Question ${id}`, kind: 'approval', agent: 'Claude', pane: 'Worker', links: [], createdAt: 1, ageMs: 125_000,
+    machine: 'This Mac', machineId: 'local', onStack: false, ...extra,
+  });
+  const waiting = { ok: true, items: [
+    waitingItem('n-1', { sessionId: 's-1', sessionName: 'Release', onStack: true, links: [{ label: 'PR', url: 'https://github.com/o/r/pull/1' }] }),
+    waitingItem('n-2', { sessionId: 's-1', sessionName: 'Release', kind: 'question', ageMs: 4_000, choices: ['Yes', 'No'] }),
+    waitingItem('n-3', { kind: 'permission', ageMs: 3 * 3_600_000 }),
+  ] };
+  const pushArgs = ['autopilot', 'stack', 'push', '--file', 'docs/plan.html', '--title', 'Plan', '--note', 'Why', '--tab', 'https://localhost:5173', '--tab=notes.md', '--next'];
+  const cases = [
+    { args: ['autopilot', 'status'], channel: 'runpane:autopilot:status', requestArgs: [], result: snapshot, lines: [
+      'Autopilot is on and running.',
+      'Sentinel is on: Autopilot keeps your Sessions moving while you are away.',
+      'Run run-1: /pane/autopilot/run-1',
+      'Chat tab: panel __autopilot_panel_run-1 in pane __autopilot_owner_run-1',
+      'Stack: 2 entries; showing "Ship it?".',
+      'Waiting: 2 items in 1 Session; the walk is on Release.',
+    ] },
+    { args: ['autopilot', 'status'], channel: 'runpane:autopilot:status', requestArgs: [],
+      result: { ...sentinelOff, enabled: false, state: 'stopped', entitlement: { entitled: false, reason: 'Autopilot is for Pane Pro.', next: 'Upgrade in Settings.' }, run: null, panelId: null, ownerPaneId: null, stack: { entries: [], shownId: null }, walk: { sessions: [] } },
+      lines: [
+        'Autopilot is off. Turn it on in Settings > Advanced > Experimental > Autopilot.',
+        'Not available: Autopilot is for Pane Pro. Next: Upgrade in Settings.',
+        'Stack: 0 entries.',
+        'Waiting: 0 items in 0 Sessions.',
+      ] },
+    { args: ['autopilot', 'waiting'], channel: 'runpane:autopilot:waiting', requestArgs: [], result: waiting, lines: [
+      'Release (s-1)',
+      '  n-1  approval  Question n-1  Claude - Worker  2m  on the stack',
+      '  n-2  question  Question n-2  Claude - Worker  4s',
+      'Not in a Session',
+      '  n-3  permission  Question n-3  Claude - Worker  3h',
+    ] },
+    { args: ['autopilot', 'waiting'], channel: 'runpane:autopilot:waiting', requestArgs: [], result: { ok: true, items: [] }, lines: ['Nothing is waiting on the person.'] },
+    { args: ['autopilot', 'stack'], channel: 'runpane:autopilot:stack', requestArgs: [], result: { ok: true, ...stack }, lines: [
+      'Stack: 2 entries.',
+      '> 1. e-1 item: Ship it? - Release (shown)',
+      '  2. e-2 file: Plan (done)',
+    ] },
+    { args: pushArgs, channel: 'runpane:autopilot:stack-push',
+      requestArgs: [{ file: path.join(rootDir, 'docs', 'plan.html'), title: 'Plan', note: 'Why', tabs: [{ url: 'https://localhost:5173' }, { path: path.join(rootDir, 'notes.md') }], next: true }],
+      result: { ok: true, entry, shown: false, position: 2, total: 3 },
+      lines: ['On the stack: "Ship it?" (2 of 3); it comes up when the person is done with the one on screen.'] },
+    { args: ['autopilot', 'stack', 'push', '--item', 'n-1'], channel: 'runpane:autopilot:stack-push', requestArgs: [{ item: 'n-1' }],
+      result: { ok: true, entry, shown: true, position: 1, total: 1 }, lines: ['On the stack and on screen: "Ship it?" (1 of 1).'] },
+  ];
+  const autopilotEnv = { PANE_SESSION_ID: '__autopilot_owner_run-1', PANE_PANEL_ID: '__autopilot_panel_run-1' };
+  for (const runtime of ['npm', 'pip']) {
+    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-autopilot-${runtime}-`));
+    try {
+      for (const testCase of cases) {
+        for (const json of [false, true]) {
+          const frames = [];
+          const args = json ? [...testCase.args, '--json'] : testCase.args;
+          const run = await withFakeDaemon(paneDir, () => ({ result: testCase.result }),
+            () => runCliOnce(runtime, args, paneDir, 20_000, json ? autopilotEnv : { PANE_SESSION_ID: '', PANE_PANEL_ID: '' }),
+            (frame) => { if (frame.type === 'request' && frame.id === 1) frames.push(frame); });
+          assert.strictEqual(run.code, 0, `${runtime} ${args.join(' ')} exits 0. stderr=${run.stderr}`);
+          assert.strictEqual(frames.length, 1);
+          assert.strictEqual(frames[0].channel, testCase.channel);
+          assert.deepStrictEqual(frames[0].args, testCase.requestArgs, `${runtime} ${args.join(' ')} sends the request`);
+          // daemonCaller()/daemon_caller(): the frame names the Pane and tab from PANE_SESSION_ID / PANE_PANEL_ID, else none.
+          assert.deepStrictEqual(frames[0].caller, json ? { paneId: autopilotEnv.PANE_SESSION_ID, panelId: autopilotEnv.PANE_PANEL_ID } : undefined, `${runtime} request caller`);
+          if (json) assert.deepStrictEqual(JSON.parse(run.stdout), testCase.result, `${runtime} ${args.join(' ')} prints the result`);
+          else assert.strictEqual(lf(run.stdout), `${testCase.lines.join('\n')}\n`, `${runtime} ${args.join(' ')} prints its lines`);
+        }
+      }
+
+      // A daemon error prints its code and next step, like every other command.
+      const failure = { message: 'The person paused Autopilot, so nothing new goes on the stack. Nothing was added.', code: 'AUTOPILOT_PAUSED', next: 'Wait for [Pane - Go on].' };
+      const failed = await withFakeDaemon(paneDir, () => ({ error: failure }), () => runCliOnce(runtime, ['autopilot', 'stack', 'push', '--item', 'n-1', '--json'], paneDir));
+      assert.strictEqual(failed.code, 1, `${runtime} a refused push exits 1`);
+      assert.deepStrictEqual(JSON.parse(failed.stdout), { ok: false, error: failure });
+      assertIncludes(lf(failed.stderr), `${failure.message}\nNext: ${failure.next}`);
+
+      // Autopilot's wait: its kinds are accepted, sent as given, and the first event prints at once.
+      const kinds = ['item.created', 'item.answered', 'session.created', 'session.archived', 'orchestrator.turn_ended'];
+      const created = { gen: 6, at: '2026-11-03T00:00:00.000Z', kind: 'item.created', paneId: 'pane-1', paneName: 'Worker', panelId: 'panel-1', source: 'agent', reason: 'Ship it?', itemId: 'n-1', sessionId: 's-1', sessionName: 'Release' };
+      for (const json of [true, false]) {
+        const requests = [];
+        const watchArgs = ['watch', '--as', 'autopilot', '--kinds', kinds.join(','), '--until-event', ...(json ? ['--json'] : [])];
+        const run = await withFakeDaemon(paneDir, scriptedWatch([{ result: { ...watchResult(6), timedOut: false, entries: [created] } }], requests),
+          () => runCliOnce(runtime, watchArgs, paneDir));
+        assert.strictEqual(run.code, 0, `${runtime} Autopilot's watch exits 0 on its event. stderr=${run.stderr}`);
+        assert.strictEqual(requests.length, 1);
+        assert.strictEqual(requests[0].as, 'autopilot');
+        assert.deepStrictEqual(requests[0].kinds, kinds);
+        for (const field of ['settleMs', 'blockedSettleMs', 'minIntervalMs']) assert.strictEqual(requests[0][field], undefined, `${runtime} --until-event sends no cadence`);
+        if (json) assert.deepStrictEqual(lf(run.stdout).trim().split('\n').map(line => JSON.parse(line)), [{ ...created, epoch: watchResult(6).epoch }]);
+        else assert.strictEqual(lf(run.stdout), 'ITEM Worker pane pane-1 panel panel-1 n-1: Ship it?\n');
+      }
+    } finally {
+      fs.rmSync(paneDir, { recursive: true, force: true });
+    }
+  }
+
+  // Both parsers refuse the same malformed pushes before any daemon request.
+  const invalid = [
+    ['autopilot', 'stack', 'push'],
+    ['autopilot', 'stack', 'push', '--item', 'n-1', '--url', 'https://example.com'],
+    ['autopilot', 'stack', 'push', '--item', 'n-1', '--tab'],
+    ['autopilot', 'stack', 'push', '--item', 'n-1', '--tab='],
+    ['autopilot', 'stack', '--next'],
+    ['panels', 'create', '--pane', 'p', '--agent', 'codex', '--next'],
+  ];
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const nodeErrors = invalid.map((args) => { try { parseRunpaneArgs(args); return 'accepted'; } catch (error) { return error.message; } });
+  const pythonErrors = JSON.parse(runPythonSnippet(`
+import json
+import sys
+from runpane.cli import parse_args
+errors = []
+for args in json.loads(sys.stdin.read()):
+    try:
+        parse_args(args)
+        errors.append("accepted")
+    except ValueError as error:
+        errors.append(str(error))
+print(json.dumps(errors))
+`, JSON.stringify(invalid)));
+  assert.deepStrictEqual(pythonErrors, nodeErrors, 'Python and Node refuse autopilot stack push input alike');
+  assert.deepStrictEqual(nodeErrors, [
+    'runpane autopilot stack push needs exactly one of --item <id>, --file <path>, --url <url>, or --session <id|name>.',
+    'runpane autopilot stack push needs exactly one of --item <id>, --file <path>, --url <url>, or --session <id|name>.',
+    '--tab requires a value.',
+    '--tab requires a value.',
+    '--next is only valid with runpane autopilot stack push.',
+    '--next is only valid with runpane autopilot stack push.',
+  ]);
+}
+
 async function runChecks() {
   checkGeneratedContractFresh();
   ensureBuiltCli();
@@ -6135,6 +6298,7 @@ async function runChecks() {
   await checkArchiveClosedAndCallerPanel();
   await checkReportDeliveryLine();
   await checkNotifyParity();
+  await checkAutopilotParity();
   await checkPaneCreateBlockedReadiness();
   await checkPanelResumeCommandExitedReadiness();
   await checkPanelCloseForceParity();

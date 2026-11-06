@@ -7,6 +7,7 @@ import type { RemotePwaAffordances, RemotePwaTerminalShortcut } from '@shared/ty
 import type { RunpanePaneCreateRequest, RunpanePaneCreateResult, RunpanePauseResult, RunpanePauseScope, RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
 
+import { DemoAutopilot, demoAutopilotItems } from './demoAutopilot';
 import { demoChanges, demoFileDiff, demoFileText, demoFolder, demoLogs, demoSearch } from './demoFiles';
 import { demoPageHtml } from './demoPages';
 import { DEMO_PANES, DEMO_PROJECTS, DEMO_SESSION, DEMO_SESSION_PAGES, demoMachines, demoNotifyItems, demoReply, shellScreen, type DemoPaneSeed, type DemoTool } from './demoData';
@@ -68,6 +69,7 @@ export class DemoWorkspace {
   private shortcuts = SHORTCUTS;
   private sessions: OrchestrationSessionRecord[];
   private readonly epoch: string;
+  private readonly autopilot: DemoAutopilot;
 
   constructor(readonly startedAt: number = Date.now()) {
     this.epoch = `demo-${startedAt}`;
@@ -75,12 +77,18 @@ export class DemoWorkspace {
     this.notify = demoNotifyItems(startedAt);
     this.sessions = [this.sessionRecord(DEMO_SESSION.id, DEMO_SESSION.name, DEMO_SESSION.agent, { goal: DEMO_SESSION.goal })];
     this.panes.push(this.sessionPane(this.sessions[0], DEMO_SESSION.screen));
+    // Autopilot walks the sample Session: its planner's two approvals and one of its own.
+    const session = { id: DEMO_SESSION.id, name: DEMO_SESSION.name, paneId: this.sessions[0].internalSessionId };
+    this.notify.push(...demoAutopilotItems(startedAt, session));
+    this.autopilot = new DemoAutopilot(session, () => this.notify, (channel, ...args) => this.emit(channel, ...args), startedAt);
     // One agent finishes soon after you arrive, so its Pane shows Ready.
     this.later(FINISH_AFTER_MS, () => this.setState('demo-react-19', 'demo-react-19-agent', 'idle'));
   }
 
   async invoke(channel: string, args: unknown[]): Promise<JsonValue> {
     const [first, second] = args;
+    const autopilot = channel.startsWith('autopilot:') || channel.startsWith('chat-tab:') ? this.autopilot.invoke(channel, args) : undefined;
+    if (autopilot !== undefined) return autopilot;
     switch (channel) {
       case 'sessions:get-all-with-projects': return this.projects(pane => !pane.archived);
       case 'sessions:get-archived-with-projects': return this.projects(pane => pane.archived).filter(project => project.sessions.length > 0);
@@ -494,6 +502,7 @@ export class DemoWorkspace {
     if (item?.state !== 'sent' || this.answerGeneration.get(id) !== generation) return;
     this.replaceNotify({ ...item, state: 'answered', resolvedAt: Date.now() });
     this.notifyChanged();
+    this.autopilot.answered(id);
     // The question outlives its Pane when you delete the Pane first; then there is no agent to show.
     const { paneId, panelId } = item.source;
     const panel = this.panes.find(pane => pane.id === paneId)?.panels.find(candidate => candidate.id === panelId);

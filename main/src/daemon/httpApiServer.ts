@@ -61,6 +61,7 @@ const remoteInvokeRequestSchema: BoundarySchema<RemoteInvokeRequest> = boundary.
   runtimeId: boundary.optional(boundary.string),
   clientLabel: boundary.optional(boundary.string),
   requestId: boundary.optional(boundary.refine(boundary.string, (id) => id.length > 0 && id.length <= 128, 'expected a request id of 1 to 128 characters')),
+  caller: boundary.optional(boundary.object({ paneId: boundary.optional(boundary.string), panelId: boundary.optional(boundary.string) })),
 });
 
 interface ConnectedRemoteEventClient {
@@ -848,7 +849,7 @@ export class PaneRemoteHttpApiServer {
     await this.respondToInvoke(request, response, invokeRequest.requestId, auth.client?.id ?? (login ? `login:${login}` : 'open'), () => this.commandRegistry.invokeRemote(
       invokeRequest.channel,
       this.getInvokeArgsForRequest(invokeRequest, auth, request),
-      { teammate },
+      { teammate, caller: invokeRequest.caller },
     ));
   }
 

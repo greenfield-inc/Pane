@@ -29,6 +29,7 @@ import { registerJourneyTimingHandlers } from './journeyTimings';
 import { registerRemoteDaemonHandlers } from './remoteDaemon';
 import { registerRunpaneHandlers } from './runpane';
 import { registerNotifyHandlers } from './notify';
+import { registerAutopilotHandlers } from './autopilot';
 import { registerDesktopAlertHandlers } from './desktopAlerts';
 import { registerClipboardHandlers } from './clipboard';
 import { registerResourceMonitorHandlers } from './resourceMonitor';
@@ -153,6 +154,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerChatTabHandlers(ipcMain, services, commandRegistry);
   registerSshHostHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
+  registerAutopilotHandlers(services, commandRegistry, notify);
   registerUsageHandlers(ipcMain, commandRegistry);
   registerSessionImportHandlers(ipcMain, services, commandRegistry);
   if (services.loopManager) registerLoopHandlers(ipcMain, services.loopManager, commandRegistry);

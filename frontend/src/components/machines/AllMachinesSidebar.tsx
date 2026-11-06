@@ -8,6 +8,7 @@ import { RenameDialog } from '../CompactSessionMenu';
 import { PermissionDialog } from '../PermissionDialog';
 import { MachineBadge } from './MachineBadge';
 import { MachineMark } from './MachineMark';
+import { AutopilotNavRow } from '../autopilot/AutopilotNavRow';
 import {
   LoopsNavRow,
   ApprovalsNavRow,
@@ -291,7 +292,9 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
 
   return (
     <div className="flex flex-col pb-2" data-testid="all-machines-sidebar">
+      {/* Same order as the single-machine sidebar: Loops, Autopilot, Approvals (D-117, D-198). */}
       <LoopsNavRow active={activeView === 'loops'} />
+      <AutopilotNavRow />
       <ApprovalsNavRow />
 
       {offline.map(({ machine }) => (

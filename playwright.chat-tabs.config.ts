@@ -8,7 +8,7 @@ const port = getPlaywrightPort();
 
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['chat-tabs.spec.ts'],
+  testMatch: ['chat-tabs.spec.ts', 'autopilot.spec.ts'],
   timeout: 120 * 1000,
   forbidOnly: true,
   retries: 0,

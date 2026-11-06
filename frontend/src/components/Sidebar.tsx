@@ -42,6 +42,7 @@ import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus
 import { createProjectById, getPinnedSessions, groupSessionsByProject } from '../utils/sessionOrdering';
 import { DiscordIcon } from './DiscordIcon';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
+import { AutopilotRailButton } from './autopilot/AutopilotNavRow';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSshHostsRefresh, useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
@@ -664,6 +665,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 )}
               </button>
             </Tooltip>}
+
+            {/* Same order as the full sidebar: Autopilot, then Approvals right under it. */}
+            <AutopilotRailButton buttonClass={COMPACT_RAIL_BUTTON} activeClass={COMPACT_RAIL_ACTIVE} idleClass={COMPACT_RAIL_IDLE} />
 
             {approvals.enabled && <Tooltip content={approvals.title} side="right">
               <button
