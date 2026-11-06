@@ -7,6 +7,7 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
 
 - `main/` Electron main process · `frontend/` React + Vite renderer ·
   `shared/` types · `tests/` Playwright · `packages/runpane{,-py}` the CLI ·
+  `packages/pane-cloud-contract` the Pane Cloud service and fleet APIs ·
   `mobile/` Capacitor companion
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the pieces fit
 - [CONTRIBUTING.md](CONTRIBUTING.md): setup, tests, debugging, PRs
