@@ -24,7 +24,14 @@ Inside the Pane workspace, depend on `"pane-cloud-contract": "workspace:*"`. Fro
 "pane-cloud-contract": "github:greenfield-inc/Pane#<commit>&path:/packages/pane-cloud-contract"
 ```
 
-The package builds itself on install (`prepare`), so list it in pnpm's `onlyBuiltDependencies`.
+The package builds itself on install (`prepare`), so allow that build. On pnpm 10, add it to
+`onlyBuiltDependencies` in `package.json`'s `pnpm` field. On pnpm 11 and later, add the key pnpm's
+error prints to `allowBuilds` in `pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  "pane-cloud-contract@https://codeload.github.com/greenfield-inc/Pane/tar.gz/<commit>#path:/packages/pane-cloud-contract": true
+```
 
 Run the contract tests against your own server, in any test framework:
 
