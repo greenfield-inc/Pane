@@ -67,7 +67,8 @@ const LogsPanel: React.FC<LogsPanelProps> = ({ panel, isActive }) => {
       {/* In a full refactor, we'd adapt LogsView to work with panel state */}
       <div className="flex-1 overflow-hidden">
         <LogsView 
-          sessionId={panel.sessionId} 
+          panelId={panel.id}
+          sessionId={panel.sessionId}
           isVisible={isActive}
         />
       </div>

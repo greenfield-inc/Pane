@@ -1,28 +1,35 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Search, X, Download, Trash2, ChevronUp, ChevronDown, Filter, Copy, Check } from 'lucide-react';
+import { X, Download, Trash2, Filter, Copy, Check } from 'lucide-react';
 import { cn } from '../../../utils/cn';
 import AnsiToHtml from 'ansi-to-html';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { getTerminalTheme } from '../../../utils/terminalTheme';
 import { LiveRegion } from '../../ui/LiveRegion';
-import { areKeyboardShortcutsEnabled, useConfigStore } from '../../../stores/configStore';
 import { useScrollSurface } from '../../../hooks/useScrollSurface';
+import { useCommittedRef } from '../../../hooks/useCommittedRef';
+import { FindBar } from '../../find/FindBar';
+import { reportFindResult, useFindBar, type FindAdapter } from '../../find/findController';
+import { stepMatchIndex } from '../../find/findText';
+import { usePanelFind } from '../../find/usePanelFind';
+import { findLogOccurrences, splitLineByQuery, stripAnsi, type LogOccurrence } from './logsFind';
 
 import { SessionLogBuffer, type LogEntry } from '../../../../../shared/utils/session-log-buffer';
 
 interface LogsViewProps {
+  panelId: string;
   sessionId: string;
   isVisible: boolean;
 }
 
-export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
+export const LogsView: React.FC<LogsViewProps> = ({ panelId, sessionId, isVisible }) => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logBuffer = useRef(new SessionLogBuffer());
   const [filterTerm, setFilterTerm] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchVisible, setSearchVisible] = useState(false);
-  const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
-  const [searchMatches, setSearchMatches] = useState<number[]>([]);
+  // Pane's find (Cmd/Ctrl+F): the query lives in the shared find bar; this
+  // view owns the occurrences and which one is current (1-based, 0 = none).
+  const findBar = useFindBar(panelId);
+  const [findQuery, setFindQuery] = useState('');
+  const [currentOccurrence, setCurrentOccurrence] = useState(0);
   const [autoScroll, setAutoScroll] = useState(true);
   const [copied, setCopied] = useState(false);
   const logsViewRef = useRef<HTMLDivElement>(null);
@@ -38,9 +45,7 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
     logContainerRef.current = element;
     registerScrollSurface(element);
   }, [registerScrollSurface]);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const { theme } = useTheme();
-  const keyboardShortcutsEnabled = useConfigStore((state) => areKeyboardShortcutsEnabled(state.config));
 
   // ANSI → HTML converter using the active theme's terminal palette
   // (--color-terminal-* tokens), so log colours match the terminal panel.
@@ -132,78 +137,64 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
     });
   }, [logs, filterTerm]);
 
-  // Find search matches in filtered logs
+  const occurrences = useMemo<LogOccurrence[]>(
+    () => findLogOccurrences(filteredLogs.map(log => log.message), findQuery),
+    [filteredLogs, findQuery],
+  );
+  const filteredLogsRef = useCommittedRef(filteredLogs);
+  const occurrencesRef = useCommittedRef(occurrences);
+  const currentRef = useCommittedRef(currentOccurrence);
+  const [scrollRequest, setScrollRequest] = useState(0);
+
+  const findAdapter = useMemo<FindAdapter>(() => ({
+    mode: () => 'text',
+    search(query) {
+      const next = findLogOccurrences(filteredLogsRef.current.map(log => log.message), query);
+      const current = next.length ? 1 : 0;
+      setFindQuery(query);
+      setCurrentOccurrence(current);
+      setScrollRequest(request => request + 1);
+      return { current, total: next.length };
+    },
+    step(direction) {
+      const total = occurrencesRef.current.length;
+      const current = stepMatchIndex(currentRef.current, total, direction);
+      setCurrentOccurrence(current);
+      setScrollRequest(request => request + 1);
+      return { current, total };
+    },
+    clear() {
+      setFindQuery('');
+      setCurrentOccurrence(0);
+    },
+    selectedText() {
+      const selection = window.getSelection();
+      const container = logContainerRef.current;
+      if (!selection || selection.isCollapsed || !container || !selection.anchorNode || !container.contains(selection.anchorNode)) return '';
+      return selection.toString();
+    },
+    restoreFocus() {
+      logContainerRef.current?.focus({ preventScroll: true });
+    },
+  }), [filteredLogsRef, occurrencesRef, currentRef]);
+  usePanelFind(panelId, logsViewRef, findAdapter);
+
+  // New or filtered log lines change the count while the bar stays open.
   useEffect(() => {
-    if (!searchTerm || !searchVisible) {
-      setSearchMatches([]);
-      setCurrentSearchIndex(0);
-      return;
-    }
+    if (!findBar.open || !findQuery) return;
+    const total = occurrences.length;
+    const current = total ? Math.min(Math.max(currentRef.current, 1), total) : 0;
+    if (current !== currentRef.current) setCurrentOccurrence(current);
+    reportFindResult(panelId, { current, total });
+  }, [occurrences, findBar.open, findQuery, panelId, currentRef]);
 
-    const matches: number[] = [];
-    const searchLower = searchTerm.toLowerCase();
-    
-    filteredLogs.forEach((log, index) => {
-      if (log.message.toLowerCase().includes(searchLower)) {
-        matches.push(index);
-      }
-    });
-
-    setSearchMatches(matches);
-    setCurrentSearchIndex(matches.length > 0 ? 0 : -1);
-  }, [searchTerm, filteredLogs, searchVisible]);
-
-  const goToNextMatch = useCallback(() => {
-    if (searchMatches.length === 0) return;
-    const nextIndex = (currentSearchIndex + 1) % searchMatches.length;
-    setCurrentSearchIndex(nextIndex);
-    scrollToMatch(searchMatches[nextIndex]);
-  }, [currentSearchIndex, searchMatches]);
-
-  const goToPreviousMatch = useCallback(() => {
-    if (searchMatches.length === 0) return;
-    const prevIndex = currentSearchIndex === 0 ? searchMatches.length - 1 : currentSearchIndex - 1;
-    setCurrentSearchIndex(prevIndex);
-    scrollToMatch(searchMatches[prevIndex]);
-  }, [currentSearchIndex, searchMatches]);
-
-  const scrollToMatch = (matchIndex: number) => {
-    const logElements = logContainerRef.current?.querySelectorAll('.log-line');
-    if (logElements && logElements[matchIndex]) {
-      logElements[matchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  };
-
-  // Keyboard shortcuts
+  // Scroll the current occurrence into view after each search or step.
   useEffect(() => {
-    if (!isVisible) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Cmd+F or Ctrl+F for search
-      if (keyboardShortcutsEnabled && (e.metaKey || e.ctrlKey) && e.key === 'f') {
-        e.preventDefault();
-        setSearchVisible(true);
-        setTimeout(() => searchInputRef.current?.focus(), 100);
-      }
-      // Escape to close search
-      else if (e.key === 'Escape' && searchVisible) {
-        setSearchVisible(false);
-        setSearchTerm('');
-      }
-      // Enter to go to next match, Shift+Enter for previous
-      else if (e.key === 'Enter' && searchVisible && searchMatches.length > 0) {
-        e.preventDefault();
-        if (e.shiftKey) {
-          goToPreviousMatch();
-        } else {
-          goToNextMatch();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isVisible, keyboardShortcutsEnabled, searchVisible, searchMatches, goToNextMatch, goToPreviousMatch]);
+    if (!scrollRequest) return;
+    logContainerRef.current
+      ?.querySelector('[data-find-current="true"]')
+      ?.scrollIntoView({ block: 'center' });
+  }, [scrollRequest]);
 
   const handleClearLogs = async () => {
     try {
@@ -319,57 +310,7 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
         </div>
       </div>
 
-      {/* Floating Search Bar */}
-      {searchVisible && (
-        <div className="absolute top-16 right-4 z-50 bg-surface-secondary border border-border-primary rounded-lg shadow-lg p-2">
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-text-tertiary" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search in logs..."
-                className="w-64 pl-10 pr-8 py-2 bg-bg-primary text-text-primary placeholder-text-tertiary rounded-lg border border-border-secondary focus:outline-none focus:border-interactive transition-colors"
-              />
-            </div>
-            
-            {searchMatches.length > 0 && (
-              <div className="flex items-center gap-1">
-                <span className="text-xs text-text-secondary px-2">
-                  {currentSearchIndex + 1} / {searchMatches.length}
-                </span>
-                <button
-                  onClick={goToPreviousMatch}
-                  className="p-1 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded transition-colors"
-                  title="Previous match (Shift+Enter)"
-                >
-                  <ChevronUp className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={goToNextMatch}
-                  className="p-1 text-text-secondary hover:text-text-primary hover:bg-surface-hover rounded transition-colors"
-                  title="Next match (Enter)"
-                >
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-            
-            <button
-              onClick={() => {
-                setSearchVisible(false);
-                setSearchTerm('');
-              }}
-              className="p-1 text-text-tertiary hover:text-text-primary transition-colors"
-              title="Close search (Esc)"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      <FindBar panelId={panelId} className="top-[6.75rem] right-4" />
 
       {/* Logs Container */}
       <div 
@@ -393,56 +334,53 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
           </div>
         ) : (
           <div className="break-all">
-            {filteredLogs.map((log, index) => {
-              const isCurrentMatch = searchVisible && searchMatches.includes(index) && searchMatches[currentSearchIndex] === index;
-              const isMatch = searchVisible && searchTerm && searchMatches.includes(index);
-              
-              // Convert ANSI codes to HTML
-              const htmlContent = ansiConverter.toHtml(log.message);
-              
-              if (!searchTerm || !searchVisible) {
+            {(() => {
+              // Occurrences are in line order, so each line's first one gives
+              // the global index of every hit on it.
+              const firstOccurrenceOfLine = new Map<number, number>();
+              occurrences.forEach((occurrence, index) => {
+                if (!firstOccurrenceOfLine.has(occurrence.line)) firstOccurrenceOfLine.set(occurrence.line, index);
+              });
+              const currentLine = currentOccurrence > 0 ? occurrences[currentOccurrence - 1]?.line : undefined;
+              return filteredLogs.map((log, index) => {
+              const firstOccurrence = firstOccurrenceOfLine.get(index);
+              if (firstOccurrence === undefined) {
                 return (
-                  <div 
-                    key={index} 
+                  <div
+                    key={index}
                     className="log-line"
-                    dangerouslySetInnerHTML={{ __html: htmlContent }}
+                    dangerouslySetInnerHTML={{ __html: ansiConverter.toHtml(log.message) }}
                   />
                 );
               }
-              
-              // For search highlighting, we need to work with the raw text
-              // but still preserve the ANSI styling
-              const isHighlighted = isMatch || isCurrentMatch;
-              
+
+              // A line with hits shows its ANSI-stripped text so each hit can be
+              // marked; the current hit is drawn more strongly than the others.
+              const isCurrentLine = currentLine === index;
+              let ordinal = firstOccurrence;
               return (
-                <div 
-                  key={index} 
-                  className={cn(
-                    "log-line",
-                    isCurrentMatch && "bg-status-warning/30",
-                    isMatch && !isCurrentMatch && "bg-status-warning/10"
-                  )}
+                <div
+                  key={index}
+                  className={cn('log-line', isCurrentLine ? 'bg-status-warning/30' : 'bg-status-warning/10')}
                 >
-                  {isHighlighted ? (
-                    // When highlighting search results, show raw text with highlight
-                    // This is a trade-off: we lose ANSI colors but gain search highlighting
-                    log.message.split(new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'))
-                      .map((part, i) => 
-                        part.toLowerCase() === searchTerm.toLowerCase() ? (
-                          <span key={i} className="bg-status-warning/50 text-text-on-status-warning px-0.5">
-                            {part}
-                          </span>
-                        ) : (
-                          <span key={i}>{part}</span>
-                        )
-                      )
-                  ) : (
-                    // When not highlighting, show with ANSI colors
-                    <span dangerouslySetInnerHTML={{ __html: htmlContent }} />
-                  )}
+                  {splitLineByQuery(stripAnsi(log.message), findQuery).map((part, i) => {
+                    if (!part.hit) return <span key={i}>{part.text}</span>;
+                    const isCurrent = ordinal === currentOccurrence - 1;
+                    ordinal += 1;
+                    return (
+                      <span
+                        key={i}
+                        data-find-current={isCurrent ? 'true' : undefined}
+                        className={cn('px-0.5', isCurrent ? 'bg-status-warning text-text-on-status-warning' : 'bg-status-warning/50 text-text-on-status-warning')}
+                      >
+                        {part.text}
+                      </span>
+                    );
+                  })}
                 </div>
               );
-            })}
+              });
+            })()}
           </div>
         )}
       </div>

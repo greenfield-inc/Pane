@@ -6017,6 +6017,11 @@ THE SOFTWARE.
 
 --------------------------------------------------------------------------------
 
+Package: @xterm/addon-search
+Version: 0.17.0-beta.299
+Author: The xterm.js authors
+Repository: https://github.com/xtermjs/xterm.js/tree/master/addons/addon-search
+
 Package: @xterm/addon-web-links
 Version: 0.13.0-beta.299
 Author: The xterm.js authors

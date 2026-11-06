@@ -12,11 +12,14 @@ import { usePanelStore } from '../../../stores/panelStore';
 import { useConfigStore } from '../../../stores/configStore';
 import type { BrowserPanelState, ToolPanel } from '../../../../../shared/types/panels';
 import { copyTerminalText } from '../../../utils/terminalClipboard';
+import { useCommittedRef } from '../../../hooks/useCommittedRef';
 
 export interface UseTerminalLinksConfig {
   workingDirectory: string;
   sessionId: string;
   onCopyError: () => void;
+  /** While true, selection changes (find selecting a match) show no copy popover. */
+  suppressSelectionPopover?: () => boolean;
 }
 
 interface TooltipState {
@@ -77,6 +80,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
   const [githubRemoteUrl, setGithubRemoteUrl] = useState<string | null>(null);
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
   const { onCopyError } = config;
+  const suppressSelectionPopoverRef = useCommittedRef(config.suppressSelectionPopover);
   const mousePositionRef = useRef({ x: 0, y: 0 });
 
   const [pathContext, setPathContext] = useState<TerminalPathContext | null>(null);
@@ -168,6 +172,10 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     }
 
     const disposable = terminal.onSelectionChange(() => {
+      if (suppressSelectionPopoverRef.current?.()) {
+        setSelectionPopover((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+        return;
+      }
       if (terminal.hasSelection()) {
         const text = terminal.getSelection();
         const { x, y } = mousePositionRef.current;
@@ -180,7 +188,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     return () => {
       disposable.dispose();
     };
-  }, [terminal, isRemoteMode, onCopyError]);
+  }, [terminal, isRemoteMode, onCopyError, suppressSelectionPopoverRef]);
 
   // Get panel store methods
   const addPanel = usePanelStore((state) => state.addPanel);

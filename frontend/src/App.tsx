@@ -75,6 +75,7 @@ import type { AnalyticsIdentity, TerminalShortcut } from './types/config';
 import type { ResumableSession } from '../../shared/types/panels';
 import { useLoopsRefresh } from './stores/loopsStore';
 import { LoopDrawer } from './components/loops/LoopDrawer';
+import { useFindHotkeys } from './components/find/findRouter';
 import type { Project } from './types/project';
 import type { SettingsCategoryId, SettingsOpenRequest, SettingsTarget } from './types/settings';
 import type {
@@ -247,6 +248,9 @@ function App() {
   }, []);
 
   // Keyboard shortcuts
+
+  // Cmd/Ctrl+F, Cmd/Ctrl+G and Shift+Cmd/Ctrl+G find in the focused tab.
+  useFindHotkeys();
 
   useHotkey({
     id: 'open-command-palette',

@@ -47,7 +47,7 @@ function FontSpecimen({ url, sessionId, filePath }: { url: string; sessionId: st
   }, [url]);
   if (error) return <FilePreviewNotice sessionId={sessionId} filePath={filePath} message="Cannot preview this font." />;
   return (
-    <div className="h-full overflow-auto p-6 space-y-6 text-text-primary">
+    <div data-find-empty="" className="h-full overflow-auto p-6 space-y-6 text-text-primary">
       <label className="block text-sm">Specimen text<input className="mt-2 w-full rounded border border-border-primary bg-surface-secondary p-2" value={sample} onChange={event => setSample(event.target.value)} /></label>
       {!family ? <p role="status">Loading font…</p> : <div style={{ fontFamily: family }} className="space-y-6 break-words">
         {[16, 24, 36, 48, 72].map(size => <p key={size} style={{ fontSize: size }}>{sample}</p>)}
@@ -117,9 +117,9 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
         {formatError ? notice(formatError) : kind === 'image' ? (
-          <div className="h-full flex items-center justify-center p-4 overflow-auto"><img src={url} alt={fileName} className="max-w-full max-h-full object-contain" onError={() => setError('Cannot preview this image.')} /></div>
+          <div data-find-empty="" className="h-full flex items-center justify-center p-4 overflow-auto"><img src={url} alt={fileName} className="max-w-full max-h-full object-contain" onError={() => setError('Cannot preview this image.')} /></div>
         ) : kind === 'pdf' ? (
-          <object data={url} onError={() => setError('Cannot preview this PDF.')} type="application/pdf" aria-label={fileName} className="w-full h-full">{notice('Cannot preview this PDF.')}</object>
+          <object data-find-empty="" data={url} onError={() => setError('Cannot preview this PDF.')} type="application/pdf" aria-label={fileName} className="w-full h-full">{notice('Cannot preview this PDF.')}</object>
         ) : kind === 'font' ? <FontSpecimen url={url} sessionId={sessionId} filePath={filePath} />
         : listing ? <PreviewTable columns={listing.columns} rows={listing.rows} />
         : table ? <PreviewTable columns={table.rows[0] ?? []} rows={table.rows.slice(1)} />

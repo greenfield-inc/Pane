@@ -332,6 +332,9 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 |----------|--------|
 | `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command |
 | `⌘K` / `Ctrl+K` | Clear terminal scrollback |
+| `⌘F` / `Ctrl+F` | Find in the focused tab (terminal, browser, file preview, Logs) |
+| `⌘G` / `Ctrl+G` | Find next |
+| `⌘⇧G` / `Ctrl+Shift+G` | Find previous |
 | `⌘N` / `Ctrl+N` | New pane |
 | `⌘⇧W` / `Ctrl+Shift+W` | Archive pane |
 | `⌘1-9` / `Ctrl+1-9` | Switch pane |

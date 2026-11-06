@@ -33,7 +33,7 @@ export function FilePreviewActions({ sessionId, filePath }: FileLocation) {
 
 export function FilePreviewNotice({ sessionId, filePath, message }: FileLocation & { message: string }) {
   return (
-    <div className="h-full flex flex-col items-center justify-center gap-4 p-6 bg-surface-primary text-text-secondary">
+    <div data-find-empty="" className="h-full flex flex-col items-center justify-center gap-4 p-6 bg-surface-primary text-text-secondary">
       <p role="status">{message}</p>
       <FilePreviewActions sessionId={sessionId} filePath={filePath} />
     </div>
@@ -54,7 +54,7 @@ export function MediaFilePreview({ sessionId, filePath, kind, fileName }: FileLo
     'aria-label': fileName,
   };
   return (
-    <div className="h-full flex flex-col items-center justify-center gap-4 p-4 bg-surface-primary text-text-primary">
+    <div data-find-empty="" className="h-full flex flex-col items-center justify-center gap-4 p-4 bg-surface-primary text-text-primary">
       {/* Local media has no supplied caption file. Do not fabricate empty tracks. */}
       {kind === 'video' ? (
         <video {...properties} className="w-full min-h-0 flex-1 object-contain" onLoadedMetadata={event => {

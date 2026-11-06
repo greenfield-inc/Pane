@@ -79,7 +79,8 @@ import * as path from 'path';
 import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
 import type { ConfigManager } from './services/configManager';
-import { areKeyboardShortcutsEnabled, shouldForwardCommandPaletteShortcut } from './utils/keyboardShortcuts';
+import { areKeyboardShortcutsEnabled } from './utils/keyboardShortcuts';
+import { shouldForwardWebviewKey } from './utils/webviewKeyForwarding';
 import {
   parseStoredOverlayColors,
   shouldEnableWindowControlsOverlay,
@@ -150,6 +151,9 @@ export let mainWindow: BrowserWindow | null = null;
 // Map webContentsId → {panelId, sessionId} for webview popup interception.
 // Populated by browser-panel:register-webview IPC, consumed by did-attach-webview handler.
 export const webviewContextMap = new Map<number, { panelId: string; sessionId: string }>();
+
+// Browser-tab webviews whose Pane find bar is open, so Escape in the page closes it.
+const findActiveWebviews = new Set<number>();
 
 // Active DevTools WebContentsViews, keyed by the page webContentsId they inspect
 const activeDevToolsViews = new Map<number, Electron.WebContentsView>();
@@ -604,63 +608,32 @@ async function createWindow() {
     });
 
     wvContents.setBackgroundThrottling(true);
+    // One cleanup per guest, however many times its find bar opens and closes.
+    const guestId = wvContents.id;
+    wvContents.once('destroyed', () => findActiveWebviews.delete(guestId));
 
-    // Forward app hotkeys from webview to renderer.
+    // Forward Pane's hotkeys from webview to renderer (see webviewKeyForwarding.ts).
     // Webviews are separate processes — keyboard events inside them never reach
-    // the renderer's window listener where the hotkey system lives. Only intercept
-    // the specific Ctrl/Cmd+key combos that Pane actually handles, so that normal
-    // browser shortcuts (Ctrl+F, Ctrl+R, Ctrl+A in inputs, etc.) still work
-    // inside embedded browser panels.
-    // Whitelist of Pane hotkeys that should be forwarded from webviews.
-    // mod+key (no extra modifiers):
-    const paneHotkeys: ReadonlySet<string> = new Set([
-      'b', ',', 'n', 'a', 'd', 'w', 't', '`',
-      // mod+1..9 switch session, mod+Tab/ArrowDown cycle next
-      '1', '2', '3', '4', '5', '6', '7', '8', '9',
-      'tab', 'arrowdown', 'arrowup',
-    ]);
-    // mod+shift+key — matched by physical key code (Digit/Key) because
-    // input.key reports the shifted symbol (e.g. '!' for Shift+1) which
-    // varies by keyboard layout.
-    const paneShiftCodes: ReadonlySet<string> = new Set([
-      'KeyE', 'KeyN', 'KeyK', 'KeyP', 'KeyZ', 'KeyL', 'KeyR', 'KeyM', 'KeyU',
-      'KeyB', 'KeyW', 'KeyD',
-      'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
-      'Digit6', 'Digit7', 'Digit8', 'Digit9',
-      'Tab', // mod+shift+Tab cycles prev session
-    ]);
+    // the renderer's window listener where the hotkey system lives. Pane's find
+    // keys (Cmd/Ctrl+F, Cmd/Ctrl+G, Shift+Cmd/Ctrl+G) are taken from browser
+    // tabs only, and Escape only while that tab's find bar is open; the Docs
+    // dialog webview and every other key stay with the page.
     wvContents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
-      const mod = input.control || input.meta;
-      if (!mod) return;
-
-      const key = input.key.toLowerCase();
-      const code = input.code;
-      const config = configManager.getConfig();
-      if (
-        !areKeyboardShortcutsEnabled(config)
-        && !shouldForwardCommandPaletteShortcut(config, input)
-      ) return;
-
-      // Skip AltGr: on Windows/Linux international layouts, AltGr reports
-      // control+alt simultaneously. We detect this as control+alt without
-      // meta, and only forward when the physical key is a letter, digit,
-      // or slash (the patterns used by Pane's mod+alt shortcuts). This
-      // prevents blocking character input like @, €, or \ on those layouts.
-      const isAltGr = input.control && input.alt && !input.meta
-        && !/^(Key[A-Z]|Digit[0-9]|Slash)$/.test(code);
-
-      // Determine if this combo matches a registered Pane hotkey.
-      // mod+alt combos are forwarded (user-configurable terminal shortcuts
-      // use mod+alt+<key>), but AltGr character input is excluded above.
-      const isPaneHotkey =
-        (input.alt && !isAltGr) ||
-        (input.shift && !input.alt && paneShiftCodes.has(code)) ||
-        (!input.shift && !input.alt && paneHotkeys.has(key));
-
-      if (!isPaneHotkey) return;
+      const isBrowserTab = webviewContextMap.has(wvContents.id);
+      if (!shouldForwardWebviewKey(input, {
+        config: configManager.getConfig(),
+        isBrowserTab,
+        findActive: isBrowserTab && findActiveWebviews.has(wvContents.id),
+      })) return;
 
       event.preventDefault();
+      if (input.key === 'Escape') {
+        // Names the tab, since focus in Pane's window may be anywhere while the page has it.
+        const context = webviewContextMap.get(wvContents.id);
+        if (context) mainWindow?.webContents.send('browser-panel:find-escape', { panelId: context.panelId });
+        return;
+      }
       mainWindow?.webContents.send('synthetic-keydown', {
         key: input.key,
         code: input.code,
@@ -709,6 +682,13 @@ async function createWindow() {
   // Guard: only register once (createWindow can be called again on macOS activate).
   if (!devToolsHandlersRegistered) {
   devToolsHandlersRegistered = true;
+  ipcMain.handle('browser-panel:set-find-active', (_, wcId: number, active: boolean) => {
+    // The guest's 'destroyed' handler (did-attach-webview) removes it when it goes.
+    const guest = webContents.fromId(wcId);
+    if (active && guest && !guest.isDestroyed()) findActiveWebviews.add(wcId);
+    else findActiveWebviews.delete(wcId);
+    return { success: true };
+  });
   ipcMain.handle('browser-panel:open-devtools-inline', async (_, pageWcId: number, bounds: { x: number; y: number; width: number; height: number }) => {
     try {
       const pageWC = webContents.fromId(pageWcId);

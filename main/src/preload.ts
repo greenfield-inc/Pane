@@ -288,6 +288,14 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
+  // Escape pressed in a browser tab's page while its Pane find bar is open.
+  ipcRenderer.on('browser-panel:find-escape', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:find-escape', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:find-escape to window:', e);
+    }
+  });
   ipcRenderer.on('browser-panel:file-refused', (_event: Electron.IpcRendererEvent, data: { panelId: string; message: string; next?: string }) => {
     try {
       window.dispatchEvent(new CustomEvent('browser-panel:file-refused', { detail: data }));
