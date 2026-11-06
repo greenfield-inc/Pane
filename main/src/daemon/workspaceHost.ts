@@ -6,6 +6,7 @@ import { runRemoteSetupCommand, type RemoteSetupCommandRunner } from './remote-s
 import { randomBytes } from 'crypto';
 import type { PaneEventSink } from '../core/eventSink';
 import type { WorkspaceAccessPolicy } from './auth';
+import type { RemoteDaemonConnectedClient } from '../../../shared/types/remoteDaemon';
 import { createWorkspacePasswordVerifier, type SecretCheck } from './workspacePassword';
 import { GlassesAccess } from './glassesAccess';
 import {
@@ -181,6 +182,11 @@ export class PaneWorkspaceHostController {
     private readonly inBootWindow: () => boolean = paneInBootWindow,
   ) {
     this.glasses = new GlassesAccess(configManager);
+  }
+
+  /** Who has the workspace event stream open right now. */
+  connectedClients(): RemoteDaemonConnectedClient[] {
+    return this.server?.getConnectedClients() ?? [];
   }
 
   getEventSink(): PaneEventSink {

@@ -8,6 +8,7 @@ import { saveProjectSettings } from './project';
 import type { UpdateProjectRequest } from '../../../frontend/src/types/project';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
@@ -109,6 +110,10 @@ import type {
   RunpanePaneArchiveRequest,
   RunpanePaneArchiveResult,
   RunpanePaneArchiveSafetyCheck,
+  RunpaneHostPushAllResult,
+  RunpaneHostPushResult,
+  RunpaneHostUnpushedItem,
+  RunpaneHostUnpushedResult,
   RunpanePaneArchiveSafetyCheckReason,
   RunpanePaneArchiveSuccessResult,
   RunpanePaneAdoptRequest,
@@ -1112,6 +1117,9 @@ export function registerRunpaneHandlers(
       return { ok: items.every(item => item.ok), repo: repoSummary, items };
     }, result => ({ repoId: result.repo.id, resultCount: result.items.length }));
   });
+
+  commandRegistry.register('runpane:host:unpushed', () => listUnpushedWork(services));
+  commandRegistry.register('runpane:host:push-all', () => pushAllUnpushedWork(services));
 
   commandRegistry.register('runpane:panes:archive', async (request: PaneCommandValue): Promise<RunpanePaneArchiveResult | RunpanePaneArchiveBulkResult> => {
     if (isRecord(request) && request.sessionId !== undefined) {
@@ -5595,6 +5603,116 @@ async function computeArchiveSafety(services: AppServices, pane: Session): Promi
   }
 }
 
+/**
+ * Every open Pane whose work is not all on its remote. Repositories are checked four at a time;
+ * the Panes of one repository one after another, since their fetches share one ref store.
+ */
+export async function listUnpushedWork(services: AppServices): Promise<RunpaneHostUnpushedResult> {
+  const seen = new Set<string>();
+  const byRepo = new Map<number | undefined, Session[]>();
+  // Main-repo and adopted Panes count too: deleting the machine loses their work like any other.
+  for (const pane of services.sessionManager.getAllSessions()) {
+    if (pane.archived || !pane.worktreePath || seen.has(pane.worktreePath)) continue;
+    seen.add(pane.worktreePath);
+    byRepo.set(pane.projectId, [...(byRepo.get(pane.projectId) ?? []), pane]);
+  }
+  const checkPane = async (pane: Session): Promise<RunpaneHostUnpushedItem> => {
+    const safetyCheck = withBusyAgents(await computeArchiveSafety(services, pane), pane.id);
+    const ctx = services.sessionManager.getProjectContext(pane.id);
+    if (ctx && safetyCheck.unpushedCommits) {
+      // Commits already on another remote branch, such as pane/saved/<name>, are on the remote.
+      const offEveryRemote = await listCommitsAhead(pane.worktreePath, ['--remotes'], ctx.commandRunner.wslContext);
+      if (offEveryRemote.length === 0) Object.assign(safetyCheck, { unpushedCommits: 0, unpushedCommitDetails: [] });
+    }
+    return {
+      paneId: pane.id,
+      paneName: pane.name,
+      repoName: ctx?.project.name ?? null,
+      branch: ctx ? await currentBranch(pane.worktreePath, ctx.commandRunner) : null,
+      safetyCheck,
+    };
+  };
+  const checked = (await mapWithConcurrency([...byRepo.values()], 4, async (panes) => {
+    const items: RunpaneHostUnpushedItem[] = [];
+    for (const pane of panes) items.push(await checkPane(pane));
+    return items;
+  })).flat();
+  const items = checked.filter(({ safetyCheck: check }) => check.performed
+    ? Boolean(check.hasUncommittedChanges || check.hasUntrackedFiles || check.unpushedCommits)
+    // A Pane with no repository has nothing to push; one whose git check failed is shown as unknown.
+    : check.reason === 'git-error');
+  return { items, checkedPanes: seen.size, checkedAt: new Date().toISOString() };
+}
+
+/**
+ * Commits each listed Pane's loose files as WIP and pushes it, never forcing. A Pane on the base
+ * branch, or with no branch, goes to `pane/saved/<name>` so the base branch is never written.
+ */
+export async function pushAllUnpushedWork(services: AppServices): Promise<RunpaneHostPushAllResult> {
+  const { items } = await listUnpushedWork(services);
+  const results: RunpaneHostPushResult[] = [];
+  for (const item of items) results.push(await pushUnpushedItem(services, item));
+  const { items: remaining } = await listUnpushedWork(services);
+  return { results, remaining: remaining.length };
+}
+
+async function pushUnpushedItem(services: AppServices, item: RunpaneHostUnpushedItem): Promise<RunpaneHostPushResult> {
+  const result: RunpaneHostPushResult = { paneId: item.paneId, paneName: item.paneName, outcome: 'skipped', committedWip: false };
+  const pane = services.sessionManager.getSession(item.paneId);
+  const ctx = services.sessionManager.getProjectContext(item.paneId);
+  if (item.safetyCheck.busyAgents?.some((agent) => agent.state === 'working')) {
+    return { ...result, message: `An agent is working in ${item.paneName}. Stop the agent in ${item.paneName}, then push again.` };
+  }
+  if (!pane || !ctx || !item.safetyCheck.performed) {
+    return { ...result, outcome: 'failed', message: `Pane couldn't check git in ${item.paneName}, so nothing was pushed. Open ${item.paneName} and run git status to see why.` };
+  }
+  const runner = ctx.commandRunner;
+  const cwd = pane.worktreePath;
+  try {
+    if (item.safetyCheck.hasUncommittedChanges || item.safetyCheck.hasUntrackedFiles) {
+      // Agent setup is disposable and stays out, as archive ignores it.
+      await runner.execFile('git', ['add', '-A', '--', '.', ':!.codex', ':!.claude', ':!.agent-farm'], cwd, { timeout: 30_000 });
+      // Hooks may need tools or a network this machine no longer has; the work must still leave.
+      await runner.execFile('git', ['commit', '--no-verify', '-m', `WIP: saved by Pane before ${os.hostname()} stops`], cwd, { timeout: 30_000 });
+      result.committedWip = true;
+    }
+    const baseBranch = await services.worktreeManager.getSessionLocalBaseBranch(pane, ctx);
+    if (item.branch && item.branch !== baseBranch) {
+      await services.worktreeManager.gitPush(cwd, runner);
+      const upstream = await services.worktreeManager.getUpstream(cwd, runner);
+      return { ...result, outcome: 'pushed', pushedTo: upstream ?? `origin/${item.branch}` };
+    }
+    const upstream = item.safetyCheck.upstream;
+    const remote = upstream ? await resolveUpstreamRemote(cwd, upstream, runner) : 'origin';
+    const saved = `pane/saved/${savedBranchSlug(item.paneName, item.paneId)}`;
+    await runner.execFile('git', ['push', remote, `HEAD:refs/heads/${saved}`], cwd, { timeout: 60_000 });
+    return { ...result, outcome: 'pushed', pushedTo: `${remote}/${saved}` };
+  } catch (error) {
+    const detail = reasonOf(error);
+    const next = /rejected|non-fast-forward|fetch first/i.test(detail)
+      ? `Pull in ${item.paneName} and push again.`
+      : /auth|permission denied|could not read username|403/i.test(detail)
+        ? 'Sign in to GitHub on this machine: gh auth login'
+        : `Open ${item.paneName} and push it by hand.`;
+    return { ...result, outcome: 'failed', message: `Pushing ${item.paneName} failed: ${detail}. ${next}` };
+  }
+}
+
+/** The checked-out branch, or null on a detached HEAD. */
+async function currentBranch(worktreePath: string, commandRunner: CommandRunner): Promise<string | null> {
+  try {
+    const { stdout } = await commandRunner.execFile('git', ['symbolic-ref', '--short', '-q', 'HEAD'], worktreePath, { silent: true, timeout: 10_000 });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function savedBranchSlug(paneName: string, paneId: string): string {
+  const slug = paneName.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
+  return slug || paneId;
+}
+
 type ArchiveCommitEvidence = Omit<RunpanePaneArchiveSafetyCheck, 'performed' | 'hasUncommittedChanges' | 'hasUntrackedFiles'>;
 
 async function computeUnpublishedCommits(
@@ -5934,12 +6052,17 @@ function describeUnmergedPr(
   }
 }
 
+/** An agent tab, as opposed to a plain terminal or another kind of tab. */
+export function isAgentPanel(panel: ToolPanel): boolean {
+  return panel.type === 'terminal' && Boolean(panelToSummary(panel).isCliPanel);
+}
+
 /**
  * `working` or `blocked` when the panel's agent is mid-turn or waiting for an answer. Only agent
  * tabs count: Pane reports any terminal printing output as working, and a dev server is not a turn.
  */
 function agentBusyState(panel: ToolPanel): 'working' | 'blocked' | undefined {
-  const state = panel.type === 'terminal' && panelToSummary(panel).isCliPanel ? terminalPanelManager.getAgentStatus(panel.id) : undefined;
+  const state = isAgentPanel(panel) ? terminalPanelManager.getAgentStatus(panel.id) : undefined;
   return state === 'working' || state === 'blocked' ? state : undefined;
 }
 

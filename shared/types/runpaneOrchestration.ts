@@ -1570,3 +1570,63 @@ export interface RunpaneInboxAckResult {
   /** Ids that matched no item (already acknowledged, or never existed). */
   unknown: string[];
 }
+
+/** Why this machine should not stop yet. */
+export type RunpaneHostStopBlocker =
+  | { code: 'agent-working'; paneId: string; panelId: string; title: string }
+  | { code: 'client-connected'; person: string | null; device: string | null }
+  /** Daemon commands that are still changing the workspace. */
+  | { code: 'work-in-flight'; mutations: number }
+  /** A worktree is still being removed. */
+  | { code: 'worktree-removal' }
+  /** Pane is holding new work back for an update or a prepared stop. */
+  | { code: 'update-in-progress' };
+
+/** `runpane host status`: whether this machine can stop now, and what keeps it running. */
+export interface RunpaneHostStatusResult {
+  safeToStop: boolean;
+  blockers: RunpaneHostStopBlocker[];
+  agents: { working: number; blocked: number; idle: number };
+  clients: Array<{ id: string; person: string | null; device: string | null; listener: 'paired' | 'workspace'; connectedAt: string }>;
+  checkedAt: string;
+}
+
+/** `runpane host prepare-stop`: Pane finished writing and holds new work back for a minute. */
+export interface RunpaneHostPrepareStopResult {
+  ready: true;
+  settledMutations: number;
+}
+
+/** An open Pane whose work is not all on its remote. */
+export interface RunpaneHostUnpushedItem {
+  paneId: string;
+  paneName: string;
+  repoName: string | null;
+  branch: string | null;
+  safetyCheck: RunpanePaneArchiveSafetyCheck;
+}
+
+/** `runpane host unpushed`: every open Pane with work not on its remote. */
+export interface RunpaneHostUnpushedResult {
+  items: RunpaneHostUnpushedItem[];
+  checkedPanes: number;
+  checkedAt: string;
+}
+
+export interface RunpaneHostPushResult {
+  paneId: string;
+  paneName: string;
+  outcome: 'pushed' | 'skipped' | 'failed';
+  /** Uncommitted files were saved as a WIP commit before the push. */
+  committedWip: boolean;
+  /** The remote branch the work went to, such as `origin/pane/saved/fix-login`. */
+  pushedTo?: string;
+  /** Why it was skipped or failed, with the next step. */
+  message?: string;
+}
+
+/** `runpane host push-all`: each listed Pane's outcome, and how many still have work off the remote. */
+export interface RunpaneHostPushAllResult {
+  results: RunpaneHostPushResult[];
+  remaining: number;
+}

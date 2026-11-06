@@ -4,6 +4,9 @@ export const REMOTE_READ_CHANNELS = new Set([
   'agent-chat:get',
   'agent-chat:receipt',
   'runpane:update:progress',
+  // Whether this machine can stop, and which Panes have work off their remote; both only read.
+  'runpane:host:status',
+  'runpane:host:unpushed',
   'config:get',
   'config:get-session-preferences',
   'ui-state:get-expanded',

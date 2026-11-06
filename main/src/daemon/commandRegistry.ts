@@ -64,6 +64,11 @@ export class PaneCommandRegistry {
 
   cancelUpdateQuiescence(): void { this.updateQuiescing = false; }
 
+  /** Daemon commands still changing the workspace, and whether new ones are held back. */
+  inFlight() {
+    return { mutations: this.mutations.size, quiescing: this.updateQuiescing };
+  }
+
   private readonly handlers = new Map<string, RegisteredPaneCommandHandler>();
   private readonly boundChannels = new Set<string>();
 
@@ -101,7 +106,8 @@ export class PaneCommandRegistry {
     }
 
     // A notify call waits for a person for hours; an update ends it like any other disconnect.
-    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !channel.startsWith('runpane:update:') && channel !== 'runpane:notify';
+    // Preparing a stop waits for every other mutation, so it is not one itself.
+    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !channel.startsWith('runpane:update:') && channel !== 'runpane:notify' && channel !== 'runpane:host:prepare-stop';
     if (mutation && this.updateQuiescing) throw new PaneError('ERR_UPDATE_QUIESCING', 'Pane is saving this workspace for an update. The action was not sent.', 'Wait for the update to reconnect before submitting it.');
     const result = Promise.resolve(handler(...args));
     if (mutation) this.mutations.add(result);
