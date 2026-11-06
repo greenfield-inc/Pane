@@ -135,6 +135,32 @@ export type LoopSchedulePreview =
   | { ok: true; scheduleText: string; nextRunAtMs: number; /** The next three runs, soonest first. */ nextRunsAtMs: number[] }
   | { ok: false; error: string };
 
+export const loopGithubTriggersSchema = boundary.object({
+  repo: boundary.string,
+  commentPhrase: boundary.optional(boundary.string),
+  changesRequested: boundary.optional(boundary.boolean),
+  checkFailed: boundary.optional(boundary.boolean),
+  prOpened: boundary.optional(boundary.boolean),
+  issueLabel: boundary.optional(boundary.string),
+  allowForks: boundary.optional(boundary.boolean),
+  hourlyCap: boundary.optional(boundary.number),
+}) satisfies BoundarySchema<LoopGithubTriggers>;
+
+export const loopGithubEventSchema = boundary.object({
+  key: boundary.string,
+  kind: boundary.enumeration('comment', 'review', 'check', 'pr', 'label'),
+  repo: boundary.string,
+  number: boundary.number,
+  isPr: boundary.boolean,
+  url: boundary.string,
+  author: boundary.nullable(boundary.string),
+  atMs: boundary.number,
+  summary: boundary.string,
+  text: boundary.optional(boundary.string),
+  headRef: boundary.optional(boundary.string),
+  fork: boundary.optional(boundary.boolean),
+}) satisfies BoundarySchema<LoopGithubEvent>;
+
 export const loopInputSchema = boundary.object({
   id: boundary.optional(boundary.string),
   name: boundary.string,
@@ -146,16 +172,7 @@ export const loopInputSchema = boundary.object({
   initialInput: boundary.optional(boundary.string),
   worktreeTemplate: boundary.optional(boundary.string),
   enabled: boundary.boolean,
-  github: boundary.optional(boundary.object({
-    repo: boundary.string,
-    commentPhrase: boundary.optional(boundary.string),
-    changesRequested: boundary.optional(boundary.boolean),
-    checkFailed: boundary.optional(boundary.boolean),
-    prOpened: boundary.optional(boundary.boolean),
-    issueLabel: boundary.optional(boundary.string),
-    allowForks: boundary.optional(boundary.boolean),
-    hourlyCap: boundary.optional(boundary.number),
-  })),
+  github: boundary.optional(loopGithubTriggersSchema),
 }) satisfies BoundarySchema<LoopInput>;
 
 /** The shortest allowed gap between two runs of one loop. */

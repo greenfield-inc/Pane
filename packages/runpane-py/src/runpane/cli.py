@@ -278,6 +278,8 @@ class ParsedArgs:
     notify_action: Optional[str] = None
     loop_id: Optional[str] = None
     cron: Optional[str] = None
+    github: Optional[str] = None
+    run_id: Optional[str] = None
     paused: bool = False
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
@@ -1226,6 +1228,12 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--cron":
         parsed.cron = value
+        return
+    if flag == "--github":
+        parsed.github = value
+        return
+    if flag == "--run":
+        parsed.run_id = value
         return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 

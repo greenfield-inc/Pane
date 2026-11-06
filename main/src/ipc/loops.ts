@@ -86,8 +86,8 @@ export function registerLoopHandlers(ipcMain: IpcMain, loopManager: LoopManager,
     respond(() => loopManager.delete(decodeBoundary(id, boundary.string))));
   commandRegistry.register('loops:set-enabled', (id: PaneCommandValue, enabled: PaneCommandValue) =>
     respond(() => loopManager.setEnabled(decodeBoundary(id, boundary.string), decodeBoundary(enabled, boundary.boolean))));
-  commandRegistry.register('loops:run-now', (id: PaneCommandValue) =>
-    respond(() => loopManager.runNow(decodeBoundary(id, boundary.string))));
+  commandRegistry.register('loops:run-now', (id: PaneCommandValue, runId?: PaneCommandValue) =>
+    respond(() => loopManager.runNow(decodeBoundary(id, boundary.string), decodeBoundary(runId, boundary.optional(boundary.string)))));
   commandRegistry.register('loops:preview', (cron: PaneCommandValue) =>
     respond(() => previewLoopSchedule(decodeBoundary(cron, boundary.string), Date.now())));
   commandRegistry.bindChannels(ipcMain, LOOP_CHANNELS);

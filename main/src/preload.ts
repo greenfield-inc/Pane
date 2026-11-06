@@ -506,7 +506,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     save: (input: LoopInput): Promise<IPCResponse> => invokeIpc('loops:save', input),
     delete: (id: string): Promise<IPCResponse> => invokeIpc('loops:delete', id),
     setEnabled: (id: string, enabled: boolean): Promise<IPCResponse> => invokeIpc('loops:set-enabled', id, enabled),
-    runNow: (id: string): Promise<IPCResponse> => invokeIpc('loops:run-now', id),
+    runNow: (id: string, runId?: string): Promise<IPCResponse> => invokeIpc('loops:run-now', id, runId),
     preview: (cron: string): Promise<IPCResponse> => invokeIpc('loops:preview', cron),
   },
   // Mission Control — live overview of every agent pane across all sessions

@@ -1803,7 +1803,7 @@ export const RUNPANE_CONTRACT = {
       "name": "loops create",
       "summary": "Create a loop: a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, use your agent harness's own sleep and wake.",
       "usage": [
-        "runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]"
+        "runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> (--cron <expr>|--github <json>) (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -1822,7 +1822,7 @@ export const RUNPANE_CONTRACT = {
       "name": "loops update",
       "summary": "Change a loop's repo or Session, name, schedule, agent or command, prompt, or worktree template. Loops are for large recurring jobs and run at most once an hour; for short waits, use your agent harness's own sleep and wake.",
       "usage": [
-        "runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]"
+        "runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--github <json|none>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "idempotent": true,
@@ -1841,7 +1841,7 @@ export const RUNPANE_CONTRACT = {
       "name": "loops run",
       "summary": "Start a run of a loop now. The schedule stays the same.",
       "usage": [
-        "runpane loops run --loop <id> --yes [--json] [--pane-dir <path>]"
+        "runpane loops run --loop <id> [--run <run-id>] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -2261,6 +2261,16 @@ export const RUNPANE_CONTRACT = {
         "description": "Five-field cron schedule in this machine's local time zone, such as \"0 3 * * *\". Runs must be at least 60 minutes apart."
       },
       {
+        "name": "--github",
+        "value": "<json|none>",
+        "description": "GitHub events that also start a project loop's runs, as JSON: {\"repo\":\"owner/name\",\"commentPhrase\":\"/pane\",\"changesRequested\":true,\"checkFailed\":true,\"prOpened\":true,\"issueLabel\":\"agent\",\"allowForks\":false,\"hourlyCap\":12}. Comments and reviews count only from repo collaborators. none removes the triggers."
+      },
+      {
+        "name": "--run",
+        "value": "<run-id>",
+        "description": "loops run: start the GitHub event a skipped run was for (missed, over the hourly cap, or on a PR with an active run)."
+      },
+      {
         "name": "--message",
         "value": "<message>",
         "description": "Commit message for panes commit."
@@ -2621,7 +2631,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
         "  runpane loops list [--json]",
-        "  runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
+        "  runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> (--cron <expr>|--github <json>) (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
         "  runpane loops update|run|pause|resume|delete --loop <id> --yes",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
@@ -4008,9 +4018,9 @@ export const RUNPANE_CONTRACT = {
         "",
         "Commands:",
         "  runpane loops list [--json] [--pane-dir <path>]",
-        "  runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]",
-        "  runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]",
-        "  runpane loops run --loop <id> --yes [--json] [--pane-dir <path>]",
+        "  runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> (--cron <expr>|--github <json>) (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]",
+        "  runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--github <json|none>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]",
+        "  runpane loops run --loop <id> [--run <run-id>] --yes [--json] [--pane-dir <path>]",
         "  runpane loops pause --loop <id> --yes [--json] [--pane-dir <path>]",
         "  runpane loops resume --loop <id> --yes [--json] [--pane-dir <path>]",
         "  runpane loops delete --loop <id> --yes [--json] [--pane-dir <path>]"
@@ -4027,7 +4037,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "loops create": [
         "Usage:",
-        "runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]",
+        "runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> (--cron <expr>|--github <json>) (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]",
         "",
         "Create a loop: a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, use your agent harness's own sleep and wake.",
         "With --repo, each run is a new Pane in a fresh worktree from the repo's default base branch.",
@@ -4041,6 +4051,7 @@ export const RUNPANE_CONTRACT = {
         "                                  it gets, not only loop runs.",
         "  --name <name>                   Loop name.",
         "  --cron <expr>                   Five-field cron in local time, such as \"0 3 * * *\"; at least 1 hour apart.",
+        "  --github <json|none>            GitHub events that also start runs, such as {\"repo\":\"acme/app\",\"commentPhrase\":\"/pane\"}; none removes them.",
         "  --agent <claude|codex|cursor>   Agent each run starts; for a Session loop, the Session's agent.",
         "                                  Runs skip permission prompts.",
         "  --tool-command <command>        Command each run starts instead of an agent, such as",
@@ -4059,7 +4070,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "loops update": [
         "Usage:",
-        "runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]",
+        "runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--github <json|none>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]",
         "",
         "Change a loop's repo or Session, name, schedule, agent or command, prompt, or worktree template. Loops are for large recurring jobs and run at most once an hour; for short waits, use your agent harness's own sleep and wake.",
         "With --repo, each run is a new Pane in a fresh worktree from the repo's default base branch.",
@@ -4074,6 +4085,7 @@ export const RUNPANE_CONTRACT = {
         "                                  it gets, not only loop runs.",
         "  --name <name>                   Loop name.",
         "  --cron <expr>                   Five-field cron in local time, such as \"0 3 * * *\"; at least 1 hour apart.",
+        "  --github <json|none>            GitHub events that also start runs, such as {\"repo\":\"acme/app\",\"commentPhrase\":\"/pane\"}; none removes them.",
         "  --agent <claude|codex|cursor>   Agent each run starts; for a Session loop, the Session's agent.",
         "                                  Runs skip permission prompts.",
         "  --tool-command <command>        Command each run starts instead of an agent, such as",
@@ -4091,12 +4103,13 @@ export const RUNPANE_CONTRACT = {
       ],
       "loops run": [
         "Usage:",
-        "runpane loops run --loop <id> --yes [--json] [--pane-dir <path>]",
+        "runpane loops run --loop <id> [--run <run-id>] --yes [--json] [--pane-dir <path>]",
         "",
         "Start a run of a loop now. The schedule stays the same.",
         "",
         "Options:",
         "  --loop <id>                     Loop id, from runpane loops list.",
+        "  --run <run-id>                  Start the GitHub event this skipped run was for.",
         "  --yes                           Confirm the change.",
         "  --json                          Print JSON output.",
         "  --pane-dir <path>               Connect to a specific Pane data directory."
@@ -4443,7 +4456,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
         "  python -m runpane loops list [--json]",
-        "  python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
+        "  python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> (--cron <expr>|--github <json>) (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
         "  python -m runpane loops update|run|pause|resume|delete --loop <id> --yes",
         "  runpane help [command]",
         "",
@@ -5732,9 +5745,9 @@ export const RUNPANE_CONTRACT = {
         "",
         "Commands:",
         "  python -m runpane loops list [--json] [--pane-dir <path>]",
-        "  python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]",
-        "  python -m runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]",
-        "  python -m runpane loops run --loop <id> --yes [--json] [--pane-dir <path>]",
+        "  python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> (--cron <expr>|--github <json>) (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]",
+        "  python -m runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--github <json|none>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]",
+        "  python -m runpane loops run --loop <id> [--run <run-id>] --yes [--json] [--pane-dir <path>]",
         "  python -m runpane loops pause --loop <id> --yes [--json] [--pane-dir <path>]",
         "  python -m runpane loops resume --loop <id> --yes [--json] [--pane-dir <path>]",
         "  python -m runpane loops delete --loop <id> --yes [--json] [--pane-dir <path>]"
@@ -5751,7 +5764,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "loops create": [
         "Usage:",
-        "python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]",
+        "python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> (--cron <expr>|--github <json>) (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]",
         "",
         "Create a loop: a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, use your agent harness's own sleep and wake.",
         "With --repo, each run is a new Pane in a fresh worktree from the repo's default base branch.",
@@ -5765,6 +5778,7 @@ export const RUNPANE_CONTRACT = {
         "                                  it gets, not only loop runs.",
         "  --name <name>                   Loop name.",
         "  --cron <expr>                   Five-field cron in local time, such as \"0 3 * * *\"; at least 1 hour apart.",
+        "  --github <json|none>            GitHub events that also start runs, such as {\"repo\":\"acme/app\",\"commentPhrase\":\"/pane\"}; none removes them.",
         "  --agent <claude|codex|cursor>   Agent each run starts; for a Session loop, the Session's agent.",
         "                                  Runs skip permission prompts.",
         "  --tool-command <command>        Command each run starts instead of an agent, such as",
@@ -5783,7 +5797,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "loops update": [
         "Usage:",
-        "python -m runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]",
+        "python -m runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--github <json|none>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]",
         "",
         "Change a loop's repo or Session, name, schedule, agent or command, prompt, or worktree template. Loops are for large recurring jobs and run at most once an hour; for short waits, use your agent harness's own sleep and wake.",
         "With --repo, each run is a new Pane in a fresh worktree from the repo's default base branch.",
@@ -5798,6 +5812,7 @@ export const RUNPANE_CONTRACT = {
         "                                  it gets, not only loop runs.",
         "  --name <name>                   Loop name.",
         "  --cron <expr>                   Five-field cron in local time, such as \"0 3 * * *\"; at least 1 hour apart.",
+        "  --github <json|none>            GitHub events that also start runs, such as {\"repo\":\"acme/app\",\"commentPhrase\":\"/pane\"}; none removes them.",
         "  --agent <claude|codex|cursor>   Agent each run starts; for a Session loop, the Session's agent.",
         "                                  Runs skip permission prompts.",
         "  --tool-command <command>        Command each run starts instead of an agent, such as",
@@ -5815,12 +5830,13 @@ export const RUNPANE_CONTRACT = {
       ],
       "loops run": [
         "Usage:",
-        "python -m runpane loops run --loop <id> --yes [--json] [--pane-dir <path>]",
+        "python -m runpane loops run --loop <id> [--run <run-id>] --yes [--json] [--pane-dir <path>]",
         "",
         "Start a run of a loop now. The schedule stays the same.",
         "",
         "Options:",
         "  --loop <id>                     Loop id, from runpane loops list.",
+        "  --run <run-id>                  Start the GitHub event this skipped run was for.",
         "  --yes                           Confirm the change.",
         "  --json                          Print JSON output.",
         "  --pane-dir <path>               Connect to a specific Pane data directory."
@@ -7406,6 +7422,41 @@ export const RUNPANE_CONTRACT = {
         "--session",
         "Nightly",
         "--yes"
+      ],
+      [
+        "loops",
+        "create",
+        "--repo",
+        "active",
+        "--name",
+        "pr-helper",
+        "--github",
+        "{\"repo\":\"acme/app\",\"commentPhrase\":\"/pane\",\"checkFailed\":true}",
+        "--agent",
+        "claude",
+        "--prompt",
+        "Fix it",
+        "--dry-run",
+        "--json"
+      ],
+      [
+        "loops",
+        "update",
+        "--loop",
+        "loop-1",
+        "--github",
+        "none",
+        "--yes"
+      ],
+      [
+        "loops",
+        "run",
+        "--loop",
+        "loop-1",
+        "--run",
+        "run-7",
+        "--yes",
+        "--json"
       ],
       [
         "loops",
@@ -14209,6 +14260,39 @@ export const RUNPANE_CONTRACT = {
         },
         "enabled": {
           "type": "boolean"
+        },
+        "github": {
+          "type": "object",
+          "required": [
+            "repo"
+          ],
+          "properties": {
+            "repo": {
+              "type": "string"
+            },
+            "commentPhrase": {
+              "type": "string"
+            },
+            "changesRequested": {
+              "type": "boolean"
+            },
+            "checkFailed": {
+              "type": "boolean"
+            },
+            "prOpened": {
+              "type": "boolean"
+            },
+            "issueLabel": {
+              "type": "string"
+            },
+            "allowForks": {
+              "type": "boolean"
+            },
+            "hourlyCap": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -14299,7 +14383,8 @@ export const RUNPANE_CONTRACT = {
               "trigger": {
                 "enum": [
                   "schedule",
-                  "manual"
+                  "manual",
+                  "github"
                 ]
               },
               "status": {
@@ -14320,10 +14405,105 @@ export const RUNPANE_CONTRACT = {
                   "string",
                   "null"
                 ]
+              },
+              "event": {
+                "type": "object",
+                "required": [
+                  "key",
+                  "kind",
+                  "repo",
+                  "number",
+                  "isPr",
+                  "url",
+                  "author",
+                  "atMs",
+                  "summary"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "comment",
+                      "review",
+                      "check",
+                      "pr",
+                      "label"
+                    ]
+                  },
+                  "repo": {
+                    "type": "string"
+                  },
+                  "number": {
+                    "type": "number"
+                  },
+                  "isPr": {
+                    "type": "boolean"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "author": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "atMs": {
+                    "type": "number"
+                  },
+                  "summary": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "headRef": {
+                    "type": "string"
+                  },
+                  "fork": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
           }
+        },
+        "github": {
+          "type": "object",
+          "required": [
+            "repo"
+          ],
+          "properties": {
+            "repo": {
+              "type": "string"
+            },
+            "commentPhrase": {
+              "type": "string"
+            },
+            "changesRequested": {
+              "type": "boolean"
+            },
+            "checkFailed": {
+              "type": "boolean"
+            },
+            "prOpened": {
+              "type": "boolean"
+            },
+            "issueLabel": {
+              "type": "string"
+            },
+            "allowForks": {
+              "type": "boolean"
+            },
+            "hourlyCap": {
+              "type": "number"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

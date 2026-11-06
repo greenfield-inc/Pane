@@ -181,10 +181,19 @@ export class LoopManager {
     return this.present(loop);
   }
 
-  /** Start a run now. The schedule is unchanged. */
-  async runNow(id: string): Promise<Loop> {
+  /**
+   * Start a run now. The schedule is unchanged. With `runId`, start the
+   * GitHub event that skipped run was for.
+   */
+  async runNow(id: string, runId?: string): Promise<Loop> {
     const loop = this.options.repo.get(id);
     if (!loop) throw loopNotFound(id);
+    if (runId) {
+      if (this.options.repo.getRun(runId)?.loopId !== id) {
+        throw new PaneError('ERR_LOOP_NOT_FOUND', `Loop "${loop.name}" has no run ${runId}. Nothing was started.`, 'List the loop\'s runs with `runpane loops list --json` and pick a run id from it.');
+      }
+      return this.runEvent(runId);
+    }
     if (this.starting.has(id)) {
       throw new PaneError('ERR_LOOP_STARTING', `A run of "${loop.name}" is already starting. No second run was started.`, 'Wait for it to appear, then run again if you need another.');
     }

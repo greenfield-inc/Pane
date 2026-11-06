@@ -521,9 +521,9 @@ runpane pr watch [--pane <id>] --url <PR URL> [--head <full-sha>] [--json] [--pa
 runpane pr unwatch [--pane <id>] --url <PR URL> [--json] [--pane-dir <path>]
 runpane pr list [--pane <id>] [--json] [--pane-dir <path>]
 runpane loops list [--json] [--pane-dir <path>]
-runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]
-runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]
-runpane loops run --loop <id> --yes [--json] [--pane-dir <path>]
+runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> (--cron <expr>|--github <json>) (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]
+runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--github <json|none>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]
+runpane loops run --loop <id> [--run <run-id>] --yes [--json] [--pane-dir <path>]
 runpane loops pause --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops resume --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops delete --loop <id> --yes [--json] [--pane-dir <path>]
@@ -675,6 +675,8 @@ These flags are consumed by local daemon-control commands:
 --note <text>
 --loop <id>
 --cron <expr>
+--github <json|none>
+--run <run-id>
 --message <message>
 --query <text>
 --doc <path>

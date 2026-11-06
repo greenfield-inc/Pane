@@ -164,6 +164,9 @@ export interface ParsedArgs {
   loopId?: string;
   cron?: string;
   paused?: boolean;
+  /** loops create/update: `LoopGithubTriggers` JSON, or `none`; loops run: a skipped GitHub event run to start. */
+  github?: string;
+  runId?: string;
   /** `runpane workspace <machine> ...` */
   workspaceMachine?: string;
   workspacePath?: string;
@@ -1211,6 +1214,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--cron') {
     parsed.cron = value;
+    return;
+  }
+  if (flag === '--github') {
+    parsed.github = value;
+    return;
+  }
+  if (flag === '--run') {
+    parsed.runId = value;
     return;
   }
 

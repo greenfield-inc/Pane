@@ -2623,16 +2623,20 @@ interface LoopInput {
   initialInput?: string;
   worktreeTemplate?: string;
   enabled: boolean;
+  /** `LoopGithubTriggers`: GitHub events that also start runs; the daemon validates it. */
+  github?: JsonObject;
 }
 
 interface LoopRun {
   id: string;
   loopId: string;
   slotAtMs: number;
-  trigger: 'schedule' | 'manual';
+  trigger: 'schedule' | 'manual' | 'github';
   status: 'started' | 'failed' | 'skipped';
   error: string | null;
   sessionId: string | null;
+  /** `LoopGithubEvent`: the GitHub event the run started from, or was skipped for. */
+  event?: JsonObject;
 }
 
 /** The CLI's copy of `Loop` in shared/types/loop.ts, which this package cannot import. */
@@ -2648,15 +2652,23 @@ type LoopSchedulePreview = { ok: true; scheduleText: string; nextRunAtMs: number
 
 /** An optional loop field the daemon may send as null. */
 const optionalLoopText = boundary.optional(boundary.nullable(boundary.string));
-const loopRunSchema: BoundarySchema<LoopRun> = boundary.object({
+const loopRunFieldsSchema = boundary.object({
   id: boundary.string,
   loopId: boundary.string,
   slotAtMs: boundary.number,
-  trigger: boundary.enumeration('schedule', 'manual'),
+  trigger: boundary.enumeration('schedule', 'manual', 'github'),
   status: boundary.enumeration('started', 'failed', 'skipped'),
   error: boundary.nullable(boundary.string),
   sessionId: boundary.nullable(boundary.string),
+  event: boundary.optional(boundary.nullable(boundary.jsonObject)),
 });
+/** Leaves `event` out unless the run has one; the Python CLI prints runs the same way. */
+const loopRunSchema: BoundarySchema<LoopRun> = {
+  decode(cursor) {
+    const { event, ...run } = loopRunFieldsSchema.decode(cursor);
+    return event ? { ...run, event } : run;
+  },
+};
 const loopFieldsSchema = boundary.object({
   id: boundary.string,
   name: boundary.string,
@@ -2668,6 +2680,7 @@ const loopFieldsSchema = boundary.object({
   initialInput: optionalLoopText,
   worktreeTemplate: optionalLoopText,
   enabled: boundary.boolean,
+  github: boundary.optional(boundary.nullable(boundary.jsonObject)),
   createdAtMs: boundary.number,
   nextRunAtMs: boundary.nullable(boundary.number),
   scheduleText: boundary.string,
@@ -2676,7 +2689,7 @@ const loopFieldsSchema = boundary.object({
 /** Drops unset optional fields and puts the set ones last; the Python CLI prints loops in this same order. */
 const loopSchema: BoundarySchema<Loop> = {
   decode(cursor) {
-    const { projectId, orchestrationSessionId, agent, toolCommand, initialInput, worktreeTemplate, ...rest } = loopFieldsSchema.decode(cursor);
+    const { projectId, orchestrationSessionId, agent, toolCommand, initialInput, worktreeTemplate, github, ...rest } = loopFieldsSchema.decode(cursor);
     const loop: Loop = rest;
     if (projectId) loop.projectId = projectId;
     if (orchestrationSessionId) loop.orchestrationSessionId = orchestrationSessionId;
@@ -2684,6 +2697,7 @@ const loopSchema: BoundarySchema<Loop> = {
     if (toolCommand) loop.toolCommand = toolCommand;
     if (initialInput) loop.initialInput = initialInput;
     if (worktreeTemplate) loop.worktreeTemplate = worktreeTemplate;
+    if (github) loop.github = github;
     return loop;
   },
 };
@@ -2729,6 +2743,12 @@ export async function runLoopsList(parsed: ParsedArgs): Promise<number> {
 
 export async function runLoopsSave(parsed: ParsedArgs): Promise<number> {
   const input = parsed.command === 'loops update' ? await mergeLoopUpdate(parsed) : await buildLoopCreate(parsed);
+  if (parsed.dryRun && !input.cron && input.github) {
+    const scheduleText = `On GitHub events in ${String(input.github.repo)}`;
+    if (parsed.json) printJson({ ok: true, dryRun: true, input, scheduleText, nextRunAtMs: null });
+    else console.log(`Would save loop ${input.name}: ${scheduleText}${input.enabled ? '' : ' (paused)'}.`);
+    return 0;
+  }
   if (parsed.dryRun) {
     const preview = await invokeDaemon('runpane:loops:preview', [{ cron: input.cron }], loopPreviewSchema, { paneDir: parsed.paneDir });
     if (!preview.ok) throw new RunpaneError('ERR_RUNPANE_LOOP_CRON', `${preview.error} Nothing was saved.`, 'Pass a five-field cron such as "0 3 * * *" with --cron.');
@@ -2752,7 +2772,8 @@ function describeLoopRunStatus(run: LoopRun): string {
 export async function runLoopsRun(parsed: ParsedArgs): Promise<number> {
   const id = requireLoopId(parsed);
   await confirmMutation(parsed);
-  const { loop } = await invokeDaemon('runpane:loops:run-now', [{ loopId: id }], loopResultSchema, { paneDir: parsed.paneDir });
+  const runId = parsed.runId?.trim();
+  const { loop } = await invokeDaemon('runpane:loops:run-now', [runId ? { loopId: id, runId } : { loopId: id }], loopResultSchema, { paneDir: parsed.paneDir });
   const [run] = loop.runs;
   if (parsed.json) {
     printJson({ ok: true, loop });
@@ -2820,8 +2841,9 @@ async function buildLoopCreate(parsed: ParsedArgs): Promise<LoopInput> {
   const name = parsed.name?.trim();
   const session = parsed.sessionId?.trim();
   if (parsed.repo && session) throw new Error('runpane loops create takes either --repo or --session, not both.');
-  if ((!parsed.repo && !session) || !name || !parsed.cron) {
-    throw new Error('runpane loops create requires --repo <selector> or --session <id|name|new>, --name <name>, and --cron <expr>.');
+  const github = loopGithubFlag(parsed);
+  if ((!parsed.repo && !session) || !name || (!parsed.cron && !github)) {
+    throw new Error('runpane loops create requires --repo <selector> or --session <id|name|new>, --name <name>, and --cron <expr> or --github <json>.');
   }
   const agent = loopAgent(parsed);
   if (agent && parsed.toolCommand) throw new Error('runpane loops create takes either --agent or --tool-command, not both.');
@@ -2830,13 +2852,31 @@ async function buildLoopCreate(parsed: ParsedArgs): Promise<LoopInput> {
     name,
     projectId: parsed.repo ? await resolveLoopProjectId(parsed, parsed.repo) : undefined,
     orchestrationSessionId: session,
-    cron: parsed.cron,
+    cron: parsed.cron ?? '',
     agent,
     toolCommand: parsed.toolCommand,
     initialInput: resolveInitialInput(parsed),
     worktreeTemplate: parsed.worktreeName,
     enabled: !parsed.paused,
+    github: github ?? undefined,
   });
+}
+
+/** `--github <json>` as an object, `--github none` as null (remove the triggers), or undefined when absent. */
+function loopGithubFlag(parsed: ParsedArgs): JsonObject | null | undefined {
+  const value = parsed.github?.trim();
+  if (value === undefined) return undefined;
+  if (value === 'none') return null;
+  let decoded: JsonValue;
+  try {
+    decoded = decodeBoundary(JSON.parse(value), boundary.json);
+  } catch {
+    throw new RunpaneError('ERR_RUNPANE_LOOP_GITHUB', '--github is not valid JSON. Nothing was saved.', 'Pass an object such as \'{"repo":"acme/app","commentPhrase":"/pane"}\', or none to remove the triggers.');
+  }
+  if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) {
+    throw new RunpaneError('ERR_RUNPANE_LOOP_GITHUB', '--github must be a JSON object. Nothing was saved.', 'Pass an object such as \'{"repo":"acme/app","commentPhrase":"/pane"}\', or none to remove the triggers.');
+  }
+  return decoded;
 }
 
 /** Reads the loop and replaces the fields the flags name; --agent and --tool-command replace each other, as do --repo and --session. */
@@ -2850,6 +2890,7 @@ async function mergeLoopUpdate(parsed: ParsedArgs): Promise<LoopInput> {
   const loops = await listLoops(parsed);
   const loop = loops.find((candidate) => candidate.id === id);
   if (!loop) throw new RunpaneError('ERR_RUNPANE_LOOP_NOT_FOUND', `No loop found with id ${id}. Nothing was changed.`, 'See loop ids with `runpane loops list`.');
+  const github = loopGithubFlag(parsed);
   const replacesTool = Boolean(agent || parsed.toolCommand);
   const replacesTarget = Boolean(parsed.repo || session);
   const initialInput = resolveInitialInput(parsed);
@@ -2864,12 +2905,13 @@ async function mergeLoopUpdate(parsed: ParsedArgs): Promise<LoopInput> {
     initialInput: initialInput ?? loop.initialInput,
     worktreeTemplate: parsed.worktreeName ?? loop.worktreeTemplate,
     enabled: loop.enabled,
+    github: github === undefined ? loop.github : github ?? undefined,
   });
 }
 
 /** Leaves out the optional fields that are unset or blank, so the daemon stores them as absent. */
 function withoutEmptyLoopFields(input: LoopInput): LoopInput {
-  const { projectId, orchestrationSessionId, agent, toolCommand, initialInput, worktreeTemplate, ...rest } = input;
+  const { projectId, orchestrationSessionId, agent, toolCommand, initialInput, worktreeTemplate, github, ...rest } = input;
   const result: LoopInput = rest;
   if (projectId) result.projectId = projectId;
   if (orchestrationSessionId) result.orchestrationSessionId = orchestrationSessionId;
@@ -2877,6 +2919,7 @@ function withoutEmptyLoopFields(input: LoopInput): LoopInput {
   if (toolCommand?.trim()) result.toolCommand = toolCommand;
   if (initialInput?.trim()) result.initialInput = initialInput;
   if (worktreeTemplate?.trim()) result.worktreeTemplate = worktreeTemplate;
+  if (github) result.github = github;
   return result;
 }
 
