@@ -9,6 +9,7 @@ exports.ERROR_STATUS = {
     unauthenticated: 401,
     signature_invalid: 401,
     operation_expired: 401,
+    payment_required: 402,
     not_invited: 403,
     not_machine_owner: 403,
     not_team_owner: 403,

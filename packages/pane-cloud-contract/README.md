@@ -74,7 +74,8 @@ stubs: `pnpm --filter pane-cloud-contract test`.
 ## Errors
 
 Every error response is `{ "error": { "code", "message", "next" } }`, and each code has one HTTP
-status (`ERROR_STATUS` in `src/errors.ts`). The clients throw `CloudApiError` for these, and
+status (`ERROR_STATUS` in `src/errors.ts`). `payment_required` (402) means the team's bill is unpaid
+or its subscription ended; its `next` points at the billing manage link (`GET /v1/billing`). The clients throw `CloudApiError` for these, and
 `ContractViolationError` for any response outside the contract.
 
 ## Service API
@@ -132,7 +133,8 @@ Called only by the service. Every change to a machine is one signed operation.
 | Operation | Runs on | Parameters |
 | --- | --- | --- |
 | `create` | host | none; the same fixed size limits for every machine (`MACHINE_LIMITS`) |
-| `resume`, `stop`, `delete` | host | none; stop snapshots memory and disk |
+| `resume`, `delete` | host | none |
+| `stop` | host | `cause`: `user`, `billing`, `end_of_beta` or `abuse`, recorded as the machine's `stateReason`; stop snapshots memory and disk. The fleet's own stops (idle, memory pressure, host maintenance, host loss) set their own reason |
 | `bootstrap` | guest | `release`: a published Pane `version`, `arch: arm64` and the `.deb`'s `debSha256` |
 | `update_pane` | guest | the same `release`; the host refuses a checksum that is not a published release |
 | `prepare_to_stop` | guest | none |
