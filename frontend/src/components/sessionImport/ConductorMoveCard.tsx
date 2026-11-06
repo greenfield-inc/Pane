@@ -189,7 +189,7 @@ export function ConductorMoveCard({ scan, machines, onClose, onRescanned, onBusy
                       />
                       <span className="min-w-0 flex-1">
                         <span className={cn('block truncate', movable ? 'text-text-primary' : 'text-text-tertiary')}>{workspace.name}</span>
-                        <span className="block truncate text-xs text-text-tertiary">{workspaceMeta(workspace)}</span>
+                        <span className="block text-xs text-text-tertiary">{workspaceMeta(workspace)}</span>
                       </span>
                       {/* Fixed box, so the row keeps its size while the spinner comes and goes. */}
                       <span className="mt-0.5 flex h-3.5 w-3.5 flex-none items-center justify-center" aria-hidden>
@@ -247,7 +247,7 @@ function ReadDisclosure({ scan }: { scan: ConductorMoveScan }) {
 function MoveResult({ result, onDone }: { result: ConductorMoveResult; onDone: () => void }) {
   const failed = result.results.filter(entry => entry.outcome === 'not moved');
   const moved = result.results.filter(entry => entry.outcome === 'moved');
-  const notes = moved.flatMap(entry => workspaceNotes(entry));
+  const notes = moved.flatMap(entry => workspaceNotes(entry, result.machine));
   return (
     <div className="mt-2 space-y-2 text-sm">
       <p className="text-text-primary">{moveHeadline(result)}</p>
@@ -285,18 +285,18 @@ function MoveResult({ result, onDone }: { result: ConductorMoveResult; onDone: (
 }
 
 /** A moved workspace's chats that didn't resume, and a setup script that failed. */
-function workspaceNotes(entry: MovedWorkspaceResult): Array<{ key: string; label: string; text: string }> {
+function workspaceNotes(entry: MovedWorkspaceResult, machine: string): Array<{ key: string; label: string; text: string }> {
   const notes = entry.chats
     .filter(chat => chat.outcome !== 'continued')
     .map(chat => ({
       key: `${entry.key}:${chat.key}`,
       label: `${entry.name} · ${chat.title ?? agentName(chat.agent)}`,
-      text: chat.outcome === 'waiting for trust' ? 'answer the trust prompt in its tab'
-        : chat.outcome === 'still starting' ? 'its agent is still loading; check its tab'
+      text: chat.outcome === 'waiting for trust' ? `answer the trust prompt in its tab on ${machine}`
+        : chat.outcome === 'still starting' ? `its agent is still loading; check its tab on ${machine}`
           : chat.reason ?? 'it didn\'t resume',
     }));
   if (entry.setup && !entry.setup.ok) {
-    notes.push({ key: `${entry.key}:setup`, label: `${entry.name} · setup script`, text: `failed (from ${entry.setup.source})${entry.setup.detail ? `: ${entry.setup.detail}` : ''}. Run it again in a terminal there.` });
+    notes.push({ key: `${entry.key}:setup`, label: `${entry.name} · setup script`, text: `failed (from ${entry.setup.source})${entry.setup.detail ? `: ${entry.setup.detail}` : ''}. Run it again in a terminal on ${machine}.` });
   }
   return notes;
 }

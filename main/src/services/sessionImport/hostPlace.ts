@@ -201,7 +201,10 @@ async function placeMovedWorkspace(placement: HostWorkspacePlacement, port: Host
     const staging = fs.mkdtempSync(path.join(port.paneDir, 'session-import-staging-'));
     try {
       const sessions = await stageChats(placement, staging, worktree, repo.path, port);
-      const placed = await placeSessions({ sessions, port, stores: port.stores, paneDir: port.paneDir });
+      const placed = await placeSessions({
+        sessions, port, stores: port.stores, paneDir: port.paneDir,
+        retryNext: `Its transcript is on ${port.machineName}: open its Pane there and resume it from a new tab.`,
+      });
       let pane = placed.results.find(result => result.paneId && result.outcome !== 'not continued');
       if (!pane) {
         const adopted = await port.adoptWithoutChat(repo.id, worktree, path.basename(worktree));
