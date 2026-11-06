@@ -249,7 +249,12 @@ watcher.`); zero is fine, because the named cursor gets it on its next wait.
 **Status files.** When your protocol keeps richer state in a file, the file is
 the truth and the report is the signal. Write the file first, then report
 with `--summary-file <that file>`: Pane keeps up to 16,000 characters of it
-and its absolute path as `summaryPath`. Map your states onto the four:
+and its absolute path as `summaryPath`. Keep the file in the worker's
+`.pane/prompts/` folder, beside its brief: once Pane has delivered a brief
+there with `--as-file-pointer`, it hides that folder from git, so the file never
+blocks archiving and goes away with the worktree. An untracked file
+anywhere else in the worktree makes the archive dry run unclean and keeps the
+Pane. Map your states onto the four:
 
 | The worker's own state | Report |
 | --- | --- |
@@ -426,7 +431,12 @@ runpane panels open --url file://<absolute path> --title <short name> --split --
 `--url` takes http, https and file URLs, and HTML and images render. `--file
 <path>` opens a file from the Pane's worktree in an editor tab. The tab opens
 beside the conversation in the calling Pane (or Session) unless you pass
-`--pane`, and reopening the same URL reloads its tab. Link anything else.
+`--pane`, and reopening the same URL reloads its tab.
+
+Keep one status document and open that; link plans, PRs, mock-ups and reports
+from it rather than opening each one. Open another page only when the person
+needs to look at it now, and close it once that's done (see Keep the Session
+tidy below).
 
 ## Shared checkout and ports
 
@@ -488,9 +498,59 @@ runpane lock list --json
 the agent fills in `runpane handoff --template`, then runs
 `runpane handoff "<destination>" --note-file <note> [--push]`.
 
-## Clean up
+## Keep the Session tidy
 
-Archiving removes a Pane's worktree, so it needs the person's approval. Once
-PRs merge, preview with `runpane panes archive --session <S> --merged --dry-run --json`
-and rerun with `--yes`. It keeps any Pane with an open or unmerged PR,
-unpushed work, a busy agent or unsent input, and says why. Close every page, server and browser you opened.
+Clean up as you go, without asking. In your next message, say in one line what
+you closed or archived. This applies only to a Session orchestrator, and only
+to its own Session's Panes and tabs. Outside a Session, archiving removes a
+Pane's worktree, so it still needs the person's approval: preview with the
+dry run and offer it.
+
+Keep one status document for this Session, in the Session folder, and update it
+in place. Open it beside the person when you first write it (`runpane panels open
+--url file://<path> --source agent --yes --json`) and reopen the same URL after
+each material update; it is the one tab you keep open. Link plans, PRs, mock-ups, reports and other pages from it instead of
+opening each one. Reopening the same URL reuses its tab. Open a page beside the
+person only when they need to look at it now: a question's files, a PR waiting
+for their look, a visual tweak. Close it once that's done. When Approvals is
+on, a question's files go on its card as links.
+
+Close a tab you opened (`runpane panels close --panel <id> --yes --json`;
+`--dry-run` checks without closing) once it no longer matters:
+
+- the person is no longer asking about it or working on it;
+- it was opened a while ago and nothing current points to it: no open item on
+  your work list, no question waiting, no running worker, nothing the person
+  is asking about;
+- it showed something for an item that is now done: a question that was
+  answered, a plan or design that was approved or replaced, a PR that merged
+  or closed, screenshots of a tweak that was accepted;
+- a newer revision of the same document is open in another tab;
+- it is a worker's tab, the worker reported done and is idle, its result is
+  recorded, and nothing on your work list will send it more work.
+
+Judge from what the person is asking about and working on now. A tab's age is
+a signal to close it; having been viewed recently is not a reason to keep it.
+Keep the status document open until /wrap-up. Never close a tab the person
+opened, an agent in the middle of a turn, or a tab with text the person typed
+and didn't send. `panels close` refuses these. Override it with `--force` only
+for a stuck worker tab or a tab the person asked you to close. Open tabs
+with `--source agent`: only those count as yours, and
+`runpane panels list --json` shows who opened each tab (`openedBy`). Stop
+servers and browsers you started once nothing needs them.
+
+Archive a feature's Pane when its PR merged or closed and no agent in it is
+working. That includes a PR you merged because the person told you to: archive
+its Pane right after the merge, in the same turn. Run
+`runpane panes archive --pane <id> --dry-run --json` first and archive with
+`--yes` only if it is clean. If it reports uncommitted or unpushed work, a
+busy agent or unsent input, keep the Pane and say why. Never pass `--force`. For several at
+once: `runpane panes archive --session <S> --merged --closed --dry-run --json`,
+then the same with `--yes`. The local branch stays, and `runpane panes restore`
+brings the worktree back.
+
+When: as each item closes, and when you start, resume or wake. Never touch
+Panes or tabs of another Session.
+
+When the person types /wrap-up or asks to wrap up, follow
+[/wrap-up](../wrap-up/SKILL.md).

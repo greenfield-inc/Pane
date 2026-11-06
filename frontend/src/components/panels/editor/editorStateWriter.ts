@@ -12,8 +12,8 @@ export interface EditorStateWriter {
  * Batches an editor tab's state writes (cursor, scroll, dirty flag) into one
  * write per `waitMs`, merging fields so a later cursor update never drops a
  * pending dirty flag. A tab that just became dirty is written at once, since
- * archive reads that flag to keep a Pane with unsaved edits; while it stays
- * dirty, its writes are debounced like any other.
+ * archive and `runpane panels close` read that flag to keep unsaved edits; while
+ * it stays dirty, its writes are debounced like any other.
  */
 export function createEditorStateWriter(write: WriteEditorState, waitMs: number): EditorStateWriter {
   let pending: { panelId: string; sessionId: string; state: Partial<EditorPanelState> } | undefined;

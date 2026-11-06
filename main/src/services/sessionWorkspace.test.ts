@@ -116,12 +116,71 @@ describe('Session workspace instructions', () => {
     expect(() => prepareSessionWorkspace('session-a')).toThrow('markers are incomplete');
     await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(broken);
   });
-  it('tells the agent to write plans as HTML and open them in split tabs', async () => {
+  it('tells the agent to write plans as HTML, link them from the status document, and open them only when needed', async () => {
     const cwd = prepareSessionWorkspace('plans');
-    const agents = await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8');
+    const agents = (await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).replace(/\s+/g, ' ');
     expect(agents).toContain('self-contained HTML file');
     expect(agents).toContain('runpane panels open --file');
+    expect(agents).toContain('Link it from the Session\'s status document');
+    expect(agents).toContain('Open it beside the user only when they need to look at it now');
+    expect(agents).not.toContain('Then show the rendered page with runpane panels open');
     expect(agents).not.toContain('progress.html');
+  });
+
+  it('gives the orchestrator its own Keep the Session tidy section', async () => {
+    const cwd = prepareSessionWorkspace('tidy');
+    const agents = (await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).replace(/\s+/g, ' ');
+    expect(agents).toContain('## Keep the Session tidy');
+    expect(agents).toContain('Clean up as you go, without asking. In your next message, say in one line what you closed or archived.');
+    expect(agents).toContain('Keep one status document for this Session, in the Session folder, and update it in place.');
+    expect(agents).toContain('Open it beside the person when you first write it');
+    expect(agents).toContain('Open a page beside the person only when they need to look at it now');
+    expect(agents).toContain('runpane panels close --panel <id> --yes --json');
+    expect(agents).toContain('A tab\'s age is a signal to close it; having been viewed recently is not a reason to keep it.');
+    expect(agents).toContain('Never close a tab the person opened, an agent in the middle of a turn, or a tab with text the person typed and didn\'t send.');
+    expect(agents).toContain('archive its Pane right after the merge, in the same turn');
+    expect(agents).toContain('runpane panes archive --pane <id> --dry-run --json');
+    expect(agents).toContain('Never pass `--force`.');
+    expect(agents).toContain('runpane panes archive --session tidy --merged --closed --dry-run --json');
+    expect(agents).toContain('Never touch Panes or tabs of another Session.');
+    expect(agents).toContain(`When the person types /wrap-up or asks to wrap up, follow ${path.join(cwd, '.claude', 'skills', 'wrap-up', 'SKILL.md')}`);
+    expect(agents).not.toMatch(/archiv[^.]*approv|approv[^.]*archiv/i);
+  });
+
+  it('installs /wrap-up in the Session folder for Claude Code and Codex, and keeps the scaffold pristine', async () => {
+    const record: OrchestrationSessionRecord = {
+      id: 'wrap', name: 'Wrap', agent: 'claude', internalSessionId: 'owner',
+      panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor' },
+      goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+      associations: [], activity: [], revision: 1, createdAt: '2026-11-04', updatedAt: '2026-11-04',
+    };
+    const cwd = prepareSessionWorkspace(record.id, undefined, record);
+    const bundled = await fs.readFile(path.join(__dirname, 'paneChatBundle', 'skills', 'wrap-up', 'SKILL.md'), 'utf8');
+    for (const folder of ['.claude', '.agents']) {
+      const skill = await fs.readFile(path.join(cwd, folder, 'skills', 'wrap-up', 'SKILL.md'), 'utf8');
+      expect(skill).toContain('name: wrap-up');
+      expect(skill).toContain(bundled.split('---\n').slice(2).join('---\n').trim());
+    }
+    expect(isPristineSessionWorkspace(record)).toBe(true);
+    // A user's own edit to the skill survives the next launch and marks the folder as used.
+    const claudeSkill = path.join(cwd, '.claude', 'skills', 'wrap-up', 'SKILL.md');
+    await fs.writeFile(claudeSkill, '---\nname: wrap-up\n---\nMine.\n');
+    prepareSessionWorkspace(record.id, undefined, record);
+    await expect(fs.readFile(claudeSkill, 'utf8')).resolves.toBe('---\nname: wrap-up\n---\nMine.\n');
+    expect(isPristineSessionWorkspace(record)).toBe(false);
+    expect(discardSessionScaffold(record)).toBe(false);
+  });
+
+  it('removes a pristine scaffold including its /wrap-up skill', async () => {
+    const record: OrchestrationSessionRecord = {
+      id: 'discard', name: 'Discard', agent: 'codex', internalSessionId: 'owner',
+      panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor' },
+      goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+      associations: [], activity: [], revision: 1, createdAt: '2026-11-04', updatedAt: '2026-11-04',
+    };
+    const cwd = prepareSessionWorkspace(record.id, undefined, record);
+    expect(discardSessionScaffold(record)).toBe(true);
+    await expect(fs.access(cwd)).rejects.toThrow();
   });
 
   it('requires Pane delegation instead of silent fallbacks', async () => {

@@ -13,6 +13,8 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { Project } from '../database/models';
+import type { ConfigManager } from '../services/configManager';
+import type { AppConfig } from '../types/config';
 import type { Session } from '../types/session';
 import type { AppServices } from './types';
 import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
@@ -30,6 +32,7 @@ import { removeWorktreeViaTrash, waitForPendingWorktreeTrash } from '../services
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
+import { getChatTabManager } from '../services/chatTabs';
 import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
 import { usageManager } from '../services/usage/usageManager';
@@ -313,6 +316,12 @@ function createTempGitRepo(name = 'repo'): string {
   execFileSync('git', ['config', 'user.name', 'Pane Test'], { cwd: repoPath, stdio: 'ignore' });
   execFileSync('git', ['config', 'user.email', 'pane-test@example.invalid'], { cwd: repoPath, stdio: 'ignore' });
   return repoPath;
+}
+
+function configStub(value: Partial<ConfigManager>): ConfigManager {
+  // SAFETY: chat tab creation reads only getConfig() from the config manager;
+  // any other method call fails at its own site.
+  return value as ConfigManager;
 }
 
 function createRegistry(services = createServices()): PaneCommandRegistry {
@@ -2929,6 +2938,57 @@ describe('runpane IPC handlers', () => {
     }));
   });
 
+  it('records who opened a chat tab, so panels close can close an agent\'s chat tab too', async () => {
+    const chatPanel: ToolPanel = { ...terminalPanel, id: 'chat-panel', type: 'chat', title: 'Claude' };
+    vi.mocked(panelManager.createPanel).mockResolvedValue(chatPanel);
+    vi.mocked(panelManager.getPanel).mockReturnValue(chatPanel);
+    const manager = getChatTabManager();
+    const ensure = vi.spyOn(manager, 'ensure').mockResolvedValue(undefined);
+    const view = vi.spyOn(manager, 'view').mockReturnValue({ panelId: chatPanel.id, agent: 'claude', status: 'idle', permissions: [], questions: [], queue: [], messageCount: 0 });
+    const config: AppConfig = { chatTabsEnabled: true };
+    setPaneRuntime({
+      eventSink: { send: () => undefined },
+      getConfigManager: () => configStub({ getConfig: () => config }),
+      getPtyHostRuntime: () => null,
+      getWebviewContextMap: () => new Map(),
+    });
+    try {
+      const registry = createRegistry(createServices());
+      await registry.invoke('runpane:panels:create', [{ paneId: session.id, type: 'chat', chat: { agent: 'claude' }, source: 'agent', callerPanelId: 'orchestrator-panel' }]);
+      await registry.invoke('runpane:panels:create', [{ paneId: session.id, type: 'chat', chat: { agent: 'claude' } }]);
+
+      expect(vi.mocked(panelManager.createPanel).mock.calls.map(([request]) => [request.type, request.metadata?.openedBy])).toEqual([
+        ['chat', { source: 'agent', panelId: 'orchestrator-panel' }],
+        ['chat', undefined],
+      ]);
+    } finally {
+      resetPaneRuntimeForTests();
+      ensure.mockRestore();
+      view.mockRestore();
+    }
+  });
+
+  it('records who opened each tab it creates, so panels close can tell an agent\'s tab from the person\'s', async () => {
+    vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+    vi.mocked(panelManager.getPanel).mockReturnValue(terminalPanel);
+    const registry = createRegistry(createServices());
+
+    await registry.invoke('runpane:panels:create', [{ paneId: session.id, tool: { agent: 'claude' }, noFocus: true, source: 'agent', callerPanelId: 'orchestrator-panel' }]);
+    await registry.invoke('runpane:panes:create', [{
+      repo: { id: project.id }, panes: [{ name: 'worker', tool: { agent: 'codex' } }], source: 'agent', callerPanelId: 'orchestrator-panel',
+    }]);
+    await registry.invoke('runpane:panels:create', [{ paneId: session.id, tool: { agent: 'claude' }, noFocus: true, source: 'user' }]);
+    await registry.invoke('runpane:panels:create', [{ paneId: session.id, tool: { agent: 'claude' }, noFocus: true }]);
+
+    const metadata = vi.mocked(panelManager.createPanel).mock.calls.map(([request]) => request.metadata?.openedBy);
+    expect(metadata).toEqual([
+      { source: 'agent', panelId: 'orchestrator-panel' },
+      { source: 'agent', panelId: 'orchestrator-panel' },
+      { source: 'user' },
+      undefined,
+    ]);
+  });
+
   it('rejects a resume id for a wrapper command before opening a tab', async () => {
     vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
     await expect(createRegistry(createServices()).invoke('runpane:panels:create', [{
@@ -2984,6 +3044,7 @@ describe('runpane IPC handlers', () => {
         launchCommand: RUNPANE_CONTRACT.agentTemplates.claude.command,
         isCliPanel: true,
       },
+      metadata: { openedBy: { source: 'agent' } },
       activate: false,
     });
     expect(terminalPanelManager.initializeTerminal).toHaveBeenCalledWith(
@@ -3698,32 +3759,26 @@ describe('runpane IPC handlers', () => {
     });
   });
 
-  it('closes a panel through the app close-tab command and names what it closed', async () => {
+  it('with force, closes a tab the person opened through the app close-tab command and names what it closed (D-209)', async () => {
     const registry = createRegistry();
     const closeTab = vi.fn(async () => ({ success: true }));
     registry.register('panels:delete', closeTab);
 
-    const result = await registry.invoke('runpane:panels:close', [{ panelId: terminalPanel.id }]);
+    expect(await registry.invoke('runpane:panels:close', [{ panelId: terminalPanel.id }]))
+      .toMatchObject({ ok: false, closed: false, refused: { code: 'opened-by-user' } });
+    expect(closeTab).not.toHaveBeenCalled();
+
+    const result = await registry.invoke('runpane:panels:close', [{ panelId: terminalPanel.id, force: true }]);
 
     expect(closeTab).toHaveBeenCalledWith(terminalPanel.id);
-    expect(result).toMatchObject({ ok: true, paneId: session.id, panelId: terminalPanel.id, type: 'terminal', title: 'Codex' });
-  });
-
-  it('refuses to close an unknown panel without touching any tab', async () => {
-    const registry = createRegistry();
-    const closeTab = vi.fn(async () => ({ success: true }));
-    registry.register('panels:delete', closeTab);
-
-    await expect(registry.invoke('runpane:panels:close', [{ panelId: 'missing-panel' }]))
-      .rejects.toMatchObject({ code: 'ERR_RUNPANE_PANEL_NOT_FOUND' });
-    expect(closeTab).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, closed: true, forced: true, paneId: session.id, panelId: terminalPanel.id, type: 'terminal', title: 'Codex' });
   });
 
   it('reports the app refusing to close a panel', async () => {
     const registry = createRegistry();
     registry.register('panels:delete', async () => ({ success: false, error: 'This panel cannot be closed.' }));
 
-    await expect(registry.invoke('runpane:panels:close', [{ panelId: terminalPanel.id }]))
+    await expect(registry.invoke('runpane:panels:close', [{ panelId: terminalPanel.id, force: true }]))
       .rejects.toMatchObject({ code: 'ERR_RUNPANE_PANEL_CLOSE_FAILED', message: expect.stringContaining('This panel cannot be closed.') });
   });
 
@@ -8014,9 +8069,9 @@ describe('runpane IPC handlers', () => {
       expect(sessionsDelete).toHaveBeenCalledWith(session.id);
     });
 
-    it('keeps a Pane whose idle agent holds a draft or whose editor has unsaved edits', async () => {
+    it('keeps a Pane whose idle agent holds a draft that panels close refuses to lose, in the sweep too', async () => {
       const externalSession: Session = { ...session, worktreeOwnership: 'external' };
-      const drafting: ToolPanel = { ...terminalPanel, id: 'drafting', title: 'Codex' };
+      const drafting: ToolPanel = { ...terminalPanel, id: 'drafting', title: 'Codex', metadata: { ...terminalPanel.metadata, openedBy: { source: 'agent' } } };
       const editing: ToolPanel = { ...terminalPanel, id: 'editing', type: 'editor', title: 'notes.md', state: { isActive: false, customState: { filePath: 'notes.md', isDirty: true } } };
       vi.mocked(panelManager.getPanelsForSession).mockReturnValue([drafting, editing]);
       vi.mocked(panelManager.getPanel).mockImplementation(panelId => [drafting, editing].find(panel => panel.id === panelId));
@@ -8029,7 +8084,10 @@ describe('runpane IPC handlers', () => {
       });
       const registry = createRegistry(services);
       const sessionsDelete = registerSessionsDeleteStub(registry, services);
+      registry.register('panels:delete', vi.fn(async () => ({ success: true })));
 
+      // The close and the archive agree: neither loses the draft.
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: 'drafting' }])).toMatchObject({ ok: false, refused: { code: 'unsent-input' } });
       expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }])).toMatchObject({
         wouldArchive: false,
         blocked: { code: 'unsent-input', safetyCheck: { unsentInput: [{ panelId: 'drafting', title: 'Codex', kind: 'composer' }, { panelId: 'editing', title: 'notes.md', kind: 'editor' }] } },
@@ -8056,6 +8114,7 @@ describe('runpane IPC handlers', () => {
       expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }]))
         .toMatchObject({ ok: true, wouldArchive: true, safetyCheck: { performed: false } });
     });
+
     it('rejects archiving a pane that is already archived', async () => {
       const services = createServices({
         // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
@@ -9018,6 +9077,38 @@ describe('runpane IPC handlers', () => {
         expect(sessionsDelete).not.toHaveBeenCalled();
       });
 
+      it('with --closed also sweeps a Pane whose PR closed unmerged, and still keeps one with unpushed work', async () => {
+        const { git, pane } = createRemoteRepo();
+        const panes = [
+          pane('pane-closed'),
+          pane('pane-closed-unpushed', worktreePath => git(worktreePath, 'commit', '--allow-empty', '-m', 'local only')),
+          pane('pane-open'),
+        ];
+        const lookups = new Map<string, PrLookup>([
+          ['pane-closed', { ok: true, pr: { prNumber: 4, prState: 'CLOSED' } }],
+          ['pane-closed-unpushed', { ok: true, pr: { prNumber: 5, prState: 'CLOSED' } }],
+          ['pane-open', { ok: true, pr: { prNumber: 6, prState: 'OPEN' } }],
+        ]);
+        const { services } = createBulkServices(panes, panes.map(p => p.id), async paneId => lookups.get(paneId) ?? merged);
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true, closed: true }]);
+
+        expect(sessionsDelete).toHaveBeenCalledTimes(1);
+        expect(sessionsDelete).toHaveBeenCalledWith('pane-closed');
+        expect(result).toMatchObject({
+          merged: true,
+          closed: true,
+          archived: 1,
+          items: [
+            { paneId: 'pane-closed', outcome: 'archived', pr: { state: 'closed', number: 4 } },
+            { paneId: 'pane-closed-unpushed', outcome: 'skipped', skipped: { code: 'unpushed-commits' } },
+            { paneId: 'pane-open', outcome: 'skipped', skipped: { code: 'pr-open' } },
+          ],
+        });
+      });
+
       it('keeps a merged Pane whose agent is mid-turn', async () => {
         const { pane } = createRemoteRepo();
         const panes = [pane('pane-busy'), pane('pane-idle')];
@@ -9040,7 +9131,9 @@ describe('runpane IPC handlers', () => {
             { paneId: 'pane-idle', outcome: 'archived' },
           ],
         });
+        expect(result).toEqual(expect.not.objectContaining({ closed: true }));
       });
+
       it('dry-runs the Session archive, says what it would do, and reports a reason for every skipped Pane', async () => {
         const { pane } = createRemoteRepo();
         const panes = [
@@ -9680,6 +9773,214 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  describe('runpane:panels:close', () => {
+    const rule = '─'.repeat(40);
+    const agentOpened = { source: 'agent' as const, panelId: 'orchestrator-panel' };
+
+    function panelWith(overrides: Partial<ToolPanel> & { openedBy?: ToolPanel['metadata']['openedBy'] }): ToolPanel {
+      const { openedBy, ...rest } = overrides;
+      const metadata = { ...terminalPanel.metadata, ...rest.metadata };
+      if (openedBy) metadata.openedBy = openedBy;
+      return { ...terminalPanel, id: 'closing-panel', ...rest, metadata };
+    }
+
+    function closeRegistry(panel: ToolPanel | undefined) {
+      vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) => (panel && panelId === panel.id ? panel : undefined));
+      const registry = createRegistry();
+      const deletePanel = vi.fn(async () => ({ success: true }));
+      registry.register('panels:delete', deletePanel);
+      return { registry, deletePanel };
+    }
+
+    it('closes a tab an agent opened through the same path as the UI, leaving the Pane alone', async () => {
+      const panel = panelWith({ type: 'browser', title: 'Plan', state: { isActive: false, customState: { currentUrl: 'file:///plan.html' } }, openedBy: agentOpened });
+      const { registry, deletePanel } = closeRegistry(panel);
+
+      const result = await registry.invoke('runpane:panels:close', [{ panelId: panel.id }]);
+
+      expect(deletePanel).toHaveBeenCalledWith(panel.id);
+      expect(result).toEqual({ ok: true, paneId: session.id, panelId: panel.id, type: 'browser', title: 'Plan', closed: true, generation: expect.any(Number) });
+    });
+
+    it('with force, closes a stuck agent mid-turn but still keeps a permanent tab (D-209)', async () => {
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('working');
+      const busy = panelWith({ state: { isActive: false, customState: { agentType: 'codex', isCliPanel: true } }, openedBy: agentOpened });
+      const first = closeRegistry(busy);
+      expect(await first.registry.invoke('runpane:panels:close', [{ panelId: busy.id }]))
+        .toMatchObject({ ok: false, refused: { code: 'agent-busy', next: expect.stringContaining('--force') } });
+      expect(await first.registry.invoke('runpane:panels:close', [{ panelId: busy.id, force: true, dryRun: true }]))
+        .toMatchObject({ ok: true, dryRun: true, wouldClose: true, closed: false });
+      expect(first.deletePanel).not.toHaveBeenCalled();
+      expect(await first.registry.invoke('runpane:panels:close', [{ panelId: busy.id, force: true }]))
+        .toMatchObject({ ok: true, closed: true, forced: true });
+      expect(first.deletePanel).toHaveBeenCalledWith(busy.id);
+
+      const permanent = panelWith({ metadata: { ...terminalPanel.metadata, permanent: true }, openedBy: agentOpened });
+      const second = closeRegistry(permanent);
+      expect(await second.registry.invoke('runpane:panels:close', [{ panelId: permanent.id, force: true }]))
+        .toMatchObject({ ok: false, closed: false, refused: { code: 'permanent' } });
+      expect(second.deletePanel).not.toHaveBeenCalled();
+    });
+
+    it('closes an idle worker tab an agent started, even one the person just looked at', async () => {
+      const panel = panelWith({ state: { isActive: true, customState: { agentType: 'codex', isCliPanel: true } }, openedBy: agentOpened });
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› Ask Codex to do anything', 'idle'));
+      const { registry, deletePanel } = closeRegistry(panel);
+
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: panel.id }])).toMatchObject({ ok: true, closed: true });
+      expect(deletePanel).toHaveBeenCalledWith(panel.id);
+    });
+
+    it('reports a tab that is already gone as already closed', async () => {
+      const { registry, deletePanel } = closeRegistry(undefined);
+
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: 'gone-panel' }]))
+        .toEqual({ ok: true, panelId: 'gone-panel', closed: false, alreadyClosed: true, generation: expect.any(Number) });
+      expect(deletePanel).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a tab with no opener (opened before this change, or from the UI)', panelWith({ type: 'browser', state: { isActive: false } }), 'opened-by-user'],
+      ['a tab the person opened through runpane', panelWith({ type: 'browser', state: { isActive: false }, openedBy: { source: 'user' } }), 'opened-by-user'],
+      ['a permanent tab', panelWith({ type: 'diff', state: { isActive: false }, metadata: { ...terminalPanel.metadata, permanent: true }, openedBy: agentOpened }), 'permanent'],
+      ['an editor with unsaved edits', panelWith({ type: 'editor', state: { isActive: false, customState: { filePath: 'plan.md', isDirty: true } }, openedBy: agentOpened }), 'unsent-input'],
+    ])('refuses %s without closing it', async (_label, panel, code) => {
+      const { registry, deletePanel } = closeRegistry(panel);
+
+      const result = await registry.invoke('runpane:panels:close', [{ panelId: panel.id }]);
+
+      expect(result).toMatchObject({ ok: false, paneId: session.id, panelId: panel.id, closed: false, refused: { code } });
+      expect(result).toHaveProperty('refused.message', expect.any(String));
+      expect(result).toHaveProperty('refused.next', expect.any(String));
+      expect(deletePanel).not.toHaveBeenCalled();
+    });
+
+    it.each(['working', 'blocked'] as const)('refuses an agent that is mid-turn (%s)', async (state) => {
+      const panel = panelWith({ openedBy: agentOpened });
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue(state);
+      const { registry, deletePanel } = closeRegistry(panel);
+
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: panel.id }]))
+        .toMatchObject({ ok: false, closed: false, refused: { code: 'agent-busy' } });
+      expect(deletePanel).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['codex', '› my unsent draft'],
+      ['claude', `${rule}\n❯ half a thought\n${rule}`],
+    ] as const)('refuses a %s tab with text typed but not sent', async (agentType, screen) => {
+      const panel = panelWith({ state: { isActive: false, customState: { agentType, isCliPanel: true } }, openedBy: agentOpened });
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(screen, 'idle', agentType));
+      const { registry, deletePanel } = closeRegistry(panel);
+
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: panel.id }]))
+        .toMatchObject({ ok: false, closed: false, refused: { code: 'unsent-input' } });
+      expect(deletePanel).not.toHaveBeenCalled();
+    });
+
+    it('reports unsent text before a busy state, since the text is what a close would lose', async () => {
+      const panel = panelWith({ state: { isActive: false, customState: { agentType: 'codex', isCliPanel: true } }, openedBy: agentOpened });
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› my unsent draft', 'active'));
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('working');
+      const { registry } = closeRegistry(panel);
+
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: panel.id }]))
+        .toMatchObject({ ok: false, refused: { code: 'unsent-input' } });
+    });
+
+    it('refuses a running terminal whose input Pane cannot read', async () => {
+      const panel = panelWith({ state: { isActive: false, customState: { agentType: 'cursor', isCliPanel: true } }, openedBy: agentOpened });
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('cursor agent ready', 'idle', 'cursor'));
+      const { registry, deletePanel } = closeRegistry(panel);
+
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: panel.id }]))
+        .toMatchObject({ ok: false, closed: false, refused: { code: 'input-unknown' } });
+      expect(deletePanel).not.toHaveBeenCalled();
+    });
+
+    it('refuses a live chat tab, whose draft Pane cannot see', async () => {
+      const panel = panelWith({ type: 'chat', state: { isActive: false }, openedBy: agentOpened });
+      const running = vi.spyOn(getChatTabManager(), 'isRunning').mockReturnValue(true);
+      const state = vi.spyOn(getChatTabManager(), 'agentState').mockReturnValue('idle');
+      const { registry, deletePanel } = closeRegistry(panel);
+
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: panel.id }]))
+        .toMatchObject({ ok: false, closed: false, refused: { code: 'input-unknown' } });
+      expect(deletePanel).not.toHaveBeenCalled();
+      running.mockRestore();
+      state.mockRestore();
+    });
+
+    it('refuses a chat tab whose agent is mid-turn', async () => {
+      const panel = panelWith({ type: 'chat', state: { isActive: false }, openedBy: agentOpened });
+      const running = vi.spyOn(getChatTabManager(), 'isRunning').mockReturnValue(true);
+      const state = vi.spyOn(getChatTabManager(), 'agentState').mockReturnValue('working');
+      const { registry, deletePanel } = closeRegistry(panel);
+
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: panel.id }]))
+        .toMatchObject({ ok: false, closed: false, refused: { code: 'agent-busy' } });
+      expect(deletePanel).not.toHaveBeenCalled();
+      running.mockRestore();
+      state.mockRestore();
+    });
+
+    it('closes a chat tab whose agent exited, though it reads as blocked until restarted', async () => {
+      const panel = panelWith({ type: 'chat', state: { isActive: false }, openedBy: agentOpened });
+      const running = vi.spyOn(getChatTabManager(), 'isRunning').mockReturnValue(false);
+      // ChatTabManager maps a stopped tab with a problem ("the agent exited") to blocked.
+      const state = vi.spyOn(getChatTabManager(), 'agentState').mockReturnValue('blocked');
+      const { registry, deletePanel } = closeRegistry(panel);
+
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: panel.id }])).toMatchObject({ ok: true, closed: true });
+      expect(deletePanel).toHaveBeenCalledWith(panel.id);
+      running.mockRestore();
+      state.mockRestore();
+    });
+
+    it('closes a stopped terminal: nothing typed into it survives', async () => {
+      const panel = panelWith({ state: { isActive: false, customState: { agentType: 'cursor', isCliPanel: true } }, openedBy: agentOpened });
+      vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(false);
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue(undefined);
+      const { registry, deletePanel } = closeRegistry(panel);
+
+      expect(await registry.invoke('runpane:panels:close', [{ panelId: panel.id }])).toMatchObject({ ok: true, closed: true });
+      expect(deletePanel).toHaveBeenCalledWith(panel.id);
+    });
+
+    it('reports what it would do on a dry run without closing anything', async () => {
+      const closable = panelWith({ type: 'browser', state: { isActive: false }, openedBy: agentOpened });
+      const first = closeRegistry(closable);
+      expect(await first.registry.invoke('runpane:panels:close', [{ panelId: closable.id, dryRun: true }]))
+        .toEqual({ ok: true, paneId: session.id, panelId: closable.id, type: 'browser', title: closable.title, closed: false, dryRun: true, wouldClose: true });
+      expect(first.deletePanel).not.toHaveBeenCalled();
+
+      const refused = panelWith({ type: 'browser', state: { isActive: false } });
+      const second = closeRegistry(refused);
+      expect(await second.registry.invoke('runpane:panels:close', [{ panelId: refused.id, dryRun: true }]))
+        .toMatchObject({ ok: false, dryRun: true, wouldClose: false, closed: false, refused: { code: 'opened-by-user' } });
+      expect(second.deletePanel).not.toHaveBeenCalled();
+    });
+
+    it('reports a close the UI path declined as not closed', async () => {
+      const panel = panelWith({ type: 'browser', state: { isActive: false }, openedBy: agentOpened });
+      const { registry, deletePanel } = closeRegistry(panel);
+      deletePanel.mockResolvedValue({ success: false, error: 'This panel cannot be closed.' });
+
+      await expect(registry.invoke('runpane:panels:close', [{ panelId: panel.id }])).rejects.toThrow('This panel cannot be closed.');
+    });
+
+    it('lists who opened each tab', async () => {
+      const opened = panelWith({ type: 'browser', state: { isActive: false }, openedBy: agentOpened });
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([terminalPanel, opened]);
+
+      // SAFETY: runpane:panels:list resolves to a RunpanePanelListResult.
+      const result = await createRegistry().invoke('runpane:panels:list', [{ paneId: session.id }]) as RunpanePanelListResult;
+
+      expect(result.panels.find(panel => panel.id === opened.id)?.openedBy).toEqual(agentOpened);
+      expect(result.panels.find(panel => panel.id === terminalPanel.id)?.openedBy).toBeUndefined();
+    });
+  });
+
   describe('runpane:panels:open', () => {
     let worktree: string;
 
@@ -9731,6 +10032,25 @@ describe('runpane IPC handlers', () => {
       });
       expect(request.initialState).toEqual({ customState: { filePath: 'plan.html', isPreview: false, isDirty: false } });
       expect(result).toMatchObject({ ok: true, type: 'editor', filePath: 'plan.html', placement: 'split', reused: false, active: true });
+    });
+
+    it('records an agent as the opener, and keeps the first opener when a tab is reopened', async () => {
+      const registry = createRegistry(openServices({ ...session, worktreePath: worktree }));
+
+      await registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: 'plan.html', source: 'agent', callerPanelId: 'orchestrator-panel' }]);
+      expect(vi.mocked(panelManager.createPanel).mock.calls[0][0].metadata).toEqual({ openPlacement: 'split', openedBy: { source: 'agent', panelId: 'orchestrator-panel' } });
+
+      const mine: ToolPanel = {
+        id: 'mine', sessionId: session.id, type: 'editor', title: 'plan.html',
+        state: { isActive: false, customState: { filePath: 'plan.html' } },
+        metadata: { createdAt: '', lastActiveAt: '', position: 1 },
+      };
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([mine]);
+      vi.mocked(panelManager.getPanel).mockReturnValue(mine);
+      // SAFETY: panels:open ignores updatePanel's resolved value.
+      vi.mocked(panelManager.updatePanel).mockResolvedValue(undefined as never);
+      await registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: 'plan.html', source: 'agent', callerPanelId: 'orchestrator-panel' }]);
+      expect(vi.mocked(panelManager.updatePanel).mock.calls[0][1]).not.toHaveProperty('metadata');
     });
 
     it('opens other files as editor tabs and honors --tab and --no-focus', async () => {

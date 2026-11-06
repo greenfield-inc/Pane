@@ -93,6 +93,68 @@ describe('Pane Chat skill bundle', () => {
     expect(guide).toContain('ask in this tab as before');
   });
 
+  it('archives without asking only inside a Session; outside one, archiving still needs approval (D-96)', async () => {
+    for (const file of await markdownFiles(bundleRoot)) {
+      const text = (await fs.readFile(file, 'utf8')).replace(/\s+/g, ' ');
+      // Every sentence that ties archiving to approval is about working outside a Session.
+      for (const sentence of text.split(/(?<=\.)\s/)) {
+        if (/archiv[^.]*approv|approv[^.]*archiv/i.test(sentence)) expect(sentence, file).toMatch(/Outside a Session/);
+      }
+      expect(text, file).not.toContain('approval before destructive cleanup');
+    }
+    const orchestration = (await fs.readFile(path.join(bundleRoot, 'skills', 'pane-orchestration', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
+    expect(orchestration).toContain('This applies only to a Session orchestrator, and only to its own Session\'s Panes and tabs.');
+    expect(orchestration).not.toContain('"the Session" means the Panes and tabs you started');
+    const runpane = (await fs.readFile(path.join(bundleRoot, 'skills', 'runpane', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
+    expect(runpane).toContain('As a Session orchestrator, archive a feature Pane of your own Session without asking');
+    expect(runpane).toContain('Outside a Session, archiving removes a Pane\'s worktree, so it needs the user\'s cleanup approval');
+  });
+
+  it('replaces Clean up with the Keep the Session tidy rules', async () => {
+    const text = (await fs.readFile(path.join(bundleRoot, 'skills', 'pane-orchestration', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
+    expect(text).not.toContain('## Clean up');
+    expect(text).toContain('## Keep the Session tidy');
+    expect(text).toContain('Keep one status document for this Session, in the Session folder, and update it in place.');
+    expect(text).toContain('Link plans, PRs, mock-ups, reports and other pages from it instead of opening each one.');
+    expect(text).toContain('runpane panels close --panel <id> --yes --json');
+    expect(text).toContain('runpane panes archive --pane <id> --dry-run --json');
+    expect(text).toContain('runpane panes archive --session <S> --merged --closed --dry-run --json');
+    expect(text).toContain('Never pass `--force`.');
+    expect(text).toContain('[/wrap-up](../wrap-up/SKILL.md)');
+    // A worker's untracked status file elsewhere in the worktree would keep its Pane from archiving.
+    expect(text).toContain('An untracked file anywhere else in the worktree makes the archive dry run unclean and keeps the Pane.');
+    const runpane = (await fs.readFile(path.join(bundleRoot, 'skills', 'runpane', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
+    expect(runpane).toContain('--merged --closed --dry-run --json');
+    expect(runpane).toContain('Never pass `--force`.');
+  });
+
+  it('ships /wrap-up with every step of the guide', async () => {
+    const text = (await fs.readFile(path.join(bundleRoot, 'skills', 'wrap-up', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
+    expect(text).toContain('runpane sessions overview --session "$PANE_ORCHESTRATION_SESSION_ID" --json');
+    // D-107: the person hears about what needs attention before anything is archived, and is never asked to choose.
+    expect(text.indexOf('## 2. Tell the person first, if anything needs attention')).toBeLessThan(text.indexOf('## 3. Archive what is safe'));
+    expect(text).toContain('runpane notify --ui info --title "Wrapping up: N things need attention"');
+    expect(text).toContain('every item on the card, worded the same.');
+    expect(text).toContain('This is a notice, not a question: /wrap-up asks nothing and doesn\'t wait for an answer.');
+    expect(text).not.toContain('Keep going, or stop?');
+    // D-107: the Session is never archived by /wrap-up; its report stays readable in the open Session.
+    expect(text).not.toContain('{"archived":true}');
+    expect(text).not.toMatch(/## \d\. Archive the Session/);
+    expect(text).toContain('Never archive the Session itself, and never run `runpane sessions update` with `archived`: that is the person\'s action.');
+    expect(text).toContain('that the Session stays open, and the person can archive it from the sidebar');
+    expect(text).toContain('Nothing left to do in this Session.');
+    expect(text).toContain('Never skip this, even when everything was archived and nothing was kept.');
+    // A busy worker keeps its Pane until it finishes; nothing is forced.
+    expect(text).toContain('A worker still working (`agent-busy`) is left to finish: keep its Pane and its work-list item.');
+    expect(text).toContain('runpane panels wait --panel <id> --for idle --json');
+    // sessions overview's PR state is cached and can still say open right after a merge.
+    expect(text).toContain('which asks GitHub now (`items[].pr`), not from `sessions overview`');
+    expect(text).toContain('runpane panes restore');
+    expect(text).toContain('/wrap-up never merges a PR, commits or pushes for a worker, passes `--force`, deletes a branch, closes a tab the person opened, archives the Session, or touches a Pane or tab outside this Session');
+    // The Session folder copy has to work on its own.
+    expect(text).not.toMatch(/\]\(\.{0,2}\//);
+  });
+
   it('gives each helper subagent a bundled skill', async () => {
     for (const agent of await fs.readdir(path.join(bundleRoot, 'agents'))) {
       const text = await fs.readFile(path.join(bundleRoot, 'agents', agent), 'utf8');

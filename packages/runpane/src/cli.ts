@@ -29,6 +29,7 @@ import {
 } from './installers';
 import {
   runAgentsDoctor,
+  runPanelsClose,
   runPanelsCreate,
   runPanelsInput,
   runPanelsLastMessage,
@@ -37,7 +38,6 @@ import {
   runPanelsScreen,
   runPanelsSubmit,
   runPanelsSubmitComposer,
-  runPanelsClose,
   runPanelsWait,
   runPanelsResume,
   runPause,
@@ -350,6 +350,9 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'panels open': async (parsed, telemetryContext) => {
     return runPanelsOpen(parsed);
   },
+  'panels close': async (parsed, telemetryContext) => {
+    return runPanelsClose(parsed);
+  },
   'panels output': async (parsed, telemetryContext) => {
     return runPanelsOutput(parsed);
   },
@@ -364,9 +367,6 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   },
   'panels submit-composer': async (parsed, telemetryContext) => {
     return runPanelsSubmitComposer(parsed);
-  },
-  'panels close': async (parsed, telemetryContext) => {
-    return runPanelsClose(parsed);
   },
   'panels wait': async (parsed, telemetryContext) => {
     return runPanelsWait(parsed);

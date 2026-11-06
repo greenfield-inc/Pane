@@ -7,6 +7,7 @@ import {
   type RunpaneCommand
 } from './generated/contract';
 import { boundary, decodeBoundary } from './boundaryDecoder';
+import { RunpaneError } from './errors';
 
 export type { ArtifactFormat, InstallTarget, RunpaneAgent, RunpaneCommand };
 
@@ -95,6 +96,8 @@ export interface ParsedArgs {
   force?: boolean;
   removeWorktree?: boolean;
   merged?: boolean;
+  /** panes archive --session --merged --closed: also Panes whose PR closed unmerged. */
+  closed?: boolean;
   launch?: boolean;
   watchAs?: string;
   watchSince?: number;
@@ -507,6 +510,13 @@ function validatePanesArchiveArgs(parsed: ParsedArgs): void {
   if (parsed.merged && !parsed.sessionId) {
     throw new Error('--merged requires --session.');
   }
+  if (parsed.closed && !parsed.sessionId) {
+    throw new RunpaneError(
+      'ERR_RUNPANE_INVALID_ARGUMENT',
+      '--closed requires --session: it adds Panes whose PR closed unmerged to a Session sweep. Nothing was archived.',
+      'Run `runpane panes archive --session <id|name> --merged --closed`, or archive one Pane with `runpane panes archive --pane <pane-id>`.',
+    );
+  }
   if (parsed.sessionId && !parsed.merged) {
     throw new Error('runpane panes archive --session requires --merged.');
   }
@@ -690,6 +700,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--merged') {
     parsed.merged = true;
+    return;
+  }
+  if (flag === '--closed') {
+    parsed.closed = true;
     return;
   }
   if (flag === '--launch') {

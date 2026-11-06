@@ -326,6 +326,19 @@ export interface ToolPanelMetadata {
   teammate?: string;
   /** The tab this one takes over from (Switch to chat), so it opens in that tab's slot. */
   replacesPanelId?: string;
+  /**
+   * Who opened this tab through runpane (`panels open`, `panels create`, `agents start`,
+   * `panes create`). Absent on tabs the person opened in Pane and on every tab from before
+   * Pane recorded it; `runpane panels close` treats both as the person's and refuses them.
+   */
+  openedBy?: PanelOpener;
+}
+
+/** Who opened a tab: the request's `source`, and the calling tab when an agent in a Pane tab opened it. */
+export interface PanelOpener {
+  source: 'agent' | 'user';
+  /** The tab whose agent opened this one ($PANE_PANEL_ID of the caller), when known. */
+  panelId?: string;
 }
 
 export type PanelOpenPlacement = 'split' | 'tab';

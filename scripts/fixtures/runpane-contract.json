@@ -1298,6 +1298,45 @@
       "OLD,STALE",
       "--yes",
       "--json"
+    ],
+    [
+      "panels",
+      "close",
+      "--panel",
+      "panel-1",
+      "--dry-run",
+      "--json"
+    ],
+    [
+      "panels",
+      "close",
+      "--panel",
+      "panel-1",
+      "--source",
+      "agent",
+      "--yes",
+      "--json",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "panels",
+      "close",
+      "--panel",
+      "panel-1",
+      "--force",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panes",
+      "archive",
+      "--session",
+      "session-a",
+      "--merged",
+      "--closed",
+      "--dry-run",
+      "--json"
     ]
   ],
   "help": {

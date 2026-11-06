@@ -1195,7 +1195,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   includeHeldInput: false, idleBackoff: false, allManaged: false, allStopped: false,
   includeShells: false, noHeldInput: false, selfTest: false, report: false,
   watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [], attachments: [],
-  asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false,
+  asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false, closed: false,
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false,
 };
@@ -2435,10 +2435,11 @@ print(json.dumps(stdout.getvalue().splitlines()))
   }
 }
 
-async function checkPanelCloseParity() {
-  const result = { ok: true, generation: 41, paneId: 'session-1', panelId: 'panel-1', type: 'terminal', title: 'Claude Code' };
+/** D-209: --force reaches the daemon from both CLIs, and both say the close was forced. */
+async function checkPanelCloseForceParity() {
+  const result = { ok: true, generation: 41, paneId: 'session-1', panelId: 'panel-1', type: 'terminal', title: 'Claude Code', closed: true, forced: true };
   assertMatchesJsonSchema(result, contract.jsonSchemas.panelCloseResult, 'panels close result');
-  const expected = 'Closed terminal tab "Claude Code" (panel-1) in pane session-1.';
+  const expected = 'Closed panel panel-1 (Claude Code) with --force.';
 
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -2450,15 +2451,15 @@ async function checkPanelCloseParity() {
   daemonClient.invokeDaemon = async (channel, args) => { calls.push({ channel, request: args[0] }); return result; };
   console.log = (line) => stdout.push(String(line));
   try {
-    await runPanelsClose(parseRunpaneArgs(['panels', 'close', '--panel', 'panel-1', '--yes']));
-    await runPanelsClose(parseRunpaneArgs(['panels', 'close', '--panel', 'panel-1', '--yes', '--json']));
+    await runPanelsClose(parseRunpaneArgs(['panels', 'close', '--panel', 'panel-1', '--force', '--yes']));
+    await runPanelsClose(parseRunpaneArgs(['panels', 'close', '--panel', 'panel-1', '--force', '--yes', '--json']));
   } finally {
     daemonClient.invokeDaemon = originalInvokeDaemon;
     console.log = originalConsoleLog;
   }
   assert.deepStrictEqual(calls, [
-    { channel: 'runpane:panels:close', request: { panelId: 'panel-1' } },
-    { channel: 'runpane:panels:close', request: { panelId: 'panel-1' } },
+    { channel: 'runpane:panels:close', request: { panelId: 'panel-1', force: true } },
+    { channel: 'runpane:panels:close', request: { panelId: 'panel-1', force: true } },
   ]);
   assert.deepStrictEqual(stdout[0], expected);
   assert.deepStrictEqual(JSON.parse(stdout[1]), result);
@@ -2479,7 +2480,7 @@ def invoke(channel, args, **kwargs):
 local_control.invoke_daemon = invoke
 stdout = io.StringIO()
 with contextlib.redirect_stdout(stdout):
-    local_control.run_panels_close(parse_args(["panels", "close", "--panel", "panel-1", "--yes"]))
+    local_control.run_panels_close(parse_args(["panels", "close", "--panel", "panel-1", "--force", "--yes"]))
 print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines()}))
 `, JSON.stringify(result)));
   assert.deepStrictEqual(python.calls, [calls[0]]);
@@ -3290,6 +3291,310 @@ print(json.dumps({"codes": codes, "calls": calls, "stdout": stdout.getvalue().sp
   assert.ok(python.stdout.includes('Reported ready pr#747 fc5dce9 for panel panel-1. Recorded on Session session-a.'), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('Opened PR #747.'), python.stdout.join('\n'));
   assert.ok(python.stderr.includes('transcript-unavailable: No claude transcript reply found.'), python.stderr.join('\n'));
+}
+
+async function checkPanelsCloseParity() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runPanelsClose } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const schemas = contract.jsonSchemas;
+  const refused = {
+    code: 'agent-busy',
+    message: 'The agent in panel panel-3 is in the middle of a turn, so it was not closed.',
+    next: 'Wait until it is idle (`runpane panels wait --panel panel-3 --for idle --json`), then close it again.',
+  };
+  const results = {
+    'panel-1': { ok: true, generation: 12, paneId: 'session-1', panelId: 'panel-1', title: 'Plan', closed: true },
+    'panel-2': { ok: true, paneId: 'session-1', panelId: 'panel-2', title: 'Review', closed: false, dryRun: true, wouldClose: true },
+    'panel-3': { ok: false, paneId: 'session-1', panelId: 'panel-3', title: 'Claude', closed: false, refused },
+    'panel-4': { ok: false, paneId: 'session-1', panelId: 'panel-4', title: 'Notes', closed: false, dryRun: true, wouldClose: false, refused: { ...refused, code: 'opened-by-user' } },
+    gone: { ok: true, panelId: 'gone', closed: false, alreadyClosed: true },
+  };
+  for (const [id, result] of Object.entries(results)) {
+    assertMatchesJsonSchema(result, schemas.panelCloseResult, `panels close result ${id}`);
+  }
+  assert.strictEqual(matchesJsonSchema({ ...results['panel-3'], refused: { code: refused.code, message: refused.message } }, schemas.panelCloseResult), false);
+  assert.deepStrictEqual(schemas.panelCloseResult.properties.refused.properties.code.enum, ['opened-by-user', 'permanent', 'agent-busy', 'unsent-input', 'input-unknown']);
+  assertMatchesJsonSchema({ panelId: 'panel-1', dryRun: true, source: 'agent' }, schemas.panelCloseRequest, 'panels close request');
+  assert.ok(contract.commands.some((command) => command.name === 'panels close' && command.toolsets.includes('core')));
+
+  const runs = [
+    ['panels', 'close', '--panel', 'panel-1', '--source', 'agent', '--yes', '--json'],
+    ['panels', 'close', '--panel', 'panel-2', '--dry-run', '--json'],
+    ['panels', 'close', '--panel', 'panel-3', '--yes'],
+    ['panels', 'close', '--panel', 'panel-4', '--dry-run'],
+    ['panels', 'close', '--panel', 'gone', '--yes'],
+    ['panels', 'close', '--panel', 'panel-1', '--yes'],
+  ];
+  const calls = [];
+  const stdout = [];
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  daemonClient.invokeDaemon = async (channel, args, schema) => {
+    calls.push({ channel, request: args[0] });
+    return decodeBoundary(results[args[0].panelId], schema);
+  };
+  console.log = (line) => stdout.push(String(line));
+  const codes = [];
+  try {
+    for (const args of runs) codes.push(await runPanelsClose(parseRunpaneArgs(args)));
+    await assert.rejects(runPanelsClose(parseRunpaneArgs(['panels', 'close', '--yes'])), (error) => error.code === 'ERR_RUNPANE_INVALID_ARGUMENT' && /requires --panel/.test(error.message));
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+
+  // Refused closes, including a refused dry run, exit 1; an already-closed tab is not an error.
+  assert.deepStrictEqual(codes, [0, 0, 1, 1, 0, 0]);
+  assert.ok(calls.every((call) => call.channel === 'runpane:panels:close'));
+  const requests = calls.map((call) => JSON.parse(JSON.stringify(call.request)));
+  assert.deepStrictEqual(requests, [
+    { panelId: 'panel-1', source: 'agent' },
+    { panelId: 'panel-2', dryRun: true },
+    { panelId: 'panel-3' },
+    { panelId: 'panel-4', dryRun: true },
+    { panelId: 'gone' },
+    { panelId: 'panel-1' },
+  ]);
+  // The boundary decoder keeps every declared field.
+  assert.deepStrictEqual(JSON.parse(stdout[0]), results['panel-1']);
+  assert.deepStrictEqual(JSON.parse(stdout[1]), results['panel-2']);
+  const humanLines = [
+    `Refused to close panel panel-3 (Claude): ${refused.message} Next: ${refused.next}`,
+    `Would refuse to close panel panel-4 (Notes): ${refused.message} Next: ${refused.next}`,
+    'Panel gone is already closed.',
+    'Closed panel panel-1 (Plan).',
+  ];
+  assert.deepStrictEqual(stdout.slice(2), humanLines);
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+results = json.loads(${JSON.stringify(JSON.stringify(results))})
+calls = []
+def invoke(channel, args, **kwargs):
+    calls.append({"channel": channel, "request": args[0]})
+    return results[args[0]["panelId"]]
+
+local_control.invoke_daemon = invoke
+stdout = io.StringIO()
+codes = []
+with contextlib.redirect_stdout(stdout):
+    for args in json.loads(${JSON.stringify(JSON.stringify(runs))}):
+        codes.append(local_control.run_panels_close(parse_args(args)))
+try:
+    local_control.run_panels_close(parse_args(["panels", "close", "--yes"]))
+    missing = None
+except Exception as error:
+    missing = {"code": getattr(error, "code", None), "message": str(error), "next": getattr(error, "next", None)}
+print(json.dumps({"codes": codes, "calls": calls, "stdout": stdout.getvalue().splitlines(), "missing": missing}))
+`));
+  assert.deepStrictEqual(python.codes, codes);
+  assert.deepStrictEqual(python.calls, JSON.parse(JSON.stringify(calls)));
+  assert.deepStrictEqual(python.stdout.slice(-humanLines.length), humanLines);
+  assert.strictEqual(python.missing.code, 'ERR_RUNPANE_INVALID_ARGUMENT');
+  assert.match(python.missing.message, /requires --panel/);
+  assert.ok(python.missing.next);
+}
+
+async function checkArchiveClosedAndCallerPanel() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const localControl = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const { runAgentsStart } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'agentTasks.js'));
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const schemas = contract.jsonSchemas;
+  const busySafety = {
+    performed: true,
+    hasUncommittedChanges: false,
+    busyAgents: [{ panelId: 'panel-9', title: 'Codex', state: 'working' }],
+  };
+  const bulk = {
+    ok: true,
+    sessionId: 'session-a',
+    merged: true,
+    closed: true,
+    dryRun: true,
+    removeWorktree: false,
+    archived: 1,
+    skipped: 2,
+    failed: 0,
+    items: [
+      { paneId: 'pane-1', name: 'abandoned', outcome: 'would-archive', pr: { state: 'closed', number: 12 }, safetyCheck: { performed: true } },
+      {
+        paneId: 'pane-3',
+        outcome: 'skipped',
+        skipped: { code: 'unsent-input', message: 'Codex (panel panel-8) has text typed but not sent.' },
+        pr: { state: 'merged', number: 14 },
+        safetyCheck: { performed: true, unsentInput: [{ panelId: 'panel-8', title: 'Codex', kind: 'composer' }, { panelId: 'panel-7', title: 'notes.md', kind: 'editor' }] },
+      },
+      {
+        paneId: 'pane-2',
+        outcome: 'skipped',
+        skipped: { code: 'agent-busy', message: 'Codex (panel panel-9) is mid-turn.' },
+        pr: { state: 'merged', number: 13 },
+        safetyCheck: busySafety,
+      },
+    ],
+  };
+  const blocked = {
+    ok: false,
+    paneId: 'pane-2',
+    blocked: { code: 'agent-busy', message: 'Codex (panel panel-9) is mid-turn. Archiving would stop it.', safetyCheck: busySafety },
+    nextCommand: 'runpane panes archive --pane pane-2 --force --yes',
+  };
+  const panelList = {
+    ok: true,
+    paneId: 'pane-1',
+    panels: [
+      { id: 'panel-1', panelId: 'panel-1', paneId: 'pane-1', type: 'browser', title: 'Plan', active: true, openedBy: { source: 'agent', panelId: 'panel-0' } },
+      { id: 'panel-2', panelId: 'panel-2', paneId: 'pane-1', type: 'terminal', title: 'Claude', active: false },
+    ],
+  };
+  assertMatchesJsonSchema(bulk, schemas.paneArchiveBulkResult, 'bulk archive with --closed');
+  assertMatchesJsonSchema(blocked, schemas.paneArchiveResult, 'agent-busy archive refusal');
+  assertMatchesJsonSchema(panelList, schemas.panelListResult, 'panels list with openedBy');
+  assertMatchesJsonSchema({ sessionId: 'session-a', merged: true, closed: true }, schemas.paneArchiveBulkRequest, 'bulk archive request');
+
+  const responses = {
+    'runpane:panes:archive': (request) => (request.sessionId ? bulk : blocked),
+    'runpane:panels:list': () => panelList,
+  };
+  const calls = [];
+  const stdout = [];
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const originalConsoleError = console.error;
+  daemonClient.invokeDaemon = async (channel, args, schema) => {
+    calls.push({ channel, request: args[0] });
+    const respond = responses[channel];
+    if (!respond) throw new Error(`stop after ${channel}`);
+    return decodeBoundary(respond(args[0]), schema);
+  };
+  console.log = (line) => stdout.push(String(line));
+  console.error = (line) => stdout.push(String(line));
+  const codes = [];
+  try {
+    codes.push(await localControl.runPanesArchive(parseRunpaneArgs(['panes', 'archive', '--session', 'session-a', '--merged', '--closed', '--dry-run', '--json'])));
+    codes.push(await localControl.runPanesArchive(parseRunpaneArgs(['panes', 'archive', '--pane', 'pane-2', '--yes', '--json'])));
+    codes.push(await localControl.runPanesArchive(parseRunpaneArgs(['panes', 'archive', '--pane', 'pane-2', '--yes'])));
+    codes.push(await localControl.runPanelsList(parseRunpaneArgs(['panels', 'list', '--pane', 'pane-1', '--json'])));
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+    console.error = originalConsoleError;
+  }
+  assert.deepStrictEqual(codes, [0, 1, 1, 0]);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(calls[0].request)), { sessionId: 'session-a', merged: true, closed: true, dryRun: true });
+  // The decoders declare closed, agent-busy, unsent-input, busyAgents, unsentInput and openedBy, so nothing is dropped.
+  assert.deepStrictEqual(JSON.parse(stdout[0]), bulk);
+  assert.deepStrictEqual(JSON.parse(stdout[1]), blocked);
+  assertIncludes(stdout.join('\n'), 'Busy: Codex (panel panel-9) is mid-turn');
+  assert.deepStrictEqual(schemas.paneArchiveResult.oneOf[2].properties.blocked.properties.code.enum.slice(-2), ['agent-busy', 'unsent-input']);
+  assert.deepStrictEqual(JSON.parse(stdout[stdout.length - 1]), panelList);
+
+  // --closed belongs to the Session sweep.
+  const closedWithoutSession = ['panes', 'archive', '--pane', 'pane-1', '--closed', '--yes'];
+  assert.throws(() => parseRunpaneArgs(closedWithoutSession), (error) => error.code === 'ERR_RUNPANE_INVALID_ARGUMENT' && /--closed requires --session/.test(error.message) && Boolean(error.next));
+
+  // Every request that opens a tab names the calling tab from PANE_PANEL_ID, trimmed, and omits it outside Pane.
+  const openRequests = async () => {
+    const seen = {};
+    daemonClient.invokeDaemon = async (channel, args) => {
+      seen[channel] = seen[channel] ?? JSON.parse(JSON.stringify(args[0]));
+      throw new Error(`stop after ${channel}`);
+    };
+    const attempt = async (promise) => { await promise.catch(() => undefined); };
+    try {
+      await attempt(localControl.runPanelsOpen(parseRunpaneArgs(['panels', 'open', '--pane', 'pane-1', '--url', 'http://localhost:3000', '--source', 'agent', '--yes', '--json'])));
+      seen.panelCreate = await localControl.buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'pane-1', '--agent', 'claude', '--source', 'agent', '--yes']));
+      seen.chatCreate = await localControl.buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'pane-1', '--chat', '--agent', 'claude', '--source', 'agent', '--yes']));
+      seen.paneCreate = await localControl.buildPaneCreateRequest(parseRunpaneArgs(['panes', 'create', '--repo', 'active', '--name', 'w1', '--agent', 'claude', '--source', 'agent', '--yes']));
+      await attempt(runAgentsStart(parseRunpaneArgs(['agents', 'start', '--pane', 'pane-1', '--agent', 'codex', '--prompt', 'Review it', '--yes', '--json'])));
+      seen.agentsStartPane = seen['runpane:panels:create'];
+      delete seen['runpane:panels:create'];
+      await attempt(runAgentsStart(parseRunpaneArgs(['agents', 'start', '--repo', 'active', '--name', 'w2', '--agent', 'codex', '--prompt', 'Fix it', '--yes', '--json'])));
+    } finally {
+      daemonClient.invokeDaemon = originalInvokeDaemon;
+    }
+    return {
+      panelsOpen: seen['runpane:panels:open'].callerPanelId,
+      panelsCreate: seen.panelCreate.callerPanelId,
+      chatCreate: seen.chatCreate.callerPanelId,
+      panesCreate: seen.paneCreate.callerPanelId,
+      agentsStartPane: seen.agentsStartPane.callerPanelId,
+      agentsStartRepo: seen['runpane:panes:create'].callerPanelId,
+    };
+  };
+  process.env.PANE_PANEL_ID = '  panel-caller  ';
+  let withCaller;
+  try {
+    withCaller = await openRequests();
+  } finally {
+    delete process.env.PANE_PANEL_ID;
+  }
+  assert.deepStrictEqual(withCaller, {
+    panelsOpen: 'panel-caller', panelsCreate: 'panel-caller', chatCreate: 'panel-caller', panesCreate: 'panel-caller', agentsStartPane: 'panel-caller', agentsStartRepo: 'panel-caller',
+  });
+  assert.deepStrictEqual(await openRequests(), {
+    panelsOpen: undefined, panelsCreate: undefined, chatCreate: undefined, panesCreate: undefined, agentsStartPane: undefined, agentsStartRepo: undefined,
+  });
+  for (const name of ['panelOpenRequest', 'panelCreateRequest', 'paneCreateRequest']) {
+    assert.deepStrictEqual(schemas[name].properties.callerPanelId.type, 'string', `${name} declares callerPanelId`);
+  }
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import os
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+bulk = json.loads(${JSON.stringify(JSON.stringify(bulk))})
+calls = []
+def invoke(channel, args, **kwargs):
+    calls.append({"channel": channel, "request": args[0]})
+    return bulk if channel == "runpane:panes:archive" else {"ok": True, "paneId": "pane-1", "panelId": "panel-1", "type": "browser", "title": "x", "placement": "split", "active": True, "reused": False}
+
+local_control.invoke_daemon = invoke
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    code = local_control.run_panes_archive(parse_args(["panes", "archive", "--session", "session-a", "--merged", "--closed", "--dry-run", "--json"]))
+try:
+    parse_args(${JSON.stringify(closedWithoutSession)})
+    closed_error = None
+except Exception as error:
+    closed_error = {"code": getattr(error, "code", None), "message": str(error), "next": getattr(error, "next", None)}
+
+def caller_ids():
+    with contextlib.redirect_stdout(io.StringIO()):
+        local_control.run_panels_open(parse_args(["panels", "open", "--pane", "pane-1", "--url", "http://localhost:3000", "--source", "agent", "--yes", "--json"]))
+    return {
+        "panelsOpen": calls[-1]["request"].get("callerPanelId"),
+        "panelsCreate": local_control.build_panel_create_request(parse_args(["panels", "create", "--pane", "pane-1", "--agent", "claude", "--source", "agent", "--yes"])).get("callerPanelId"),
+        "chatCreate": local_control.build_panel_create_request(parse_args(["panels", "create", "--pane", "pane-1", "--chat", "--agent", "claude", "--source", "agent", "--yes"])).get("callerPanelId"),
+        "panesCreate": local_control.build_pane_create_request(parse_args(["panes", "create", "--repo", "active", "--name", "w1", "--agent", "claude", "--source", "agent", "--yes"])).get("callerPanelId"),
+    }
+
+os.environ["PANE_PANEL_ID"] = "  panel-caller  "
+with_caller = caller_ids()
+del os.environ["PANE_PANEL_ID"]
+without_caller = caller_ids()
+print(json.dumps({"code": code, "archiveRequest": calls[0]["request"], "closedError": closed_error, "withCaller": with_caller, "withoutCaller": without_caller}))
+`));
+  assert.strictEqual(python.code, 0);
+  assert.deepStrictEqual(python.archiveRequest, JSON.parse(JSON.stringify(calls[0].request)));
+  assert.strictEqual(python.closedError.code, 'ERR_RUNPANE_INVALID_ARGUMENT');
+  assert.match(python.closedError.message, /--closed requires --session/);
+  assert.ok(python.closedError.next);
+  assert.deepStrictEqual(python.withCaller, { panelsOpen: 'panel-caller', panelsCreate: 'panel-caller', chatCreate: 'panel-caller', panesCreate: 'panel-caller' });
+  assert.deepStrictEqual(python.withoutCaller, { panelsOpen: null, panelsCreate: null, chatCreate: null, panesCreate: null });
 }
 
 async function checkPanesCostParity() {
@@ -5826,11 +6131,13 @@ async function runChecks() {
   await checkChatTabCreateParity();
   await checkDeliveryParity();
   await checkReportParity();
+  await checkPanelsCloseParity();
+  await checkArchiveClosedAndCallerPanel();
   await checkReportDeliveryLine();
   await checkNotifyParity();
   await checkPaneCreateBlockedReadiness();
   await checkPanelResumeCommandExitedReadiness();
-  await checkPanelCloseParity();
+  await checkPanelCloseForceParity();
   await checkSessionChildPinDefaults();
   await checkPanesCostParity();
   await checkPaneRenameParity();

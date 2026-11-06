@@ -73,7 +73,7 @@ import { classifyWorktree } from '../services/worktreeTrash';
 import { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
-import { pausedMarkOf, type TerminalPausedMark, type BrowserPanelState, type CreatePanelRequest, type EditorPanelState, type TerminalAgentReport, type TerminalExpectedReport, type TerminalPanelState, type ToolPanel } from '../../../shared/types/panels';
+import { pausedMarkOf, type TerminalPausedMark, type BrowserPanelState, type CreatePanelRequest, type EditorPanelState, type PanelOpener, type TerminalAgentReport, type TerminalExpectedReport, type TerminalPanelState, type ToolPanel, type ToolPanelMetadata } from '../../../shared/types/panels';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { withSessionFolderAccess } from '../services/agents/sessionFolderAccess';
 import { sessionWorkspacePath } from '../services/sessionWorkspace';
@@ -148,8 +148,11 @@ import type {
   RunpaneChatTabSpec,
   RunpanePanelCreateResult,
   RunpanePanelOpenRequest,
+  RunpanePanelCloseRefusal,
   RunpanePaneArchiveBusyAgent,
   RunpanePaneArchiveUnsentInput,
+  RunpanePanelCloseRequest,
+  RunpanePanelCloseResult,
   RunpanePanelOpenResult,
   RunpanePanelInputRequest,
   RunpanePanelInputResult,
@@ -172,7 +175,6 @@ import type {
   RunpanePanelStateSummary,
   RunpanePanelSubmitComposerRequest,
   RunpanePanelSubmitComposerResult,
-  RunpanePanelCloseResult,
   RunpanePanelSubmitComposerStrategy,
   RunpanePanelSubmitRequest,
   RunpanePanelSubmitResult,
@@ -293,13 +295,13 @@ const RUNPANE_CHANNELS = [
   'runpane:panes:archive',
   'runpane:panels:create',
   'runpane:panels:open',
+  'runpane:panels:close',
   'runpane:panels:list',
   'runpane:panels:output',
   'runpane:panels:input',
   'runpane:panels:screen',
   'runpane:panels:submit',
   'runpane:panels:submit-composer',
-  'runpane:panels:close',
   'runpane:panels:wait',
   'runpane:panels:resume',
   'runpane:panels:resume-many',
@@ -376,10 +378,10 @@ const MUTATING_RUNPANE_ACTIONS = new Set([
   'panes:rename',
   'panels:create',
   'panels:open',
+  'panels:close',
   'panels:input',
   'panels:submit',
   'panels:submit-composer',
-  'panels:close',
   'report',
   'sessions:create',
   'sessions:update',
@@ -994,6 +996,7 @@ export function registerRunpaneHandlers(
             associateSession: normalized.associateSession,
             expectReport: normalized.expectReport,
             source: normalized.source,
+            callerPanelId: normalized.callerPanelId,
           });
           if (normalized.focus === true) requestHostDesktopFocus(created);
           return created;
@@ -1213,6 +1216,7 @@ export function registerRunpaneHandlers(
       assertResumableTool(tool, normalized.resume);
       const { panel, readiness, initialInput, promptFile, attachments, warnings } = await createTerminalPanelForSession(services, pane, tool, {
         expectReport: shouldExpectReport(normalized, Boolean(tool.initialInput)),
+        openedBy: panelOpener(normalized.source, normalized.callerPanelId),
         activate: resolvePanelCreateActivation(normalized, tool),
         agentSessionId: normalized.resume,
         waitReady: normalized.waitReady,
@@ -1275,12 +1279,15 @@ export function registerRunpaneHandlers(
         await panelManager.updatePanel(existing.id, { title, state });
         panel = panelManager.getPanel(existing.id) ?? existing;
       } else {
+        const metadata: Partial<ToolPanelMetadata> = { openPlacement: placement };
+        const openedBy = panelOpener(normalized.source, normalized.callerPanelId);
+        if (openedBy) metadata.openedBy = openedBy;
         panel = await panelManager.createPanel({
           sessionId: pane.id,
           type: target.type,
           title: normalized.title || target.title,
           initialState: { customState: target.customState },
-          metadata: { openPlacement: placement },
+          metadata,
           activate,
           announceActivation: activate,
         });
@@ -1304,6 +1311,36 @@ export function registerRunpaneHandlers(
       ok: result.ok,
       resultCount: 1,
     }));
+  });
+
+  commandRegistry.register('runpane:panels:close', async (request: PaneCommandValue): Promise<RunpanePanelCloseResult> => {
+    return withRunpaneAction(services, 'panels:close', {}, async (): Promise<RunpanePanelCloseResult> => {
+      const normalized = parsePanelCloseRequest(request);
+      const panel = panelManager.getPanel(normalized.panelId);
+      if (!panel) {
+        return { ok: true, panelId: normalized.panelId, closed: false, alreadyClosed: true };
+      }
+      const base = { paneId: panel.sessionId, panelId: panel.id, type: panel.type, title: panel.title };
+      const force = normalized.force === true;
+      const refused = await panelCloseRefusal(panel, force);
+      if (normalized.dryRun) {
+        const preview: RunpanePanelCloseResult = { ok: !refused, ...base, closed: false, dryRun: true, wouldClose: !refused };
+        if (refused) preview.refused = refused;
+        return preview;
+      }
+      if (refused) {
+        return { ok: false, ...base, closed: false, refused };
+      }
+      // The UI's own close: stops a terminal's process, then removes the tab. The Pane and its worktree stay.
+      const deleted = decodeBoundary(
+        await commandRegistry.invoke('panels:delete', [panel.id]),
+        boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) }),
+      );
+      if (!deleted.success) {
+        throw new PaneError('ERR_RUNPANE_PANEL_CLOSE_FAILED', `Pane could not close panel ${panel.id}: ${deleted.error ?? 'it gave no reason'}. The tab is still open.`, 'See the Pane\'s tabs with `runpane panels list --pane <pane-id>`.');
+      }
+      return force ? { ok: true, ...base, closed: true, forced: true } : { ok: true, ...base, closed: true };
+    }, result => ({ paneId: result.paneId, panelId: result.panelId, ok: result.ok, resultCount: result.closed ? 1 : 0 }));
   });
 
   commandRegistry.register('runpane:panels:output', async (request: PaneCommandValue): Promise<RunpanePanelOutputResult> => {
@@ -1759,22 +1796,6 @@ export function registerRunpaneHandlers(
       ok: result.ok,
       inputBytes: result.inputBytes,
     }));
-  });
-
-  commandRegistry.register('runpane:panels:close', async (request: PaneCommandValue): Promise<RunpanePanelCloseResult> => {
-    return withRunpaneAction(services, 'panels:close', {}, async () => {
-      const { panelId } = decodeBoundary(request, boundary.object({ panelId: boundary.nonEmptyString }));
-      const panel = resolvePanel(panelId);
-      // The app's own close-tab path: it stops a terminal's process and tells every window.
-      const closed = decodeBoundary(
-        await commandRegistry.invoke('panels:delete', [panel.id]),
-        boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) }),
-      );
-      if (!closed.success) {
-        throw new PaneError('ERR_RUNPANE_PANEL_CLOSE_FAILED', `Pane could not close panel ${panel.id}: ${closed.error ?? 'it gave no reason'}. The tab is still open.`, 'See the Pane\'s tabs with `runpane panels list --pane <pane-id>`.');
-      }
-      return { ok: true as const, paneId: panel.sessionId, panelId: panel.id, type: panel.type, title: panel.title };
-    }, result => ({ paneId: result.paneId, panelId: result.panelId }));
   });
 
   commandRegistry.register('runpane:panels:wait', async (request: PaneCommandValue): Promise<RunpanePanelWaitResult> => {
@@ -2273,6 +2294,96 @@ function panelUnsentInput(panel: ToolPanel, screen: RunpanePanelScreenResult | u
 }
 
 /**
+ * Why `panels close` must keep this tab, or undefined when closing it loses nothing.
+ * Only an agent's tab may close; the person's tabs (and every tab without a recorded
+ * opener) stay. An agent mid-turn, text typed but not sent, and unsaved edits stay too.
+ * `force` (D-209) closes it as the tab's close button does, for a stuck tab: only a
+ * permanent tab, which the close button can't close either, still stays.
+ */
+async function panelCloseRefusal(panel: ToolPanel, force: boolean): Promise<RunpanePanelCloseRefusal | undefined> {
+  const keep = `Leave panel ${panel.id} open; the person can close it in Pane.`;
+  if (!force && panel.metadata.openedBy?.source !== 'agent') {
+    return {
+      code: 'opened-by-user',
+      message: `Panel ${panel.id} was not opened by an agent (the person opened it, or it predates Pane recording who opened tabs), so it was not closed.`,
+      next: `${keep} Only tabs opened with \`--source agent\` can be closed by runpane, unless the person asked you to close it: then rerun with \`--force\`.`,
+    };
+  }
+  if (panel.metadata.permanent) {
+    return { code: 'permanent', message: `Panel ${panel.id} is a permanent tab and cannot be closed.`, next: keep };
+  }
+  if (force) return undefined;
+  const chat = panel.type === 'chat' && getChatTabManager().isRunning(panel.id);
+  // Text the person typed is the most specific reason to keep a tab, so it is reported first.
+  const screen = await livePanelScreen(panel);
+  const unsent = panelUnsentInput(panel, screen);
+  if (unsent === 'editor') {
+    return {
+      code: 'unsent-input',
+      message: `Panel ${panel.id} has unsaved edits, so it was not closed.`,
+      next: `${keep} Close it again once its edits are saved or discarded.`,
+    };
+  }
+  if (unsent === 'composer') {
+    return {
+      code: 'unsent-input',
+      message: `Panel ${panel.id} has text typed into its composer that was not sent, so it was not closed.`,
+      next: `${keep} Close it again once that text is sent or cleared.`,
+    };
+  }
+  const agentState = agentBusyState(panel);
+  if (agentState) {
+    return {
+      code: 'agent-busy',
+      message: `The agent in panel ${panel.id} is ${agentState === 'working' ? 'in the middle of a turn' : 'waiting for an answer'}, so it was not closed.`,
+      next: `Wait until it is idle (\`runpane panels wait --panel ${panel.id} --for idle --json\`), then close it again. If it is stuck, \`--force\` closes it anyway and ends its turn.`,
+    };
+  }
+  if (chat) {
+    // A chat tab's draft lives only in the clients showing it; Pane cannot see it from here.
+    return {
+      code: 'input-unknown',
+      message: `Panel ${panel.id} is a chat tab, and Pane cannot see whether its composer holds a draft, so it did not close it.`,
+      next: `${keep} Stop its conversation first if it is finished; a stopped tab can be closed.`,
+    };
+  }
+  if (screen && !screen.composer.isPresent) {
+    return {
+      code: 'input-unknown',
+      message: `Pane cannot read the input of panel ${panel.id} (${screen.state.agentType ?? 'a terminal'}), so it cannot tell whether text was typed but not sent, and did not close it.`,
+      next: `${keep} Stop its process first if it is finished; a stopped terminal can be closed.`,
+    };
+  }
+  return undefined;
+}
+
+/** The opener a runpane request records on the tab it opens; none without an explicit source. */
+function panelOpener(source: 'user' | 'agent' | undefined, callerPanelId: string | undefined): PanelOpener | undefined {
+  if (source === 'agent') return callerPanelId ? { source, panelId: callerPanelId } : { source };
+  if (source === 'user') return { source };
+  return undefined;
+}
+
+function parsePanelCloseRequest(value: PaneCommandValue): RunpanePanelCloseRequest {
+  if (!isRecord(value)) {
+    throw new Error('Panel close request must be an object');
+  }
+  const panelId = optionalString(value.panelId)?.trim();
+  if (!panelId) {
+    throw new Error('Panel close request must include panelId');
+  }
+  if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
+    throw new Error('Panel close source must be user or agent');
+  }
+  return {
+    panelId,
+    dryRun: optionalBoolean(value.dryRun),
+    force: optionalBoolean(value.force),
+    source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+  };
+}
+
+/**
  * Pass the Pane's dock shell id (see getDockTerminalPanel) to mark that panel `dock: true`, and
  * `launchExited` (hasLaunchCommandExited) to report a panel whose command exited to its shell as stopped.
  */
@@ -2306,6 +2417,7 @@ function panelToSummary(panel: ToolPanel, dockPanelId?: string, launchExited = f
     report: readPanelAgentReport(panel),
     paused: pausedMarkOf(panel),
     ...panelResumeSummary(customState, initialCommand),
+    openedBy: panel.metadata.openedBy,
   };
 }
 
@@ -2398,9 +2510,13 @@ interface PaneCreateItemOptions {
   associateSession?: string;
   expectReport?: boolean;
   source?: 'user' | 'agent';
+  /** The calling tab, recorded as the opener of the Pane's agent tab. */
+  callerPanelId?: string;
 }
 
 interface TerminalPanelCreateOptions {
+  /** Who is opening the tab; stored on the panel for `panels close`. */
+  openedBy?: PanelOpener;
   expectReport?: boolean;
   activate?: boolean;
   waitReady?: boolean;
@@ -2592,6 +2708,9 @@ async function createTerminalPanelForSession(
     title: tool.title,
     initialState,
   };
+  if (options.openedBy) {
+    createRequest.metadata = { openedBy: options.openedBy };
+  }
   if (options.activate === false) {
     createRequest.activate = false;
   } else {
@@ -3062,6 +3181,7 @@ async function createPaneItem(
         .then(async () => {
           await createTerminalPanelForSession(services, session, tool, {
             activate: options.activate, agentSessionId: item.resume, expectReport: shouldExpectReport(options, Boolean(tool.initialInput)),
+            openedBy: panelOpener(options.source, options.callerPanelId),
           });
         })
         .catch(error => console.error(`[Runpane] Pane ${session.id} did not launch after queued setup:`, error));
@@ -3087,6 +3207,7 @@ async function createPaneItem(
 
     const { panel, readiness, initialInput, promptFile, attachments, warnings } = await createTerminalPanelForSession(services, session, tool, {
       expectReport: shouldExpectReport(options, Boolean(tool.initialInput)),
+      openedBy: panelOpener(options.source, options.callerPanelId),
       activate: options.activate,
       agentSessionId: item.resume,
       waitReady: options.waitReady,
@@ -3455,7 +3576,7 @@ async function createRunpaneChatTab(services: AppServices, paneId: string, reque
   const created = await createChatTab(services, {
     sessionId: paneId, agent: chat.agent, title: chat.title, initialInput: chat.initialInput, activate,
     launch: chat.profile ? { kind: 'profile', profile: chat.profile, args: chat.args } : { kind: 'agent' },
-  });
+  }, panelOpener(request.source, request.callerPanelId));
   const manager = getChatTabManager();
   const expected = shouldExpectReport(request, Boolean(chat.initialInput)) ? services.expectedReportTracker?.arm(created.panelId, new Date().toISOString(), true) : undefined;
   if (request.waitReady) {
@@ -4805,6 +4926,7 @@ function parsePaneCreateRequest(value: PaneCommandValue): RunpanePaneCreateReque
     noFocus: optionalBoolean(value.noFocus),
     focus: optionalBoolean(value.focus),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    callerPanelId: optionalString(value.callerPanelId)?.trim() || undefined,
     associateSession: optionalString(value.associateSession)?.trim() || undefined,
     expectReport: optionalBoolean(value.expectReport),
   };
@@ -5016,6 +5138,7 @@ function parsePanelCreateRequest(value: PaneCommandValue): RunpanePanelCreateReq
       paneId, type: 'chat', chat,
       noFocus: optionalBoolean(value.noFocus), focus: optionalBoolean(value.focus),
       source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+      callerPanelId: optionalString(value.callerPanelId)?.trim() || undefined,
       waitReady: optionalBoolean(value.waitReady), readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
       expectReport: optionalBoolean(value.expectReport),
     };
@@ -5028,6 +5151,7 @@ function parsePanelCreateRequest(value: PaneCommandValue): RunpanePanelCreateReq
     noFocus: optionalBoolean(value.noFocus),
     focus: optionalBoolean(value.focus),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    callerPanelId: optionalString(value.callerPanelId)?.trim() || undefined,
     waitReady: optionalBoolean(value.waitReady),
     readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
     expectReport: optionalBoolean(value.expectReport),
@@ -5068,6 +5192,7 @@ function parsePanelOpenRequest(value: PaneCommandValue): RunpanePanelOpenRequest
     noFocus: optionalBoolean(value.noFocus),
     focus: optionalBoolean(value.focus),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    callerPanelId: optionalString(value.callerPanelId)?.trim() || undefined,
   };
 }
 
@@ -5927,7 +6052,7 @@ async function archiveSessionPanes(
       await assertRemovableWorktree(services, pane, removeWorktree);
       const removesWorktree = removesPaneWorktree(pane, removeWorktree);
       const pr = await findPrStatusForPane(services, paneId);
-      const prSkip = describeUnmergedPr(pr, paneId, Boolean(request.dryRun));
+      const prSkip = describeUnmergedPr(pr, paneId, Boolean(request.dryRun), Boolean(request.closed));
       if (prSkip) {
         items.push({ ...base, outcome: 'skipped', skipped: prSkip, pr });
         continue;
@@ -5971,6 +6096,7 @@ async function archiveSessionPanes(
     ok: failed === 0,
     sessionId: record.id,
     merged: true,
+    closed: request.closed ? true : undefined,
     dryRun: request.dryRun ? true : undefined,
     removeWorktree,
     archived: items.filter(item => item.outcome === 'archived' || item.outcome === 'would-archive').length,
@@ -6033,15 +6159,17 @@ function describeUnmergedPr(
   pr: RunpanePaneArchivePrStatus,
   paneId: string,
   dryRun: boolean,
+  includeClosed: boolean,
 ): { code: RunpanePaneArchiveBulkSkipCode; message: string } | undefined {
   const kept = dryRun ? 'Would keep the Pane' : 'Kept the Pane';
+  if (pr.state === 'closed' && includeClosed) return undefined;
   switch (pr.state) {
     case 'merged':
       return undefined;
     case 'open':
       return { code: 'pr-open', message: `PR #${pr.number} is still open. ${kept} for its review, fix and QA tabs; rerun the sweep after the PR merges.` };
     case 'closed':
-      return { code: 'pr-not-merged', message: `PR #${pr.number} was closed without merging. ${kept}; if the work is abandoned, archive it with \`runpane panes archive --pane ${paneId}\`.` };
+      return { code: 'pr-not-merged', message: `PR #${pr.number} was closed without merging. ${kept}; if the work is abandoned, archive it with \`runpane panes archive --pane ${paneId}\`, or rerun the sweep with --closed.` };
     case 'none':
       return { code: 'pr-not-merged', message: `The Pane's branch has no PR yet. ${kept}; rerun the sweep after its PR merges, or archive it with \`runpane panes archive --pane ${paneId}\` if it needs no PR.` };
     case 'unknown':
@@ -6054,7 +6182,10 @@ function describeUnmergedPr(
  * tabs count: Pane reports any terminal printing output as working, and a dev server is not a turn.
  */
 function agentBusyState(panel: ToolPanel): 'working' | 'blocked' | undefined {
-  const state = panel.type === 'terminal' && panelToSummary(panel).isCliPanel ? terminalPanelManager.getAgentStatus(panel.id) : undefined;
+  // A chat tab whose agent exited reads as blocked (it needs a restart), but no turn is running.
+  const state = panel.type === 'chat'
+    ? getChatTabManager().isRunning(panel.id) ? getChatTabManager().agentState(panel.id) : undefined
+    : panel.type === 'terminal' && panelToSummary(panel).isCliPanel ? terminalPanelManager.getAgentStatus(panel.id) : undefined;
   return state === 'working' || state === 'blocked' ? state : undefined;
 }
 
@@ -6227,6 +6358,7 @@ function parsePaneArchiveBulkRequest(value: Record<string, PaneCommandValue>): R
   const request = decodeBoundary(value, boundary.object({
     sessionId: boundary.nonEmptyString,
     merged: boundary.optional(boundary.boolean),
+    closed: boundary.optional(boundary.boolean),
     paneId: boundary.optional(boundary.string),
     force: boundary.optional(boundary.boolean),
     source: boundary.optional(boundary.enumeration('user', 'agent')),
@@ -6245,6 +6377,7 @@ function parsePaneArchiveBulkRequest(value: Record<string, PaneCommandValue>): R
   return {
     sessionId: request.sessionId.trim(),
     merged: true,
+    closed: request.closed,
     source: request.source,
     dryRun: request.dryRun,
     removeWorktree: request.removeWorktree,

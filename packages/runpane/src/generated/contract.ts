@@ -629,7 +629,7 @@ export const RUNPANE_CONTRACT = {
       "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.",
       "usage": [
         "runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json] [--pane-dir <path>]",
-        "runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json] [--pane-dir <path>]"
+        "runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "toolsets": [
@@ -785,6 +785,24 @@ export const RUNPANE_CONTRACT = {
       ]
     },
     {
+      "name": "panels close",
+      "summary": "Close a tab an agent opened, exactly like closing it in Pane; refuses the person's tabs, busy agents and unsent input unless --force.",
+      "usage": [
+        "runpane panels close --panel <panel-id> [--dry-run] [--force] [--source user|agent] --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "panels"
+      ],
+      "jsonSchemas": [
+        "panelCloseRequest",
+        "panelCloseResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "panels list",
       "summary": "List tool panels inside a Pane session.",
       "usage": [
@@ -906,22 +924,6 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "panelResumeResult",
         "panelResumeManyResult"
-      ],
-      "localControl": true
-    },
-    {
-      "name": "panels close",
-      "summary": "Close a tab in a Pane, stopping its process, as closing the tab in the app does.",
-      "usage": [
-        "runpane panels close --panel <panel-id> --yes [--json] [--pane-dir <path>]"
-      ],
-      "mutates": true,
-      "toolsets": [
-        "panels"
-      ],
-      "jsonSchemas": [
-        "panelCloseRequest",
-        "panelCloseResult"
       ],
       "localControl": true
     },
@@ -2500,7 +2502,7 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--force",
-        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes, one of its agents is mid-turn, or a tab holds unsent input; for lock release, release another owner's lock."
+        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes, one of its agents is mid-turn, or a tab holds unsent input; for panels close, close the tab even if an agent opened it, its agent is busy, or it holds unsent input (a stuck tab); for lock release, release another owner's lock."
       },
       {
         "name": "--remove-worktree",
@@ -2509,6 +2511,10 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--merged",
         "description": "With panes archive --session, archive only Panes whose PR is confirmed merged and whose worktree has no uncommitted, untracked or unpushed work. Other Panes are skipped with a reason (pr-open, pr-not-merged, pr-status-unknown, or a local safety code)."
+      },
+      {
+        "name": "--closed",
+        "description": "With panes archive --session --merged, also archive Panes whose PR closed without merging, with the same unsaved-work checks."
       },
       {
         "name": "--launch",
@@ -2651,7 +2657,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane watch --until-event",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes",
-        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--dry-run] --yes",
+        "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes",
         "  runpane panes pause|resume --pane <pane-id> --yes [--json]",
         "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] --yes",
         "  runpane panels list --pane <pane-id> [--json]",
@@ -2662,9 +2668,9 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
-        "  runpane panels close --panel <panel-id> --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
         "  runpane panes push --pane <pane-id> --yes [--json] [--pane-dir <path>]",
@@ -2978,7 +2984,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [options]",
         "  runpane panes archive --pane <pane-id> [--force] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
-        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--dry-run] --yes [--json]",
+        "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes [--json]",
         "  runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json]",
@@ -3156,9 +3162,9 @@ export const RUNPANE_CONTRACT = {
       "panes archive": [
         "Usage:",
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json]",
-        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
+        "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
         "",
-        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state. Refuses a Pane with an agent mid-turn or waiting for an answer (agent-busy), or with a tab holding unsent composer text or unsaved editor edits (unsent-input), unless --force is passed; the --session sweep skips it.",
+        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state. Refuses a Pane with an agent mid-turn or waiting for an answer (agent-busy), or with a tab holding unsent composer text or unsaved editor edits (unsent-input), unless --force is passed; the --session sweep skips it. Add --closed to the sweep to also archive Panes whose PR closed without merging.",
         "",
         "Options:",
         "  --pane <pane-id>               Pane/session id to archive",
@@ -3167,6 +3173,7 @@ export const RUNPANE_CONTRACT = {
         "  --remove-worktree              Also check and remove an adopted Pane's worktree (the branch is kept)",
         "  --session <id|name>            Archive the Panes associated with this Session (requires --merged)",
         "  --merged                       Only archive Panes that are clean and pushed, or merged via a PR",
+        "  --closed                       With --session --merged, also archive Panes whose PR closed unmerged",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Refresh and print archive safety evidence without archiving",
@@ -3235,6 +3242,7 @@ export const RUNPANE_CONTRACT = {
         "Commands:",
         "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [options]",
         "  runpane panels open (--url <url>|--file <path>) [--split|--tab] --yes [--json]",
+        "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
@@ -3243,7 +3251,6 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
-        "  runpane panels close --panel <panel-id> --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "",
@@ -3257,6 +3264,7 @@ export const RUNPANE_CONTRACT = {
         "",
         "agentDetection says how Pane knows agentType: declared, command, process, or screen. launchCommand is the command the panel was launched with.",
         "resumeId is the saved agent session ID that reopens the panel; resumeSource says which rule uses it: agent-farm, configured, or agent.",
+        "openedBy says who opened the tab through runpane: source agent or user, and panelId of the tab that opened it. Tabs without it are the person's.",
         "",
         "Options:",
         "  --pane <pane-id>               Pane/session id",
@@ -3446,6 +3454,25 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>             Connect to a specific Pane data directory.",
         "  --yes                         Skip confirmation prompts.",
         "  --json                        Print JSON output."
+      ],
+      "panels close": [
+        "Usage:",
+        "  runpane panels close --panel <panel-id> [--dry-run] [--force] [--source user|agent] --yes [--json] [--pane-dir <path>]",
+        "",
+        "Closes a tab exactly like closing it in Pane (a terminal tab's process stops); never archives the Pane or touches its worktree. Only tabs an agent opened with --source agent can close. Refuses, without closing, the person's tabs (and tabs from before Pane recorded openers), permanent tabs, an agent mid-turn or waiting for an answer, unsent composer text or unsaved edits, and a live tab whose input Pane cannot read. A refusal exits 1 with the reason and the next step. --force closes it anyway, as the tab's close button does, for a stuck tab or one the person asked you to close; only a permanent tab still stays. A tab id that no longer exists reports alreadyClosed.",
+        "",
+        "Options:",
+        "  --panel <panel-id>             Tab to close",
+        "  --dry-run                      Report whether the tab would close, and why not, without closing it",
+        "  --force                        Close it even if an agent didn't open it, its agent is busy, or it holds unsent input",
+        "  --source <user|agent>          Mark mutation source",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "  --yes                          Skip confirmation for mutating commands",
+        "",
+        "Examples:",
+        "  runpane panels close --panel <panel-id> --dry-run --json",
+        "  runpane panels close --panel <panel-id> --yes --json"
       ],
       "panels submit-composer": [
         "Submit an agent composer using the panel-appropriate key sequence.",
@@ -3943,25 +3970,6 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
       ],
-      "panels close": [
-        "Close a tab in a Pane, stopping its process, as closing the tab in the app does.",
-        "",
-        "Usage:",
-        "  runpane panels close --panel <panel-id> --yes [--json] [--pane-dir <path>]",
-        "",
-        "Closes one tab (agent, terminal, browser or editor) the way its close button in the app does:",
-        "a terminal tab's process is stopped and the tab is removed from every window showing the Pane.",
-        "A Pane's permanent tabs cannot be closed. Closing the tab this command runs in stops this command too.",
-        "",
-        "Options:",
-        "  --panel <panel-id>            Panel id, from runpane panels list",
-        "  --yes                         Skip the confirmation prompt",
-        "  --pane-dir <path>             Connect to a specific Pane data directory",
-        "  --json                        Print machine-readable output",
-        "",
-        "Examples:",
-        "  runpane panels close --panel <panel-id> --yes --json"
-      ],
       "lock": [
         "Usage:",
         "  runpane lock <acquire|release|list> [options]",
@@ -4418,7 +4426,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane watch --until-event",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes",
-        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--dry-run] --yes",
+        "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes",
         "  runpane panes pause|resume --pane <pane-id> --yes [--json]",
         "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] --yes",
         "  runpane panels list --pane <pane-id> [--json]",
@@ -4429,9 +4437,9 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
-        "  runpane panels close --panel <panel-id> --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
         "  runpane panes push --pane <pane-id> --yes [--json] [--pane-dir <path>]",
@@ -4751,7 +4759,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [options]",
         "  runpane panes archive --pane <pane-id> [--force] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
-        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--dry-run] --yes [--json]",
+        "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes [--json]",
         "  runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json]",
         "  runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json]",
@@ -4921,9 +4929,9 @@ export const RUNPANE_CONTRACT = {
       "panes archive": [
         "Usage:",
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json]",
-        "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
+        "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
         "",
-        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state. Refuses a Pane with an agent mid-turn or waiting for an answer (agent-busy), or with a tab holding unsent composer text or unsaved editor edits (unsent-input), unless --force is passed; the --session sweep skips it.",
+        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state. Refuses a Pane with an agent mid-turn or waiting for an answer (agent-busy), or with a tab holding unsent composer text or unsaved editor edits (unsent-input), unless --force is passed; the --session sweep skips it. Add --closed to the sweep to also archive Panes whose PR closed without merging.",
         "",
         "Options:",
         "  --pane <pane-id>",
@@ -4932,6 +4940,7 @@ export const RUNPANE_CONTRACT = {
         "  --remove-worktree",
         "  --session <id|name>",
         "  --merged",
+        "  --closed",
         "  --pane-dir <path>",
         "  --json",
         "  --dry-run",
@@ -5000,6 +5009,7 @@ export const RUNPANE_CONTRACT = {
         "Commands:",
         "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [options]",
         "  runpane panels open (--url <url>|--file <path>) [--split|--tab] --yes [--json]",
+        "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
@@ -5008,7 +5018,6 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
-        "  runpane panels close --panel <panel-id> --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "",
@@ -5022,6 +5031,7 @@ export const RUNPANE_CONTRACT = {
         "",
         "agentDetection says how Pane knows agentType: declared, command, process, or screen. launchCommand is the command the panel was launched with.",
         "resumeId is the saved agent session ID that reopens the panel; resumeSource says which rule uses it: agent-farm, configured, or agent.",
+        "openedBy says who opened the tab through runpane: source agent or user, and panelId of the tab that opened it. Tabs without it are the person's.",
         "",
         "Options:",
         "  --pane <pane-id>",
@@ -5203,6 +5213,25 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>             Connect to a specific Pane data directory.",
         "  --yes                         Skip confirmation prompts.",
         "  --json                        Print JSON output."
+      ],
+      "panels close": [
+        "Usage:",
+        "  runpane panels close --panel <panel-id> [--dry-run] [--force] [--source user|agent] --yes [--json] [--pane-dir <path>]",
+        "",
+        "Closes a tab exactly like closing it in Pane (a terminal tab's process stops); never archives the Pane or touches its worktree. Only tabs an agent opened with --source agent can close. Refuses, without closing, the person's tabs (and tabs from before Pane recorded openers), permanent tabs, an agent mid-turn or waiting for an answer, unsent composer text or unsaved edits, and a live tab whose input Pane cannot read. A refusal exits 1 with the reason and the next step. --force closes it anyway, as the tab's close button does, for a stuck tab or one the person asked you to close; only a permanent tab still stays. A tab id that no longer exists reports alreadyClosed.",
+        "",
+        "Options:",
+        "  --panel <panel-id>",
+        "  --dry-run",
+        "  --force",
+        "  --source <user|agent>",
+        "  --pane-dir <path>",
+        "  --json",
+        "  --yes",
+        "",
+        "Examples:",
+        "  runpane panels close --panel <panel-id> --dry-run --json",
+        "  runpane panels close --panel <panel-id> --yes --json"
       ],
       "panels submit-composer": [
         "Submit an agent composer using the panel-appropriate key sequence.",
@@ -5667,25 +5696,6 @@ export const RUNPANE_CONTRACT = {
         "  --limit <count>                Maximum characters to return; defaults to 20000 (the end is kept)",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
-      ],
-      "panels close": [
-        "Close a tab in a Pane, stopping its process, as closing the tab in the app does.",
-        "",
-        "Usage:",
-        "  python -m runpane panels close --panel <panel-id> --yes [--json] [--pane-dir <path>]",
-        "",
-        "Closes one tab (agent, terminal, browser or editor) the way its close button in the app does:",
-        "a terminal tab's process is stopped and the tab is removed from every window showing the Pane.",
-        "A Pane's permanent tabs cannot be closed. Closing the tab this command runs in stops this command too.",
-        "",
-        "Options:",
-        "  --panel <panel-id>            Panel id, from runpane panels list",
-        "  --yes                         Skip the confirmation prompt",
-        "  --pane-dir <path>             Connect to a specific Pane data directory",
-        "  --json                        Print machine-readable output",
-        "",
-        "Examples:",
-        "  python -m runpane panels close --panel <panel-id> --yes --json"
       ],
       "lock": [
         "Usage:",
@@ -6177,9 +6187,9 @@ export const RUNPANE_CONTRACT = {
       "runpane agents send --pane <pane-id> --text \"Also add a test\" --yes --json",
       "runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json",
       "runpane panels last-message --panel <panel-id> --json",
+      "runpane panels close --panel <panel-id> --yes --json",
       "runpane panels resume --panel <panel-id> --wait-ready --yes --json",
       "runpane panels resume --session <id|name> --wait-ready --yes --json",
-      "runpane panels close --panel <panel-id> --yes --json",
       "runpane panes pause --pane <pane-id> --yes --json",
       "runpane panes resume --pane <pane-id> --yes --json",
       "runpane docs search --query \"archive a pane\" --json",
@@ -6218,10 +6228,11 @@ export const RUNPANE_CONTRACT = {
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
       "For `panes create --wait-ready` (and `panels create`, `panes adopt --launch`), ready means an identified agent at its own input box: declared with `--agent`, or detected from the command, its foreground process or its screen. A `--tool-command` that never shows a supported agent is not ready: `readiness.ok` is false with `readiness.reason.code` `no-agent-detected` after the timeout, or `command-exited` as soon as the command exits back to the shell, and nothing is typed into it. `agent-not-ready` means the agent was detected but its input box was not ready in time. CLI readiness is confirmed on consecutive polls. Codex also requires a recognized configured model or context footer below its live composer; its provisional startup composer is not ready. Hidden or unrecognized Codex status lines conservatively time out rather than prove readiness. Startup prompts return blocked with the prompt's own text in blocked.message and a suggestedCommand, and Pane never answers them, apart from Claude's folder trust for a Session's own folder: first-run trust and daemon dialogs and Agent Farm's `Trust this repository workspace? [y/N]` as blocked.kind=first-run-dialog; Codex's security setup banner and any other prompt, including a wrapper's or shell's `[y/N]` before the agent appears, as agent-prompt. A starting message blocked this way is held and sent once the prompt is answered and the agent's input box is ready. Every create with a starting message returns `initialInput`. Pane stages the text in the composer, presses the agent's submit key separately (Ctrl+Enter for Codex, declared or detected), and checks where it went: `initialInput.delivery` is `taken` or `queued` (from the agent's transcript or its screen), `in-composer`, or `unknown` (`argv` means a prompt was routed at launch; Pane gives the transcript up to 10 seconds before settling on unknown). `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`, and the create's `ok` is false unless a Claude or Codex starting message is verified. Cursor and OpenCode have no acceptance probe: their delivery stays `unknown` with a delivery.message saying so, `verification: unverifiable`, and `ok` follows readiness. Without `--wait-ready` the create returns at once with `initialInput.verifiedSubmitted: false`, a delivery.message saying the call did not wait, and a `panels wait` nextCommand; Pane still sends the message once the agent is identified and at its input box, and gives up without typing it if no supported agent appears within 30 seconds.",
-      "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane. Archive refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless `--force` is used, and the Session sweep skips it.",
+      "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane. Archive refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless `--force` is used, and the Session sweep skips it. Add `--closed` to the sweep to also archive Panes whose PR closed without merging.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
       "`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.",
       "`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. Files open in an editor tab with read-only previews for supported formats, and HTML opens as editable source; an existing tab showing the same target is reused. It brings the tab forward for clients already showing that Pane, and never raises or focuses the Pane window or switches anyone's Pane.",
+      "`runpane panels close --panel <panel-id>` closes a tab exactly like closing it in Pane (a terminal tab's process stops) and never archives the Pane or touches its worktree. Only a tab an agent opened with `--source agent` can close; Pane records that opener, and `panels list` shows it as `openedBy`. It refuses, without closing, the person's tabs and every tab from before Pane recorded openers (`opened-by-user`), permanent tabs (`permanent`), an agent mid-turn or waiting for an answer (`agent-busy`), unsent composer text or unsaved editor edits (`unsent-input`), and a live tab whose input Pane cannot read, such as agents other than Claude and Codex or chat tabs (`input-unknown`). A refusal prints `{ ok: false, closed: false, refused: { code, message, next } }` and exits 1. A tab id that no longer exists returns `alreadyClosed: true`. `--dry-run` reports `wouldClose` and any refusal without closing. `--force` closes the tab anyway, as its close button does, for a stuck tab or one the person asked to close (`forced: true`); only a permanent tab still stays.",
       "`runpane panels list` lists tool panels inside one Pane session. Each panel with a saved agent session ID reports it as `resumeId`, with `resumeSource` (`agent-farm`, `configured`, or `agent`) naming the rule that reopens the conversation.",
       "`runpane panels output` reads bounded recent terminal output from one panel and strips common terminal control noise for agent use.",
       "`runpane panels input` sends exact input bytes to one terminal panel. Prefer `--input-file` for newlines, Ctrl-C, quotes, or shell-sensitive text.",
@@ -7578,6 +7589,45 @@ export const RUNPANE_CONTRACT = {
         "--env-remove",
         "OLD,STALE",
         "--yes",
+        "--json"
+      ],
+      [
+        "panels",
+        "close",
+        "--panel",
+        "panel-1",
+        "--dry-run",
+        "--json"
+      ],
+      [
+        "panels",
+        "close",
+        "--panel",
+        "panel-1",
+        "--source",
+        "agent",
+        "--yes",
+        "--json",
+        "--pane-dir",
+        "/tmp/pane"
+      ],
+      [
+        "panels",
+        "close",
+        "--panel",
+        "panel-1",
+        "--force",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panes",
+        "archive",
+        "--session",
+        "session-a",
+        "--merged",
+        "--closed",
+        "--dry-run",
         "--json"
       ]
     ],
@@ -9171,6 +9221,10 @@ export const RUNPANE_CONTRACT = {
             "user",
             "agent"
           ]
+        },
+        "callerPanelId": {
+          "type": "string",
+          "description": "The calling tab ($PANE_PANEL_ID), recorded as the opener of the tabs this creates. The CLI sets it from PANE_PANEL_ID."
         },
         "associateSession": {
           "type": "string",
@@ -11204,6 +11258,25 @@ export const RUNPANE_CONTRACT = {
               },
               "paused": {
                 "$ref": "#/jsonSchemas/pausedMark"
+              },
+              "openedBy": {
+                "type": "object",
+                "description": "Who opened this tab through runpane, and the tab that opened it when known. Omitted for the person's tabs and tabs from before Pane recorded it; `panels close` closes only tabs whose source is agent.",
+                "required": [
+                  "source"
+                ],
+                "properties": {
+                  "source": {
+                    "enum": [
+                      "agent",
+                      "user"
+                    ]
+                  },
+                  "panelId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
@@ -12549,6 +12622,10 @@ export const RUNPANE_CONTRACT = {
             "agent"
           ]
         },
+        "callerPanelId": {
+          "type": "string",
+          "description": "The calling tab ($PANE_PANEL_ID), recorded as the opener of the tabs this creates. The CLI sets it from PANE_PANEL_ID."
+        },
         "waitReady": {
           "type": "boolean"
         },
@@ -12809,6 +12886,10 @@ export const RUNPANE_CONTRACT = {
             "user",
             "agent"
           ]
+        },
+        "callerPanelId": {
+          "type": "string",
+          "description": "The calling tab ($PANE_PANEL_ID), recorded as the opener of the tabs this creates. The CLI sets it from PANE_PANEL_ID."
         }
       },
       "additionalProperties": false
@@ -12861,6 +12942,109 @@ export const RUNPANE_CONTRACT = {
         },
         "reused": {
           "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelCloseRequest": {
+      "type": "object",
+      "required": [
+        "panelId"
+      ],
+      "properties": {
+        "panelId": {
+          "type": "string"
+        },
+        "dryRun": {
+          "type": "boolean",
+          "description": "Report whether the tab would close, and why not, without closing it."
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Close it as the tab's close button does, skipping every check but permanent: for a stuck tab, or one the person asked to close. A busy agent's turn and unsent input are lost."
+        },
+        "source": {
+          "enum": [
+            "user",
+            "agent"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelCloseResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "panelId",
+        "closed"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "False when the close was refused (the tab stays open); the CLI exits 1."
+        },
+        "generation": {
+          "type": "number"
+        },
+        "paneId": {
+          "type": "string",
+          "description": "Omitted only when the tab was already gone."
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "description": "The tab's type, such as terminal, chat, browser or editor. Omitted only when the tab was already gone."
+        },
+        "title": {
+          "type": "string"
+        },
+        "closed": {
+          "type": "boolean"
+        },
+        "forced": {
+          "type": "boolean",
+          "description": "Closed with --force, skipping the checks that would have kept it."
+        },
+        "alreadyClosed": {
+          "type": "boolean",
+          "description": "No tab has this id: it was closed already."
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "wouldClose": {
+          "type": "boolean",
+          "description": "Dry run only: whether the close would go ahead."
+        },
+        "refused": {
+          "type": "object",
+          "description": "Why the tab was kept open. opened-by-user: not opened by an agent with --source agent (including tabs from before Pane recorded openers). permanent: a permanent tab. agent-busy: its agent is mid-turn or waiting for an answer. unsent-input: unsent composer text or unsaved editor edits. input-unknown: a live tab whose input Pane cannot read.",
+          "required": [
+            "code",
+            "message",
+            "next"
+          ],
+          "properties": {
+            "code": {
+              "enum": [
+                "opened-by-user",
+                "permanent",
+                "agent-busy",
+                "unsent-input",
+                "input-unknown"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "next": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -12969,50 +13153,6 @@ export const RUNPANE_CONTRACT = {
             "observed",
             "unverifiable"
           ]
-        }
-      },
-      "additionalProperties": false
-    },
-    "panelCloseRequest": {
-      "type": "object",
-      "required": [
-        "panelId"
-      ],
-      "properties": {
-        "panelId": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
-    },
-    "panelCloseResult": {
-      "type": "object",
-      "required": [
-        "ok",
-        "paneId",
-        "panelId",
-        "type",
-        "title"
-      ],
-      "properties": {
-        "ok": {
-          "const": true
-        },
-        "generation": {
-          "type": "number"
-        },
-        "paneId": {
-          "type": "string"
-        },
-        "panelId": {
-          "type": "string"
-        },
-        "type": {
-          "type": "string",
-          "description": "The closed tab's type, such as terminal, browser or editor."
-        },
-        "title": {
-          "type": "string"
         }
       },
       "additionalProperties": false
@@ -13788,6 +13928,10 @@ export const RUNPANE_CONTRACT = {
         "merged": {
           "const": true
         },
+        "closed": {
+          "type": "boolean",
+          "description": "Also archive Panes whose PR closed without merging, with the same unsaved-work checks."
+        },
         "source": {
           "enum": [
             "user",
@@ -13823,6 +13967,9 @@ export const RUNPANE_CONTRACT = {
           "type": "string"
         },
         "merged": {
+          "const": true
+        },
+        "closed": {
           "const": true
         },
         "dryRun": {
@@ -15351,6 +15498,7 @@ export const RUNPANE_CONTRACT = {
             "--pane <pane-id>",
             "--session <id|name>",
             "--merged",
+            "--closed",
             "--source <user|agent>",
             "--force",
             "--remove-worktree",
@@ -15427,6 +15575,18 @@ export const RUNPANE_CONTRACT = {
             "--split",
             "--tab",
             "--no-focus",
+            "--source <user|agent>",
+            "--yes",
+            "--json"
+          ]
+        },
+        {
+          "name": "panels close",
+          "summary": "Close a tab an agent opened once it no longer matters; refuses the person's tabs, busy agents and unsent input.",
+          "arguments": [
+            "--panel <panel-id>",
+            "--dry-run",
+            "--force",
             "--source <user|agent>",
             "--yes",
             "--json"
@@ -15521,15 +15681,6 @@ export const RUNPANE_CONTRACT = {
             "--yes",
             "--json",
             "--pane-dir <path>"
-          ]
-        },
-        {
-          "name": "panels close",
-          "summary": "Close a tab, stopping its process, as the app's close button does.",
-          "arguments": [
-            "--panel <panel-id>",
-            "--yes",
-            "--json"
           ]
         },
         {
@@ -16854,7 +17005,7 @@ export const RUNPANE_CONTRACT = {
       "panes archive": {
         "name": "panes archive",
         "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.",
-        "details": "Use this to close out a Pane once its PR has merged. The safety check refreshes the configured upstream before comparing it to HEAD and includes exact unpushed commit IDs and subjects. When the branch has no upstream or its upstream is gone (GitHub deletes merged branches), a merged pull request whose head is HEAD counts as pushed, so squash-merged branches archive without --force. Refuses unsafe archive operations unless --force is used. Use --dry-run to inspect the same evidence without mutating Pane state. Use --session <id|name> --merged to close out every finished Pane of a Session at once. Archive also refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless --force is used, since archiving stops the agent or loses the input.",
+        "details": "Use this to close out a Pane once its PR has merged. The safety check refreshes the configured upstream before comparing it to HEAD and includes exact unpushed commit IDs and subjects. When the branch has no upstream or its upstream is gone (GitHub deletes merged branches), a merged pull request whose head is HEAD counts as pushed, so squash-merged branches archive without --force. Refuses unsafe archive operations unless --force is used. Use --dry-run to inspect the same evidence without mutating Pane state. Use --session <id|name> --merged to close out every finished Pane of a Session at once. Archive also refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless --force is used, since archiving stops the agent or loses the input. Add --closed to the Session sweep to also archive Panes whose PR closed without merging.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -16892,6 +17043,11 @@ export const RUNPANE_CONTRACT = {
             "description": "With --session, archive only Panes whose PR is confirmed merged and whose worktree has no uncommitted, untracked or unpushed work; skip the rest with a reason and next step. An open PR is skipped as pr-open, no PR or a closed unmerged PR as pr-not-merged, and a PR state GitHub cannot confirm as pr-status-unknown."
           },
           {
+            "name": "--closed",
+            "required": false,
+            "description": "With --session --merged, also archive Panes whose PR closed without merging, with the same unsaved-work checks. Without --closed they are skipped as pr-not-merged."
+          },
+          {
             "name": "--yes",
             "required": false,
             "description": "Skip confirmation for mutating commands."
@@ -16918,6 +17074,7 @@ export const RUNPANE_CONTRACT = {
           "runpane panes archive --pane <pane-id> --dry-run --json",
           "runpane panes archive --pane <pane-id> --remove-worktree --yes --json",
           "runpane panes archive --session <id|name> --merged --dry-run --json",
+          "runpane panes archive --session <id|name> --merged --closed --dry-run --json",
           "runpane panes archive --session <id|name> --merged --remove-worktree --yes --json",
           "runpane panes archive --pane <pane-id> --force --yes --json"
         ],
@@ -16939,7 +17096,7 @@ export const RUNPANE_CONTRACT = {
           "Undo an archive with `runpane panes restore --pane <pane-id> --yes`, which recreates the worktree. `runpane links create --pane <pane-id>` gives the user a link to review the Pane first.",
           "When the safety check is skipped, `safetyCheck.reason` says why: `external-worktree` (an adopted Pane whose worktree Pane does not own), `main-repo`, `missing-project-context`, or `git-error`. `worktreeWillRemain: true` means archiving leaves the worktree on disk.",
           "An agent mid-turn or waiting for an answer blocks archive with `agent-busy` (`safetyCheck.busyAgents` lists them); wait until it is idle with `runpane panels wait --panel <id> --for idle`, then archive again. The Session sweep skips such a Pane with skipped.code `agent-busy`.",
-          "A tab holding text typed into an agent's composer but not sent, or an editor with unsaved edits, blocks archive with `unsent-input` (`safetyCheck.unsentInput` lists them); send, save or clear it, then archive again. `--force` discards it."
+          "A tab holding text typed into an agent's composer but not sent, or an editor with unsaved edits, blocks archive with `unsent-input` (`safetyCheck.unsentInput` lists them), the same input `panels close` refuses to lose; send, save or clear it, then archive again. `--force` discards it."
         ]
       },
       "panes pin": {
@@ -17264,7 +17421,8 @@ export const RUNPANE_CONTRACT = {
           "The ids returned here are stable inputs for `panels output` and `panels input`.",
           "`agentType` is the agent Pane treats the panel as; `agentDetection` says how it knows (`declared`, `command`, `process`, or `screen`), and `launchCommand` is the command the panel was launched with.",
           "`resumeId` is the agent session ID Pane saved for reopening the panel, and `resumeSource` says which rule resumes with it: `agent-farm` (an `agent-farm run` or `agent-farm agent` command), `configured` (the panel's own resume command), or `agent` (a built-in agent's captured session). Both are omitted when no ID is saved.",
-          "Every Pane has one plain shell titled `Terminal`, its terminal dock: `dock: true` marks it, and the field is omitted on every other panel. Setup progress notices appear there; it is not a tool or agent tab and does not count toward the Pane's `status`. A `--tool-command` tab without `--title` or `--agent` is titled from its command (whole words up to 40 characters)."
+          "Every Pane has one plain shell titled `Terminal`, its terminal dock: `dock: true` marks it, and the field is omitted on every other panel. Setup progress notices appear there; it is not a tool or agent tab and does not count toward the Pane's `status`. A `--tool-command` tab without `--title` or `--agent` is titled from its command (whole words up to 40 characters).",
+          "`openedBy` says who opened the tab through runpane: `source` (`agent` or `user`) and, when known, `panelId` of the tab that opened it. It is omitted for the person's tabs and tabs from before Pane recorded it; `panels close` closes only tabs whose `openedBy.source` is `agent`."
         ]
       },
       "panels output": {
@@ -17640,8 +17798,8 @@ export const RUNPANE_CONTRACT = {
       },
       "panels close": {
         "name": "panels close",
-        "summary": "Close a tab in a Pane, stopping its process, as closing the tab in the app does.",
-        "details": "Use this to remove a tab you no longer need, such as a finished or stuck worker. It runs the app's own close-tab path: a terminal tab's process is stopped, the tab disappears from every window showing the Pane, and another tab becomes active if it was the active one.",
+        "summary": "Close a tab an agent opened, exactly like closing it in Pane; refuses the person's tabs, busy agents and unsent input unless --force.",
+        "details": "Closes a tab through the same path as closing it in Pane, so a terminal tab's process stops. It never archives the Pane or touches its worktree. Only a tab an agent opened can close: Pane records the opener when a tab is opened with `--source agent` (panels open, panels create, panes create, agents start). It refuses, without closing, a tab not opened by an agent (the person's, and every tab from before Pane recorded openers), a permanent tab, an agent mid-turn or waiting for an answer, unsent composer text or unsaved editor edits, and a live tab whose input Pane cannot read (agents other than Claude and Codex, and chat tabs). A refusal exits 1 with `refused.code`, `refused.message` and `refused.next`. A tab id that no longer exists returns `alreadyClosed: true`. `--dry-run` reports the same without closing. `--force` (only for a stuck tab, or one the person asked you to close) closes it anyway, as the tab's close button does: a busy agent's turn and unsent input are lost, and the result says `forced: true`. A permanent tab still stays.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -17649,7 +17807,23 @@ export const RUNPANE_CONTRACT = {
             "name": "--panel",
             "value": "<panel-id>",
             "required": true,
-            "description": "Panel id to close (any tab type)."
+            "description": "Tab to close."
+          },
+          {
+            "name": "--dry-run",
+            "required": false,
+            "description": "Report whether the tab would close, and why not, without closing it."
+          },
+          {
+            "name": "--force",
+            "required": false,
+            "description": "Close it even if an agent didn't open it, its agent is busy, or it holds unsent input. Only for a stuck tab, or one the person asked you to close."
+          },
+          {
+            "name": "--source",
+            "value": "<user|agent>",
+            "required": false,
+            "description": "Mutation source."
           },
           {
             "name": "--yes",
@@ -17669,6 +17843,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
+          "runpane panels close --panel <panel-id> --dry-run --json",
           "runpane panels close --panel <panel-id> --yes --json"
         ],
         "jsonSchemas": [
@@ -17676,9 +17851,10 @@ export const RUNPANE_CONTRACT = {
           "panelCloseResult"
         ],
         "notes": [
-          "Closing is not undoable: the tab and its scrollback are gone. To stop an agent and keep its tab, send it Ctrl-C with `panels input` instead; to restart a stopped one, use `panels resume`.",
-          "A Pane's permanent tabs cannot be closed; the command fails and nothing changes.",
-          "Closing the tab the command runs in stops the caller too, so it may not see the result."
+          "ok:false with `refused` means the tab was NOT closed. `refused.code` is opened-by-user, permanent, agent-busy, unsent-input, or input-unknown; follow `refused.next`. Use --force only when the tab is stuck or the person asked you to close it.",
+          "`alreadyClosed: true` (ok:true, closed:false) means no tab has that id any more.",
+          "With --dry-run, `wouldClose` says whether the close would go ahead and `refused` says why not. Nothing closes; a refused dry run also exits 1.",
+          "Open tabs with `--source agent` so they count as yours; `panels list` shows who opened each tab as `openedBy`."
         ]
       },
       "panels pause": {
@@ -17977,7 +18153,8 @@ export const RUNPANE_CONTRACT = {
           "`panels create` is for visible helper/reviewer tabs, not the agent's default private delegation mechanism.",
           "For agent-created panels, prefer --source agent or --no-focus to avoid stealing focus from the user or implementation tab.",
           "With --tool-command, --agent names the agent the command runs (a wrapper such as `agent-farm run`): Pane launches the command unchanged and treats the panel as that agent. Without --agent, Pane detects Claude Code, Codex and Cursor from the foreground process or the agent's screen, and --wait-ready waits for the detected agent's input box; a command that never shows a supported agent is not ready and nothing is typed into it.",
-          "`--chat` or `--agent-farm` creates a chat tab: --initial-input is its first prompt, sent once when the conversation starts; --wait-ready waits for the agent to start. `panels submit`, `wait`, `screen`, `output`, `last-message`, `report` and `resume` work on chat tabs; `panels input` and `submit-composer` do not."
+          "`--chat` or `--agent-farm` creates a chat tab: --initial-input is its first prompt, sent once when the conversation starts; --wait-ready waits for the agent to start. `panels submit`, `wait`, `screen`, `output`, `last-message`, `report` and `resume` work on chat tabs; `panels input` and `submit-composer` do not.",
+          "With `--source agent`, Pane records this tab as opened by an agent (and by the calling tab from PANE_PANEL_ID), so `panels close` can close it later."
         ]
       },
       "panels open": {
@@ -18061,7 +18238,8 @@ export const RUNPANE_CONTRACT = {
           "Prefer this over opening the system browser when showing the user a page, plan, report, or dev server.",
           "Write plans and reports as self-contained HTML files. Use --url with a file URL to render a page in a live browser, or --file to open its editable source; reopening the same target reuses its tab.",
           "When the user views Pane from another computer, a file page loads only files in its own folder and the folders inside it. Keep the page's CSS, scripts and images there, put them inline, or serve the folder over HTTP and open its localhost URL. Give file URLs as the host sees them, not as the other computer would.",
-          "Opening a tab does not steal window focus; use `panes focus` only on explicit user request."
+          "Opening a tab does not steal window focus; use `panes focus` only on explicit user request.",
+          "With `--source agent`, Pane records this tab as opened by an agent (and by the calling tab from PANE_PANEL_ID), so `panels close` can close it later."
         ]
       },
       "panels submit-composer": {
