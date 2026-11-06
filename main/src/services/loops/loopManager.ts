@@ -161,8 +161,8 @@ export class LoopManager {
       enabled: input.enabled,
       scheduleFromMs: restartsSchedule ? nowMs : existing.scheduleFromMs,
       createdAtMs: existing?.createdAtMs ?? nowMs,
-      ...(github ? { github } : {}),
     };
+    if (github) loop.github = github;
     repo.upsert(loop);
     this.changed();
     return this.present(loop);
@@ -331,7 +331,8 @@ export class LoopManager {
   private async execute(loop: StoredLoop, slotAtMs: number, trigger: LoopRunTrigger, event?: LoopGithubEvent): Promise<void> {
     const { repo } = this.options;
     // Recorded before the Pane exists, so a crash mid-create cannot run the slot twice.
-    const run: LoopRun = { id: randomUUID(), loopId: loop.id, slotAtMs, trigger, status: 'started', error: null, sessionId: null, ...(event ? { event } : {}) };
+    const run: LoopRun = { id: randomUUID(), loopId: loop.id, slotAtMs, trigger, status: 'started', error: null, sessionId: null };
+    if (event) run.event = event;
     repo.addRun(run);
     // Runs from events start side by side; the set guards one schedule or manual run at a time.
     if (!event) this.starting.add(loop.id);
@@ -510,15 +511,13 @@ function validGithubTriggers(input: LoopGithubTriggers): LoopGithubTriggers {
   }
   const commentPhrase = input.commentPhrase?.trim() || undefined;
   const issueLabel = input.issueLabel?.trim() || undefined;
-  const triggers: LoopGithubTriggers = {
-    repo,
-    ...(commentPhrase ? { commentPhrase } : {}),
-    ...(input.changesRequested ? { changesRequested: true } : {}),
-    ...(input.checkFailed ? { checkFailed: true } : {}),
-    ...(input.prOpened ? { prOpened: true } : {}),
-    ...(issueLabel ? { issueLabel } : {}),
-    ...(input.allowForks ? { allowForks: true } : {}),
-  };
+  const triggers: LoopGithubTriggers = { repo };
+  if (commentPhrase) triggers.commentPhrase = commentPhrase;
+  if (input.changesRequested) triggers.changesRequested = true;
+  if (input.checkFailed) triggers.checkFailed = true;
+  if (input.prOpened) triggers.prOpened = true;
+  if (issueLabel) triggers.issueLabel = issueLabel;
+  if (input.allowForks) triggers.allowForks = true;
   if (!commentPhrase && !triggers.changesRequested && !triggers.checkFailed && !triggers.prOpened && !issueLabel) {
     throw new PaneError('ERR_LOOP_INVALID', 'Choose at least one GitHub event, or remove the GitHub trigger. Nothing was saved.', 'Turn on a comment phrase, changes-requested reviews, failing checks, new PRs or an issue label.');
   }

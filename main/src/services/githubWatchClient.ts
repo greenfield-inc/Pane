@@ -137,10 +137,11 @@ export class GithubWatchClient {
   rest(host: string, path: string, etag?: string): Promise<{ changed: false } | { changed: true; etag: string | null; body: JsonValue }> {
     return this.queue(async () => {
       const root = host === 'github.com' ? 'https://api.github.com' : `https://${host}/api/v3`;
-      const response = await this.send(host, `${root}${path}`, token => ({
-        method: 'GET',
-        headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', ...(etag ? { 'if-none-match': etag } : {}) },
-      }));
+      const response = await this.send(host, `${root}${path}`, token => {
+        const headers = new Headers({ authorization: `Bearer ${token}`, accept: 'application/vnd.github+json' });
+        if (etag) headers.set('if-none-match', etag);
+        return { method: 'GET', headers };
+      });
       if (response.status === 304) return { changed: false };
       try { return { changed: true, etag: response.headers.get('etag'), body: decodeBoundary(await response.json(), boundary.json) }; }
       catch { throw new GithubWatchError('GitHub returned an invalid response; watching will retry.'); }

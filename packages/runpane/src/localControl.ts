@@ -2867,16 +2867,11 @@ function loopGithubFlag(parsed: ParsedArgs): JsonObject | null | undefined {
   const value = parsed.github?.trim();
   if (value === undefined) return undefined;
   if (value === 'none') return null;
-  let decoded: JsonValue;
   try {
-    decoded = decodeBoundary(JSON.parse(value), boundary.json);
+    return decodeBoundary(JSON.parse(value), boundary.jsonObject);
   } catch {
-    throw new RunpaneError('ERR_RUNPANE_LOOP_GITHUB', '--github is not valid JSON. Nothing was saved.', 'Pass an object such as \'{"repo":"acme/app","commentPhrase":"/pane"}\', or none to remove the triggers.');
-  }
-  if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) {
     throw new RunpaneError('ERR_RUNPANE_LOOP_GITHUB', '--github must be a JSON object. Nothing was saved.', 'Pass an object such as \'{"repo":"acme/app","commentPhrase":"/pane"}\', or none to remove the triggers.');
   }
-  return decoded;
 }
 
 /** Reads the loop and replaces the fields the flags name; --agent and --tool-command replace each other, as do --repo and --session. */

@@ -97,7 +97,7 @@ export class GithubLoopEventSource {
         const number = Number(comment.issue_url.split('/').pop());
         const pull = pullByNumber.get(number);
         candidates.push({
-          event: { ...(pull ? prContext(repo, pull) : {}), key: `comment:${comment.id}`, kind: 'comment', repo, number, isPr: true, url: comment.html_url,
+          event: { ...prContext(repo, pull), key: `comment:${comment.id}`, kind: 'comment', repo, number, isPr: true, url: comment.html_url,
             author: comment.user?.login ?? null, atMs: Date.parse(comment.created_at), summary: `Comment by @${comment.user?.login ?? 'ghost'}`,
             text: clip(comment.body ?? '') },
           collaborator: COLLABORATOR_ASSOCIATIONS.has(comment.author_association ?? ''),
@@ -137,7 +137,7 @@ export class GithubLoopEventSource {
         const isPr = issue.pull_request !== undefined;
         const pull = isPr ? pullByNumber.get(issue.number) : undefined;
         candidates.push({
-          event: { ...(pull ? prContext(repo, pull) : {}), key: `label:${labeled.id}`, kind: 'label', repo, number: issue.number, isPr, url: issue.html_url,
+          event: { ...prContext(repo, pull), key: `label:${labeled.id}`, kind: 'label', repo, number: issue.number, isPr, url: issue.html_url,
             author: labeled.actor?.login ?? null, atMs: Date.parse(labeled.created_at), summary: `Labeled ${labeled.label.name}`,
             text: clip(`${issue.title}\n\n${issue.body ?? ''}`) },
           collaborator: true,
@@ -159,10 +159,13 @@ export class GithubLoopEventSource {
   }
 }
 
-/** The PR facts a run needs: its head branch when the branch lives in `repo`, and whether it comes from a fork. */
-function prContext(repo: string, pull: Pull): Pick<LoopGithubEvent, 'repo' | 'headRef' | 'fork'> {
-  const fork = (pull.head.repo?.full_name ?? '').toLowerCase() !== repo.toLowerCase();
-  return { repo, fork, ...(fork ? {} : { headRef: pull.head.ref }) };
+/** The PR facts a run needs, when the PR is known: its head branch when the branch lives in `repo`, and whether it comes from a fork. */
+function prContext(repo: string, pull: Pull | undefined): Pick<LoopGithubEvent, 'repo' | 'headRef' | 'fork'> {
+  const context: Pick<LoopGithubEvent, 'repo' | 'headRef' | 'fork'> = { repo };
+  if (!pull) return context;
+  context.fork = (pull.head.repo?.full_name ?? '').toLowerCase() !== repo.toLowerCase();
+  if (!context.fork) context.headRef = pull.head.ref;
+  return context;
 }
 
 function items<T>(value: JsonValue, schema: BoundarySchema<T>): T[] {

@@ -123,21 +123,22 @@ export async function startLoopRun(
     : `${slot.toLocaleString('en-US', { month: 'short' })} ${slot.getDate()} ${pad(slot.getHours())}:${pad(slot.getMinutes())}`;
   const name = `${loopSlug(loop.name)} · ${label}`;
   const initialInput = event ? eventPrompt(loop.initialInput, event) : loop.initialInput;
+  const pane: RunpanePaneCreateRequest['panes'][number] = {
+    name,
+    worktreeName: `${loopSlug(loop.worktreeTemplate ?? `loop-${loop.name}`)}-${event ? `${event.isPr ? 'pr' : 'issue'}${event.number}-` : ''}${stamp}`,
+    pinned: false,
+    tool: loop.toolCommand
+      ? { command: loop.toolCommand, initialInput }
+      : { agent: loop.agent ?? 'claude', initialInput },
+  };
+  // A PR's run starts at its head; a new local branch, since `panes create` never reuses one.
+  if (event?.headRef) pane.baseBranch = `origin/${event.headRef}`;
   const request: RunpanePaneCreateRequest = {
     repo: { id: projectId },
     noFocus: true,
     // Wait for the agent so the prompt's delivery is checked, and a run that never got it says so.
     waitReady: Boolean(initialInput),
-    panes: [{
-      name,
-      worktreeName: `${loopSlug(loop.worktreeTemplate ?? `loop-${loop.name}`)}-${event ? `${event.isPr ? 'pr' : 'issue'}${event.number}-` : ''}${stamp}`,
-      // A PR's run starts at its head; a new local branch, since `panes create` never reuses one.
-      ...(event?.headRef ? { baseBranch: `origin/${event.headRef}` } : {}),
-      pinned: false,
-      tool: loop.toolCommand
-        ? { command: loop.toolCommand, initialInput }
-        : { agent: loop.agent ?? 'claude', initialInput },
-    }],
+    panes: [pane],
   };
   const result = decodeBoundary(await commandRegistry.invoke('runpane:panes:create', [request]), paneCreateResultSchema);
   const item = result.items[0];

@@ -1,23 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { GithubLoopEventSource, githubRepoFromRemote, type GithubRestRead } from './githubLoopEvents';
+import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
 
 const NOW = Date.parse('2026-11-06T12:00:00Z');
 const at = (minutesAgo: number) => new Date(NOW - minutesAgo * 60_000).toISOString();
 
 /** A fake GitHub REST API: path → body, answering 304 when the caller sends the last ETag. */
-function fakeGithub(routes: Record<string, unknown>) {
+function fakeGithub(routes: JsonObject) {
   const reads: string[] = [];
   const rest: GithubRestRead = async (_host, path, etag) => {
     reads.push(path);
     const key = Object.keys(routes).find(route => path.startsWith(route));
     if (!key) throw new Error(`unexpected read ${path}`);
     const tag = `"${key}:${JSON.stringify(routes[key]).length}"`;
-    return etag === tag ? { changed: false } : { changed: true, etag: tag, body: routes[key] as never };
+    return etag === tag ? { changed: false } : { changed: true, etag: tag, body: routes[key] ?? null };
   };
   return { rest, reads };
 }
 
-const pull = (number: number, extra: Record<string, unknown> = {}) => ({
+const pull = (number: number, extra: JsonObject = {}): JsonObject => ({
   number, html_url: `https://github.com/acme/app/pull/${number}`, title: `PR ${number}`, body: 'Adds a thing',
   created_at: at(5), updated_at: at(1), author_association: 'MEMBER', user: { login: 'maya' },
   head: { ref: `feature-${number}`, sha: `sha${number}`, repo: { full_name: 'acme/app' } }, base: { repo: { full_name: 'acme/app' } },

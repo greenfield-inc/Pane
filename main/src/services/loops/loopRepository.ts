@@ -1,5 +1,6 @@
 import type { Database } from 'better-sqlite3-multiple-ciphers';
-import type { LoopAgent, LoopGithubEvent, LoopGithubTriggers, LoopRun, LoopRunStatus, LoopRunTrigger } from '../../../../shared/types/loop';
+import { loopGithubEventSchema, loopGithubTriggersSchema, type LoopAgent, type LoopGithubTriggers, type LoopRun, type LoopRunStatus, type LoopRunTrigger } from '../../../../shared/types/loop';
+import { decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 
 /**
  * Loops and their runs in SQLite, through the raw better-sqlite3 handle (the
@@ -69,8 +70,7 @@ function toLoop(row: LoopRow): StoredLoop {
   if (row.tool_command !== null) loop.toolCommand = row.tool_command;
   if (row.initial_input !== null) loop.initialInput = row.initial_input;
   if (row.worktree_template !== null) loop.worktreeTemplate = row.worktree_template;
-  // SAFETY: Loop writes persist github_triggers only as JSON of a decoded LoopGithubTriggers.
-  if (row.github_triggers !== null) loop.github = JSON.parse(row.github_triggers) as LoopGithubTriggers;
+  if (row.github_triggers !== null) loop.github = decodeBoundary(JSON.parse(row.github_triggers), loopGithubTriggersSchema);
   return loop;
 }
 
@@ -86,8 +86,7 @@ function toRun(row: LoopRunRow): LoopRun {
     error: row.error,
     sessionId: row.session_id,
   };
-  // SAFETY: Run writes persist event only as JSON of a LoopGithubEvent.
-  if (row.event !== null) run.event = JSON.parse(row.event) as LoopGithubEvent;
+  if (row.event !== null) run.event = decodeBoundary(JSON.parse(row.event), loopGithubEventSchema);
   return run;
 }
 
