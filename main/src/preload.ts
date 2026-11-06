@@ -39,6 +39,7 @@ import type {
   CloudSandboxCreateRequest,
   CloudSandboxesSnapshot,
 } from '../../shared/types/cloudSandboxes';
+import type { PaneCloudSnapshot } from '../../shared/types/paneCloud';
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../../shared/types/panels';
@@ -788,6 +789,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, snapshot: CloudSandboxesSnapshot) => callback(snapshot);
       ipcRenderer.on('remote-daemon:cloud-sandboxes-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('remote-daemon:cloud-sandboxes-changed', wrappedCallback);
+    },
+    getPaneCloud: (): Promise<IPCResponse<PaneCloudSnapshot>> => invokeIpc('pane-cloud:get'),
+    signInPaneCloud: (): Promise<IPCResponse<PaneCloudSnapshot>> => invokeIpc('pane-cloud:sign-in'),
+    signOutPaneCloud: (): Promise<IPCResponse<PaneCloudSnapshot>> => invokeIpc('pane-cloud:sign-out'),
+    createPaneCloudMachine: (name: string): Promise<IPCResponse<PaneCloudSnapshot>> => invokeIpc('pane-cloud:create', name),
+    startPaneCloudMachine: (): Promise<IPCResponse<PaneCloudSnapshot>> => invokeIpc('pane-cloud:start'),
+    stopPaneCloudMachine: (): Promise<IPCResponse<PaneCloudSnapshot>> => invokeIpc('pane-cloud:stop'),
+    updatePaneCloudMachine: (): Promise<IPCResponse<PaneCloudSnapshot>> => invokeIpc('pane-cloud:update-pane'),
+    deletePaneCloudMachine: (): Promise<IPCResponse<PaneCloudSnapshot>> => invokeIpc('pane-cloud:delete'),
+    onPaneCloudChanged: (callback: (snapshot: PaneCloudSnapshot) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, snapshot: PaneCloudSnapshot) => callback(snapshot);
+      ipcRenderer.on('pane-cloud:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('pane-cloud:changed', wrappedCallback);
     },
   },
 

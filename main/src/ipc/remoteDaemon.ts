@@ -80,6 +80,7 @@ import type { SavedRemoteHosts } from '../../../packages/runpane/src/cloud/saved
 import { createDefaultClaudeModelSource } from '../../../packages/runpane/src/cloud/claudeDefaults';
 import { getShellPath } from '../utils/shellPath';
 import { watchClaudeSettings } from '../services/claudeSettingsWatcher';
+import { DEFAULT_PANE_CLOUD_URL, PaneCloudManager } from '../services/paneCloud';
 
 interface IpcMainHandleLike {
   handle(
@@ -165,6 +166,7 @@ function lazyDefaultClaudeModel(): () => Promise<string | null> {
 
 let cloudConnectionListener: ((state: RemotePaneConnectionState) => void) | null = null;
 let stopClaudeSettingsWatch: (() => void) | null = null;
+let paneCloud: PaneCloudManager | null = null;
 
 let remoteHostStateForwarder:
   | ((state: RemoteDaemonHostRuntimeState) => void)
@@ -1009,6 +1011,53 @@ export function registerRemoteDaemonHandlers(
       return { success: false, error: getCloudErrorMessage(error, 'Failed to dismiss cloud sandbox error') };
     }
   });
+
+  // Pane Cloud: the seat's machine is saved as a codeless Tailscale host once it joins the tailnet.
+  paneCloud?.dispose();
+  const cloud = new PaneCloudManager({
+    serviceUrl: process.env.PANE_CLOUD_URL || DEFAULT_PANE_CLOUD_URL,
+    tokenFile: path.join(getAppDirectory(), 'cloud-sandboxes', 'pane-cloud.json'),
+    hosts: {
+      save: async (profile) => {
+        await applyRemoteClientTransition((current) => ({
+          next: { ...current, client: { ...current.client, profiles: upsertById(current.client.profiles, profile) } },
+          resyncRenderer: false,
+        }));
+      },
+      forget: async (machineId) => { await applyRemoteClientTransition(async (current) => {
+        const removedIds = new Set(current.client.profiles.filter((profile) => profile.paneCloud?.machineId === machineId).map((profile) => profile.id));
+        const removesActive = current.client.activeProfileId !== null && removedIds.has(current.client.activeProfileId);
+        if (removesActive && current.client.mode === 'remote') await remotePaneClientController.switchToLocalMode();
+        return {
+          next: {
+            ...current,
+            client: {
+              profiles: current.client.profiles.filter((profile) => !removedIds.has(profile.id)),
+              activeProfileId: removesActive ? null : current.client.activeProfileId,
+              mode: removesActive ? 'local' : current.client.mode,
+            },
+          },
+          resyncRenderer: removesActive && current.client.mode === 'remote',
+        };
+      }); },
+    },
+    onChange: (snapshot) => {
+      const mainWindow = getMainWindow?.();
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pane-cloud:changed', snapshot);
+    },
+  });
+  paneCloud = cloud;
+  ipcMain.handle('pane-cloud:get', async () => ({ success: true, data: await cloud.refresh() }));
+  ipcMain.handle('pane-cloud:sign-in', async () => ({ success: true, data: await cloud.startSignIn() }));
+  ipcMain.handle('pane-cloud:sign-out', async () => ({ success: true, data: await cloud.signOut() }));
+  ipcMain.handle('pane-cloud:create', async (_event, name: PaneCommandValue) => ({
+    success: true,
+    data: await cloud.createMachine(decodeBoundary(name, boundary.nonEmptyString)),
+  }));
+  ipcMain.handle('pane-cloud:start', async () => ({ success: true, data: await cloud.startMachine() }));
+  ipcMain.handle('pane-cloud:stop', async () => ({ success: true, data: await cloud.stopMachine() }));
+  ipcMain.handle('pane-cloud:update-pane', async () => ({ success: true, data: await cloud.updatePane() }));
+  ipcMain.handle('pane-cloud:delete', async () => ({ success: true, data: await cloud.deleteMachine() }));
 }
 
 const DAEMON_VERSION_TIMEOUT_MS = 5000;

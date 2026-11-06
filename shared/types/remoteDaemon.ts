@@ -133,6 +133,8 @@ export interface RemotePaneConnectionProfile {
   tailnetMachine?: string;
   tailnetDomain?: string;
   cloud?: RemotePaneCloudInfo;
+  /** Set on the codeless host of a Pane Cloud machine: the service's id for it. */
+  paneCloud?: { machineId: string };
   hostKind?: RemoteHostKind;
   /** Environment the host terminal's shell starts with on this host. Saved unencrypted with the profile: not for secrets. */
   hostTerminalEnv?: HostTerminalEnvVar[];
@@ -633,6 +635,7 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
   tailnetMachine: boundary.optional(boundary.nonEmptyString),
   tailnetDomain: boundary.optional(boundary.nonEmptyString),
   cloud: boundary.optional(remoteCloudInfoSchema),
+  paneCloud: boundary.optional(boundary.object({ machineId: boundary.nonEmptyString })),
   hostKind: boundary.optional(remoteHostKindSchema),
   hostTerminalEnv: boundary.optional(boundary.array(hostTerminalEnvVarSchema)),
   ghInsecureStorage: boundary.optional(boundary.boolean),
