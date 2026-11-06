@@ -142,7 +142,7 @@ test('adding a cloud sandbox shows live progress, a failure with Retry, then the
   // The new host is in the switcher like any other saved host.
   await leaveSettings(page);
   await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
-  await expect(page.getByRole('menuitemradio', { name: /alpha/ })).toContainText('https://rp-alpha.tail1234.ts.net');
+  await expect(page.getByRole('menuitemradio', { name: /alpha/ })).toContainText('Cloud sandbox');
 });
 
 test('cloud rows stop, start, update Pane and remove after confirmation', async ({ page }, testInfo) => {

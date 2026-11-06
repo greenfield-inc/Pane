@@ -589,11 +589,11 @@ function CloudSandboxRow({ sandbox, now, onAction, onViewLog }: {
     <li className="space-y-2 py-3" aria-label={`Cloud sandbox ${sandbox.label}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="flex items-center gap-2 text-sm font-medium text-text-primary">
+          <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
             <Cloud className="h-4 w-4 flex-none text-text-tertiary" />
             <span className="truncate">{sandbox.label}</span>
             <Badge size="sm" variant={badge.variant}>{badge.label}</Badge>
-          </p>
+          </div>
           {details && <p className="mt-1 truncate text-xs text-text-tertiary">{details}</p>}
           {sandbox.progress && (
             <p className="mt-1 truncate text-xs text-text-secondary" role="status">{sandbox.progress}</p>

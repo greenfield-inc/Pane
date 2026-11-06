@@ -593,6 +593,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
               token: 'synthetic-cloud-token',
               transport: 'http+sse',
               cloud: { provider: 'boat', sandboxId: `sbx-${request.name}`, sessionId: request.name, nodeId: `node-${request.name}`, hostname, version: 1 },
+              // What main's config normalization adds to every cloud profile.
+              hostKind: { label: 'cloud sandbox', icon: 'cloud' },
             };
             remoteDaemonConfig.client.profiles.push(profile);
             syncRemoteDaemonConfig();
