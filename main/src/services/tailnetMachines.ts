@@ -209,12 +209,12 @@ export async function discoverTailnetMachines({ readStatus, probe, savedSecrets,
   return { ok: true, tailnet: tailnet.tailnet, domain, machines };
 }
 
-/** Machine names are unique only within a tailnet, so a saved password is keyed by both. */
 /** The profile id of a machine's codeless connection; one per machine on each tailnet. */
 export function tailnetProfileId(domain: string, name: string): string {
   return `tailnet-${domain.toLowerCase()}-${name.toLowerCase()}`;
 }
 
+/** Machine names are unique only within a tailnet, so a saved password is keyed by both. */
 export function savedSecretKey(domain: string, name: string): string {
   return `${domain.toLowerCase()}/${name.toLowerCase()}`;
 }

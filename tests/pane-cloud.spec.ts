@@ -66,7 +66,7 @@ test('the machine page shows the daily CPU budget and every operation with who a
   await mock(page, 'setPaneCloudCpuUsed(43200)');
 
   await page.getByRole('group', { name: 'Pane Cloud machine dev' }).getByRole('button', { name: 'Details' }).click();
-  await expect(page.getByRole('heading', { name: 'pane-mach-1' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'dev' })).toBeVisible();
   await expect(page.getByText('12 of 12 vCPU-hours today')).toBeVisible();
   await expect(page.getByText(/Daily CPU budget used/)).toBeVisible();
 

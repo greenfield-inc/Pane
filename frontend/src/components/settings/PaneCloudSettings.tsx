@@ -138,7 +138,7 @@ function MachineRow({ machine, busy, run, onOpenMachine }: {
       </div>
       {budget?.throttled && <p className="text-sm text-status-warning">{budget.throttled}</p>}
       {machine.tailnetLoginUrl && (
-        <div className="space-y-2 rounded-md border border-status-info/30 bg-status-info/10 p-3 text-sm" role="status">
+        <div className="space-y-2 rounded-md border border-border-secondary bg-surface-secondary p-3 text-sm" role="status">
           <p className="font-medium text-text-primary">Join {machine.name} to your tailnet</p>
           <p className="text-text-secondary">Open the Tailscale login and sign in with your own account. {machine.name} joins as a device you own, and Pane connects to it as soon as it does.</p>
           <Button type="button" size="sm" icon={<ExternalLink className="h-4 w-4" />} onClick={() => void window.electronAPI?.openExternal(machine.tailnetLoginUrl ?? '')}>
