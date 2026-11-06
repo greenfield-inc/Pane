@@ -19,8 +19,8 @@ export default defineConfig({
   forbidOnly: true,
   // No retries for minimal tests
   retries: 0,
-  // Use more workers for parallel execution
-  workers: 2,
+  // Measured on the 4-vCPU CI runner: 3 workers ran the suite faster than 2 or 4.
+  workers: 3,
   // Reporter optimized for CI
   reporter: [
     ['list'],
@@ -56,15 +56,13 @@ export default defineConfig({
     },
   ],
 
-  // Run your local dev server before starting the tests
+  // The tests mock the Electron API (tests/electronApiMock.ts), so they need
+  // only the renderer from Vite, not the Electron app.
   webServer: {
-    command: 'pnpm electron-dev',
+    command: 'pnpm --filter frontend exec vite',
     port: devServerPort,
     reuseExistingServer: false,
     timeout: 45 * 1000,
-    env: getPlaywrightServerEnv(devServerPort, {
-      DISPLAY: ':99',
-      ELECTRON_DISABLE_SANDBOX: '1',
-    }),
+    env: getPlaywrightServerEnv(devServerPort),
   },
 });
