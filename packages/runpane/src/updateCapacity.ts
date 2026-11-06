@@ -15,7 +15,7 @@ const fs: typeof nodeFs = process.versions.electron
  * snapshot copies these and every top-level file (config, databases, journals).
  */
 export const PANE_STATE_FOLDERS = [
-  'agent-chat', 'artifacts', 'images', 'logs', 'mcp', 'migrate-to-pane', 'notes',
+  'agent-chat', 'artifacts', 'cloud-sandboxes', 'images', 'logs', 'mcp', 'migrate-to-pane', 'notes',
   'prompts', 'remote-daemon', 'sessions', 'skills', 'uploads',
 ] as const;
 

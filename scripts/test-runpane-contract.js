@@ -4763,6 +4763,44 @@ function compareAgentContextParity() {
   }
 }
 
+// Commands the contract ships only in the npm package: the Python wrapper exits 2 and prints their pip help, which
+// says to run them with npx. Cloud commands do so with their real arguments too, and never read stdin.
+function checkPipNpmOnlyCommands() {
+  const python = findPython();
+  const env = { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONPATH: pythonSource, RUNPANE_TELEMETRY_DISABLED: '1' };
+  // Python writes CRLF on Windows: both sides go through lf(), so the check compares lines, not line endings.
+  // (The help texts are ASCII and no paths are compared, so nothing else here depends on the OS.)
+  const lf = (text) => (text ?? '').replace(/\r\n/g, '\n');
+  const pipHelp = (name) => lf(`${contract.help.pip[name].join('\n')}\n`);
+  const runPip = (args) => {
+    const result = childProcess.spawnSync(python, ['-m', 'runpane', ...args], { cwd: rootDir, encoding: 'utf8', env, input: 'NOT-FOR-RUNPANE\n' });
+    return { status: result.status, stdout: lf(result.stdout), stderr: lf(result.stderr) };
+  };
+  // No `wrappers` means both wrappers ship the command.
+  const npmOnly = contract.commands.filter((command) => command.wrappers && !command.wrappers.includes('pip'));
+  assert.ok(npmOnly.some((command) => command.name === 'cloud setup'), 'cloud commands are npm-only');
+  for (const command of npmOnly) {
+    const expected = pipHelp(command.name);
+    const result = runPip(command.name.split(' '));
+    assert.strictEqual(result.status, 2, `${command.name}: ${result.stderr}`);
+    assert.strictEqual(result.stdout, '', command.name);
+    assert.strictEqual(result.stderr, expected, command.name);
+    assertIncludes(result.stderr, `npx --yes runpane@latest ${command.name}`);
+  }
+  for (const args of [
+    ['cloud', 'setup', '--boat-key-file', '-', '--boat-org', 'test'],
+    ['cloud', 'new', '--label', 'demo', '--size', 'small', '--yes', '--json'],
+    ['cloud', 'status', 'rp-demo1234', '--json'],
+    ['cloud', 'remove', 'rp-demo1234', '--yes'],
+  ]) {
+    const result = runPip(args);
+    assert.strictEqual(result.status, 2, `${args.join(' ')}: ${result.stderr}`);
+    assert.strictEqual(result.stdout, '');
+    assert.strictEqual(result.stderr, pipHelp(args.slice(0, 2).join(' ')));
+    assert.ok(!result.stderr.includes('NOT-FOR-RUNPANE'), 'stdin is never read or echoed');
+  }
+}
+
 function checkNoArgsAndSetupFallback() {
   const python = findPython();
   const pythonEnv = {
@@ -5801,6 +5839,7 @@ async function runChecks() {
   compareAgentContextParity();
   await checkNodeReleaseTimeout();
   checkNoArgsAndSetupFallback();
+  checkPipNpmOnlyCommands();
   checkDoctorReportSafety();
   childProcess.execFileSync(process.execPath, ['--test', path.join(__dirname, 'test-runpane-dispatch.js')], {
     cwd: rootDir,

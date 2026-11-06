@@ -1,16 +1,21 @@
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { Plus, Radio, Settings, SquareTerminal } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { showActionError } from '../stores/errorStore';
 import { getHostTerminalPresentation, openHostTerminal } from '../utils/hostTerminal';
+import { getCloudHostSwitcherEntry } from '../utils/cloudSandboxPresentation';
+import { API } from '../utils/api';
 import type { MachineEntry } from '../utils/machineList';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
+import type { CloudSandboxView } from '../../../shared/types/cloudSandboxes';
 
 interface RemoteHostSwitcherProps {
   trigger: ReactElement;
   position: DropdownProps['position'];
   machines: MachineEntry[];
+  /** Cloud sandboxes behind saved hosts, so a stopped one offers Start instead of a dead connection. */
+  cloudSandboxes: CloudSandboxView[];
   switching: boolean;
   hostingSummary: string | null;
   onSelect: (machine: MachineEntry) => Promise<MachineSelectOutcome>;
@@ -35,6 +40,7 @@ export function RemoteHostSwitcher({
   trigger,
   position,
   machines,
+  cloudSandboxes,
   switching,
   hostingSummary,
   onSelect,
@@ -51,6 +57,24 @@ export function RemoteHostSwitcher({
     else showActionError(`Could not switch to ${machine.name}`, outcome.error);
   };
 
+  // A stopped sandbox has no daemon to connect to: start it first, then switch to it.
+  const [starting, setStarting] = useState(false);
+  const startAndPick = async (sandbox: CloudSandboxView, machine: MachineEntry) => {
+    if (starting) return;
+    setStarting(true);
+    try {
+      const response = await API.remoteDaemon.startCloudSandbox(sandbox.id);
+      const started = response.data?.sandboxes.find((candidate) => candidate.id === sandbox.id);
+      if (!response.success || started?.state !== 'running' || started.error) {
+        showActionError(`Could not start ${machine.name}`, response.error ?? started?.error ?? 'The sandbox did not reach running.');
+        return;
+      }
+    } finally {
+      setStarting(false);
+    }
+    await pick(machine);
+  };
+
   const openTerminal = async (hostName: string) => {
     try {
       await openHostTerminal();
@@ -61,17 +85,20 @@ export function RemoteHostSwitcher({
 
   const items: DropdownItem[] = machines.map((machine) => {
     // Only the active host's terminal can open: the window talks to one host at a time.
-    const terminal = machine.active && machine.kind !== 'local'
+    const sandbox = machine.profile ? cloudSandboxes.find((candidate) => candidate.profileId === machine.profile?.id) : undefined;
+    const cloudEntry = getCloudHostSwitcherEntry(sandbox);
+    // A sandbox that is not running has no shell to open.
+    const terminal = machine.active && machine.kind !== 'local' && !cloudEntry
       ? getHostTerminalPresentation(machine.profile ?? { label: machine.name })
       : null;
     return {
       id: machine.id,
       label: <span className="font-medium">{machine.name}</span>,
-      description: machine.subtitle,
+      description: cloudEntry?.description ?? machine.subtitle,
       // A disabled row is dimmed as a whole, so its mark stays solid inside it.
       leading: <MachineMark os={machine.os} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
-      disabled: switching || unpickable(machine),
-      onClick: () => void pick(machine),
+      disabled: switching || starting || (cloudEntry ? cloudEntry.action === 'wait' : unpickable(machine)),
+      onClick: () => void (sandbox && cloudEntry?.action === 'start' ? startAndPick(sandbox, machine) : pick(machine)),
       action: terminal ? { label: terminal.openLabel, icon: SquareTerminal, onClick: () => void openTerminal(terminal.hostName) } : undefined,
     };
   });

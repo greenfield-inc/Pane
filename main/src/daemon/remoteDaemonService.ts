@@ -323,6 +323,10 @@ async function installSystemdUserService(
     'Type=simple',
     `Environment=${quoteForSystemd(`PANE_DIR=${paneDir}`)}`,
     `ExecStart=${quoteForSystemd(launcherPath)}`,
+    // SIGTERM only the daemon, and SIGKILL what is left after it exits. With the default
+    // control-group mode a stop also kills Electron's GPU and network helpers, and Electron
+    // aborts before its shutdown has stopped the terminals and saved their scrollback.
+    'KillMode=mixed',
     'Restart=on-failure',
     'RestartSec=3',
     '',

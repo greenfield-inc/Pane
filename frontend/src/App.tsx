@@ -78,6 +78,7 @@ import { LoopDrawer } from './components/loops/LoopDrawer';
 import type { Project } from './types/project';
 import type { SettingsCategoryId, SettingsOpenRequest, SettingsTarget } from './types/settings';
 import { onOpenHostGitHubSettings } from './utils/hostSettings';
+import { onOpenSettingsAt } from './utils/settingsLinks';
 import type {
   PanePermissionRequest,
   PanePermissionResolvedEvent,
@@ -829,6 +830,8 @@ function App() {
 
   // A host whose GitHub sign-in lives in Settings (e.g. from a clone error) opens it here.
   useEffect(() => onOpenHostGitHubSettings(openSettings), [openSettings]);
+  // Links to a Settings field from anywhere, e.g. the cloud sandbox setup warning.
+  useEffect(() => onOpenSettingsAt(openSettings), [openSettings]);
 
   useEffect(() => window.electronAPI?.events?.onAppMenuAction?.((action) => {
     if (action === 'open-settings') openSettings();

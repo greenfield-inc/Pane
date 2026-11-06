@@ -240,6 +240,10 @@ jobs:
     - name: Check wrapper package versions
       run: node scripts/sync-runpane-package-versions.js --check
 
+    # Before the build, which regenerates them.
+    - name: Check cloud bootstrap assets are current
+      run: node packages/runpane/scripts/generate-cloud-assets.js --check
+
     - name: Build npm wrapper
       run: pnpm --filter runpane build
 
@@ -266,6 +270,12 @@ jobs:
 
     - name: Run wrapper telemetry tests
       run: node --test scripts/test-runpane-telemetry.js
+
+    # The wrapper's unit tests use `rm -rf` and `node --test` globs (Node 21+),
+    # so they run once, on Linux at the current Node.
+    - name: Run wrapper unit tests
+      if: runner.os == 'Linux' && matrix.node-version == '22.23.4'
+      run: pnpm --filter runpane test
 
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.

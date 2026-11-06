@@ -12,7 +12,8 @@ describe('host GitHub settings', () => {
     const unsubscribe = onOpenHostGitHubSettings(open);
 
     openHostGitHubSettings();
-    expect(open).toHaveBeenCalledWith({ category: 'remote-access' });
+    // On cloud sandboxes the credentials are the GitHub token field under Cloud sandboxes.
+    expect(open).toHaveBeenCalledWith({ category: 'remote-access', setting: 'remote-cloud-github-token' });
 
     unsubscribe();
     openHostGitHubSettings();

@@ -8,6 +8,12 @@ import {
 import { setupConsoleWrapper } from '../utils/consoleWrapper';
 import { usageManager } from '../services/usage/usageManager';
 
+/**
+ * systemd SIGKILLs a stop that runs past TimeoutStopSec (90 s by default),
+ * and that kill skips the shutdown steps still pending. Exit well before it.
+ */
+const SHUTDOWN_DEADLINE_MS = 30_000;
+
 let daemonHost: PaneDaemonHost | null = null;
 let shutdownInProgress = false;
 let startupRegistered = false;
@@ -25,12 +31,32 @@ export async function startHeadlessHost<Host>(
   return host;
 }
 
+/**
+ * Electron answers SIGTERM and SIGINT by quitting the app, and the process
+ * signal handlers never run, so a service stop skipped the host's shutdown.
+ * Hold every quit until `shutdown` has run; it exits the process itself.
+ */
+interface QuittingApp {
+  on(event: 'will-quit', listener: (event: { preventDefault(): void }) => void): void;
+}
+
+export function shutdownBeforeQuit(electronApp: QuittingApp, shutdown: () => Promise<void>): void {
+  electronApp.on('will-quit', (event) => {
+    event.preventDefault();
+    void shutdown();
+  });
+}
+
 async function shutdown(exitCode: number): Promise<void> {
   if (shutdownInProgress) {
     return;
   }
 
   shutdownInProgress = true;
+  setTimeout(() => {
+    console.error(`[Pane daemon] Shutdown did not finish within ${SHUTDOWN_DEADLINE_MS} ms; exiting`);
+    process.exit(exitCode);
+  }, SHUTDOWN_DEADLINE_MS).unref();
   try {
     usageManager.stop();
     await daemonHost?.shutdown();
@@ -80,6 +106,8 @@ export function startHeadlessPaneProcess(): void {
     console.error('[Pane daemon] Failed to start headless host:', error);
     await shutdown(1);
   });
+
+  shutdownBeforeQuit(app, () => shutdown(0));
 
   process.on('SIGINT', () => {
     void shutdown(0);

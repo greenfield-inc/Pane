@@ -26,6 +26,7 @@ import type { Session } from '../types/session';
 import { useSessionNavigationHotkeys } from '../hooks/useSessionNavigationHotkeys';
 import { useRemoteRuntimeState } from '../hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from '../hooks/useConnectionPresence';
+import { useCloudSandboxes } from '../hooks/useCloudSandboxes';
 import { useAppBuildInfo } from '../hooks/useAppBuildInfo';
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { getRemoteFooterStatus } from '../utils/remoteRuntimePresentation';
@@ -293,11 +294,19 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   }, [machines, selectMachine, switcherVisible]);
   useEffect(() => (allMachines ? startAllMachinesFeed() : undefined), [allMachines]);
   const switcherLabel = allMachines ? 'Showing all machines. Switch machine' : `Agents run on ${activeMachine.name}. Switch machine`;
+  // Hosts main saves or forgets on its own (a cloud sandbox being added or removed) arrive the same way.
+  useEffect(() => API.remoteDaemon.onProfilesChanged(() => {
+    void fetchConfig().catch(() => undefined);
+  }), [fetchConfig]);
+  // Only a saved cloud host needs sandbox state; everyone else never asks the cloud library.
+  const hasCloudProfile = machines.some((machine) => machine.profile?.cloud);
+  const { snapshot: cloudSandboxesSnapshot } = useCloudSandboxes(hasCloudProfile);
   const renderRemoteHostSwitcher = (trigger: React.ReactElement, position: 'bottom-left' | 'top-right') => (
     <RemoteHostSwitcher
       trigger={trigger}
       position={position}
       machines={machines}
+      cloudSandboxes={cloudSandboxesSnapshot.sandboxes}
       switching={switchingId !== null}
       hostingSummary={getHostingSummary(remoteHostState)}
       onSelect={(machine) => {

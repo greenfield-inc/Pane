@@ -181,6 +181,8 @@ export interface ParsedArgs {
   handoffPush?: boolean;
   /** Start a fresh agent with the note instead of carrying the sender's own session. */
   handoffNoteOnly?: boolean;
+  /** `runpane cloud <subcommand> ...`: the arguments after `cloud`, parsed by cloud/cli.ts. */
+  cloudArgv?: string[];
   remoteSetupArgs: string[];
 }
 
@@ -261,6 +263,10 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
       helpTopic: args.join(' ') || undefined,
       ...DEFAULTS
     };
+  }
+
+  if (first === 'cloud') {
+    return parseCloudEntry(args);
   }
 
   const groupHelpTopic = matchCommandGroupHelp(args);
@@ -479,6 +485,28 @@ export function splitWorkspacePassThrough(argv: string[]): { machine: string; co
   if (args[0] !== 'workspace' || !args[1] || WORKSPACE_SUBCOMMANDS.has(args[1]) || args[1].startsWith('-')) return null;
   if (!args[2] || WORKSPACE_VERBS.has(args[2])) return null;
   return { machine: args[1], command: args.slice(2) };
+}
+
+/** `runpane cloud ...` keeps its own flags (cloud/cli.ts); only the subcommand is matched here. */
+function parseCloudEntry(args: string[]): ParsedArgs {
+  const wantsHelp = (arg: string) => arg === '-h' || arg === '--help';
+  if (args.length === 1 || wantsHelp(args[1])) {
+    return { command: 'help', helpTopic: 'cloud', ...DEFAULTS };
+  }
+  const matched = matchCommand(args);
+  if (!matched) {
+    throw new Error(`Unknown cloud command: ${args[1]}\n\n${helpText('cloud')}`);
+  }
+  const rest = args.slice(matched.tokens.length);
+  if (rest.some(wantsHelp)) {
+    return { command: 'help', helpTopic: matched.name, ...DEFAULTS };
+  }
+  return {
+    command: decodeBoundary(matched.name, commandSchema),
+    ...DEFAULTS,
+    cloudArgv: [...matched.tokens.slice(1), ...rest],
+    remoteSetupArgs: []
+  };
 }
 
 function validateReportArgs(parsed: ParsedArgs): void {

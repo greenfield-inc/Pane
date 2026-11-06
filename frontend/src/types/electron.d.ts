@@ -31,6 +31,12 @@ import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate 
 import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../../shared/types/glasses';
 import type {
+  CloudCredentialsUpdate,
+  CloudLocalStartScript,
+  CloudSandboxCreateRequest,
+  CloudSandboxesSnapshot,
+} from '../../../shared/types/cloudSandboxes';
+import type {
   PanePermissionRequest,
   PanePermissionResolvedEvent,
   PanePermissionResponse,
@@ -468,6 +474,23 @@ interface ElectronAPI {
     onSetupProgress: (callback: (progress: RemoteHostSetupProgress) => void) => () => void;
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => () => void;
     onHostStateChanged: (callback: (state: RemoteDaemonHostRuntimeState) => void) => () => void;
+    getCloudSandboxes: () => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    updateCloudCredentials: (update: CloudCredentialsUpdate) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    createCloudSandbox: (request: CloudSandboxCreateRequest) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    startCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    stopCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    updateCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    removeCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    retryCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    dismissCloudSandbox: (id: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    getCloudStartupScript: () => Promise<IPCResponse<{ script: string }>>;
+    saveCloudStartupScript: (script: string) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    readCloudSandboxStartupLog: (id: string) => Promise<IPCResponse<{ log: string }>>;
+    getCloudLocalStartScript: () => Promise<IPCResponse<CloudLocalStartScript>>;
+    saveCloudLocalStartScript: (settings: CloudLocalStartScript) => Promise<IPCResponse<CloudSandboxesSnapshot>>;
+    /** Main saved or forgot a host on its own (e.g. a cloud sandbox); refetch the config. */
+    onProfilesChanged: (callback: () => void) => () => void;
+    onCloudSandboxesChanged: (callback: (snapshot: CloudSandboxesSnapshot) => void) => () => void;
   };
 
   // Prompts
