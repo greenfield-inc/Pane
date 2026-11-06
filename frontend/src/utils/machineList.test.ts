@@ -139,6 +139,12 @@ describe('buildMachineList', () => {
     ]);
   });
 
+  it('names what a host added with a code is when its saved host says so', () => {
+    const sandbox = { ...cloudVm, hostKind: { label: 'cloud sandbox', icon: 'cloud' as const } };
+    const list = buildMachineList(input({ profiles: [buildBox, sandbox], tailnet: null, localName: null }));
+    expect(byName(list, 'cloud-vm').subtitle).toBe('Cloud sandbox');
+  });
+
   it('gives this computer and its Tailscale machines different colours', () => {
     const list = buildMachineList(input());
     const mine = ['studio-mac', 'build-box', 'office-pc', 'travel-laptop'].map((name) => byName(list, name).slot);

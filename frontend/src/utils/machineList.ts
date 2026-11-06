@@ -118,7 +118,10 @@ export function buildMachineList({ connectionState, profiles, tailnet, localName
     const active = entry.profile !== undefined && entry.profile.id === activeProfileId;
     // An active machine that now wants a password asks for it instead of retrying the stored one.
     const needsPassword = active && connectionState.status !== 'connected' && idle.action === 'password';
-    const prefix = entry.kind === 'code' ? 'Added with a code' : null;
+    // A host that some flow created (a cloud sandbox) says what it is; others say how they were added.
+    const kindLabel = entry.profile?.hostKind?.label;
+    const codePrefix = kindLabel ? `${kindLabel.charAt(0).toUpperCase()}${kindLabel.slice(1)}` : 'Added with a code';
+    const prefix = entry.kind === 'code' ? codePrefix : null;
     const stateText = needsPassword ? idle.stateText : active ? activeStateText(connectionState) : idle.stateText;
     return {
       ...entry,
