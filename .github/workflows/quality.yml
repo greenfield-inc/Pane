@@ -127,6 +127,9 @@ jobs:
         node scripts/test-license-generation.js
         node --test scripts/flapping-link-proxy.test.mjs scripts/patch-electron-builder-macos-keychain.test.js
 
+    - name: Run Pane Cloud contract tests
+      run: pnpm --filter pane-cloud-contract test
+
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
     # failed so it never hides behind them.
