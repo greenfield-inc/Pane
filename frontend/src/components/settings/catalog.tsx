@@ -97,8 +97,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Remote Access',
     description: 'Your machines, who can connect, and paired phones and glasses.',
     icon: Link2,
-    settingIds: ['remote-machines', 'remote-visibility', 'remote-address', 'remote-password', 'remote-glasses', 'remote-pane', 'remote-cloud-sandboxes', 'remote-cloud-credentials', 'remote-cloud-github-token', 'remote-cloud-startup-script', 'remote-host-setup', 'remote-advanced-host'],
-    aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'visibility', 'password', 'my machines', 'machines', 'switch machine', 'workspaces', 'glasses', 'even g2', 'phone', 'devices', 'connection code', 'cloud sandbox', 'boat', 'startup script', 'github token'],
+    settingIds: ['remote-machines', 'remote-visibility', 'remote-address', 'remote-password', 'remote-glasses', 'remote-pane', 'remote-cloud-provider', 'remote-pane-cloud', 'remote-pane-cloud-create', 'remote-cloud-sandboxes', 'remote-cloud-credentials', 'remote-cloud-github-token', 'remote-cloud-startup-script', 'remote-host-setup', 'remote-advanced-host'],
+    aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'visibility', 'password', 'my machines', 'machines', 'switch machine', 'workspaces', 'glasses', 'even g2', 'phone', 'devices', 'connection code', 'cloud sandbox', 'pane cloud', 'cloud machine', 'boat', 'startup script', 'github token'],
   },
   {
     id: 'integrations',
