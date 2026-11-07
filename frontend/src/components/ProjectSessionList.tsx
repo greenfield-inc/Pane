@@ -36,6 +36,8 @@ import { useAnyLoopRunning } from './loops/loopRunView';
 import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
 import { SSH_HOSTS_SESSION_ID } from '../../../shared/types/sshHosts';
+import { DropLine, useRowReorder, type ReorderList, type RowReorder } from '../hooks/useRowReorder';
+import { useErrorStore } from '../stores/errorStore';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 import {
   isArchivedOrchestrationSession,
@@ -60,7 +62,6 @@ interface ProjectSessionListProps {
   projects: Project[];
   onProjectsChange: (update: (projects: Project[]) => Project[]) => void;
   onProjectsRefresh: () => void;
-  sessionSortAscending: boolean;
   pinnedSectionExpanded: boolean;
   repositoriesSectionExpanded: boolean;
   onPinnedSectionExpandedChange: (expanded: boolean) => void;
@@ -78,7 +79,6 @@ export function ProjectSessionList({
   projects,
   onProjectsChange,
   onProjectsRefresh,
-  sessionSortAscending,
   pinnedSectionExpanded,
   repositoriesSectionExpanded,
   onPinnedSectionExpandedChange,
@@ -163,9 +163,26 @@ export function ProjectSessionList({
   }, []);
 
   // Group sessions by project
+  const reorderPanes = useSessionStore(s => s.reorderPanes);
+  const [paneOrderAnnouncement, setPaneOrderAnnouncement] = useState('');
+  const reorderPane = useRowReorder(setPaneOrderAnnouncement);
+  /** A project's Panes as one list; a move is saved on the host they run on. */
+  const paneList = (projectId: number, panes: Session[]): ReorderList => ({
+    id: `project:${projectId}`,
+    keys: panes.map(pane => pane.id),
+    save: (order) => {
+      reorderPanes(projectId, order).catch((cause: unknown) => {
+        setPaneOrderAnnouncement('');
+        useErrorStore.getState().showError({
+          title: 'The Pane order was not saved',
+          error: `The list is back in its previous order. ${ipcErrorMessage(cause, 'The host did not answer.')}`,
+        });
+      });
+    },
+  });
   const sessionsByProject = useMemo(
-    () => groupSessionsByProject(sessions, sessionSortAscending),
-    [sessions, sessionSortAscending]
+    () => groupSessionsByProject(sessions),
+    [sessions]
   );
 
   const projectById = useMemo(() => createProjectById(projects), [projects]);
@@ -564,6 +581,7 @@ export function ProjectSessionList({
           />
         )}
 
+        <p role="status" aria-live="polite" className="sr-only">{paneOrderAnnouncement}</p>
         {/* Projects */}
         {repositoriesSectionExpanded && !inboxActive && projects.map((project) => {
           const isExpanded = expandedProjects.has(project.id);
@@ -664,6 +682,7 @@ export function ProjectSessionList({
                 <div id={`project-sessions-${project.id}`}>
                   {projectSessions.map((session) => (
                     <SessionRow
+                      reorder={reorderPane(paneList(project.id, projectSessions), session.id, session.name || 'Untitled')}
                       key={session.id}
                       session={session}
                       isActive={activeView === 'sessions' && sidebarNavigationScope === 'repositories' && session.id === activeSessionId}
@@ -1050,6 +1069,8 @@ interface SessionRowProps {
   repositoryName?: string;
   rowLayout: SidebarPaneRowLayout;
   nested?: boolean;
+  /** Drag and Alt+Up/Down within the row's project. */
+  reorder?: RowReorder;
 }
 
 interface GitStatusIPCResponse {
@@ -1059,7 +1080,7 @@ interface GitStatusIPCResponse {
 
 function SessionRow({
   session, isActive, globalIndex, onClick,
-  onArchive, onTogglePinned, onDismiss, displayName, repositoryName, rowLayout, nested = false,
+  onArchive, onTogglePinned, onDismiss, displayName, repositoryName, rowLayout, nested = false, reorder,
 }: SessionRowProps) {
   const [contextMenu, setContextMenu] = useState<CompactSessionMenuState | null>(null);
   const initialGitStatusRequestRef = useRef<string | null>(null);
@@ -1113,6 +1134,9 @@ function SessionRow({
 
   return (<>
     <div
+      data-row-key={reorder ? session.id : undefined}
+      {...reorder?.drag}
+      onKeyDown={reorder?.onKeyDown}
       onContextMenu={event => { event.preventDefault(); setContextMenu({ session, x: event.clientX, y: event.clientY }); }}
       className={cn(
         'group/session relative mx-2 flex w-[calc(100%-1rem)] items-center gap-1 rounded-md text-left transition-colors',
@@ -1123,6 +1147,7 @@ function SessionRow({
         isActive ? 'bg-surface-selected' : 'hover:bg-surface-hover'
       )}
     >
+      {reorder && <DropLine edge={reorder.indicator} />}
       <Tooltip
         content={<SessionDetailTooltip session={session} gitStatus={session.gitStatus} showName showDiffStats={false} globalIndex={globalIndex} />}
         side="right"
@@ -1130,6 +1155,7 @@ function SessionRow({
       >
         <button
           type="button"
+          data-row-open
           onClick={() => { resumeIfOpenResumes({ kind: 'pane', id: session.id }, Boolean(session.paused)); onClick(); }}
           aria-current={isActive ? 'page' : undefined}
           aria-label={accessibleName}

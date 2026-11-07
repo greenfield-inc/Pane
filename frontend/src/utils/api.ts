@@ -590,6 +590,21 @@ export class API {
       return window.electronAPI.sessions.reorder(sessionOrders);
     },
 
+    async reorderInProject(projectId: number, paneIds: string[]) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessions.reorderInProject(projectId, paneIds);
+    },
+
+    async sortPanes(order: 'newest' | 'oldest') {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessions.sortPanes(order);
+    },
+
+    async getPaneOrder() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessions.getPaneOrder();
+    },
+
     async generateCompactedContext(sessionId: string) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.sessions.generateCompactedContext(sessionId);

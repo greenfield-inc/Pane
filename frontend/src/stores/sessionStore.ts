@@ -10,6 +10,8 @@ import { API } from '../utils/api';
 import { startSwitchPane } from '../utils/journeyTimings';
 import { normalizeSession, normalizeSessionOutput, normalizeSessions } from '../utils/sessionNormalization';
 import { isOwnPaneCreation } from '../utils/ownPaneCreations';
+import { groupSessionsByProject } from '../utils/sessionOrdering';
+import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 
 interface CreateSessionRequest {
   prompt: string;
@@ -48,6 +50,11 @@ interface SessionStore {
   clearTerminalOutput: (sessionId: string) => void;
   getTerminalOutput: (sessionId: string) => string[];
   createSession: (request: CreateSessionRequest) => Promise<void>;
+  /**
+   * Moves Panes within their project, as a drag does: the list shows the new order at once and
+   * the host saves it. A failure puts the list back and rejects with the host's reason.
+   */
+  reorderPanes: (projectId: number, paneIds: string[]) => Promise<void>;
   markSessionAsViewed: (sessionId: string) => Promise<void>;
   
   setDeletingSessionIds: (ids: string[]) => void;
@@ -79,6 +86,14 @@ interface SessionStore {
 let selectionVersion = 0;
 let pendingSelectionFetch: { sessionId: string; promise: ReturnType<typeof API.sessions.get> } | null = null;
 
+type PaneOrders = Map<string, number | undefined>;
+
+/**
+ * Pane moves still waiting on their host, by project: the newest move's number, how many are in
+ * flight, and the last order the host confirmed (or the order before the first of them).
+ */
+const paneMoves = new Map<number, { latest: number; inFlight: number; saved: PaneOrders; savedBy: number }>();
+
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -98,6 +113,36 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   activeSpotlights: new Map(),
   
   setSessions: (sessions) => set({ sessions: normalizeSessions(sessions) }),
+  reorderPanes: async (projectId, paneIds) => {
+    const listed = groupSessionsByProject(get().sessions).get(projectId) ?? [];
+    const moved = moveWithinOwnPlaces(listed, paneIds, (pane) => pane.id);
+    // Highest first, as the host numbers them.
+    const after: PaneOrders = new Map(moved.map((pane, index) => [pane.id, moved.length - 1 - index]));
+    const withOrder = (orders: PaneOrders) => set((state) => ({
+      sessions: state.sessions.map((pane) => (orders.has(pane.id) ? { ...pane, displayOrder: orders.get(pane.id) } : pane)),
+    }));
+    const moves = paneMoves.get(projectId) ?? { latest: 0, inFlight: 0, saved: new Map(listed.map((pane) => [pane.id, pane.displayOrder])), savedBy: 0 };
+    paneMoves.set(projectId, moves);
+    const generation = ++moves.latest;
+    moves.inFlight += 1;
+    withOrder(after);
+    try {
+      const response = await API.sessions.reorderInProject(projectId, paneIds);
+      if (!response.success) throw new Error(response.error ?? 'The host did not save the Pane order.');
+      if (generation > moves.savedBy) {
+        moves.saved = after;
+        moves.savedBy = generation;
+      }
+    } catch (error) {
+      // Only the newest move puts the list back, to the last order the host saved: an older move
+      // failing after a newer one must not undo it.
+      if (generation === moves.latest) withOrder(moves.saved);
+      throw error;
+    } finally {
+      moves.inFlight -= 1;
+      if (moves.inFlight === 0) paneMoves.delete(projectId);
+    }
+  },
   invalidateHost: () => {
     selectionVersion += 1;
     pendingSelectionFetch = null;

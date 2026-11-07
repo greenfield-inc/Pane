@@ -35,6 +35,7 @@ import { useMachines } from '../hooks/useMachines';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { RemoteHostSwitcher } from './RemoteHostSwitcher';
 import { AllMachinesSidebar } from './machines/AllMachinesSidebar';
+import { usePaneSort } from '../hooks/usePaneSort';
 import { isAllMachinesOn, startAllMachinesFeed, useAllMachinesStore } from '../stores/allMachinesStore';
 import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
@@ -157,7 +158,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   // The sidebar's search opens the same launcher as its shortcut.
   const openSearch = useCallback(() => hotkeys.get('open-command-palette')?.action(), [hotkeys]);
   const { version, gitCommit, worktreeName } = useAppBuildInfo();
-  const [sessionSortAscending, setSessionSortAscending] = useState<boolean>(false); // Newest first until the host says otherwise
   const [sidebarSectionExpansion, setSidebarSectionExpansion] = useState<Record<SidebarSection, boolean>>({
     pinned: true,
     repositories: true,
@@ -179,7 +179,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         const result = await window.electronAPI.uiState.getExpanded();
         if (cancelled) return;
         if (result.success && result.data) {
-          setSessionSortAscending(result.data.sessionSortAscending ?? false);
           hydrateExpandedProjects(result.data.expandedProjects ?? []);
           hydrateExpandedSessions(result.data.expandedSessions ?? []);
           hydrateExpandedArchivedProjects(result.data.expandedArchivedProjects ?? []);
@@ -202,18 +201,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       cancelled = true;
     };
   }, [hydrateExpandedArchivedProjects, hydrateExpandedProjects, hydrateExpandedSessions]);
-
-  const toggleSessionSortOrder = async () => {
-    const newValue = !sessionSortAscending;
-    setSessionSortAscending(newValue);
-
-    // Save to database via electronAPI
-    try {
-      await window.electronAPI.uiState.saveSessionSortAscending(newValue);
-    } catch (error) {
-      console.error('Failed to save session sort order:', error);
-    }
-  };
 
   const handleSidebarSectionExpandedChange = useCallback((section: SidebarSection, expanded: boolean) => {
     setSidebarSectionExpansion(prev => ({
@@ -289,6 +276,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   }, [machineId, machineName, machineOs, machineSlot, machineLocal, setActiveMachine]);
   // Hidden only while no other machine is saved or on Tailscale.
   const switcherVisible = machines.length > 1 || remoteConnectionState.mode === 'remote';
+  const paneSort = usePaneSort({ id: machineId, local: machineLocal });
   const allMachines = useAllMachinesStore(isAllMachinesOn);
   const setAllMachines = useAllMachinesStore((state) => state.setEnabled);
   // Saved machines and this computer: the ones All machines lists.
@@ -367,7 +355,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const loops = useLoopsStore((state) => state.loops);
   const loopRunning = useAnyLoopRunning(loops);
   const approvals = useApprovalsNav();
-  useSessionNavigationHotkeys({ projects, sessionSortAscending });
+  useSessionNavigationHotkeys({ projects });
   useSshHostsRefresh();
 
   useEffect(() => {
@@ -412,8 +400,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   }, [projects, activeProjectId]);
 
   const sessionsByProject = useMemo(
-    () => groupSessionsByProject(sessions, sessionSortAscending),
-    [sessions, sessionSortAscending],
+    () => groupSessionsByProject(sessions),
+    [sessions],
   );
   const projectById = useMemo(() => createProjectById(projects), [projects]);
   const pinnedSessions = useMemo(
@@ -476,11 +464,20 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           icon: HelpCircleIcon,
           onClick: onHelpClick
         },
+        // Actions on the host: each re-sorts its Panes once, then drags hold until the next pick.
         {
-          id: 'sort',
-          label: sessionSortAscending ? 'Sort: Oldest first' : 'Sort: Newest first',
+          id: 'sort-newest',
+          label: 'Sort: Newest first',
+          description: paneSort.newPanes === 'top' ? 'Current · new on top' : 'New on top',
           icon: ArrowUpDown,
-          onClick: toggleSessionSortOrder
+          onClick: () => void paneSort.sort('newest')
+        },
+        {
+          id: 'sort-oldest',
+          label: 'Sort: Oldest first',
+          description: paneSort.newPanes === 'bottom' ? 'Current · new at bottom' : 'New at bottom',
+          icon: ArrowUpDown,
+          onClick: () => void paneSort.sort('oldest')
         },
         {
           id: 'refresh',
@@ -949,7 +946,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             projects={projects}
             onProjectsChange={setProjects}
             onProjectsRefresh={loadProjects}
-            sessionSortAscending={sessionSortAscending}
             pinnedSectionExpanded={sidebarSectionExpansion.pinned}
             repositoriesSectionExpanded={sidebarSectionExpansion.repositories}
             onPinnedSectionExpandedChange={handlePinnedSectionExpandedChange}

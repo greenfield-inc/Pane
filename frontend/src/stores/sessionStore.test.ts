@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitStatus, Session, SessionOutput } from '../types/session';
 import { useSessionStore } from './sessionStore';
+import { groupSessionsByProject } from '../utils/sessionOrdering';
 
 function session(overrides: Partial<Session> = {}): Session {
   return {
@@ -308,5 +309,73 @@ describe('sessionStore', () => {
     expect(flushedState.pendingGitStatusLoading).not.toBe(queuedSnapshot);
     expect(flushedState.pendingGitStatusLoading.size).toBe(0);
     expect(flushedState.gitStatusLoading.has('session-loading')).toBe(true);
+  });
+});
+
+describe('moving a Pane within its project', () => {
+  const reorderInProject = vi.fn();
+  const ids = () => groupSessionsByProject(useSessionStore.getState().sessions).get(1)?.map(item => item.id);
+
+  beforeEach(() => {
+    reorderInProject.mockReset();
+    vi.stubGlobal('window', { dispatchEvent: vi.fn(), electronAPI: { sessions: { reorderInProject } } });
+    useSessionStore.setState({
+      sessions: [
+        session({ id: 'c', projectId: 1, displayOrder: 2 }),
+        session({ id: 'b', projectId: 1, displayOrder: 1 }),
+        session({ id: 'a', projectId: 1, displayOrder: 0 }),
+        session({ id: 'other', projectId: 2, displayOrder: 0 }),
+      ],
+    });
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('shows the new order at once and sends it to the host', async () => {
+    let answer: (value: { success: boolean }) => void = () => undefined;
+    reorderInProject.mockReturnValue(new Promise(resolve => { answer = resolve; }));
+
+    const saving = useSessionStore.getState().reorderPanes(1, ['b', 'c', 'a']);
+    expect(ids()).toEqual(['b', 'c', 'a']);
+    answer({ success: true });
+    await saving;
+
+    expect(reorderInProject).toHaveBeenCalledWith(1, ['b', 'c', 'a']);
+    expect(ids()).toEqual(['b', 'c', 'a']);
+  });
+
+  it('keeps a newer saved move when an older move fails afterwards', async () => {
+    const replies: Array<(value: { success: boolean; error?: string }) => void> = [];
+    reorderInProject.mockImplementation(() => new Promise(resolve => { replies.push(resolve); }));
+
+    const first = useSessionStore.getState().reorderPanes(1, ['b', 'c', 'a']);
+    const second = useSessionStore.getState().reorderPanes(1, ['a', 'b', 'c']);
+    replies[1]({ success: true });
+    await second;
+    replies[0]({ success: false, error: 'The connection dropped.' });
+
+    await expect(first).rejects.toThrow(/connection dropped/);
+    expect(ids()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('puts the list back to the last saved order when the newest move fails', async () => {
+    const replies: Array<(value: { success: boolean; error?: string }) => void> = [];
+    reorderInProject.mockImplementation(() => new Promise(resolve => { replies.push(resolve); }));
+
+    const first = useSessionStore.getState().reorderPanes(1, ['b', 'c', 'a']);
+    const second = useSessionStore.getState().reorderPanes(1, ['a', 'b', 'c']);
+    replies[0]({ success: true });
+    await first;
+    replies[1]({ success: false, error: 'The connection dropped.' });
+
+    await expect(second).rejects.toThrow(/connection dropped/);
+    expect(ids()).toEqual(['b', 'c', 'a']);
+  });
+
+  it('puts the list back and says why when the host does not save it', async () => {
+    reorderInProject.mockResolvedValue({ success: false, error: 'build-box runs an older Pane that does not have this command (sessions:reorder-in-project). Nothing was changed. Next: Update Pane on build-box' });
+
+    await expect(useSessionStore.getState().reorderPanes(1, ['a', 'b', 'c'])).rejects.toThrow(/older Pane/);
+    expect(ids()).toEqual(['c', 'b', 'a']);
   });
 });

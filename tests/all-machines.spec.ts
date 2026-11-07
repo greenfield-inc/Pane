@@ -24,9 +24,10 @@ const pane = (id: string, name: string, projectId: number, lastActivity: string)
   id, name, projectId, worktreePath: `/code/${name}`, prompt: '', status: 'stopped', createdAt: '2026-10-30T08:00:00Z', lastActivity,
   output: [], jsonMessages: [], archived: false, isHidden: false, isFavorite: false,
 });
-const project = (id: number, name: string, panes: JsonValue[]) => ({
-  id, name, path: `/code/${name}`, active: false, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', sessions: panes,
-});
+const project = (id: number, name: string, panes: JsonValue[], repository?: string) => {
+  const row = { id, name, path: `/code/${name}`, active: false, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z', sessions: panes };
+  return repository ? { ...row, repository } : row;
+};
 const session = (id: string, name: string, paneIds: string[]) => ({
   id, name, agent: 'claude', internalSessionId: `${id}-internal`, panelIds: { claude: `${id}-c`, codex: `${id}-x`, cursor: `${id}-u` },
   goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [], activity: [], revision: 1,
@@ -77,9 +78,16 @@ const tailnetMachines: TailnetMachineList = {
   ],
 };
 
-async function openAllMachines(page: Page, colorScheme: 'light' | 'dark' = 'light', extra: Partial<Parameters<typeof installElectronApiMock>[1]> = {}) {
+const PROJECTS = ['acme-web', 'infra', 'pane', 'blog'];
+
+/**
+ * Turns All machines on. Projects start closed; `open` opens them all, as most tests need their
+ * Pane rows. `preferences` are this computer's saved ones, to stand in for a relaunch.
+ */
+async function openAllMachines(page: Page, colorScheme: 'light' | 'dark' = 'light', { open = true, preferences = {}, extra = {} }: { open?: boolean; preferences?: Record<string, string>; extra?: Partial<Parameters<typeof installElectronApiMock>[1]> } = {}) {
   await page.emulateMedia({ colorScheme });
   await installElectronApiMock(page, {
+    initialPreferences: preferences,
     // The mock serves one set of Panes whichever machine the app is on: build-box's, once it switches there.
     initialProjects: [{ id: 1, name: 'acme-web', path: '/code/acme-web', active: true, created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z' }],
     initialSessions: [pane('a1', 'load-test-checkout', 1, '2026-10-30T08:30:00Z')],
@@ -99,10 +107,24 @@ async function openAllMachines(page: Page, colorScheme: 'light' | 'dark' = 'ligh
       });
     }
   }, [{ id: 'build', name: 'build-box' }, { id: 'devbox', name: 'parsa-devbox' }, { id: 'travel', name: 'travel-laptop' }]);
-  await page.getByRole('button', { name: 'Agents run on studio-mac. Switch machine' }).click();
-  await page.getByRole('menuitemradio', { name: /All machines/ }).click();
+  // A relaunch comes back in All machines.
+  if (preferences.sidebar_all_machines !== 'true') {
+    await page.getByRole('button', { name: 'Agents run on studio-mac. Switch machine' }).click();
+    await page.getByRole('menuitemradio', { name: /All machines/ }).click();
+  }
   await expect(page.getByTestId('all-machines-sidebar')).toBeVisible();
+  await expect(page.getByTestId('all-machines-project')).toHaveCount(4);
+  // A relaunch keeps the projects it had open.
+  if (open) {
+    for (const name of PROJECTS) {
+      const expand = page.getByRole('button', { name: `Expand project ${name}` });
+      if (await expand.count()) await expand.click();
+    }
+  }
 }
+
+const sessionRows = (page: Page) => page.getByTestId('all-machines-session-row');
+const savedLayout = async (page: Page) => (await mock(page)).evaluate(api => api.getPreferences().sidebar_all_machines_layout ?? null);
 
 const projectRows = (page: Page, name: string) => page.getByTestId('all-machines-project')
   .filter({ has: page.getByRole('button', { name: `Collapse project ${name}` }) })
@@ -122,14 +144,158 @@ test('All machines lists every machine\'s rows, one project per repository, and 
   expect(await (await mock(page)).evaluate(api => api.getPreferences().sidebar_all_machines)).toBe('true');
 });
 
-test('a Pane that turns active on another machine moves to the top of its project', async ({ page }) => {
+test('agent events move no Session or Pane row', async ({ page }) => {
   await openAllMachines(page);
-  await (await mock(page)).evaluate((api, build) => api.emitMachineEvent(
-    { type: 'event', machineId: 'build', channel: 'panel:agentStatus', args: [] },
-    { build },
-  ), { 'panels:agent-statuses': { success: true, data: [{ panelId: 'p', sessionId: 'a1', state: 'working', reason: null }] } });
+  const before = await projectRows(page, 'acme-web').allTextContents();
+  await expect(sessionRows(page)).toHaveText([/Spring sale launch/, /Backup rotation/]);
 
-  await expect(projectRows(page, 'acme-web').first()).toHaveText(/load-test-checkout.*build/, { timeout: 2_000 });
+  // build-box's Pane starts working, then asks you something; its Session turns blocked and updates.
+  for (const state of ['working', 'blocked'] as const) {
+    await (await mock(page)).evaluate((api, build) => api.emitMachineEvent(
+      { type: 'event', machineId: 'build', channel: 'panel:agentStatus', args: [] },
+      { build },
+    ), { 'panels:agent-statuses': { success: true, data: [
+      { panelId: 'p', sessionId: 'a1', state, reason: null },
+      { panelId: 'q', sessionId: 's1-internal', state, reason: null },
+    ] } });
+    // The event landed: build-box's statuses were read again and its Session shows the state.
+    await expect(page.getByTestId('all-machines-session-row').filter({ hasText: 'Backup rotation' }).getByLabel(state === 'working' ? /working/i : /blocked|needs/i).first()).toBeVisible();
+    await expect(projectRows(page, 'acme-web')).toHaveText(before);
+    await expect(sessionRows(page)).toHaveText([/Spring sale launch/, /Backup rotation/]);
+  }
+});
+
+test('switching to All machines opens no project, and what you open is remembered across a relaunch', async ({ page, browser }) => {
+  await openAllMachines(page, 'light', { open: false });
+  for (const name of PROJECTS) await expect(page.getByRole('button', { name: `Expand project ${name}` })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByTestId('all-machines-pane-row')).toHaveCount(0);
+  // No Pane opened by itself.
+  await expect(page.getByTestId('window-title-bar-label').filter({ hasText: /fix-checkout-race|load-test-checkout|add-dark-mode/ })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Expand project infra' }).click();
+  await page.getByRole('button', { name: 'Expand Backup rotation' }).click();
+  // Leave All machines for one machine, then come back.
+  await page.getByRole('button', { name: 'Showing all machines. Switch machine' }).click();
+  await page.getByRole('menuitemradio', { name: /studio-mac/ }).click();
+  await page.getByRole('button', { name: /Switch machine/ }).click();
+  await page.getByRole('menuitemradio', { name: /All machines/ }).click();
+  await expect(page.getByRole('button', { name: 'Collapse project infra' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Collapse Backup rotation' })).toBeVisible();
+
+  const relaunched = await browser.newPage();
+  await openAllMachines(relaunched, 'light', { open: false, preferences: await (await mock(page)).evaluate(api => api.getPreferences()) });
+  await expect(relaunched.getByRole('button', { name: 'Collapse project infra' })).toBeVisible();
+  await expect(relaunched.getByRole('button', { name: 'Collapse Backup rotation' })).toBeVisible();
+  for (const name of ['acme-web', 'pane', 'blog']) await expect(relaunched.getByRole('button', { name: `Expand project ${name}` })).toBeVisible();
+  await relaunched.close();
+});
+
+test('two computers keep their own arrangement: a drag saves on this computer only and survives a relaunch', async ({ page, browser }) => {
+  await openAllMachines(page);
+  // Drag build-box's Session above this computer's; move a Pane down with Alt+Down.
+  await sessionRows(page).filter({ hasText: 'Backup rotation' }).dragTo(sessionRows(page).filter({ hasText: 'Spring sale launch' }), { targetPosition: { x: 20, y: 2 } });
+  await expect(sessionRows(page)).toHaveText([/Backup rotation/, /Spring sale launch/]);
+  await page.getByRole('button', { name: 'fix-checkout-race on studio-mac' }).focus();
+  await page.keyboard.press('Alt+ArrowDown');
+  await expect(projectRows(page, 'acme-web')).toHaveText([/add-dark-mode/, /fix-checkout-race/, /load-test-checkout/]);
+  await expect(page.getByRole('button', { name: 'fix-checkout-race on studio-mac' })).toBeFocused();
+
+  expect(JSON.parse(await savedLayout(page) ?? '{}')).toMatchObject({
+    sessions: ['build:s1', 'local:s1'],
+    panes: { 'name:acme-web': ['local:a2', 'local:a1', 'build:a1'] },
+  });
+  // Nothing was sent to any machine: their own orders are unchanged.
+  expect(await (await mock(page)).evaluate(api => api.getMachineRuns())).toEqual([]);
+
+  // Another computer with no arrangement of its own starts from each machine's order.
+  const other = await browser.newPage();
+  await openAllMachines(other);
+  await expect(sessionRows(other)).toHaveText([/Spring sale launch/, /Backup rotation/]);
+  await expect(projectRows(other, 'acme-web')).toHaveText([/fix-checkout-race/, /add-dark-mode/, /load-test-checkout/]);
+  await other.close();
+
+  const relaunched = await browser.newPage();
+  await openAllMachines(relaunched, 'light', { preferences: await (await mock(page)).evaluate(api => api.getPreferences()) });
+  await expect(sessionRows(relaunched)).toHaveText([/Backup rotation/, /Spring sale launch/]);
+  await expect(projectRows(relaunched, 'acme-web')).toHaveText([/add-dark-mode/, /fix-checkout-race/, /load-test-checkout/]);
+  await relaunched.close();
+});
+
+test('before anything is dragged, a new Session or Pane on another machine still lands first', async ({ page }) => {
+  await openAllMachines(page);
+  await expect(sessionRows(page)).toHaveText([/Spring sale launch/, /Backup rotation/]);
+  await expect(projectRows(page, 'acme-web')).toHaveText([/fix-checkout-race/, /add-dark-mode/, /load-test-checkout/]);
+
+  const fresh = { ...pane('a9', 'new-pane-on-build', 1, '2026-10-30T10:00:00Z'), createdAt: '2026-10-30T10:00:00Z' };
+  const nightly = { ...session('s2', 'Nightly rebuild', []), createdAt: '2026-10-30T10:00:00Z' };
+  await (await mock(page)).evaluate((api, build) => {
+    api.emitMachineEvent({ type: 'event', machineId: 'build', channel: 'session:created', args: [] }, { build });
+    api.emitMachineEvent({ type: 'event', machineId: 'build', channel: 'orchestration-sessions:changed', args: [] }, { build });
+  }, {
+    'sessions:get-all-with-projects': { success: true, data: [
+      project(1, 'acme-web', [fresh, pane('a1', 'load-test-checkout', 1, '2026-10-30T08:30:00Z')]),
+      project(2, 'infra', [pane('b2', 'terraform-upgrade', 2, '2026-10-30T08:40:00Z')]),
+    ] },
+    'orchestration-sessions:list': { success: true, data: { sessions: [nightly, session('s1', 'Backup rotation', ['b2'])] } },
+  });
+
+  await expect(sessionRows(page)).toHaveText([/Nightly rebuild/, /Spring sale launch/, /Backup rotation/]);
+  await expect(projectRows(page, 'acme-web')).toHaveText([/new-pane-on-build/, /fix-checkout-race/, /add-dark-mode/, /load-test-checkout/]);
+});
+
+test('a new Session or Pane lands first in its list and every other row keeps its place', async ({ page }) => {
+  await openAllMachines(page);
+  await page.getByRole('button', { name: 'Session Backup rotation on build-box' }).focus();
+  await page.keyboard.press('Alt+ArrowUp');
+  await page.getByRole('button', { name: 'load-test-checkout on build-box' }).focus();
+  await page.keyboard.press('Alt+ArrowUp');
+  await expect(sessionRows(page)).toHaveText([/Backup rotation/, /Spring sale launch/]);
+  await expect(projectRows(page, 'acme-web')).toHaveText([/fix-checkout-race/, /load-test-checkout/, /add-dark-mode/]);
+
+  const fresh = { ...pane('a9', 'new-pane-on-build', 1, '2026-10-30T10:00:00Z'), createdAt: '2026-10-30T10:00:00Z' };
+  const nightly = { ...session('s2', 'Nightly rebuild', []), createdAt: '2026-10-30T10:00:00Z' };
+  await (await mock(page)).evaluate((api, build) => {
+    api.emitMachineEvent({ type: 'event', machineId: 'build', channel: 'session:created', args: [] }, { build });
+    api.emitMachineEvent({ type: 'event', machineId: 'build', channel: 'orchestration-sessions:changed', args: [] }, { build });
+  }, {
+    'sessions:get-all-with-projects': { success: true, data: [
+      project(1, 'acme-web', [fresh, pane('a1', 'load-test-checkout', 1, '2026-10-30T08:30:00Z')]),
+      project(2, 'infra', [pane('b2', 'terraform-upgrade', 2, '2026-10-30T08:40:00Z')]),
+    ] },
+    'orchestration-sessions:list': { success: true, data: { sessions: [nightly, session('s1', 'Backup rotation', ['b2'])] } },
+  });
+
+  await expect(sessionRows(page)).toHaveText([/Nightly rebuild/, /Backup rotation/, /Spring sale launch/]);
+  await expect(projectRows(page, 'acme-web')).toHaveText([/new-pane-on-build/, /fix-checkout-race/, /load-test-checkout/, /add-dark-mode/]);
+});
+
+for (const scheme of ['light', 'dark'] as const) test(`one project row per repository, with a mark for each machine it is on (${scheme})`, async ({ page }, testInfo) => {
+  await openAllMachines(page, scheme, { open: false });
+  // build-box cloned acme-web under another folder name; parsa-devbox has a different repository
+  // with the same folder name; travel-laptop runs an older Pane, so its projects carry no identity.
+  await (await mock(page)).evaluate((api, reads) => {
+    for (const [machineId, answers] of Object.entries(reads)) {
+      api.emitMachineEvent({ type: 'event', machineId, channel: 'project:list-changed', args: [] }, { [machineId]: answers });
+    }
+  }, {
+    local: { 'sessions:get-all-with-projects': { success: true, data: [project(1, 'acme-web', [pane('a1', 'fix-checkout-race', 1, '2026-10-30T09:10:00Z')], 'github.com/acme/web')] } },
+    build: { 'sessions:get-all-with-projects': { success: true, data: [
+      project(1, 'web-checkout', [pane('a1', 'load-test-checkout', 1, '2026-10-30T08:30:00Z')], 'github.com/acme/web'),
+      project(2, 'infra', [pane('b2', 'terraform-upgrade', 2, '2026-10-30T08:40:00Z')], 'github.com/acme/infra'),
+    ] } },
+    devbox: { 'sessions:get-all-with-projects': { success: true, data: [project(1, 'acme-web', [pane('d1', 'fork-sync', 1, '2026-10-30T08:20:00Z')], 'github.com/someone/acme-web')] } },
+    travel: { 'sessions:get-all-with-projects': { success: true, data: [project(4, 'infra', [pane('t1', 'trip-notes', 4, '2026-10-30T07:00:00Z')])] } },
+  });
+
+  const projects = page.getByTestId('all-machines-project');
+  await expect(projects.getByTestId('all-machines-project-machines')).toHaveCount(3);
+  await expect(projects.getByTestId('all-machines-project-machines').nth(0)).toHaveAccessibleName('On studio-mac, build-box');
+  await expect(projects.getByTestId('all-machines-project-machines').nth(1)).toHaveAccessibleName('On build-box, travel-laptop');
+  await expect(projects.getByTestId('all-machines-project-machines').nth(2)).toHaveAccessibleName('On parsa-devbox');
+
+  await projects.nth(0).getByRole('button', { name: 'Expand project acme-web' }).click();
+  await expect(projects.nth(0).getByTestId('all-machines-pane-row')).toHaveText([/fix-checkout-race.*studi/, /load-test-checkout.*build/]);
+  await page.screenshot({ path: testInfo.outputPath(`all-machines-repositories-${scheme}.png`) });
 });
 
 test('row actions run on the row\'s own machine without switching', async ({ page }) => {
@@ -231,7 +397,7 @@ const autopilotSnapshot: JsonObject = {
   state: 'stopped', sentinel: false, stack: { entries: [], shownId: null }, walk: { sessions: [] },
 };
 for (const scheme of ['light', 'dark'] as const) test(`All machines shows the Autopilot row between Loops and Approvals, and it opens Autopilot (${scheme})`, async ({ page }, testInfo) => {
-  await openAllMachines(page, scheme, { autopilotSnapshot, notifySnapshot: notifyFixture() });
+  await openAllMachines(page, scheme, { extra: { autopilotSnapshot, notifySnapshot: notifyFixture() } });
   const sidebar = page.getByTestId('all-machines-sidebar');
   await expect(sidebar.locator('[data-testid="loops-nav"] + [data-testid="autopilot-nav"] + [data-testid="approvals-nav"]')).toHaveCount(1);
   await expect(sidebar.getByTestId('autopilot-nav-state')).toHaveText('start');

@@ -1,6 +1,7 @@
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import type { SidebarNavigationScope } from '../stores/navigationStore';
+import { comparePaneOrder } from '../../../shared/utils/paneOrder';
 
 export interface PinnedSession {
   session: Session;
@@ -11,16 +12,6 @@ export interface PinnedSession {
 
 function getRepositoryName(projectName: string | undefined): string {
   return projectName?.split(/[\\/]/).filter(Boolean).pop() || 'Unknown';
-}
-
-function hasDisplayOrder(session: Session): boolean {
-  return Number.isFinite(session.displayOrder ?? Number.NaN);
-}
-
-function compareCreatedAt(a: Session, b: Session, ascending: boolean): number {
-  const da = new Date(a.createdAt).getTime();
-  const db = new Date(b.createdAt).getTime();
-  return ascending ? da - db : db - da;
 }
 
 function pinnedAtTime(session: Session): number {
@@ -35,22 +26,8 @@ function pinnedAtTime(session: Session): number {
   return Number.isNaN(createdAt) ? 0 : createdAt;
 }
 
-function compareSessionsForSidebar(
-  a: Session,
-  b: Session,
-  createdAtAscending: boolean
-): number {
-  if (createdAtAscending && hasDisplayOrder(a) && hasDisplayOrder(b) && a.displayOrder !== b.displayOrder) {
-    return (a.displayOrder ?? 0) - (b.displayOrder ?? 0);
-  }
-
-  return compareCreatedAt(a, b, createdAtAscending);
-}
-
-export function groupSessionsByProject(
-  sessions: Session[],
-  createdAtAscending: boolean
-): Map<number, Session[]> {
+/** Each project's listed Panes, in the order their host saved (newest first until arranged). */
+export function groupSessionsByProject(sessions: Session[]): Map<number, Session[]> {
   const map = new Map<number, Session[]>();
 
   sessions
@@ -63,7 +40,7 @@ export function groupSessionsByProject(
     });
 
   map.forEach((list, key) => {
-    map.set(key, list.slice().sort((a, b) => compareSessionsForSidebar(a, b, createdAtAscending)));
+    map.set(key, list.slice().sort(comparePaneOrder));
   });
 
   return map;

@@ -24,6 +24,11 @@ export interface Project {
   wsl_enabled?: boolean;
   wsl_distribution?: string | null;
   environment?: ProjectEnvironment;
+  /**
+   * The repository across machines: the origin remote as `host/owner/repo`, lower-cased.
+   * Only in the project list a host serves; absent without an origin or from an older Pane.
+   */
+  repository?: string;
 }
 
 export interface CreateProjectRequest {

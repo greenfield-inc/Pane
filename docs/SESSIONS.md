@@ -241,6 +241,18 @@ first. A host running an older Pane cannot save an order: the list snaps back
 and the error says to update Pane on that host. Dragging a Session onto the
 workspace still tiles it.
 
+In the sidebar's **All machines** view, Sessions from every machine form one
+list you arrange the same way, by drag or **Alt+↑**/**Alt+↓**. That arrangement
+is saved on the computer you are looking from, not on any machine it shows: two
+computers keep two arrangements, and each machine's own order (its one-computer
+view, the phone and `runpane sessions list`) is unchanged. The first time a
+machine answers on this computer, its Sessions join the arrangement in that
+machine's own order, after the Sessions of machines listed before it in the
+machine menu, so a first look follows the menu however late each machine
+answers. A Session that appears after that, such as
+a new one, goes first whether or not you have moved anything; agent status and
+activity never move a row.
+
 Click a Session row to open its chat, or find it by name in Search (`⌘⇧P` /
 `Ctrl+Shift+P`, or the Search field above **New**), which also has **New Session**. A Session with associated Panes shows a
 chevron that expands or collapses them; a Session without Panes shows none.
@@ -263,6 +275,23 @@ menu takes it out again; the Pane and its worktree are unchanged. Pinned Pane
 rows show the Pane name with its repository muted beside it. Single-line Pane rows omit change counts and PR numbers; the
 optional two-row layout shows those details below the title. Session and Pane
 context menus use compact widths.
+
+Under each repository, drag a Pane up or down to change its place, or move a
+focused Pane row with **Alt+↑** and **Alt+↓**; a line shows where it will land
+and a screen reader hears its new position. The order is saved on the machine
+the Pane runs on (its `display_order`), so the phone shows it too, and agent
+activity, renames and archiving other Panes never move a row. A new Pane lands
+at the top. **Sort** in the sidebar's **⋯** menu is an action on that machine:
+**Sort: Newest first** or **Sort: Oldest first** (the current one says
+*Current*) re-sorts every repository's Panes once by creation and sets where
+new Panes land (top under Newest first, bottom
+under Oldest first); drags made afterwards hold. A machine running an older
+Pane cannot save a Pane order: the list snaps back and the error says to update
+Pane on that host. Commands: `sessions:reorder-in-project` (`{ projectId,
+paneIds }`; the listed Panes trade the places they hold, unknown ids are
+ignored, timestamps are kept), `sessions:sort-panes` (`{ order: "newest" |
+"oldest" }`) and `sessions:get-pane-order` (`{ newPanes: "top" | "bottom",
+chosen }`).
 
 The experimental **Attention inbox** (Settings > Advanced > Experimental) turns
 the Projects list into an Inbox of the Panes that need you: an agent waiting on

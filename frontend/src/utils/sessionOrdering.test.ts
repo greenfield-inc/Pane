@@ -68,31 +68,21 @@ describe('sessionOrdering', () => {
     expect(pinned.map(item => item.session.id)).toEqual(['a-alpha', 'a-zeta', 'b-zeta']);
   });
 
-  it('orders sessions by displayOrder in the default ascending view', () => {
+  it('lists a project\'s Panes in the host\'s saved order, highest first, whatever their age', () => {
     const grouped = groupSessionsByProject([
-      session({ id: 'newer', projectId: 1, displayOrder: 2, createdAt: '2026-01-03T00:00:00.000Z' }),
-      session({ id: 'older', projectId: 1, displayOrder: 0, createdAt: '2026-01-01T00:00:00.000Z' }),
+      session({ id: 'dragged-down', projectId: 1, displayOrder: 0, createdAt: '2026-01-03T00:00:00.000Z' }),
+      session({ id: 'oldest-dragged-up', projectId: 1, displayOrder: 2, createdAt: '2026-01-01T00:00:00.000Z' }),
       session({ id: 'middle', projectId: 1, displayOrder: 1, createdAt: '2026-01-02T00:00:00.000Z' }),
-    ], true);
+    ]);
 
-    expect(grouped.get(1)?.map(item => item.id)).toEqual(['older', 'middle', 'newer']);
+    expect(grouped.get(1)?.map(item => item.id)).toEqual(['oldest-dragged-up', 'middle', 'dragged-down']);
   });
 
-  it('keeps newest-first sorting when the user flips the sort direction', () => {
-    const grouped = groupSessionsByProject([
-      session({ id: 'newer', projectId: 1, displayOrder: 2, createdAt: '2026-01-03T00:00:00.000Z' }),
-      session({ id: 'older', projectId: 1, displayOrder: 0, createdAt: '2026-01-01T00:00:00.000Z' }),
-      session({ id: 'middle', projectId: 1, displayOrder: 1, createdAt: '2026-01-02T00:00:00.000Z' }),
-    ], false);
-
-    expect(grouped.get(1)?.map(item => item.id)).toEqual(['newer', 'middle', 'older']);
-  });
-
-  it('uses createdAt sort when displayOrder is absent', () => {
+  it('lists Panes with no saved order newest first', () => {
     const grouped = groupSessionsByProject([
       session({ id: 'old', projectId: 1, createdAt: '2026-01-01T00:00:00.000Z' }),
       session({ id: 'new', projectId: 1, createdAt: '2026-01-03T00:00:00.000Z' }),
-    ], false);
+    ]);
 
     expect(grouped.get(1)?.map(item => item.id)).toEqual(['new', 'old']);
   });
@@ -102,7 +92,7 @@ describe('sessionOrdering', () => {
     const grouped = groupSessionsByProject([
       session({ id: 'one', projectId: 1, displayOrder: 0 }),
       session({ id: 'two', projectId: 2, displayOrder: 0 }),
-    ], true);
+    ]);
 
     expect(flattenSessionsByProjects(projects, grouped).map(item => item.id)).toEqual(['two', 'one']);
     expect(flattenSessionsByProjects(projects, grouped, new Set([1])).map(item => item.id)).toEqual(['one']);
