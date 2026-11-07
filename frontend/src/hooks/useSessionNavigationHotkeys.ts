@@ -17,12 +17,10 @@ import type { Project } from '../types/project';
 
 interface UseSessionNavigationHotkeysOptions {
   projects: Project[];
-  sessionSortAscending: boolean;
 }
 
 export function useSessionNavigationHotkeys({
   projects,
-  sessionSortAscending,
 }: UseSessionNavigationHotkeysOptions): void {
   const sessions = useSessionStore(s => s.sessions);
   const activeSessionId = useSessionStore(s => s.activeSessionId);
@@ -32,8 +30,8 @@ export function useSessionNavigationHotkeys({
   const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
 
   const sessionsByProject = useMemo(
-    () => groupSessionsByProject(sessions, sessionSortAscending),
-    [sessions, sessionSortAscending]
+    () => groupSessionsByProject(sessions),
+    [sessions]
   );
 
   const projectById = useMemo(() => createProjectById(projects), [projects]);

@@ -50,6 +50,8 @@ export type ElectronApiMockOptions = {
   /** autopilot:snapshot answer; absent: no Autopilot API, as in a build without it. */
   autopilotSnapshot?: JsonObject;
   initialSessions?: JsonObject[];
+  /** The host runs an older Pane with no Pane order commands: they fail as the remote client says. */
+  paneOrderUnsupported?: boolean;
   initialLoops?: Loop[];
   /** remote-daemon:list-tailnet-machines answer. */
   tailnetMachines?: TailnetMachineList;
@@ -446,6 +448,26 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const sessionDeleteCalls: string[] = [];
     const sessionRestoreCalls: string[] = [];
     const sessionFavoriteToggleCalls: string[] = [];
+    const paneOrderCalls: JsonValue[] = [];
+    let newPanePlacement: 'top' | 'bottom' | null = null;
+    const hostOutdated = (channel: string) => Promise.reject(new Error(`Error invoking remote method '${channel}': Error: build-box runs an older Pane that does not have this command (${channel}). Nothing was changed. Next: Update Pane on build-box (run \`runpane update\` there), then try again.`));
+    const paneTime = (pane: JsonObject) => Date.parse(String(pane.createdAt ?? '')) || 0;
+    /** The host's order: highest displayOrder first, then newest. */
+    const projectPanes = (projectId: number) => mockSessions
+      .filter((pane) => pane.projectId === projectId && pane.archived !== true && pane.isMainRepo !== true)
+      .sort((a, b) => {
+        const ao = Number(a.displayOrder ?? Number.NaN);
+        const bo = Number(b.displayOrder ?? Number.NaN);
+        return Number.isFinite(ao) && Number.isFinite(bo) && ao !== bo ? bo - ao : paneTime(b) - paneTime(a);
+      });
+    const savePaneOrder = (ordered: JsonObject[]) => {
+      ordered.forEach((pane, index) => {
+        const displayOrder = ordered.length - 1 - index;
+        if (pane.displayOrder === displayOrder) return;
+        pane.displayOrder = displayOrder;
+        emit('session:updated', clone(pane));
+      });
+    };
     const gitStageAndCommitCalls: Array<{ sessionId: string; message: string }> = [];
     let gitIdentity = mockOptions.gitIdentity ? clone(mockOptions.gitIdentity) : null;
     const gitCommitResults = clone(mockOptions.gitCommitResults ?? []);
@@ -1375,6 +1397,30 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           sessionFavoriteToggleCalls.push(sessionId);
           return success();
         },
+        reorderInProject: (projectId: number, paneIds: string[]) => {
+          paneOrderCalls.push({ reorderInProject: { projectId, paneIds: clone(paneIds) } });
+          if (mockOptions.paneOrderUnsupported) return hostOutdated('sessions:reorder-in-project');
+          const panes = projectPanes(projectId);
+          const listed = paneIds.filter((id, index) => paneIds.indexOf(id) === index && panes.some((pane) => pane.id === id));
+          const queue = listed.map((id) => panes.find((item) => item.id === id) ?? null);
+          savePaneOrder(panes.map((pane) => (listed.includes(String(pane.id)) ? queue.shift() ?? pane : pane)));
+          return success({ moved: [] });
+        },
+        sortPanes: (order: 'newest' | 'oldest') => {
+          paneOrderCalls.push({ sortPanes: order });
+          if (mockOptions.paneOrderUnsupported) return hostOutdated('sessions:sort-panes');
+          newPanePlacement = order === 'newest' ? 'top' : 'bottom';
+          const projectIds = [...new Set(mockSessions.map((pane) => Number(pane.projectId)))];
+          for (const projectId of projectIds) {
+            const created = projectPanes(projectId).sort((a, b) => paneTime(b) - paneTime(a));
+            savePaneOrder(order === 'newest' ? created : created.reverse());
+          }
+          return success({ moved: [] });
+        },
+        getPaneOrder: () => {
+          if (mockOptions.paneOrderUnsupported) return hostOutdated('sessions:get-pane-order');
+          return success({ newPanes: newPanePlacement ?? 'top', chosen: newPanePlacement !== null });
+        },
         getAll: () => {
           sessionsGetCount += 1;
           return success(clone(mockSessions));
@@ -1926,6 +1972,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getSessionDeleteCalls() {
           return clone(sessionDeleteCalls);
+        },
+        getPaneOrderCalls() {
+          return clone(paneOrderCalls);
         },
         getSessionRestoreCalls() {
           return clone(sessionRestoreCalls);

@@ -18,5 +18,6 @@ describe('MachineOfflineBanner', () => {
     );
 
     expect(text(markup)).toMatch(/^build-box went offline at 9:14\b.*Its rows are from then\.Retry$/);
-  });
+  // The first import of the sidebar loads its whole store graph: 2-3 s when the full suite runs in parallel.
+  }, 15_000);
 });

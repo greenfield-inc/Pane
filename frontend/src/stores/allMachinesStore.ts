@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { API, type IPCResponse } from '../utils/api';
-import type { MachineRef, MachineSnapshot, MachineView } from '../utils/allMachinesTree';
+import { ipcErrorMessage } from '../utils/ipcErrorMessage';
+import { useErrorStore } from './errorStore';
+import { seedArrangement, type MachineRef, type MachineSnapshot, type MachineView, type SeededArrangement } from '../utils/allMachinesTree';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
 import {
   type MachineConnectionsEvent,
@@ -10,6 +13,8 @@ import {
 
 /** The local preference that keeps the sidebar in All machines across relaunch. */
 const ALL_MACHINES_PREFERENCE = 'sidebar_all_machines';
+/** How this computer arranged All machines; never sent to another machine. */
+const ALL_MACHINES_LAYOUT_PREFERENCE = 'sidebar_all_machines_layout';
 /** Events arrive in bursts; one read per machine covers a burst. */
 const MACHINE_REREAD_DEBOUNCE_MS = 250;
 /** A machine reconnecting for less than this keeps its rows bright, so a blip never flickers. */
@@ -68,6 +73,37 @@ interface OfflineNotice {
   question: string | null;
 }
 
+/**
+ * This computer's All machines arrangement and what is open in it. `open` holds
+ * `section:sessions`, `section:projects`, `project:<project key>` and `session:<row key>`;
+ * a project or Session it does not name is closed. `seeded` names the machines whose first look
+ * is in the order (see `seedArrangement`).
+ */
+export interface AllMachinesLayout extends SeededArrangement {
+  open: string[];
+}
+
+const DEFAULT_LAYOUT: AllMachinesLayout = { sessions: null, panes: {}, open: ['section:sessions', 'section:projects'], seeded: [] };
+
+const layoutSchema = boundary.object({
+  sessions: boundary.nullable(boundary.array(boundary.string)),
+  panes: boundary.record(boundary.array(boundary.string)),
+  open: boundary.array(boundary.string),
+  seeded: boundary.optional(boundary.array(boundary.string)),
+});
+
+/** The saved layout, or the default one when nothing is saved or it cannot be read. */
+function readLayout(value: string | null): AllMachinesLayout {
+  if (!value) return DEFAULT_LAYOUT;
+  try {
+    const layout = decodeBoundary(JSON.parse(value), layoutSchema);
+    return { ...layout, seeded: layout.seeded ?? [] };
+  } catch (error) {
+    console.warn('[allMachines] The saved layout could not be read, so it starts fresh:', error);
+    return DEFAULT_LAYOUT;
+  }
+}
+
 interface AllMachinesState {
   /** The sidebar shows every machine's rows. */
   enabled: boolean;
@@ -84,11 +120,44 @@ interface AllMachinesState {
   offlineNotice: OfflineNotice | null;
   /** Bumped when a machine's offline grace ends, so its rows dim on time. */
   clock: number;
+  /** This computer's arrangement and open rows. */
+  layout: AllMachinesLayout;
   setEnabled: (enabled: boolean) => void;
   hydrate: () => Promise<void>;
+  /** Saves the Session rows' order, keys across machines. */
+  arrangeSessions: (order: string[]) => void;
+  /** Saves one project's Pane rows' order. */
+  arrangePanes: (projectKey: string, order: string[]) => void;
+  /** Opens or closes a section, project or Session row (see `AllMachinesLayout.open`). */
+  toggleOpen: (key: string) => void;
+  /** Takes the first look of each machine whose list has now answered into the arrangement. */
+  takeFirstLooks: (answered: (machineId: string, list: 'sessions' | 'projects') => boolean) => void;
 }
 
-export const useAllMachinesStore = create<AllMachinesState>((set) => ({
+export const useAllMachinesStore = create<AllMachinesState>((set, get) => {
+  /**
+   * Shows the layout now and saves it on this computer. A move or open/close you made that
+   * cannot be saved says so: it stays on screen until Pane restarts, then the last saved
+   * arrangement returns. A first look that cannot be saved is taken again next launch.
+   */
+  const saveLayout = (layout: AllMachinesLayout, yours = true) => {
+    set({ layout });
+    const notSaved = (reason: string) => {
+      console.warn('[allMachines] Could not remember the arrangement:', reason);
+      if (!yours) return;
+      useErrorStore.getState().showError({
+        title: 'Your All machines arrangement was not saved',
+        error: `${reason} The change shows until Pane restarts, then the last saved arrangement comes back. Make the change again to try saving it.`,
+      });
+    };
+    const reasonOf = (error: Error | string | null) => ipcErrorMessage(error, 'This computer could not save it.');
+    try {
+      API.preferences.set(ALL_MACHINES_LAYOUT_PREFERENCE, JSON.stringify(layout)).catch((error: Error) => notSaved(reasonOf(error)));
+    } catch (error) {
+      notSaved(reasonOf(error instanceof Error ? error : String(error)));
+    }
+  };
+  return {
   enabled: false,
   machines: [],
   snapshots: {},
@@ -97,6 +166,7 @@ export const useAllMachinesStore = create<AllMachinesState>((set) => ({
   switchMachine: null,
   offlineNotice: null,
   clock: 0,
+  layout: DEFAULT_LAYOUT,
   setEnabled: (enabled) => {
     set({ enabled, offlineNotice: null });
     API.preferences.set(ALL_MACHINES_PREFERENCE, String(enabled)).catch((error) => {
@@ -105,13 +175,31 @@ export const useAllMachinesStore = create<AllMachinesState>((set) => ({
   },
   hydrate: async () => {
     try {
-      const response = await API.preferences.get(ALL_MACHINES_PREFERENCE);
-      set({ enabled: response === 'true' });
+      const [enabled, layout] = await Promise.all([
+        API.preferences.get(ALL_MACHINES_PREFERENCE),
+        API.preferences.get(ALL_MACHINES_LAYOUT_PREFERENCE),
+      ]);
+      set({ enabled: enabled === 'true', layout: readLayout(layout) });
     } catch (error) {
       console.warn('[allMachines] Could not read the sidebar mode:', error);
     }
   },
-}));
+  arrangeSessions: (order) => saveLayout({ ...get().layout, sessions: order }),
+  arrangePanes: (projectKey, order) => {
+    const { layout } = get();
+    saveLayout({ ...layout, panes: { ...layout.panes, [projectKey]: order } });
+  },
+  takeFirstLooks: (answered) => {
+    const state = get();
+    const next = seedArrangement(state.layout, machineViews(state), answered);
+    if (next) saveLayout({ ...state.layout, ...next }, false);
+  },
+  toggleOpen: (key) => {
+    const { layout } = get();
+    saveLayout({ ...layout, open: layout.open.includes(key) ? layout.open.filter((item) => item !== key) : [...layout.open, key] });
+  },
+  };
+});
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -134,6 +222,8 @@ export function startAllMachinesFeed(): () => void {
   /** `<machine id>\n<list>` of each read in flight, and of each one asked for again meanwhile. */
   const inFlight = new Set<string>();
   const again = new Set<string>();
+  /** `<machine id>\n<list>` of each list that has answered at least once. */
+  const answered = new Set<string>();
   let stopped = false;
   let graceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -153,6 +243,10 @@ export function startAllMachinesFeed(): () => void {
         if (!state.machines.some((machine) => machine.id === machineId)) return state;
         return { snapshots: { ...state.snapshots, [machineId]: { ...EMPTY_SNAPSHOT, ...state.snapshots[machineId], [key]: value } } };
       });
+      if (useAllMachinesStore.getState().machines.some((machine) => machine.id === machineId)) {
+        answered.add(list);
+        useAllMachinesStore.getState().takeFirstLooks((id, which) => answered.has(`${id}\n${which}`));
+      }
     } catch (error) {
       console.warn(`[allMachines] Could not read ${key} from ${machineId}:`, error);
     } finally {
@@ -248,10 +342,12 @@ export function isMachineDimmed(machine: MachineState | undefined, now = Date.no
   return !Number.isFinite(since) || now - since >= OFFLINE_GRACE_MS;
 }
 
-/** Each machine with its lists and whether its rows are from when it stopped answering. */
+/** Each machine, in the machine menu's order, with its lists and whether its rows are from when it stopped answering. */
 export function machineViews(state: Pick<AllMachinesState, 'machines' | 'snapshots' | 'entries'>, now = Date.now()): MachineView[] {
   const entries = new Map(state.entries.map((entry) => [entry.id, entry]));
-  return state.machines.map((machine) => ({
+  const menuPlace = new Map(state.entries.map((entry, index) => [entry.id, index]));
+  const place = (id: string) => menuPlace.get(id) ?? state.entries.length;
+  return [...state.machines].sort((a, b) => place(a.id) - place(b.id)).map((machine) => ({
     machine: entries.get(machine.id) ?? { id: machine.id, name: machine.label, os: null, slot: 0 },
     snapshot: state.snapshots[machine.id] ?? null,
     offline: isMachineDimmed(machine, now),

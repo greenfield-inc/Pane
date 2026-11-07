@@ -149,6 +149,8 @@ import { panelManager } from './panelManager';
 import { ProjectEnvService, type ResolvedProjectEnv } from './projectEnvVars';
 import { teammatePaneCaller } from '../daemon/commandRegistry';
 import type { AnalyticsManager } from './analyticsManager';
+import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
+import { comparePaneOrder, type NewPanePlacement, type PaneOrderSettings } from '../../../shared/utils/paneOrder';
 
 export class SessionManager extends EventEmitter {
   private activeSessions: Map<string, Session> = new Map();
@@ -417,6 +419,66 @@ export class SessionManager extends EventEmitter {
   getSessionsForProject(projectId: number): Session[] {
     const dbSessions = this.db.getAllSessions(projectId);
     return this.toSessions(dbSessions);
+  }
+
+  /** A project's listed Panes (hidden ones too) in the order the sidebar shows them. */
+  private panesInOrder(projectId: number): DbSession[] {
+    return this.db.getAllSessions(projectId, { includeHidden: true })
+      .sort((a, b) => comparePaneOrder({ displayOrder: a.display_order, createdAt: a.created_at }, { displayOrder: b.display_order, createdAt: b.created_at }));
+  }
+
+  /** The display_order writes that make `ordered` a project's order, highest first. */
+  private paneOrderChanges(ordered: readonly DbSession[]): Array<{ id: string; displayOrder: number }> {
+    return ordered
+      .map((pane, index) => ({ id: pane.id, displayOrder: ordered.length - 1 - index, before: pane.display_order }))
+      .filter(({ displayOrder, before }) => displayOrder !== before)
+      .map(({ id, displayOrder }) => ({ id, displayOrder }));
+  }
+
+  /**
+   * Saves every change in one transaction, then tells viewers about each Pane that moved. The
+   * order is saved by then, so a viewer that cannot be told is logged, not reported as a failure.
+   */
+  private savePaneOrders(changes: ReadonlyArray<{ id: string; displayOrder: number }>, placement?: NewPanePlacement): string[] {
+    if (changes.length === 0 && !placement) return [];
+    this.db.setPaneDisplayOrders(changes, placement);
+    for (const { id } of changes) {
+      try {
+        this.publishSessionMetadata(id, this.db.getSession(id));
+      } catch (error) {
+        console.warn(`[SessionManager] The Pane order is saved, but viewers were not told that ${id} moved:`, error);
+      }
+    }
+    return changes.map(({ id }) => id);
+  }
+
+  /**
+   * Puts the listed Panes of a project in the given order within the places they hold, as a
+   * drag does; ids that are not the project's listed Panes are ignored. Timestamps are kept.
+   * Returns the ids of the Panes whose saved place changed.
+   */
+  reorderPanesInProject(projectId: number, paneIds: readonly string[]): string[] {
+    const panes = this.panesInOrder(projectId);
+    return this.savePaneOrders(this.paneOrderChanges(moveWithinOwnPlaces(panes, paneIds, (pane) => pane.id)));
+  }
+
+  /**
+   * Sort, picked once: re-sorts every project's Panes by creation, newest or oldest first, and
+   * puts new Panes on top (newest) or at the bottom (oldest) from then on. Drags still hold after.
+   * Every project and the placement save together, or nothing changes.
+   */
+  sortPanes(order: 'newest' | 'oldest'): string[] {
+    const changes = this.db.getAllProjects().flatMap((project) => {
+      const created = this.panesInOrder(project.id)
+        .sort((a, b) => comparePaneOrder({ createdAt: a.created_at }, { createdAt: b.created_at }));
+      return this.paneOrderChanges(order === 'newest' ? created : created.reverse());
+    });
+    return this.savePaneOrders(changes, order === 'newest' ? 'top' : 'bottom');
+  }
+
+  getPaneOrderSettings(): PaneOrderSettings {
+    const placement = this.db.getNewPanePlacement();
+    return { newPanes: placement ?? 'top', chosen: placement !== null };
   }
 
   getSession(id: string): Session | undefined {

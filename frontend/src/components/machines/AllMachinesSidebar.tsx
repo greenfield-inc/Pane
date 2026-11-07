@@ -24,7 +24,8 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { commandOnMachine, openOnMachine, runOnMachine } from '../../utils/machineRowActions';
-import { type AllMachinesPane, type AllMachinesSession, type MachineRef } from '../../utils/allMachinesTree';
+import { savedOrderAfterMove, type AllMachinesPane, type AllMachinesSession, type MachineRef } from '../../utils/allMachinesTree';
+import { DropLine, useRowReorder, type ReorderList, type RowReorder } from '../../hooks/useRowReorder';
 import { cn } from '../../utils/cn';
 
 /** "9:14", in this computer's clock format. */
@@ -135,13 +136,16 @@ function BadgeSlot({ machine, label, onMenu }: { machine: MachineRef; label: str
   );
 }
 
-function PaneRow({ row, active, nested, onMenu }: { row: AllMachinesPane; active: boolean; nested: boolean; onMenu: (menu: RowMenu) => void }) {
+function PaneRow({ row, active, nested, onMenu, reorder }: { row: AllMachinesPane; active: boolean; nested: boolean; onMenu: (menu: RowMenu) => void; reorder?: RowReorder }) {
   const { pane, machine } = row;
   const label = pane.gitStatus?.prTitle || pane.name || 'Untitled';
   const openMenu = (x: number, y: number) => onMenu({ x, y, machine, target: { kind: 'pane', row } });
   return (
     <div
       data-testid="all-machines-pane-row"
+      data-row-key={row.key}
+      {...reorder?.drag}
+      onKeyDown={reorder?.onKeyDown}
       onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
       className={cn(
         'group/row relative mx-2 flex w-[calc(100%-1rem)] items-center gap-1.5 rounded-md py-1 pr-2 text-left transition-colors',
@@ -150,8 +154,10 @@ function PaneRow({ row, active, nested, onMenu }: { row: AllMachinesPane; active
         row.offline && 'opacity-50',
       )}
     >
+      <DropLine edge={reorder?.indicator ?? null} />
       <button
         type="button"
+        data-row-open
         onClick={() => void openOnMachine(machine.id, { kind: 'pane', id: pane.id, name: label })}
         aria-current={active ? 'page' : undefined}
         aria-label={`${label} on ${machine.name}`}
@@ -180,8 +186,9 @@ function PaneRow({ row, active, nested, onMenu }: { row: AllMachinesPane; active
   );
 }
 
-function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane }: {
+function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reorder }: {
   row: AllMachinesSession;
+  reorder: RowReorder;
   active: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -191,7 +198,8 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane }: {
   const { session, machine } = row;
   const openMenu = (x: number, y: number) => onMenu({ x, y, machine, target: { kind: 'session', row } });
   return (
-    <div className={cn(row.offline && 'opacity-50')}>
+    <div className={cn('relative', row.offline && 'opacity-50')} data-row-key={row.key} {...reorder.drag} onKeyDown={reorder.onKeyDown}>
+      <DropLine edge={reorder.indicator} />
       <div
         data-testid="all-machines-session-row"
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
@@ -202,6 +210,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane }: {
       >
         <button
           type="button"
+          data-row-open
           onClick={() => void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name })}
           aria-current={active ? 'page' : undefined}
           aria-label={`Session ${session.name} on ${machine.name}`}
@@ -234,6 +243,31 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane }: {
   );
 }
 
+/** Row keys split into pinned and the rest, in one pass, each in the order shown. */
+function splitPinned<Row extends { key: string }>(rows: readonly Row[], isPinned: (row: Row) => boolean) {
+  const pinned: string[] = [];
+  const rest: string[] = [];
+  for (const row of rows) (isPinned(row) ? pinned : rest).push(row.key);
+  return { pinned, rest };
+}
+
+/** One mark per machine the project is on, dimmed for a machine that is offline. */
+function ProjectMachineMarks({ entries }: { entries: ReadonlyArray<{ machine: MachineRef; offline: boolean }> }) {
+  const machines = [...new Map(entries.map((entry) => [entry.machine.id, entry])).values()];
+  return (
+    <span
+      role="img"
+      aria-label={`On ${machines.map((entry) => entry.machine.name).join(', ')}`}
+      data-testid="all-machines-project-machines"
+      className="flex flex-none items-center gap-1"
+    >
+      {machines.map(({ machine, offline }) => (
+        <MachineMark key={machine.id} os={machine.os} slot={machine.slot} size="logo" presence={offline ? 'dimmed' : 'solid'} />
+      ))}
+    </span>
+  );
+}
+
 function SectionHeader({ label, expanded, onToggle }: { label: string; expanded: boolean; onToggle: () => void }) {
   return (
     <div className={SIDEBAR_SECTION_ROW}>
@@ -247,18 +281,11 @@ function SectionHeader({ label, expanded, onToggle }: { label: string; expanded:
   );
 }
 
-/** Adds the key to a set state, or removes it when it is there. */
-function toggle(set: (update: (current: ReadonlySet<string>) => ReadonlySet<string>) => void, key: string): void {
-  set((current) => {
-    const next = new Set(current);
-    if (!next.delete(key)) next.add(key);
-    return next;
-  });
-}
-
 /**
  * The sidebar in All machines: today's Sessions and Projects tree with every saved machine's
- * rows, a machine badge on each. A project with the same name on several machines is one project.
+ * rows, a machine badge on each, in the order this computer arranged them. A repository on
+ * several machines is one project row, with a mark for each machine. Projects and Sessions start closed, and what you
+ * open is remembered on this computer.
  */
 export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const { views, tree, activeMachineId } = useAllMachinesTree();
@@ -266,10 +293,13 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const activeView = useNavigationStore((state) => state.activeView);
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const selectedSessionId = useOrchestrationSessionStore((state) => state.selectedSessionId);
-  const [sessionsExpanded, setSessionsExpanded] = useState(true);
-  const [projectsExpanded, setProjectsExpanded] = useState(true);
-  const [collapsedProjects, setCollapsedProjects] = useState<ReadonlySet<string>>(new Set());
-  const [expandedSessions, setExpandedSessions] = useState<ReadonlySet<string>>(new Set());
+  const layout = useAllMachinesStore((state) => state.layout);
+  const toggleOpen = useAllMachinesStore((state) => state.toggleOpen);
+  const arrangeSessions = useAllMachinesStore((state) => state.arrangeSessions);
+  const arrangePanes = useAllMachinesStore((state) => state.arrangePanes);
+  const isOpen = (key: string) => layout.open.includes(key);
+  const [announcement, setAnnouncement] = useState('');
+  const reorderRow = useRowReorder(setAnnouncement);
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [renaming, setRenaming] = useState<RowMenu | null>(null);
   const [reviewing, setReviewing] = useState<RowMenu | null>(null);
@@ -278,6 +308,22 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const renderPane = (nested: boolean) => (row: AllMachinesPane) => (
     <PaneRow key={row.key} row={row} active={isActivePane(row)} nested={nested} onMenu={setMenu} />
   );
+
+  // Pinned rows and the rest are separate lists; a move saves the whole list as shown.
+  const sessionGroups = splitPinned(tree.sessions, (row) => Boolean(row.session.isPinned));
+  const sessionList = (pinned: boolean): ReorderList => ({
+    id: pinned ? 'sessions:pinned' : 'sessions',
+    keys: pinned ? sessionGroups.pinned : sessionGroups.rest,
+    save: (order) => arrangeSessions(savedOrderAfterMove(layout.sessions, pinned ? [...order, ...sessionGroups.rest] : [...sessionGroups.pinned, ...order])),
+  });
+  const paneList = (projectKey: string, panes: AllMachinesPane[], pinned: boolean): ReorderList => {
+    const groups = splitPinned(panes, (row) => Boolean(row.pane.isFavorite));
+    return {
+      id: `project:${projectKey}:${pinned ? 'pinned' : 'rest'}`,
+      keys: pinned ? groups.pinned : groups.rest,
+      save: (order) => arrangePanes(projectKey, savedOrderAfterMove(layout.panes[projectKey] ?? null, pinned ? [...order, ...groups.rest] : [...groups.pinned, ...order])),
+    };
+  };
 
   const offline = views.filter((view) => view.offline);
   const loaded = views.some((view) => view.snapshot !== null);
@@ -292,6 +338,7 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
 
   return (
     <div className="flex flex-col pb-2" data-testid="all-machines-sidebar">
+      <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
       {/* Same order as the single-machine sidebar: Loops, Autopilot, Approvals (D-117, D-198). */}
       <LoopsNavRow active={activeView === 'loops'} />
       <AutopilotNavRow />
@@ -315,34 +362,35 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
         <>
           {tree.sessions.length > 0 && (
             <>
-              <SectionHeader label="Sessions" expanded={sessionsExpanded} onToggle={() => setSessionsExpanded(!sessionsExpanded)} />
-              {sessionsExpanded && tree.sessions.map((row) => (
+              <SectionHeader label="Sessions" expanded={isOpen('section:sessions')} onToggle={() => toggleOpen('section:sessions')} />
+              {isOpen('section:sessions') && tree.sessions.map((row) => (
                 <SessionRow
                   key={row.key}
                   row={row}
                   active={row.machine.id === activeMachineId && activeView === 'pane-chat' && row.session.id === selectedSessionId}
-                  expanded={expandedSessions.has(row.key)}
-                  onToggle={() => toggle(setExpandedSessions, row.key)}
+                  expanded={isOpen(`session:${row.key}`)}
+                  onToggle={() => toggleOpen(`session:${row.key}`)}
                   onMenu={setMenu}
                   renderPane={renderPane(true)}
+                  reorder={reorderRow(sessionList(Boolean(row.session.isPinned)), row.key, row.session.name)}
                 />
               ))}
             </>
           )}
 
-          <SectionHeader label="Projects" expanded={projectsExpanded} onToggle={() => setProjectsExpanded(!projectsExpanded)} />
-          {projectsExpanded && tree.projects.map((project) => {
-            const expanded = !collapsedProjects.has(project.key);
+          <SectionHeader label="Projects" expanded={isOpen('section:projects')} onToggle={() => toggleOpen('section:projects')} />
+          {isOpen('section:projects') && tree.projects.map((project) => {
+            const expanded = isOpen(`project:${project.key}`);
             const allOffline = project.entries.every((entry) => entry.offline);
             return (
               <div key={project.key} data-testid="all-machines-project">
                 <button
                   type="button"
-                  onClick={() => toggle(setCollapsedProjects, project.key)}
+                  onClick={() => toggleOpen(`project:${project.key}`)}
                   aria-expanded={expanded}
                   aria-label={`${expanded ? 'Collapse' : 'Expand'} project ${project.name}`}
                   className={cn(
-                    'mx-2 flex min-h-7 w-[calc(100%-1rem)] items-center gap-1.5 rounded-md py-0.5 pl-2 pr-1 text-left transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-interactive',
+                    'mx-2 flex min-h-7 w-[calc(100%-1rem)] items-center gap-1.5 rounded-md py-0.5 pl-2 pr-2 text-left transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-interactive',
                     allOffline && 'opacity-50',
                   )}
                 >
@@ -350,8 +398,18 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
                     {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-text-primary">{project.name}</span>
+                  <ProjectMachineMarks entries={project.entries} />
                 </button>
-                {expanded && project.panes.map(renderPane(true))}
+                {expanded && project.panes.map((row) => (
+                  <PaneRow
+                    key={row.key}
+                    row={row}
+                    active={isActivePane(row)}
+                    nested
+                    onMenu={setMenu}
+                    reorder={reorderRow(paneList(project.key, project.panes, Boolean(row.pane.isFavorite)), row.key, row.pane.gitStatus?.prTitle || row.pane.name || 'Untitled')}
+                  />
+                ))}
               </div>
             );
           })}

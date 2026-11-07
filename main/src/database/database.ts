@@ -1,4 +1,5 @@
 import Database from "better-sqlite3-multiple-ciphers";
+import type { NewPanePlacement } from '../../../shared/utils/paneOrder';
 import { readFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -226,6 +227,10 @@ export interface PanelBufferMigrationOutcome {
   result: PanelBufferMigrationResult | null;
   error: Error | null;
 }
+
+
+/** The ui_state key holding where this host puts new Panes (`top` or `bottom`). */
+const NEW_PANE_PLACEMENT_KEY = 'panes.newPanePlacement';
 
 export class DatabaseService {
   private db: Database.Database;
@@ -3217,7 +3222,11 @@ export class DatabaseService {
         maxSessionOrder?.max_order ?? -1,
         maxFolderOrder?.max_order ?? -1,
       );
-      const displayOrder = maxOrder + 1;
+      // The sidebar lists the highest display_order first: a new Pane takes the top, or the
+      // bottom once Sort was set to Oldest first on this host.
+      const displayOrder = this.getUIState(NEW_PANE_PLACEMENT_KEY) === 'bottom'
+        ? this.minPaneDisplayOrder(data.project_id ?? null) - 1
+        : maxOrder + 1;
 
       this.db
         .prepare(
@@ -4388,6 +4397,45 @@ export class DatabaseService {
     );
 
     updateMany(projectOrders);
+  }
+
+  /** The lowest display_order among a project's listed Panes, or 0 when it has none. */
+  private minPaneDisplayOrder(projectId: number | null): number {
+    // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
+    const row = this.db
+      .prepare(
+        `
+        SELECT MIN(display_order) as min_order
+        FROM sessions
+        WHERE project_id = ?
+          AND (archived = 0 OR archived IS NULL)
+          AND (is_main_repo = 0 OR is_main_repo IS NULL)
+      `,
+      )
+      .get(projectId) as { min_order: number | null };
+    return row?.min_order ?? 0;
+  }
+
+  /** Where this host puts new Panes, as Sort last set it; null until Sort is picked. */
+  getNewPanePlacement(): NewPanePlacement | null {
+    const value = this.getUIState(NEW_PANE_PLACEMENT_KEY);
+    return value === 'top' || value === 'bottom' ? value : null;
+  }
+
+  setNewPanePlacement(placement: NewPanePlacement): void {
+    this.setUIState(NEW_PANE_PLACEMENT_KEY, placement);
+  }
+
+  /**
+   * Writes each Pane's display_order and nothing else (timestamps and activity stay as they
+   * were), and, when given, where new Panes land. All of it saves, or none of it does.
+   */
+  setPaneDisplayOrders(orders: ReadonlyArray<{ id: string; displayOrder: number }>, placement?: NewPanePlacement): void {
+    const stmt = this.db.prepare('UPDATE sessions SET display_order = ? WHERE id = ?');
+    this.transaction(() => {
+      for (const { id, displayOrder } of orders) stmt.run(displayOrder, id);
+      if (placement) this.setNewPanePlacement(placement);
+    });
   }
 
   reorderSessions(

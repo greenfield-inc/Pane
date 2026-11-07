@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
 import type { AppServices } from './types';
-import type { PaneCommandRegistry } from '../daemon/commandRegistry';
+import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { CreateSessionRequest, Session } from '../types/session';
 import type { SessionCreationJob } from '../services/taskQueue';
 import { getAppSubdirectory } from '../utils/appDirectory';
@@ -29,6 +29,9 @@ import {
   createValidationError,
 } from '../utils/sessionValidation';
 import { detectProjectConfig } from '../services/projectConfigDetector';
+import { RepositoryIdentities } from '../services/repositoryIdentity';
+import { comparePaneOrder } from '../../../shared/utils/paneOrder';
+import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const DAEMON_SESSION_CHANNELS = [
@@ -55,6 +58,9 @@ const DAEMON_SESSION_CHANNELS = [
   'sessions:rename',
   'sessions:toggle-favorite',
   'sessions:reorder',
+  'sessions:reorder-in-project',
+  'sessions:sort-panes',
+  'sessions:get-pane-order',
   'sessions:save-images',
   'sessions:save-large-text',
   'sessions:restore',
@@ -94,11 +100,41 @@ interface SessionDeleteOptions {
   removeExternalWorktree?: boolean;
 }
 
+const paneOrderRequestSchema = boundary.object({
+  projectId: boundary.number,
+  paneIds: boundary.array(boundary.nonEmptyString),
+});
+const sortRequestSchema = boundary.object({ order: boundary.enumeration('newest', 'oldest') });
+
+function decodePaneOrderRequest(value: PaneCommandValue) {
+  try {
+    return decodeBoundary(value, paneOrderRequestSchema);
+  } catch (cause) {
+    throw new PaneError('ERR_PANE_ORDER_INVALID', `The Pane order request was not understood (${reasonOf(cause)}), so nothing was saved.`, 'Send { projectId: <number>, paneIds: [<Pane id>, ...] } with the project\'s Panes in their new order.');
+  }
+}
+
+function decodeSortRequest(value: PaneCommandValue) {
+  try {
+    return decodeBoundary(value, sortRequestSchema);
+  } catch (cause) {
+    throw new PaneError('ERR_PANE_ORDER_INVALID', `The Sort request was not understood (${reasonOf(cause)}), so nothing was sorted.`, 'Send { order: "newest" } or { order: "oldest" }.');
+  }
+}
+
+/** A failed Pane order command, as text Electron IPC can carry: what happened, why, and the next step. */
+function paneOrderFailure(error: Error, what: string) {
+  if (error instanceof PaneError) return { success: false, error: paneErrorText(error) };
+  console.error(`[Sessions] ${what}:`, error);
+  return { success: false, error: paneErrorText({ message: `${what}: ${reasonOf(error)}. Nothing was changed.`, next: 'Try again; if it keeps failing, restart Pane on this host.' }) };
+}
+
 export function registerSessionHandlers(
   ipcMain: IpcMain,
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
 ): void {
+  const repositoryIdentities = new RepositoryIdentities();
   const {
     sessionManager,
     databaseService,
@@ -223,18 +259,20 @@ export function registerSessionHandlers(
   commandRegistry.register('sessions:get-all-with-projects', async () => {
     try {
       const allProjects = databaseService.getAllProjects();
-      const projectsWithSessions = allProjects.map(project => {
-        // Newest first: the order the phone and glasses show a repository's Panes in.
+      // Read from git once per project path; a repeat request runs no git.
+      const identities = await repositoryIdentities.of(allProjects);
+      const projectsWithSessions = allProjects.map((project, index) => {
+        // The host's saved Pane order (newest first until arranged): what the phone, glasses
+        // and All machines show a repository's Panes in.
         const sessions = sessionManager.getSessionsForProject(project.id)
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .sort(comparePaneOrder)
           .map(attachCachedGitStatus);
         const folders = databaseService.getFoldersForProject(project.id);
         const convertedFolders = folders.map(convertDbFolderToRendererFolder);
-        return {
-          ...project,
-          sessions,
-          folders: convertedFolders
-        };
+        const listed: typeof project & { repository?: string; sessions: typeof sessions; folders: typeof convertedFolders } = { ...project, sessions, folders: convertedFolders };
+        const repository = identities[index];
+        if (repository) listed.repository = repository;
+        return listed;
       });
       return { success: true, data: projectsWithSessions };
     } catch (error) {
@@ -1539,6 +1577,32 @@ export function registerSessionHandlers(
     } catch (error) {
       console.error('Failed to reorder sessions:', error);
       return { success: false, error: 'Failed to reorder sessions' };
+    }
+  });
+
+  commandRegistry.register('sessions:reorder-in-project', async (value: PaneCommandValue) => {
+    try {
+      const { projectId, paneIds } = decodePaneOrderRequest(value);
+      return { success: true, data: { moved: sessionManager.reorderPanesInProject(projectId, paneIds) } };
+    } catch (error) {
+      return paneOrderFailure(error instanceof Error ? error : new Error(String(error)), 'The Pane order was not saved');
+    }
+  });
+
+  commandRegistry.register('sessions:sort-panes', async (value: PaneCommandValue) => {
+    try {
+      const { order } = decodeSortRequest(value);
+      return { success: true, data: { moved: sessionManager.sortPanes(order) } };
+    } catch (error) {
+      return paneOrderFailure(error instanceof Error ? error : new Error(String(error)), 'The Panes were not sorted');
+    }
+  });
+
+  commandRegistry.register('sessions:get-pane-order', async () => {
+    try {
+      return { success: true, data: sessionManager.getPaneOrderSettings() };
+    } catch (error) {
+      return paneOrderFailure(error instanceof Error ? error : new Error(String(error)), 'Could not read where new Panes go');
     }
   });
 

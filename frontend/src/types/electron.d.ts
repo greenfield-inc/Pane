@@ -381,6 +381,11 @@ interface ElectronAPI {
     
     // Reorder operations
     reorder: (sessionOrders: Array<{ id: string; displayOrder: number }>) => Promise<IPCResponse>;
+    /** Saves a project's Pane order on the host: the listed Panes trade the places they hold. */
+    reorderInProject: (projectId: number, paneIds: string[]) => Promise<IPCResponse<{ moved: string[] }>>;
+    /** Sort, once: re-sorts every project's Panes on the host and sets where new Panes land. */
+    sortPanes: (order: 'newest' | 'oldest') => Promise<IPCResponse<{ moved: string[] }>>;
+    getPaneOrder: () => Promise<IPCResponse<import('../../../shared/utils/paneOrder').PaneOrderSettings>>;
     
     // Image operations
     saveImages: (sessionId: string, images: Array<{ name: string; dataUrl: string; type: string }>) => Promise<string[]>;

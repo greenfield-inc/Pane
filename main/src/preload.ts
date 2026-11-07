@@ -664,6 +664,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // Reorder operations
     reorder: (sessionOrders: Array<{ id: string; displayOrder: number }>): Promise<IPCResponse> => invokeIpc('sessions:reorder', sessionOrders),
+    reorderInProject: (projectId: number, paneIds: string[]): Promise<IPCResponse> => invokeIpc('sessions:reorder-in-project', { projectId, paneIds }),
+    sortPanes: (order: 'newest' | 'oldest'): Promise<IPCResponse> => invokeIpc('sessions:sort-panes', { order }),
+    getPaneOrder: (): Promise<IPCResponse> => invokeIpc('sessions:get-pane-order'),
     
     // Image operations
     saveImages: (sessionId: string, images: Array<{ name: string; dataUrl: string; type: string }>): Promise<string[]> => invokeIpc('sessions:save-images', sessionId, images),
