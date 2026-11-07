@@ -17,6 +17,7 @@ import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
 import { PrivacySettings } from './settings/categories/PrivacySettings';
 import { ImportExportSettings } from './settings/categories/ImportExportSettings';
 import { AdvancedSettings } from './settings/categories/AdvancedSettings';
+import { AutopilotSettings } from './settings/categories/AutopilotSettings';
 import { UsageView } from './usage/UsageView';
 import { RemoteAccessWorkflows } from './settings/RemoteAccessWorkflows';
 import { MachineDetails } from './settings/MachineDetails';
@@ -25,6 +26,7 @@ import { useDirtySettingsForms } from './settings/useDirtySettingsForms';
 import { registerSettingsExit } from '../utils/settingsExit';
 import { useRemoteAccessSettings } from './settings/useRemoteAccessSettings';
 import { SETTINGS_CATEGORIES, settingDomId } from './settings/catalog';
+import { useAutopilotStore } from '../stores/autopilotStore';
 import type {
   RemoteAccessSubviewId,
   SettingsCategoryId,
@@ -45,6 +47,8 @@ interface SettingsProps {
   onUpdate: (versionInfo: VersionInfo) => void;
   onSendFeedback: () => void;
 }
+
+const SETTINGS_WITHOUT_AUTOPILOT = SETTINGS_CATEGORIES.filter((item) => item.id !== 'autopilot');
 
 export function Settings({ isOpen, onClose, category, onCategoryChange, openRequest, onOpenRequestHandled, onShowKeyboardShortcuts, onUpdate, onSendFeedback }: SettingsProps) {
   const persistence = useSettingsPersistence(isOpen);
@@ -169,6 +173,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     });
   }, [clearRemoteRequests, requestTransition]);
 
+  // Settings › Autopilot shows only while Autopilot is on (Advanced › Experimental).
+  const autopilotOn = useAutopilotStore((state) => state.snapshot?.enabled === true);
   const content = () => {
     if (!persistence.config) return null;
     const sharedDirtyProps = { onDirtyChange: setDirty };
@@ -190,6 +196,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <WorktreesGitSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'notify':
         return <NotifySettings persistence={persistence} />;
+      case 'autopilot':
+        return <AutopilotSettings {...sharedDirtyProps} />;
       case 'notifications':
         return <NotificationSettings persistence={persistence} />;
       case 'remote-access':
@@ -247,7 +255,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
             )}
           </div>
         ) : (
-          <SettingsLayout category={category} categories={SETTINGS_CATEGORIES} onCategoryChange={changeCategory} onBack={requestClose} fullBleed={category === 'usage'}>
+          <SettingsLayout category={category} categories={autopilotOn ? SETTINGS_CATEGORIES : SETTINGS_WITHOUT_AUTOPILOT} onCategoryChange={changeCategory} onBack={requestClose} fullBleed={category === 'usage'}>
             {content()}
           </SettingsLayout>
         )}

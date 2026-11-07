@@ -84,6 +84,7 @@ export interface AppConfig {
   defaultOrchestratorAgent?: PaneChatAgent;
   // Experimental: chat tabs (Claude and Codex over ACP, no terminal).
   chatTabsEnabled?: boolean;
+  autopilotEnabled?: boolean;
   // Auto-check for updates
   autoCheckUpdates?: boolean;
   // Start Pane automatically when the user logs in
@@ -216,6 +217,7 @@ export interface UpdateConfigRequest {
   defaultModel?: string;
   defaultOrchestratorAgent?: PaneChatAgent;
   chatTabsEnabled?: boolean;
+  autopilotEnabled?: boolean;
   autoCheckUpdates?: boolean;
   autoStartOnBoot?: boolean;
   keepAwakeWhileSessionsActive?: boolean;

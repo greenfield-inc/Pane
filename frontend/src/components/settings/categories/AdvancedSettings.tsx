@@ -8,6 +8,8 @@ import type { SettingsPersistence } from '../useSettingsPersistence';
 import { isChatTabsEnabled, isMissionControlEnabled, isNotesEnabled } from '../../../stores/configStore';
 import type { Journey, JourneyTimingSummary } from '../../../../../shared/types/journeyTimings';
 import type { IPCResponse } from '../../../utils/api';
+import { useAutopilotStore } from '../../../stores/autopilotStore';
+import { showActionError } from '../../../stores/errorStore';
 
 const JOURNEY_LABELS = {
   app_launch: 'App launch',
@@ -26,6 +28,7 @@ interface AdvancedSettingsProps {
 
 export function AdvancedSettings({ persistence, platform, onDirtyChange }: AdvancedSettingsProps) {
   const config = persistence.config!;
+  const autopilot = useAutopilotStore((state) => state.snapshot);
   const persistedPaths = config.additionalPaths ?? [];
   const persistedPathsKey = JSON.stringify(persistedPaths);
   const [pathsText, setPathsText] = useState(persistedPaths.join('\n'));
@@ -174,6 +177,21 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
           />
         </SettingRow>
         <SettingRow
+          settingId="autopilot"
+          label="Autopilot"
+          description={autopilotDescription(isChatTabsEnabled(config), autopilot?.entitlement)}
+          disabled={!isChatTabsEnabled(config) || autopilot?.entitlement.entitled === false}
+        >
+          <ImmediateToggle
+            label="Autopilot"
+            value={autopilot?.enabled ?? config.autopilotEnabled === true}
+            disabled={!autopilot || (!autopilot.enabled && (!isChatTabsEnabled(config) || !autopilot.entitlement.entitled))}
+            onSave={(value) => window.electronAPI.autopilot.setEnabled(value)
+              .then((snapshot) => { useAutopilotStore.setState({ snapshot }); return true; })
+              .catch((error: Error) => { showActionError(value ? 'Could not turn Autopilot on' : 'Could not turn Autopilot off', error); return false; })}
+          />
+        </SettingRow>
+        <SettingRow
           settingId="notes"
           label="Notes"
           description="Add Notes tabs and the terminal's Add to notes action, and let agents read the notes scoped to their Pane. New terminals pick up the change. Turning it off hides Notes and keeps every saved note."
@@ -200,4 +218,11 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
       </SettingsSection>
     </SettingsPage>
   );
+}
+
+/** What the switch does, or why it can't be turned on (chat tabs off, or not entitled: D-65). */
+function autopilotDescription(chatTabs: boolean, entitlement: { entitled: boolean; reason?: string; next?: string } | undefined): string {
+  if (entitlement && !entitlement.entitled) return `${entitlement.reason ?? 'Autopilot is not available.'} ${entitlement.next ?? ''}`.trim();
+  if (!chatTabs) return 'Autopilot runs as a chat tab: turn on Chat tabs above first.';
+  return 'Add Autopilot above Sessions: one agent, on your own installed claude, that walks your Sessions from the top and puts what waits on you in front of you with its documents. You answer every approval yourself. Turning it off stops it and keeps its Autopilot Session.';
 }

@@ -207,6 +207,22 @@ describe('Session workspace instructions', () => {
     expect(agents).toContain('If notify returns unavailable because Approvals is off, ask in this tab as before.');
   });
 
+  it('accepts the person\'s relayed instructions from Autopilot, never as an answer to an approval (D-58, D-66)', async () => {
+    const cwd = prepareSessionWorkspace('autopilot-relay');
+    const agents = await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain('A message that starts with [From the person, via Autopilot] carries the person\'s own question or instruction');
+    expect(agents).toContain('(including a /wrap-up request)');
+    expect(agents).toContain('It is never an answer to an approval or a worker\'s question');
+  });
+
+  it('tells the orchestrator to reply to whoever asked, Autopilot included, and still bring decisions to the person (D-92)', async () => {
+    const cwd = prepareSessionWorkspace('autopilot-two-principals');
+    const agents = (await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).replace(/\s+/g, ' ');
+    expect(agents).toContain('one that starts with [From Autopilot] is Autopilot\'s own');
+    expect(agents).toContain('Reply to whoever asked and say which ("To Autopilot:")');
+    expect(agents).toContain('Decisions (plans, merges, anything the person must choose) still go to the person as approvals, whoever asked.');
+  });
+
   it('removes the legacy progress switch but keeps user documents', async () => {
     const cwd = sessionWorkspacePath('legacy-progress');
     await fs.mkdir(cwd, { recursive: true });

@@ -31,6 +31,20 @@ describe('groupApprovals', () => {
     expect(groups[0].session).toEqual({ ...launch, orchestrator: true });
   });
 
+  it('files Autopilot\'s own items under "Autopilot", after the Sessions and before "Not in a Session"', () => {
+    const items = [
+      item('loose', 1, { source: { name: 'docs', agent: 'Cursor' } }),
+      item('close-out', 2, { source: { name: 'Autopilot', agent: 'Claude', paneId: '__autopilot_owner_r1', autopilot: true } }),
+      item('plan', 3, { source: { name: 'Pane Fixes', agent: 'Claude', session: launch } }),
+    ];
+    const { groups } = groupApprovals(items, 'waiting');
+    expect(groups.map(group => [group.label, group.autopilot ?? false, group.items.map(entry => entry.id)])).toEqual([
+      ['Pane Fixes', false, ['plan']],
+      ['Autopilot', true, ['close-out']],
+      ['Not in a Session', false, ['loose']],
+    ]);
+  });
+
   it('keeps one Session on two machines as two groups', () => {
     const items = [
       item('a', 1, { source: { name: 'x', agent: 'Claude', session: launch }, machineId: 'local', machine: 'macbook' }),

@@ -1506,6 +1506,65 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "autopilot status",
+      "summary": "Show Autopilot (experimental): whether it is on and running, whether Sentinel is on, its run, its stack, and what waits in each Session.",
+      "usage": [
+        "runpane autopilot status [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "autopilot"
+      ],
+      "jsonSchemas": [
+        "autopilotStatusResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "autopilot waiting",
+      "summary": "List every approval and question waiting on the person, grouped by Session, for Autopilot's walk.",
+      "usage": [
+        "runpane autopilot waiting [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "autopilot"
+      ],
+      "jsonSchemas": [
+        "autopilotWaitingResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "autopilot stack",
+      "summary": "List the entries on Autopilot's stack in order, and which one is on screen.",
+      "usage": [
+        "runpane autopilot stack [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "autopilot"
+      ],
+      "jsonSchemas": [
+        "autopilotStackResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "autopilot stack push",
+      "summary": "Put a waiting item, a document, a URL, or a Session on Autopilot's stack for the person to look at.",
+      "usage": [
+        "runpane autopilot stack push (--item <id> | --file <path> | --url <url> | --session <id|name>) [--title <text>] [--note <text>] [--tab <path-or-url>]... [--next] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "autopilot"
+      ],
+      "jsonSchemas": [
+        "autopilotStackPushRequest",
+        "autopilotStackPushResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "sessions list",
       "summary": "List durable named orchestration Sessions.",
       "usage": [
@@ -2461,6 +2520,11 @@ export const RUNPANE_CONTRACT = {
         "name": "--arg",
         "value": "<key=value>",
         "description": "A launch argument for --agent-farm, shown to the agent in its LAUNCH CONTEXT; repeatable."
+      },
+      {
+        "name": "--item",
+        "value": "<id>",
+        "description": "autopilot stack push only: the waiting item (an id from `runpane autopilot waiting`) to put on the stack."
       }
     ],
     "localBoolean": [
@@ -2486,7 +2550,7 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--tab",
-        "description": "Open the tab in the current tab group instead of split view."
+        "description": "Open the tab in the current tab group instead of split view. On autopilot stack push it takes a value instead: --tab <path-or-url> adds a tab (a file, or an http(s) URL); repeatable."
       },
       {
         "name": "--pinned",
@@ -2603,6 +2667,10 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--chat",
         "description": "Open the agent as a chat tab (Claude or Codex over ACP, no terminal) instead of a terminal tab."
+      },
+      {
+        "name": "--next",
+        "description": "autopilot stack push only: put the entry right after the one on screen, so it comes up next (jumping back up to a higher Session)."
       }
     ]
   },
@@ -2688,6 +2756,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--resume <id>] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--session <id|name>] [--json]",
+        "  runpane autopilot status|waiting|stack [--json]",
+        "  runpane autopilot stack push (--item <id>|--file <path>|--url <url>|--session <id|name>) [--next] [--json]",
         "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]",
@@ -3065,6 +3135,10 @@ export const RUNPANE_CONTRACT = {
         "--follow --since <generation> has no consumer name and bypasses settling and batching. Cadence requires a named follow consumer; --as cannot be combined with numeric --since.",
         "agent.report.missing (an agent given work ended its turn or exited without `runpane report`) is opt-in:",
         "add it to --kinds to wake on MISSING REPORT too.",
+        "Autopilot's kinds are opt-in the same way, never in a default: item.created and item.answered",
+        "(ITEM|ANSWERED <pane-name> pane <pane-id> [panel <panel-id>] <item-id>: <title>), session.created",
+        "and session.archived (SESSION NEW|ARCHIVED <name> pane <pane-id> session <session-id>), and",
+        "orchestrator.turn_ended (TURN ENDED <session-name> pane <pane-id> panel <panel-id> session <session-id>).",
         "",
         "Options:",
         "  --session <id|name>            Watch every Pane in a Session; associate/detach apply live",
@@ -4317,6 +4391,71 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
       ],
+      "autopilot": [
+        "Usage:",
+        "  runpane autopilot <status|waiting|stack|stack push> [options]",
+        "",
+        "Autopilot (experimental) walks every Session from the top and brings the person what waits on",
+        "them, one stack entry at a time. Approvals stay the person's: Pane refuses any answer from Autopilot."
+      ],
+      "autopilot status": [
+        "Usage:",
+        "  runpane autopilot status [--json] [--pane-dir <path>]",
+        "",
+        "Shows whether Autopilot is on and running, stopped or paused, its current run folder, how many",
+        "entries its stack holds and which one is on screen, and how many items wait in each Session.",
+        "",
+        "Options:",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
+      ],
+      "autopilot waiting": [
+        "Usage:",
+        "  runpane autopilot waiting [--json] [--pane-dir <path>]",
+        "",
+        "Lists every approval, question, permission prompt, and stuck worker waiting on the person,",
+        "grouped by Session in the order Autopilot walks them (top first), one line per item: its id,",
+        "kind, title, agent · Pane, how long it has waited, and \"on the stack\" when it is already there.",
+        "Fails with AUTOPILOT_OFF while Autopilot is off.",
+        "",
+        "Options:",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
+      ],
+      "autopilot stack": [
+        "Usage:",
+        "  runpane autopilot stack [--json] [--pane-dir <path>]",
+        "",
+        "Lists the stack's entries in order; > marks the one on screen. Fails with AUTOPILOT_OFF while",
+        "Autopilot is off.",
+        "",
+        "Options:",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
+      ],
+      "autopilot stack push": [
+        "Usage:",
+        "  runpane autopilot stack push (--item <id> | --file <path> | --url <url> | --session <id|name>) [--title <text>] [--note <text>] [--tab <path-or-url>]... [--next] [--json] [--pane-dir <path>]",
+        "",
+        "Puts one entry on Autopilot's stack. A new entry never replaces the one on screen: it waits",
+        "and comes up when the person is done with that one. Give exactly one of --item, --file, --url,",
+        "or --session. Relative paths resolve against this directory.",
+        "",
+        "Options:",
+        "  --item <id>                    A waiting item from `runpane autopilot waiting`",
+        "  --file <path>                  A document to show (HTML, Markdown, or text)",
+        "  --url <url>                    A page or running app to show",
+        "  --session <id|name>            A Session's overview",
+        "  --title <text>                 The entry's title (default: the item's, file's, or Session's name)",
+        "  --note <text>                  Autopilot's one line about why it is here",
+        "  --tab <path-or-url>            An extra tab: a file, or an http(s) URL; repeatable",
+        "  --next                         Put it right after the entry on screen, so it comes up next",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Fails with AUTOPILOT_PAUSED while the person has paused Autopilot, and AUTOPILOT_STACK_INVALID",
+        "when the item, file, URL, or Session is not one Pane can show."
+      ],
       "panels pause": [
         "Usage:",
         "  runpane panels pause --panel <panel-id> --yes [--json] [--pane-dir <path>]",
@@ -4457,6 +4596,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--resume <id>] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--session <id|name>] [--json]",
+        "  runpane autopilot status|waiting|stack [--json]",
+        "  runpane autopilot stack push (--item <id>|--file <path>|--url <url>|--session <id|name>) [--next] [--json]",
         "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]",
@@ -4832,6 +4973,10 @@ export const RUNPANE_CONTRACT = {
         "--follow --since <generation> has no consumer name and bypasses settling and batching. Cadence requires a named follow consumer; --as cannot be combined with numeric --since.",
         "agent.report.missing (an agent given work ended its turn or exited without `runpane report`) is opt-in:",
         "add it to --kinds to wake on MISSING REPORT too.",
+        "Autopilot's kinds are opt-in the same way, never in a default: item.created and item.answered",
+        "(ITEM|ANSWERED <pane-name> pane <pane-id> [panel <panel-id>] <item-id>: <title>), session.created",
+        "and session.archived (SESSION NEW|ARCHIVED <name> pane <pane-id> session <session-id>), and",
+        "orchestrator.turn_ended (TURN ENDED <session-name> pane <pane-id> panel <panel-id> session <session-id>).",
         "",
         "Options:",
         "  --session <id|name>            Watch every Pane in a Session; associate/detach apply live",
@@ -5998,6 +6143,71 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
       ],
+      "autopilot": [
+        "Usage:",
+        "  runpane autopilot <status|waiting|stack|stack push> [options]",
+        "",
+        "Autopilot (experimental) walks every Session from the top and brings the person what waits on",
+        "them, one stack entry at a time. Approvals stay the person's: Pane refuses any answer from Autopilot."
+      ],
+      "autopilot status": [
+        "Usage:",
+        "  runpane autopilot status [--json] [--pane-dir <path>]",
+        "",
+        "Shows whether Autopilot is on and running, stopped or paused, its current run folder, how many",
+        "entries its stack holds and which one is on screen, and how many items wait in each Session.",
+        "",
+        "Options:",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
+      ],
+      "autopilot waiting": [
+        "Usage:",
+        "  runpane autopilot waiting [--json] [--pane-dir <path>]",
+        "",
+        "Lists every approval, question, permission prompt, and stuck worker waiting on the person,",
+        "grouped by Session in the order Autopilot walks them (top first), one line per item: its id,",
+        "kind, title, agent · Pane, how long it has waited, and \"on the stack\" when it is already there.",
+        "Fails with AUTOPILOT_OFF while Autopilot is off.",
+        "",
+        "Options:",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
+      ],
+      "autopilot stack": [
+        "Usage:",
+        "  runpane autopilot stack [--json] [--pane-dir <path>]",
+        "",
+        "Lists the stack's entries in order; > marks the one on screen. Fails with AUTOPILOT_OFF while",
+        "Autopilot is off.",
+        "",
+        "Options:",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
+      ],
+      "autopilot stack push": [
+        "Usage:",
+        "  runpane autopilot stack push (--item <id> | --file <path> | --url <url> | --session <id|name>) [--title <text>] [--note <text>] [--tab <path-or-url>]... [--next] [--json] [--pane-dir <path>]",
+        "",
+        "Puts one entry on Autopilot's stack. A new entry never replaces the one on screen: it waits",
+        "and comes up when the person is done with that one. Give exactly one of --item, --file, --url,",
+        "or --session. Relative paths resolve against this directory.",
+        "",
+        "Options:",
+        "  --item <id>                    A waiting item from `runpane autopilot waiting`",
+        "  --file <path>                  A document to show (HTML, Markdown, or text)",
+        "  --url <url>                    A page or running app to show",
+        "  --session <id|name>            A Session's overview",
+        "  --title <text>                 The entry's title (default: the item's, file's, or Session's name)",
+        "  --note <text>                  Autopilot's one line about why it is here",
+        "  --tab <path-or-url>            An extra tab: a file, or an http(s) URL; repeatable",
+        "  --next                         Put it right after the entry on screen, so it comes up next",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Fails with AUTOPILOT_PAUSED while the person has paused Autopilot, and AUTOPILOT_STACK_INVALID",
+        "when the item, file, URL, or Session is not one Pane can show."
+      ],
       "panels pause": [
         "Usage:",
         "  runpane panels pause --panel <panel-id> --yes [--json] [--pane-dir <path>]",
@@ -6270,7 +6480,8 @@ export const RUNPANE_CONTRACT = {
       "`runpane handoff` hands a task to another agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. When the sender is a Pane tab running a Claude, Codex, Cursor or OpenCode session and the receiver is the same agent, the handoff carries that session: on another machine its files are copied into that machine's agent store and the receiver resumes the same id; on this machine the receiver resumes a fork, because two agents never resume one session on one machine. The receiver starts with no prompt, and the CLI runs the continuity check and reports JSON `continuity.result` `continued`, `inconclusive` (exit 0; `next` gives a probe question) or `not-continued` (exit 1; the receiver is kept and `next` gives the `--note-only` command). `--note-only`, a different agent, or a tab with no carried session starts a fresh agent with the note (`fresh-agent`). JSON `continuity` is `{ carried, result, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }`: `sessionId` is the sender's session, `resumedId` the id the receiver resumes (the fork's on this machine), `checks` are the continuity checks (`historyLoaded` is null when there was nothing to compare; `originalUntouched` is set for forks), and a dry run sets `carried`, `sessionId`, `fork`, `files` and `bytes` with no `result`. After `continued` or `inconclusive` the sending agent ends its turn and makes no more changes on the branch. An OpenCode session travels as its export: `opencode export` on this machine, then `opencode import` inside the receiving repository there, and an OpenCode receiver is accepted only to continue an OpenCode session. A Cursor session is carried only to another machine, best effort since Cursor's store is undocumented: Cursor has no fork, and a copied chat still writes to the original, so on this machine the result is `not-continued` and nothing is started. A destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`); a copy already there is replaced only when the sender's holds all of it and no agent there runs it, otherwise nothing is copied and the result is `not-continued`. A destination Pane too old to resume a carried session is refused before anything is sent (`ERR_HANDOFF_RESUME_UNSUPPORTED`). From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead; a same-agent Session resumes the sender's conversation when first opened. The receiver reports back to the sender's panel.",
       "`runpane pr watch`: Register durable GitHub PR monitoring for a Pane.",
       "`runpane pr unwatch`: Remove a Pane’s explicit PR registration.",
-      "`runpane pr list`: List PR registrations and stopped watches."
+      "`runpane pr list`: List PR registrations and stopped watches.",
+      "`runpane autopilot status|waiting|stack` read Autopilot (experimental): its switch, run and stack, and every approval or question waiting on the person grouped by Session. `runpane autopilot stack push (--item <id>|--file <path>|--url <url>|--session <id|name>) [--title <text>] [--note <text>] [--tab <path-or-url>]... [--next]` puts one entry on its stack; relative paths resolve against the caller's directory, and a new entry never replaces the one on screen. Approvals stay the person's: Pane refuses every answer that comes from Autopilot's panel with AUTOPILOT_CANNOT_ANSWER."
     ],
     "wrapperFlagNote": "The top-level `runpane --version` form prints the wrapper version. The install subcommand form `runpane install --version vX.Y.Z` selects a Pane release.",
     "localControlFlagNote": "`runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, use Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane`), which reaches the Windows named-pipe daemon through WSL interop; older Pane builds need `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'`.",
@@ -7628,6 +7839,59 @@ export const RUNPANE_CONTRACT = {
         "--merged",
         "--closed",
         "--dry-run",
+        "--json"
+      ],
+      [
+        "autopilot",
+        "status",
+        "--json"
+      ],
+      [
+        "autopilot",
+        "waiting"
+      ],
+      [
+        "autopilot",
+        "stack",
+        "--json"
+      ],
+      [
+        "autopilot",
+        "stack",
+        "push",
+        "--item",
+        "n-1",
+        "--note",
+        "Needs a go",
+        "--next",
+        "--json"
+      ],
+      [
+        "autopilot",
+        "stack",
+        "push",
+        "--file",
+        "/tmp/plan.html",
+        "--title",
+        "Plan",
+        "--tab",
+        "https://localhost:5173",
+        "--tab=/tmp/notes.md"
+      ],
+      [
+        "autopilot",
+        "stack",
+        "push",
+        "--session",
+        "Release"
+      ],
+      [
+        "watch",
+        "--as",
+        "autopilot",
+        "--kinds",
+        "item.created,item.answered,session.created,session.archived,orchestrator.turn_ended",
+        "--until-event",
         "--json"
       ]
     ],
@@ -10148,7 +10412,12 @@ export const RUNPANE_CONTRACT = {
             "pr.comment",
             "pr.stopped",
             "github.unavailable",
-            "github.recovered"
+            "github.recovered",
+            "item.created",
+            "item.answered",
+            "session.created",
+            "session.archived",
+            "orchestrator.turn_ended"
           ]
         },
         "paneId": {
@@ -10362,6 +10631,10 @@ export const RUNPANE_CONTRACT = {
             "type": "string"
           },
           "description": "The screen lines of the prompt an agent.blocked entry's agent waits on (at most 20)."
+        },
+        "itemId": {
+          "type": "string",
+          "description": "The Notify item of an item.created or item.answered entry; `runpane autopilot stack push --item <id>` takes it."
         }
       },
       "additionalProperties": false
@@ -15179,6 +15452,625 @@ export const RUNPANE_CONTRACT = {
         }
       }
     },
+    "autopilotStackEntry": {
+      "type": "object",
+      "required": [
+        "id",
+        "ref",
+        "title",
+        "tabs",
+        "addedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ref": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "notifyId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "item"
+                },
+                "notifyId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "path"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "file"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "url"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "url"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "sessionId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "session"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "sessionName": {
+          "type": "string"
+        },
+        "tabs": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "label",
+                  "notifyId"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "item"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "notifyId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "label",
+                  "path"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "file"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "label",
+                  "url"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "url"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "label",
+                  "sessionId"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "session"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "description": "The first tab is the entry's own (its approval, document, URL, or Session)."
+        },
+        "note": {
+          "type": "string"
+        },
+        "addedAt": {
+          "type": "number",
+          "description": "Epoch ms."
+        },
+        "byAutopilot": {
+          "type": "boolean",
+          "description": "About something Autopilot wrote or asked itself."
+        },
+        "doneAt": {
+          "type": "number",
+          "description": "Epoch ms when it was resolved (answered, expired, or dismissed)."
+        }
+      },
+      "additionalProperties": false,
+      "description": "One entry on Autopilot's stack. References only: the item, file, URL, or Session it is about."
+    },
+    "autopilotStatusResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "enabled",
+        "chatTabsEnabled",
+        "entitlement",
+        "run",
+        "panelId",
+        "ownerPaneId",
+        "state",
+        "sentinel",
+        "stack",
+        "walk"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "The experimental switch (Settings › Advanced › Experimental › Autopilot)."
+        },
+        "chatTabsEnabled": {
+          "type": "boolean",
+          "description": "Autopilot runs as a chat tab, so it needs chat tabs on."
+        },
+        "entitlement": {
+          "type": "object",
+          "required": [
+            "entitled"
+          ],
+          "properties": {
+            "entitled": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "next": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "run": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "id",
+                "folder",
+                "docsFolder",
+                "createdAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "folder": {
+                  "type": "string"
+                },
+                "docsFolder": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "panelId": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Autopilot's chat tab, once the run has one."
+        },
+        "ownerPaneId": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "stopped",
+            "running",
+            "paused"
+          ]
+        },
+        "sentinel": {
+          "type": "boolean",
+          "description": "Sentinel Mode: Autopilot keeps Sessions moving while the person is away (turning it on also starts Autopilot)."
+        },
+        "sentinelSince": {
+          "type": "number",
+          "description": "Epoch milliseconds when Sentinel was turned on; absent while it is off."
+        },
+        "stack": {
+          "type": "object",
+          "required": [
+            "entries",
+            "shownId"
+          ],
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/jsonSchemas/autopilotStackEntry"
+              }
+            },
+            "shownId": {
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The entry on screen; null when none is."
+            }
+          },
+          "additionalProperties": false
+        },
+        "walk": {
+          "type": "object",
+          "required": [
+            "sessions"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "description": "The Session the walk is on."
+            },
+            "sessions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name",
+                  "waiting"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "waiting": {
+                    "type": "number",
+                    "description": "Items waiting on the person in this Session."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "autopilotWaitingResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "items"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "items": {
+          "type": "array",
+          "description": "Grouped by Session, top first, in the order Autopilot walks them.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "kind",
+              "agent",
+              "pane",
+              "links",
+              "createdAt",
+              "ageMs",
+              "machine",
+              "machineId",
+              "onStack"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "approval",
+                  "question",
+                  "permission",
+                  "stuck"
+                ]
+              },
+              "sessionId": {
+                "type": "string",
+                "description": "Absent: not in a Session."
+              },
+              "sessionName": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "pane": {
+                "type": "string"
+              },
+              "paneId": {
+                "type": "string"
+              },
+              "panelId": {
+                "type": "string"
+              },
+              "orchestrator": {
+                "type": "boolean",
+                "description": "The asking tab is the Session's orchestrator."
+              },
+              "byAutopilot": {
+                "type": "boolean",
+                "description": "Autopilot asked it itself."
+              },
+              "context": {
+                "type": "string"
+              },
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "label"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "createdAt": {
+                "type": "number",
+                "description": "Epoch ms."
+              },
+              "ageMs": {
+                "type": "number"
+              },
+              "machine": {
+                "type": "string"
+              },
+              "machineId": {
+                "type": "string"
+              },
+              "onStack": {
+                "type": "boolean",
+                "description": "Already on the stack."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "autopilotStackResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "entries",
+        "shownId"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/autopilotStackEntry"
+          }
+        },
+        "shownId": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The entry on screen; null when none is."
+        }
+      },
+      "additionalProperties": false
+    },
+    "autopilotStackPushRequest": {
+      "type": "object",
+      "required": [],
+      "properties": {
+        "item": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string",
+          "description": "Absolute: runpane resolves a relative path against the caller's directory."
+        },
+        "url": {
+          "type": "string"
+        },
+        "session": {
+          "type": "string",
+          "description": "Session id or exact name."
+        },
+        "title": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "tabs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "next": {
+          "type": "boolean",
+          "description": "Right after the entry on screen, so it comes up next."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Exactly one of item, file, url, or session."
+    },
+    "autopilotStackPushResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "entry",
+        "shown",
+        "position",
+        "total"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "entry": {
+          "oneOf": [
+            {
+              "$ref": "#/jsonSchemas/autopilotStackEntry"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "shown": {
+          "type": "boolean",
+          "description": "The entry is on screen now (the stack had nothing open)."
+        },
+        "position": {
+          "type": "number",
+          "description": "1-based place on the stack."
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
     "pausedMark": {
       "type": "object",
       "required": [
@@ -18381,7 +19273,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--kinds",
             "required": false,
             "value": "<kind,...>",
-            "description": "Replace the default event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited, panel.stopped, panel.paused, panel.unpaused, agent.report, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged. Defaults: defaults.watch.follow.kinds under --follow, defaults.watch.untilEvent.kinds under --until-event, every kind for a one-shot read."
+            "description": "Replace the default event kinds: agent.ready, agent.busy, agent.blocked, agent.unknown, agent.idle, pane.created, pane.gone, panel.exited, panel.stopped, panel.paused, panel.unpaused, agent.report, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged. Opt-in only, never in a default: agent.report.missing, and Autopilot's item.created, item.answered, session.created, session.archived, orchestrator.turn_ended. Defaults: defaults.watch.follow.kinds under --follow, defaults.watch.untilEvent.kinds under --until-event, every kind for a one-shot read."
           },
           {
             "name": "--json",
@@ -18515,7 +19407,8 @@ export const RUNPANE_CONTRACT = {
           "Never pipe --follow into grep -m1, head, or any other exit-on-match reader: it does not exit when its reader does until its next write. To wait for one event, use --until-event.",
           "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.base_changed,pr.base_deleted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
           "--follow has one default cadence: READY 3m, BLOCKED 30s, non-urgent batches 10m, IDLE after 10m with backoff, expiry 3h, heartbeats off. Individual duration flags override it. --present and --profile were removed; use --ready-settle, --blocked-settle, and --min-interval for timing overrides.",
-          "--until-event delivers matching events immediately without follow settling or batching. A harness that consumes a named follow stream gets its cadence; a process-exit waiter keeps immediate single-event semantics. --follow --since <generation> has no consumer name and bypasses settling and batching. Cadence requires a named follow consumer; --as cannot be combined with numeric --since."
+          "--until-event delivers matching events immediately without follow settling or batching. A harness that consumes a named follow stream gets its cadence; a process-exit waiter keeps immediate single-event semantics. --follow --since <generation> has no consumer name and bypasses settling and batching. Cadence requires a named follow consumer; --as cannot be combined with numeric --since.",
+          "Autopilot's kinds reach only watches that list them in --kinds (a Session scope alone does not): item.created and item.answered when an approval or question starts or stops waiting on the person (ITEM|ANSWERED <pane-name> pane <pane-id> [panel <panel-id>] <item-id>: <title>; JSON itemId and reason), session.created and session.archived (SESSION NEW|ARCHIVED <name> pane <pane-id> session <session-id>; paneId is the Session's own Pane), and orchestrator.turn_ended when a Session orchestrator goes from working to idle (TURN ENDED ...). Autopilot waits with `runpane watch --as autopilot --kinds item.created,item.answered,session.created,session.archived,orchestrator.turn_ended --until-event --json`."
         ]
       },
       "panes git-status": {
@@ -21126,6 +22019,173 @@ export const RUNPANE_CONTRACT = {
           "Inside a Pane terminal the question names its Pane and panel (PANE_SESSION_ID and PANE_PANEL_ID); elsewhere it names the working directory.",
           "An older Pane ignores links and shows the card without them.",
           "Invalid input, such as choices with ui ask or 10 choices, fails with a message naming the field, and nothing is shown."
+        ]
+      },
+      "autopilot status": {
+        "name": "autopilot status",
+        "summary": "Show Autopilot (experimental): whether it is on and running, whether Sentinel is on, its run, its stack, and what waits in each Session.",
+        "details": "Autopilot (experimental) is one always-running agent above every Session. It is not a Session: its run lives in <PANE_DIR>/autopilot/. Read this first to know whether it is on, entitled, and running.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane autopilot status --json"
+        ],
+        "jsonSchemas": [
+          "autopilotStatusResult"
+        ],
+        "notes": [
+          "Works while Autopilot is off (enabled: false), so a caller can tell off from broken."
+        ]
+      },
+      "autopilot waiting": {
+        "name": "autopilot waiting",
+        "summary": "List every approval and question waiting on the person, grouped by Session, for Autopilot's walk.",
+        "details": "Autopilot's walk reads this: every item waiting on the person, filed under its Session (or not in one), top Session first, with who asked, how long it has waited, and whether it is already on the stack.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane autopilot waiting --json"
+        ],
+        "jsonSchemas": [
+          "autopilotWaitingResult"
+        ],
+        "notes": [
+          "Fails with AUTOPILOT_OFF while Autopilot is off.",
+          "Answering is the person's: Pane refuses any answer, permission response, or raw input from Autopilot's panel with AUTOPILOT_CANNOT_ANSWER."
+        ]
+      },
+      "autopilot stack": {
+        "name": "autopilot stack",
+        "summary": "List the entries on Autopilot's stack in order, and which one is on screen.",
+        "details": "The stack holds entries in the order Autopilot put them; one is shown at a time and the next comes up when the person resolves it.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane autopilot stack --json"
+        ],
+        "jsonSchemas": [
+          "autopilotStackResult"
+        ],
+        "notes": [
+          "Fails with AUTOPILOT_OFF while Autopilot is off. A resolved entry carries doneAt."
+        ]
+      },
+      "autopilot stack push": {
+        "name": "autopilot stack push",
+        "summary": "Put a waiting item, a document, a URL, or a Session on Autopilot's stack for the person to look at.",
+        "details": "Give exactly one of --item, --file, --url, or --session. A new entry never replaces the one on screen; --next puts it right after it. runpane resolves relative file paths (the entry's and its tabs') against the caller's directory before sending.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--item",
+            "value": "<id>",
+            "required": false,
+            "description": "A waiting item's id from `runpane autopilot waiting`."
+          },
+          {
+            "name": "--file",
+            "value": "<path>",
+            "required": false,
+            "description": "A document to show: HTML loads as a page, anything else as text."
+          },
+          {
+            "name": "--url",
+            "value": "<url>",
+            "required": false,
+            "description": "An http(s) page or running app to show."
+          },
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": false,
+            "description": "A Session whose overview to show."
+          },
+          {
+            "name": "--title",
+            "value": "<text>",
+            "required": false,
+            "description": "The entry's title; defaults to the item's, file's, or Session's own."
+          },
+          {
+            "name": "--note",
+            "value": "<text>",
+            "required": false,
+            "description": "Autopilot's one line about why it is here."
+          },
+          {
+            "name": "--tab",
+            "value": "<path-or-url>",
+            "required": false,
+            "description": "An extra tab: a file path, or an http(s) URL. Repeatable on the CLI."
+          },
+          {
+            "name": "--next",
+            "required": false,
+            "description": "Put it right after the entry on screen, so it comes up next (jumping back up to a higher Session)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane autopilot stack push --item n-1a2b3c --note \"The release orchestrator wants a go\" --json",
+          "runpane autopilot stack push --file docs/plan.html --tab https://localhost:5173 --next --json"
+        ],
+        "jsonSchemas": [
+          "autopilotStackPushRequest",
+          "autopilotStackPushResult"
+        ],
+        "notes": [
+          "Errors: AUTOPILOT_OFF (off), AUTOPILOT_PAUSED (the person paused Autopilot; wait for Go on), AUTOPILOT_STACK_INVALID (no such item, file, URL, or Session).",
+          "The result says where the entry went: position of total, and shown when it is on screen now."
         ]
       }
     },

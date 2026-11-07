@@ -31,6 +31,9 @@ const dark = {
   grouped: '#010409',
   card: '#161b22',
   cardBorder: 'transparent',
+  // Autopilot's violet (--color-autopilot on the desktop): its row, its own items, the walk's current Session.
+  autopilot: '#a78bfa',
+  autopilotText: '#c4b5fd',
 };
 
 type ColorTokens = { [Key in keyof typeof dark]: string };
@@ -59,6 +62,8 @@ const light: ColorTokens = {
   grouped: '#f2f4f7',
   card: '#ffffff',
   cardBorder: 'rgba(31, 35, 40, 0.12)',
+  autopilot: '#7c3aed',
+  autopilotText: '#6d28d9',
 };
 
 export const colors = { light, dark };

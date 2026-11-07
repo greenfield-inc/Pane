@@ -1337,6 +1337,59 @@
       "--closed",
       "--dry-run",
       "--json"
+    ],
+    [
+      "autopilot",
+      "status",
+      "--json"
+    ],
+    [
+      "autopilot",
+      "waiting"
+    ],
+    [
+      "autopilot",
+      "stack",
+      "--json"
+    ],
+    [
+      "autopilot",
+      "stack",
+      "push",
+      "--item",
+      "n-1",
+      "--note",
+      "Needs a go",
+      "--next",
+      "--json"
+    ],
+    [
+      "autopilot",
+      "stack",
+      "push",
+      "--file",
+      "/tmp/plan.html",
+      "--title",
+      "Plan",
+      "--tab",
+      "https://localhost:5173",
+      "--tab=/tmp/notes.md"
+    ],
+    [
+      "autopilot",
+      "stack",
+      "push",
+      "--session",
+      "Release"
+    ],
+    [
+      "watch",
+      "--as",
+      "autopilot",
+      "--kinds",
+      "item.created,item.answered,session.created,session.archived,orchestrator.turn_ended",
+      "--until-event",
+      "--json"
     ]
   ],
   "help": {

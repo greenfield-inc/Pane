@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { chatTurns } from '@shared/chatTabPresentation';
 import type { AgentChatMessage } from '@shared/types/agentChat';
 
-import { chatRows } from './chatRows';
+import { chatRows, splitFencedBlocks } from './chatRows';
 
 const messages: AgentChatMessage[] = [
   { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Rebase them' }] },
@@ -48,4 +48,48 @@ describe('phone chat rows', () => {
     expect(rows.flatMap(row => row.kind === 'worker' ? [row.note.text] : [])).toEqual(['switch-to-chat is asking you', 'approvals-global finished']);
     expect(rows.some(row => row.kind === 'fold' && row.summary.includes('worker'))).toBe(false);
   });
+
+  it('draws registered fenced blocks itself and shows control lines as notices (Autopilot)', () => {
+    const autopilot: AgentChatMessage[] = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: '[Pane · Start] Read every Session.' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Pane Fixes: 4 things for you.\n\n```autopilot-items\nq14\n```\n\nTap an option to answer.' }] },
+    ];
+    const rows = chatRows(chatTurns(autopilot, { running: false }), {
+      open: new Set(), blocks: new Set(['autopilot-items']),
+      notice: text => (text.startsWith('[Pane · Start]') ? 'You pressed Start' : undefined),
+    });
+    // A finished response ends with its copy row (D-140).
+    expect(rows.map(row => row.kind)).toEqual(['notice', 'text', 'block', 'text', 'copy']);
+    expect(rows[0]).toMatchObject({ text: 'You pressed Start' });
+    expect(rows[2]).toMatchObject({ language: 'autopilot-items', content: 'q14\n' });
+    expect(new Set(rows.map(row => row.key)).size).toBe(rows.length);
+  });
 });
+
+describe('hidden lines', () => {
+  it('drops a person\'s line whose notice is empty (Pane\'s own wake-ups)', () => {
+    const messages: AgentChatMessage[] = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: '[Pane · Sentinel check]' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Checked in: nothing new.' }] },
+    ];
+    const rows = chatRows(chatTurns(messages, { running: false }), { open: new Set(), notice: text => (text.startsWith('[Pane · Sentinel check]') ? '' : undefined) });
+    expect(rows.map(row => row.kind)).toEqual(['text', 'copy']);
+  });
+});
+
+describe('splitFencedBlocks', () => {
+  it('keeps other fences and plain text as they are', () => {
+    const text = 'Run this:\n```sh\npnpm test\n```';
+    expect(splitFencedBlocks(text, new Set(['autopilot-items']))).toEqual([{ kind: 'text', text }]);
+    expect(splitFencedBlocks('no blocks', new Set())).toEqual([{ kind: 'text', text: 'no blocks' }]);
+  });
+
+  it('splits around each registered block, in order', () => {
+    expect(splitFencedBlocks('```autopilot-items\na\n```\nthen\n```autopilot-items\nb\nc\n```', new Set(['autopilot-items']))).toEqual([
+      { kind: 'block', language: 'autopilot-items', content: 'a\n' },
+      { kind: 'text', text: 'then' },
+      { kind: 'block', language: 'autopilot-items', content: 'b\nc\n' },
+    ]);
+  });
+});
+

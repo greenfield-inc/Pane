@@ -47,6 +47,8 @@ export type ElectronApiMockOptions = {
   notificationsSupported?: boolean;
   mainAnalyticsEvents?: AnalyticsMainEvent[];
   initialProjects?: JsonObject[];
+  /** autopilot:snapshot answer; absent: no Autopilot API, as in a build without it. */
+  autopilotSnapshot?: JsonObject;
   initialSessions?: JsonObject[];
   initialLoops?: Loop[];
   /** remote-daemon:list-tailnet-machines answer. */
@@ -793,7 +795,29 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return Promise.resolve({ success: true, data: true });
       },
     };
+    const autopilotSnapshot = mockOptions.autopilotSnapshot;
+    // Settings › Autopilot (D-196): the file's text, saved as main would (trimmed; applied at once while it runs).
+    let autopilotInstructions = '';
+    const autopilotSaves: string[] = [];
+    const instructionsView = () => ({
+      text: autopilotInstructions,
+      path: '/Users/demo/.pane/autopilot/instructions.md',
+      builtIn: '# Pane Autopilot\n\nYou are Autopilot: one always-running agent above the person\'s Pane Sessions.\n\n## Never\n- Never answer an approval, a question card or a permission prompt.',
+      status: !autopilotInstructions ? 'none' : autopilotSnapshot?.state === 'stopped' ? 'next-start' : 'applied',
+    });
+    const autopilotApi = autopilotSnapshot ? {
+      instructions: () => Promise.resolve(instructionsView()),
+      setInstructions: (text: string) => {
+        autopilotSaves.push(text);
+        autopilotInstructions = text.trim();
+        return Promise.resolve(instructionsView());
+      },
+      snapshot: () => Promise.resolve(clone(autopilotSnapshot)),
+      opened: () => Promise.resolve(clone(autopilotSnapshot)),
+      onChanged: () => unsubscribe,
+    } : undefined;
     const electronAPI = {
+      autopilot: autopilotApi,
       notify: notifyApi,
       paneSecrets: paneSecretsApi,
       machines: machinesApi,
@@ -1720,6 +1744,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       value: {
         getConfig() {
           return clone(configState);
+        },
+        getAutopilotInstructionSaves() {
+          return clone(autopilotSaves);
         },
         getPreferences() {
           return clone(preferences);

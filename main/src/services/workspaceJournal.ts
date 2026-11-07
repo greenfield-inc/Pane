@@ -93,6 +93,18 @@ interface WorkspaceJournalOptions {
 /** Called with every entry the journal appends. */
 export type WorkspaceJournalListener = (entry: RunpaneWorkspaceEntry) => void;
 
+/** One `panel:agentStatus` event as the journal receives it, from a terminal or a chat tab. */
+export interface WorkspaceAgentStatus {
+  panelId: string;
+  /** The Pane the panel is in. */
+  paneId: string;
+  state: AgentState;
+  reason?: string | null;
+}
+
+/** Called with every agent status the journal receives, journalled or not (chat tabs are not). */
+export type WorkspaceAgentStatusListener = (status: WorkspaceAgentStatus) => void;
+
 const DEFAULT_CAPACITY = 4096;
 /**
  * Long enough that a prompt-like line flashing past in normal output never becomes
@@ -121,8 +133,18 @@ const sessionMembershipEventSchema = boundary.object({
   sessionName: boundary.optional(boundary.string),
   paneIds: boundary.optional(boundary.array(boundary.string)),
 });
-/** Kinds only a consumer that lists them in `kinds` receives; a Session scope alone does not. */
-const EXPLICIT_ONLY_KINDS: readonly RunpaneWorkspaceEntryKind[] = ['agent.report.missing'];
+/**
+ * Kinds only a consumer that lists them in `kinds` receives; a Session scope alone does not.
+ * Autopilot's kinds are here, so orchestrators' and older clients' watches never see them.
+ */
+const EXPLICIT_ONLY_KINDS: readonly RunpaneWorkspaceEntryKind[] = [
+  'agent.report.missing',
+  'item.created',
+  'item.answered',
+  'session.created',
+  'session.archived',
+  'orchestrator.turn_ended',
+];
 /** Kinds an older build wrote and this one no longer emits; a saved journal skips them instead of failing to load. */
 const RETIRED_KINDS: readonly string[] = ['panel.resumed'];
 const savedEntryKindSchema = boundary.object({ kind: boundary.string });
@@ -186,6 +208,7 @@ export class WorkspaceJournal implements PaneEventSink {
   private readonly exitedPanels = new Set<string>();
   private readonly waiters = new Set<WorkspaceWaiter>();
   private readonly listeners = new Set<WorkspaceJournalListener>();
+  private readonly agentStatusListeners = new Set<WorkspaceAgentStatusListener>();
   /** Blocked statuses waiting out the debounce before they are journalled. */
   private readonly pendingBlocked = new Map<string, ReturnType<typeof setTimeout>>();
   /** The rule behind each journalled block, so a different prompt while blocked is journalled too. */
@@ -260,6 +283,12 @@ export class WorkspaceJournal implements PaneEventSink {
   subscribe(listener: WorkspaceJournalListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Calls `listener` with every agent status event; returns the unsubscribe function. */
+  onAgentStatus(listener: WorkspaceAgentStatusListener): () => void {
+    this.agentStatusListeners.add(listener);
+    return () => this.agentStatusListeners.delete(listener);
   }
 
   get generation(): number {
@@ -424,6 +453,13 @@ export class WorkspaceJournal implements PaneEventSink {
       const payload = decodeOptionalBoundary(args[0], agentStatusEventSchema);
       if (!payload) return;
       this.consumeAgentStatus(payload);
+      for (const listener of [...this.agentStatusListeners]) {
+        try {
+          listener({ panelId: payload.panelId, paneId: payload.sessionId, state: payload.state, reason: payload.reason });
+        } catch (error) {
+          console.warn('[WorkspaceJournal] An agent status listener failed:', error);
+        }
+      }
       return;
     }
 
@@ -475,6 +511,7 @@ export class WorkspaceJournal implements PaneEventSink {
     for (const timer of this.pendingBlocked.values()) clearTimeout(timer);
     this.pendingBlocked.clear();
     this.listeners.clear();
+    this.agentStatusListeners.clear();
     for (const waiter of this.waiters) {
       clearTimeout(waiter.timer);
       waiter.resolve({ ...this.readAfter(waiter.cursor, waiter.filter, waiter.limit), timedOut: true });

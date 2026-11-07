@@ -2458,6 +2458,13 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
         return f"REPORT {name} {pane}{panel} {describe_report(report) if report else 'unknown'}"
     if kind == "agent.report.missing":
         return f"MISSING REPORT {name} {pane}{panel} {sanitize_watch_value(entry.get('reason') or 'ready')}"
+    if kind in {"item.created", "item.answered"}:
+        reason = ": " + sanitize_watch_value(entry["reason"]) if entry.get("reason") else ""
+        return f"{workspace_label(kind)} {name} {pane}{panel} {sanitize_watch_value(entry.get('itemId') or '?')}{reason}"
+    if kind in {"session.created", "session.archived"}:
+        return f"{workspace_label(kind)} {name} {pane} session {sanitize_watch_value(entry.get('sessionId') or '')}"
+    if kind == "orchestrator.turn_ended":
+        return f"TURN ENDED {name} {pane}{panel} session {sanitize_watch_value(entry.get('sessionId') or '')}"
     return f"{workspace_label(kind)} {name} {pane}{panel}"
 
 
@@ -2539,6 +2546,11 @@ def workspace_label(kind: Any) -> str:
         "pr.merged": "PR MERGED",
         "agent.report": "REPORT",
         "agent.report.missing": "MISSING REPORT",
+        "item.created": "ITEM",
+        "item.answered": "ANSWERED",
+        "session.created": "SESSION NEW",
+        "session.archived": "SESSION ARCHIVED",
+        "orchestrator.turn_ended": "TURN ENDED",
     }.get(kind, str(kind).upper())
 
 

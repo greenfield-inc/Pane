@@ -61,6 +61,19 @@ def get_pane_daemon_endpoint(app_directory: str, platform: str = sys.platform) -
     }
 
 
+def daemon_caller(env=None):
+    """The Pane and tab this runpane runs in; Pane uses it only to refuse (Autopilot answering), never to grant."""
+    env = os.environ if env is None else env
+    caller = {}
+    pane_id = (env.get("PANE_SESSION_ID") or "").strip()
+    panel_id = (env.get("PANE_PANEL_ID") or "").strip()
+    if pane_id:
+        caller["paneId"] = pane_id
+    if panel_id:
+        caller["panelId"] = panel_id
+    return caller or None
+
+
 def invoke_daemon(
     channel: str,
     args: Optional[List[Any]] = None,
@@ -76,6 +89,9 @@ def invoke_daemon(
         "channel": channel,
         "args": args or [],
     }
+    caller = daemon_caller()
+    if caller:
+        request["caller"] = caller
     encoded = encode_frame({
         "type": "request",
         "id": 0,

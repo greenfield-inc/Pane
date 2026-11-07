@@ -10,6 +10,7 @@ import {
   KeyRound,
   Link2,
   Monitor,
+  Navigation,
   Settings,
   Shield,
   SlidersHorizontal,
@@ -67,6 +68,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     icon: Bell,
     settingIds: ['notify-enabled', 'notify-show-outside', 'notify-position', 'notify-shortcut', 'notify-updates-hide-after', 'notify-sound', 'notify-show-details'],
     aliases: ['notify', 'approvals', 'questions', 'approve', 'answer', 'ask', 'strip', 'answer all', 'shortcut', 'updates', 'sound', 'details', 'inbox'],
+  },
+  {
+    id: 'autopilot',
+    label: 'Autopilot',
+    description: 'Your own instructions for Autopilot.',
+    icon: Navigation,
+    settingIds: ['autopilot-instructions'],
+    aliases: ['autopilot', 'instructions', 'prompt', 'custom prompt', 'tune', 'behavior'],
   },
   {
     id: 'usage',
@@ -145,8 +154,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Advanced',
     description: 'Diagnostics, terminal backend, environment paths, and experimental features.',
     icon: SlidersHorizontal,
-    settingIds: ['verbose-logging', 'developer-mode', 'journey-timings', 'pty-host', 'additional-paths', 'mission-control', 'chat-tabs', 'notes', 'attention-inbox'],
-    aliases: ['debug', 'verbose', 'developer', 'performance', 'timings', 'pty', 'path', 'experimental', 'mission control', 'inbox', 'attention'],
+    settingIds: ['verbose-logging', 'developer-mode', 'journey-timings', 'pty-host', 'additional-paths', 'mission-control', 'chat-tabs', 'autopilot', 'notes', 'attention-inbox'],
+    aliases: ['debug', 'verbose', 'developer', 'performance', 'timings', 'pty', 'path', 'experimental', 'mission control', 'inbox', 'attention', 'autopilot', 'agent above sessions'],
   },
 ] as const;
 

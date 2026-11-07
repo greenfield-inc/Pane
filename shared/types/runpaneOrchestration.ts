@@ -177,7 +177,18 @@ export type RunpaneWorkspaceEntryKind =
   | 'pr.comment'
   | 'pr.stopped'
   | 'github.unavailable'
-  | 'github.recovered';
+  | 'github.recovered'
+  /**
+   * Autopilot's kinds, delivered only when listed in kinds (a Session scope alone does not):
+   * an approval or question started waiting on the person (`itemId`, title in `reason`), or
+   * stopped waiting (answered, expired or withdrawn); a Session was created or archived
+   * (`paneId` is its own workspace Pane); a Session orchestrator finished a turn.
+   */
+  | 'item.created'
+  | 'item.answered'
+  | 'session.created'
+  | 'session.archived'
+  | 'orchestrator.turn_ended';
 
 /** The PR a `pr.*` entry reports on. */
 export interface RunpaneWorkspacePullRequest {
@@ -241,6 +252,8 @@ export interface RunpaneWorkspaceEntry {
   expectedSince?: string;
   /** The screen lines of the prompt an `agent.blocked` entry's agent is waiting on (at most 20). */
   screenLines?: string[];
+  /** The Notify item of an `item.created` or `item.answered` entry (`runpane autopilot stack push --item <id>`). */
+  itemId?: string;
 }
 
 export interface RunpaneWorkspacePanelSummary {

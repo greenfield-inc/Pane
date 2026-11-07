@@ -18,6 +18,8 @@ export interface ChatRowActions {
   /** Opens the phone's Diff view; a diff never renders in the thread by itself. */
   onViewDiff?: (path: string) => void;
   onOpenWorker?: (paneId: string) => void;
+  /** Draws a `block` row (a fenced block in a language the screen registered). */
+  renderBlock?: (language: string, content: string) => ReactNode;
 }
 
 function Markdown({ text }: { text: string }) {
@@ -164,6 +166,8 @@ export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowAc
     case 'plan': return <Todo entries={row.entries} />;
     case 'stopped': return <Text variant="footnote" style={{ color: theme.chat.mutedForeground, fontStyle: 'italic' }}>{row.text}</Text>;
     case 'worker': return <WorkerNoteRow note={row.note} onOpen={actions.onOpenWorker} />;
+    case 'block': return actions.renderBlock?.(row.language, row.content) ?? <Markdown text={`\`\`\`${row.language}\n${row.content}\`\`\``} />;
+    case 'notice': return <Text testID="chat-notice" variant="footnote" style={[styles.notice, { color: theme.chat.mutedForeground }]}>{row.text}</Text>;
     case 'content': return <Text variant="footnote" numberOfLines={2} style={{ color: theme.chat.mutedForeground }}>{describeChatContent(row.content).label}</Text>;
   }
 }
@@ -181,4 +185,5 @@ const styles = StyleSheet.create({
   output: { padding: 8, borderRadius: 8, overflow: 'hidden' },
   card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, gap: 6 },
   todoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  notice: { alignSelf: 'center', textAlign: 'center', paddingVertical: 2 },
 });

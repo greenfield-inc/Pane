@@ -34,6 +34,7 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
   initialInputSentAt: boundary.optional(boundary.string),
   orchestrationSessionId: boundary.optional(boundary.string),
   sessionFolder: boundary.optional(boundary.string),
+  autopilotRunId: boundary.optional(boundary.string),
   agentReport: boundary.optional(report),
 });
 

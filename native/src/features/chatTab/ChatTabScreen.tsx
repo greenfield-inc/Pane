@@ -1,6 +1,6 @@
 import { AssistantRuntimeProvider, ThreadPrimitive, useExternalStoreRuntime, type AppendMessage } from '@assistant-ui/react-native';
 import { LegendList } from '@legendapp/list/react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Keyboard, StyleSheet, View } from 'react-native';
 
 import { arrangeComposerControls, choiceName, isRiskyMode, triggerLabels } from '@shared/chatComposerControls';
@@ -41,6 +41,14 @@ export interface ChatTabScreenProps {
   onOpenWorker?: (paneId: string) => void;
   onViewDiff?: (path: string) => void;
   placeholder?: string;
+  /** Fenced blocks this screen draws itself, by language (Autopilot's `autopilot-items` cards). */
+  blocks?: Readonly<Record<string, (content: string) => ReactNode>>;
+  /** A person's message shown as a short notice instead, '' to hide it, or undefined to keep it (Autopilot's control lines). */
+  /** A queued message's label instead of its raw text (Autopilot's Pane lines), or undefined to keep it. */
+  queuedLabel?: (text: string) => string | undefined;
+  userNotice?: (text: string) => string | undefined;
+  /** Shows the agent's settings control in the composer; Autopilot's chat has none to change. */
+  settings?: boolean;
 }
 
 /**
@@ -49,7 +57,7 @@ export interface ChatTabScreenProps {
  * owns the composer; Pane draws the rows (Legend List over chatRows), the dock
  * and the composer's parts.
  */
-export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, placeholder }: ChatTabScreenProps) {
+export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, placeholder, blocks, userNotice, queuedLabel, settings: showSettings = true }: ChatTabScreenProps) {
   const theme = useTheme();
   const { chat, viewer, snapshot, connected } = useChatTab(panelId);
   const view = snapshot.view;
@@ -58,7 +66,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
   const [settings, setSettings] = useState(false);
   const working = view?.status === 'working' || view?.status === 'blocked';
   const messages = snapshot.transcript?.messages ?? [];
-  const rows = chatRows(chatTurns(messages, { running: working }), { open, workers });
+  const rows = chatRows(chatTurns(messages, { running: working }), { open, workers, blocks: new Set(Object.keys(blocks ?? {})), notice: userNotice });
   const agent = view ? AGENT_NAMES[view.agent] : 'the agent';
   const disabled = !connected || !view || view.status === 'stopped';
   const commands = matchingCommands(snapshot.draft, view?.commands ?? []);
@@ -162,6 +170,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
             renderItem={({ item }) => <View style={styles.row}><ChatRowView row={item} actions={{
               onToggleTurn: turnId => setOpen(current => { const next = new Set(current); if (next.has(turnId)) next.delete(turnId); else next.add(turnId); return next; }),
               onViewDiff, onOpenWorker,
+              renderBlock: (language, content) => blocks?.[language]?.(content),
             }} /></View>} />}
       </Dimmed>
       <View style={styles.dock}>
@@ -172,12 +181,12 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
         </View>}
         {view?.questions.map(question => <QuestionCard key={question.id} question={question} disabled={disabled || busy} onAnswer={answer => void act(() => chat.answer(panelId, question.id, answer))} />)}
         {view?.permissions.map(permission => <ApprovalCard key={permission.id} permission={permission} agent={agent} disabled={disabled || busy} onAnswer={optionId => void act(() => chat.permission(panelId, permission.id, optionId))} />)}
-        {!!view?.queue.length && <QueueList queue={view.queue} onRemove={operationId => void act(() => chat.unqueue(panelId, operationId))} />}
+        {!!view?.queue.length && <QueueList queue={view.queue} label={queuedLabel} onRemove={operationId => void act(() => chat.unqueue(panelId, operationId))} />}
         <ChatCommandList commands={commands} onPick={pickCommand} />
         <ChatTabComposer agent={agent} placeholder={placeholder ?? 'Ask anything'}
           disabled={disabled} pending={pending} working={working} canStop={!busy && connected} canAttach={!!view?.canAttachImages}
           model={labels.model} effort={labels.effort}
-          riskyMode={arranged.mode && isRiskyMode(arranged.mode) ? choiceName(arranged.mode) : undefined} canConfigure={!!view?.controls.length}
+          riskyMode={arranged.mode && isRiskyMode(arranged.mode) ? choiceName(arranged.mode) : undefined} canConfigure={!!view?.controls.length} settings={showSettings}
           onDraft={text => viewer.setDraft(text)} onAttach={() => void attach()} onSettings={() => setSettings(true)} onStop={() => void act(() => chat.cancel(panelId))} />
       </View>
       <ComposerSheet visible={settings} onClose={() => setSettings(false)} testID="chat-settings-sheet">

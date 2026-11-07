@@ -36,6 +36,8 @@ export interface ChatTabComposerProps {
   /** The permission mode's name when it never asks (Bypass): a small marker stays on the row. */
   riskyMode?: string;
   canConfigure: boolean;
+  /** Shows the agent's settings control; false leaves its space empty (Autopilot's chat has none to change). */
+  settings?: boolean;
   onDraft: (text: string) => void;
   onAttach: () => void;
   onSettings: () => void;
@@ -46,7 +48,7 @@ export interface ChatTabComposerProps {
  * The phone's composer on assistant-ui's primitives: the runtime holds the text and
  * the attached images and hands a send to the screen's onNew. Pane draws it.
  */
-export function ChatTabComposer({ agent, placeholder, disabled, pending, working, canStop, canAttach, model, effort, riskyMode, canConfigure, onDraft, onAttach, onSettings, onStop }: ChatTabComposerProps) {
+export function ChatTabComposer({ agent, placeholder, disabled, pending, working, canStop, canAttach, model, effort, riskyMode, canConfigure, settings = true, onDraft, onAttach, onSettings, onStop }: ChatTabComposerProps) {
   const theme = useTheme();
   const empty = useAuiState(state => state.composer.isEmpty);
   const attached = useAuiState(state => state.composer.attachments.length > 0);
@@ -69,13 +71,13 @@ export function ChatTabComposer({ agent, placeholder, disabled, pending, working
         <Icon ios="shield.slash" android="remove_moderator" size={15} color={theme.colors.warning} />
       </View>}
       <View style={styles.spacer} />
-      <Pressable testID="chat-settings" accessibilityRole="button" accessibilityLabel={`Model and options: ${[model, effort].filter(Boolean).join(' · ') || 'Agent settings'}`}
+      {settings && <Pressable testID="chat-settings" accessibilityRole="button" accessibilityLabel={`Model and options: ${[model, effort].filter(Boolean).join(' · ') || 'Agent settings'}`}
         disabled={!canConfigure || disabled} onPress={onSettings} style={({ pressed }) => [styles.model, { backgroundColor: pressed ? theme.chat.muted : 'transparent', opacity: !canConfigure || disabled ? 0.5 : 1 }]}>
         {model || effort
           ? <>{model && <Text numberOfLines={1} style={[styles.modelText, { color: theme.chat.foreground }]}>{model}</Text>}
             {effort && <Text numberOfLines={1} style={[styles.modelText, { color: theme.chat.mutedForeground }]}>{effort}</Text>}</>
           : <Text numberOfLines={1} style={[styles.modelText, { color: theme.chat.foreground }]}>Agent settings</Text>}
-      </Pressable>
+      </Pressable>}
       {/* Stop cancels the host's turn; the runtime never runs, since the host queues a message sent meanwhile. */}
       {working && <Pressable testID="chat-stop" accessibilityRole="button" accessibilityLabel="Stop" disabled={!canStop} onPress={onStop} style={styles.target}>
         <View style={[styles.send, { backgroundColor: theme.chat.primary }]}><Icon ios="stop.fill" android="stop" size={14} color={theme.chat.onPrimary} /></View>

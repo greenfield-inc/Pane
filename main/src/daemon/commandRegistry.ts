@@ -3,6 +3,7 @@ import { isDaemonOwnedChannel } from './daemonChannels';
 import type { IpcMainInvokeEvent } from 'electron';
 import { AsyncLocalStorage } from 'async_hooks';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
+import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 
 const invocationSignal = new AsyncLocalStorage<AbortSignal>();
 
@@ -12,6 +13,16 @@ export function paneCommandSignal(): AbortSignal | undefined {
 
 /** A remote call, and the Tailscale login of a caller who is not this computer's owner. */
 const remoteInvocation = new AsyncLocalStorage<{ teammate: string | null }>();
+
+const callerInvocation = new AsyncLocalStorage<PaneDaemonCaller>();
+
+/** The agent's Pane and tab that sent the current request over the control socket; undefined for Pane's own UI. */
+export function paneCommandCaller(): PaneDaemonCaller | undefined {
+  return callerInvocation.getStore();
+}
+
+/** Runs before every command; throws to refuse it (Autopilot's D-66 refusal). */
+export type PaneCommandGuard = (channel: string, args: readonly PaneCommandValue[], caller: PaneDaemonCaller | undefined) => void;
 
 export function isRemotePaneCommand(): boolean {
   return remoteInvocation.getStore() !== undefined;
@@ -65,6 +76,13 @@ export class PaneCommandRegistry {
   cancelUpdateQuiescence(): void { this.updateQuiescing = false; }
 
   private readonly handlers = new Map<string, RegisteredPaneCommandHandler>();
+  private readonly guards: PaneCommandGuard[] = [];
+
+  /** Adds a check every command passes first, whatever route it came by. */
+  addGuard(guard: PaneCommandGuard): () => void {
+    this.guards.push(guard);
+    return () => { const index = this.guards.indexOf(guard); if (index >= 0) this.guards.splice(index, 1); };
+  }
   private readonly boundChannels = new Set<string>();
 
   register<TArgs extends PaneCommandValue[], TResult extends PaneCommandValue>(
@@ -100,6 +118,8 @@ export class PaneCommandRegistry {
       );
     }
 
+    for (const guard of this.guards) guard(channel, args, callerInvocation.getStore());
+
     // A notify call waits for a person for hours; an update ends it like any other disconnect.
     const mutation = !REMOTE_READ_CHANNELS.has(channel) && !channel.startsWith('runpane:update:') && channel !== 'runpane:notify';
     if (mutation && this.updateQuiescing) throw new PaneError('ERR_UPDATE_QUIESCING', 'Pane is saving this workspace for an update. The action was not sent.', 'Wait for the update to reconnect before submitting it.');
@@ -109,13 +129,15 @@ export class PaneCommandRegistry {
   }
 
   /** Transport-owned cancellation cannot be supplied through request arguments. */
-  invokeConnected(channel: string, args: readonly PaneCommandValue[], signal: AbortSignal): Promise<PaneCommandValue> {
-    return invocationSignal.run(signal, () => this.invoke(channel, args));
+  invokeConnected(channel: string, args: readonly PaneCommandValue[], signal: AbortSignal, caller?: PaneDaemonCaller): Promise<PaneCommandValue> {
+    const run = () => invocationSignal.run(signal, () => this.invoke(channel, args));
+    return caller ? callerInvocation.run(caller, run) : run();
   }
 
   /** Provenance is set by the HTTP transport, never by caller-supplied arguments. */
-  invokeRemote(channel: string, args: readonly PaneCommandValue[] = [], caller: { teammate?: string | null } = {}): Promise<PaneCommandValue> {
-    return remoteInvocation.run({ teammate: caller.teammate ?? null }, () => this.invoke(channel, args));
+  invokeRemote(channel: string, args: readonly PaneCommandValue[] = [], from: { teammate?: string | null; caller?: PaneDaemonCaller } = {}): Promise<PaneCommandValue> {
+    const run = () => remoteInvocation.run({ teammate: from.teammate ?? null }, () => this.invoke(channel, args));
+    return from.caller ? callerInvocation.run(from.caller, run) : run();
   }
 
   bindChannel(ipcMain: IpcMainHandleLike, channel: string): void {

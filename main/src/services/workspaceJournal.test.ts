@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { TerminalStateEmulator } from './terminalStateEmulator';
 import type { WorkspaceHeldInputScreen } from './workspaceHeldInput';
@@ -566,5 +569,42 @@ describe('presentStoppedPanel', () => {
     for (const filter of [{}, { sessionId: 'session-1' }, { kinds: ['agent.ready' as const] }]) {
       expect(presentStoppedPanel(stopped, filter)).toMatchObject({ kind: 'agent.unknown', running: false });
     }
+  });
+});
+
+describe('Autopilot kinds', () => {
+  const AUTOPILOT_KINDS = ['item.created', 'item.answered', 'session.created', 'session.archived', 'orchestrator.turn_ended'] as const;
+
+  it('reach only watches that list them, survive a restart with their item id, and pass agents-only', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-journal-autopilot-'));
+    try {
+      const filePath = path.join(directory, 'journal.json');
+      const journal = new WorkspaceJournal({ filePath });
+      for (const kind of AUTOPILOT_KINDS) {
+        journal.append({ kind, paneId: 'pane-1', paneName: 'Worker', source: 'session', reason: kind, itemId: kind.startsWith('item.') ? 'n-1' : undefined });
+      }
+      expect(journal.readAfter(0, {}).entries).toEqual([]);
+      expect(journal.readAfter(0, { sessionId: 'session-1' }).entries).toEqual([]);
+      expect(journal.readAfter(0, { kinds: ['agent.report', 'agent.blocked', 'panel.exited', 'pane.gone'] }).entries).toEqual([]);
+      const listed = journal.readAfter(0, { kinds: [...AUTOPILOT_KINDS], agentsOnly: true }).entries;
+      expect(listed.map(entry => entry.kind)).toEqual([...AUTOPILOT_KINDS]);
+      journal.dispose();
+      const reloaded = new WorkspaceJournal({ filePath });
+      expect(reloaded.readAfter(0, { kinds: ['item.created'] }).entries).toMatchObject([{ kind: 'item.created', itemId: 'n-1' }]);
+      reloaded.dispose();
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('tells agent status listeners about every status, chat tabs included', () => {
+    const journal = new WorkspaceJournal({ resolvePanel: () => undefined });
+    const seen: string[] = [];
+    const stop = journal.onAgentStatus(status => seen.push(`${status.paneId}/${status.panelId}:${status.state}`));
+    journal.send('panel:agentStatus', { panelId: 'chat-1', sessionId: 'pane-1', state: 'working', reason: 'chat' });
+    stop();
+    journal.send('panel:agentStatus', { panelId: 'chat-1', sessionId: 'pane-1', state: 'idle', reason: 'chat' });
+    expect(seen).toEqual(['pane-1/chat-1:working']);
+    expect(journal.readAfter(0, {}).entries).toEqual([]);
   });
 });

@@ -76,7 +76,7 @@ test.describe('Approvals in the main window', () => {
     const badge = page.getByTestId('approvals-nav');
     await expect(badge).toHaveAccessibleName('Approvals, 3 waiting');
     await expect(badge).toContainText('3');
-    // The row sits in the sidebar's top list, below Loops; the title bar keeps only the machine pill.
+    // The row sits in the sidebar's top list, below Loops (below Autopilot when it is on); the title bar keeps only the machine pill.
     await expect(page.locator('[data-testid="loops-nav"] + [data-testid="approvals-nav"]')).toHaveCount(1);
     await expect(page.getByTestId('notify-nav')).toHaveCount(0);
     await expect(page.getByTestId('notify-in-pane-strip')).toHaveCount(0);

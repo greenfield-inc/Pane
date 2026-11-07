@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CircleCheck, CircleHelp, ExternalLink, FileText, GitBranch, Globe, Hourglass, Inbox, MessageSquare, MessagesSquare, ShieldAlert } from 'lucide-react';
+import { CircleCheck, CircleHelp, ExternalLink, FileText, GitBranch, Globe, Hourglass, Inbox, MessageSquare, MessagesSquare, Navigation, ShieldAlert } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
@@ -27,6 +27,7 @@ const linksOpenHere = (item: NotifyItem, activeMachineId: string) => (item.machi
 function ItemIcon({ item }: { item: NotifyItem }) {
   const className = 'mt-0.5 h-4 w-4 shrink-0';
   if (item.relay) return <Hourglass className={cn(className, 'text-status-warning')} aria-hidden="true" />;
+  if (item.source.autopilot) return <Navigation className={cn(className, 'text-autopilot')} aria-hidden="true" />;
   if (item.agentPrompt) return <ShieldAlert className={cn(className, 'text-status-warning')} aria-hidden="true" />;
   if (item.ui === 'approve') return <CircleCheck className={cn(className, 'text-status-warning')} aria-hidden="true" />;
   if (item.ui === 'ask') return <MessagesSquare className={cn(className, 'text-status-warning')} aria-hidden="true" />;
@@ -42,10 +43,10 @@ function useMachineMark() {
 }
 
 function GroupHeader({ group, mark }: { group: ApprovalGroup; mark: ReactNode }) {
-  const Icon = group.session ? MessageSquare : GitBranch;
+  const Icon = group.autopilot ? Navigation : group.session ? MessageSquare : GitBranch;
   return (
-    <div className="flex items-center gap-2 px-4 pb-1.5 pt-4 text-[12.5px] font-medium text-text-secondary" data-testid="approvals-group">
-      <Icon className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
+    <div className={cn('flex items-center gap-2 px-4 pb-1.5 pt-4 text-[12.5px] font-medium', group.autopilot ? 'text-autopilot-on-tint' : 'text-text-secondary')} data-testid="approvals-group">
+      <Icon className={cn('h-3.5 w-3.5 shrink-0', group.autopilot ? 'text-autopilot' : 'text-text-tertiary')} aria-hidden="true" />
       <span className="min-w-0 truncate">{group.label}</span>
       {group.machine && (
         <span className="inline-flex shrink-0 items-center gap-1 rounded bg-surface-tertiary px-1.5 py-px font-mono text-[11px] text-text-secondary">
@@ -76,7 +77,7 @@ function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; 
         <span className="block truncate text-[13.5px] font-medium text-text-primary">{item.title}</span>
         <span className="block truncate text-[12px] text-text-tertiary">
           {item.state === 'expired' ? 'Expired · ' : item.state === 'info' ? 'Update · ' : item.answerSummary ? `→ ${item.answerSummary} · ` : ''}
-          {item.relay ? `${item.relay.worker} asks the orchestrator` : `${item.source.agent} · ${item.source.name}`}
+          {item.relay ? `${item.relay.worker} asks the orchestrator` : item.source.autopilot ? 'written by Autopilot' : `${item.source.agent} · ${item.source.name}`}
           {item.unreachable ? ` · ${item.machine ?? 'its machine'} can't be reached` : ''}
         </span>
       </span>
@@ -229,7 +230,9 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
     usePanelStore.getState().requestActivation({ sessionId: sessionPaneId, panelId: orchestratorPanelId });
   }, [sessionPaneId, orchestratorPanelId, shownItemId]);
 
+  const navigateToAutopilot = useNavigationStore((state) => state.navigateToAutopilot);
   const openInPane = (item: NotifyItem, target: Beside) => {
+    if (target.kind === 'autopilot') { navigateToAutopilot(); return; }
     const machineId = item.machineId ?? activeMachineId;
     if (target.kind === 'session') void openOnMachine(machineId, { kind: 'session', id: target.sessionId, name: target.name });
     else if (target.kind === 'pane') void openOnMachine(machineId, { kind: 'pane', id: target.paneId, name: target.name });
@@ -302,6 +305,15 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
               className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-interactive px-3 font-medium text-text-on-interactive hover:bg-interactive-hover"
             >
               Open on {beside.machine}
+            </button>
+          </div>
+        )}
+        {beside.kind === 'autopilot' && (
+          <div className="m-auto max-w-sm text-center text-[13px] text-text-secondary" data-testid="approvals-autopilot">
+            <p>Autopilot asks you this. Open Autopilot to see it in its chat, with any documents it wrote for it.</p>
+            <button type="button" onClick={navigateToAutopilot}
+              className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-interactive px-3 font-medium text-text-on-interactive hover:bg-interactive-hover">
+              <Navigation className="h-3.5 w-3.5" aria-hidden="true" /> Open Autopilot
             </button>
           </div>
         )}

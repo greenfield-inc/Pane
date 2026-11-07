@@ -12,6 +12,8 @@ import { AllMachinesHome, type AllMachinesFeed } from '@/features/allMachines/Al
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
 import { approvalItems, itemEntry, questionDetail, sessionKey, sessionsByPane, waitingCounts, type ApprovalEntry } from '@/features/approvals/approvals';
 import { openApproval } from '@/features/approvals/ApprovalScreen';
+import { AutopilotRow } from '@/features/autopilot/AutopilotRow';
+import { useAutopilot } from '@/features/autopilot/hooks';
 import { useOtherMachines } from '@/features/allMachines/useOtherMachines';
 import { DemoBadge } from '@/features/demo/DemoBadge';
 import { ConnectionBar, Dimmed, presenceLabel } from '@/features/hosts/ConnectionStatus';
@@ -68,6 +70,7 @@ export function PaneListScreen() {
   const statuses = useAgentStatuses();
   const permissions = usePendingPermissions();
   const notify = useNotifyShared();
+  const autopilot = useAutopilot();
   const markSeen = useMarkPaneSeen();
   const toggleFavorite = useToggleFavorite();
   const archive = useArchivePane();
@@ -121,6 +124,35 @@ export function PaneListScreen() {
   ];
   const waitingCount = approvals.length;
   const waitingBySession = waitingCounts(approvals).bySession;
+  // Autopilot's row sits above "Waiting on you" while it's on for this computer (D-75).
+  const autopilotSnapshot = autopilot.data?.enabled ? autopilot.data : undefined;
+
+  const approvalsHeader = waitingCount > 0 ? (
+    <ApprovalGroups
+      entries={approvals}
+      machineOf={key => (key === profile.id ? current : undefined)}
+      renderEntry={(entry, divided) => (entry.kind === 'question' ? (
+        <>
+          <WaitingRow
+            testID={`notify-row-${entry.item.id}`}
+            name={entry.item.source.name}
+            detail={questionDetail(entry.item)}
+            divided={divided}
+            onPress={() => openApproval(entry.item.id)}
+          />
+          {entry.item.state === 'waiting' ? <AgentPromptActions item={entry.item} inset={33} offline={presence === 'unreachable' ? profile.label : undefined} /> : null}
+        </>
+      ) : (
+        <WaitingRow
+          testID={`permission-row-${entry.request.sessionId}`}
+          name={paneNames.get(entry.request.sessionId) ?? 'Pane'}
+          detail={permissionDetail(entry.request)}
+          divided={divided}
+          onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: entry.request.sessionId, requestId: entry.request.id } })}
+        />
+      ))}
+    />
+  ) : null;
 
   const confirmArchive = (pane: { id: string; name: string }) => {
     Alert.alert(`Archive “${pane.name}”?`, 'Its agents stop and its worktree is removed. You can still find it under Archived.', [
@@ -159,6 +191,7 @@ export function PaneListScreen() {
       statuses.refetch(),
       permissions.refetch(),
       notify.refetch(),
+      autopilot.refetch(),
       sessions.refetch(),
       expanded.archived ? archived.refetch() : undefined,
       ...(all ? others.map(other => other.refetch()) : []),
@@ -204,7 +237,7 @@ export function PaneListScreen() {
   const renderItem = ({ item, index }: { item: SidebarItem; index: number }) => {
     switch (item.type) {
       case 'section':
-        return <SidebarSectionHeader item={item} first={index === 0 && waitingCount === 0} onToggle={() => toggleSection(item.section)} />;
+        return <SidebarSectionHeader item={item} first={index === 0 && waitingCount === 0 && !autopilotSnapshot} onToggle={() => toggleSection(item.section)} />;
       case 'repo':
         return (
           <SectionHeader
@@ -346,31 +379,11 @@ export function PaneListScreen() {
               onRefresh={() => void refresh()}
               style={styles.fill}
               contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 + NEW_BUTTON + 16 }]}
-              ListHeaderComponent={waitingCount > 0 ? (
-                <ApprovalGroups
-                  entries={approvals}
-                  machineOf={key => (key === profile.id ? current : undefined)}
-                  renderEntry={(entry, divided) => (entry.kind === 'question' ? (
-                    <>
-                      <WaitingRow
-                        testID={`notify-row-${entry.item.id}`}
-                        name={entry.item.source.name}
-                        detail={questionDetail(entry.item)}
-                        divided={divided}
-                        onPress={() => openApproval(entry.item.id)}
-                      />
-                      {entry.item.state === 'waiting' ? <AgentPromptActions item={entry.item} inset={33} offline={presence === 'unreachable' ? profile.label : undefined} /> : null}
-                    </>
-                  ) : (
-                    <WaitingRow
-                      testID={`permission-row-${entry.request.sessionId}`}
-                      name={paneNames.get(entry.request.sessionId) ?? 'Pane'}
-                      detail={permissionDetail(entry.request)}
-                      divided={divided}
-                      onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: entry.request.sessionId, requestId: entry.request.id } })}
-                    />
-                  ))}
-                />
+              ListHeaderComponent={autopilotSnapshot || approvalsHeader ? (
+                <>
+                  {autopilotSnapshot ? <AutopilotRow snapshot={autopilotSnapshot} /> : null}
+                  {approvalsHeader}
+                </>
               ) : null}
               ListEmptyComponent={
                 loading ? <LoadingRows />

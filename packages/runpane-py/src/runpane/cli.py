@@ -10,6 +10,7 @@ import sys
 from typing import Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from .agent_context import run_agent_context
+from .autopilot import run_autopilot_stack, run_autopilot_stack_push, run_autopilot_status, run_autopilot_waiting
 from .daemon_actions import contract_command, run_daemon_action, run_links_create
 from .doctor import run_doctor
 from .download import download_artifact
@@ -104,6 +105,7 @@ COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
 COMMAND_GROUP_HELP_TOPICS.add("loops")
 COMMAND_GROUP_HELP_TOPICS.add("secrets")
+COMMAND_GROUP_HELP_TOPICS.add("autopilot")
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
 MAX_LOCK_DURATION_MS = 86_400_000
@@ -270,6 +272,10 @@ class ParsedArgs:
     wait_timeout_ms: Optional[int] = None
     all: bool = False
     inbox_ids: List[str] = field(default_factory=list)
+    # autopilot stack push: --item, the repeatable --tab <path-or-url>, and --next.
+    item: Optional[str] = None
+    stack_tabs: List[str] = field(default_factory=list)
+    stack_next: bool = False
     lock_ttl_ms: Optional[int] = None
     lock_wait_ms: Optional[int] = None
     note: Optional[str] = None
@@ -562,6 +568,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         raise ValueError("runpane inbox ack needs the item ids to clear, or --all --session <id|name>.")
     if parsed.command == "inbox ack" and parsed.all and parsed.inbox_ids:
         raise ValueError("runpane inbox ack accepts either item ids or --all, not both.")
+    if parsed.command == "autopilot stack push":
+        validate_stack_push_args(parsed)
     return parsed
 
 
@@ -582,6 +590,12 @@ def take_exec_command(args: List[str]) -> Optional[List[str]]:
     command = args[start:]
     del args[start:]
     return command
+
+
+def validate_stack_push_args(parsed: ParsedArgs) -> None:
+    given = [value for value in (parsed.item, parsed.file, parsed.url, parsed.session_id) if value is not None]
+    if len(given) != 1:
+        raise ValueError("runpane autopilot stack push needs exactly one of --item <id>, --file <path>, --url <url>, or --session <id|name>.")
 
 
 # The commands that dispatch work and accept `--wait` for its result.
@@ -769,6 +783,16 @@ def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
             # Offline commands accept --pane-dir and ignore it, so one --pane-dir works for every command.
             index += 1
             parsed.pane_dir = read_value(args, index, arg, literal_values)
+        elif parsed.command == "autopilot stack push" and (arg == "--tab" or arg.startswith("--tab=")):
+            # `--tab` places a new panel elsewhere; on `autopilot stack push` it takes a file or URL.
+            if arg == "--tab":
+                index += 1
+                value = read_value(args, index, arg, literal_values)
+            else:
+                value = arg[len("--tab="):]
+            if not value.strip():
+                raise ValueError("--tab requires a value.")
+            parsed.stack_tabs.append(value)
         elif is_local_command and arg == "--wait" and parsed.command in WAIT_FOR_RESULT_COMMANDS:
             # `lock acquire --wait <ms>` takes a value; on a dispatch command `--wait` is a switch.
             parsed.wait_for_result = True
@@ -928,6 +952,11 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--paused":
         parsed.paused = True
+        return
+    if flag == "--next":
+        if parsed.command != "autopilot stack push":
+            raise ValueError("--next is only valid with runpane autopilot stack push.")
+        parsed.stack_next = True
         return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
@@ -1254,6 +1283,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--cron":
         parsed.cron = value
         return
+    if flag == "--item":
+        parsed.item = value
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -1566,6 +1598,10 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "notify": lambda parsed, context: run_notify(parsed),
     "inbox": lambda parsed, context: run_inbox(parsed),
     "inbox ack": lambda parsed, context: run_inbox_ack(parsed),
+    "autopilot status": lambda parsed, context: run_autopilot_status(parsed),
+    "autopilot waiting": lambda parsed, context: run_autopilot_waiting(parsed),
+    "autopilot stack": lambda parsed, context: run_autopilot_stack(parsed),
+    "autopilot stack push": lambda parsed, context: run_autopilot_stack_push(parsed),
     "agents doctor": lambda parsed, context: run_agents_doctor(parsed),
     "panes adopt": lambda parsed, context: run_panes_adopt(parsed),
     "help": lambda parsed, context: print_help(parsed),

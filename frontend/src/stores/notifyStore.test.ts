@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
 import { notifyFixture } from '../../../tests/fixtures/notifySnapshot';
-import { sessionWaitingCount, waitingCount, waitingElsewhere } from './notifyStore';
+import { selectNotifyItems, sessionWaitingCount, waitingCount, waitingElsewhere } from './notifyStore';
 
 const launch = { id: 'session-launch', name: 'Launch', paneId: 'session-launch-pane' };
 
@@ -38,5 +38,12 @@ describe('Approvals counts', () => {
     );
     expect(waitingElsewhere(snapshot, 'local')).toBe(1);
     expect(waitingElsewhere(snapshot, 'studio')).toBe(2);
+  });
+});
+
+describe('selectNotifyItems', () => {
+  it('returns the same empty list every time before the first snapshot, so a component reading it never loops (review F-3)', () => {
+    expect(selectNotifyItems({ snapshot: null })).toBe(selectNotifyItems({ snapshot: null }));
+    expect(selectNotifyItems({ snapshot: null })).toEqual([]);
   });
 });

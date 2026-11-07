@@ -4864,6 +4864,11 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'github.recovered',
   'agent.report',
   'agent.report.missing',
+  'item.created',
+  'item.answered',
+  'session.created',
+  'session.archived',
+  'orchestrator.turn_ended',
 );
 
 function parseWorkspaceKinds(value: PaneCommandValue): RunpaneWorkspaceEntryKind[] | undefined {

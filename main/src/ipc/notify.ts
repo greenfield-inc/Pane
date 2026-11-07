@@ -130,6 +130,7 @@ const notifyItemSchema = boundary.object({
     name: boundary.string,
     agent: boundary.string,
     session: boundary.optional(sessionSchema),
+    autopilot: boundary.optional(boundary.boolean),
   }),
   relay: boundary.optional(boundary.object({ inboxItemId: boundary.nonEmptyString, worker: boundary.string, question: boundary.string })),
   state: boundary.enumeration('waiting', 'sent', 'answered', 'expired', 'info'),

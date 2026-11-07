@@ -1,4 +1,5 @@
 import { app, BrowserWindow, globalShortcut } from 'electron';
+import { AUTOPILOT_OWNER_PANE_PREFIX } from '../../../../shared/types/autopilot';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import type { ConfigManager } from '../configManager';
@@ -462,6 +463,7 @@ export class NotifyService {
     if (pane) {
       const source: NotifySource = { paneId: pane.paneId, name: pane.name, agent };
       if (pane.panelId) source.panelId = pane.panelId;
+      if (pane.paneId.startsWith(AUTOPILOT_OWNER_PANE_PREFIX)) { source.autopilot = true; source.name = 'Autopilot'; }
       return source;
     }
     return { name: caller.cwd ? path.basename(caller.cwd) : 'Outside Pane', agent };

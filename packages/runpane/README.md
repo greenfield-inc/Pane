@@ -284,6 +284,14 @@ agent.report,agent.report.missing,agent.blocked,panel.exited,pane.gone`.
 on-screen questions a Session has not acknowledged (an orchestrator reads it
 when it starts or resumes), and `runpane inbox ack <id>...` clears them.
 
+Autopilot (experimental) reads `runpane autopilot status|waiting|stack` and adds
+to its stack with `runpane autopilot stack push (--item <id>|--file <path>|--url
+<url>|--session <id|name>) [--tab <path-or-url>]... [--next]`. It waits with
+`runpane watch --as autopilot --kinds
+item.created,item.answered,session.created,session.archived,orchestrator.turn_ended
+--until-event --json`; like `agent.report.missing`, these kinds reach only
+watchers that list them.
+
 To dispatch and get the result in one call, add `--wait`. It blocks on that
 panel and prints one line of JSON when the worker reports (exit 0), ends
 without a report (3, with `lastOutput`), waits on a prompt (4, with

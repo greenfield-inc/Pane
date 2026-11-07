@@ -69,6 +69,7 @@ export class ConfigManager extends EventEmitter {
       defaultModel: 'sonnet',
       defaultOrchestratorAgent: DEFAULT_PANE_CHAT_AGENT,
       chatTabsEnabled: false,
+      autopilotEnabled: false,
       notesEnabled: false,
       autoStartOnBoot: true,
       keepAwakeWhileSessionsActive: true,

@@ -1,3 +1,4 @@
+import { AutopilotView } from './autopilot/AutopilotView';
 import { useRef, useEffect, useState, memo, useMemo, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useSessionStore } from '../stores/sessionStore';
@@ -1986,6 +1987,10 @@ export const SessionView = memo(() => {
 
   if (activeView === 'loops') {
     return <LoopsView />;
+  }
+
+  if (activeView === 'autopilot') {
+    return <AutopilotView />;
   }
 
   const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);

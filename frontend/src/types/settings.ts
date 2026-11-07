@@ -6,6 +6,7 @@ export type SettingsCategoryId =
   | 'usage'
   | 'worktrees-git'
   | 'notify'
+  | 'autopilot'
   | 'notifications'
   | 'remote-access'
   | 'integrations'
@@ -96,6 +97,8 @@ export type SettingsSettingId =
   | 'additional-paths'
   | 'mission-control'
   | 'chat-tabs'
+  | 'autopilot'
+  | 'autopilot-instructions'
   | 'notes';
 
 export interface SettingsTarget {

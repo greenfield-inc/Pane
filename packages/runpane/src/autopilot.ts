@@ -1,0 +1,318 @@
+import path from 'node:path';
+import { boundary, type BoundarySchema } from './boundaryDecoder';
+import type { ParsedArgs } from './commands';
+import { invokeDaemon } from './daemonClient';
+
+// The CLI's copy of the shapes in shared/types/autopilot.ts, which this package cannot import.
+
+type AutopilotTab =
+  | { kind: 'item'; label: string; notifyId: string }
+  | { kind: 'file'; label: string; path: string }
+  | { kind: 'url'; label: string; url: string }
+  | { kind: 'session'; label: string; sessionId: string };
+
+type AutopilotStackRef =
+  | { kind: 'item'; notifyId: string }
+  | { kind: 'file'; path: string }
+  | { kind: 'url'; url: string }
+  | { kind: 'session'; sessionId: string };
+
+interface AutopilotStackEntry {
+  id: string;
+  ref: AutopilotStackRef;
+  title: string;
+  sessionId?: string;
+  sessionName?: string;
+  tabs: AutopilotTab[];
+  note?: string;
+  addedAt: number;
+  byAutopilot?: boolean;
+  doneAt?: number;
+}
+
+interface AutopilotStack {
+  entries: AutopilotStackEntry[];
+  shownId: string | null;
+}
+
+interface AutopilotStatusResult extends AutopilotStack {
+  ok: true;
+}
+
+interface AutopilotSnapshotResult {
+  ok: true;
+  enabled: boolean;
+  chatTabsEnabled: boolean;
+  entitlement: { entitled: boolean; reason?: string; next?: string };
+  run: { id: string; folder: string; docsFolder: string; createdAt: string } | null;
+  panelId: string | null;
+  ownerPaneId: string | null;
+  state: 'stopped' | 'running' | 'paused';
+  /** Sentinel Mode: Autopilot keeps Sessions moving while the person is away. */
+  sentinel: boolean;
+  sentinelSince?: number;
+  stack: AutopilotStack;
+  walk: { sessionId?: string; sessions: Array<{ id: string; name: string; waiting: number }> };
+}
+
+interface AutopilotWaitingItem {
+  id: string;
+  title: string;
+  kind: 'approval' | 'question' | 'permission' | 'stuck';
+  sessionId?: string;
+  sessionName?: string;
+  agent: string;
+  pane: string;
+  paneId?: string;
+  panelId?: string;
+  orchestrator?: boolean;
+  byAutopilot?: boolean;
+  context?: string;
+  choices?: string[];
+  links: Array<{ label: string; path?: string; url?: string }>;
+  createdAt: number;
+  ageMs: number;
+  machine: string;
+  machineId: string;
+  onStack: boolean;
+}
+
+interface AutopilotWaitingResult {
+  ok: true;
+  items: AutopilotWaitingItem[];
+}
+
+interface AutopilotStackPushResult {
+  ok: true;
+  entry: AutopilotStackEntry | null;
+  shown: boolean;
+  position: number;
+  total: number;
+}
+
+interface AutopilotStackPushRequest {
+  item?: string;
+  file?: string;
+  url?: string;
+  session?: string;
+  title?: string;
+  note?: string;
+  tabs?: Array<{ label?: string; path?: string; url?: string }>;
+  next?: boolean;
+}
+
+const tabSchema: BoundarySchema<AutopilotTab> = boundary.union(
+  boundary.object({ kind: boundary.literal('item'), label: boundary.string, notifyId: boundary.string }),
+  boundary.object({ kind: boundary.literal('file'), label: boundary.string, path: boundary.string }),
+  boundary.object({ kind: boundary.literal('url'), label: boundary.string, url: boundary.string }),
+  boundary.object({ kind: boundary.literal('session'), label: boundary.string, sessionId: boundary.string }),
+);
+const refSchema: BoundarySchema<AutopilotStackRef> = boundary.union(
+  boundary.object({ kind: boundary.literal('item'), notifyId: boundary.string }),
+  boundary.object({ kind: boundary.literal('file'), path: boundary.string }),
+  boundary.object({ kind: boundary.literal('url'), url: boundary.string }),
+  boundary.object({ kind: boundary.literal('session'), sessionId: boundary.string }),
+);
+const entrySchema: BoundarySchema<AutopilotStackEntry> = boundary.object({
+  id: boundary.string,
+  ref: refSchema,
+  title: boundary.string,
+  sessionId: boundary.optional(boundary.string),
+  sessionName: boundary.optional(boundary.string),
+  tabs: boundary.array(tabSchema),
+  note: boundary.optional(boundary.string),
+  addedAt: boundary.number,
+  byAutopilot: boundary.optional(boundary.boolean),
+  doneAt: boundary.optional(boundary.number),
+});
+const stackFields = {
+  entries: boundary.array(entrySchema),
+  shownId: boundary.nullable(boundary.string),
+};
+const stackSchema: BoundarySchema<AutopilotStack> = boundary.object(stackFields);
+const stackResultSchema: BoundarySchema<AutopilotStatusResult> = boundary.object({ ok: boundary.literal(true), ...stackFields });
+const snapshotResultSchema: BoundarySchema<AutopilotSnapshotResult> = boundary.object({
+  ok: boundary.literal(true),
+  enabled: boundary.boolean,
+  chatTabsEnabled: boundary.boolean,
+  entitlement: boundary.object({
+    entitled: boundary.boolean,
+    reason: boundary.optional(boundary.string),
+    next: boundary.optional(boundary.string),
+  }),
+  run: boundary.nullable(boundary.object({
+    id: boundary.string,
+    folder: boundary.string,
+    docsFolder: boundary.string,
+    createdAt: boundary.string,
+  })),
+  panelId: boundary.nullable(boundary.string),
+  ownerPaneId: boundary.nullable(boundary.string),
+  state: boundary.enumeration('stopped', 'running', 'paused'),
+  sentinel: boundary.boolean,
+  sentinelSince: boundary.optional(boundary.number),
+  stack: stackSchema,
+  walk: boundary.object({
+    sessionId: boundary.optional(boundary.string),
+    sessions: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, waiting: boundary.number })),
+  }),
+});
+const waitingItemSchema: BoundarySchema<AutopilotWaitingItem> = boundary.object({
+  id: boundary.string,
+  title: boundary.string,
+  kind: boundary.enumeration('approval', 'question', 'permission', 'stuck'),
+  sessionId: boundary.optional(boundary.string),
+  sessionName: boundary.optional(boundary.string),
+  agent: boundary.string,
+  pane: boundary.string,
+  paneId: boundary.optional(boundary.string),
+  panelId: boundary.optional(boundary.string),
+  orchestrator: boundary.optional(boundary.boolean),
+  byAutopilot: boundary.optional(boundary.boolean),
+  context: boundary.optional(boundary.string),
+  choices: boundary.optional(boundary.array(boundary.string)),
+  links: boundary.array(boundary.object({
+    label: boundary.string,
+    path: boundary.optional(boundary.string),
+    url: boundary.optional(boundary.string),
+  })),
+  createdAt: boundary.number,
+  ageMs: boundary.number,
+  machine: boundary.string,
+  machineId: boundary.string,
+  onStack: boundary.boolean,
+});
+const waitingResultSchema: BoundarySchema<AutopilotWaitingResult> = boundary.object({
+  ok: boundary.literal(true),
+  items: boundary.array(waitingItemSchema),
+});
+const pushResultSchema: BoundarySchema<AutopilotStackPushResult> = boundary.object({
+  ok: boundary.literal(true),
+  entry: boundary.nullable(entrySchema),
+  shown: boundary.boolean,
+  position: boundary.number,
+  total: boundary.number,
+});
+
+const URL_TAB = /^https?:\/\//i;
+
+function printJson(value: AutopilotSnapshotResult | AutopilotWaitingResult | AutopilotStatusResult | AutopilotStackPushResult): void {
+  console.log(JSON.stringify(value, null, 2));
+}
+
+function plural(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+/** `45s`, `12m`, `3h`, `2d`: how long an item has waited. */
+function formatAge(ageMs: number): string {
+  const seconds = Math.max(0, Math.floor(ageMs / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+/** `runpane autopilot status`: the switch, the agent, the run, the stack and the walk. */
+export async function runAutopilotStatus(parsed: ParsedArgs): Promise<number> {
+  const result = await invokeDaemon('runpane:autopilot:status', [], snapshotResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+  console.log(result.enabled ? `Autopilot is on and ${result.state}.` : 'Autopilot is off. Turn it on in Settings > Advanced > Experimental > Autopilot.');
+  if (result.enabled && result.sentinel) console.log('Sentinel is on: Autopilot keeps your Sessions moving while you are away.');
+  if (!result.entitlement.entitled) {
+    const reason = result.entitlement.reason ?? 'This account cannot use Autopilot.';
+    console.log(`Not available: ${reason}${result.entitlement.next ? ` Next: ${result.entitlement.next}` : ''}`);
+  }
+  if (result.enabled && !result.chatTabsEnabled) console.log('Chat tabs are off; Autopilot runs as a chat tab, so it needs them on.');
+  if (result.run) console.log(`Run ${result.run.id}: ${result.run.folder}`);
+  if (result.panelId) console.log(`Chat tab: panel ${result.panelId}${result.ownerPaneId ? ` in pane ${result.ownerPaneId}` : ''}`);
+  const shown = result.stack.entries.find(entry => entry.id === result.stack.shownId);
+  console.log(`Stack: ${plural(result.stack.entries.length, 'entry', 'entries')}${shown ? `; showing "${shown.title}"` : ''}.`);
+  const walking = result.walk.sessions.find(session => session.id === result.walk.sessionId);
+  const waiting = result.walk.sessions.reduce((sum, session) => sum + session.waiting, 0);
+  const sessionsWaiting = result.walk.sessions.filter(session => session.waiting > 0).length;
+  console.log(`Waiting: ${plural(waiting, 'item', 'items')} in ${plural(sessionsWaiting, 'Session', 'Sessions')}${walking ? `; the walk is on ${walking.name}` : ''}.`);
+  return 0;
+}
+
+/** `runpane autopilot waiting`: what waits on the person, grouped by Session in the order Pane gives. */
+export async function runAutopilotWaiting(parsed: ParsedArgs): Promise<number> {
+  const result = await invokeDaemon('runpane:autopilot:waiting', [], waitingResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+  if (result.items.length === 0) {
+    console.log('Nothing is waiting on the person.');
+    return 0;
+  }
+  let group: string | undefined;
+  for (const item of result.items) {
+    const key = item.sessionId ?? '';
+    if (key !== group) {
+      group = key;
+      console.log(item.sessionId ? `${item.sessionName ?? item.sessionId} (${item.sessionId})` : 'Not in a Session');
+    }
+    console.log(`  ${item.id}  ${item.kind}  ${item.title}  ${item.agent} - ${item.pane}  ${formatAge(item.ageMs)}${item.onStack ? '  on the stack' : ''}`);
+  }
+  return 0;
+}
+
+/** `runpane autopilot stack`: the entries in order; `>` marks the one on screen. */
+export async function runAutopilotStack(parsed: ParsedArgs): Promise<number> {
+  const result = await invokeDaemon('runpane:autopilot:stack', [], stackResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+  if (result.entries.length === 0) {
+    console.log('The stack is empty.');
+    return 0;
+  }
+  console.log(`Stack: ${plural(result.entries.length, 'entry', 'entries')}.`);
+  result.entries.forEach((entry, index) => {
+    const shown = entry.id === result.shownId;
+    const session = entry.sessionName ? ` - ${entry.sessionName}` : '';
+    console.log(`${shown ? '>' : ' '} ${index + 1}. ${entry.id} ${entry.ref.kind}: ${entry.title}${session}${entry.doneAt !== undefined ? ' (done)' : ''}${shown ? ' (shown)' : ''}`);
+  });
+  return 0;
+}
+
+/**
+ * Builds the `runpane:autopilot:stack-push` request. Files (the entry's and its tabs') resolve
+ * against `cwd`, so Pane gets absolute paths; a tab that starts with http:// or https:// is a URL.
+ */
+function buildStackPushRequest(parsed: ParsedArgs, cwd: string): AutopilotStackPushRequest {
+  const request: AutopilotStackPushRequest = {};
+  if (parsed.item !== undefined) request.item = parsed.item;
+  if (parsed.file !== undefined) request.file = path.resolve(cwd, parsed.file);
+  if (parsed.url !== undefined) request.url = parsed.url;
+  if (parsed.sessionId !== undefined) request.session = parsed.sessionId;
+  if (parsed.title !== undefined) request.title = parsed.title;
+  if (parsed.note !== undefined) request.note = parsed.note;
+  if (parsed.stackTabs?.length) {
+    request.tabs = parsed.stackTabs.map(tab => (URL_TAB.test(tab) ? { url: tab } : { path: path.resolve(cwd, tab) }));
+  }
+  if (parsed.stackNext) request.next = true;
+  return request;
+}
+
+/** `runpane autopilot stack push`: one more entry; it never replaces the one on screen. */
+export async function runAutopilotStackPush(parsed: ParsedArgs, cwd: string = process.cwd()): Promise<number> {
+  const request = buildStackPushRequest(parsed, cwd);
+  const result = await invokeDaemon('runpane:autopilot:stack-push', [request], pushResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+  const title = result.entry ? `"${result.entry.title}"` : 'it';
+  console.log(result.shown
+    ? `On the stack and on screen: ${title} (${result.position} of ${result.total}).`
+    : `On the stack: ${title} (${result.position} of ${result.total}); it comes up when the person is done with the one on screen.`);
+  return 0;
+}

@@ -28,6 +28,7 @@ import { usePanelStore } from '../stores/panelStore';
 import { useAttentionInboxStore } from '../stores/attentionInboxStore';
 import { paneHasWaitingQuestion, useNotifyStore } from '../stores/notifyStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
+import { AutopilotNavRow } from './autopilot/AutopilotNavRow';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
@@ -444,6 +445,8 @@ export function ProjectSessionList({
         ) : null}
 
         <LoopsNavRow active={activeView === 'loops'} />
+        {/* Approvals sits right under Autopilot, which answers them for you (D-117). */}
+        <AutopilotNavRow />
         <ApprovalsNavRow />
 
         {missionControlEnabled && (

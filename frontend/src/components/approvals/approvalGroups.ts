@@ -10,10 +10,13 @@ export interface ApprovalGroup {
   /** The machine the group's items come from, when the screen shows more than one. */
   machineId?: string;
   machine?: string;
+  /** Autopilot's own items (D-60): shown violet, "written by Autopilot". */
+  autopilot?: boolean;
   items: NotifyItem[];
 }
 
 const NOT_IN_A_SESSION = 'Not in a Session';
+const AUTOPILOT = 'Autopilot';
 
 /** The queue column's content for one tab, with both tabs' counts. */
 export interface ApprovalQueue {
@@ -32,7 +35,7 @@ const resolved = (item: NotifyItem) => item.resolvedAt ?? item.createdAt;
 /**
  * The Approvals queue: the tab's items grouped by Session and machine. Waiting lists oldest
  * first, so a new item never moves the one being answered; Answered lists newest first.
- * "Not in a Session" comes last.
+ * Autopilot's own items come after the Sessions, and "Not in a Session" last.
  */
 export function groupApprovals(items: NotifyItem[], tab: ApprovalsTab): ApprovalQueue {
   const waitingItems = items.filter(isWaiting);
@@ -42,7 +45,15 @@ export function groupApprovals(items: NotifyItem[], tab: ApprovalsTab): Approval
     : [...answeredItems].sort((a, b) => resolved(b) - resolved(a));
   const groups = new Map<string, ApprovalGroup>();
   let loose: ApprovalGroup | undefined;
+  const autopilot = new Map<string, ApprovalGroup>();
   for (const item of shown) {
+    if (item.source.autopilot) {
+      const key = `${item.machineId ?? 'local'}:autopilot`;
+      const group = autopilot.get(key) ?? { key, label: AUTOPILOT, autopilot: true, machineId: item.machineId, machine: item.machine, items: [] };
+      autopilot.set(key, group);
+      group.items.push(item);
+      continue;
+    }
     const session = item.source.session;
     if (!session) {
       loose ??= { key: 'none', label: NOT_IN_A_SESSION, items: [] };
@@ -63,7 +74,7 @@ export function groupApprovals(items: NotifyItem[], tab: ApprovalsTab): Approval
     // An answer in its Undo hold still shows, but no longer waits on you.
     waiting: waitingItems.filter(item => item.state === 'waiting').length,
     answered: answeredItems.length,
-    groups: [...groups.values(), ...(loose ? [loose] : [])],
+    groups: [...groups.values(), ...autopilot.values(), ...(loose ? [loose] : [])],
   };
 }
 
@@ -72,6 +83,7 @@ export type Beside =
   | { kind: 'session'; sessionId: string; paneId: string; name: string }
   | { kind: 'pane'; paneId: string; panelId?: string; name: string }
   | { kind: 'machine'; machineId: string; machine: string }
+  | { kind: 'autopilot' }
   | { kind: 'none' };
 
 /**
@@ -83,6 +95,8 @@ export type Beside =
 export function besideOf(item: NotifyItem, activeMachineId: string): Beside {
   const machineId = item.machineId ?? 'local';
   if (machineId !== activeMachineId) return { kind: 'machine', machineId, machine: item.machine ?? 'this computer' };
+  // Autopilot's own item (D-60): it lives in Autopilot, not in a Pane the person opens.
+  if (item.source.autopilot) return { kind: 'autopilot' };
   const session = item.source.session;
   if (session && (session.orchestrator || item.relay)) return { kind: 'session', sessionId: session.id, paneId: session.paneId, name: session.name };
   if (item.source.paneId) return { kind: 'pane', paneId: item.source.paneId, panelId: item.source.panelId, name: item.source.name };

@@ -14,6 +14,10 @@
 //   env NAME [NAME...]  replies with those environment variables as JSON
 //   caps                replies with the client capabilities, session _meta and mode
 //   steps N             N completed steps of mixed kinds, then a reply
+//   [Pane · Start]      Autopilot's Start: reads `runpane autopilot waiting --json`, puts the
+//                       topmost Session's items on the stack, and lists them in an
+//                       autopilot-items block (the real CLI, through the daemon)
+//   approve it          Autopilot told to approve: says where the buttons are, as the skill says
 //   background          replies, then runs a turn of its own with no prompt open (as Claude does for a
 //                       finished background task), announced as an async task to a client that takes them
 //
@@ -23,6 +27,7 @@ import { Readable, Writable } from 'node:stream';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 const store = process.env.SCRIPTED_AGENT_STORE ?? path.join(process.cwd(), '.scripted-agent');
 mkdirSync(store, { recursive: true });
@@ -105,6 +110,38 @@ const app = agent()
     await send({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text } });
     const [word, ...rest] = text.trim().split(/\s+/);
     if (word === 'signout') throw RequestError.authRequired();
+    if (text.startsWith('[Pane · Start]') || text.startsWith('[Pane · Go on]')) {
+      const runpane = (...args) => execFileSync('runpane', args, { encoding: 'utf8', env: process.env, timeout: 20_000 });
+      const step = async (title, run) => {
+        const toolCallId = `tool-${randomUUID()}`;
+        await send({ sessionUpdate: 'tool_call', toolCallId, title, kind: 'execute', status: 'in_progress', rawInput: { command: title } });
+        try { const output = run(); await send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', rawOutput: { stdout: output } }); return output; }
+        catch (error) { await send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'failed', rawOutput: { stderr: String(error?.stderr ?? error) } }); throw error; }
+      };
+      let items;
+      try { items = JSON.parse(await step('runpane autopilot waiting --json', () => runpane('autopilot', 'waiting', '--json'))).items; }
+      catch { await say('I could not read what waits: runpane autopilot waiting failed.'); return { stopReason: 'end_turn' }; }
+      const local = items.filter(item => item.machineId === 'local');
+      if (local.length === 0) { await say("Nothing waits on you now; I'll keep watching."); return { stopReason: 'end_turn' }; }
+      const sessions = [...new Set(local.map(item => item.sessionName ?? 'Not in a Session'))];
+      const top = local.filter(item => (item.sessionName ?? 'Not in a Session') === sessions[0]);
+      for (const item of top) await step(`runpane autopilot stack push --item ${item.id} --json`, () => runpane('autopilot', 'stack', 'push', '--item', item.id, '--json'));
+      await say(`**${local.length} ${local.length === 1 ? 'thing waits' : 'things wait'} on you** across ${sessions.length} ${sessions.length === 1 ? 'Session' : 'Sessions'}. Tap one to open it on the stack, or ask me about any of them.\n\n\`\`\`autopilot-items\n${local.map(item => item.id).join('\n')}\n\`\`\`\n`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('[Pane · Sentinel on]')) {
+      await say(`I'll keep your Sessions moving while you're away. I answer only what a plan or decision already settles, nudge Sessions that stall, and send anything that needs you to your phone.\n\n\`\`\`autopilot-log\n{"at":"10:12","session":"Pane Fixes","kind":"answered","what":"Keep #1215's prompts? -> yes","why":"D-21 in the cover sheet"}\n\`\`\`\n`);
+      return { stopReason: 'end_turn' };
+    }
+    if (text.startsWith('[Pane · Sentinel check]')) { await say('Checked in: nothing new.'); return { stopReason: 'end_turn' }; }
+    if (text.startsWith('[Pane · Sentinel off]')) {
+      await say(`\`\`\`autopilot-away\n{"summary":{"from":"09:58","to":"12:08"}}\n{"at":"10:12","session":"Pane Fixes","kind":"answered","what":"Keep #1215's prompts? -> yes","why":"D-21 in the cover sheet"}\n{"at":"10:38","session":"Infra","kind":"nudged","what":"orchestrator idle 25 min with a blocked report"}\n\`\`\`\n\nOne thing still needs you: the release question in Pane Fixes.`);
+      return { stopReason: 'end_turn' };
+    }
+    if (/^approve it\b/i.test(text.trim())) {
+      await say('Approvals are yours: the buttons are on the card, here in the chat.');
+      return { stopReason: 'end_turn' };
+    }
     if (word === 'crash') { await say('About to stop.'); process.exit(3); }
     if (word === 'slow') {
       while (!session.cancelled) { await say('.'); await new Promise(resolve => setTimeout(resolve, 30)); }

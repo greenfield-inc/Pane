@@ -234,6 +234,20 @@ export class ChatTabManager {
     this.tabs.delete(panelId);
   }
 
+  /**
+   * Ends the tab's agent and leaves it stopped with `reason` (Autopilot turned off or replaced).
+   * Unlike a crash it offers no Restart: whatever stopped it starts it again. The conversation is kept.
+   */
+  async stop(panelId: string, reason: { message: string; next: string }): Promise<void> {
+    this.required(panelId);
+    const tab = this.tabs.get(panelId);
+    if (tab) {
+      await tab.starting?.catch(() => undefined);
+      await this.release(tab);
+    }
+    this.stopWith(panelId, { code: 'exited', message: reason.message, next: reason.next });
+  }
+
   /** Pane is quitting: end every agent. Saved state is left as it was, so each tab comes back on the next launch. */
   async stopAll(): Promise<void> {
     await Promise.allSettled([...this.tabs.values()].map(async tab => { await tab.starting?.catch(() => undefined); await this.release(tab); }));

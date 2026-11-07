@@ -158,6 +158,12 @@ export interface ParsedArgs {
   all?: boolean;
   /** inbox ack: the item ids to clear. */
   inboxIds?: string[];
+  /** autopilot stack push `--item`: the waiting item to put on the stack. */
+  item?: string;
+  /** autopilot stack push `--tab`, repeatable: extra tabs, each a file path or an http(s) URL. */
+  stackTabs?: string[];
+  /** autopilot stack push `--next`: right after the entry on screen, so it comes up next. */
+  stackNext?: boolean;
   lockTtlMs?: number;
   lockWaitMs?: number;
   note?: string;
@@ -212,7 +218,7 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops', 'secrets']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops', 'secrets', 'autopilot']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -368,6 +374,7 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   if (parsed.command === 'inbox ack' && parsed.all && parsed.inboxIds?.length) {
     throw new Error('runpane inbox ack accepts either item ids or --all, not both.');
   }
+  if (parsed.command === 'autopilot stack push') validateStackPushArgs(parsed);
   return parsed;
 }
 
@@ -503,6 +510,13 @@ function validateReportArgs(parsed: ParsedArgs): void {
   }
 }
 
+function validateStackPushArgs(parsed: ParsedArgs): void {
+  const given = [parsed.item, parsed.file, parsed.url, parsed.sessionId].filter(value => value !== undefined).length;
+  if (given !== 1) {
+    throw new Error('runpane autopilot stack push needs exactly one of --item <id>, --file <path>, --url <url>, or --session <id|name>.');
+  }
+}
+
 function validatePanesArchiveArgs(parsed: ParsedArgs): void {
   if (parsed.paneId && parsed.sessionId) {
     throw new Error('runpane panes archive accepts either --pane or --session, not both.');
@@ -574,6 +588,13 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
     // Offline commands accept --pane-dir and ignore it, so one --pane-dir works for every command.
     if ((isAgentContextCommand || parsed.command === 'version') && arg === '--pane-dir') {
       parsed.paneDir = readValue(args, ++index, arg, literalValues);
+      continue;
+    }
+    // `--tab` places a new panel elsewhere; on `autopilot stack push` it takes a file or URL.
+    if (parsed.command === 'autopilot stack push' && (arg === '--tab' || arg.startsWith('--tab='))) {
+      const value = arg === '--tab' ? readValue(args, ++index, arg, literalValues) : arg.slice('--tab='.length);
+      if (!value.trim()) throw new Error('--tab requires a value.');
+      (parsed.stackTabs ??= []).push(value);
       continue;
     }
     // `lock acquire --wait <ms>` takes a value; on a dispatch command `--wait` is a switch.
@@ -812,6 +833,11 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--paused') {
     parsed.paused = true;
+    return;
+  }
+  if (flag === '--next') {
+    if (parsed.command !== 'autopilot stack push') throw new Error('--next is only valid with runpane autopilot stack push.');
+    parsed.stackNext = true;
     return;
   }
 
@@ -1250,6 +1276,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--cron') {
     parsed.cron = value;
+    return;
+  }
+  if (flag === '--item') {
+    parsed.item = value;
     return;
   }
 

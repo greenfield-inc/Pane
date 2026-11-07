@@ -31,6 +31,8 @@ const DAEMON_EVENT_PREFIXES = [
 ] as const;
 
 const DAEMON_EVENT_EXACT_CHANNELS = new Set<string>([
+  // Autopilot's snapshot, so the phone's Autopilot row and walk bar follow the desktop.
+  'autopilot:changed',
   'git-status-loading',
   'git-status-updated',
   'logs:output',
@@ -371,7 +373,7 @@ export class PaneDaemonServer {
   ): Promise<PaneDaemonSuccessResponseFrame | PaneDaemonErrorResponseFrame> {
     try {
       const result = signal
-        ? await this.commandRegistry.invokeConnected(frame.channel, frame.args, signal)
+        ? await this.commandRegistry.invokeConnected(frame.channel, frame.args, signal, frame.caller)
         : await this.commandRegistry.invoke(frame.channel, frame.args);
       return {
         type: 'response',
