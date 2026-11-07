@@ -2,10 +2,14 @@ import * as Haptics from 'expo-haptics';
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
+import { originLine } from '@shared/approvalReceipts';
 import { decisionModel, type DecisionModel, type DecisionOption } from '@shared/autopilotDecision';
 import type { NotifyAnswer, NotifyItem } from '@shared/types/notify';
 
+import { useDaemon } from '@/daemon';
 import { sinceLabel } from '@/features/allMachines/allMachinesList';
+import { ApprovalActions } from '@/features/approvals/ApprovalActions';
+import { receiptLines } from '@/features/approvals/approvals';
 import { useNotifyCommand } from '@/features/notify/hooks';
 import { useTheme, withAlpha } from '@/theme';
 import { Icon, Text } from '@/ui';
@@ -19,12 +23,11 @@ const KIND_ICON: Record<DecisionModel['kind'], Glyph> = {
   Question: { ios: 'questionmark.circle', android: 'help' },
   Permission: { ios: 'exclamationmark.shield', android: 'gpp_maybe' },
   Autopilot: { ios: 'location', android: 'near_me' },
-  Stuck: { ios: 'hourglass', android: 'hourglass_empty' },
 };
 
-/** The card's top line after its kind: Q-n, Session, who asked ("its own" on Autopilot's). */
+/** The card's top line after its kind: Q-n, and "its own" on Autopilot's. Who asked is the origin line below. */
 function decisionMeta(model: DecisionModel): string {
-  return [model.qn, model.byAutopilot ? 'its own' : undefined, model.session, model.byAutopilot ? undefined : model.who].filter(Boolean).join(' · ');
+  return [model.qn, model.byAutopilot ? 'its own' : undefined].filter(Boolean).join(' · ');
 }
 
 /**
@@ -52,8 +55,9 @@ function sameAnswer(a: NotifyAnswer | undefined, b: NotifyAnswer): boolean {
 }
 
 /**
- * Autopilot's decision card (D-77): kind · Q-n · Session · who and its age, the question, a
- * one-line why, then the options with the recommended one marked. In the chat (`chat`) an option
+ * Autopilot's decision card (D-77): kind · Q-n and its age, the origin line, the question, a
+ * one-line why, then the options with the recommended one marked, its receipts, and Close, Override
+ * or Reopen. In the chat (`chat`) an option
  * answers at once and the footer opens the approval full screen; on that screen (`full`) the
  * options answer only when there are more than two (two or fewer are the buttons at the bottom).
  * Autopilot's own items are violet. An answered card collapses to its answer.
@@ -67,6 +71,7 @@ export function DecisionCard({ notifyId, item, variant, onOpen, answer }: {
 }) {
   const theme = useTheme();
   const { colors } = theme;
+  const { profile } = useDaemon();
   const state = cardState(item);
   if (!item) {
     return (
@@ -92,8 +97,10 @@ export function DecisionCard({ notifyId, item, variant, onOpen, answer }: {
           </Text>
           {open ? <Text variant="footnote" tone="muted">{sinceLabel(model.createdAt, Date.now())}</Text> : null}
         </View>
+        <Text testID="decision-origin" variant="footnote" tone="muted" numberOfLines={1}>{originLine(item, profile.label)}</Text>
         <Text testID="decision-title" variant="headline" selectable style={[styles.title, !open && { color: colors.textSecondary }]}>{model.title}</Text>
         {open && model.why ? <Text variant="subhead" tone="secondary" numberOfLines={variant === 'chat' ? 2 : undefined}>{model.why}</Text> : null}
+        {open ? receiptLines(item).map(line => <Text key={line} testID="decision-receipt" variant="footnote" tone="secondary">{line}</Text>) : null}
       </View>
       {open ? (
         <>
@@ -106,6 +113,7 @@ export function DecisionCard({ notifyId, item, variant, onOpen, answer }: {
           ) : null}
         </>
       ) : <Outcome state={state} undo={answer.undo} busy={answer.busy} />}
+      <ApprovalActions item={item} style={styles.itemActions} />
       {answer.error ? <Text testID="decision-error" variant="footnote" tone="danger" style={styles.error}>{answer.error} Nothing else changed; check the card before answering again.</Text> : null}
       {/* An answered card collapses to its answer (round 4, screen 5). */}
       {variant === 'chat' && onOpen && open ? (
@@ -204,4 +212,5 @@ const styles = StyleSheet.create({
   undo: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
   footer: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, minHeight: 48, borderTopWidth: StyleSheet.hairlineWidth },
   error: { paddingHorizontal: 14, paddingBottom: 10 },
+  itemActions: { paddingHorizontal: 14, paddingBottom: 12 },
 });

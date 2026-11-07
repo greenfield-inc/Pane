@@ -41,7 +41,7 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 | `git` | status, commit, push, pull, fetch, rebase onto main, squash-rebase onto main, stash, stash-pop, soft reset (`panes_*`) |
 | `sessions` | the `sessions_*` tools (including `sessions_pause` and `sessions_resume`) and the three named-lock tools (`lock_acquire`, `lock_release`, `lock_list`) |
 | `loops` | `loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete` (see [Loops](LOOPS.md)) |
-| `autopilot` | `autopilot_status`, `autopilot_waiting`, `autopilot_stack`, `autopilot_stack_push`: Autopilot's (experimental) reads and its stack. `autopilot_stack_push` takes one `tab` per call (the CLI's `--tab` repeats). Pane refuses any answer from Autopilot's panel with `AUTOPILOT_CANNOT_ANSWER` |
+| `autopilot` | `autopilot_status`, `autopilot_waiting`, `autopilot_stack`, `autopilot_stack_push`, `autopilot_answer`, `autopilot_close`, `autopilot_rewrite`: Autopilot's (experimental) reads, its stack, and its actions on waiting items. `autopilot_stack_push` takes one `tab` per call (the CLI's `--tab` repeats). Only Autopilot's panel may act (`AUTOPILOT_ONLY`), and a permission prompt, or an answer or rewrite of a secret card, is refused with `AUTOPILOT_CANNOT_ANSWER` |
 | `repos` | the repository tools, including `repos_get` and `repos_update` (a repo's Project Settings: build, run and archive scripts, worktree folder) |
 | `secrets` | `secrets_list`, `secrets_delete`. No tool sets or reads a value: agents use secrets through `runpane secrets exec` ([Pane secrets](PANE_SECRETS.md)) |
 | `docs`, `links`, `admin` | documentation, deep-link, and diagnostic tools |

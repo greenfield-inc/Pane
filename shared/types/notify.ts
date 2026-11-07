@@ -2,10 +2,11 @@
  * Pane Notify: agents call the `notify` MCP tool (or `runpane notify`) and Pane shows the
  * question wherever the person is, then returns the answer as the tool result.
  *
- * The main process owns one in-memory queue (main/src/services/notify/notifyQueue.ts) and
- * pushes a {@link NotifySnapshot} to every surface: the main window, the floating strip and
- * the round. Surfaces send {@link NotifyAction}s back; the first answer wins and every
- * surface clears together. Nothing is persisted: a question lives only while its call is open.
+ * Each machine keeps its approvals in one table of its sessions.db (ApprovalStore), and the queue
+ * (main/src/services/notify/notifyQueue.ts) works from it and pushes a {@link NotifySnapshot} to
+ * every surface: the main window, the floating strip and the round. Surfaces send commands back;
+ * the first answer wins and every surface clears together. An item exists only while someone can
+ * act on it and someone can take the answer (D-147): it outlives a call, but not its asker.
  */
 
 export type NotifyUi = 'options' | 'approve' | 'ask' | 'secret' | 'info';
@@ -81,6 +82,10 @@ export interface NotifyAgentPrompt {
 export interface NotifyRequest extends Partial<NotifyQuestion> {
   /** Keep waiting on a question an earlier call returned `waiting` for. */
   resume?: string;
+  /** A Session orchestrator improves this waiting item (a worker's question) instead of posting a second card. */
+  relays?: string;
+  /** Autopilot's own item: the Session it is about (an id or name). Absent: it links to Autopilot's chat. */
+  aboutSession?: string;
   /** Return `waiting` after this long, for clients whose tool calls time out (Cursor's CLI). */
   returnAfterMs?: number;
   caller: NotifyCaller;
@@ -141,6 +146,62 @@ export const NOTIFY_UPDATES_HIDE_AFTER_CHOICES = [4, 6, 10, 20] as const;
  */
 export type NotifyItemState = 'waiting' | 'sent' | 'answered' | 'expired' | 'info';
 
+/** Who answered or closed an item, on every device's receipt. */
+export type NotifyActor = 'you' | 'autopilot' | 'orchestrator' | 'pane';
+
+/** Where an item came from. */
+export type NotifyOriginKind = 'orchestrator' | 'worker' | 'autopilot' | 'claude-prompt' | 'pane' | 'agent';
+
+/**
+ * What every item is connected to (D-168): the Session it came from. Outside a Session, it links
+ * to its Pane, to Autopilot's chat, or, for a caller outside Pane and Pane itself, to the machine.
+ */
+export type NotifyConnected =
+  | { kind: 'session'; id: string; name: string; paneId: string }
+  | { kind: 'pane'; id: string; name: string }
+  | { kind: 'autopilot'; id: 'autopilot'; name: 'Autopilot' }
+  | { kind: 'machine'; id: string; name: string };
+
+/** Who answered, and why when it wasn't the person. */
+export interface NotifyAnswerReceipt {
+  by: NotifyActor;
+  /** Autopilot's reason: a D-n, a document or the person's words. */
+  because?: string;
+}
+
+/** Why an item closed without an answer: "Session archived", "the asking tab was closed". */
+export interface NotifyClosed {
+  by: NotifyActor;
+  reason: string;
+  /** Epoch ms. */
+  at: number;
+}
+
+/** How an answer reached its asker: its open call, or typed into its tab. */
+export interface NotifyDelivered {
+  via: 'call' | 'tab';
+  /** Epoch ms. */
+  at: number;
+}
+
+/** Who reopened a closed item, from where, and which close that reversed. */
+export interface NotifyReopened {
+  by: NotifyActor;
+  /** The device that reopened it, when another screen did. */
+  device?: string;
+  /** Epoch ms. */
+  at: number;
+  closedBy: NotifyActor;
+  closedReason: string;
+}
+
+/** The person's Override of an answer, sent to the asker as a correction. */
+export interface NotifyCorrection {
+  summary: string;
+  by: NotifyActor;
+  /** Epoch ms. */
+  at: number;
+}
 export interface NotifySource {
   /** The Pane the call came from, when it was linked to one. */
   paneId?: string;
@@ -151,6 +212,8 @@ export interface NotifySource {
   agent: string;
   /** The Session the asking Pane works in, resolved by the host when the item is made. Absent: "Not in a Session". */
   session?: NotifySession;
+  /** The asking Pane's project, for Approvals' By project sort (D-176). Absent outside a project or from an older machine. */
+  project?: string;
   /** Autopilot asked (its own approval, D-60): Approvals files it under "Autopilot", shown violet. */
   autopilot?: boolean;
 }
@@ -166,8 +229,8 @@ export interface NotifySession {
 }
 
 /**
- * A worker's blocked question its orchestrator hasn't acknowledged for a while (Approvals'
- * fallback): shown read-only, so a question is never invisible while its orchestrator is down.
+ * A read-only mirror of a worker's question, sent only by an older machine: this build makes the
+ * question itself an answerable item.
  */
 export interface NotifyRelay {
   /** The Session inbox item it mirrors. */
@@ -202,8 +265,36 @@ export interface NotifyItem extends NotifyQuestion {
   unreachable?: boolean;
   /** Snapshot only: from a saved machine the app isn't on, so it offers no Open in Pane. */
   elsewhere?: boolean;
-  /** Set on a fallback item (state `waiting`, never in `queue`): it takes no answer. */
+  /** From an older machine only (state `waiting`, never in `queue`): it takes no answer. */
   relay?: NotifyRelay;
+  /** Where it came from. Absent from an older machine. */
+  originKind?: NotifyOriginKind;
+  /** The Session (or Pane, Autopilot, machine) it belongs to; every item has one. Absent from an older machine. */
+  connected?: NotifyConnected;
+  /** Who answered it, for the receipt. */
+  answeredBy?: NotifyAnswerReceipt;
+  /** Set when it closed without an answer; its state reads `expired` so older machines show it as ended. */
+  closed?: NotifyClosed;
+  /** Epoch ms when it went stale (3 days unanswered): grouped, never rings or pushes again. */
+  staleSince?: number;
+  /** A worker's question its orchestrator still has first call on: it shows, but doesn't ring yet. */
+  quiet?: boolean;
+  /** Autopilot rewrote an unclear item: this item is the rewrite of that one. */
+  rewrittenFrom?: { id: string; title: string; qn?: string };
+  /** Autopilot rewrote this item: it closed in favour of that one. */
+  rewrittenAs?: { id: string; title: string };
+  /** The answer reached the asker. */
+  delivered?: NotifyDelivered;
+  /** The orchestrator recorded the answer as this D-n. */
+  decision?: string;
+  /** The person's Overrides, oldest first. */
+  corrections?: NotifyCorrection[];
+  /** The person brought it back after it closed: only they do, so it isn't to be closed again unasked. */
+  reopened?: NotifyReopened;
+  /** The phone was pushed for it; a restart doesn't push again. */
+  pushed?: boolean;
+  /** The one-time summary card after an upgrade: the items it offers to close, oldest first. */
+  summaryOf?: string[];
 }
 
 /** What the strip shows. Main decides; every surface renders the same thing. */
@@ -234,6 +325,8 @@ export interface NotifySnapshot {
   firstRun: boolean;
   /** Pane's Notify block in each agent's user-level instruction file. */
   instructionFiles: NotifyInstructionsFile[];
+  /** Saved approvals couldn't be imported on this start: nothing was lost and it retries on the next. */
+  importError?: { code: string; message: string; next: string };
 }
 
 /**
@@ -260,7 +353,21 @@ export type NotifyRemoteCommand =
   | { type: 'undo' | 'dismiss' | 'skip'; id: string }
   | { type: 'remind'; id: string; after: Exclude<NotifyRemindAfter, 'pane'> }
   /** A phone opens an item's link `index` beside its card, with the host's fallbacks (`paneId` is the Pane shown there). */
-  | NotifyRemoteOpenLink;
+  | NotifyRemoteOpenLink
+  /** The person closes an item, or undoes a close. A machine too old for these refuses them. */
+  | { type: 'close'; id: string; reason?: string }
+  | { type: 'reopen'; id: string }
+  /** The person corrects an answer already sent. */
+  | { type: 'override'; id: string; answer: NotifyAnswer }
+  /** Autopilot on any machine acts on this machine's item, recorded as "by Autopilot" here. */
+  | NotifyAgentAction;
+
+/** What Autopilot does to an item, applied by the machine that holds it (D-165). */
+export type NotifyAgentAction =
+  | { type: 'agent-answer'; id: string; answer: NotifyAnswer; because: string; machine?: string }
+  | { type: 'agent-close'; id: string; reason: string; machine?: string }
+  /** `newId` names the rewrite, so the machine asking knows it without a reply. */
+  | { type: 'agent-rewrite'; id: string; question: NotifyQuestion; reason?: string; machine?: string; newId?: string };
 
 export interface NotifyRemoteOpenLink {
   type: 'open-link';
@@ -311,7 +418,13 @@ export type NotifyCommand =
   | { type: 'close-round' }
   | { type: 'open-inbox' }
   /** Show or Hide details on a pop-up card: the next card opens the same way. */
-  | { type: 'show-details'; shown: boolean };
+  | { type: 'show-details'; shown: boolean }
+  /** Close: the item ends, and its asker is told. */
+  | { type: 'close'; id: string; reason?: string }
+  /** Reopen a closed item: it waits again. */
+  | { type: 'reopen'; id: string }
+  /** Override: the person's answer goes to the asker as a correction. */
+  | { type: 'override'; id: string; answer: NotifyAnswer };
 
 /** Where main sends the main window: Approvals (optionally on one item) or its settings. */
 export type NotifyNavigateTarget = 'inbox' | 'settings' | { approval: string };

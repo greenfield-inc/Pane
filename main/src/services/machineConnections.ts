@@ -136,7 +136,7 @@ export class MachineConnections {
   private async invoke(machineId: string, { channel, args }: Invocation, options: { write?: boolean } = {}): Promise<PaneCommandValue> {
     if (machineId === LOCAL_MACHINE_ID) {
       // This computer's Notify takes the sender the HTTP server would add for a remote screen.
-      return this.deps.invokeLocal(channel, channel === 'notify:remote-command' ? [...args, { device: os.hostname() }] : args);
+      return this.deps.invokeLocal(channel, channel === 'notify:remote-command' ? [...args, { device: os.hostname().split('.')[0] }] : args);
     }
     const machine = this.machines.get(machineId);
     if (!machine) throw unknownMachine(machineId);

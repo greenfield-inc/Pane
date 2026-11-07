@@ -1390,6 +1390,90 @@
       "item.created,item.answered,session.created,session.archived,orchestrator.turn_ended",
       "--until-event",
       "--json"
+    ],
+    [
+      "inbox",
+      "ack",
+      "in-1a2b3c4d",
+      "--decision",
+      "D-147",
+      "--json"
+    ],
+    [
+      "notify",
+      "--relays",
+      "in-1a2b3c4d",
+      "--ui",
+      "ask",
+      "--title",
+      "Q-39: Run it?"
+    ],
+    [
+      "notify",
+      "--ui",
+      "ask",
+      "--title",
+      "Which?",
+      "--about-session=Release",
+      "--json"
+    ],
+    [
+      "autopilot",
+      "answer",
+      "n-1",
+      "--choice",
+      "Yes",
+      "--note",
+      "Go",
+      "--because",
+      "D-22",
+      "--json"
+    ],
+    [
+      "autopilot",
+      "answer",
+      "n-1",
+      "--approve",
+      "--because=The person said so"
+    ],
+    [
+      "autopilot",
+      "answer",
+      "n-1",
+      "--deny",
+      "--because",
+      "D-23"
+    ],
+    [
+      "autopilot",
+      "answer",
+      "n-1",
+      "--text",
+      "main",
+      "--because",
+      "D-24"
+    ],
+    [
+      "autopilot",
+      "close",
+      "n-1",
+      "--reason",
+      "The PR merged",
+      "--json"
+    ],
+    [
+      "autopilot",
+      "rewrite",
+      "n-1",
+      "--ui",
+      "options",
+      "--title",
+      "Q-3: Which?",
+      "--context",
+      "Why",
+      "--choices=[{\"label\":\"A\"}]",
+      "--links=[{\"label\":\"Notes\",\"url\":\"https://example.com\"}]",
+      "--json"
     ]
   ],
   "help": {

@@ -3796,10 +3796,26 @@ interface InboxItem {
   screenLines?: string[];
 }
 
+/** An answer to one of the Session's workers, kept 7 days so its D-n can be recorded. */
+interface InboxAnswer {
+  id: string;
+  title: string;
+  answer: string;
+  by: 'you' | 'autopilot' | 'orchestrator' | 'pane';
+  because?: string;
+  worker: string;
+  panelId?: string;
+  answeredAt: string;
+  delivered?: 'call' | 'tab';
+  decision?: string;
+}
+
 interface InboxListResult {
   ok: true;
   session: { id: string; name: string };
   items: InboxItem[];
+  /** Absent from an older Pane. */
+  answers?: InboxAnswer[];
 }
 
 interface InboxAckResult {
@@ -3824,10 +3840,23 @@ const inboxItemSchema: BoundarySchema<InboxItem> = boundary.object({
   reason: boundary.optional(boundary.string),
   screenLines: boundary.optional(boundary.array(boundary.string)),
 });
+const inboxAnswerSchema: BoundarySchema<InboxAnswer> = boundary.object({
+  id: boundary.string,
+  title: boundary.string,
+  answer: boundary.string,
+  by: boundary.enumeration('you', 'autopilot', 'orchestrator', 'pane'),
+  because: boundary.optional(boundary.string),
+  worker: boundary.string,
+  panelId: boundary.optional(boundary.string),
+  answeredAt: boundary.string,
+  delivered: boundary.optional(boundary.enumeration('call', 'tab')),
+  decision: boundary.optional(boundary.string),
+});
 const inboxListResultSchema: BoundarySchema<InboxListResult> = boundary.object({
   ok: boundary.literal(true),
   session: boundary.object({ id: boundary.string, name: boundary.string }),
   items: boundary.array(inboxItemSchema),
+  answers: boundary.optional(boundary.array(inboxAnswerSchema)),
 });
 const inboxAckResultSchema: BoundarySchema<InboxAckResult> = boundary.object({
   ok: boundary.literal(true),
@@ -3836,6 +3865,7 @@ const inboxAckResultSchema: BoundarySchema<InboxAckResult> = boundary.object({
 });
 
 const MAX_INBOX_DETAIL_LENGTH = 300;
+const INBOX_DECISION = /^D-\d+$/;
 
 /** `--session`, else the Session whose orchestrator this terminal is. */
 function inboxSession(parsed: ParsedArgs, env: NodeJS.ProcessEnv): string | undefined {
@@ -3854,12 +3884,22 @@ export async function runInbox(parsed: ParsedArgs, env: NodeJS.ProcessEnv = proc
   }
   if (result.items.length === 0) {
     console.log(`Inbox for ${result.session.name}: nothing unacknowledged.`);
-    return 0;
+  } else {
+    console.log(`Inbox for ${result.session.name}: ${result.items.length} unacknowledged.`);
+    for (const item of result.items) console.log(formatInboxItem(item));
+    console.log(`Clear handled items with: runpane inbox ack ${result.items.map(item => item.id).join(' ')}`);
   }
-  console.log(`Inbox for ${result.session.name}: ${result.items.length} unacknowledged.`);
-  for (const item of result.items) console.log(formatInboxItem(item));
-  console.log(`Clear handled items with: runpane inbox ack ${result.items.map(item => item.id).join(' ')}`);
+  const unrecorded = (result.answers ?? []).filter(answer => !answer.decision);
+  for (const answer of unrecorded) console.log(formatInboxAnswer(answer));
+  if (unrecorded.length > 0) console.log('Record each with: runpane inbox ack <id> --decision <D-n>');
   return 0;
+}
+
+const ANSWERED_BY = { you: 'you', autopilot: 'Autopilot', orchestrator: 'the orchestrator', pane: 'Pane' } as const;
+
+/** `<id> ANSWERED <worker>: <title> -> <answer> (by you) needs a D-n`. */
+function formatInboxAnswer(answer: InboxAnswer): string {
+  return `${answer.id} ANSWERED ${oneLine(answer.worker)}: ${oneLine(answer.title)} -> ${clip(oneLine(answer.answer))} (by ${ANSWERED_BY[answer.by]}) needs a D-n`;
 }
 
 export async function runInboxAck(parsed: ParsedArgs, env: NodeJS.ProcessEnv = process.env): Promise<number> {
@@ -3867,15 +3907,21 @@ export async function runInboxAck(parsed: ParsedArgs, env: NodeJS.ProcessEnv = p
   if (parsed.all && !session) {
     throw new Error('runpane inbox ack --all needs --session <id|name> outside a Session orchestrator.');
   }
+  const decision = parsed.inboxDecision;
+  if (decision !== undefined) {
+    if (parsed.all) throw new RunpaneError('ERR_INBOX_INVALID', 'runpane inbox ack --decision records on the items you name, so it can\'t go with --all. Nothing was acknowledged.', 'Pass the item ids from runpane inbox.');
+    if (!INBOX_DECISION.test(decision)) throw new RunpaneError('ERR_INBOX_INVALID', `--decision must look like D-147; got "${decision}". Nothing was acknowledged.`, 'Pass the D-n from your decision log.');
+  }
   const result = await invokeDaemon('runpane:inbox:ack', [{
     ids: parsed.all ? undefined : parsed.inboxIds,
     session,
     all: parsed.all || undefined,
+    decision,
   }], inboxAckResultSchema, { paneDir: parsed.paneDir });
   if (parsed.json) {
     printJson(result);
   } else {
-    console.log(`Acknowledged ${result.acknowledged.length} inbox item${result.acknowledged.length === 1 ? '' : 's'}.`);
+    console.log(`Acknowledged ${result.acknowledged.length} inbox item${result.acknowledged.length === 1 ? '' : 's'}${decision && result.acknowledged.length > 0 ? `, recorded as ${decision}` : ''}.`);
     if (result.unknown.length > 0) console.log(`Not found (already acknowledged?): ${result.unknown.join(', ')}`);
   }
   return 0;

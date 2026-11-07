@@ -11,6 +11,10 @@ import { AutopilotItemRows } from './AutopilotItemRows';
 import { AutopilotDecisionCard } from './AutopilotDecisionCard';
 import { SentinelAwayCard, SentinelLogRows } from './AutopilotSentinelLog';
 import { showActionError } from '../../stores/errorStore';
+import { useAllMachinesStore } from '../../stores/allMachinesStore';
+import { offlineRows, offlineRowText } from '../approvals/approvalGroups';
+import { withMachineLabels } from '../notify/notifyFormat';
+import { AutopilotReach } from './AutopilotReach';
 import { AutopilotStack } from './AutopilotStack';
 import { AWAY_BLOCK, controlLine, ITEMS_BLOCK, LOG_BLOCK, queuedControlLabel } from '../../../../shared/autopilotTranscript';
 
@@ -84,7 +88,7 @@ function StartCard({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending
           {snapshot.stack.entries.length > 0 ? 'Autopilot is stopped' : 'Autopilot is ready'}
         </div>
         <p className="mt-2 text-[13.5px] leading-relaxed text-text-secondary">
-          Press Start and Autopilot reads every Session and what waits on you, then walks them from the top, one item at a time on the stack. You answer every approval yourself.
+          Press Start and Autopilot reads every Session and what waits on you, then walks them from the top, one item at a time on the stack. It can answer and close approvals when the way is clear or you tell it to, with a receipt you can override; permission prompts stay yours.
         </p>
         {blocked && <p className="mt-2 text-[13px] text-status-warning-on-tint" role="alert">{blocked}</p>}
         <button type="button" disabled={pending || !!blocked} onClick={() => void runAutopilot('start')} data-testid="autopilot-start-button"
@@ -105,7 +109,13 @@ function CurrentDock({ snapshot }: { snapshot: AutopilotSnapshot }) {
   const notifyId = shown?.ref.kind === 'item' && shown.doneAt === undefined ? shown.ref.notifyId : undefined;
   const item = useNotifyStore((state) => (notifyId ? state.snapshot?.items.find((candidate) => candidate.id === notifyId) : undefined));
   const rendered = useRenderedItems((state) => (notifyId ? (state.counts[notifyId] ?? 0) > 0 : false));
+  const machines = useAllMachinesStore((state) => state.entries);
   if (!item || rendered) return null;
+  // Its machine can't be reached: nothing to answer, so no card.
+  if (item.unreachable) {
+    const [row] = offlineRows(withMachineLabels([item], machines));
+    return row ? <p className="mx-auto w-full max-w-[var(--thread-max-width)] px-6 pb-2 text-[12.5px] text-text-tertiary" data-testid="autopilot-dock-offline">{offlineRowText(row)}</p> : null;
+  }
   return (
     <div className="mx-auto w-full max-w-[var(--thread-max-width)] px-6 pb-2" data-testid="autopilot-dock">
       <AutopilotDecisionCard item={item} current />
@@ -259,6 +269,7 @@ export function AutopilotView() {
       <section aria-label="Autopilot chat" className="flex min-h-0 w-[44%] min-w-[340px] max-w-[720px] flex-col border-r border-border-primary">
         <Header snapshot={snapshot} pending={pending} />
         <WalkBar snapshot={snapshot} />
+        <AutopilotReach snapshot={snapshot} />
         {/* Start follows Autopilot's state, not the chat's: after a restart the agent reloads its conversation but waits for Start. */}
         {snapshot.panelId && snapshot.state === 'stopped' && <StartCard snapshot={snapshot} pending={pending} />}
         <div className="min-h-0 flex-1">

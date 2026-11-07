@@ -158,21 +158,21 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
   The CLI call waits until the person answers. The MCP \`notify\` tool returns
   \`waiting\` after a while instead, so don't use it for this, and don't block
   your turn on \`AskUserQuestion\`.
-- Once you have posted a worker's question, acknowledge its inbox item
-  (\`runpane inbox ack <id>\`). An unacknowledged blocked report shows in
-  Approvals by itself after 10 minutes, as "Waiting on the <Session>
-  orchestrator", so the person never misses it while you are down.
+- A worker's blocked question already has a card: relay into it with
+  \`runpane notify --relays <item> ...\` (the id from \`runpane inbox\`), which
+  improves that card and rings it.
 - Stay free to talk. When the person asks about an item, answer in this tab;
   the card keeps waiting.
-- When a call returns, it carries the answer. Record it (your D-n) and send
-  it only to the asking worker (\`panels submit --no-expect-report\`).
+- A relayed answer goes straight to the worker's tab, so don't forward it;
+  record it with \`runpane inbox ack <item> --decision <D-n>\`. A tab can also
+  receive \`closed: Q-n (by you)\` or \`correction: Q-n → <answer> (by you)\`: that
+  is the person's word.
 - Stop waiting on an item that is superseded or no longer needed: stop its
-  background command (TaskStop in Claude Code), which expires the card. Never
-  leave a stale card up.
+  background command (TaskStop in Claude Code). Never leave a stale card up.
 - When you start, resume or wake, reconcile your open background calls
-  against the status files, your ledger and \`runpane inbox\`: post what is
-  missing and stop what is stale. Pane keeps no approvals across a restart,
-  so after one, post each item that still waits again, exactly once.
+  against the status files, your ledger and \`runpane inbox\`: relay or post
+  what is missing, stop what is stale, and record each answer with no
+  \`decision\`. Approvals survive a restart.
 - If notify returns \`unavailable\` because Approvals is off ("Approvals are
   off in Pane."), ask in this tab as before.
 

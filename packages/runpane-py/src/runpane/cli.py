@@ -10,7 +10,15 @@ import sys
 from typing import Callable, Dict, List, Optional, Set, Tuple, TypeVar
 
 from .agent_context import run_agent_context
-from .autopilot import run_autopilot_stack, run_autopilot_stack_push, run_autopilot_status, run_autopilot_waiting
+from .autopilot import (
+    run_autopilot_answer,
+    run_autopilot_close,
+    run_autopilot_rewrite,
+    run_autopilot_stack,
+    run_autopilot_stack_push,
+    run_autopilot_status,
+    run_autopilot_waiting,
+)
 from .daemon_actions import contract_command, run_daemon_action, run_links_create
 from .doctor import run_doctor
 from .download import download_artifact
@@ -138,6 +146,22 @@ NOTIFY_VALUE_FLAGS = {
     "--suggestions": "notify_suggestions",
     "--action": "notify_action",
     "--links": "notify_links",
+    "--relays": "notify_relays",
+    "--about-session": "notify_about_session",
+}
+# Autopilot's commands that take a waiting item's id as their first word.
+AUTOPILOT_ITEM_COMMANDS = {"autopilot answer", "autopilot close", "autopilot rewrite"}
+# Flags one command owns; on any other they are refused rather than ignored.
+# Flags only some commands own; on any other they are refused rather than ignored.
+FLAG_OWNERS = {
+    "--relays": ("notify",),
+    "--about-session": ("notify",),
+    "--decision": ("inbox ack",),
+    "--choice": ("autopilot answer",),
+    "--approve": ("autopilot answer",),
+    "--deny": ("autopilot answer",),
+    "--because": ("autopilot answer",),
+    "--reason": ("secrets request", "autopilot close"),
 }
 HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
@@ -272,8 +296,17 @@ class ParsedArgs:
     wait_timeout_ms: Optional[int] = None
     all: bool = False
     inbox_ids: List[str] = field(default_factory=list)
+    # inbox ack --decision: the D-n to record on each item.
+    inbox_decision: Optional[str] = None
     # autopilot stack push: --item, the repeatable --tab <path-or-url>, and --next.
+    # --item is also the <id> of autopilot answer, close and rewrite.
     item: Optional[str] = None
+    # autopilot answer: exactly one way of answering, checked when it runs.
+    answer_choice: Optional[str] = None
+    answer_approve: bool = False
+    answer_deny: bool = False
+    # autopilot answer --because, autopilot close --reason: why, recorded on the item.
+    because: Optional[str] = None
     stack_tabs: List[str] = field(default_factory=list)
     stack_next: bool = False
     lock_ttl_ms: Optional[int] = None
@@ -288,6 +321,8 @@ class ParsedArgs:
     notify_suggestions: Optional[str] = None
     notify_action: Optional[str] = None
     notify_links: Optional[str] = None
+    notify_relays: Optional[str] = None
+    notify_about_session: Optional[str] = None
     loop_id: Optional[str] = None
     cron: Optional[str] = None
     paused: bool = False
@@ -522,6 +557,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     if parsed.command == "inbox ack":
         while args and not args[0].startswith("-"):
             parsed.inbox_ids.append(args.pop(0))
+    if parsed.command in AUTOPILOT_ITEM_COMMANDS and args and not args[0].startswith("-"):
+        parsed.item = args.pop(0)
     if parsed.command == "install" and args and not args[0].startswith("-"):
         target = args.pop(0)
         if target not in TARGETS:
@@ -796,6 +833,8 @@ def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
         elif is_local_command and arg == "--wait" and parsed.command in WAIT_FOR_RESULT_COMMANDS:
             # `lock acquire --wait <ms>` takes a value; on a dispatch command `--wait` is a switch.
             parsed.wait_for_result = True
+        elif is_local_command and arg in FLAG_OWNERS and parsed.command not in FLAG_OWNERS[arg]:
+            raise ValueError(f"{arg} is only valid with runpane {' or runpane '.join(FLAG_OWNERS[arg])}.")
         elif is_local_command and arg in LOCAL_BOOLEAN_FLAGS:
             parse_local_boolean_flag(parsed, arg)
         elif is_local_command and arg in LOCAL_VALUE_FLAGS:
@@ -957,6 +996,12 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         if parsed.command != "autopilot stack push":
             raise ValueError("--next is only valid with runpane autopilot stack push.")
         parsed.stack_next = True
+        return
+    if flag == "--approve":
+        parsed.answer_approve = True
+        return
+    if flag == "--deny":
+        parsed.answer_deny = True
         return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
@@ -1286,6 +1331,15 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--item":
         parsed.item = value
         return
+    if flag == "--decision":
+        parsed.inbox_decision = value
+        return
+    if flag == "--choice":
+        parsed.answer_choice = value
+        return
+    if flag == "--because":
+        parsed.because = value
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -1316,7 +1370,7 @@ def read_value(args: List[str], index: int, flag: str, literal_values: Set[int])
     if clearable and index < len(args) and args[index] == "":
         return ""
     bare_flag = index < len(args) and re.fullmatch(r"--[a-z][a-z-]*", args[index]) is not None
-    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains", "--reason"}
+    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains", "--because", "--reason", "--choice"}
     if index >= len(args) or not args[index] or (not free_text and args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]
@@ -1602,6 +1656,9 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "autopilot waiting": lambda parsed, context: run_autopilot_waiting(parsed),
     "autopilot stack": lambda parsed, context: run_autopilot_stack(parsed),
     "autopilot stack push": lambda parsed, context: run_autopilot_stack_push(parsed),
+    "autopilot answer": lambda parsed, context: run_autopilot_answer(parsed),
+    "autopilot close": lambda parsed, context: run_autopilot_close(parsed),
+    "autopilot rewrite": lambda parsed, context: run_autopilot_rewrite(parsed),
     "agents doctor": lambda parsed, context: run_agents_doctor(parsed),
     "panes adopt": lambda parsed, context: run_panes_adopt(parsed),
     "help": lambda parsed, context: print_help(parsed),

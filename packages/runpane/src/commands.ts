@@ -158,8 +158,16 @@ export interface ParsedArgs {
   all?: boolean;
   /** inbox ack: the item ids to clear. */
   inboxIds?: string[];
-  /** autopilot stack push `--item`: the waiting item to put on the stack. */
+  /** inbox ack `--decision`: the D-n to record on each item. */
+  inboxDecision?: string;
+  /** autopilot stack push `--item`, or the `<id>` of autopilot answer, close and rewrite. */
   item?: string;
+  /** autopilot answer: exactly one way of answering, checked when it runs. */
+  answerChoice?: string;
+  answerApprove?: boolean;
+  answerDeny?: boolean;
+  /** autopilot answer `--because`, autopilot close `--reason`: why, recorded on the item. */
+  because?: string;
   /** autopilot stack push `--tab`, repeatable: extra tabs, each a file path or an http(s) URL. */
   stackTabs?: string[];
   /** autopilot stack push `--next`: right after the entry on screen, so it comes up next. */
@@ -176,6 +184,8 @@ export interface ParsedArgs {
   notifySuggestions?: string;
   notifyAction?: string;
   notifyLinks?: string;
+  notifyRelays?: string;
+  notifyAboutSession?: string;
   /** loops: the loop id, its cron, and create's --paused. */
   loopId?: string;
   cron?: string;
@@ -225,6 +235,19 @@ const MAX_LOCK_DURATION_MS = 86_400_000;
 
 const REMOTE_VALUE_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteValue.map((flag) => flag.name));
 const REMOTE_BOOLEAN_FLAGS = new Set<string>(RUNPANE_CONTRACT.flags.remoteBoolean.map((flag) => flag.name));
+/** Autopilot's commands that take a waiting item's id as their first word. */
+const AUTOPILOT_ITEM_COMMANDS = new Set(['autopilot answer', 'autopilot close', 'autopilot rewrite']);
+/** Flags only some commands own; on any other they are refused rather than ignored. */
+const FLAG_OWNERS = new Map<string, readonly string[]>([
+  ['--relays', ['notify']],
+  ['--about-session', ['notify']],
+  ['--decision', ['inbox ack']],
+  ['--choice', ['autopilot answer']],
+  ['--approve', ['autopilot answer']],
+  ['--deny', ['autopilot answer']],
+  ['--because', ['autopilot answer']],
+  ['--reason', ['secrets request', 'autopilot close']],
+]);
 const LOCAL_VALUE_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localValue);
 const LOCAL_BOOLEAN_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localBoolean);
 const INLINE_VALUE_FLAGS = new Set<string>([
@@ -452,8 +475,11 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
   return args.splice(1, 1)[0];
 }
 
-/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; read and write take one path; inbox ack takes item ids. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds'> {
+/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; read and write take one path; inbox ack takes item ids; Autopilot's answer, close and rewrite take one. */
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item'> {
+  if (AUTOPILOT_ITEM_COMMANDS.has(command)) {
+    return args[0] !== undefined && !args[0].startsWith('-') ? { item: args.shift() ?? '' } : {};
+  }
   if (command === 'inbox ack') {
     const ids: string[] = [];
     while (args[0] !== undefined && !args[0].startsWith('-')) ids.push(args.shift() ?? '');
@@ -601,6 +627,10 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
     if (isLocalCommand && arg === '--wait' && WAIT_FOR_RESULT_COMMANDS.has(parsed.command)) {
       parsed.waitForResult = true;
       continue;
+    }
+    const owners = FLAG_OWNERS.get(arg);
+    if (isLocalCommand && owners && !owners.includes(parsed.command)) {
+      throw new Error(`${arg} is only valid with runpane ${owners.join(' or runpane ')}.`);
     }
     if (isLocalCommand && LOCAL_BOOLEAN_FLAGS.has(arg)) {
       parseLocalBooleanFlag(arg, parsed);
@@ -838,6 +868,14 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   if (flag === '--next') {
     if (parsed.command !== 'autopilot stack push') throw new Error('--next is only valid with runpane autopilot stack push.');
     parsed.stackNext = true;
+    return;
+  }
+  if (flag === '--approve') {
+    parsed.answerApprove = true;
+    return;
+  }
+  if (flag === '--deny') {
+    parsed.answerDeny = true;
     return;
   }
 
@@ -1274,6 +1312,26 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.notifyLinks = value;
     return;
   }
+  if (flag === '--relays') {
+    parsed.notifyRelays = value;
+    return;
+  }
+  if (flag === '--about-session') {
+    parsed.notifyAboutSession = value;
+    return;
+  }
+  if (flag === '--decision') {
+    parsed.inboxDecision = value;
+    return;
+  }
+  if (flag === '--choice') {
+    parsed.answerChoice = value;
+    return;
+  }
+  if (flag === '--because') {
+    parsed.because = value;
+    return;
+  }
   if (flag === '--cron') {
     parsed.cron = value;
     return;
@@ -1380,7 +1438,7 @@ function readValue(args: string[], index: number, flag: string, literalValues: S
   const clearable = REPO_SETTING_FLAGS.includes(flag);
   if (clearable && value === '') return value;
   const freeText = (clearable && !/^--[a-z][a-z-]*$/.test(value ?? ''))
-    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains', '--reason'].includes(flag);
+    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains', '--because', '--reason', '--choice'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

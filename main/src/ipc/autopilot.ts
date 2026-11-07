@@ -14,6 +14,9 @@ import { chatLaunchFromCommand } from '../services/chatTabs/launch';
 import { decodeChatPanelState } from '../services/chatTabs/state';
 import { getAppDirectory } from '../utils/appDirectory';
 import { getPaneEventSink } from '../core/runtime';
+import { parseRewriteQuestion } from './notify';
+import { listTailnetMachines } from './workspaceAccess';
+import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
@@ -41,6 +44,14 @@ const pushSchema = boundary.object({
   }))),
 });
 const remoteCommandTypeSchema = boundary.object({ type: boundary.string });
+const answerSchema = boundary.union(
+  boundary.object({ choice: boundary.nonEmptyString, note: boundary.optional(boundary.string) }),
+  boundary.object({ approved: boundary.boolean, note: boundary.optional(boundary.string) }),
+  boundary.object({ text: boundary.nonEmptyString }),
+);
+const answerRequestSchema = boundary.object({ id: boundary.nonEmptyString, answer: answerSchema, because: boundary.nonEmptyString });
+const closeRequestSchema = boundary.object({ id: boundary.nonEmptyString, reason: boundary.nonEmptyString });
+const rewriteIdSchema = boundary.object({ id: boundary.nonEmptyString });
 /** The phone asks for an HTML page inline: it can't load the computer's file URL. */
 const readDocOptionsSchema = boundary.object({ inline: boundary.optional(boundary.boolean) });
 
@@ -50,7 +61,8 @@ type AutopilotServices = Pick<AppServices, 'configManager' | 'sessionManager' | 
 
 /**
  * Autopilot's channels: `autopilot:*` for Pane's UI (the person), `runpane:autopilot:*` for the
- * CLI and MCP, plus a guard on every command that refuses answers from Autopilot (D-66).
+ * CLI and MCP, plus a guard on every command that refuses what stays the person's: permission
+ * prompts and raw keys into other tabs (D-149).
  */
 export function registerAutopilotHandlers(services: AutopilotServices, commandRegistry: PaneCommandRegistry, notify: NotifyService): AutopilotManager {
   let sessionsList: AutopilotSessionInfo[] = [];
@@ -128,7 +140,7 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
   manager.on('changed', (snapshot: AutopilotSnapshot) => getPaneEventSink().send('autopilot:changed', snapshot));
   void manager.initialize().catch(error => console.warn('[Autopilot] Could not prepare the current run:', error));
 
-  commandRegistry.addGuard((channel, args, caller) => refuseAnswers(manager, notify, channel, args, caller));
+  commandRegistry.addGuard((channel, args, caller) => refusePersonOnly(manager, notify, channel, args, caller));
   // Autopilot's watch kinds (item.*, session.*, orchestrator.turn_ended), journalled for `--kinds` watches only.
   if (services.workspaceJournal) connectAutopilotEvents({
     journal: services.workspaceJournal,
@@ -166,9 +178,34 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
 
   // runpane and the pane MCP.
   commandRegistry.register('runpane:autopilot:status', () => ({ ok: true, ...manager.snapshot() }));
-  commandRegistry.register('runpane:autopilot:waiting', () => {
+  commandRegistry.register('runpane:autopilot:waiting', async () => {
     requireOn(manager);
-    return { ok: true, items: manager.waiting() };
+    const { offline, cantSee } = await machinesOutOfSight(notify, () => listTailnetMachines(services.configManager));
+    return { ok: true, items: manager.waiting(), offline, cantSee };
+  });
+  // Autopilot's actions (D-149 to D-152): applied by the machine that holds the item, and recorded there "by Autopilot".
+  // The check only refuses: anyone else asking would be recorded as Autopilot.
+  const requireAutopilot = (what: string) => {
+    requireOn(manager);
+    const caller = paneCommandCaller();
+    if (manager.isAutopilotCaller(caller)) return;
+    throw new PaneError('AUTOPILOT_ONLY', `Only Autopilot can ${what}: the item would record "by Autopilot". Nothing was changed.`, 'Answer through runpane notify, or ask Autopilot to do it.');
+  };
+  commandRegistry.register('runpane:autopilot:answer', async (request: PaneCommandValue) => {
+    requireAutopilot('answer for the person');
+    const { id, answer, because } = decodeBoundary(request, answerRequestSchema);
+    return { ok: true, ...await notify.agentAct({ type: 'agent-answer', id, answer, because }) };
+  });
+  commandRegistry.register('runpane:autopilot:close', async (request: PaneCommandValue) => {
+    requireAutopilot('close an item for the person');
+    const { id, reason } = decodeBoundary(request, closeRequestSchema);
+    return { ok: true, ...await notify.agentAct({ type: 'agent-close', id, reason }) };
+  });
+  commandRegistry.register('runpane:autopilot:rewrite', async (request: PaneCommandValue) => {
+    requireAutopilot('rewrite an item for the person');
+    const { id } = decodeBoundary(request, rewriteIdSchema);
+    const { id: _id, ...question } = decodeBoundary(request, boundary.jsonObject);
+    return { ok: true, ...await notify.agentAct({ type: 'agent-rewrite', id, question: parseRewriteQuestion(question) }) };
   });
   commandRegistry.register('runpane:autopilot:stack', () => {
     requireOn(manager);
@@ -190,15 +227,28 @@ function requireOn(manager: AutopilotManager): void {
 }
 
 /**
- * D-66, enforced in the control plane: every route by which an answer reaches an agent refuses
- * Autopilot. The person's own UI sends no caller and is never refused.
+ * What Autopilot can't see: saved machines it can't reach, and the person's Tailscale machines not
+ * saved here (one-way connections, D-165). Tailscale's list is optional: without it, only saved machines show.
  */
-export function refuseAnswers(manager: Pick<AutopilotManager, 'isAutopilotCaller' | 'refuseAnswerFrom'>, notify: Pick<NotifyService, 'queue'>, channel: string, args: readonly PaneCommandValue[], caller: PaneDaemonCaller | undefined): void {
+async function machinesOutOfSight(notify: Pick<NotifyService, 'queue'>, tailnet: () => Promise<TailnetMachineList>): Promise<{ offline: string[]; cantSee: string[] }> {
+  const offline = notify.queue.savedMachines().filter(machine => !machine.online).map(machine => machine.machine);
+  const list = await tailnet().catch((error: Error): TailnetMachineList => ({ ok: false, reason: error.message, fix: '' }));
+  const cantSee = list.ok ? list.machines.filter(machine => machine.mine && !machine.profileId && machine.state !== 'offline').map(machine => machine.name) : [];
+  return { offline, cantSee };
+}
+
+/**
+ * D-149, enforced in the control plane: Autopilot may answer and close through its own commands,
+ * which record it. Every other route by which an answer reaches an agent is refused, since it
+ * would read as the person's. The person's own UI sends no caller and is never refused.
+ */
+export function refusePersonOnly(manager: Pick<AutopilotManager, 'isAutopilotCaller' | 'refuseAnswerFrom'>, notify: Pick<NotifyService, 'queue'>, channel: string, args: readonly PaneCommandValue[], caller: PaneDaemonCaller | undefined): void {
   if (!manager.isAutopilotCaller(caller)) return;
   switch (channel) {
     case 'notify:remote-command': {
       const type = decodeBoundary(args[0] ?? {}, remoteCommandTypeSchema).type;
-      if (type === 'answer' || type === 'undo') manager.refuseAnswerFrom(caller, 'an approval or question');
+      // Autopilot's own commands carry its name and the machine that holds the item checks them; these would read as the person's.
+      if (type === 'answer' || type === 'undo' || type === 'close' || type === 'reopen' || type === 'override') manager.refuseAnswerFrom(caller, 'an approval or question as if it were the person');
       // Hiding, skipping or snoozing a card takes it from the person, which is just as much theirs.
       if (type === 'dismiss' || type === 'skip' || type === 'remind') manager.refuseAnswerFrom(caller, 'an approval or question (hiding or putting off its card)');
       return;
@@ -233,10 +283,10 @@ export function refuseAnswers(manager: Pick<AutopilotManager, 'isAutopilotCaller
   }
 }
 
-/** Files linked from items still waiting on the person (or held for Undo): their cards open them. */
+/** Files linked from the items a card can still show, finished ones too: their cards open them, here and from other machines. */
 function itemLinkPaths(notify: Pick<NotifyService, 'queue'>): string[] {
   return notify.queue.snapshot().items
-    .filter(item => item.state === 'waiting' || item.state === 'sent')
+    .filter(item => (item.machineId ?? 'local') === 'local')
     .flatMap(item => (item.links ?? []).flatMap(link => 'path' in link ? [link.path] : []));
 }
 

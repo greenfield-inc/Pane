@@ -114,6 +114,8 @@ export interface AppConfig {
   };
   // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
   notify?: Partial<NotifySettings>;
+  /** Epoch ms `notify.enabled` last changed, on the machine where the person changed it; shared with it. Absent: 0. */
+  notifyEnabledChangedAt?: number;
   // Dev mode for debugging
   devMode?: boolean;
   // Additional paths to add to PATH environment variable

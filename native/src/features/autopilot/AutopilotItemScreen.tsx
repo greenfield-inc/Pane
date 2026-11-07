@@ -6,14 +6,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { decisionModel, type DecisionModel } from '@shared/autopilotDecision';
 import type { NotifyItem } from '@shared/types/notify';
 
-import { approvalOrder } from '@/features/approvals/approvals';
+import { useDaemon } from '@/daemon';
+import { ConnectedRow } from '@/features/approvals/ApprovalActions';
+import { approvalOrder, connectedLink } from '@/features/approvals/approvals';
+import { useApprovalSort } from '@/features/approvals/approvalSortPreference';
 import { ConnectionBar } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
 
-import { answerBar, cardState, contextSource, itemPosition, relatedDocs, stackEntryFor, type CardState, type RelatedDoc } from './autopilot';
+import { answerBar, cardState, contextSource, itemPosition, relatedDocs, stackEntryFor, type CardState, type RelatedDoc, autopilotItems } from './autopilot';
 import { DecisionCard, useDecisionAnswer } from './DecisionCard';
 import { useAutopilot } from './hooks';
 
@@ -37,12 +40,14 @@ export function AutopilotItemScreen({ notifyId }: { notifyId: string }) {
   const theme = useTheme();
   const { colors } = theme;
   const insets = useSafeAreaInsets();
+  const { profile } = useDaemon();
   const notify = useNotifyShared();
   const autopilot = useAutopilot();
-  const item = notify.data?.items.find(candidate => candidate.id === notifyId);
+  const item = autopilotItems(autopilot.data, notify.data?.items).find(candidate => candidate.id === notifyId);
   const answer = useDecisionAnswer(notifyId, backToChat);
   const model = item ? decisionModel(item) : undefined;
-  const position = itemPosition(autopilot.data, notifyId, approvalOrder(notify.data));
+  const sort = useApprovalSort(state => state.sort);
+  const position = itemPosition(autopilot.data, notifyId, approvalOrder(notify.data, sort));
   const entry = stackEntryFor(autopilot.data, notifyId);
 
   let body: ReactNode;
@@ -54,6 +59,7 @@ export function AutopilotItemScreen({ notifyId }: { notifyId: string }) {
         <DecisionCard notifyId={notifyId} item={item} variant="full" answer={answer} />
         {item && model ? (
           <>
+            <ConnectedRow link={connectedLink(item, profile.label)} />
             <Section testID="autopilot-item-context" title={model.contextLabel} right={contextSource(model)}>
               <ContextBody item={item} model={model} note={entry?.note} />
             </Section>

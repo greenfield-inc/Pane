@@ -1,8 +1,27 @@
+import { decisionLine, receiptLine } from '@shared/approvalReceipts';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { NotifyItem, NotifyRemoteOpenLink, NotifySharedState } from '@shared/types/notify';
 
-/** The last group on Approvals, for items asked outside any Session (and every item from an older host). */
+import { NOTIFY_KIND_LABEL } from '@/features/notify/notifyQuestions';
+
+/** The group for items asked outside any Session (and every item from an older host). */
 export const NOT_IN_A_SESSION = 'Not in a Session';
+
+/** The group for items outside any project (and every item from an older host). */
+export const NO_PROJECT = 'No project';
+
+/** How Approvals lists: flat with the newest on top, or in groups. Remembered per device. */
+export type ApprovalSort = 'recent' | 'session' | 'project';
+
+export const APPROVAL_SORTS: ReadonlyArray<{ id: ApprovalSort; label: string }> = [
+  { id: 'recent', label: 'Most recent' },
+  { id: 'session', label: 'By Session' },
+  { id: 'project', label: 'By project' },
+];
+
+export function parseApprovalSort(value: string | null): ApprovalSort {
+  return APPROVAL_SORTS.find(sort => sort.id === value)?.id ?? 'recent';
+}
 
 /** What Approvals groups: a Notify item or a permission request, on one machine. */
 export interface ApprovalEntry {
@@ -12,7 +31,9 @@ export interface ApprovalEntry {
   machineKey: string;
   /** The Session it belongs to; none files it under "Not in a Session". */
   session?: { id: string; name: string };
-  /** Epoch ms it was asked: each group lists oldest first. */
+  /** The project it belongs to; none files it under "No project". */
+  project?: string;
+  /** Epoch ms it sorts by, newest first: when it was asked, or when it was answered once it's done. */
   at: number;
   /** It waits on you: an open question, a fallback item, or a permission request. False for an answer held for Undo. */
   waiting: boolean;
@@ -20,35 +41,45 @@ export interface ApprovalEntry {
 
 export interface ApprovalGroup<T extends ApprovalEntry> {
   key: string;
+  /** Empty for Most recent's one group, which has no header. */
   label: string;
-  /** The machine of a Session's group; "Not in a Session" mixes machines and has none. */
+  /** The machine of a Session's or project's group; the groups for neither mix machines and have none. */
   machineKey?: string;
   entries: T[];
 }
 
 /**
- * Approvals on home: entries grouped by Session and machine, oldest first, so a new one never
- * moves the one being answered. Groups follow their oldest entry; "Not in a Session" comes last.
- * The desktop's queue column groups the same way (frontend/src/components/approvals/approvalGroups.ts).
+ * Approvals on home, newest first. Most recent is one flat group; By Session and By project group
+ * by that and machine, with each group placed by its newest entry.
+ * The desktop's queue column sorts the same way (frontend/src/components/approvals/approvalGroups.ts).
  */
-export function groupBySession<T extends ApprovalEntry>(entries: readonly T[]): ApprovalGroup<T>[] {
+export function groupApprovals<T extends ApprovalEntry>(entries: readonly T[], sort: ApprovalSort): ApprovalGroup<T>[] {
+  // By key on a tie, so entries of the same millisecond don't swap as reads arrive.
+  const newestFirst = [...entries].sort((a, b) => b.at - a.at || a.key.localeCompare(b.key));
+  if (sort === 'recent') return newestFirst.length > 0 ? [{ key: 'recent', label: '', entries: newestFirst }] : [];
   const groups = new Map<string, ApprovalGroup<T>>();
-  let loose: ApprovalGroup<T> | undefined;
-  for (const entry of [...entries].sort((a, b) => a.at - b.at)) {
-    if (!entry.session) {
-      loose ??= { key: 'none', label: NOT_IN_A_SESSION, entries: [] };
-      loose.entries.push(entry);
-      continue;
-    }
-    const key = sessionKey(entry.machineKey, entry.session.id);
-    let group = groups.get(key);
-    if (!group) {
-      group = { key, label: entry.session.name || 'Untitled', machineKey: entry.machineKey, entries: [] };
-      groups.set(key, group);
-    }
+  for (const entry of newestFirst) {
+    const fresh = sort === 'session' ? sessionGroup<T>(entry) : projectGroup<T>(entry);
+    const group = groups.get(fresh.key) ?? fresh;
+    groups.set(fresh.key, group);
     group.entries.push(entry);
   }
-  return [...groups.values(), ...(loose ? [loose] : [])];
+  return [...groups.values()];
+}
+
+function sessionGroup<T extends ApprovalEntry>({ machineKey, session }: ApprovalEntry): ApprovalGroup<T> {
+  if (!session) return { key: 'none', label: NOT_IN_A_SESSION, entries: [] };
+  return { key: sessionKey(machineKey, session.id), label: session.name || 'Untitled', machineKey, entries: [] };
+}
+
+function projectGroup<T extends ApprovalEntry>({ machineKey, project }: ApprovalEntry): ApprovalGroup<T> {
+  if (!project) return { key: 'no-project', label: NO_PROJECT, entries: [] };
+  return { key: `${machineKey}:project:${project}`, label: project, machineKey, entries: [] };
+}
+
+/** A row's who and where, since Most recent has no group header to say it: "api-fix in Sales Skill". */
+export function askerLine(asker: string, session?: { name: string }): string {
+  return session ? `${asker} in ${session.name || 'Untitled'}` : asker;
 }
 
 /** A Session on one machine: Session ids can repeat from one machine to the next. */
@@ -80,23 +111,69 @@ export function waitingCounts(entries: readonly ApprovalEntry[]): WaitingCounts 
   return { bySession, total };
 }
 
+/** Waiting 3 days unanswered (D-147): it goes to the Stale group and leaves every count. */
+export function isStale(item: NotifyItem): boolean {
+  return item.state === 'waiting' && item.staleSince !== undefined;
+}
+
 /**
- * The Notify items Approvals lists: open questions, fallback items, and answers still held for
- * Undo (so a card answered here stays on screen with its Undo until the agent has it).
+ * The Notify items Approvals lists: open questions, an older machine's fallback items, and answers
+ * still held for Undo (so a card answered here stays on screen with its Undo until the agent has it).
  */
 export function approvalItems(state: NotifySharedState | undefined): NotifyItem[] {
-  return (state?.items ?? []).filter(item => item.state === 'waiting' || item.state === 'sent').sort((a, b) => a.createdAt - b.createdAt);
+  return (state?.items ?? []).filter(item => (item.state === 'waiting' || item.state === 'sent') && !isStale(item)).sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** The collapsed Stale group at the bottom of Waiting, oldest first. */
+export function staleItems(state: NotifySharedState | undefined): NotifyItem[] {
+  return (state?.items ?? []).filter(isStale).sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** How long the Answered group lists an item, as the desktop's Answered list does. */
+const ANSWERED_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** It was answered or closed: its card shows a receipt, and it takes an Override or a Reopen. */
+export function isResolved(item: NotifyItem): boolean {
+  return item.state === 'answered' || item.state === 'expired';
+}
+
+/** The collapsed Answered group: the last 24 hours' answered and closed items, newest first. */
+export function answeredItems(state: NotifySharedState | undefined, now: number): NotifyItem[] {
+  const resolvedAt = (item: NotifyItem) => item.resolvedAt ?? item.createdAt;
+  return (state?.items ?? []).filter(item => isResolved(item) && now - resolvedAt(item) <= ANSWERED_WINDOW_MS).sort((a, b) => resolvedAt(b) - resolvedAt(a));
+}
+
+/** Which of Approvals' lists the approval screen steps through. */
+export type ApprovalList = 'waiting' | 'stale' | 'answered';
+
+export function parseApprovalList(value: string | undefined): ApprovalList {
+  return value === 'stale' || value === 'answered' ? value : 'waiting';
+}
+
+/** The ids the approval screen steps through and counts for `list`: the order home shows them in. */
+export function approvalListOrder(state: NotifySharedState | undefined, list: ApprovalList, now: number, sort: ApprovalSort): string[] {
+  if (list === 'stale') return staleItems(state).map(item => item.id);
+  return orderOf(list === 'answered' ? answeredItems(state, now) : approvalItems(state), sort);
+}
+
+/** When an item sorts: as it was answered once it's done, else as it was asked. */
+export function approvalAt(item: NotifyItem): number {
+  return isResolved(item) ? item.resolvedAt ?? item.createdAt : item.createdAt;
 }
 
 /** A Notify item as an Approvals entry. */
 export function itemEntry(item: NotifyItem, machineKey: string): ApprovalEntry & { item: NotifyItem } {
-  const session = item.source.session;
-  return { key: `${machineKey}:question:${item.id}`, machineKey, at: item.createdAt, waiting: item.state === 'waiting', item, ...(session ? { session: { id: session.id, name: session.name } } : {}) };
+  const { session, project } = item.source;
+  return { key: `${machineKey}:question:${item.id}`, machineKey, at: approvalAt(item), waiting: item.state === 'waiting', item, ...(session ? { session: { id: session.id, name: session.name } } : {}), ...(project ? { project } : {}) };
+}
+
+function orderOf(items: readonly NotifyItem[], sort: ApprovalSort): string[] {
+  return groupApprovals(items.map(item => itemEntry(item, 'here')), sort).flatMap(group => group.entries.map(entry => entry.item.id));
 }
 
 /** The approval screen's order, the same as home's: item ids group by group. "1 of N" counts these. */
-export function approvalOrder(state: NotifySharedState | undefined, machineKey = 'here'): string[] {
-  return groupBySession(approvalItems(state).map(item => itemEntry(item, machineKey))).flatMap(group => group.entries.map(entry => entry.item.id));
+export function approvalOrder(state: NotifySharedState | undefined, sort: ApprovalSort): string[] {
+  return orderOf(approvalItems(state), sort);
 }
 
 /** "1 of 5": where `id` sits in `order`, or null when it isn't there. */
@@ -222,16 +299,64 @@ export async function openApprovalLink(
   return added ? { kind: 'opened', panelId: added } : { kind: 'opened' };
 }
 
-/** A fallback item's line: it takes no answer here. */
-export function relayLine(item: NotifyItem): string | null {
-  if (!item.relay) return null;
-  const session = item.source.session?.name || 'Session';
-  return `Waiting on the ${session} orchestrator: ${item.relay.worker} asks “${item.relay.question}”`;
+/** An older machine's mirror of a worker's question: it takes no answer here. */
+export const OLDER_MACHINE_NOTE = 'Its machine runs an older Pane, so only its orchestrator can answer this one. Update Pane there to answer it here.';
+
+/** The card's top line: what it needs, or what happened to it. */
+export function approvalKindLabel(item: NotifyItem): string {
+  if (item.state === 'answered') return 'Answered';
+  if (item.state === 'expired') return item.closed ? 'Closed' : 'Ended';
+  return NOTIFY_KIND_LABEL[item.ui];
 }
 
-/** The card's top line: what kind, then who asked. */
-export function approvalMeta(item: NotifyItem): string {
-  return [item.source.name, item.source.agent].filter(Boolean).join(' · ');
+/** Every receipt a card shows: who acted, the decision it was recorded as, and the latest correction. */
+export function receiptLines(item: NotifyItem): string[] {
+  const correction = item.corrections?.at(-1);
+  return [
+    receiptLine(item),
+    decisionLine(item),
+    correction ? `Corrected by ${correction.by === 'you' ? 'you' : correction.by === 'autopilot' ? 'Autopilot' : 'the orchestrator'}: ${correction.summary}` : undefined,
+  ].filter(line => line !== undefined);
+}
+
+/** What to open from an item's connected row. Null: there's nothing on the phone to open. */
+export type ConnectedTarget =
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'pane'; paneId: string }
+  | { kind: 'autopilot' };
+
+export interface ConnectedLink {
+  kind: 'session' | 'pane' | 'autopilot' | 'machine';
+  text: string;
+  target: ConnectedTarget | null;
+}
+
+/**
+ * What an opened item is connected to (D-168, J32): its Session, its Pane outside a Session,
+ * Autopilot, or just the machine. `machine` is the phone's saved name for the item's machine, also
+ * used instead of the name the host gave a machine-level item. An older machine sends no
+ * `connected`, so it is read from the item's source.
+ */
+export function connectedLink(item: NotifyItem, machine: string): ConnectedLink {
+  const connected = item.connected;
+  const session = connected?.kind === 'session' ? connected : connected ? undefined : item.source.session;
+  if (session) return { kind: 'session', text: `Session · ${session.name || 'Untitled'} · ${machine}`, target: { kind: 'session', sessionId: session.id } };
+  if (connected?.kind === 'autopilot' || (!connected && item.source.autopilot)) return { kind: 'autopilot', text: `Autopilot · ${machine}`, target: { kind: 'autopilot' } };
+  const pane = connected?.kind === 'pane' ? connected : !connected && item.source.paneId ? { id: item.source.paneId, name: item.source.name } : undefined;
+  if (pane) return { kind: 'pane', text: `Pane · ${pane.name} · ${machine}`, target: { kind: 'pane', paneId: pane.id } };
+  return { kind: 'machine', text: machine, target: null };
+}
+
+/** One saved machine that isn't online: its approvals collapse to this row (D-147). */
+export interface OfflineMachine {
+  key: string;
+  name: string;
+  /** What was waiting there when it was last read. */
+  waiting: number;
+}
+
+export function machineOfflineLine(machine: string, waiting: number): string {
+  return `${machine} offline · ${waiting} waiting · they come back when ${machine} is online`;
 }
 
 /** Each Pane's Session, from the host's Session list, for permission requests (which name only their Pane). */
@@ -240,8 +365,10 @@ export function sessionsByPane(sessions: ReadonlyArray<{ id: string; name: strin
     .flatMap(session => session.associations.map(association => [association.paneId, { id: session.id, name: session.name }] as const)));
 }
 
-/** A question's row on home: its title, what was sent while the answer is held for Undo, or that it waits on an orchestrator. */
+/** A question's row on home: its title, what was sent while the answer is held for Undo, or its receipt once it's done. */
 export function questionDetail(item: NotifyItem): string {
   if (item.state === 'sent') return `Sent: ${item.answerSummary ?? 'your answer'}`;
-  return item.relay ? `Waiting on the orchestrator: ${item.title}` : item.title;
+  if (!isResolved(item)) return item.title;
+  const receipt = receiptLine(item) ?? item.answerSummary;
+  return receipt ? `${receipt} · ${item.title}` : item.title;
 }

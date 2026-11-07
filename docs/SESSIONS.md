@@ -1285,9 +1285,10 @@ item.created,item.answered,session.created,session.archived,orchestrator.turn_en
 `--kinds` (a Session scope alone does not deliver them), so orchestrators'
 watches never see them. `item.created` and `item.answered` (ITEM / ANSWERED)
 mark an approval or question starting or stopping waiting on the person; the
-entry carries `itemId` and the title in `reason` (for an item whose asker
-stopped before anyone answered, `reason` starts with "No answer (the asker
-stopped waiting): "), and its `paneId` is the
+entry carries `itemId` and the title in `reason`, after why it's news: "No
+answer (the asker stopped waiting): " when its asker left, its receipt when it
+closed ("Closed by Autopilot: <why>: ", "Closed: Session archived: "), or
+"Reopened by you, after …: " when the person brought it back. Its `paneId` is the
 asking Pane. `session.created` and `session.archived` (SESSION NEW / SESSION
 ARCHIVED) carry the Session and its own workspace Pane as `paneId`.
 `orchestrator.turn_ended` (TURN ENDED) marks a Session orchestrator going from
@@ -1321,8 +1322,12 @@ Pane keeps, per Session, what its orchestrator has not acknowledged:
 reports (`agent.report`), missing reports (`agent.report.missing`), and
 questions on screen (`agent.blocked`, with `screenLines`). It is fed from the
 journal for every Pane associated with the Session (`main/src/services/sessionInbox.ts`)
-and saved with a journal epoch and replay watermark in `session-inbox.json`
-below `PANE_DIR`. Restart replays committed events after the watermark, with
+and saved with a journal epoch and replay watermark in the `approvals` table of
+`sessions.db`, one row per item; a blocked report shares its row with the
+question's card. A one-time import moved older `session-inbox.json` files there:
+the file is backed up first as `session-inbox.json.before-import`, the original
+is left in place, and a failed import changes nothing and retries on the next
+start. Restart replays committed events after the watermark, with
 stable item IDs, including a report whose inbox write failed. Acknowledgements
 and the watermark are saved together; replay does not resurrect handled items.
 Recovery is bounded by the journal's retention. If entries expired before
@@ -1334,12 +1339,17 @@ older report or missing report; a blocked item goes once its panel moves on
 
 ```text
 runpane inbox --session <id|name> [--json]       # defaults to $PANE_ORCHESTRATION_SESSION_ID
-runpane inbox ack <item-id>... [--session <id|name>]
+runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>]
 runpane inbox ack --all --session <id|name>
 ```
 
+`runpane inbox` also lists `answers`: what the Session's workers were told, kept
+7 days. Human output prints each one with no decision as needing a D-n, and
+`runpane inbox ack <item> --decision <D-n>` records it, even on an item already
+cleared.
+
 An orchestrator runs `runpane inbox` when it starts or resumes, to catch what
-finished while it was down. Pane never adds the inbox to the orchestrator's
+finished while it was down, its workers' unrecorded answers included. Pane never adds the inbox to the orchestrator's
 turns: worker output reaches it only as the result of a tool call it made.
 
 ### What waits on the person: Approvals
@@ -1355,6 +1365,13 @@ default), a Session has one voice to the person: its orchestrator.
   `runpane report --state blocked --question "<question>"` instead. A
   worker's `notify` call isn't shown to the person; it returns `unavailable`
   with a `next` that says to report blocked.
+- **A worker's question is a card at once.** Its blocked report shows in
+  Approvals straight away with an answer box. It rings once the orchestrator
+  relays it or after 10 minutes, so the orchestrator first settles what the plan
+  already answers (D-79). The answer goes straight to the asking tab, whether or
+  not the orchestrator is running: `answer: Q-n → <answer> (by you)`. The tab can
+  also receive `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)`;
+  workers and orchestrators treat those as the person's word.
 - **Orchestrator mode.** The generated orchestrator skill, the Session's
   `AGENTS.md` and the orchestrator guide
   (`paneChatBundle/skills/pane-orchestration/SKILL.md`, "What waits on the
@@ -1365,35 +1382,35 @@ default), a Session has one voice to the person: its orchestrator.
   through Approvals with context (why, the options with the recommended one
   first, related files and links). These are instructions; Pane doesn't
   check turns.
-- **The orchestrator posts.** The same three carry the posting rule: keep every item that waits on the person (a
+- **The orchestrator relays and posts.** The same three carry the posting rule: keep every item that waits on the person (a
   worker's needs_you or blocked question, a plan or design approval, a PR
   ready to merge, a next step only they can take) posted to Approvals exactly
   once, titled with its Q-n and with the worker's files and PR as `--links`.
   Post each one with `runpane notify ... --json` as a background command (in
   Claude Code, Bash with `run_in_background`), not the MCP `notify` tool,
   which returns `waiting` after a while, and not a blocking
-  `AskUserQuestion`. The orchestrator stays free to talk about the item in its
-  tab while the card waits, and the background call returns the answer, which
-  it sends only to the asking worker. After posting a worker's question it
-  acknowledges the inbox item. Stopping an item's background call expires the
-  card, which is how a stale item is dropped. On start, resume or wake it
-  reconciles against the status files, its ledger and `runpane inbox`; Pane
-  keeps no approvals across a restart, so it posts what still waits again,
-  exactly once. When `notify` returns `unavailable` because Approvals is off,
-  it asks in its own tab as before.
+  `AskUserQuestion`. A worker's question already has a card, so the orchestrator
+  relays into it: `runpane notify --relays <item> ...`, with the id from `runpane
+  inbox`, gives that card its choices, context and links and rings it, and the
+  call waits on it as on any notify. The answer goes straight to the worker's
+  tab, so the orchestrator doesn't forward it; it records the decision with
+  `runpane inbox ack <item> --decision <D-n>`, and the card reads "Recorded as
+  D-n". The older way (post a second card, ack, forward the answer) keeps working
+  for one release. The orchestrator stays free to talk about the item in its
+  tab while the card waits. Stopping an item's background call drops its own
+  stale item. On start, resume or wake it reconciles against the status files,
+  its ledger and `runpane inbox`, and records any answer with no decision.
+  Approvals survive a restart, and an asker that posts the same question again
+  joins the waiting card. When `notify` returns `unavailable` because Approvals
+  is off, it asks in its own tab as before.
 - **Filing.** Pane files each item under the Session its Pane belongs to, and
   marks items from the orchestrator's own tabs. Claude permission prompts and
   chat tab prompts still come straight from the asking tab and are filed under
   its Session.
-- **Fallback.** A worker's blocked report with a question that stays
-  unacknowledged in the Session inbox for 10 minutes shows in Approvals
-  read-only: "Waiting on the <Session> orchestrator: <worker> asked this and
-  it hasn't been picked up. Answer in the orchestrator's tab." It clears when
-  the orchestrator acknowledges the item (`runpane inbox ack`) or the worker
-  reports again, and never shows while Approvals is off. So a worker's
-  question is never invisible while its orchestrator is down or follows an
-  older rule set. The code is `refreshRelays` in
-  `main/src/services/notify/notifyService.ts`.
+- **Closing with the Session.** Closing or archiving a Session closes the
+  waiting items connected to it, workers' and orchestrators' alike, within 5 s
+  ("closed: Session closed", "closed: Session archived"). A worker's newer report
+  closes its older question ("closed: the worker moved on").
 
 See [PANE_NOTIFY.md](PANE_NOTIFY.md) for the Approvals screen itself.
 

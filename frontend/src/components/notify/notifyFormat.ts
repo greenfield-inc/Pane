@@ -1,4 +1,7 @@
 import type { NotifyItem, NotifyUi } from '../../../../shared/types/notify';
+import { originLine } from '../../../../shared/approvalReceipts';
+import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
+import { THIS_COMPUTER } from '../../utils/machineList';
 
 export const NOTIFY_KIND_LABEL = {
   options: 'Needs a choice',
@@ -17,6 +20,40 @@ export const NOTIFY_KIND_DOT = {
   info: 'bg-status-success',
 } satisfies Record<NotifyUi, string>;
 
+/** A machine as the picker names it. */
+export interface MachineName {
+  id: string;
+  name: string;
+}
+
+/**
+ * The machine an item shows (J26). Another machine goes by its saved name, or the name its item
+ * carries. This computer goes by its picker name or none, never the hostname its items carry.
+ */
+export function machineLabel(item: NotifyItem, machines: readonly MachineName[] = []): string | undefined {
+  if (item.machineId === LOCAL_MACHINE_ID) {
+    const name = machines.find((machine) => machine.id === LOCAL_MACHINE_ID)?.name;
+    return name && name !== THIS_COMPUTER ? name : undefined;
+  }
+  return machines.find((machine) => machine.id === item.machineId)?.name ?? item.machine;
+}
+
+/** The items with `machine` holding what they show, so every surface below reads it as it is. */
+export function withMachineLabels(items: readonly NotifyItem[], machines: readonly MachineName[]): NotifyItem[] {
+  return items.map((item) => {
+    const machine = machineLabel(item, machines);
+    if (machine === item.machine) return item;
+    if (machine) return { ...item, machine };
+    const unlabelled = { ...item };
+    delete unlabelled.machine;
+    return unlabelled;
+  });
+}
+
+/** The origin line with the machine as it shows: no label stays no label. */
+export function originOf(item: NotifyItem, machines: readonly MachineName[] = []): string {
+  return originLine(item, machineLabel(item, machines) ?? '');
+}
 /** A secret card's destination line: "Saves as Pane secret stripe/STRIPE_KEY · replaces the saved value". */
 export function secretSavesAs(item: NotifyItem): string {
   const target = item.secret;
@@ -28,7 +65,7 @@ export const SECRET_KEPT_OUT = 'Kept out of chat. Any agent on your machines can
 
 /** Who asked: "notify-remote · Claude", plus the machine while two machines' questions show. */
 export function askedBy(item: NotifyItem): string {
-  return [item.source.name, item.source.agent, item.machine].filter(Boolean).join(' · ');
+  return [item.source.name, item.source.agent, machineLabel(item)].filter(Boolean).join(' · ');
 }
 
 /** On a question whose machine is out of reach; the card stays answerable for when it returns. */

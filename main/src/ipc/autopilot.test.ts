@@ -7,7 +7,7 @@ import { AutopilotManager } from '../services/autopilot/autopilotManager';
 import { NotifyQueue } from '../services/notify/notifyQueue';
 import { DEFAULT_NOTIFY_SETTINGS } from '../../../shared/types/notify';
 import { parsePaneDaemonFrame, type PaneDaemonCaller } from '../../../shared/types/daemon';
-import { readDocument, refuseAnswers } from './autopilot';
+import { readDocument, refusePersonOnly } from './autopilot';
 
 let root: string;
 let queue: NotifyQueue;
@@ -48,7 +48,7 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-/** Every answer route refuseAnswers knows, with the arguments Pane's UI or runpane send. */
+/** Every answer route refusePersonOnly knows, with the arguments Pane's UI or runpane send. */
 const ANSWER_ROUTES: Array<[string, PaneCommandValue[]]> = [
   ['notify:remote-command', [{ type: 'answer', id: 'n-1', answer: { approved: true } }]],
   ['notify:remote-command', [{ type: 'undo', id: 'n-1' }]],
@@ -67,15 +67,18 @@ const ANSWER_ROUTES: Array<[string, PaneCommandValue[]]> = [
   ['sessions:input', ['pane-1', 'y\r']],
   ['sessions:send-terminal-input', ['pane-1', 'y\r']],
   // Hiding, skipping or snoozing a card takes it away from the person.
+  ['notify:remote-command', [{ type: 'close', id: 'n-1' }]],
+  ['notify:remote-command', [{ type: 'reopen', id: 'n-1' }]],
+  ['notify:remote-command', [{ type: 'override', id: 'n-1', answer: { text: 'x' } }]],
   ['notify:remote-command', [{ type: 'dismiss', id: 'n-1' }]],
   ['notify:remote-command', [{ type: 'skip', id: 'n-1' }]],
   ['notify:remote-command', [{ type: 'remind', id: 'n-1', after: '1h' }]],
 ];
 
 const refuse = (channel: string, args: PaneCommandValue[], caller: PaneDaemonCaller | undefined) =>
-  () => refuseAnswers(manager, { queue }, channel, args, caller);
+  () => refusePersonOnly(manager, { queue }, channel, args, caller);
 
-describe('refuseAnswers (D-66)', () => {
+describe('refusePersonOnly (D-149)', () => {
   it.each(ANSWER_ROUTES)('refuses %s from Autopilot\'s panel', (channel, args) => {
     for (const caller of [AUTOPILOT, AUTOPILOT_PANEL_ONLY]) {
       expect(refuse(channel, args, caller)).toThrow(expect.objectContaining({ code: 'AUTOPILOT_CANNOT_ANSWER' }));
@@ -94,6 +97,10 @@ describe('refuseAnswers (D-66)', () => {
     expect(refuse('runpane:panels:submit', [{ panelId: 'panel-quiet', text: 'next task' }], AUTOPILOT)).not.toThrow();
     expect(refuse('runpane:autopilot:stack-push', [{ item: 'n-1' }], AUTOPILOT)).not.toThrow();
     expect(refuse('runpane:panes:list', [], AUTOPILOT)).not.toThrow();
+    // Its own commands record it; the machine that holds the item refuses a permission prompt (J13).
+    expect(refuse('runpane:autopilot:answer', [{ id: 'n-1', answer: { text: 'x' }, because: 'D-1' }], AUTOPILOT)).not.toThrow();
+    expect(refuse('notify:remote-command', [{ type: 'agent-answer', id: 'n-1', answer: { text: 'x' }, because: 'D-1' }], AUTOPILOT)).not.toThrow();
+    expect(refuse('notify:remote-command', [{ type: 'agent-close', id: 'n-1', reason: 'x' }], AUTOPILOT)).not.toThrow();
   });
 });
 
@@ -106,7 +113,7 @@ describe('the caller on daemon request frames', () => {
     expect(older.type === 'request' && older.caller).toBe(undefined);
 
     const registry = new PaneCommandRegistry();
-    registry.addGuard((channel, args, caller) => refuseAnswers(manager, { queue }, channel, args, caller));
+    registry.addGuard((channel, args, caller) => refusePersonOnly(manager, { queue }, channel, args, caller));
     const seen: Array<PaneDaemonCaller | undefined> = [];
     registry.register('runpane:panels:input', async () => { await Promise.resolve(); seen.push(paneCommandCaller()); return { ok: true }; });
     registry.register('runpane:panes:list', async () => { await Promise.resolve(); seen.push(paneCommandCaller()); return { ok: true }; });
@@ -121,7 +128,7 @@ describe('the caller on daemon request frames', () => {
 
   it('refuses an answer from Autopilot that arrives over another machine\'s /invoke too', async () => {
     const registry = new PaneCommandRegistry();
-    registry.addGuard((channel, args, caller) => refuseAnswers(manager, { queue }, channel, args, caller));
+    registry.addGuard((channel, args, caller) => refusePersonOnly(manager, { queue }, channel, args, caller));
     registry.register('notify:remote-command', async () => null);
     await expect(registry.invokeRemote('notify:remote-command', [{ type: 'answer', id: 'n-1', answer: { approved: true } }, { device: 'studio' }], { caller: AUTOPILOT })).rejects.toMatchObject({ code: 'AUTOPILOT_CANNOT_ANSWER' });
     // A phone or another screen sends no caller: the person answering is never refused.

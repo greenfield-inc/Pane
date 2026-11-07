@@ -20,9 +20,10 @@ on; turning Autopilot off stops it. It writes its own
 documents and approvals, passes your questions and instructions to
 orchestrators, and asks orchestrators to `/wrap-up` finished work.
 
-**Approvals are always yours.** Autopilot brings them and explains them, but
-never answers one, not even when you tell it to. The control plane refuses
-it (`AUTOPILOT_CANNOT_ANSWER`).
+**It works your approvals, within limits (D-149 to D-152).** See
+[What it does with approvals](#what-it-does-with-approvals-d-149-to-d-152).
+Permission prompts stay yours, and everything else it does is recorded "by
+Autopilot" with your Override or Reopen.
 
 ## Turning it on
 
@@ -100,6 +101,41 @@ no project, no Session record and no associations. Other machines' items show
 on the stack, read live through the workspace. Nothing from them is copied
 into the folder.
 
+## What it does with approvals (D-149 to D-152)
+
+There is no setting for this: it is how Autopilot works, in its skill, and it
+takes its cues from you ("leave those to me", "handle the approvals"). By
+default, Autopilot:
+
+| It… | Recorded on the item, on every device |
+| --- | --- |
+| surfaces approvals from every machine, grouped so you can talk them through | |
+| closes the ones that don't matter or that it judges stale; you can reopen them | "Closed by Autopilot: <reason>" |
+| may close an unclear one and re-ask it rewritten; the answer goes to the original asker | "Closed by Autopilot: rewritten as …" on the old one, "Rewritten by Autopilot from Q-n" on the new one |
+| answers only when the way forward is clear and the item relates to what it's working on with you, or when you tell it to handle approvals | "Answered by Autopilot · because <D-n, document or your words>", with **Override** |
+| never answers a permission prompt, or types raw keys into another tab | refused in code ([The guard](#the-guard-d-149)) |
+
+An answer is delivered at once, with no hold. Override sends your answer to the
+asker as a correction, recorded on the item. Sentinel follows the same rules.
+
+**Its queue (D-168).** Its watch tells it of approvals made outside its chat,
+and `runpane autopilot waiting` is the queue: read from each machine's table,
+with no copy. It tells you a count and brings in one group at a time, related
+items together; when a group is finished it brings the next. An item answered
+or closed elsewhere just leaves the queue.
+
+**Across machines (D-165).** An approval lives on the machine where its creator
+runs, and Autopilot's own on Autopilot's machine (from the phone, that's the
+desktop the phone is talking to). Autopilot reads every connected machine, and
+its answers and closes go to the owner, which records them "by Autopilot"; a
+rewrite stays on the old item's machine. The owner takes the first answer or
+close, so a later one, from another Autopilot or from you, is refused with
+"already answered by …" and changes nothing. A saved machine it can't reach
+shows as "<machine> offline", and an answer aimed at it is refused with nothing
+queued. One of your Tailscale machines not saved here shows as "Can't see:
+<machine>": a machine reads only the machines it has saved, so add it there. An
+owner too old for these commands is reported as needing an update.
+
 ## In the chat and on the right (D-91)
 
 - **The question lives in the chat.** Each item Autopilot brings is a
@@ -174,12 +210,12 @@ is on, and the walk bar says how many Sessions it keeps moving.
 
 - Every 5 minutes, while Autopilot is idle and not paused, Pane wakes it with a
   `[Pane · Sentinel check]` line (hidden in the chat).
-- It answers only orchestrators' questions that a plan, a decision or a clear
-  recommendation settles, citing the source; nudges a Session stuck 10 quiet
-  minutes with open work (at most 2 per Session per hour, then it asks you);
-  and sends everything else to you as its own approval, which pushes to your
-  phone. It never answers approvals or permission prompts, merges, archives
-  or creates Sessions.
+- It answers orchestrators' questions that a plan, a decision or a clear
+  recommendation settles, citing the source; works approvals by the rules
+  above; nudges a Session that has been quiet 10 minutes with open work (at
+  most 2 per Session per hour, then it asks you); and sends everything else to
+  you as its own approval, which pushes to your phone. It never answers
+  permission prompts, merges, archives or creates Sessions.
 - Each call shows in the chat as it happens (an `autopilot-log` block) and goes
   in `docs/away-log.html`. Turning Sentinel off posts a **While you were
   away** card (`autopilot-away`) with **Tell a Session otherwise** and the log.
@@ -216,8 +252,14 @@ Autopilot follows the Pane-shipped `pane-autopilot` skill
 controls reach it as `[Pane · Start]`, `[Pane · Pause]`, `[Pane · Go on]`,
 `[Pane · Carry on]` and `[Pane · Instructions]` lines. It uses:
 
-- `runpane autopilot waiting --json` to list every waiting item on this
-  machine, by Session in sidebar order.
+- `runpane autopilot waiting --json`, its queue: every waiting item on every
+  machine it can reach, this machine's by Session in sidebar order, with
+  `quiet`, `stale` and `connected` on each, and the `offline` and `cantSee`
+  machines.
+- `runpane autopilot answer <id> (--choice <label> | --approve | --deny |
+  --text <text>) --because <why>`, `runpane autopilot close <id> --reason <why>`
+  and `runpane autopilot rewrite <id> --ui ... --title ...`, on the machine that
+  holds the item. Anyone but Autopilot is refused with `AUTOPILOT_ONLY`.
 - `runpane autopilot stack push --item <id> [--next]` to put an item on the
   stack. It also takes `--file`, `--url` or `--session` instead of `--item`.
   `--next` puts a higher Session's new item right after the one on screen
@@ -230,31 +272,36 @@ controls reach it as `[Pane · Start]`, `[Pane · Pause]`, `[Pane · Go on]`,
   to ask an orchestrator, with the message marked `[From the person, via
   Autopilot]`. Every Session's fixed capability text accepts such a message
   as the person's own question or instruction, `/wrap-up` included. It never
-  counts as an answer to an approval. Autopilot's own messages are marked
+  counts as an answer to an approval, and answering one goes through `runpane
+  autopilot answer`. Autopilot's own messages are marked
   `[From Autopilot]`; an orchestrator replies to whoever asked and still
   sends anything the person must decide to them as an approval.
 
-The four `runpane autopilot` commands are also MCP tools in the `autopilot`
-toolset ([PANE_MCP.md](PANE_MCP.md)). With Autopilot off, `waiting`, `stack`
-and `stack push` fail with `AUTOPILOT_OFF`, saying how to turn it on;
+The seven `runpane autopilot` commands are also MCP tools in the `autopilot`
+toolset ([PANE_MCP.md](PANE_MCP.md)). With Autopilot off, all but `status` fail
+with `AUTOPILOT_OFF`, saying how to turn it on;
 `status` reports `enabled: false` (its plain output also says how to turn it
 on; `--json` gives only the state).
 
-## The refusal (D-66)
+## The guard (D-149)
 
 runpane sends the caller's Pane and tab (`PANE_SESSION_ID`, `PANE_PANEL_ID`)
 on every daemon request (`caller` on the request frame; older builds leave it
-out). A guard on the command registry refuses every answer route when the
-caller is Autopilot's tab or owner Pane:
+out). Autopilot acts on approvals only through `runpane autopilot answer`,
+`close` and `rewrite`, which record it; the machine that holds the item refuses
+them for a permission prompt (`AUTOPILOT_CANNOT_ANSWER`), Claude tool permissions
+and Bypass changes included. A guard on the command registry refuses every other
+answer route when the caller is Autopilot's tab or owner Pane, since those
+would read as the person's:
 
-- `notify:remote-command` answer and undo, and dismiss, skip and remind
-  (hiding or putting off a card is the person's call too)
+- `notify:remote-command` answer, undo, close, reopen and override, and dismiss,
+  skip and remind (hiding or putting off a card is the person's call too)
 - `permission:respond`
 - `chat-tab:permission` and `chat-tab:answer` for any other tab
 - every raw-input route: `runpane:panels:input`, `terminal:input`,
   `terminal:paste-file`, `terminal:paste-image`, `panels:send-input`,
   `panels:send-terminal-input`, `sessions:input`, `sessions:send-terminal-input`
-- `runpane:panels:submit` to a tab with a waiting permission prompt
+- `runpane:panels:submit` and `submit-composer` to a tab with a waiting permission prompt
 
 Sending a chat message to another chat tab (`chat-tab:send`) is allowed: it
 queues a message and never answers that tab's pending prompt, whose own answer
@@ -274,7 +321,7 @@ rewrites its own environment.
 | Part | Where |
 | --- | --- |
 | Manager, store, stack, entitlement, events | `main/src/services/autopilot/` |
-| Channels (`autopilot:*`, `runpane:autopilot:*`) and the refusal guard | `main/src/ipc/autopilot.ts` |
+| Channels (`autopilot:*`, `runpane:autopilot:*`) and the guard | `main/src/ipc/autopilot.ts` |
 | Types | `shared/types/autopilot.ts` |
 | Desktop view, stack, sidebar row | `frontend/src/components/autopilot/` |
 | Settings › Autopilot (your instructions) | `frontend/src/components/settings/categories/AutopilotSettings.tsx` |

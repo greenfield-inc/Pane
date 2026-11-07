@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { originLine } from '@shared/approvalReceipts';
 import type { NotifyItem, NotifyRemoteCommand, NotifySharedState } from '@shared/types/notify';
 import type { ToolPanel } from '@shared/types/panels';
 
@@ -15,7 +16,7 @@ import { MachineBadge } from '@/features/machines/MachineBadge';
 import { useMachines } from '@/features/machines/useMachines';
 import { AgentPromptActions } from '@/features/notify/AgentPromptActions';
 import { useNotifyCommand, useNotifyShared } from '@/features/notify/hooks';
-import { type AnsweredHere, NOTIFY_KIND_LABEL, notifySheetState } from '@/features/notify/notifyQuestions';
+import { type AnsweredHere, notifySheetState } from '@/features/notify/notifyQuestions';
 import { QuestionForm, SentLine } from '@/features/notify/NotifySheet';
 import { Notice } from '@/features/panes/PaneKit';
 import { useSessionView } from '@/features/sessions/hooks';
@@ -24,14 +25,16 @@ import { TerminalScreen } from '@/features/terminal/TerminalScreen';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
 
-import { approvalOrder, approvalParams, approvalPosition, approvalWorkspace, approvalMeta, nextApproval, openApprovalLink, relayLine, resolveSelection, type ApprovalWorkspace } from './approvals';
+import { ApprovalActions, ConnectedRow, QuestionActions } from './ApprovalActions';
+import { useApprovalSort } from './approvalSortPreference';
+import { approvalKindLabel, approvalListOrder, approvalParams, approvalPosition, approvalWorkspace, connectedLink, isResolved, nextApproval, OLDER_MACHINE_NOTE, openApprovalLink, receiptLines, resolveSelection, type ApprovalList, type ApprovalWorkspace } from './approvals';
 
 /** The card never takes more than this share of the screen; the Session below keeps the rest. */
 const CARD_MAX_SHARE = 0.45;
 
-/** Opens an item's approval screen on the machine the phone is on. */
-export function openApproval(notifyId: string) {
-  router.push({ pathname: '/approval/[notifyId]', params: { notifyId } });
+/** Opens an item's approval screen on the machine the phone is on, stepping through the list it's in. */
+export function openApproval(notifyId: string, list: ApprovalList = 'waiting') {
+  router.push({ pathname: '/approval/[notifyId]', params: list === 'waiting' ? { notifyId } : { notifyId, list } });
 }
 
 /**
@@ -39,10 +42,12 @@ export function openApproval(notifyId: string) {
  * then the Session it belongs to (its tabs and its orchestrator's chat, where you can ask about
  * it) or the Pane that asked. An item answered elsewhere steps to the next, or back home when it
  * was the last. `hintPaneId` is the Pane a push alert named, shown when the item can't be read.
+ * `list` is the one of Approvals' lists it steps through: Waiting, Stale or Answered.
  */
-export function ApprovalScreen({ notifyId, hintPaneId }: { notifyId: string; hintPaneId?: string }) {
+export function ApprovalScreen({ notifyId, hintPaneId, list = 'waiting' }: { notifyId: string; hintPaneId?: string; list?: ApprovalList }) {
   const shared = useNotifyShared();
-  const order = approvalOrder(shared.data);
+  const sort = useApprovalSort(state => state.sort);
+  const order = approvalListOrder(shared.data, list, Date.now(), sort);
   // The order this screen last showed, so an item that vanishes is followed by the one after it.
   const [shown, setShown] = useState<readonly string[]>([]);
   const selection = shared.data ? resolveSelection(order, notifyId, shown) : null;
@@ -75,18 +80,19 @@ export function ApprovalScreen({ notifyId, hintPaneId }: { notifyId: string; hin
     card = <CardFrame testID="approval-loading"><ActivityIndicator /></CardFrame>;
   }
 
-  // While the item is loading or gone, the alert's Pane stands in.
-  const workspace = item ? approvalWorkspace(item) : selection?.kind === 'gone' || shared.isError ? approvalWorkspace(undefined, hintPaneId) : { kind: 'none' as const };
-  return <Workspace workspace={workspace} topBar={topBar} card={card} loading={!item} />;
+  // While the item is loading or gone, the alert's Pane stands in. A finished item's asker may be gone, so nothing mounts under it.
+  const finished = item ? isResolved(item) : false;
+  const workspace = item && !finished ? approvalWorkspace(item) : !item && (selection?.kind === 'gone' || shared.isError) ? approvalWorkspace(undefined, hintPaneId) : { kind: 'none' as const };
+  return <Workspace workspace={workspace} topBar={topBar} card={card} quiet={!item || finished} />;
 }
 
 /** The card above the workspace: a Session's (with its chat), a Pane's tabs, or nothing for a question asked outside Pane. */
-function Workspace({ workspace, topBar, card, loading }: { workspace: ApprovalWorkspace; topBar: ReactNode; card: ReactNode; loading: boolean }) {
+function Workspace({ workspace, topBar, card, quiet }: { workspace: ApprovalWorkspace; topBar: ReactNode; card: ReactNode; quiet: boolean }) {
   if (workspace.kind === 'session') return <SessionWorkspace key={workspace.sessionId} sessionId={workspace.sessionId} paneId={workspace.paneId} topBar={topBar} card={card} />;
   if (workspace.kind === 'pane') return <TerminalScreen key={workspace.paneId} paneId={workspace.paneId} initialPanelId={workspace.panelId} topBar={topBar} above={card} />;
   return (
     <Bare topBar={topBar} card={card}>
-      {loading ? null : <Text testID="approval-no-pane" variant="footnote" tone="muted" style={styles.bareNote}>Asked from outside Pane, so there are no tabs to show.</Text>}
+      {quiet ? null : <Text testID="approval-no-pane" variant="footnote" tone="muted" style={styles.bareNote}>Asked from outside Pane, so there are no tabs to show.</Text>}
     </Bare>
   );
 }
@@ -167,11 +173,13 @@ function CardFrame({ children, testID }: { children: ReactNode; testID: string }
 }
 
 /**
- * The approval card: who asked and when, the question, its related links, and its answer
- * controls (the Notify sheet's, or Yes and No for an agent's prompt). A fallback item is read-only.
+ * The approval card: what it needs and when, who asked, the question, what it's connected to, its
+ * related links, its answer controls (the Notify sheet's, or Yes and No for an agent's prompt),
+ * its receipts, and Close, Override or Reopen. An older machine's mirror is read-only.
  */
 function ApprovalCard({ item, shared, onNext }: { item: NotifyItem; shared: NotifySharedState; onNext?: () => void }) {
   const theme = useTheme();
+  const { profile } = useDaemon();
   const [answeredHere, setAnsweredHere] = useState<AnsweredHere | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [moreChoices, setMoreChoices] = useState(false);
@@ -186,13 +194,13 @@ function ApprovalCard({ item, shared, onNext }: { item: NotifyItem; shared: Noti
   if (answeredHere && state.kind === 'question') setAnsweredHere(null);
   const undoing = command.isPending && command.variables[0].type === 'undo';
   const error = command.isError ? command.error.message : null;
-  const relay = relayLine(item);
+  const finished = isResolved(item);
   const workspace = approvalWorkspace(item);
   const shownPaneId = workspace.kind === 'none' ? undefined : workspace.paneId;
 
   let body: ReactNode = null;
-  if (relay) {
-    body = <Text testID="approval-relay" variant="subhead" tone="secondary" selectable>{relay}</Text>;
+  if (item.relay) {
+    body = <Text testID="approval-read-only" variant="subhead" tone="secondary" selectable>{OLDER_MACHINE_NOTE}</Text>;
   } else if (state.kind === 'question' && item.agentPrompt && !moreChoices) {
     body = (
       <>
@@ -208,22 +216,7 @@ function ApprovalCard({ item, shared, onNext }: { item: NotifyItem; shared: Noti
         {({ fields, actions }) => (
           <>
             {fields}
-            {actions.length > 0 ? (
-              <View style={styles.actions}>
-                {actions.map(action => (
-                  <View key={action.testID} style={styles.action}>
-                    <Button
-                      testID={action.testID}
-                      title={action.title}
-                      variant={action.variant === 'danger' ? 'destructive' : 'primary'}
-                      loading={action.loading}
-                      disabled={action.disabled}
-                      onPress={action.onPress}
-                    />
-                  </View>
-                ))}
-              </View>
-            ) : null}
+            <QuestionActions actions={actions} />
           </>
         )}
       </QuestionForm>
@@ -244,7 +237,12 @@ function ApprovalCard({ item, shared, onNext }: { item: NotifyItem; shared: Noti
       </>
     );
   } else if (state.kind === 'closed') {
-    body = <Text testID="notify-closed" variant="subhead" tone="secondary">{state.message}</Text>;
+    body = (
+      <>
+        <Text testID="notify-closed" variant="subhead" tone="secondary">{state.message}</Text>
+        {item.state === 'answered' && item.answerSummary ? <SentLine summary={item.answerSummary} /> : null}
+      </>
+    );
   }
 
   return (
@@ -257,20 +255,23 @@ function ApprovalCard({ item, shared, onNext }: { item: NotifyItem; shared: Noti
           onPress={() => setCollapsed(!collapsed)}
           style={styles.metaRow}
         >
-          <Icon ios={relay ? 'hourglass' : 'checkmark.circle'} android={relay ? 'hourglass_empty' : 'check_circle'} size={15} color={theme.colors.warning} />
-          <Text variant="footnote" tone="muted" numberOfLines={1} style={styles.fill}>
-            <Text variant="footnote" tone="secondary" style={styles.bold}>{relay ? 'Waiting' : NOTIFY_KIND_LABEL[item.ui]}</Text>
-            {`  ·  ${approvalMeta(item)}`}
-          </Text>
+          <Icon ios="checkmark.circle" android="check_circle" size={15} color={finished ? theme.colors.textMuted : theme.colors.warning} />
+          <Text variant="footnote" tone="secondary" numberOfLines={1} style={[styles.fill, styles.bold]}>{approvalKindLabel(item)}</Text>
           <Text variant="footnote" tone="muted">{sinceLabel(item.createdAt, Date.now())}</Text>
           <Icon ios={collapsed ? 'chevron.down' : 'chevron.up'} android={collapsed ? 'expand_more' : 'expand_less'} size={14} color={theme.colors.textMuted} />
         </Pressable>
+        <Text testID="approval-origin" variant="footnote" tone="muted" numberOfLines={1}>{originLine(item, profile.label)}</Text>
         <Text testID="notify-title" variant="headline" selectable numberOfLines={collapsed ? 1 : undefined}>{item.title}</Text>
         {collapsed ? null : (
           <>
             {item.context ? <Text variant="subhead" tone="secondary" selectable>{item.context}</Text> : null}
+            <ConnectedRow link={connectedLink(item, profile.label)} />
             <LinkChips item={item} shownPaneId={shownPaneId} />
             {body}
+            {receiptLines(item).filter(line => state.kind !== 'closed' || line !== state.message).map(line => (
+              <Text key={line} testID="approval-receipt" variant="footnote" tone="secondary" selectable>{line}</Text>
+            ))}
+            <ApprovalActions item={item} />
             {error ? <Notice testID="notify-error" danger message={error} /> : null}
           </>
         )}

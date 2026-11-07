@@ -224,5 +224,5 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
 function autopilotDescription(chatTabs: boolean, entitlement: { entitled: boolean; reason?: string; next?: string } | undefined): string {
   if (entitlement && !entitlement.entitled) return `${entitlement.reason ?? 'Autopilot is not available.'} ${entitlement.next ?? ''}`.trim();
   if (!chatTabs) return 'Autopilot runs as a chat tab: turn on Chat tabs above first.';
-  return 'Add Autopilot above Sessions: one agent, on your own installed claude, that walks your Sessions from the top and puts what waits on you in front of you with its documents. You answer every approval yourself. Turning it off stops it and keeps its Autopilot Session.';
+  return 'Add Autopilot above Sessions: one agent, on your own installed claude, that walks your Sessions from the top and puts what waits on you in front of you with its documents. It can answer and close approvals when the way is clear or you tell it to, with a receipt you can override; permission prompts stay yours. Turning it off stops it and keeps its Autopilot Session.';
 }

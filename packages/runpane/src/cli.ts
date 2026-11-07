@@ -13,7 +13,7 @@ import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
 import { runNotify } from './notify';
 import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
-import { runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
+import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, routeDaemonCallsTo } from './daemonClient';
 import { describeFailure, printFailure, RunpaneError } from './errors';
@@ -389,6 +389,9 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'autopilot waiting': async (parsed) => runAutopilotWaiting(parsed),
   'autopilot stack': async (parsed) => runAutopilotStack(parsed),
   'autopilot stack push': async (parsed) => runAutopilotStackPush(parsed),
+  'autopilot answer': async (parsed) => runAutopilotAnswer(parsed),
+  'autopilot close': async (parsed) => runAutopilotClose(parsed),
+  'autopilot rewrite': async (parsed) => runAutopilotRewrite(parsed),
   'agents doctor': async (parsed, telemetryContext) => {
     return runAgentsDoctor(parsed);
   },

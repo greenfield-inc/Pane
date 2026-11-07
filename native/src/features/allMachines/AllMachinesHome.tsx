@@ -3,8 +3,10 @@ import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
+import { originLine } from '@shared/approvalReceipts';
+
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
-import { questionDetail } from '@/features/approvals/approvals';
+import { askerLine, questionDetail, type ApprovalList } from '@/features/approvals/approvals';
 import { openApproval } from '@/features/approvals/ApprovalScreen';
 import { WaitingCount } from '@/features/approvals/WaitingCount';
 import { MachineBadge } from '@/features/machines/MachineBadge';
@@ -43,9 +45,9 @@ export interface CurrentMachineActions {
 }
 
 /**
- * Home's All machines list: Approvals from every saved machine, grouped by Session, then every Pane and
- * Session newest first, each with its machine's badge. An unreachable machine's rows stay,
- * dimmed, under a note that says since when, with Retry.
+ * Home's All machines list: Approvals from every saved machine, in the chosen sort, then every Pane and
+ * Session newest first, each with its machine's badge. An unreachable machine's approvals collapse
+ * to one row; its other rows stay, dimmed, under a note that says since when, with Retry.
  */
 export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshing, onRefresh, nextMachine, actions, bottomPadding }: {
   machines: Machine[];
@@ -62,7 +64,8 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
 }) {
   const theme = useTheme();
   const [query, setQuery] = useState('');
-  const { waiting, recent } = buildAllMachinesList(feeds, query);
+  const { waiting, staleQuestions, answered, offline: offlineApprovals, recent } = buildAllMachinesList(feeds, query);
+  const listsApprovals = waiting.length + staleQuestions.length + answered.length + offlineApprovals.length > 0;
   const machineOf = (key: string) => machines.find(machine => machine.key === key);
   const feedOf = (key: string) => feeds.find(feed => feed.key === key);
   const offline = feeds.filter(feed => feed.offlineSince !== undefined);
@@ -93,13 +96,12 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
     }
   };
 
-  const openWaiting = (row: WaitingRow) => {
-    if (row.stale) return sayOffline(row.machineKey, row.type === 'question' ? 'question' : 'request');
+  const openWaiting = (row: WaitingRow, list: ApprovalList) => {
     const here = row.machineKey === currentKey;
     if (row.type === 'question') {
       // The approval screen shows its machine's Session below the card, so another machine's switches first.
-      if (here) openApproval(row.item.id);
-      else router.push({ pathname: '/open', params: { host: row.machineKey, notifyId: row.item.id } });
+      if (here) openApproval(row.item.id, list);
+      else router.push({ pathname: '/open', params: { host: row.machineKey, notifyId: row.item.id, ...(list === 'waiting' ? {} : { list }) } });
     } else if (here) {
       router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: row.request.sessionId, requestId: row.request.id } });
     } else {
@@ -111,34 +113,33 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
     <View>
       <ApprovalGroups
         entries={waiting}
+        stale={staleQuestions}
+        answered={answered}
+        offline={offlineApprovals}
         machineOf={machineOf}
-        renderEntry={(row, divided) => {
+        renderEntry={(row, divided, list) => {
           const machine = machineOf(row.machineKey);
           const permission = row.type === 'permission' ? describePermission(row.request) : null;
           return (
             <>
               <AllRow
                 testID={row.type === 'question' ? `notify-row-${row.item.id}` : `permission-row-${row.request.sessionId}`}
-                title={row.type === 'question' ? row.item.source.name : row.paneName}
+                title={row.type === 'question' ? originLine(row.item, '') : askerLine(row.paneName, row.session)}
                 detail={row.type === 'question' ? questionDetail(row.item) : permission?.target ? `${permission.title}: ${permission.target}` : permission?.title ?? ''}
                 machine={machine}
                 stale={row.stale}
                 divided={divided}
-                leading={<StatusBadge status="blocked" />}
-                onPress={() => openWaiting(row)}
+                leading={<StatusBadge status={list === 'answered' ? 'idle' : 'blocked'} />}
+                onPress={() => openWaiting(row, list)}
               />
               {row.type === 'question' && row.item.state === 'waiting' ? (
-                <AgentPromptActions
-                  item={row.item}
-                  machine={row.machineKey === currentKey ? null : machine?.profile ?? null}
-                  offline={row.stale ? machine?.name ?? 'Its machine' : undefined}
-                />
+                <AgentPromptActions item={row.item} machine={row.machineKey === currentKey ? null : machine?.profile ?? null} />
               ) : null}
             </>
           );
         }}
       />
-      {recent.length > 0 ? <SectionHeader title={noneAnswer ? 'Last seen' : 'Recent'} first={waiting.length === 0} /> : null}
+      {recent.length > 0 ? <SectionHeader title={noneAnswer ? 'Last seen' : 'Recent'} first={!listsApprovals} /> : null}
     </View>
   );
 
@@ -232,7 +233,7 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
         style={styles.fill}
         contentContainerStyle={[styles.content, { paddingBottom: bottomPadding }]}
         ListHeaderComponent={loading ? null : header}
-        ListEmptyComponent={waiting.length > 0 ? null : empty}
+        ListEmptyComponent={listsApprovals ? null : empty}
         renderItem={renderRow}
       />
     </View>

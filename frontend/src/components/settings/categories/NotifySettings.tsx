@@ -120,7 +120,7 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
         <SettingRow
           settingId="notify-enabled"
           label="Approvals"
-          description="Let agents in Pane ask you questions and send updates."
+          description="Let agents in Pane ask you questions and send updates. Applies to all your machines."
           saveState={persistence.saveStates['notify-enabled']}
         >
           <ImmediateToggle label="Approvals" value={settings.enabled} onSave={(enabled) => save('notify-enabled', 'enabled', enabled)} />

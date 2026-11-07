@@ -94,3 +94,43 @@ export async function syncSharedCredentials(hosts: readonly SharedCredentialHost
   const applied = await Promise.all(behind.map(read => read.host.apply(newest).then(() => true, () => false)));
   return { reached: reached.length, updated: applied.filter(Boolean).length };
 }
+
+/**
+ * The Approvals on/off switch as a host holds it. It travels on its own commands, not with the keys:
+ * a phone relays keys and has no business relaying this, and a host too old for it refuses the
+ * commands instead of silently dropping it.
+ */
+export interface SharedNotifySwitch {
+  enabled: boolean;
+  /** Epoch ms of the last change, on the host where the person made it. 0: never changed since sharing began. */
+  changedAt: number;
+}
+
+/**
+ * The later change wins. Equal times settle on off: only a value stored before sharing existed
+ * has no time, and an off there was somebody's choice, while most on values are just the default.
+ * The rule looks only at the values, so every host picks the same one whatever order it reads them in.
+ */
+export function isNewerNotifySwitch(candidate: SharedNotifySwitch, current: SharedNotifySwitch): boolean {
+  if (candidate.changedAt !== current.changedAt) return candidate.changedAt > current.changedAt;
+  return !candidate.enabled && current.enabled;
+}
+
+export interface SharedNotifySwitchHost {
+  read(): Promise<SharedNotifySwitch>;
+  apply(notifySwitch: SharedNotifySwitch): Promise<void>;
+}
+
+/**
+ * Reads every reachable host, then writes the newest value to the hosts behind it. Unreachable
+ * hosts and hosts too old to share the switch are skipped; they catch up on a later sync.
+ */
+export async function syncSharedNotifySwitch(hosts: readonly SharedNotifySwitchHost[]): Promise<{ reached: number; updated: number }> {
+  const reads = await Promise.all(hosts.map(host => host.read().then(notifySwitch => ({ host, notifySwitch }), () => null)));
+  const reached = reads.filter(read => read !== null);
+  if (reached.length === 0) return { reached: 0, updated: 0 };
+  const newest = reached.reduce((best, read) => isNewerNotifySwitch(read.notifySwitch, best) ? read.notifySwitch : best, reached[0].notifySwitch);
+  const behind = reached.filter(read => isNewerNotifySwitch(newest, read.notifySwitch));
+  const applied = await Promise.all(behind.map(read => read.host.apply(newest).then(() => true, () => false)));
+  return { reached: reached.length, updated: applied.filter(Boolean).length };
+}

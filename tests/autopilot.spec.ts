@@ -249,7 +249,7 @@ test('Autopilot: switch, Start, the walk on the stack, answers by you, never by 
     await expect(page.getByTestId('autopilot-session-overview')).toBeVisible();
     await shot(page, '07-d3-close-out');
     await page.getByRole('button', { name: /^Approvals/ }).first().click();
-    await expect(page.getByTestId('approvals-group').filter({ hasText: 'Autopilot' })).toBeVisible();
+    await expect(page.getByTestId('approvals-queue').getByText('Autopilot').first()).toBeVisible();
     await shot(page, '08-approvals-autopilot-group');
     await page.getByTestId('autopilot-nav').click();
 

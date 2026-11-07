@@ -19,7 +19,7 @@ import { useNotifyShared } from '@/features/notify/hooks';
 import { useTheme, withAlpha } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
 
-import { composerPlaceholder, startBlocked, walkBar } from './autopilot';
+import { composerPlaceholder, startBlocked, walkBar, autopilotItems } from './autopilot';
 import { DecisionCard, useDecisionAnswer } from './DecisionCard';
 import { useAutopilot, useAutopilotControl, useAutopilotOpened, useAutopilotSentinel } from './hooks';
 import { SentinelAwayCard, SentinelLogRows } from './SentinelBlocks';
@@ -55,7 +55,7 @@ export function AutopilotScreen() {
   } else if (snapshot.state === 'stopped' || !snapshot.panelId) {
     body = <StartPanel snapshot={snapshot} />;
   } else {
-    const items = notify.data?.items ?? [];
+    const items = autopilotItems(snapshot, notify.data?.items);
     body = (
       <ChatTabScreen
         key={snapshot.panelId}
@@ -197,7 +197,7 @@ function StartPanel({ snapshot }: { snapshot: AutopilotSnapshot }) {
       <AutopilotMark size={56} />
       <Text variant="title" style={styles.centerText}>Autopilot</Text>
       <Text variant="body" tone="secondary" style={styles.centerText}>
-        Press Start and I’ll bring what needs you, one at a time, from the top Session down. You answer every approval yourself.
+        Press Start and I’ll bring what needs you, one at a time, from the top Session down.
       </Text>
       {blocked ? <Text testID="autopilot-start-blocked" variant="subhead" style={[styles.centerText, { color: colors.warning }]}>{blocked}</Text> : null}
       {start.isError ? <Text testID="autopilot-start-error" variant="subhead" tone="danger" style={styles.centerText}>{start.error.message}</Text> : null}

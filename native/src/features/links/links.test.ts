@@ -207,6 +207,7 @@ describe('a push tap', () => {
   it('falls back to the asking Pane without a Session Pane, and opens Panes and Sessions as before', () => {
     expect(openRoute({ notifyId: 'q1', paneId: 'worker' })).toEqual({ pathname: '/approval/[notifyId]', params: { notifyId: 'q1', paneId: 'worker' } });
     expect(openRoute({ notifyId: 'q1' })).toEqual({ pathname: '/approval/[notifyId]', params: { notifyId: 'q1' } });
+    expect(openRoute({ notifyId: 'q1', list: 'stale' })).toEqual({ pathname: '/approval/[notifyId]', params: { notifyId: 'q1', list: 'stale' } });
     expect(openRoute({ sessionId: 's1' })).toEqual({ pathname: '/session/[sessionId]', params: { sessionId: 's1' } });
     expect(openRoute({ paneId: 'p', panelId: 'x' })).toEqual({ pathname: '/pane/[paneId]', params: { paneId: 'p', panelId: 'x' } });
     expect(openRoute({})).toBeNull();

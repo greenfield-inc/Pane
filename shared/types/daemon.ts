@@ -143,6 +143,8 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'remote:settings:update',
   'credentials:shared:get',
   'credentials:shared:apply',
+  'notify:switch:get',
+  'notify:switch:apply',
   'git:restore',
   'git:revert',
   'permission:getPending',

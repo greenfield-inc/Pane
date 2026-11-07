@@ -17,7 +17,8 @@ import { StateScreen } from '@/features/tabs/StateScreen';
 import { monoFontFamily, useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
 
-import { docBackLabel, fileName } from './autopilot';
+import { docBackLabel, fileName, autopilotItems } from './autopilot';
+import { useAutopilot } from './hooks';
 
 function backToItem() {
   if (router.canGoBack()) router.back();
@@ -35,7 +36,8 @@ export function AutopilotDocScreen({ notifyId, path, url, label }: { notifyId?: 
   const insets = useSafeAreaInsets();
   const { notice, retry } = useConnectionPresence();
   const notify = useNotifyShared();
-  const item = notify.data?.items.find(candidate => candidate.id === notifyId);
+  const autopilot = useAutopilot();
+  const item = autopilotItems(autopilot.data, notify.data?.items).find(candidate => candidate.id === notifyId);
   // A document with no item (Sentinel's away log) opens from the chat and goes back to it.
   const back = notifyId ? docBackLabel(item ? decisionModel(item) : undefined) : 'Chat';
   const footer = notifyId ? `Back to ${back} to answer` : 'Back to the chat';

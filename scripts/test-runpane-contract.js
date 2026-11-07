@@ -1206,6 +1206,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false, closed: false,
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
+  answerApprove: false, answerDeny: false,
 };
 
 function normalizeParsedArgs(value) {
@@ -6148,6 +6149,46 @@ async function checkAutopilotParity() {
       '  n-3  permission  Question n-3  Claude - Worker  3h',
     ] },
     { args: ['autopilot', 'waiting'], channel: 'runpane:autopilot:waiting', requestArgs: [], result: { ok: true, items: [] }, lines: ['Nothing is waiting on the person.'] },
+    { args: ['autopilot', 'waiting'], channel: 'runpane:autopilot:waiting', requestArgs: [], result: {
+      ok: true,
+      items: [
+        waitingItem('n-4', { kind: 'question', ageMs: 4 * 86_400_000, stale: true, connected: { kind: 'session', id: 's-1', name: 'Release', paneId: 'p-1' }, sessionId: 's-1', sessionName: 'Release' }),
+        waitingItem('n-5', { kind: 'question', ageMs: 60_000, quiet: true, machine: 'Mac mini', machineId: 'mini', connected: { kind: 'pane', id: 'p-2', name: 'Worker' } }),
+      ],
+      offline: ['Studio'],
+      cantSee: ['tylers-macbook-pro'],
+    }, lines: [
+      'Release (s-1)',
+      '  n-4  question  Question n-4  Claude - Worker  4d  stale',
+      'Not in a Session',
+      '  n-5  question  Question n-5  Claude - Worker  1m  on Mac mini  quiet',
+      'Studio offline',
+      "Can't see: tylers-macbook-pro",
+    ] },
+    { args: ['autopilot', 'waiting'], channel: 'runpane:autopilot:waiting', requestArgs: [], result: { ok: true, items: [], offline: ['Studio'], cantSee: [] }, lines: ['Nothing is waiting on the person.', 'Studio offline'] },
+    { args: ['autopilot', 'answer', 'n-1', '--choice', 'Yes', '--note', 'Go', '--because', 'D-22'], channel: 'runpane:autopilot:answer',
+      requestArgs: [{ id: 'n-1', answer: { choice: 'Yes', note: 'Go' }, because: 'D-22' }], result: { ok: true, id: 'n-1', machine: 'Mac mini' },
+      lines: ['Answered n-1 on Mac mini, recorded by Autopilot because D-22. The person can Override it.'] },
+    { args: ['autopilot', 'answer', 'n-1', '--approve', '--because=The person said so'], channel: 'runpane:autopilot:answer',
+      requestArgs: [{ id: 'n-1', answer: { approved: true }, because: 'The person said so' }], result: { ok: true, id: 'n-1' },
+      lines: ['Answered n-1, recorded by Autopilot because The person said so. The person can Override it.'] },
+    { args: ['autopilot', 'answer', 'n-1', '--deny', '--note', 'Not yet', '--because', 'D-23'], channel: 'runpane:autopilot:answer',
+      requestArgs: [{ id: 'n-1', answer: { approved: false, note: 'Not yet' }, because: 'D-23' }], result: { ok: true, id: 'n-1' },
+      lines: ['Answered n-1, recorded by Autopilot because D-23. The person can Override it.'] },
+    { args: ['autopilot', 'answer', 'n-1', '--text', 'main', '--because', 'D-24'], channel: 'runpane:autopilot:answer',
+      requestArgs: [{ id: 'n-1', answer: { text: 'main' }, because: 'D-24' }], result: { ok: true, id: 'n-1' },
+      lines: ['Answered n-1, recorded by Autopilot because D-24. The person can Override it.'] },
+    { args: ['autopilot', 'close', 'n-1', '--reason', 'The PR merged'], channel: 'runpane:autopilot:close',
+      requestArgs: [{ id: 'n-1', reason: 'The PR merged' }], result: { ok: true, id: 'n-1' },
+      lines: ['Closed n-1: The PR merged. The person can reopen it.'] },
+    { args: ['autopilot', 'rewrite', 'n-1', '--ui', 'options', '--title', 'Q-3: Which?', '--context', 'Why', '--choices=[{"label":"A","recommended":true},{"label":"B"}]',
+      '--links=[{"label":"Notes","path":"docs/plan.html"},{"label":"PR","url":"https://example.com/pr/1"}]'], channel: 'runpane:autopilot:rewrite',
+      requestArgs: [{ id: 'n-1', ui: 'options', title: 'Q-3: Which?', context: 'Why', choices: [{ label: 'A', recommended: true }, { label: 'B' }],
+        links: [{ label: 'Notes', path: path.join(rootDir, 'docs', 'plan.html') }, { label: 'PR', url: 'https://example.com/pr/1' }] }],
+      result: { ok: true, id: 'n-9' }, lines: ['Rewrote n-1 as n-9. Its answer goes to the original asker.'] },
+    { args: ['autopilot', 'rewrite', 'n-1', '--ui', 'ask', '--title', 'Which?', '--suggestions=["main"]'], channel: 'runpane:autopilot:rewrite',
+      requestArgs: [{ id: 'n-1', ui: 'ask', title: 'Which?', suggestions: ['main'] }], result: { ok: true, id: 'n-9', machine: 'Mac mini' },
+      lines: ['Rewrote n-1 as n-9 on Mac mini. Its answer goes to the original asker.'] },
     { args: ['autopilot', 'stack'], channel: 'runpane:autopilot:stack', requestArgs: [], result: { ok: true, ...stack }, lines: [
       'Stack: 2 entries.',
       '> 1. e-1 item: Ship it? - Release (shown)',
@@ -6180,6 +6221,104 @@ async function checkAutopilotParity() {
           if (json) assert.deepStrictEqual(JSON.parse(run.stdout), testCase.result, `${runtime} ${args.join(' ')} prints the result`);
           else assert.strictEqual(lf(run.stdout), `${testCase.lines.join('\n')}\n`, `${runtime} ${args.join(' ')} prints its lines`);
         }
+      }
+
+      // An older Pane still calls a worker's question "stuck": it reads as a question, in both forms.
+      const olderWaiting = { ok: true, items: [waitingItem('n-6', { kind: 'stuck', ageMs: 60_000 })] };
+      const olderText = await withFakeDaemon(paneDir, () => ({ result: olderWaiting }), () => runCliOnce(runtime, ['autopilot', 'waiting'], paneDir));
+      assert.strictEqual(lf(olderText.stdout), 'Not in a Session\n  n-6  question  Question n-6  Claude - Worker  1m\n');
+      const olderJson = await withFakeDaemon(paneDir, () => ({ result: olderWaiting }), () => runCliOnce(runtime, ['autopilot', 'waiting', '--json'], paneDir));
+      assert.ok(!olderJson.stdout.includes('stuck'), `${runtime} never prints the old kind`);
+      assert.strictEqual(JSON.parse(olderJson.stdout).items[0].kind, 'question');
+
+      // An older Pane has no action channels: the error says so, and what to do.
+      const older = await withFakeDaemon(paneDir, () => ({ error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'Unknown channel' } }),
+        () => runCliOnce(runtime, ['autopilot', 'close', 'n-1', '--reason', 'Old', '--json'], paneDir));
+      assert.strictEqual(older.code, 1);
+      assert.deepStrictEqual(JSON.parse(older.stdout), { ok: false, error: { code: 'ERR_AUTOPILOT_PANE_TOO_OLD', message: "This Pane can't run runpane autopilot close yet. Nothing was changed.", next: 'Update Pane, or bring the item to the person.' } });
+
+      // The owner's refusals pass through with their code and next step.
+      const answered = { message: 'Already answered by you on Mac mini. Nothing was changed.', code: 'ERR_APPROVALS_ALREADY_ENDED', next: 'Leave it.' };
+      const late = await withFakeDaemon(paneDir, () => ({ error: answered }), () => runCliOnce(runtime, ['autopilot', 'answer', 'n-1', '--approve', '--because', 'D-1', '--json'], paneDir));
+      assert.deepStrictEqual(JSON.parse(late.stdout), { ok: false, error: answered });
+
+      // Autopilot's actions are refused before any request, with a code and the next step.
+      const refused = [
+        [['autopilot', 'answer', '--approve', '--because', 'D-1'], "runpane autopilot answer needs a waiting item's id. Nothing was changed."],
+        [['autopilot', 'answer', 'n-1', '--because', 'D-1'], 'runpane autopilot answer needs exactly one of --choice <label>, --approve, --deny, or --text <text>. Nothing was changed.'],
+        [['autopilot', 'answer', 'n-1', '--approve', '--deny', '--because', 'D-1'], 'runpane autopilot answer needs exactly one of --choice <label>, --approve, --deny, or --text <text>. Nothing was changed.'],
+        [['autopilot', 'answer', 'n-1', '--approve'], "runpane autopilot answer needs --because <why>: a D-n, a document or the person's words, recorded on the item. Nothing was changed."],
+        [['autopilot', 'answer', 'n-1', '--approve', '--because', ' '], "runpane autopilot answer needs --because <why>: a D-n, a document or the person's words, recorded on the item. Nothing was changed."],
+        [['autopilot', 'answer', 'n-1', '--text', 'main', '--note', 'x', '--because', 'D-1'], '--note goes with --choice, --approve or --deny. Nothing was changed.'],
+        [['autopilot', 'close', 'n-1'], 'runpane autopilot close needs --reason <why>, recorded on the item and told to its asker. Nothing was changed.'],
+        [['autopilot', 'close', '--reason', 'Old'], "runpane autopilot close needs a waiting item's id. Nothing was changed."],
+        [['autopilot', 'rewrite', 'n-1', '--ui', 'info', '--title', 'Hi'], "A rewrite must take an answer, so --ui info doesn't fit. Nothing was changed."],
+        [['autopilot', 'rewrite', 'n-1', '--ui', 'approve', '--title', 'Hi', '--detail', 'x'], 'runpane autopilot rewrite takes --context, --choices, --suggestions and --links, not --detail, --detail-label or --action. Nothing was changed.'],
+        [['autopilot', 'rewrite', 'n-1', '--ui', 'options', '--title', 'Hi'], 'choices is required with ui options: 1 to 9 choices, such as [{"label":"Ship it"},{"label":"Wait"}]. Nothing was shown to the person.'],
+      ];
+      for (const [args, message] of refused) {
+        const frames = [];
+        const run = await withFakeDaemon(paneDir, () => ({ result: { ok: true, id: 'n-1' } }), () => runCliOnce(runtime, [...args, '--json'], paneDir),
+          (frame) => { if (frame.type === 'request' && frame.id === 1) frames.push(frame); });
+        assert.strictEqual(run.code, 1, `${runtime} ${args.join(' ')} exits 1`);
+        const { error } = JSON.parse(run.stdout);
+        assert.strictEqual(error.code, 'ERR_AUTOPILOT_INVALID', `${runtime} ${args.join(' ')}`);
+        assert.strictEqual(error.message, message, `${runtime} ${args.join(' ')}`);
+        assert.ok(error.next, `${runtime} ${args.join(' ')} says what to do next`);
+        assert.strictEqual(frames.length, 0, `${runtime} ${args.join(' ')} sends nothing`);
+      }
+
+      // A worker's answers: the inbox names those with no D-n, and ack records one.
+      const answers = [
+        { id: 'n-7', title: 'Q-39: Run the script?', answer: 'Yes', by: 'autopilot', because: 'D-22', worker: 'Worker', panelId: 'panel-1', answeredAt: '2026-11-03T00:00:00.000Z', delivered: 'tab' },
+        { id: 'n-8', title: 'Q-40: Which?', answer: 'main', by: 'you', worker: 'Worker', answeredAt: '2026-11-03T00:00:00.000Z', decision: 'D-147' },
+      ];
+      const inboxResult = { ok: true, session: { id: 's-1', name: 'Release' }, items: [], answers };
+      const inboxText = await withFakeDaemon(paneDir, () => ({ result: inboxResult }), () => runCliOnce(runtime, ['inbox', '--session', 's-1'], paneDir));
+      assert.strictEqual(lf(inboxText.stdout), [
+        'Inbox for Release: nothing unacknowledged.',
+        'n-7 ANSWERED Worker: Q-39: Run the script? -> Yes (by Autopilot) needs a D-n',
+        'Record each with: runpane inbox ack <id> --decision <D-n>',
+        '',
+      ].join('\n'), `${runtime} inbox prints what still needs a D-n`);
+      const inboxJson = await withFakeDaemon(paneDir, () => ({ result: inboxResult }), () => runCliOnce(runtime, ['inbox', '--session', 's-1', '--json'], paneDir));
+      assert.deepStrictEqual(JSON.parse(inboxJson.stdout), inboxResult);
+      const inboxOlder = await withFakeDaemon(paneDir, () => ({ result: { ...inboxResult, answers: undefined } }), () => runCliOnce(runtime, ['inbox', '--session', 's-1'], paneDir));
+      assert.strictEqual(lf(inboxOlder.stdout), 'Inbox for Release: nothing unacknowledged.\n', `${runtime} an older Pane has no answers`);
+      const ackFrames = [];
+      const acked = await withFakeDaemon(paneDir, () => ({ result: { ok: true, acknowledged: ['n-7'], unknown: [] } }),
+        () => runCliOnce(runtime, ['inbox', 'ack', 'n-7', '--decision', 'D-147'], paneDir),
+        (frame) => { if (frame.type === 'request' && frame.id === 1) ackFrames.push(frame); });
+      assert.deepStrictEqual(ackFrames[0].args, [{ ids: ['n-7'], decision: 'D-147' }], `${runtime} ack sends the decision`);
+      assert.strictEqual(lf(acked.stdout), 'Acknowledged 1 inbox item, recorded as D-147.\n');
+      for (const [args, message] of [
+        [['inbox', 'ack', 'n-7', '--decision', 'soon'], '--decision must look like D-147; got "soon". Nothing was acknowledged.'],
+        [['inbox', 'ack', '--all', '--session', 's-1', '--decision', 'D-1'], "runpane inbox ack --decision records on the items you name, so it can't go with --all. Nothing was acknowledged."],
+      ]) {
+        const run = await withFakeDaemon(paneDir, () => ({ result: { ok: true, acknowledged: [], unknown: [] } }), () => runCliOnce(runtime, [...args, '--json'], paneDir));
+        const { error } = JSON.parse(run.stdout);
+        assert.strictEqual(error.code, 'ERR_INBOX_INVALID', `${runtime} ${args.join(' ')}`);
+        assert.strictEqual(error.message, message, `${runtime} ${args.join(' ')}`);
+        assert.ok(error.next);
+      }
+
+      // Relays: the same card, the question fields required, not with resume.
+      const notifyFrames = [];
+      await withFakeDaemon(paneDir, () => ({ result: { answer: 'Yes' } }),
+        () => runCliOnce(runtime, ['notify', '--relays', 'in-1', '--about-session', 'Release', '--ui', 'ask', '--title', 'Q-39: Run it?', '--json'], paneDir),
+        (frame) => { if (frame.type === 'request' && frame.id === 1) notifyFrames.push(frame); });
+      assert.strictEqual(notifyFrames[0].args[0].relays, 'in-1', `${runtime} notify sends relays`);
+      assert.strictEqual(notifyFrames[0].args[0].aboutSession, 'Release', `${runtime} notify sends aboutSession`);
+      assert.strictEqual(notifyFrames[0].args[0].ui, 'ask');
+      for (const [args, message] of [
+        [['notify', '--relays', 'in-1'], 'ui is required: options, approve, ask, or info. Nothing was shown to the person.'],
+        [['notify', '--relays', ' ', '--ui', 'ask', '--title', 'Hi'], 'relays must be the id of a waiting item from runpane inbox. Nothing was shown to the person.'],
+        [['notify', '--resume', 'n-1', '--relays', 'in-1'], 'resume keeps waiting on an earlier question, so it takes no other fields; remove relays. Nothing was shown to the person.'],
+      ]) {
+        const run = await withFakeDaemon(paneDir, () => ({ result: { answer: 'Yes' } }), () => runCliOnce(runtime, [...args, '--json'], paneDir));
+        const { error } = JSON.parse(run.stdout);
+        assert.strictEqual(error.code, 'ERR_NOTIFY_INVALID', `${runtime} ${args.join(' ')}`);
+        assert.strictEqual(error.message, message, `${runtime} ${args.join(' ')}`);
       }
 
       // A daemon error prints its code and next step, like every other command.
@@ -6218,6 +6357,12 @@ async function checkAutopilotParity() {
     ['autopilot', 'stack', 'push', '--item', 'n-1', '--tab='],
     ['autopilot', 'stack', '--next'],
     ['panels', 'create', '--pane', 'p', '--agent', 'codex', '--next'],
+    ['panes', 'list', '--relays', 'in-1'],
+    ['autopilot', 'close', 'n-1', '--about-session', 'Release'],
+    ['inbox', '--decision', 'D-1'],
+    ['autopilot', 'close', 'n-1', '--because', 'D-1'],
+    ['autopilot', 'answer', 'n-1', '--reason', 'Old'],
+    ['notify', '--approve'],
   ];
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
   const nodeErrors = invalid.map((args) => { try { parseRunpaneArgs(args); return 'accepted'; } catch (error) { return error.message; } });
@@ -6242,7 +6387,34 @@ print(json.dumps(errors))
     '--tab requires a value.',
     '--next is only valid with runpane autopilot stack push.',
     '--next is only valid with runpane autopilot stack push.',
+    '--relays is only valid with runpane notify.',
+    '--about-session is only valid with runpane notify.',
+    '--decision is only valid with runpane inbox ack.',
+    '--because is only valid with runpane autopilot answer.',
+    '--reason is only valid with runpane secrets request or runpane autopilot close.',
+    '--approve is only valid with runpane autopilot answer.',
   ]);
+  // Every fixture above is what the published, closed schemas promise.
+  for (const [name, value] of [
+    ['autopilotAnswerResult', { ok: true, id: 'n-1', machine: 'Mac mini' }],
+    ['autopilotCloseResult', { ok: true, id: 'n-1' }],
+    ['autopilotRewriteResult', { ok: true, id: 'n-9' }],
+    ['autopilotAnswerRequest', { id: 'n-1', answer: { choice: 'Yes', note: 'Go' }, because: 'D-22' }],
+    ['autopilotAnswerRequest', { id: 'n-1', answer: { approved: false }, because: 'D-22' }],
+    ['autopilotAnswerRequest', { id: 'n-1', answer: { text: 'main' }, because: 'D-22' }],
+    ['autopilotCloseRequest', { id: 'n-1', reason: 'Old' }],
+    ['autopilotRewriteRequest', { id: 'n-1', ui: 'ask', title: 'Which?', suggestions: ['main'] }],
+    ['notifyRequest', { relays: 'in-1', aboutSession: 'Release', ui: 'ask', title: 'Which?', caller: {} }],
+    ['inboxListResult', { ok: true, session: { id: 's-1', name: 'Release' }, items: [], answers: [{ id: 'n-7', title: 'Q', answer: 'Yes', by: 'you', worker: 'W', answeredAt: 'now', delivered: 'tab', decision: 'D-1' }] }],
+    ['autopilotWaitingResult', { ok: true, items: [{ ...waitingItem('n-1', { quiet: true, stale: true, connected: { kind: 'session', id: 's-1', name: 'Release', paneId: 'p-1' } }) }], offline: ['A'], cantSee: ['B'] }],
+  ]) {
+    const valid = ajv.compile({ $ref: `contract#/jsonSchemas/${name}` });
+    assert.ok(valid(value), `${name} fixture matches the contract schema: ${ajv.errorsText(valid.errors)}`);
+  }
+  const validWaiting = ajv.compile({ $ref: 'contract#/jsonSchemas/autopilotWaitingResult' });
+  assert.ok(!validWaiting({ ok: true, items: [waitingItem('n-1', { kind: 'stuck' })] }), 'the old kind is gone from the published schema');
+  const validAnswer = ajv.compile({ $ref: 'contract#/jsonSchemas/autopilotAnswerRequest' });
+  assert.ok(!validAnswer({ id: 'n-1', answer: { text: 'main', note: 'x' }, because: 'D-1' }), 'a typed answer takes no note');
 }
 
 async function runChecks() {

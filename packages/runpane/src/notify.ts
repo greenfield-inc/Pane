@@ -23,18 +23,38 @@ interface NotifyCaller { paneId?: string; panelId?: string; cwd?: string; agent?
 
 type NotifyLink = { label: string; path: string } | { label: string; url: string };
 
-export interface NotifyRequest {
-  ui?: NotifyRequestUi;
-  title?: string;
+export interface NotifyQuestion {
+  ui: NotifyUi;
+  title: string;
   context?: string;
   choices?: NotifyChoice[];
   detail?: string;
   detailLabel?: string;
   suggestions?: string[];
   action?: NotifyAction;
-  secret?: { project: string; name: string };
   links?: NotifyLink[];
+}
+
+/** The question flags as given; JSON ones are text until checked. */
+export interface NotifyQuestionFlags {
+  ui?: string;
+  title?: string;
+  context?: string;
+  choices?: string;
+  detail?: string;
+  detailLabel?: string;
+  suggestions?: string;
+  action?: string;
+  links?: string;
+}
+
+export interface NotifyRequest extends Partial<Omit<NotifyQuestion, 'ui'>> {
+  ui?: NotifyRequestUi;
+  /** `runpane secrets request` only: the Pane secret the answer is saved as. */
+  secret?: { project: string; name: string };
   resume?: string;
+  relays?: string;
+  aboutSession?: string;
   returnAfterMs?: number;
   caller: NotifyCaller;
 }
@@ -94,7 +114,7 @@ function invalid(field: string, problem: string, next = `Fix ${field} and call n
  * time out, how soon to return `waiting`.
  */
 function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: string): NotifyRequest {
-  const given = {
+  const given: NotifyQuestionFlags = {
     ui: parsed.notifyUi,
     title: parsed.title,
     context: parsed.notifyContext,
@@ -109,13 +129,27 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
 
   if (parsed.resume !== undefined) {
     if (!parsed.resume.trim()) throw invalid('resume', 'resume must be the id from a waiting result.');
-    const extra = Object.entries(given).filter(([, value]) => value !== undefined).map(([field]) => field);
+    const extra = Object.entries({ ...given, relays: parsed.notifyRelays, aboutSession: parsed.notifyAboutSession }).filter(([, value]) => value !== undefined).map(([field]) => field);
     if (extra.length > 0) {
       throw invalid('resume', `resume keeps waiting on an earlier question, so it takes no other fields; remove ${extra.join(', ')}.`, 'Call notify again with only resume.');
     }
     return { resume: parsed.resume, ...timing, caller };
   }
 
+  const request: NotifyRequest = { ...parseNotifyQuestion(given), ...timing, caller };
+  if (parsed.notifyRelays !== undefined) {
+    if (!parsed.notifyRelays.trim()) throw invalid('relays', 'relays must be the id of a waiting item from runpane inbox.');
+    request.relays = parsed.notifyRelays;
+  }
+  if (parsed.notifyAboutSession !== undefined) {
+    if (!parsed.notifyAboutSession.trim()) throw invalid('aboutSession', 'aboutSession must be a Session id or name.');
+    request.aboutSession = parsed.notifyAboutSession;
+  }
+  return request;
+}
+
+/** Checks a question's fields, for notify and for Autopilot's rewrite of an item. */
+export function parseNotifyQuestion(given: NotifyQuestionFlags): NotifyQuestion {
   const ui = UIS.find((candidate) => candidate === given.ui);
   if (given.ui === undefined) throw invalid('ui', 'ui is required: options, approve, ask, or info.');
   if (!ui) throw invalid('ui', `ui must be options, approve, ask, or info; got "${given.ui}".`);
@@ -133,15 +167,15 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
     if (length > MAX_DETAIL_LABEL) throw invalid('detailLabel', `detailLabel takes up to ${MAX_DETAIL_LABEL} characters; got ${length}.`);
   }
 
-  const request: NotifyRequest = { ui, title: given.title, ...timing, caller };
-  if (given.context !== undefined) request.context = given.context;
-  if (given.choices !== undefined) request.choices = parseChoices(given.choices);
-  if (given.detail !== undefined) request.detail = given.detail;
-  if (given.detailLabel !== undefined) request.detailLabel = given.detailLabel;
-  if (given.suggestions !== undefined) request.suggestions = parseSuggestions(given.suggestions);
-  if (given.action !== undefined) request.action = decodeOr(parseJson(given.action), actionSchema, invalid('action', ACTION_EXPECTED));
-  if (given.links !== undefined) request.links = parseLinks(given.links);
-  return request;
+  const question: NotifyQuestion = { ui, title: given.title };
+  if (given.context !== undefined) question.context = given.context;
+  if (given.choices !== undefined) question.choices = parseChoices(given.choices);
+  if (given.detail !== undefined) question.detail = given.detail;
+  if (given.detailLabel !== undefined) question.detailLabel = given.detailLabel;
+  if (given.suggestions !== undefined) question.suggestions = parseSuggestions(given.suggestions);
+  if (given.action !== undefined) question.action = decodeOr(parseJson(given.action), actionSchema, invalid('action', ACTION_EXPECTED));
+  if (given.links !== undefined) question.links = parseLinks(given.links);
+  return question;
 }
 
 /**

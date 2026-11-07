@@ -1,10 +1,13 @@
-import { useEffect } from 'react';
-import { MessageSquare, Navigation } from 'lucide-react';
+import { useEffect, useMemo } from 'react';
+import { MessageSquare, Navigation, WifiOff } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { openOnStack, selectAutopilotStack, useAutopilotStore, useRenderedItems } from '../../stores/autopilotStore';
+import { useAllMachinesStore } from '../../stores/allMachinesStore';
+import { offlineRowText } from '../approvals/approvalGroups';
+import { withMachineLabels } from '../notify/notifyFormat';
 import { AutopilotDecisionCard } from './AutopilotDecisionCard';
-import { groupItemRows } from './autopilotFormat';
+import { groupItemRows, offlineItemRows } from './autopilotFormat';
 import { parseItemIds } from '../../../../shared/autopilotTranscript';
 
 function useRegister(ids: string[]) {
@@ -30,12 +33,15 @@ function useRegister(ids: string[]) {
  * are one line until clicked, which makes them current.
  */
 export function AutopilotItemRows({ content }: { content: string }) {
-  const items = useNotifyStore(selectNotifyItems);
+  const rawItems = useNotifyStore(selectNotifyItems);
+  const machines = useAllMachinesStore((state) => state.entries);
+  const items = useMemo(() => withMachineLabels(rawItems, machines), [rawItems, machines]);
   const stack = useAutopilotStore(selectAutopilotStack);
   const ids = parseItemIds(content);
   useRegister(ids);
   const groups = groupItemRows(ids, items, stack);
-  if (groups.length === 0) return null;
+  const offline = offlineItemRows(ids, items);
+  if (groups.length === 0 && offline.length === 0) return null;
   return (
     <div className="my-2 flex flex-col gap-2" data-testid="autopilot-items">
       {groups.map((group) => (
@@ -50,6 +56,12 @@ export function AutopilotItemRows({ content }: { content: string }) {
             ? <AutopilotDecisionCard key={row.id} item={row.item} current={row.state === 'shown'} onMakeCurrent={() => openOnStack(row.id)} />
             : <p key={row.id} className="px-1 text-[12.5px] text-text-tertiary" data-testid="autopilot-decision" data-state="gone">An earlier item, no longer waiting.</p>)}
         </div>
+      ))}
+      {offline.map((row) => (
+        <p key={row.machineId} className="flex items-center gap-2 px-1 text-[12.5px] text-text-tertiary" data-testid="autopilot-offline-row">
+          <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0">{offlineRowText(row)}</span>
+        </p>
       ))}
     </div>
   );

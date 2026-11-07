@@ -15,7 +15,7 @@ export interface DecisionOption {
 
 export interface DecisionModel {
   id: string;
-  kind: 'Approval' | 'Question' | 'Permission' | 'Autopilot' | 'Stuck';
+  kind: 'Approval' | 'Question' | 'Permission' | 'Autopilot';
   /** The Q-n the asker put at the start of its title, when it did. */
   qn?: string;
   /** The question, without its Q-n. */
@@ -34,7 +34,7 @@ export interface DecisionModel {
   contextLabel: string;
   state: NotifyItem['state'];
   answerSummary?: string;
-  /** A stuck worker's question waits on its orchestrator: it takes no answer here. */
+  /** Every waiting item takes an answer here, except a mirror from an older machine and a prompt only its terminal can answer now. */
   answerable: boolean;
   createdAt: number;
 }
@@ -42,10 +42,15 @@ export interface DecisionModel {
 /** A leading Q-n, or a range or list of them (Q-1–3, Q-4-6, Q-7, Q-8), then its separator. */
 const QN = /^\s*(Q-\d+(?:(?:[–—-]|\s*[,/&]\s*)(?:Q-)?\d+)*)\s*[:·.–—-]?\s*/;
 
+/** The Q-n the asker put at the start of a title, when it did. */
+export function leadingQn(title: string): string | undefined {
+  return QN.exec(title)?.[1];
+}
+
 export function decisionModel(item: NotifyItem): DecisionModel {
   const match = QN.exec(item.title);
   const byAutopilot = item.source.autopilot === true;
-  const kind: DecisionModel['kind'] = byAutopilot ? 'Autopilot' : item.relay ? 'Stuck' : item.agentPrompt ? 'Permission' : item.ui === 'approve' ? 'Approval' : 'Question';
+  const kind: DecisionModel['kind'] = byAutopilot ? 'Autopilot' : item.agentPrompt ? 'Permission' : item.ui === 'approve' ? 'Approval' : 'Question';
   const model: DecisionModel = {
     id: item.id,
     kind,

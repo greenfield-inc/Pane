@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ExternalLink, FileText, Globe, Layers, List, MessageSquare, Navigation, ShieldAlert, X,
+  ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ExternalLink, FileText, Globe, Layers, List, MessageSquare, Navigation, ShieldAlert, WifiOff, X,
 } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
+import { originLine } from '../../../../shared/approvalReceipts';
 import type { AutopilotStackEntry, AutopilotTab } from '../../../../shared/types/autopilot';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
@@ -12,7 +13,8 @@ import { useAllMachinesStore } from '../../stores/allMachinesStore';
 import { showActionError } from '../../stores/errorStore';
 import { openOnMachine } from '../../utils/machineRowActions';
 import { MachineMark } from '../machines/MachineMark';
-import { relativeAge } from '../notify/notifyFormat';
+import { offlineRowText, splitWaiting } from '../approvals/approvalGroups';
+import { machineLabel, relativeAge, withMachineLabels } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import { AutopilotDocument, AutopilotWebPage } from './AutopilotDocument';
 import { AutopilotSessionOverview } from './AutopilotSessionOverview';
@@ -77,9 +79,12 @@ function TabContent({ tab }: { tab: AutopilotTab }) {
 
 /** "What's waiting": every waiting item; picking one puts it on the stack and shows it. */
 function WaitingMenu({ onClose }: { onClose: () => void }) {
-  const items = useNotifyStore(selectNotifyItems);
+  const rawItems = useNotifyStore(selectNotifyItems);
+  const machines = useAllMachinesStore((state) => state.entries);
   const now = useNow();
-  const waiting = items.filter((item) => item.state === 'waiting' && !item.relay);
+  const { live, stale, offline } = useMemo(() => splitWaiting(withMachineLabels(rawItems, machines)), [rawItems, machines]);
+  const waiting = live.filter((item) => item.state === 'waiting' && !item.relay);
+  const [staleOpen, setStaleOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onDown = (event: MouseEvent) => { if (ref.current && event.target instanceof Node && !ref.current.contains(event.target)) onClose(); };
@@ -101,16 +106,31 @@ function WaitingMenu({ onClose }: { onClose: () => void }) {
   return (
     <div ref={ref} role="menu" aria-label="What's waiting" data-testid="autopilot-waiting-menu"
       className="absolute right-0 top-full z-40 mt-1 max-h-[60vh] w-[340px] overflow-y-auto rounded-xl bg-surface-primary p-1.5 shadow-card ring-1 ring-border-secondary">
-      {waiting.length === 0 && <p className="px-3 py-3 text-[13px] text-text-tertiary">Nothing waits on you.</p>}
-      {waiting.map((item) => (
+      {waiting.length === 0 && stale.length === 0 && offline.length === 0 && <p className="px-3 py-3 text-[13px] text-text-tertiary">Nothing waits on you.</p>}
+      {[...waiting, ...(staleOpen ? stale : [])].map((item) => (
         <button key={item.id} type="button" role="menuitem" onClick={() => bring(item.id)}
           className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-surface-hover">
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] text-text-primary">{item.title}</span>
-            <span className="block truncate text-[11.5px] text-text-tertiary">{item.source.autopilot ? 'Autopilot' : item.source.session?.name ?? item.source.name} · {itemKind(item)}</span>
+            <span className="block truncate text-[11.5px] text-text-tertiary">{originLine(item)} · {itemKind(item)}</span>
           </span>
           <span className="shrink-0 text-[11.5px] tabular-nums text-text-tertiary">{relativeAge(item.createdAt, now)}</span>
         </button>
+      ))}
+      {stale.length > 0 && (
+        <button type="button" role="menuitem" aria-expanded={staleOpen} onClick={() => setStaleOpen((open) => !open)} data-testid="autopilot-waiting-stale"
+          className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] font-medium text-text-secondary hover:bg-surface-hover">
+          <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
+            <ChevronRight className={cn('h-3.5 w-3.5 text-text-tertiary', staleOpen && 'rotate-90')} />
+          </span>
+          Stale · {stale.length}
+        </button>
+      )}
+      {offline.map((row) => (
+        <p key={row.machineId} className="flex items-start gap-2 px-2.5 py-2 text-[12px] text-text-tertiary" data-testid="autopilot-offline-row">
+          <WifiOff className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0">{offlineRowText(row)}</span>
+        </p>
       ))}
     </div>
   );
@@ -125,6 +145,7 @@ export function AutopilotStack() {
   const snapshot = useAutopilotStore((state) => state.snapshot);
   const items = useNotifyStore((state) => state.snapshot?.items);
   const mark = useMachineMark();
+  const machines = useAllMachinesStore((state) => state.entries);
   const [tabByEntry, setTabByEntry] = useState<Record<string, number>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const entry = shownStackEntry(snapshot);
@@ -193,7 +214,7 @@ export function AutopilotStack() {
               <KindIcon entry={entry} item={item} />
               <span className="font-semibold text-text-secondary">{entryKind(entry, item)}</span>
               {(entry.sessionName || item?.source.session?.name) && <span className="truncate">· {entry.sessionName ?? item?.source.session?.name}</span>}
-              {item?.machineId && item.machineId !== LOCAL_MACHINE_ID && <span className="inline-flex shrink-0 items-center gap-1 rounded bg-surface-tertiary px-1.5 font-mono text-[11px]">{mark(item.machineId)}{item.machine}</span>}
+              {item?.machineId && item.machineId !== LOCAL_MACHINE_ID && <span className="inline-flex shrink-0 items-center gap-1 rounded bg-surface-tertiary px-1.5 font-mono text-[11px]">{mark(item.machineId)}{machineLabel(item, machines)}</span>}
               {item && !item.source.autopilot && <span className="min-w-0 truncate">· {item.source.agent} · {item.source.name}</span>}
               {(entry.byAutopilot || item?.source.autopilot) && <span className="shrink-0 rounded-full bg-autopilot-subtle px-1.5 text-[11px] font-medium text-autopilot-on-tint">written by Autopilot</span>}
               <span className="ml-auto shrink-0 tabular-nums">{item ? relativeAge(item.createdAt, now) : relativeAge(entry.addedAt, now)}</span>
