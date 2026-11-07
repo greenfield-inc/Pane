@@ -12,18 +12,15 @@ import { inTerminalMessage } from './notifyQuestions';
 /**
  * Yes and No under an Approvals row or on its card for an agent's terminal prompt (nothing for other
  * questions); its other choices are in the question's sheet. `machine` is another saved machine the prompt is on, answered there
- * without switching. An offline machine or a prompt only its terminal can answer now gets a line
- * saying so instead of buttons.
+ * without switching. A prompt only its terminal can answer now gets a line saying so instead of buttons.
  */
-export function AgentPromptActions({ item, machine, offline, inset = 36, onAnswered }: {
+export function AgentPromptActions({ item, machine, inset = 36, onAnswered }: {
   item: NotifyItem;
   /** The host took the answer (the approval card holds it for Undo from then). */
   onAnswered?: () => void;
   /** Lines the buttons up with the row's title, past its status dot. */
   inset?: number;
   machine?: RemotePaneConnectionProfile | null;
-  /** The name of the prompt's machine while the phone can't reach it. */
-  offline?: string;
 }) {
   const onAccepted = () => {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -34,9 +31,6 @@ export function AgentPromptActions({ item, machine, offline, inset = 36, onAnswe
   const command = machine ? remote : live;
   const prompt = item.agentPrompt;
   if (!prompt) return null;
-  if (offline) {
-    return <Line inset={inset} testID={`agent-prompt-offline-${item.id}`} text={`${offline} is offline. ${item.source.agent} is still waiting there; answer when it's back or in the terminal.`} />;
-  }
   if (prompt.inTerminal) {
     return <Line inset={inset} testID={`agent-prompt-in-terminal-${item.id}`} text={inTerminalMessage(item)} />;
   }

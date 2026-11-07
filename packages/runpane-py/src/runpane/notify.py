@@ -57,11 +57,26 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
     if parsed.resume is not None:
         if not parsed.resume.strip():
             raise invalid("resume", "resume must be the id from a waiting result.")
-        extra = [field for field, value in given.items() if value is not None]
+        extra = [field for field, value in {**given, "relays": parsed.notify_relays, "aboutSession": parsed.notify_about_session}.items() if value is not None]
         if extra:
             raise invalid("resume", f"resume keeps waiting on an earlier question, so it takes no other fields; remove {', '.join(extra)}.", "Call notify again with only resume.")
         return {"resume": parsed.resume, **timing, "caller": caller}
 
+    request: Dict[str, Any] = {**parse_notify_question(given), **timing, "caller": caller}
+    if parsed.notify_relays is not None:
+        if not parsed.notify_relays.strip():
+            raise invalid("relays", "relays must be the id of a waiting item from runpane inbox.")
+        request["relays"] = parsed.notify_relays
+    if parsed.notify_about_session is not None:
+        if not parsed.notify_about_session.strip():
+            raise invalid("aboutSession", "aboutSession must be a Session id or name.")
+        request["aboutSession"] = parsed.notify_about_session
+    return request
+
+
+def parse_notify_question(given: Mapping[str, Optional[str]]) -> Dict[str, Any]:
+    """Checks a question's fields, for notify and for Autopilot's rewrite of an item. Fields left out read as not given."""
+    given = {field: given.get(field) for field in ("ui", "title", "context", "choices", "detail", "detailLabel", "suggestions", "action", "links")}
     ui = given["ui"]
     if ui is None:
         raise invalid("ui", "ui is required: options, approve, ask, or info.")
@@ -80,22 +95,22 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
         if len(given["detailLabel"]) > MAX_DETAIL_LABEL:
             raise invalid("detailLabel", f"detailLabel takes up to {MAX_DETAIL_LABEL} characters; got {len(given['detailLabel'])}.")
 
-    request: Dict[str, Any] = {"ui": ui, "title": given["title"], **timing, "caller": caller}
+    question: Dict[str, Any] = {"ui": ui, "title": given["title"]}
     if given["context"] is not None:
-        request["context"] = given["context"]
+        question["context"] = given["context"]
     if given["choices"] is not None:
-        request["choices"] = parse_choices(given["choices"])
+        question["choices"] = parse_choices(given["choices"])
     if given["detail"] is not None:
-        request["detail"] = given["detail"]
+        question["detail"] = given["detail"]
     if given["detailLabel"] is not None:
-        request["detailLabel"] = given["detailLabel"]
+        question["detailLabel"] = given["detailLabel"]
     if given["suggestions"] is not None:
-        request["suggestions"] = parse_suggestions(given["suggestions"])
+        question["suggestions"] = parse_suggestions(given["suggestions"])
     if given["action"] is not None:
-        request["action"] = parse_action(given["action"])
+        question["action"] = parse_action(given["action"])
     if given["links"] is not None:
-        request["links"] = parse_links(given["links"])
-    return request
+        question["links"] = parse_links(given["links"])
+    return question
 
 
 def notify_caller_fields(env: Mapping[str, str], cwd: str) -> Tuple[Dict[str, str], Dict[str, int]]:

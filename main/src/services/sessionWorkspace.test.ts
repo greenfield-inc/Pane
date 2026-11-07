@@ -201,9 +201,13 @@ describe('Session workspace instructions', () => {
     expect(agents).toContain("posted to Pane's Approvals, exactly once. Workers in this Session don't post; they report blocked to you.");
     expect(agents).toContain('with runpane notify ... --json as a background command (in Claude Code, Bash with run_in_background), not the MCP notify tool or AskUserQuestion');
     expect(agents).toContain('title it with its Q-n and pass the worker\'s files and PR as --links');
-    expect(agents).toContain('runpane inbox ack <id>');
-    expect(agents).toContain('Stop the background call of an item that went stale; that expires its card.');
-    expect(agents).toContain('Pane keeps no approvals across a restart, so after one, post each item that still waits again, exactly once.');
+    expect(agents).toContain('relay into it with runpane notify --relays <item>');
+    expect(agents).toContain('The answer goes straight to the worker\'s tab');
+    expect(agents).toContain('runpane inbox ack <item> --decision <D-n>');
+    expect(agents).toContain('correction: Q-n → <answer> (by you)');
+    expect(agents).toContain('Stop the background call of an item that went stale.');
+    expect(agents).toContain('Approvals survive a restart');
+    expect(agents).not.toContain('Pane keeps no approvals');
     expect(agents).toContain('If notify returns unavailable because Approvals is off, ask in this tab as before.');
   });
 

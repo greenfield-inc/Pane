@@ -483,6 +483,12 @@ export class DemoWorkspace {
     } else if (command.type === 'undo' && item.state === 'sent') {
       this.nextAnswerGeneration(item.id);
       this.replaceNotify({ ...item, state: 'waiting', answerSummary: undefined });
+    } else if (command.type === 'close' && item.state === 'waiting') {
+      this.replaceNotify({ ...item, state: 'expired', resolvedAt: Date.now(), closed: { by: 'you', reason: command.reason ?? '', at: Date.now() } });
+    } else if (command.type === 'reopen' && item.state === 'expired') {
+      this.replaceNotify({ ...item, state: 'waiting', resolvedAt: undefined, closed: undefined });
+    } else if (command.type === 'override' && item.state === 'answered') {
+      this.replaceNotify({ ...item, corrections: [...(item.corrections ?? []), { summary: summarize(item, command.answer), by: 'you', at: Date.now() }] });
     } else if (command.type === 'dismiss' || command.type === 'skip' || command.type === 'remind') {
       return null;
     }

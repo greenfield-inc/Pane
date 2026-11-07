@@ -575,6 +575,9 @@
         "autopilot waiting",
         "autopilot stack",
         "autopilot stack push",
+        "autopilot answer",
+        "autopilot close",
+        "autopilot rewrite",
         "sessions",
         "sessions list",
         "sessions create",
@@ -870,6 +873,15 @@
           "$ref": "#/$defs/helpLines"
         },
         "autopilot stack push": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "autopilot answer": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "autopilot close": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "autopilot rewrite": {
           "$ref": "#/$defs/helpLines"
         },
         "sessions": {

@@ -49,6 +49,31 @@ function setup() {
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
 
 describe('connectAutopilotEvents', () => {
+  it('says why an item left: its receipt names who closed it, and only a stopped asker reads as no answer', () => {
+    const { state, notifyChanged, read } = setup();
+    state.waiting = ['a', 'b', 'c'].map(id => item(id));
+    notifyChanged();
+    state.items = [
+      item('a', { state: 'expired', closed: { by: 'autopilot', reason: 'no build behind it', at: 1 } }),
+      item('b', { state: 'expired', closed: { by: 'pane', reason: 'Session archived', at: 1 } }),
+      item('c', { state: 'expired', closed: { by: 'pane', reason: 'the asker stopped waiting', at: 1 } }),
+    ];
+    state.waiting = [];
+    notifyChanged();
+    expect(read().filter(entry => entry.kind === 'item.answered').map(entry => entry.reason)).toEqual([
+      'Closed by Autopilot: no build behind it: Ship a?',
+      'Closed: Session archived: Ship b?',
+      `${NO_ANSWER}Ship c?`,
+    ]);
+  });
+
+  it('says who brought back an item that was closed', () => {
+    const { state, notifyChanged, read } = setup();
+    state.waiting = [item('a', { reopened: { by: 'you', at: 1, closedBy: 'autopilot', closedReason: 'stale' } })];
+    notifyChanged();
+    expect(read().map(entry => entry.reason)).toEqual(['Reopened by you, after Autopilot closed it (stale): Ship a?']);
+  });
+
   it('journals item.created when a question starts waiting and item.answered when it stops', () => {
     const s = setup();
     s.state.waiting = [item('n-1')];

@@ -46,6 +46,10 @@ import { LoopRepository } from '../services/loops/loopRepository';
 import { createLoopTestDb } from '../services/loops/loopTestDb';
 import type { TaskQueue } from '../services/taskQueue';
 import { PaneError } from '../../../shared/paneError';
+import Database from 'better-sqlite3-multiple-ciphers';
+
+/** The approvals table on its own, for tests that don't look at it. */
+const memoryDatabase = () => new Database(':memory:');
 
 // Transcript reads are real file I/O; these tests script what the transcript says.
 const findUserTurnSince = vi.spyOn(agentTranscripts, 'findUserTurnSince');
@@ -205,6 +209,7 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     } as AppServices['app'],
     getMainWindow: () => null,
     databaseService: {
+      getDb: memoryDatabase,
       getSession: vi.fn((id: string) => {
         const pane = overrides.sessionManager?.getSession(id) ?? session;
         return {
@@ -620,6 +625,7 @@ describe('runpane IPC handlers', () => {
       // SAFETY: These test doubles provide the exact service members exercised by adoption.
       return createServices({
         databaseService: {
+      getDb: memoryDatabase,
           ...createServices().databaseService,
           getAllProjects: vi.fn(() => [adoptionProject]),
           getAllSessionsIncludingArchived: vi.fn(() => duplicate
@@ -2294,7 +2300,7 @@ describe('runpane IPC handlers', () => {
     };
     const services = createServices({
       // SAFETY: Repo lookup only reads these projects and never reaches persistence for an existing repo.
-      databaseService: { getAllProjects: () => [savedProject] } as AppServices['databaseService'],
+      databaseService: { getDb: memoryDatabase, getAllProjects: () => [savedProject] } as AppServices['databaseService'],
     });
     const registry = createRegistry(services);
     for (const path of ['\\\\wsl$\\Ubuntu\\home\\user\\repo', '\\\\wsl.localhost\\Ubuntu\\home\\user\\repo']) {
@@ -2309,6 +2315,7 @@ describe('runpane IPC handlers', () => {
     const services = createServices({
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       databaseService: {
+      getDb: memoryDatabase,
         getAllProjects: vi.fn(() => []),
         createProject: vi.fn(),
       } as never,
@@ -2352,6 +2359,7 @@ describe('runpane IPC handlers', () => {
     const services = createServices({
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       databaseService: {
+      getDb: memoryDatabase,
         getAllProjects: vi.fn(() => projects),
         createProject: vi.fn((name: string, savedPath: string): Project => {
           const created = { ...savedProject, name, path: savedPath };
@@ -2407,6 +2415,7 @@ describe('runpane IPC handlers', () => {
     const registry = createRegistry(createServices({
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       databaseService: {
+      getDb: memoryDatabase,
         getAllProjects: vi.fn(() => []),
         createProject: vi.fn(),
       } as never,
@@ -2427,6 +2436,7 @@ describe('runpane IPC handlers', () => {
       const envVars: ProjectEnvVar[] = [];
       const base = createServices();
       const databaseService = {
+        getDb: memoryDatabase,
         getProjectEnvVars: vi.fn(() => envVars.map(variable => ({ ...variable }))),
         replaceProjectEnvVars: vi.fn((_projectId: number, next: readonly ProjectEnvVar[]) => { envVars.splice(0, envVars.length, ...next); }),
         getAllProjects: vi.fn(() => projects),
@@ -2788,6 +2798,7 @@ describe('runpane IPC handlers', () => {
     const services = createServices({
       // SAFETY: This fixture preserves the default service shape and overrides only the tested lookup.
       databaseService: {
+      getDb: memoryDatabase,
         ...createServices().databaseService,
         getSession: vi.fn(() => outside),
       } as AppServices['databaseService'],
@@ -2815,6 +2826,7 @@ describe('runpane IPC handlers', () => {
       const services = createServices({
         // SAFETY: This fixture preserves the default service shape and overrides only the tested lookup.
         databaseService: {
+      getDb: memoryDatabase,
           ...createServices().databaseService,
           getSession: vi.fn(() => outside),
         } as AppServices['databaseService'],
@@ -2838,6 +2850,7 @@ describe('runpane IPC handlers', () => {
     const services = createServices({
       // SAFETY: This fixture preserves the default service shape and overrides only the tested lookup.
       databaseService: {
+      getDb: memoryDatabase,
         ...createServices().databaseService,
         getSession: vi.fn(() => undefined),
       } as AppServices['databaseService'],
@@ -5409,6 +5422,7 @@ describe('runpane IPC handlers', () => {
     const services = createServices({
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       databaseService: {
+      getDb: memoryDatabase,
         ...base.databaseService,
         getAllProjects: vi.fn(() => [{ ...project, wsl_enabled: true, wsl_distribution: 'Ubuntu' }]),
       } as never,
@@ -5447,6 +5461,7 @@ describe('runpane IPC handlers', () => {
     const services = createServices({
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       databaseService: {
+      getDb: memoryDatabase,
         ...base.databaseService,
         getAllProjects: vi.fn(() => [wslProject]),
       } as never,
@@ -5628,6 +5643,7 @@ describe('runpane IPC handlers', () => {
       // SAFETY: These doubles implement the project-context, worktree, and session lookups the create handler uses.
       return createServices({
         databaseService: {
+      getDb: memoryDatabase,
           ...createServices().databaseService,
           getAllProjects: vi.fn(() => [branchProject]),
           getAllSessions: vi.fn(() => paneRows),
@@ -5818,6 +5834,7 @@ describe('runpane IPC handlers', () => {
     const services = createServices({
       // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
       databaseService: {
+      getDb: memoryDatabase,
         ...createServices().databaseService,
         getSession: vi.fn(() => databaseRow),
       } as never,

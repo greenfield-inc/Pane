@@ -653,6 +653,12 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /** Every open Session for Approvals, by id, from one read: a fallback item keeps the Session its report was filed in. */
+  /** A Session's name and state, archived too; undefined once it's gone. Approvals' liveness reads it. */
+  approvalSessionRecord(sessionId: string): { name: string; paneId: string; archived: boolean } | undefined {
+    const session = this.store.memberships().find(candidate => candidate.id === sessionId);
+    return session && { name: session.name, paneId: session.internalSessionId, archived: session.archived === true };
+  }
+
   approvalSessionsById(): Map<string, NotifySession> {
     return new Map(this.store.memberships()
       .filter(session => !session.archived)

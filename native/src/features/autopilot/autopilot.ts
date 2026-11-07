@@ -1,6 +1,9 @@
+import { receiptLine } from '@shared/approvalReceipts';
 import type { DecisionModel } from '@shared/autopilotDecision';
 import type { AutopilotSnapshot, AutopilotStackEntry } from '@shared/types/autopilot';
 import type { NotifyItem } from '@shared/types/notify';
+
+import { OLDER_MACHINE_NOTE, receiptLines } from '@/features/approvals/approvals';
 
 /**
  * Autopilot on the phone (package 5, D-75 to D-77): one chat with its agent, approvals as
@@ -63,6 +66,14 @@ export function itemPosition(snapshot: AutopilotSnapshot | undefined, notifyId: 
   const order = onStack.includes(notifyId) ? onStack : fallback;
   const index = order.indexOf(notifyId);
   return index < 0 ? null : `${index + 1} of ${order.length}`;
+}
+
+/**
+ * The items Autopilot's cards can name: the connected machine's, plus those on its stack that other
+ * machines hold, which reach the phone through it (D-165).
+ */
+export function autopilotItems(snapshot: AutopilotSnapshot | undefined, items: readonly NotifyItem[] | undefined): NotifyItem[] {
+  return [...items ?? [], ...snapshot?.otherMachineItems ?? []];
 }
 
 /** The composer's hint while an item is on screen: "Ask about Q-14…". */
@@ -136,17 +147,16 @@ export type CardState =
 
 export function cardState(item: NotifyItem | undefined): CardState {
   if (!item) return { kind: 'closed', message: 'No longer waiting.' };
-  if (item.relay) return { kind: 'closed', message: `Waiting on the ${item.source.session?.name ?? 'Session'} orchestrator, which answers ${item.relay.worker}.` };
+  if (item.relay) return { kind: 'closed', message: OLDER_MACHINE_NOTE };
   switch (item.state) {
     case 'waiting':
       return item.agentPrompt?.inTerminal ? { kind: 'closed', message: `${item.source.agent} is asking in the terminal now. Answer it on the computer.` } : { kind: 'open' };
     case 'sent':
       return { kind: 'held', answer: item.answerSummary ?? 'Your answer' };
     case 'answered':
-      // Only the person answers (D-66): the item records who took it.
-      return { kind: 'answered', answer: item.answerSummary ?? 'Answered', recorded: `by you · ${item.source.autopilot ? 'Autopilot' : item.source.session?.name ?? item.source.name} recorded it` };
+      return { kind: 'answered', answer: item.answerSummary ?? 'Answered', recorded: receiptLines(item).join(' · ') || `by you · ${item.source.autopilot ? 'Autopilot' : item.source.session?.name ?? item.source.name} recorded it` };
     case 'expired':
-      return { kind: 'closed', message: `${item.source.agent} stopped waiting.` };
+      return { kind: 'closed', message: receiptLine(item) ?? `${item.source.agent} stopped waiting.` };
     case 'info':
       return { kind: 'closed', message: 'An update. There is nothing to answer.' };
   }

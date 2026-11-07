@@ -4,7 +4,7 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
-import { followSavedMachines, registerNotifyHandlers, type NotifyMachines } from './notify';
+import { followSavedMachines, registerNotifyHandlers, type NotifyMachines, tabTakesText } from './notify';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ConfigManager } from '../services/configManager';
@@ -13,6 +13,7 @@ import type { NotifyItem, NotifyResult, NotifySharedState } from '../../../share
 import type { MachineConnectionsEvent, MachineState } from '../../../shared/types/machineConnections';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
+import type { SessionInboxEnded } from '../services/sessionInbox';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 
 /** A Pane's Notify handlers, registered the way the app registers them; no window or phone. */
@@ -87,7 +88,7 @@ describe('Notify across machines, through the registered handlers', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     await host.registry.invoke('notify:remote-command', [{ type: 'answer', id, answer: { approved: true } }, { device: 'parsa-air' }]);
     await expect(host.registry.invoke('notify:remote-command', [{ type: 'answer', id, answer: { approved: false } }, { device: 'parsa-mini' }]))
-      .rejects.toMatchObject({ code: 'ERR_NOTIFY_ANSWERED', message: 'Already answered on parsa-air. Nothing was sent.' });
+      .rejects.toMatchObject({ code: 'ERR_NOTIFY_ANSWERED', message: 'Already answered by you on parsa-air. Nothing was sent.' });
     await vi.advanceTimersByTimeAsync(3_000);
     vi.useRealTimers();
     expect(await call).toEqual({ approved: true });
@@ -298,6 +299,10 @@ describe('Approvals items, through the registered handlers', () => {
   const sessions = {
     approvalSession: (paneId: string) => paneId === 'session-pane' ? { ...launch, orchestrator: true } : paneId === 'worker' ? launch : undefined,
     approvalSessionsById: () => new Map(openSessions.map(session => [session.id, session])),
+    approvalSessionRecord: (sessionId: string) => {
+      const session = openSessions.find(candidate => candidate.id === sessionId);
+      return session ? { name: session.name, paneId: session.paneId, archived: false } : undefined;
+    },
     on: (_event: 'changed', listener: () => void) => { sessionListeners.add(listener); },
     off: (_event: 'changed', listener: () => void) => { sessionListeners.delete(listener); },
   };
@@ -327,11 +332,14 @@ describe('Approvals items, through the registered handlers', () => {
   /** A Session inbox stand-in: its items, and a way to change them as an ack or a new report would. */
   function inboxOf(items: RunpaneInboxItem[]) {
     const listeners = new Set<() => void>();
+    const endedListeners = new Set<(ended: SessionInboxEnded) => void>();
     let current = items;
     return {
       all: () => current,
       subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+      subscribeEnded: (listener: (ended: SessionInboxEnded) => void) => { endedListeners.add(listener); return () => { endedListeners.delete(listener); }; },
       set: (next: RunpaneInboxItem[]) => { current = next; for (const listener of listeners) listener(); },
+      end: (ended: SessionInboxEnded) => { current = current.filter(item => item.id !== ended.id); for (const listener of endedListeners) listener(ended); },
     };
   }
   const blocked = (at: number): RunpaneInboxItem => ({
@@ -396,49 +404,46 @@ describe('Approvals items, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
-  it("shows a worker's unacknowledged blocked question after the wait, read-only, until the orchestrator acknowledges it", async () => {
+  it("shows a worker's blocked question at once, answerable and quiet, until its orchestrator acknowledges it", async () => {
     vi.stubEnv('PANE_APPROVALS_RELAY_AFTER_MS', '60');
     const inbox = inboxOf([blocked(Date.now())]);
     const pane = await startWithSessions(inbox);
-    expect(pane.notify.snapshot().items).toEqual([]);
-
-    await new Promise(resolve => setTimeout(resolve, 120));
-    const [relay] = pane.notify.snapshot().items;
-    expect(relay).toMatchObject({
+    const [card] = pane.notify.snapshot().items;
+    expect(card).toMatchObject({
+      id: 'in-1',
+      ui: 'ask',
       state: 'waiting',
+      quiet: true,
+      originKind: 'worker',
       title: 'Use the invoice id or number in the PDF filename?',
-      source: { paneId: 'worker', panelId: 'worker-panel', name: 'api-fix', session: launch },
-      relay: { inboxItemId: 'in-1', worker: 'api-fix', question: 'Use the invoice id or number in the PDF filename?' },
+      source: { paneId: 'worker', panelId: 'worker-panel', name: 'api-fix', session: { id: launch.id, name: launch.name, paneId: launch.paneId } },
+      connected: { kind: 'session', id: launch.id },
       // The worker's status file, which its report named, opens beside the card.
       links: [{ label: 'api-fix status', path: '/work/api-fix/status.json' }],
     });
-    expect(relay.choices).toBeUndefined();
-    expect(pane.notify.snapshot().queue).toEqual([]);
-    expect((await pane.registry.invoke<NotifySharedState>('notify:remote-snapshot', [])).items).toMatchObject([{ relay: { inboxItemId: 'in-1' } }]);
-    await pane.notify.run({ type: 'answer', id: relay.id, answer: { text: 'id' } });
-    expect(pane.notify.snapshot().items).toMatchObject([{ state: 'waiting', relay: { inboxItemId: 'in-1' } }]);
+    expect(pane.notify.snapshot().queue).toEqual(['in-1']);
+    expect(pane.notify.snapshot().strip).toBeNull();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    expect(pane.notify.snapshot().items[0].quiet).toBeUndefined();
+    expect((await pane.registry.invoke<NotifySharedState>('notify:remote-snapshot', [])).items).toMatchObject([{ id: 'in-1', originKind: 'worker' }]);
 
-    inbox.set([]);
+    inbox.end({ id: 'in-1', how: 'acked', decision: 'D-9' });
     await flush();
-    expect(pane.notify.snapshot().items).toEqual([]);
+    expect(pane.notify.snapshot().items).toMatchObject([{ id: 'in-1', state: 'expired', decision: 'D-9', closed: { reason: 'its orchestrator dealt with it' } }]);
     pane.notify.dispose();
   });
 
-  it('files a fallback under the Session the worker reported to, even after the worker moved, and under none once that Session is gone', async () => {
+  it('files a card under the Session the worker reported to, even after the worker moved, and closes it when that Session closes', async () => {
     const moved = { ...blocked(Date.now() - 11 * 60_000), sessionId: 'session-2' };
-    const gone = { ...blocked(Date.now() - 11 * 60_000), id: 'in-2', sessionId: 'session-archived' };
-    const pane = await startWithSessions(inboxOf([moved, gone]));
-    expect(pane.notify.snapshot().items.map(item => [item.relay?.inboxItemId, item.source.session?.id])).toEqual([['in-1', 'session-2'], ['in-2', undefined]]);
-    const orphan = pane.notify.snapshot().items[1];
-    expect(orphan.context).toBe("Its Session is closed: api-fix asked this and nobody picked it up. Answer in api-fix's tab on the right.");
-
-    // Archiving a Session moves its fallback items at once, not at the next inbox change.
+    const pane = await startWithSessions(inboxOf([moved]));
+    expect(pane.notify.snapshot().items.map(item => [item.id, item.connected])).toEqual([['in-1', expect.objectContaining({ kind: 'session', id: 'session-2' })]]);
     archive('session-2');
-    expect(pane.notify.snapshot().items.map(item => item.source.session?.id)).toEqual([undefined, undefined]);
+    pane.notify.queue.sweep();
+    expect(pane.notify.snapshot().items).toMatchObject([{ state: 'expired', closed: { by: 'pane', reason: expect.stringMatching(/^Session (archived|closed)$/) } }]);
     pane.notify.dispose();
   });
 
-  it('never shows the fallback while Approvals is off', async () => {
+  it('never shows a worker card while Approvals is off', async () => {
     const inbox = inboxOf([blocked(Date.now() - 11 * 60_000)]);
     const pane = await startWithSessions(inbox);
     expect(pane.notify.snapshot().items).toHaveLength(1);
@@ -504,5 +509,20 @@ describe('Approvals related links, through the registered handlers', () => {
       { paneId: 'session-pane', url: pathToFileURL(planPath).href, title: 'Plan', placement: 'tab', source: 'user' },
     ]);
     notify.dispose();
+  });
+});
+
+describe('tabTakesText', () => {
+  it('types only at a live agent prompt, never at a shell', () => {
+    expect(tabTakesText('idle', { isShell: false }, undefined)).toBe(true);
+    expect(tabTakesText('idle', { isShell: true }, true)).toBe(false);
+    expect(tabTakesText('working', { isShell: false }, undefined)).toBe(false);
+    expect(tabTakesText(undefined, { isShell: false }, true)).toBe(false);
+  });
+
+  it('where the foreground can\'t be read, needs the agent\'s composer on screen', () => {
+    expect(tabTakesText('idle', undefined, true)).toBe(true);
+    expect(tabTakesText('idle', undefined, false)).toBe(false);
+    expect(tabTakesText('idle', undefined, undefined)).toBe(false);
   });
 });

@@ -108,7 +108,53 @@ describe('buildAllMachinesList', () => {
   });
 
   it('lists a machine that has not answered yet as nothing', () => {
-    expect(buildAllMachinesList([{ key: 'profile-new', name: 'new-box', snapshot: undefined }], '')).toEqual({ waiting: [], recent: [] });
+    expect(buildAllMachinesList([{ key: 'profile-new', name: 'new-box', snapshot: undefined }], '')).toEqual({ waiting: [], staleQuestions: [], answered: [], offline: [], recent: [] });
+  });
+
+  it('replaces an offline machine\'s approvals with one count, out of every other count (J20)', () => {
+    const inSession = { name: 'orchestrator', agent: 'Claude', session: { id: 's-1', name: 'Spring sale launch', paneId: 'pane-1' } };
+    const items: NotifyItem[] = [
+      { id: 'a', createdAt: 1, title: 'a', ui: 'approve', state: 'waiting', source: inSession },
+      { id: 'held', createdAt: 2, title: 'held', ui: 'approve', state: 'sent', source: inSession },
+      { id: 'old', createdAt: 3, title: 'old', ui: 'approve', state: 'waiting', staleSince: 9, source: inSession },
+    ];
+    const list = buildAllMachinesList([
+      studio,
+      { ...build, offlineSince: 1_000, snapshot: { ...build.snapshot!, notify: { ...build.snapshot!.notify!, items }, sessions: [session('s-1', 'Spring sale launch', [], '2026-10-30T09:10:00Z')] } },
+    ], '');
+    // One waiting question and one permission request; the held answer and the stale item don't count.
+    expect(list.offline).toEqual([{ key: 'profile-build', name: 'build-box', waiting: 2 }]);
+    expect(list.waiting.map(row => row.machineKey)).toEqual(['profile-studio']);
+    expect(list.staleQuestions).toEqual([]);
+    const row = list.recent.find(candidate => candidate.key === 'profile-build:session:s-1');
+    expect(row?.type === 'session' && row.waiting).toBe(0);
+  });
+
+  it('shows no row for an offline machine with nothing waiting', () => {
+    const quiet: MachineFeed = { key: 'quiet', name: 'quiet-box', offlineSince: 1, snapshot: { projects: [] } };
+    expect(buildAllMachinesList([quiet], '').offline).toEqual([]);
+  });
+
+  it('moves stale items to their own group, out of the counts and the blocked dot', () => {
+    const stale: NotifyItem = { id: 's', createdAt: 5, title: 's', ui: 'approve', state: 'waiting', staleSince: 9, source: { name: 'a', agent: 'Claude', paneId: 'pane-1', session: { id: 's-1', name: 'Spring sale launch', paneId: 'pane-1' } } };
+    const list = buildAllMachinesList([{ ...studio, snapshot: { ...studio.snapshot!, notify: { ...studio.snapshot!.notify!, items: [stale] } } }], '');
+    expect(list.waiting).toEqual([]);
+    expect(list.staleQuestions.map(row => row.key)).toEqual(['profile-studio:question:s']);
+    const pane = list.recent.find(row => row.key === 'profile-studio:pane:pane-1');
+    expect(pane?.type === 'pane' && pane.pane.status).not.toBe('blocked');
+    const sessionRow = list.recent.find(row => row.key === 'profile-studio:session:s-1');
+    expect(sessionRow?.type === 'session' && sessionRow.waiting).toBe(0);
+  });
+
+  it('lists the last 24 hours\' answered and closed items from online machines, newest first', () => {
+    const now = 100 * 60 * 60 * 1000;
+    const done = (id: string, resolvedAt: number): NotifyItem => ({ id, createdAt: 1, title: id, ui: 'approve', state: 'answered', resolvedAt, source: { name: 'a', agent: 'Claude' } });
+    const list = buildAllMachinesList([
+      { ...studio, snapshot: { ...studio.snapshot!, notify: { ...studio.snapshot!.notify!, items: [done('one', now - 1000), done('old', now - 25 * 60 * 60 * 1000)] } } },
+      { ...build, snapshot: { ...build.snapshot!, notify: { ...build.snapshot!.notify!, items: [done('two', now - 500)] } } },
+      { key: 'gone', name: 'gone-box', offlineSince: 1, snapshot: { projects: [], notify: { ...studio.snapshot!.notify!, items: [done('three', now)] } } },
+    ], '', now);
+    expect(list.answered.map(row => row.key)).toEqual(['profile-build:question:two', 'profile-studio:question:one']);
   });
 });
 

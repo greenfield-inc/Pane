@@ -32,7 +32,7 @@ pass. If it fails, stop and say what failed; don't fall back to raw
 2. Launch the worker in the feature's Pane, delivering that file.
 3. Wait with the one wait primitive. It exits when something happens.
 4. On wake, read the worker's report and its status file, then act: answer
-   it, post a question to the person ([What waits on the person](#what-waits-on-the-person-approvals)),
+   it, relay its question to the person ([What waits on the person](#what-waits-on-the-person-approvals)),
    start the next worker, or resume one.
    In a Pane Session, keep the Session's status page current as
    [`orchestrate-sessions`](../orchestrate-sessions/SKILL.md)' status-board
@@ -207,8 +207,10 @@ What wakes it, and what to do:
 When you start or resume, and after a `RESET`, `DROPPED` or failed wait, run
 `runpane inbox --session <S> --json`. It lists every report, missing report
 and on-screen question the Session hasn't acknowledged, including what
-finished while you were down, whether or not a wait was running. Clear what
-you handled with `runpane inbox ack <id>...`. `runpane sessions overview
+finished while you were down, whether or not a wait was running, plus
+`answers`: what workers were told, kept 7 days. Clear what you handled with
+`runpane inbox ack <id>...`, and record each answer with no `decision`
+(`runpane inbox ack <id> --decision <D-n>`). `runpane sessions overview
 --session <S> --json` shows each worker's state and own latest report
 (`panes[].panels[].report`) in one call. Outside a Session, read each
 worker's `runpane agents status --panel <id> --json` and its status file
@@ -284,6 +286,9 @@ For workers with no protocol of their own, end the brief with:
 When finished or blocked, run
 runpane report --state <ready|blocked|failed|done> --pr <number> --head <sha> --summary-file <path>
 (add --question "<question>" when blocked).
+Pane may type a line into this tab. `answer: Q-n → <answer> (by you)` is your
+answer. `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)` are the
+person's word too: drop the question, or take the correction over the answer.
 ```
 
 ## Answer or message a worker
@@ -320,9 +325,10 @@ You are in orchestrator mode: this Session's work moves through you.
 - **Only you ask the person.** Approvals come from you, not from the agents in
   this Session's Panes (implementers, planners, reviewers, any profile). They
   talk to you, through needs_you or `runpane report --state blocked
-  --question`. Answer them yourself when the person's request, the plan or an
-  earlier decision settles it, and say which; ask the person only about the
-  rest.
+  --question`. That question shows at once as an answerable card, and rings when
+  you relay it or after 10 minutes. Answer them yourself when the person's
+  request, the plan or an earlier decision settles it, and say which; ask the
+  person only about the rest.
 - **Autopilot may write to you.** A message that starts with `[From the person,
   via Autopilot]` carries the person's own words. One that starts with `[From
   Autopilot]` is Autopilot's own: a first brief for a Session it created, a
@@ -348,36 +354,47 @@ Keep every item that waits on the person posted to Pane's Approvals, exactly
 once. That covers a worker's needs_you or blocked question, a plan or design
 approval, a PR ready to merge, and a next step only they can take.
 
-- **Post it when it appears**, titled with its Q-n, with the files it is
-  about (the worker's status file, plan or page) and its PR as `--links`.
-  Post with the CLI as a background command, one per item, so you stay free
-  to talk: in Claude Code, Bash with `run_in_background`; elsewhere, whatever
-  re-invokes you when a process exits.
+- **Relay a worker's question into its item.** Its blocked report already made
+  a card: `runpane notify --relays <item>`, with the id from `runpane inbox`,
+  improves that card with your choices, context and links, and rings it. The
+  answer goes straight to the worker's tab (`answer: Q-n → <answer> (by you)`),
+  whether or not your call is still open, so don't forward it.
+- **Post your own item when it appears**, titled with its Q-n, with the files
+  it is about (the worker's status file, plan or page) and its PR as `--links`.
+  Post or relay with the CLI as a background command, one per item, so you stay
+  free to talk: in Claude Code, Bash with `run_in_background`; elsewhere,
+  whatever re-invokes you when a process exits.
 
   ```sh
   runpane notify --ui options --title "Q-7: <the question>" --context "<what it is for, what you need>" \
     --choices '[{"label":"<choice>","recommended":true},{"label":"<choice>"}]' \
     --links '[{"label":"Plan","path":"<absolute file>"},{"label":"PR #12","url":"https://..."}]' --json
+  # A worker's question: the same call, plus --relays <item>
   ```
 
   The CLI call waits until the person answers. The MCP `notify` tool returns
   `waiting` after a while instead, so don't use it for this, and don't block
   your turn on `AskUserQuestion`.
-- **Acknowledge the worker's inbox item** once you have posted its question
-  (`runpane inbox ack <id>`). An unacknowledged blocked report shows in
-  Approvals by itself after 10 minutes, as "Waiting on the <Session>
-  orchestrator", so the person never misses it while you are down.
+- **When a relayed call returns, record the decision**:
+  `runpane inbox ack <item> --decision <D-n>`. The card then reads "Recorded as
+  D-n". An answer to your own item comes back as the call's result: record it
+  and act on it. Pane's older way (post a second card, ack, forward the answer)
+  still works for one release, but don't start with it.
 - **Stay free to talk.** When the person asks about an item, answer in this
   tab; the card keeps waiting.
-- **When a call returns**, it carries the answer. Record it (your D-n) and
-  send it only to the asking worker (`panels submit --no-expect-report`).
+- **The person's word can arrive after the answer.** A worker's tab, or yours,
+  can receive `closed: Q-n (by you)` or `correction: Q-n → <answer> (by you)`.
+  Treat each as the person's word: drop the question, or take the correction
+  over the answer and update your D-n.
 - **Stop waiting on an item** that is superseded or no longer needed: stop its
-  background command (TaskStop in Claude Code), which expires the card.
-  Never leave a stale card up.
+  background command (TaskStop in Claude Code). Never leave a stale card up.
 - **When you start, resume or wake, reconcile** your open background calls
-  against the status files, your ledger and `runpane inbox`: post what is
-  missing and stop what is stale. Pane keeps no approvals across a restart, so
-  after one, post each item that still waits again, exactly once.
+  against the status files, your ledger and `runpane inbox`: relay or post what
+  is missing, stop what is stale, and record each answer that has no `decision`
+  (`runpane inbox ack <item> --decision <D-n>`): workers keep getting answers
+  while you are down. Approvals survive a restart, and an item whose asker is
+  gone closes by itself. A call that a restart ended can post the same question
+  again from the same tab, which joins the waiting card instead of adding one.
 - **If notify returns `unavailable`** because Approvals is off ("Approvals
   are off in Pane."), ask in this tab as before.
 

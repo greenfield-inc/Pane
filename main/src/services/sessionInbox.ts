@@ -1,9 +1,8 @@
-import fs from 'fs';
 import { PaneError, reasonOf } from '../../../shared/paneError';
-import path from 'path';
-import { createHash, randomUUID } from 'crypto';
-import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { createHash } from 'crypto';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { WorkspaceJournal } from './workspaceJournal';
+import type { ApprovalStore } from './approvals/approvalStore';
 import type {
   RunpaneInboxItem,
   RunpaneInboxItemKind,
@@ -14,7 +13,8 @@ import type {
 /**
  * Session inbox: per Session, the worker reports, missing reports, and on-screen questions its
  * orchestrator has not acknowledged. It is fed from the workspace journal, so it holds what a dead
- * or never-armed watcher would have missed, and it survives restarts in `session-inbox.json`.
+ * or never-armed watcher would have missed, and it survives restarts in the approvals table: a
+ * blocked report shares its row with the question's card.
  */
 
 /** The inbox item a journal entry becomes, if any. */
@@ -65,6 +65,7 @@ const itemSchema = boundary.object({
   reason: boundary.optional(boundary.string),
   screenLines: boundary.optional(boundary.array(boundary.string)),
 });
+/** The session-inbox.json that older builds kept, read once by the import. */
 const inboxFileSchema = boundary.object({
   version: boundary.literal(1),
   items: boundary.array(boundary.json),
@@ -78,11 +79,43 @@ export interface SessionInboxAckOutcome {
   unknown: string[];
 }
 
+/** How an item left the inbox, for the card it may share a row with. */
+export interface SessionInboxEnded {
+  id: string;
+  /** `acked`: its orchestrator dealt with it. `moved-on`: the worker reported again. */
+  how: 'acked' | 'moved-on';
+  /** The D-n the orchestrator recorded, with `inbox ack --decision`. */
+  decision?: string;
+}
+
+/** What the inbox keeps in the table: its rows and its place in the journal. */
+export type SessionInboxStore = Pick<ApprovalStore, 'unackedInboxItems' | 'saveInboxItem' | 'ackInboxItem' | 'dropInboxItem' | 'meta' | 'setMeta' | 'recordDecision' | 'transaction'>;
+
+/** One-time import of session-inbox.json (see importJsonStoreOnce): writes its rows and its place in the journal. */
+export function importSessionInboxFile(parsed: JsonValue, store: Pick<SessionInboxStore, 'saveInboxItem' | 'setMeta'>, sessionName: (sessionId: string) => string): number {
+  const file = decodeBoundary(parsed, inboxFileSchema);
+  let count = 0;
+  for (const value of file.items) {
+    const item: RunpaneInboxItem | undefined = decodeOptionalBoundary(value, itemSchema);
+    if (!item) continue;
+    store.saveInboxItem(item, sessionName(item.sessionId));
+    count += 1;
+  }
+  if (file.epoch) store.setMeta(EPOCH_KEY, file.epoch);
+  if (file.generation !== undefined) store.setMeta(GENERATION_KEY, String(file.generation));
+  return count;
+}
+
+const EPOCH_KEY = 'inbox.epoch';
+const GENERATION_KEY = 'inbox.generation';
+
 export interface SessionInboxOptions {
   /** The Sessions a Pane (and panel) belongs to, never counting a Session's own orchestrator. */
   sessionIdsFor(paneId: string, panelId: string): string[];
   /** How many items a Session keeps; the oldest go first. */
   itemsPerSession(): number;
+  /** The name a Session's rows carry. */
+  sessionName?(sessionId: string): string;
 }
 
 export class SessionInbox {
@@ -92,13 +125,12 @@ export class SessionInbox {
   private generation = 0;
   private unsubscribe?: () => void;
   private readonly listeners = new Set<() => void>();
+  private readonly endedListeners = new Set<(ended: SessionInboxEnded) => void>();
 
   constructor(
-    private readonly filePath: string,
+    private readonly store: SessionInboxStore,
     private readonly options: SessionInboxOptions,
-  ) {
-
-  }
+  ) {}
 
   /** Starts feeding the inbox from `journal`. */
   attach(journal: WorkspaceJournal): void {
@@ -142,16 +174,26 @@ export class SessionInbox {
     return () => { this.listeners.delete(listener); };
   }
 
-  /** Clears the items with these ids, limited to one Session when `sessionId` is given. */
-  ack(ids: readonly string[], sessionId?: string): SessionInboxAckOutcome {
+  /** Hears each item that left: its card, if it has one, follows. */
+  subscribeEnded(listener: (ended: SessionInboxEnded) => void): () => void {
+    this.endedListeners.add(listener);
+    return () => { this.endedListeners.delete(listener); };
+  }
+
+  /**
+   * Clears the items with these ids, limited to one Session when `sessionId` is given. A `decision`
+   * is recorded on each, including one already cleared whose answer came back later (J8, J9).
+   */
+  ack(ids: readonly string[], sessionId?: string, decision?: string): SessionInboxAckOutcome {
     this.ensureLoaded();
     const wanted = new Set(ids);
-    const acknowledged = this.items
-      .filter(item => wanted.has(item.id) && (sessionId === undefined || item.sessionId === sessionId))
-      .map(item => item.id);
+    const matched = this.items.filter(item => wanted.has(item.id) && (sessionId === undefined || item.sessionId === sessionId));
+    const acknowledged = matched.map(item => item.id);
     const cleared = new Set(acknowledged);
-    if (cleared.size > 0) this.replace(this.items.filter(item => !cleared.has(item.id)), true);
-    return { acknowledged, unknown: [...wanted].filter(id => !cleared.has(id)) };
+    if (cleared.size > 0) this.replace(this.items.filter(item => !cleared.has(item.id)), { requireDurable: true, how: 'acked', decision });
+    const recorded = decision ? [...wanted].filter(id => !cleared.has(id) && this.store.recordDecision(id, decision)) : [];
+    for (const id of recorded) this.emitEnded({ id, how: 'acked', decision });
+    return { acknowledged: [...acknowledged, ...recorded], unknown: [...wanted].filter(id => !cleared.has(id) && !recorded.includes(id)) };
   }
 
   /** Clears every item of a Session. */
@@ -165,6 +207,7 @@ export class SessionInbox {
     const panelId = entry.panelId;
     if (!panelId || entry.replay || entry.baseline) return;
     let next = this.items;
+    const movedOn = new Set<string>();
     if (UNBLOCKING_KINDS.includes(entry.kind)) {
       next = next.filter(item => !(item.kind === 'blocked' && item.panelId === panelId));
     }
@@ -172,13 +215,16 @@ export class SessionInbox {
     if (kind) {
       for (const sessionId of this.options.sessionIdsFor(entry.paneId, panelId)) {
         const superseded: readonly RunpaneInboxItemKind[] = SUPERSEDES[kind];
-        next = next.filter(item =>
-          !(item.sessionId === sessionId && item.panelId === panelId && superseded.includes(item.kind)));
+        next = next.filter(item => {
+          const replaced = item.sessionId === sessionId && item.panelId === panelId && superseded.includes(item.kind);
+          if (replaced) movedOn.add(item.id);
+          return !replaced;
+        });
         next = [...next, this.itemFor(entry, panelId, sessionId, kind)];
         next = trimSession(next, sessionId, this.options.itemsPerSession());
       }
     }
-    if (next !== this.items) this.replace(next);
+    if (next !== this.items) this.replace(next, { how: 'moved-on', ended: movedOn });
   }
 
   private itemFor(
@@ -206,13 +252,13 @@ export class SessionInbox {
     return item;
   }
 
-  private replace(items: RunpaneInboxItem[], requireDurable = false): void {
+  private replace(items: RunpaneInboxItem[], options: { requireDurable?: boolean; how?: SessionInboxEnded['how']; ended?: Set<string>; decision?: string } = {}): void {
     const previous = this.items;
     this.items = items;
     try {
-      this.persist();
+      this.persist(previous, items, options.decision, options.how === 'acked');
     } catch (error) {
-      if (requireDurable) {
+      if (options.requireDurable) {
         this.items = previous;
         throw new PaneError('ERR_RUNPANE_INBOX_ACK_WRITE',
           `Pane could not save the acknowledgement (${reasonOf(error)}); the inbox items remain unacknowledged.`,
@@ -220,35 +266,51 @@ export class SessionInbox {
       }
       console.warn('[SessionInbox] Could not save the inbox; it stays in memory:', error);
     }
-    if (items !== previous) for (const listener of [...this.listeners]) listener();
+    if (items === previous) return;
+    if (options.how) {
+      const kept = new Set(items.map(item => item.id));
+      for (const item of previous) {
+        if (kept.has(item.id)) continue;
+        // Trimmed for space is not a worker moving on: its card stays until its asker is gone.
+        if (options.how === 'acked' || options.ended?.has(item.id)) this.emitEnded({ id: item.id, how: options.how, decision: options.decision });
+      }
+    }
+    for (const listener of [...this.listeners]) listener();
+  }
+
+  private emitEnded(ended: SessionInboxEnded): void {
+    for (const listener of [...this.endedListeners]) listener(ended);
   }
 
   private ensureLoaded(): void {
     if (this.loaded) return;
     this.loaded = true;
     try {
-      const parsed = decodeBoundary(JSON.parse(fs.readFileSync(this.filePath, 'utf8')), inboxFileSchema);
-      this.epoch = parsed.epoch;
-      this.generation = parsed.generation ?? 0;
-      this.items = parsed.items.flatMap(value => {
-        const item: RunpaneInboxItem | undefined = decodeOptionalBoundary(value, itemSchema);
-        return item ? [item] : [];
-      });
+      this.epoch = this.store.meta(EPOCH_KEY);
+      this.generation = Number(this.store.meta(GENERATION_KEY) ?? 0) || 0;
+      this.items = this.store.unackedInboxItems();
     } catch (error) {
-      const details = decodeOptionalBoundary(error, boundary.object({ code: boundary.optional(boundary.string) }));
-      if (details?.code !== 'ENOENT') console.warn('[SessionInbox] Ignoring an unreadable inbox file:', error);
+      console.warn('[SessionInbox] Could not read the inbox; it starts empty:', error);
     }
   }
 
-  private persist(): void {
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
-    const temporaryPath = `${this.filePath}.tmp-${process.pid}-${randomUUID()}`;
-    try {
-      fs.writeFileSync(temporaryPath, `${JSON.stringify({ version: 1, items: this.items, epoch: this.epoch, generation: this.generation }, null, 2)}\n`, { mode: 0o600 });
-      fs.renameSync(temporaryPath, this.filePath);
-    } finally {
-      if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
-    }
+  /** Writes what changed, with the journal watermark, in one transaction. */
+  private persist(previous: RunpaneInboxItem[], next: RunpaneInboxItem[], decision: string | undefined, acked: boolean): void {
+    const now = Date.now();
+    this.store.transaction(() => {
+      const before = new Map(previous.map(item => [item.id, item]));
+      const after = new Set(next.map(item => item.id));
+      for (const item of previous) {
+        if (after.has(item.id)) continue;
+        if (acked) this.store.ackInboxItem(item.id, now, decision);
+        else this.store.dropInboxItem(item.id, now);
+      }
+      for (const item of next) {
+        if (before.get(item.id) !== item) this.store.saveInboxItem(item, this.options.sessionName?.(item.sessionId) ?? item.sessionId);
+      }
+      if (this.epoch) this.store.setMeta(EPOCH_KEY, this.epoch);
+      this.store.setMeta(GENERATION_KEY, String(this.generation));
+    });
   }
 }
 

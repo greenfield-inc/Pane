@@ -577,7 +577,7 @@ describe('AutopilotManager: the person\'s own instructions (D-196)', () => {
     await manager.setEnabled(true);
     const empty = manager.instructions();
     expect(empty).toMatchObject({ text: '', path: file(), status: 'none' });
-    expect(empty.builtIn).toContain('Never answer an approval');
+    expect(empty.builtIn).toContain('Never answer a permission prompt');
     expect(empty.builtIn).toContain('[Pane · Start]');
 
     const saved = await manager.setInstructions('Group things by repo.\nBe brief.');

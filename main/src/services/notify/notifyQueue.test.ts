@@ -280,9 +280,9 @@ describe('NotifyQueue', () => {
     await vi.advanceTimersByTimeAsync(3_000);
     expect(queue.snapshot().items.map(item => item.answerSummary)).toEqual(['Stateless JWT']);
 
-    vi.setSystemTime(new Date(2026, 9, 26, 23, 59, 59));
+    vi.advanceTimersByTime(24 * 60 * 60_000 - 1_000);
     expect(queue.snapshot().items).toHaveLength(1);
-    vi.setSystemTime(new Date(2026, 9, 27, 0, 0, 1));
+    vi.advanceTimersByTime(2_000);
     expect(queue.snapshot().items).toEqual([]);
   });
 
@@ -334,26 +334,6 @@ describe('NotifyQueue', () => {
     expect(queue.snapshot().items.find(item => item.id === updateId)?.state).toBe('info');
   });
 
-  it('refreshes once at local midnight on a daylight-saving day', async () => {
-    const previousTz = process.env.TZ;
-    process.env.TZ = 'America/Los_Angeles';
-    try {
-      // 2026-11-01 is 25 hours long in Los Angeles: clocks fall back at 02:00.
-      vi.setSystemTime(new Date('2026-11-01T22:00:00-08:00'));
-      const { queue } = makeQueue();
-      ask(queue, sessionStore);
-      let changes = 0;
-      queue.on('change', () => { changes += 1; });
-
-      await vi.advanceTimersByTimeAsync(90 * 60_000);
-      expect(changes).toBe(0);
-      await vi.advanceTimersByTimeAsync(60 * 60_000);
-      expect(changes).toBe(1);
-    } finally {
-      process.env.TZ = previousTz;
-    }
-  });
-
   it('rejects an answer that is not one of the choices', () => {
     const { queue } = makeQueue();
     ask(queue, sessionStore);
@@ -394,7 +374,7 @@ describe('NotifyQueue across machines', () => {
       ['Which session store should the refactor use?', 'mac-studio'],
     ]);
     expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: hostKey });
-    expect(laptop.remoteTarget(hostKey)).toEqual({ machineId: 'studio', machine: 'mac-studio', online: true, id: hostId });
+    expect(laptop.remoteTarget(hostKey)).toEqual({ machineId: 'studio', machine: 'mac-studio', online: true, id: hostId, ui: 'options' });
     expect(laptop.remoteTarget(laptopId)).toBeNull();
 
     laptop.noteAnsweredHere(hostKey, true);
@@ -451,9 +431,9 @@ describe('NotifyQueue across machines', () => {
     const call = ask(host, sessionStore, claude);
     const id = onlyId(host);
 
-    host.runRemote({ type: 'answer', id, answer: { choice: 'Postgres table' } }, "Parsa's iPhone", null);
-    expect(() => host.runRemote({ type: 'answer', id, answer: { choice: 'Keep Redis' } }, 'parsa-devbox', null))
-      .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_ANSWERED', message: "Already answered on Parsa's iPhone. Nothing was sent." }));
+    host.runRemote({ type: 'answer', id, answer: { choice: 'Postgres table' } }, "Parsa's iPhone");
+    expect(() => host.runRemote({ type: 'answer', id, answer: { choice: 'Keep Redis' } }, 'parsa-devbox'))
+      .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_ANSWERED', message: "Already answered by you on Parsa's iPhone. Nothing was sent." }));
     await vi.advanceTimersByTimeAsync(3_000);
     expect(call.result).toEqual({ answer: 'Postgres table' });
 

@@ -1474,6 +1474,34 @@ export class PaneRemoteHttpApiServer {
     return owner && login === owner.toLowerCase() ? login : null;
   }
 
+  /**
+   * The Approvals switch has the same callers as shared keys: its owner, or a paired device. Refused with
+   * 409, not 403, because a client takes a 403 to mean its whole connection was rejected and stops it.
+   */
+  private notifySwitchArgs(
+    args: JsonValue[],
+    auth: Extract<RemoteRequestAuthResult, { ok: true }>,
+    request: IncomingMessage,
+  ): JsonValue[] {
+    if (this.workspace) {
+      const owner = this.workspaceOwnerLogin(request);
+      if (owner) return [args[0] ?? null, { clientId: `tailnet:${owner}` }];
+      throw new RemoteDaemonBadRequestError(
+        'ERR_NOTIFY_SWITCH_OWNER_REQUIRED',
+        'Only this computer\'s owner can read or change its Approvals switch from another machine, so nothing changed.',
+        409,
+        'Sign in to Tailscale as this computer\'s owner, or change it on this computer.',
+      );
+    }
+    if (auth.client) return [args[0] ?? null, { clientId: auth.client.id }];
+    throw new RemoteDaemonBadRequestError(
+      'ERR_NOTIFY_SWITCH_PAIRING_REQUIRED',
+      'Only a paired device can read or change this computer\'s Approvals switch, so nothing changed.',
+      409,
+      'Pair this device with the computer, or change it on that computer.',
+    );
+  }
+
   private getInvokeArgsForRequest(
     invokeRequest: RemoteInvokeRequest,
     auth: Extract<RemoteRequestAuthResult, { ok: true }>,
@@ -1488,6 +1516,7 @@ export class PaneRemoteHttpApiServer {
         'Sign in to Tailscale as this computer\'s owner, or keep your notes on your own computer.',
       );
     }
+    if (invokeRequest.channel.startsWith('notify:switch:')) return this.notifySwitchArgs(args, auth, request);
     const sharesKeys = invokeRequest.channel.startsWith('credentials:shared:');
     if (sharesKeys && this.workspace) {
       // Keys belong to the owner: a teammate this workspace lets in may neither read nor replace them.

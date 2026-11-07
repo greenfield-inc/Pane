@@ -128,7 +128,7 @@ import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
 import { MachineConnections } from './services/machineConnections';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
-import { followSavedMachines } from './ipc/notify';
+import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
@@ -1618,6 +1618,7 @@ if (launchRemoteSetup) {
     if (paneDaemonHost?.paneDaemonServer) {
       logToFile('Stopping local daemon server early');
       console.log('[Main] Stopping local daemon server early...');
+      prepareNotifyForQuit();
       await paneDaemonHost.paneDaemonServer.stop();
       console.log('[Main] Local daemon server stopped');
     }

@@ -47,9 +47,17 @@ export function notifyItem(snapshot: NotifySnapshot | null, id: string | null | 
   return snapshot.items.find((item) => item.id === id);
 }
 
+/**
+ * An item the person can answer now: what every count counts. A stale item waits in its own group,
+ * an offline machine's collapses to one row, and a mirror from an older machine takes no answer.
+ */
+export function countsAsWaiting(item: NotifyItem): boolean {
+  return item.state === 'waiting' && !item.unreachable && item.staleSince === undefined && !item.relay;
+}
+
 /** Questions still waiting for an answer. Updates never count. */
 export function waitingCount(snapshot: NotifySnapshot | null): number {
-  return snapshot?.items.filter((item) => item.state === 'waiting').length ?? 0;
+  return snapshot?.items.filter(countsAsWaiting).length ?? 0;
 }
 
 /**
@@ -57,15 +65,15 @@ export function waitingCount(snapshot: NotifySnapshot | null): number {
  * with `machineId`, only that machine's (`local` for this computer).
  */
 export function sessionWaitingCount(snapshot: NotifySnapshot | null, sessionId: string, machineId?: string): number {
-  return snapshot?.items.filter((item) => item.state === 'waiting' && item.source.session?.id === sessionId
+  return snapshot?.items.filter((item) => countsAsWaiting(item) && item.source.session?.id === sessionId
     && (machineId === undefined || (item.machineId ?? 'local') === machineId)).length ?? 0;
 }
 
 /** Waiting items from machines other than the one the app is on (`local` for this computer). */
 export function waitingElsewhere(snapshot: NotifySnapshot | null, activeMachineId: string): number {
-  return snapshot?.items.filter((item) => item.state === 'waiting' && (item.machineId ?? 'local') !== activeMachineId).length ?? 0;
+  return snapshot?.items.filter((item) => countsAsWaiting(item) && (item.machineId ?? 'local') !== activeMachineId).length ?? 0;
 }
 
 export function paneHasWaitingQuestion(snapshot: NotifySnapshot | null, paneId: string): boolean {
-  return snapshot?.items.some((item) => item.state === 'waiting' && item.source.paneId === paneId) ?? false;
+  return snapshot?.items.some((item) => countsAsWaiting(item) && item.source.paneId === paneId) ?? false;
 }

@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { boundary, type BoundarySchema } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
-import { invokeDaemon } from './daemonClient';
+import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
+import { RunpaneError } from './errors';
+import { parseNotifyQuestion, type NotifyQuestion } from './notify';
 
 // The CLI's copy of the shapes in shared/types/autopilot.ts, which this package cannot import.
 
@@ -55,10 +57,12 @@ interface AutopilotSnapshotResult {
   walk: { sessionId?: string; sessions: Array<{ id: string; name: string; waiting: number }> };
 }
 
+type AutopilotConnected = { kind: 'session' | 'pane' | 'autopilot' | 'machine'; id: string; name: string; paneId?: string };
+
 interface AutopilotWaitingItem {
   id: string;
   title: string;
-  kind: 'approval' | 'question' | 'permission' | 'stuck';
+  kind: 'approval' | 'question' | 'permission';
   sessionId?: string;
   sessionName?: string;
   agent: string;
@@ -75,11 +79,43 @@ interface AutopilotWaitingItem {
   machine: string;
   machineId: string;
   onStack: boolean;
+  reopened?: { by: string; device?: string; at: number; closedBy: string; closedReason: string };
+  quiet?: boolean;
+  stale?: boolean;
+  connected?: AutopilotConnected;
 }
 
 interface AutopilotWaitingResult {
   ok: true;
   items: AutopilotWaitingItem[];
+  /** Saved machines it can't reach. Absent from an older Pane. */
+  offline?: string[];
+  /** The person's Tailscale machines not saved here. Absent from an older Pane. */
+  cantSee?: string[];
+}
+
+/** What answer, close and rewrite return: the item's id (a rewrite's new one) and the machine that holds it. */
+interface AutopilotActionResult {
+  ok: true;
+  id: string;
+  machine?: string;
+}
+
+type AutopilotAnswer = { choice: string; note?: string } | { approved: boolean; note?: string } | { text: string };
+
+interface AutopilotAnswerRequest {
+  id: string;
+  answer: AutopilotAnswer;
+  because: string;
+}
+
+interface AutopilotCloseRequest {
+  id: string;
+  reason: string;
+}
+
+interface AutopilotRewriteRequest extends NotifyQuestion {
+  id: string;
 }
 
 interface AutopilotStackPushResult {
@@ -157,9 +193,10 @@ const snapshotResultSchema: BoundarySchema<AutopilotSnapshotResult> = boundary.o
     sessions: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, waiting: boundary.number })),
   }),
 });
-const waitingItemSchema: BoundarySchema<AutopilotWaitingItem> = boundary.object({
+const waitingItemSchema = boundary.object({
   id: boundary.string,
   title: boundary.string,
+  // An older Pane marks a worker's question "stuck"; here it reads as the question it is.
   kind: boundary.enumeration('approval', 'question', 'permission', 'stuck'),
   sessionId: boundary.optional(boundary.string),
   sessionName: boundary.optional(boundary.string),
@@ -181,10 +218,32 @@ const waitingItemSchema: BoundarySchema<AutopilotWaitingItem> = boundary.object(
   machine: boundary.string,
   machineId: boundary.string,
   onStack: boundary.boolean,
+  quiet: boundary.optional(boundary.boolean),
+  stale: boundary.optional(boundary.boolean),
+  reopened: boundary.optional(boundary.object({
+    by: boundary.enumeration('you', 'autopilot', 'orchestrator', 'pane'),
+    device: boundary.optional(boundary.string),
+    at: boundary.number,
+    closedBy: boundary.enumeration('you', 'autopilot', 'orchestrator', 'pane'),
+    closedReason: boundary.string,
+  })),
+  connected: boundary.optional(boundary.object({
+    kind: boundary.enumeration('session', 'pane', 'autopilot', 'machine'),
+    id: boundary.string,
+    name: boundary.string,
+    paneId: boundary.optional(boundary.string),
+  })),
 });
-const waitingResultSchema: BoundarySchema<AutopilotWaitingResult> = boundary.object({
+const waitingResultSchema = boundary.object({
   ok: boundary.literal(true),
   items: boundary.array(waitingItemSchema),
+  offline: boundary.optional(boundary.array(boundary.string)),
+  cantSee: boundary.optional(boundary.array(boundary.string)),
+});
+const actionResultSchema: BoundarySchema<AutopilotActionResult> = boundary.object({
+  ok: boundary.literal(true),
+  id: boundary.string,
+  machine: boundary.optional(boundary.string),
 });
 const pushResultSchema: BoundarySchema<AutopilotStackPushResult> = boundary.object({
   ok: boundary.literal(true),
@@ -196,7 +255,7 @@ const pushResultSchema: BoundarySchema<AutopilotStackPushResult> = boundary.obje
 
 const URL_TAB = /^https?:\/\//i;
 
-function printJson(value: AutopilotSnapshotResult | AutopilotWaitingResult | AutopilotStatusResult | AutopilotStackPushResult): void {
+function printJson(value: AutopilotSnapshotResult | AutopilotWaitingResult | AutopilotStatusResult | AutopilotStackPushResult | AutopilotActionResult): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
@@ -242,15 +301,16 @@ export async function runAutopilotStatus(parsed: ParsedArgs): Promise<number> {
 
 /** `runpane autopilot waiting`: what waits on the person, grouped by Session in the order Pane gives. */
 export async function runAutopilotWaiting(parsed: ParsedArgs): Promise<number> {
-  const result = await invokeDaemon('runpane:autopilot:waiting', [], waitingResultSchema, { paneDir: parsed.paneDir });
+  const decoded = await invokeDaemon('runpane:autopilot:waiting', [], waitingResultSchema, { paneDir: parsed.paneDir });
+  const result: AutopilotWaitingResult = {
+    ...decoded,
+    items: decoded.items.map(item => ({ ...item, kind: item.kind === 'stuck' ? 'question' : item.kind })),
+  };
   if (parsed.json) {
     printJson(result);
     return 0;
   }
-  if (result.items.length === 0) {
-    console.log('Nothing is waiting on the person.');
-    return 0;
-  }
+  if (result.items.length === 0) console.log('Nothing is waiting on the person.');
   let group: string | undefined;
   for (const item of result.items) {
     const key = item.sessionId ?? '';
@@ -258,8 +318,17 @@ export async function runAutopilotWaiting(parsed: ParsedArgs): Promise<number> {
       group = key;
       console.log(item.sessionId ? `${item.sessionName ?? item.sessionId} (${item.sessionId})` : 'Not in a Session');
     }
-    console.log(`  ${item.id}  ${item.kind}  ${item.title}  ${item.agent} - ${item.pane}  ${formatAge(item.ageMs)}${item.onStack ? '  on the stack' : ''}`);
+    const marks = [
+      item.machineId === 'local' ? '' : `  on ${item.machine}`,
+      item.onStack ? '  on the stack' : '',
+      item.stale ? '  stale' : '',
+      item.quiet ? '  quiet' : '',
+      item.reopened ? '  reopened by you' : '',
+    ].join('');
+    console.log(`  ${item.id}  ${item.kind}  ${item.title}  ${item.agent} - ${item.pane}  ${formatAge(item.ageMs)}${marks}`);
   }
+  for (const machine of result.offline ?? []) console.log(`${machine} offline`);
+  for (const machine of result.cantSee ?? []) console.log(`Can't see: ${machine}`);
   return 0;
 }
 
@@ -314,5 +383,109 @@ export async function runAutopilotStackPush(parsed: ParsedArgs, cwd: string = pr
   console.log(result.shown
     ? `On the stack and on screen: ${title} (${result.position} of ${result.total}).`
     : `On the stack: ${title} (${result.position} of ${result.total}); it comes up when the person is done with the one on screen.`);
+  return 0;
+}
+
+function invalidAction(message: string, next: string): RunpaneError {
+  return new RunpaneError('ERR_AUTOPILOT_INVALID', `${message} Nothing was changed.`, next);
+}
+
+/** The `<id>` every action takes, from `runpane autopilot waiting`. */
+function requireItem(parsed: ParsedArgs, verb: string): string {
+  if (!parsed.item?.trim()) throw invalidAction(`runpane autopilot ${verb} needs a waiting item's id.`, 'List what waits with runpane autopilot waiting --json and pass an id from it.');
+  return parsed.item;
+}
+
+function buildAnswerRequest(parsed: ParsedArgs): AutopilotAnswerRequest {
+  const id = requireItem(parsed, 'answer');
+  const ways = [parsed.answerChoice !== undefined, parsed.answerApprove === true, parsed.answerDeny === true, parsed.panelInput !== undefined].filter(Boolean).length;
+  if (ways !== 1) throw invalidAction('runpane autopilot answer needs exactly one of --choice <label>, --approve, --deny, or --text <text>.', 'Pass one way of answering.');
+  if (!parsed.because?.trim()) throw invalidAction('runpane autopilot answer needs --because <why>: a D-n, a document or the person\'s words, recorded on the item.', 'Say why with --because. If you have no reason to give, bring the item to the person instead.');
+  const because = parsed.because;
+  if (parsed.panelInput !== undefined) {
+    if (parsed.note !== undefined) throw invalidAction('--note goes with --choice, --approve or --deny.', 'Put the note in --text.');
+    if (!parsed.panelInput.trim()) throw invalidAction('--text must be non-empty.', 'Pass the answer in --text.');
+    return { id, answer: { text: parsed.panelInput }, because };
+  }
+  if (parsed.answerChoice !== undefined) {
+    if (!parsed.answerChoice.trim()) throw invalidAction('--choice must be one of the item\'s labels.', 'Read its choices with runpane autopilot waiting --json.');
+    const answer: AutopilotAnswer = parsed.note === undefined ? { choice: parsed.answerChoice } : { choice: parsed.answerChoice, note: parsed.note };
+    return { id, answer, because };
+  }
+  const approved = parsed.answerApprove === true;
+  const answer: AutopilotAnswer = parsed.note === undefined ? { approved } : { approved, note: parsed.note };
+  return { id, answer, because };
+}
+
+function buildCloseRequest(parsed: ParsedArgs): AutopilotCloseRequest {
+  const id = requireItem(parsed, 'close');
+  if (!parsed.reason?.trim()) throw invalidAction('runpane autopilot close needs --reason <why>, recorded on the item and told to its asker.', 'Say why with --reason.');
+  return { id, reason: parsed.reason };
+}
+
+/** Links' files resolve against `cwd`, so Pane gets absolute paths, as `stack push` does. */
+function buildRewriteRequest(parsed: ParsedArgs, cwd: string): AutopilotRewriteRequest {
+  const id = requireItem(parsed, 'rewrite');
+  if (parsed.notifyDetail !== undefined || parsed.notifyDetailLabel !== undefined || parsed.notifyAction !== undefined) {
+    throw invalidAction('runpane autopilot rewrite takes --context, --choices, --suggestions and --links, not --detail, --detail-label or --action.', 'Put what the person needs to read in --context.');
+  }
+  if (parsed.notifyUi === 'info') throw invalidAction('A rewrite must take an answer, so --ui info doesn\'t fit.', 'Use --ui options, approve, or ask.');
+  let question: NotifyQuestion;
+  try {
+    question = parseNotifyQuestion({
+      ui: parsed.notifyUi,
+      title: parsed.title,
+      context: parsed.notifyContext,
+      choices: parsed.notifyChoices,
+      suggestions: parsed.notifySuggestions,
+      links: parsed.notifyLinks,
+    });
+  } catch (error) {
+    if (!(error instanceof RunpaneError)) throw error;
+    throw new RunpaneError('ERR_AUTOPILOT_INVALID', error.message, 'Fix it and run runpane autopilot rewrite again.');
+  }
+  const request: AutopilotRewriteRequest = { id, ...question };
+  if (question.links) request.links = question.links.map(link => ('path' in link ? { ...link, path: path.resolve(cwd, link.path) } : link));
+  return request;
+}
+
+/** Answer, close and rewrite: an older Pane has no such channel. */
+async function act(parsed: ParsedArgs, verb: string, request: { id: string }): Promise<AutopilotActionResult> {
+  try {
+    return await invokeDaemon(`runpane:autopilot:${verb}`, [request], actionResultSchema, { paneDir: parsed.paneDir });
+  } catch (error) {
+    if (error instanceof PaneDaemonClientError && error.code === 'ERR_UNKNOWN_CHANNEL') {
+      throw new RunpaneError('ERR_AUTOPILOT_PANE_TOO_OLD', `This Pane can't run runpane autopilot ${verb} yet. Nothing was changed.`, 'Update Pane, or bring the item to the person.');
+    }
+    throw error;
+  }
+}
+
+const onMachine = (result: AutopilotActionResult) => (result.machine ? ` on ${result.machine}` : '');
+
+/** `runpane autopilot answer`: delivered at once, and recorded "by Autopilot" on the item. */
+export async function runAutopilotAnswer(parsed: ParsedArgs): Promise<number> {
+  const request = buildAnswerRequest(parsed);
+  const result = await act(parsed, 'answer', request);
+  if (parsed.json) printJson(result);
+  else console.log(`Answered ${result.id}${onMachine(result)}, recorded by Autopilot because ${request.because}. The person can Override it.`);
+  return 0;
+}
+
+/** `runpane autopilot close`: its asker is told, and the person can reopen it. */
+export async function runAutopilotClose(parsed: ParsedArgs): Promise<number> {
+  const request = buildCloseRequest(parsed);
+  const result = await act(parsed, 'close', request);
+  if (parsed.json) printJson(result);
+  else console.log(`Closed ${result.id}${onMachine(result)}: ${request.reason}. The person can reopen it.`);
+  return 0;
+}
+
+/** `runpane autopilot rewrite`: closes the item and re-asks it; the answer goes to the original asker. */
+export async function runAutopilotRewrite(parsed: ParsedArgs, cwd: string = process.cwd()): Promise<number> {
+  const request = buildRewriteRequest(parsed, cwd);
+  const result = await act(parsed, 'rewrite', request);
+  if (parsed.json) printJson(result);
+  else console.log(`Rewrote ${request.id} as ${result.id}${onMachine(result)}. Its answer goes to the original asker.`);
   return 0;
 }

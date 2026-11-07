@@ -1,3 +1,4 @@
+import { receiptLine } from '@shared/approvalReceipts';
 import type { NotifyItem, NotifySharedState, NotifyUi } from '@shared/types/notify';
 
 /** The desktop card's kind labels (frontend/src/components/notify/notifyFormat.ts). */
@@ -46,9 +47,9 @@ export function notifySheetState(shared: NotifySharedState, notifyId: string, an
     case 'answered':
       return answeredHere
         ? { kind: 'done', title: sentTo, summary: item.answerSummary }
-        : { kind: 'closed', message: `Already answered on ${item.answeredOn ?? 'another screen'}` };
+        : { kind: 'closed', message: receiptLine(item) ?? `Already answered on ${item.answeredOn ?? 'another screen'}` };
     case 'expired':
-      return { kind: 'closed', message: `${item.source.agent} stopped waiting` };
+      return { kind: 'closed', message: receiptLine(item) ?? `${item.source.agent} stopped waiting` };
     case 'info':
       return { kind: 'closed', message: 'This is an update. There is nothing to answer.' };
   }

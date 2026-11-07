@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
 import { notifyFixture } from '../../../tests/fixtures/notifySnapshot';
-import { selectNotifyItems, sessionWaitingCount, waitingCount, waitingElsewhere } from './notifyStore';
+import { paneHasWaitingQuestion, selectNotifyItems, sessionWaitingCount, waitingCount, waitingElsewhere } from './notifyStore';
 
 const launch = { id: 'session-launch', name: 'Launch', paneId: 'session-launch-pane' };
 
@@ -21,12 +21,25 @@ describe('Approvals counts', () => {
       item('done', { state: 'answered' }),
       item('loose', { source: { name: 'docs', agent: 'Cursor' } }),
     );
-    expect(sessionWaitingCount(snapshot, 'session-launch')).toBe(3);
+    // A mirror from an older machine takes no answer, so it isn't counted.
+    expect(sessionWaitingCount(snapshot, 'session-launch')).toBe(2);
     expect(sessionWaitingCount(snapshot, 'session-other')).toBe(0);
-    expect(sessionWaitingCount(snapshot, 'session-launch', 'local')).toBe(3);
+    expect(sessionWaitingCount(snapshot, 'session-launch', 'local')).toBe(2);
     expect(sessionWaitingCount(snapshot, 'session-launch', 'studio')).toBe(0);
     // The badge: every Session's count plus what isn't in a Session.
-    expect(waitingCount(snapshot)).toBe(4);
+    expect(waitingCount(snapshot)).toBe(3);
+  });
+
+  it('leaves stale items and an offline machine\'s items out of every count', () => {
+    const snapshot = withItems(
+      item('live'),
+      item('stale', { staleSince: 5 }),
+      item('offline', { machineId: 'studio', unreachable: true }),
+    );
+    expect(waitingCount(snapshot)).toBe(1);
+    expect(sessionWaitingCount(snapshot, 'session-launch')).toBe(1);
+    expect(waitingElsewhere(snapshot, 'local')).toBe(0);
+    expect(paneHasWaitingQuestion(withItems(item('stale', { staleSince: 5, source: { name: 'x', agent: 'Claude', paneId: 'p' } })), 'p')).toBe(false);
   });
 
   it('says how many wait on machines other than the one the app is on', () => {

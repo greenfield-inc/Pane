@@ -85,11 +85,14 @@ describe('Pane Chat skill bundle', () => {
     expect(guide).toContain('or be done and say so.');
     expect(guide).toContain('pass the related files, PRs and pages as `--links`.');
     expect(guide).not.toMatch(/never (be )?stalled|Nothing left to do in this Session/i);
-    expect(guide).toContain('Post with the CLI as a background command, one per item, so you stay free to talk');
+    expect(guide).toContain('Post or relay with the CLI as a background command, one per item, so you stay free to talk');
     expect(guide).toContain('runpane notify --ui options --title "Q-7: <the question>"');
-    expect(guide).toContain('(`runpane inbox ack <id>`)');
-    expect(guide).toContain('stop its background command (TaskStop in Claude Code), which expires the card');
-    expect(guide).toContain('Pane keeps no approvals across a restart, so after one, post each item that still waits again, exactly once.');
+    expect(guide).toContain('`runpane notify --relays <item>`');
+    expect(guide).toContain('`runpane inbox ack <item> --decision <D-n>`');
+    expect(guide).toContain('`correction: Q-n → <answer> (by you)`');
+    expect(guide).toContain('stop its background command (TaskStop in Claude Code)');
+    expect(guide).toContain('Approvals survive a restart');
+    expect(guide).not.toContain('Pane keeps no approvals');
     expect(guide).toContain('ask in this tab as before');
   });
 
@@ -153,6 +156,21 @@ describe('Pane Chat skill bundle', () => {
     expect(text).toContain('/wrap-up never merges a PR, commits or pushes for a worker, passes `--force`, deletes a branch, closes a tab the person opened, archives the Session, or touches a Pane or tab outside this Session');
     // The Session folder copy has to work on its own.
     expect(text).not.toMatch(/\]\(\.{0,2}\//);
+  });
+
+  it('teaches Autopilot its rules for approvals, with permission prompts left to the person', async () => {
+    const guide = (await fs.readFile(path.join(bundleRoot, 'skills', 'pane-autopilot', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
+    for (const command of ['runpane autopilot close <id> --reason', 'runpane autopilot rewrite <id>', 'runpane autopilot answer <id>', '--because "<D-n, document or their words>"']) {
+      expect(guide).toContain(command);
+    }
+    expect(guide).toContain('the way forward is clear **and** the item relates to what you are working on with the person, or when the person told you to handle approvals');
+    expect(guide).toContain('**Never** a permission prompt');
+    expect(guide).toContain('`runpane autopilot waiting --json` **is** your queue');
+    expect(guide).toContain('bring one group at a time');
+    expect(guide).toContain('"Can\'t see: <machine>"');
+    expect(guide).toContain('"<machine> offline"');
+    expect(guide).not.toContain('D-66');
+    expect(guide).not.toMatch(/never answers? an approval/i);
   });
 
   it('gives each helper subagent a bundled skill', async () => {

@@ -55,6 +55,13 @@ describe('notifySheetState', () => {
     expect(notifySheetState(at(4, { ...question, state: 'expired' }), 'q1', null)).toEqual({ kind: 'closed', message: 'Claude stopped waiting' });
   });
 
+  it('shows the receipt once one says who answered or why it closed', () => {
+    const byAutopilot: NotifyItem = { ...question, state: 'answered', answeredBy: { by: 'autopilot', because: 'D-22' } };
+    expect(notifySheetState(at(6, byAutopilot), 'q1', null)).toEqual({ kind: 'closed', message: 'Answered by Autopilot · because D-22' });
+    const closed: NotifyItem = { ...question, state: 'expired', closed: { by: 'pane', reason: 'Session archived', at: 1 } };
+    expect(notifySheetState(at(6, closed), 'q1', null)).toEqual({ kind: 'closed', message: 'Closed: Session archived' });
+  });
+
   it('explains a question the host no longer holds', () => {
     expect(notifySheetState(at(4), 'q1', null)).toEqual({ kind: 'closed', message: 'This question is no longer waiting.' });
   });

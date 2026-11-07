@@ -9,9 +9,9 @@ import { registerConfigHandlers } from './config';
 import { registerSharedCredentialHandlers } from './sharedCredentials';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { ConfigManager } from '../services/configManager';
-import type { SharedCredentials } from '../../../shared/types/sharedCredentials';
 import { keychainSecretBackend, PaneSecretStore } from '../services/paneSecrets';
 import { FakeKeychain } from '../test/fakeKeychain';
+import type { SharedCredentials, SharedNotifySwitch } from '../../../shared/types/sharedCredentials';
 
 const tempDirs: string[] = [];
 const paired = { clientId: 'phone-1' };
@@ -198,5 +198,121 @@ describe('shared credentials on a host', () => {
     } });
 
     expect(secrets.list().map(secret => `${secret.project}/${secret.name}`)).toEqual(['qa/GOOD']);
+  });
+});
+
+describe('the Approvals switch on a host', () => {
+  async function switchOf(existingConfig?: Partial<AppConfig>) {
+    const host = await registerHost(existingConfig);
+    // SAFETY: notify:switch:get returns SharedNotifySwitch.
+    const read = async () => await host.registry.invokeRemote('notify:switch:get', [null, paired]) as SharedNotifySwitch;
+    const apply = (incoming: SharedNotifySwitch) => host.registry.invokeRemote('notify:switch:apply', [incoming, paired]);
+    return { ...host, readSwitch: read, applySwitch: apply };
+  }
+
+  it('reads as on, at time zero, when this host has never stored it', async () => {
+    const { readSwitch } = await switchOf();
+
+    expect(await readSwitch()).toEqual({ enabled: true, changedAt: 0 });
+  });
+
+  it('reads an off stored before the switch was shared as off, at time zero, so any timed value replaces it', async () => {
+    const { readSwitch, applySwitch } = await switchOf({ notify: { enabled: false } });
+
+    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 0 });
+
+    await applySwitch({ enabled: true, changedAt: 1 });
+    expect(await readSwitch()).toEqual({ enabled: true, changedAt: 1 });
+  });
+
+  it('refuses a caller that is not a paired client', async () => {
+    const { registry } = await switchOf();
+
+    await expect(registry.invokeRemote('notify:switch:get', [null])).rejects.toThrow();
+    await expect(registry.invokeRemote('notify:switch:apply', [{ enabled: false, changedAt: 1 }])).rejects.toThrow();
+  });
+
+  it('stamps a change made on this host, once, and leaves the time alone for other Approvals settings', async () => {
+    const { configManager, readSwitch } = await switchOf();
+    const before = Date.now();
+
+    await configManager.updateConfig({ notify: { enabled: false } });
+    const stamped = await readSwitch();
+    expect(stamped.enabled).toBe(false);
+    expect(stamped.changedAt).toBeGreaterThanOrEqual(before);
+
+    await configManager.updateConfig({ notify: { enabled: false } });
+    await configManager.updateConfig({ notify: { position: 'top-right', sound: false } });
+    await configManager.updateConfig({ preferredShell: 'auto' });
+    expect(await readSwitch()).toEqual(stamped);
+  });
+
+  it('wins over a time ahead of this host\'s clock when the person changes it here', async () => {
+    const future = Date.now() + 3_600_000;
+    const { configManager, readSwitch, applySwitch } = await switchOf();
+    await applySwitch({ enabled: false, changedAt: future });
+
+    await configManager.updateConfig({ notify: { enabled: true } });
+
+    expect(await readSwitch()).toEqual({ enabled: true, changedAt: future + 1 });
+  });
+
+  it('takes a newer value with that host\'s time, turns off through config-updated, and keeps per-machine settings', async () => {
+    const { configManager, readSwitch, applySwitch } = await switchOf();
+    await configManager.updateConfig({ notify: { position: 'top-right', sound: false } });
+    const updates: AppConfig[] = [];
+    configManager.on('config-updated', (config: AppConfig) => updates.push(config));
+
+    await applySwitch({ enabled: false, changedAt: 5_000 });
+
+    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 5_000 });
+    expect(updates.at(-1)?.notify).toEqual({ enabled: false, position: 'top-right', sound: false });
+  });
+
+  it('keeps its own value when an older one arrives, and writes nothing', async () => {
+    const { configManager, readSwitch, applySwitch } = await switchOf({ notify: { enabled: false }, notifyEnabledChangedAt: 5_000 });
+
+    await applySwitch({ enabled: true, changedAt: 4_000 });
+
+    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 5_000 });
+    expect(configManager.getConfig().notify?.enabled).toBe(false);
+  });
+
+  it('settles equal times on off without changing the time', async () => {
+    const { readSwitch, applySwitch } = await switchOf();
+
+    await applySwitch({ enabled: false, changedAt: 0 });
+
+    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 0 });
+  });
+
+  it('refuses a malformed value and changes nothing', async () => {
+    const { readSwitch, registry } = await switchOf();
+
+    await expect(registry.invokeRemote('notify:switch:apply', [{ enabled: 'off', changedAt: 5 }, paired])).rejects.toThrow();
+
+    expect(await readSwitch()).toEqual({ enabled: true, changedAt: 0 });
+  });
+
+  it('counts a hand edit of config.json as changed now, so an older copy cannot undo it', async () => {
+    const { configManager, readSwitch, applySwitch } = await switchOf({ notify: { enabled: true }, notifyEnabledChangedAt: 5_000 });
+    const configPath = path.join(process.env.PANE_DIR ?? '', 'config.json');
+
+    const onDisk = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(configPath, JSON.stringify({ ...onDisk, notify: { enabled: false } }, null, 2));
+    await configManager.reloadFromDisk();
+
+    await applySwitch({ enabled: true, changedAt: 5_001 });
+    const current = await readSwitch();
+    expect(current.enabled).toBe(false);
+    expect(current.changedAt).toBeGreaterThan(5_001);
+  });
+
+  it('does not treat loading a saved value at startup as a change', async () => {
+    const { readSwitch, configManager } = await switchOf({ notify: { enabled: false } });
+
+    await configManager.reloadFromDisk();
+
+    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 0 });
   });
 });

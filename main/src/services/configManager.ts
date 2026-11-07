@@ -14,7 +14,7 @@ import { randomUUID } from 'crypto';
 import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
-import { restampSharedCredentials } from './sharedCredentials';
+import { restampNotifySwitch, restampSharedCredentials } from './sharedCredentials';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
   AppearanceValidationError,
@@ -44,6 +44,7 @@ export class ConfigManager extends EventEmitter {
   private fileWatcher: FSWatcher | null = null;
   private lastConfigJson: string = '';
   private saveConfigQueue: Promise<void> = Promise.resolve();
+  private hasReadConfigFile = false;
 
   constructor(defaultGitPath?: string) {
     super();
@@ -147,7 +148,8 @@ export class ConfigManager extends EventEmitter {
   private async initializeFromDisk(): Promise<void> {
     // Ensure the config directory exists
     await fs.mkdir(this.configDir, { recursive: true });
-    
+    const lastRead = this.hasReadConfigFile ? this.config : null;
+
     try {
       const data = await fs.readFile(this.configPath, 'utf-8');
       // SAFETY: initialize immediately normalizes boundary-sensitive fields before assigning the parsed config.
@@ -247,11 +249,18 @@ export class ConfigManager extends EventEmitter {
         this.config.sharedCredentials = restamped;
         shouldPersistMigration = true;
       }
+      // A switch that changed on disk since the last read here was edited by hand.
+      const switchRestamped = lastRead ? restampNotifySwitch(lastRead, this.config) : null;
+      if (switchRestamped !== null) {
+        this.config.notifyEnabledChangedAt = switchRestamped;
+        shouldPersistMigration = true;
+      }
       if (shouldPersistMigration) {
         await this.writeConfigToDisk(this.config);
       }
+      this.hasReadConfigFile = true;
       // Lets key sharing pick up a key edited by hand.
-      if (restamped) this.emit('config-updated', this.config);
+      if (restamped || switchRestamped !== null) this.emit('config-updated', this.config);
     } catch (error: unknown) {
       let errorCode: string | undefined;
       try {
@@ -421,6 +430,10 @@ export class ConfigManager extends EventEmitter {
         }));
       }
       next.sharedCredentials = restampSharedCredentials(next, 'now') ?? next.sharedCredentials;
+      // A value from another machine arrives with that machine's time; anything else is the person, here.
+      if (updates.notifyEnabledChangedAt === undefined) {
+        next.notifyEnabledChangedAt = restampNotifySwitch(this.config, next) ?? next.notifyEnabledChangedAt;
+      }
       this.validateAppearanceUpdate(updates);
       await this.writeConfigToDisk(next);
       this.config = next;

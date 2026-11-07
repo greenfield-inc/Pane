@@ -1568,6 +1568,9 @@ def inbox_session(parsed: Any, env: Dict[str, str]) -> Optional[str]:
     return (parsed.session_id or "").strip() or (env.get("PANE_ORCHESTRATION_SESSION_ID") or "").strip() or None
 
 
+INBOX_DECISION = re.compile(r"D-\d+")
+
+
 def run_inbox(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
     env = dict(os.environ) if env is None else env
     session = inbox_session(parsed, env)
@@ -1581,12 +1584,26 @@ def run_inbox(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
     name = (result.get("session") or {}).get("name")
     if not items:
         print(f"Inbox for {name}: nothing unacknowledged.")
-        return 0
-    print(f"Inbox for {name}: {len(items)} unacknowledged.")
-    for item in items:
-        print(format_inbox_item(item))
-    print(f"Clear handled items with: runpane inbox ack {' '.join(item.get('id') for item in items)}")
+    else:
+        print(f"Inbox for {name}: {len(items)} unacknowledged.")
+        for item in items:
+            print(format_inbox_item(item))
+        print(f"Clear handled items with: runpane inbox ack {' '.join(item.get('id') for item in items)}")
+    unrecorded = [answer for answer in result.get("answers") or [] if not answer.get("decision")]
+    for answer in unrecorded:
+        print(format_inbox_answer(answer))
+    if unrecorded:
+        print("Record each with: runpane inbox ack <id> --decision <D-n>")
     return 0
+
+
+ANSWERED_BY = {"you": "you", "autopilot": "Autopilot", "orchestrator": "the orchestrator", "pane": "Pane"}
+
+
+def format_inbox_answer(answer: Dict[str, Any]) -> str:
+    """`<id> ANSWERED <worker>: <title> -> <answer> (by you) needs a D-n`."""
+    by = ANSWERED_BY.get(answer.get("by") or "you", "you")
+    return f"{answer.get('id')} ANSWERED {_one_line(answer.get('worker') or '')}: {_one_line(answer.get('title') or '')} -> {_clip(_one_line(answer.get('answer') or ''))} (by {by}) needs a D-n"
 
 
 def run_inbox_ack(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
@@ -1594,17 +1611,25 @@ def run_inbox_ack(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
     session = inbox_session(parsed, env) if parsed.all else parsed.session_id
     if parsed.all and not session:
         raise ValueError("runpane inbox ack --all needs --session <id|name> outside a Session orchestrator.")
+    decision = parsed.inbox_decision
+    if decision is not None:
+        if parsed.all:
+            raise RunpaneError("ERR_INBOX_INVALID", "runpane inbox ack --decision records on the items you name, so it can't go with --all. Nothing was acknowledged.", "Pass the item ids from runpane inbox.")
+        if not INBOX_DECISION.fullmatch(decision):
+            raise RunpaneError("ERR_INBOX_INVALID", f'--decision must look like D-147; got "{decision}". Nothing was acknowledged.', "Pass the D-n from your decision log.")
     request: Dict[str, Any] = {
         **optional_value("ids", None if parsed.all else parsed.inbox_ids),
         **optional_value("session", session),
         **optional_value("all", True if parsed.all else None),
+        **optional_value("decision", decision),
     }
     result = invoke_daemon("runpane:inbox:ack", [request], pane_dir=parsed.pane_dir)
     if parsed.json:
         print_json(result)
     else:
         acknowledged = result.get("acknowledged") or []
-        print(f"Acknowledged {len(acknowledged)} inbox item{'' if len(acknowledged) == 1 else 's'}.")
+        recorded = f", recorded as {decision}" if decision and acknowledged else ""
+        print(f"Acknowledged {len(acknowledged)} inbox item{'' if len(acknowledged) == 1 else 's'}{recorded}.")
         unknown = result.get("unknown") or []
         if unknown:
             print(f"Not found (already acknowledged?): {', '.join(unknown)}")
