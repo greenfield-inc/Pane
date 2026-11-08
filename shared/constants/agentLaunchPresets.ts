@@ -1,3 +1,5 @@
+import type { KeyboardShortcutId } from './keyboardShortcuts';
+
 export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor' | 'opencode';
 
 export interface AgentLaunchPreset {
@@ -5,7 +7,8 @@ export interface AgentLaunchPreset {
   title: string;
   command: string;
   iconKey: string;
-  hotkeyId: string;
+  hotkeyId: KeyboardShortcutId;
+  /** The default key, kept in step with the catalog (keyboardShortcutCatalog.test.ts). */
   hotkey: string;
   platforms?: readonly string[];
 }

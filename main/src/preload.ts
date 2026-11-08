@@ -911,6 +911,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Event listeners for real-time updates
   events: {
+    /** Config changed in main (Settings, another window, or a hand edit of config.json). */
+    onConfigUpdated: (callback: (config: AppConfig) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config);
+      ipcRenderer.on('config:updated', wrappedCallback);
+      return () => ipcRenderer.removeListener('config:updated', wrappedCallback);
+    },
     onPermissionRequest: (callback: (request: PermissionRequest) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, request: PermissionRequest) => callback(request);
       ipcRenderer.on('permission:request', wrappedCallback);

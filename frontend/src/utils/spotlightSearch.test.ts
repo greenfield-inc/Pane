@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import type { HotkeyDefinition } from '../stores/hotkeyStore';
+import type { EffectiveHotkeyDefinition } from '../stores/hotkeyStore';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import { buildMachineSearchItems, buildSearchItems, searchItems, type SearchItem, type SearchResults, type SearchSources } from './spotlightSearch';
@@ -43,8 +43,9 @@ function session(id: string, name: string, updatedMinutesAgo: number, paneIds: s
   };
 }
 
-function command(id: string, label: string, keys = '', extra: Partial<HotkeyDefinition> = {}): HotkeyDefinition {
-  return { id, label, keys, category: 'session', action: () => {}, ...extra };
+function command(id: string, label: string, keys = '', extra: Partial<EffectiveHotkeyDefinition> = {}): EffectiveHotkeyDefinition {
+  // SAFETY: fixtures name commands freely; the store's id type only guards registration.
+  return { id: id as EffectiveHotkeyDefinition['id'], label, keys, category: 'session', action: () => {}, ...extra };
 }
 
 const PANE = project(1, 'Pane');

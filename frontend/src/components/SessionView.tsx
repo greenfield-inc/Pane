@@ -80,6 +80,7 @@ import { LoopsView } from './loops/LoopsView';
 import { LivePreviewPrompt } from './LivePreviewPrompt';
 import { ApprovalsView } from './approvals/ApprovalsView';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
+import { CUSTOM_COMMAND_KEYS, type CustomCommandId } from '../../../shared/constants/keyboardShortcuts';
 import { useLoopsStore } from '../stores/loopsStore';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
@@ -1440,7 +1441,6 @@ export const SessionView = memo(() => {
       registerHotkey({
         id: preset.hotkeyId,
         label: `Add ${preset.title}`,
-        keys: preset.hotkey,
         category: 'tools',
         enabled: () => isInSessionViewRef.current,
         action: () => handlePanelCreateRef.current('terminal', {
@@ -1453,18 +1453,18 @@ export const SessionView = memo(() => {
   }, [agentPresets, handlePanelCreateRef, isInSessionViewRef, registerHotkey, unregisterHotkey]);
 
   useEffect(() => {
-    const CUSTOM_CMD_START = 6; // mod+alt+3-5 stay reserved for built-in agents on every platform
-    const maxSlots = Math.min(customCommands.length, 10 - CUSTOM_CMD_START);
+    // Four slots, mod+alt+7, 8, 9 and 0 by default (CUSTOM_COMMAND_KEYS); 3 to 6 are the built-in agents.
+    const maxSlots = Math.min(customCommands.length, CUSTOM_COMMAND_KEYS.length);
     const ids: string[] = [];
 
     for (let i = 0; i < maxSlots; i++) {
       const cmd = customCommands[i];
-      const id = `add-tool-custom-${i}`;
+      // SAFETY: maxSlots bounds i to the catalog's four custom slots.
+      const id = `add-tool-custom-${i}` as CustomCommandId;
       ids.push(id);
       registerHotkey({
         id,
         label: `Add ${cmd.name}`,
-        keys: `mod+alt+${CUSTOM_CMD_START + i}`,
         category: 'tools',
         enabled: () => isInSessionViewRef.current,
         action: () => handlePanelCreateRef.current('terminal', {

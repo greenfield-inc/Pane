@@ -69,7 +69,8 @@ const APPEARANCE_KEYS = [
 ] as const satisfies readonly (keyof SetupAppearance)[];
 
 const PREFERENCE_CONFIG_KEYS = [
-  'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'kittyKeyboardEnabled',
+  'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'keyboardShortcutOverrides',
+  'kittyKeyboardEnabled',
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
   'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'terminalPowerMode',
   'resumePausedOnOpen', 'autoPauseEnabled', 'autoPauseAfterHours',
@@ -113,6 +114,7 @@ const FIELD_LABELS = {
   notifications: 'Notifications',
   keyboardShortcutsEnabled: 'Keyboard shortcuts',
   commandPaletteShortcutEnabled: 'Command Palette shortcut',
+  keyboardShortcutOverrides: 'Changed key bindings',
   kittyKeyboardEnabled: 'Kitty keyboard',
   htmlFileOpenMode: 'HTML files open as',
   enableCommitFooter: 'Commit footer',
@@ -382,6 +384,7 @@ function sectionCount(sections: SetupSections, id: SetupSectionId): number {
 // ---------------------------------------------------------------- reading a file
 
 const booleanField = boundary.optional(boundary.boolean);
+const keyboardOverrideValue = boundary.nullable(boundary.string);
 const stringField = boundary.optional(boundary.string);
 const themeField = boundary.optional<Theme>({
   decode(current) {
@@ -447,6 +450,7 @@ const sectionSchemas = {
     notifications: boundary.optional(boundary.object({ playSound: boundary.boolean, enabled: boundary.boolean })),
     keyboardShortcutsEnabled: booleanField,
     commandPaletteShortcutEnabled: booleanField,
+    keyboardShortcutOverrides: boundary.optional(boundary.record(keyboardOverrideValue)),
     kittyKeyboardEnabled: booleanField,
     htmlFileOpenMode: boundary.optional(boundary.enumeration('preview', 'source')),
     enableCommitFooter: booleanField,

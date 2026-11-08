@@ -6,6 +6,7 @@ import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscri
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
 import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
+import type { KeyboardShortcutOverrides } from '../../../shared/utils/keyboardBindings';
 import type { SessionRetention } from '../../../shared/types/orchestrationSession';
 
 export interface TerminalShortcut {
@@ -16,7 +17,7 @@ export interface TerminalShortcut {
   enabled: boolean;
 }
 
-interface CustomCommand {
+export interface CustomCommand {
   resume?: CustomCommandResume | null;
   name: string;
   command: string;
@@ -183,6 +184,11 @@ export interface AppConfig {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
+  // Changed keys, by catalog id (shared/constants/keyboardShortcuts.ts). A missing id
+  // follows the default, null unassigns it, and an update replaces the whole map ({} resets all).
+  keyboardShortcutOverrides?: KeyboardShortcutOverrides;
+  // 'pending' until the person dismisses the one-time notice of keys the VS Code keymap moved.
+  keymapNotice?: 'pending' | 'seen';
   // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
@@ -258,6 +264,11 @@ export interface UpdateConfigRequest {
   defaultSessionPinned?: boolean;
   terminalShortcuts?: TerminalShortcut[];
   keyboardShortcutsEnabled?: boolean;
+  // Changed keys, by catalog id (shared/constants/keyboardShortcuts.ts). A missing id
+  // follows the default, null unassigns it, and an update replaces the whole map ({} resets all).
+  keyboardShortcutOverrides?: KeyboardShortcutOverrides;
+  // 'pending' until the person dismisses the one-time notice of keys the VS Code keymap moved.
+  keymapNotice?: 'pending' | 'seen';
   commandPaletteShortcutEnabled?: boolean;
   kittyKeyboardEnabled?: boolean;
   worktreeFileSync?: WorktreeFileSyncEntry[];
