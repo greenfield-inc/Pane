@@ -465,3 +465,44 @@ test('the switcher\'s pencil changes a machine\'s letter and colour on this comp
   expect(await (await mock(relaunched)).evaluate(api => api.getConfig().machineMarks ?? null)).toEqual({});
   await relaunched.close();
 });
+
+// P6, journey 9: machines by key.
+test('⌘⌥O opens the switcher, 0 picks All machines and a digit picks that machine; ⌃⌘0 goes back and forth', async ({ page }) => {
+  await openAllMachines(page);
+  await page.keyboard.press('ControlOrMeta+Alt+o');
+  await expect(page.getByRole('menu', { name: 'Agents run on' })).toBeVisible();
+  // The switcher lists All machines, then this computer (1), build-box (2), …
+  await page.keyboard.press('2');
+  await expect(page.getByRole('menu', { name: 'Agents run on' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Agents run on build-box. Switch machine' })).toBeVisible();
+
+  await page.keyboard.press('ControlOrMeta+Alt+o');
+  await page.keyboard.press('0');
+  await expect(page.getByTestId('all-machines-sidebar')).toBeVisible();
+
+  // All machines ⇄ the machine it was showing.
+  const toggleAll = process.platform === 'darwin' ? 'Meta+Control+0' : 'Control+Alt+Shift+0';
+  await page.keyboard.press(toggleAll);
+  await expect(page.getByTestId('all-machines-sidebar')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Agents run on build-box. Switch machine' })).toBeVisible();
+  await page.keyboard.press(toggleAll);
+  await expect(page.getByTestId('all-machines-sidebar')).toBeVisible();
+});
+
+test('next and previous machine step through the switcher order and skip an offline machine', async ({ page }) => {
+  await openAllMachines(page);
+  const next = process.platform === 'darwin' ? 'Meta+Control+BracketRight' : 'Control+Alt+Shift+BracketRight';
+  const previous = process.platform === 'darwin' ? 'Meta+Control+BracketLeft' : 'Control+Alt+Shift+BracketLeft';
+  const label = (name: string) => page.getByRole('button', { name: `Agents run on ${name}. Switch machine` });
+  await page.keyboard.press(next);
+  await expect(label('studio-mac')).toBeVisible();
+  await page.keyboard.press(next);
+  await expect(label('build-box')).toBeVisible();
+  await page.keyboard.press(next);
+  await expect(label('parsa-devbox')).toBeVisible();
+  // travel-laptop is offline, so next wraps to this computer.
+  await page.keyboard.press(next);
+  await expect(label('studio-mac')).toBeVisible();
+  await page.keyboard.press(previous);
+  await expect(label('parsa-devbox')).toBeVisible();
+});

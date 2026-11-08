@@ -11,6 +11,7 @@ import { Tooltip } from './ui/Tooltip';
 import { Kbd } from './ui/Kbd';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { useHotkeyStore } from '../stores/hotkeyStore';
+import { useHotkey } from '../hooks/useHotkey';
 import { Dropdown } from './ui/Dropdown';
 import type { DropdownItem } from './ui/Dropdown';
 import { useSessionStore } from '../stores/sessionStore';
@@ -306,6 +307,41 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
     });
   }, [machines, onMachinePasswordRequest, selectMachine, switcherVisible]);
   useEffect(() => (allMachines ? startAllMachinesFeed() : undefined), [allMachines]);
+  // Machines by key (P6): ⌘⌥O opens the switcher (then 0 or 1-9), ⌃⌘] and ⌃⌘[
+  // step through the machines in its order, skipping ones that cannot be
+  // picked, and ⌃⌘0 goes between All machines and the machine it shows.
+  const stepMachine = useCallback((delta: 1 | -1) => {
+    const pickable = machines.filter((machine) => machine.active || machine.action !== 'none');
+    if (pickable.length === 0) return;
+    const current = allMachines ? -1 : pickable.findIndex((machine) => machine.active);
+    const next = pickable[(current + delta + pickable.length) % pickable.length];
+    if (!next || (next.active && !allMachines)) return;
+    setAllMachines(false);
+    void selectMachine(next).then((outcome) => {
+      if (outcome.ok) return;
+      if (outcome.needsPassword) onMachinePasswordRequest(next.name);
+      else showActionError(`Could not switch to ${next.name}`, outcome.error);
+    });
+  }, [allMachines, machines, onMachinePasswordRequest, selectMachine, setAllMachines]);
+  useHotkey({
+    id: 'open-machine-switcher',
+    label: 'Open Machine Switcher',
+    category: 'machines',
+    enabled: () => switcherVisible,
+    action: () => {
+      const trigger = document.querySelector<HTMLElement>('[data-sidebar-key="machine-switcher"], [data-testid="compact-machine-switcher"]');
+      trigger?.click();
+    },
+  });
+  useHotkey({ id: 'next-machine', label: 'Next Machine', category: 'machines', enabled: () => switcherVisible, action: () => stepMachine(1) });
+  useHotkey({ id: 'previous-machine', label: 'Previous Machine', category: 'machines', enabled: () => switcherVisible, action: () => stepMachine(-1) });
+  useHotkey({
+    id: 'toggle-all-machines',
+    label: 'Toggle All Machines and Last Machine',
+    category: 'machines',
+    enabled: () => switcherVisible,
+    action: () => setAllMachines(!allMachines),
+  });
   const switcherLabel = allMachines ? 'Showing all machines. Switch machine' : `Agents run on ${activeMachine.name}. Switch machine`;
   const renderRemoteHostSwitcher = (trigger: React.ReactElement, position: 'bottom-left' | 'top-right') => (
     <RemoteHostSwitcher
@@ -330,6 +366,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
     <button
       type="button"
       data-compact-rail-item
+      data-testid="compact-machine-switcher"
       onClick={switcherVisible ? undefined : onRemoteSettingsClick}
       aria-label={switcherVisible ? switcherLabel : remoteFooterStatus.ariaLabel}
       className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
