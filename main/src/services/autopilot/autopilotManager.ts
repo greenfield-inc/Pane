@@ -293,6 +293,9 @@ export class AutopilotManager extends EventEmitter {
       walk: this.walk(),
     };
     if (this.sentinelSince !== undefined) snapshot.sentinelSince = this.sentinelSince;
+    const named = new Set(this.stack.entries.flatMap(entry => entry.ref.kind === 'item' ? [entry.ref.notifyId] : []));
+    const elsewhere = named.size > 0 ? this.ports.notify.items().filter(item => named.has(item.id) && (item.machineId ?? 'local') !== 'local') : [];
+    if (elsewhere.length > 0) snapshot.otherMachineItems = elsewhere;
     return snapshot;
   }
 
@@ -559,8 +562,8 @@ export class AutopilotManager extends EventEmitter {
     this.log(`refused: ${what}`);
     throw new PaneError(
       'AUTOPILOT_CANNOT_ANSWER',
-      `Autopilot cannot answer ${what}: approvals and permission prompts are always the person's (D-66). Nothing was answered; it still waits.`,
-      'Point the person to the buttons on the card in the stack (or "Open in Pane" for a permission prompt).',
+      `Autopilot cannot answer ${what}: permission prompts and raw keys into other tabs stay the person's, and its answers are recorded as its own (D-149). Nothing was answered; it still waits.`,
+      'For an approval or question, use runpane autopilot answer or close. For a permission prompt, point the person to the buttons on the card in the stack (or "Open in Pane").',
     );
   }
 
@@ -797,7 +800,7 @@ function rank(item: AutopilotWaitingItem, order: Map<string, number>): number {
 }
 
 function waitingItem(item: NotifyItem, now: number, onStack: boolean, byAutopilot: boolean): AutopilotWaitingItem {
-  const kind: AutopilotWaitingItem['kind'] = item.relay ? 'stuck' : item.agentPrompt ? 'permission' : item.ui === 'approve' ? 'approval' : 'question';
+  const kind: AutopilotWaitingItem['kind'] = item.agentPrompt ? 'permission' : item.ui === 'approve' ? 'approval' : 'question';
   const result: AutopilotWaitingItem = {
     id: item.id,
     title: item.title,
@@ -821,6 +824,10 @@ function waitingItem(item: NotifyItem, now: number, onStack: boolean, byAutopilo
   if (byAutopilot) result.byAutopilot = true;
   if (item.context) result.context = item.context;
   if (item.choices?.length) result.choices = item.choices.map(choice => choice.label);
+  if (item.quiet) result.quiet = true;
+  if (item.staleSince !== undefined) result.stale = true;
+  if (item.connected) result.connected = item.connected;
+  if (item.reopened) result.reopened = item.reopened;
   return result;
 }
 

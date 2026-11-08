@@ -1,7 +1,7 @@
 import { ChatTabNotifyBridge } from '../services/chatTabs/notifyBridge';
 import { getChatTabManager, setChatTabNotify } from '../services/chatTabs';
-import { app, BrowserWindow, type IpcMain } from 'electron';
-import os from 'os';
+import { app, BrowserWindow, powerMonitor, type IpcMain } from 'electron';
+import fs from 'fs';
 import path from 'path';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
@@ -12,6 +12,7 @@ import { hasHeadlessDaemonLaunchArg } from '../utils/runtimeMode';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
+import { submitOnlyToAgent } from './runpane';
 import { NotifyService } from '../services/notify/notifyService';
 import { ClaudePromptBridge } from '../services/claudePrompts/claudePromptBridge';
 import { setClaudePromptBridge } from '../services/claudePrompts';
@@ -19,10 +20,13 @@ import type { MachineConnections } from '../services/machineConnections';
 import { LOCAL_MACHINE_ID, type MachineState } from '../../../shared/types/machineConnections';
 import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
-import { PaneError } from '../../../shared/paneError';
+import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
-import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, type NotifyCommand, type NotifyLink, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
+import type { SessionInboxEnded } from '../services/sessionInbox';
+import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
+import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore } from '../services/paneSecrets';
@@ -65,6 +69,8 @@ const notifyRequestSchema = boundary.object({
   secret: boundary.optional(boundary.object({ project: boundary.string, name: boundary.string })),
   links: boundary.optional(boundary.array(linkInputSchema)),
   resume: boundary.optional(boundary.nonEmptyString),
+  relays: boundary.optional(boundary.nonEmptyString),
+  aboutSession: boundary.optional(boundary.nonEmptyString),
   returnAfterMs: boundary.optional(boundary.number),
   caller: boundary.object({
     paneId: boundary.optional(boundary.string),
@@ -95,7 +101,21 @@ const notifyCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('close-round') }),
   boundary.object({ type: boundary.literal('open-inbox') }),
   boundary.object({ type: boundary.literal('show-details'), shown: boundary.boolean }),
+  boundary.object({ type: boundary.literal('close'), id: boundary.nonEmptyString, reason: boundary.optional(boundary.string) }),
+  idCommand('reopen'),
+  boundary.object({ type: boundary.literal('override'), id: boundary.nonEmptyString, answer: answerSchema }),
 );
+/** The question of Autopilot's rewrite: checked further in parseNotifyRequest. */
+const rewriteQuestionSchema = boundary.object({
+  ui: boundary.enumeration('options', 'approve', 'ask', 'info'),
+  title: boundary.string,
+  context: boundary.optional(boundary.string),
+  choices: boundary.optional(boundary.array(boundary.object({ label: boundary.nonEmptyString, detail: boundary.optional(boundary.string), recommended: boundary.optional(boundary.boolean) }))),
+  detail: boundary.optional(boundary.string),
+  detailLabel: boundary.optional(boundary.string),
+  suggestions: boundary.optional(boundary.array(boundary.string)),
+  links: boundary.optional(boundary.array(linkSchema)),
+});
 const notifyRemoteCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('answer'), id: boundary.nonEmptyString, answer: answerSchema }),
   boundary.object({ type: boundary.literal('open-link'), id: boundary.nonEmptyString, index: boundary.number, paneId: boundary.optional(boundary.nonEmptyString) }),
@@ -103,9 +123,16 @@ const notifyRemoteCommandSchema = boundary.union(
   idCommand('dismiss'),
   idCommand('skip'),
   boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('3m', '5m', '15m', '10m', '1h') }),
+  boundary.object({ type: boundary.literal('close'), id: boundary.nonEmptyString, reason: boundary.optional(boundary.string) }),
+  idCommand('reopen'),
+  boundary.object({ type: boundary.literal('override'), id: boundary.nonEmptyString, answer: answerSchema }),
+  boundary.object({ type: boundary.literal('agent-answer'), id: boundary.nonEmptyString, answer: answerSchema, because: boundary.nonEmptyString, machine: boundary.optional(boundary.string) }),
+  boundary.object({ type: boundary.literal('agent-close'), id: boundary.nonEmptyString, reason: boundary.nonEmptyString, machine: boundary.optional(boundary.string) }),
+  boundary.object({ type: boundary.literal('agent-rewrite'), id: boundary.nonEmptyString, question: rewriteQuestionSchema, reason: boundary.optional(boundary.string), machine: boundary.optional(boundary.string), newId: boundary.optional(boundary.nonEmptyString) }),
 );
 /** The server's name for the sender (httpApiServer fills it in), never the caller's own claim. */
 const remoteSenderSchema = boundary.object({ device: boundary.nonEmptyString });
+const actorSchema = boundary.enumeration('you', 'autopilot', 'orchestrator', 'pane');
 const notifyItemSchema = boundary.object({
   id: boundary.nonEmptyString,
   ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
@@ -129,6 +156,7 @@ const notifyItemSchema = boundary.object({
     panelId: boundary.optional(boundary.string),
     name: boundary.string,
     agent: boundary.string,
+    project: boundary.optional(boundary.string),
     session: boundary.optional(sessionSchema),
     autopilot: boundary.optional(boundary.boolean),
   }),
@@ -139,6 +167,26 @@ const notifyItemSchema = boundary.object({
   answerSummary: boundary.optional(boundary.string),
   answeredOn: boundary.optional(boundary.string),
   snoozedUntil: boundary.optional(boundary.number),
+  originKind: boundary.optional(boundary.enumeration('orchestrator', 'worker', 'autopilot', 'claude-prompt', 'pane', 'agent')),
+  connected: boundary.optional(boundary.union(
+    boundary.object({ kind: boundary.literal('session'), id: boundary.string, name: boundary.string, paneId: boundary.string }),
+    boundary.object({ kind: boundary.literal('pane'), id: boundary.string, name: boundary.string }),
+    boundary.object({ kind: boundary.literal('autopilot'), id: boundary.literal('autopilot'), name: boundary.literal('Autopilot') }),
+    boundary.object({ kind: boundary.literal('machine'), id: boundary.string, name: boundary.string }),
+  )),
+  answeredBy: boundary.optional(boundary.object({ by: actorSchema, because: boundary.optional(boundary.string) })),
+  closed: boundary.optional(boundary.object({ by: actorSchema, reason: boundary.string, at: boundary.number })),
+  staleSince: boundary.optional(boundary.number),
+  quiet: boundary.optional(boundary.boolean),
+  rewrittenFrom: boundary.optional(boundary.object({ id: boundary.string, title: boundary.string, qn: boundary.optional(boundary.string) })),
+  rewrittenAs: boundary.optional(boundary.object({ id: boundary.string, title: boundary.string })),
+  delivered: boundary.optional(boundary.object({ via: boundary.enumeration('call', 'tab'), at: boundary.number })),
+  undelivered: boundary.optional(boundary.object({ reason: boundary.string, at: boundary.number })),
+  decision: boundary.optional(boundary.string),
+  corrections: boundary.optional(boundary.array(boundary.object({ summary: boundary.string, by: actorSchema, at: boundary.number }))),
+  reopened: boundary.optional(boundary.object({ by: actorSchema, device: boundary.optional(boundary.string), at: boundary.number, closedBy: actorSchema, closedReason: boundary.string })),
+  pushed: boundary.optional(boundary.boolean),
+  summaryOf: boundary.optional(boundary.array(boundary.string)),
 });
 const notifySharedStateSchema = boundary.object({
   machine: boundary.string,
@@ -154,18 +202,57 @@ const panelAgentSchema = boundary.object({ agentType: boundary.optional(boundary
 
 /** What Notify reads from the app's services: the config, Panes by id, and the main window. */
 type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
-  sessionManager: Pick<AppServices['sessionManager'], 'getSession'>;
-  databaseService?: Pick<AppServices['databaseService'], 'getAllProjects'>;
+  sessionManager: Pick<AppServices['sessionManager'], 'getSession'> & Partial<Pick<AppServices['sessionManager'], 'on' | 'off'>>;
+  databaseService?: Pick<AppServices['databaseService'], 'getAllProjects'> & Partial<Pick<AppServices['databaseService'], 'getSession' | 'getPanel'>>;
   /** Files each Approvals item under its Session. */
   orchestrationSessionManager?: {
     approvalSession(paneId: string, panelId?: string): NotifySession | undefined;
     approvalSessionsById(): Map<string, NotifySession>;
+    approvalSessionRecord(sessionId: string): { name: string; paneId: string; archived: boolean } | undefined;
     on(event: 'changed', listener: () => void): void;
     off(event: 'changed', listener: () => void): void;
   };
-  /** Approvals' fallback reads workers' blocked reports from it. */
-  sessionInbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void };
+  /** A worker's blocked report's question is an item. */
+  sessionInbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void; subscribeEnded(listener: (ended: SessionInboxEnded) => void): () => void; ack?(ids: readonly string[]): void };
+  approvalStore?: ApprovalStore;
+  approvalImport?: JsonStoreImportOutcome;
 };
+
+/** Seconds since this computer was used (D-144); QA's profiles on one Mac read theirs from a file (J33). */
+function idleSeconds(): number {
+  const testFile = process.env.PANE_TEST_IDLE_SECONDS_FILE;
+  if (testFile) {
+    const seconds = Number(fs.readFileSync(testFile, 'utf8'));
+    return Number.isFinite(seconds) ? seconds : 0;
+  }
+  try {
+    return powerMonitor.getSystemIdleState(1) === 'locked' ? Infinity : powerMonitor.getSystemIdleTime();
+  } catch {
+    // Before the app is ready, or where the OS won't say: don't silence anything.
+    return 0;
+  }
+}
+
+/**
+ * Whether Pane may type an owed answer into a terminal tab: only at a live agent's prompt, with an
+ * agent in the terminal's foreground process group (D-5). Typed at a shell, a nested shell, `ssh`
+ * or a REPL, `$(…)` in an answer would run (QA N1).
+ */
+export function tabTakesText(status: AgentState | undefined, agentInForeground: boolean): boolean {
+  return status === 'idle' && agentInForeground;
+}
+
+/** Why an item's Pane or tab can no longer take an answer. Read from the database, which is whole from the first moment of a start. */
+function askerPaneGone(database: NotifyServices['databaseService'], item: NotifyItem): string | undefined {
+  const { paneId, panelId } = item.source;
+  if (paneId && database?.getSession) {
+    const pane = database.getSession(paneId);
+    if (!pane) return 'Pane deleted';
+    if (pane.archived) return 'Pane archived';
+  }
+  if (panelId && database?.getPanel && !database.getPanel(panelId)) return 'the asking tab was closed';
+  return undefined;
+}
 
 export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyServices, commandRegistry: PaneCommandRegistry): NotifyService {
   const notify = new NotifyService({
@@ -187,7 +274,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     },
     rendererArguments: () => buildWindowAppearanceOptions(normalizeAppearance(services.configManager.getConfig()).appearance, false, {}).additionalArguments,
     headless: hasHeadlessDaemonLaunchArg(),
-    machine: machineName(),
+    machine: thisMachineName(),
     secrets: {
       exists: (project, name) => paneSecretStore().has(project, name),
       save: async (project, name, value) => { await paneSecretStore().set(project, name, value); },
@@ -217,14 +304,60 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     wslDistros: () => (services.databaseService?.getAllProjects() ?? [])
       .flatMap(project => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
     sessionOf: (paneId, panelId) => services.orchestrationSessionManager?.approvalSession(paneId, panelId),
+    projectOf: (paneId) => {
+      const projectId = services.databaseService?.getSession?.(paneId)?.project_id;
+      return projectId === undefined || projectId === null ? undefined : services.databaseService?.getAllProjects().find(project => project.id === projectId)?.name;
+    },
     sessionsById: () => services.orchestrationSessionManager?.approvalSessionsById() ?? new Map(),
+    sessionRecord: services.orchestrationSessionManager ? (sessionId) => services.orchestrationSessionManager?.approvalSessionRecord(sessionId) : undefined,
     onSessionsChanged: (listener) => {
       const sessions = services.orchestrationSessionManager;
       sessions?.on('changed', listener);
       return () => { sessions?.off('changed', listener); };
     },
     inbox: services.sessionInbox,
+    store: services.approvalStore,
+    importOutcome: services.approvalImport,
+    askerPaneGone: (item) => askerPaneGone(services.databaseService, item),
+    onAskersChanged: (listener) => {
+      const stopPanels = panelManager.onPanelDeleted?.(listener);
+      const manager = services.sessionManager;
+      manager.on?.('session-deleted', listener);
+      manager.on?.('session-updated', listener);
+      return () => {
+        stopPanels?.();
+        manager.off?.('session-deleted', listener);
+        manager.off?.('session-updated', listener);
+      };
+    },
+    typeIntoTab: async (panelId, text) => {
+      const panel = panelManager.getPanel(panelId);
+      if (!panel) return 'gone';
+      if (panel.type === 'chat') {
+        if (getChatTabManager().agentState(panelId) !== 'idle') return 'busy';
+      } else {
+        // The status is free to read; the process group costs a `ps`, so only an idle tab pays for it.
+        const status = terminalPanelManager.getAgentStatus(panelId);
+        if (status !== 'idle') return 'busy';
+        const agentInForeground = await terminalPanelManager.readForegroundAgent(panelId);
+        // Where Pane can't see what runs in the tab (Windows, WSL, the PTY host), it never types (F-7).
+        if (agentInForeground === undefined) return 'unsupported';
+        if (!tabTakesText(status, agentInForeground)) return 'busy';
+      }
+      try {
+        const submit = () => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: text, expectReport: false }]);
+        const result = decodeOptionalBoundary(await (panel.type === 'chat' ? submit() : submitOnlyToAgent(panelId, submit)), boundary.object({ ok: boundary.optional(boundary.boolean) }));
+        return result?.ok === false ? 'busy' : 'delivered';
+      } catch (error) {
+        // Not started yet, say: the next time it's at its prompt, or the next sweep, tries again.
+        console.warn(`[Notify] Couldn't type into tab ${panelId} yet:`, error);
+        return 'busy';
+      }
+    },
+    idleSeconds: () => (hasHeadlessDaemonLaunchArg() ? Infinity : idleSeconds()),
   });
+
+  notifyBeforeQuit = () => notify.queue.prepareForQuit();
 
   /** Set once the machine connections start: every saved machine's questions then show here. */
   let saved: SavedMachinesLink | null = null;
@@ -249,13 +382,24 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
   commandRegistry.register('notify:remote-command', async (command: PaneCommandValue, sender: PaneCommandValue) => {
     // A Mac names itself "studio.local" on its event stream; cards call it "studio".
-    const device = decodeBoundary(sender, remoteSenderSchema).device.replace(/\.local$/i, '');
-    await notify.runRemote(decodeBoundary(command, notifyRemoteCommandSchema) satisfies NotifyRemoteCommand, device, teammatePaneCaller());
+    const device = decodeBoundary(sender, remoteSenderSchema).device.replace(/\.(local|lan|home|internal)$/i, '');
+    const decoded: NotifyRemoteCommand = decodeBoundary(command, notifyRemoteCommandSchema);
+    // A forwarded rewrite takes the same checks here, on the machine that holds the item (F-8).
+    const rawQuestion = decodeBoundary(command, boundary.object({ question: boundary.optional(boundary.jsonObject) })).question;
+    const checked = decoded.type === 'agent-rewrite' && rawQuestion ? { ...decoded, question: parseRewriteQuestion(rawQuestion) } : decoded;
+    await notify.runRemote(checked, device, teammatePaneCaller());
     return null;
   });
 
   ipcMain.handle('notify:snapshot', () => notify.snapshot());
-  ipcMain.handle('notify:command', (_event, command: PaneCommandValue) => notify.run(decodeBoundary(command, notifyCommandSchema) satisfies NotifyCommand));
+  ipcMain.handle('notify:command', async (_event, command: PaneCommandValue) => {
+    try {
+      await notify.run(decodeBoundary(command, notifyCommandSchema) satisfies NotifyCommand);
+    } catch (error) {
+      // Electron passes only "PaneError: <message>" to the renderer: keep the next step in the text it shows.
+      throw error instanceof PaneError ? new Error(paneErrorText(error)) : error;
+    }
+  });
   ipcMain.on('notify:window-size', (event, size: PaneCommandValue) => notify.resizeWindow(event.sender, decodeBoundary(size, windowSizeSchema)));
   ipcMain.handle('notify:window-focus', (event) => notify.focusWindow(event.sender));
 
@@ -271,6 +415,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   terminalPanelManager.on('agent-status', (change: { panelId: string; state: AgentState }) => {
     const agentType = decodeOptionalBoundary(panelManager.getPanel(change.panelId)?.state.customState, panelAgentSchema)?.agentType;
     if (agentType === 'codex') notify.queue.panelStatus(change.panelId, change.state === 'idle');
+    // A tab back at its prompt can take what's owed to it.
+    if (change.state === 'idle') notify.queue.flushTabMessages();
   });
   terminalPanelManager.on('pause-changed', (change: { panelIds: string[]; paused: boolean }) => {
     if (change.paused) notify.queue.withdrawForPanels(change.panelIds);
@@ -363,6 +509,12 @@ interface SavedMachinesLink {
 }
 
 let followMachines: ((machines: NotifyMachines) => void) | null = null;
+let notifyBeforeQuit: (() => void) | null = null;
+
+/** Call just before stopping the daemon server: its calls ending isn't their askers leaving (J6). */
+export function prepareNotifyForQuit(): void {
+  notifyBeforeQuit?.();
+}
 
 /**
  * Shows every saved machine's questions beside this computer's, in any mode, each slot fed by
@@ -490,6 +642,13 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   return request;
 }
 
+/** Autopilot's rewrite takes the same checks as any notify call. */
+export function parseRewriteQuestion(value: PaneCommandValue, cwd?: string): NotifyQuestion {
+  const { caller: _caller, resume: _resume, relays: _relays, aboutSession: _about, returnAfterMs: _after, ...question } = parseNotifyRequest({ ...decodeBoundary(value, boundary.jsonObject), caller: { cwd } });
+  if (!question.ui || !question.title) throw invalid('ui and title are required.');
+  return { ...question, ui: question.ui, title: question.title };
+}
+
 /**
  * Related links: up to 6, each a label and exactly one of a file path (relative to the asking
  * folder) or an http(s) URL.
@@ -510,11 +669,6 @@ function parseLinks(links: Array<{ label: string; path?: string; url?: string }>
     }
     return { label, path: cwd && !path.isAbsolute(filePath ?? '') ? path.resolve(cwd, filePath ?? '') : filePath ?? '' };
   });
-}
-
-/** The name other screens and phones show for this machine, as a connected client labels itself. */
-function machineName(): string {
-  return os.hostname().trim().replace(/\.local$/i, '').slice(0, 80) || 'this computer';
 }
 
 function invalid(reason: string): PaneError {

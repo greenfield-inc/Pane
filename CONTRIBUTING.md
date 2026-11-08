@@ -138,6 +138,10 @@ pnpm test:ci:minimal
 own `typescript` 5.x, which also builds them. ESLint and editors use the 5.x
 package.
 
+To test approvals' timers without waiting, start a dev build with
+`PANE_APPROVALS_STALE_AFTER_MS` (3 days), `PANE_APPROVALS_PUSH_AFTER_MS` (about
+90 seconds) or `PANE_APPROVALS_RELAY_AFTER_MS` (10 minutes).
+
 - `pnpm --filter main test` runs Vitest in watch mode; use `exec vitest run`
   for a single pass, as CI does. Main tests live next to the code as
   `*.test.ts`.

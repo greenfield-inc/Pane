@@ -2,9 +2,12 @@
  * Autopilot (experimental, D-43): one always-running agent above every Session. It is not a
  * Session (D-69): its data lives in <PANE_DIR>/autopilot/, one folder per run, with `current`
  * naming the active run. Its agent is a chat tab in a hidden, detached owner Pane whose
- * workspace is the run folder. Approvals stay the person's (D-66): the control plane refuses
- * every answer that comes from Autopilot's panel.
+ * workspace is the run folder. It may surface, answer, close and rewrite approvals through its
+ * own commands, recorded "by Autopilot"; the control plane refuses it permission prompts and raw
+ * keys into other tabs (D-149).
  */
+
+import type { NotifyConnected, NotifyItem, NotifyReopened } from './notify';
 
 /** Where Autopilot's agent is: not started (shows Start), running its walk, or paused. */
 export type AutopilotAgentState = 'stopped' | 'running' | 'paused';
@@ -104,6 +107,11 @@ export interface AutopilotSnapshot {
   sentinelSince?: number;
   stack: AutopilotStack;
   walk: AutopilotWalk;
+  /**
+   * The items its stack names that other machines hold, under this machine's keys. A phone reads
+   * only the machine it's connected to, so it draws these from here and answers them through it (D-165).
+   */
+  otherMachineItems?: NotifyItem[];
 }
 
 /**
@@ -125,7 +133,7 @@ export interface AutopilotInstructionsView {
 export interface AutopilotWaitingItem {
   id: string;
   title: string;
-  kind: 'approval' | 'question' | 'permission' | 'stuck';
+  kind: 'approval' | 'question' | 'permission';
   /** The Session it is filed under; absent: not in a Session. */
   sessionId?: string;
   sessionName?: string;
@@ -148,6 +156,14 @@ export interface AutopilotWaitingItem {
   machineId: string;
   /** Already on the stack. */
   onStack: boolean;
+  /** A worker's question its orchestrator still has first call on. */
+  quiet?: boolean;
+  /** Unanswered for 3 days. */
+  stale?: boolean;
+  /** The Session (or Pane, Autopilot, machine) it belongs to. */
+  connected?: NotifyConnected;
+  /** The person brought it back after it closed: don't close it again unless they say so. */
+  reopened?: NotifyReopened;
 }
 
 /** `runpane autopilot stack push`: what to put on the stack. Exactly one of item, file, url or session. */

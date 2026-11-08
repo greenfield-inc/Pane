@@ -13,6 +13,8 @@ import type { LoopManager } from '../services/loops/loopManager';
 import type { SessionInbox } from '../services/sessionInbox';
 import type { ExpectedReportTracker } from '../services/expectedReports';
 import type { NotifyService } from '../services/notify/notifyService';
+import type { ApprovalStore } from '../services/approvals/approvalStore';
+import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 
 export interface DaemonHostServices extends CoreServices {
   taskQueue: TaskQueue | null;
@@ -27,6 +29,10 @@ export interface DaemonHostServices extends CoreServices {
   workspaceWatchLeases?: WorkspaceWatchLeases;
   namedLockService?: NamedLockService;
   sessionInbox?: SessionInbox;
+  /** This machine's approvals (sessions.db). */
+  approvalStore?: ApprovalStore;
+  /** How moving session-inbox.json into it went on this start. */
+  approvalImport?: JsonStoreImportOutcome;
   expectedReportTracker?: ExpectedReportTracker;
   notifyService?: NotifyService;
 }

@@ -1,20 +1,18 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SessionInbox } from './sessionInbox';
+import { ApprovalStore } from './approvals/approvalStore';
+import { SessionInbox, type SessionInboxStore } from './sessionInbox';
 import { WorkspaceJournal } from './workspaceJournal';
 import type { RunpaneWorkspaceEntry } from '../../../shared/types/runpaneOrchestration';
 
 type Entry = Omit<RunpaneWorkspaceEntry, 'gen' | 'at'>;
 
 describe('SessionInbox', () => {
-  let directory: string;
-  let filePath: string;
+  let db: Database.Database;
   let journal: WorkspaceJournal;
   const members = new Map<string, string[]>([['pane-1', ['session-a']], ['pane-2', ['session-a', 'session-b']]]);
   const open = () => {
-    const inbox = new SessionInbox(filePath, { sessionIdsFor: paneId => members.get(paneId) ?? [], itemsPerSession: () => 3 });
+    const inbox = new SessionInbox(new ApprovalStore(db, 'mini'), { sessionIdsFor: paneId => members.get(paneId) ?? [], itemsPerSession: () => 3 });
     inbox.attach(journal);
     return inbox;
   };
@@ -22,11 +20,10 @@ describe('SessionInbox', () => {
     ({ kind, paneId, paneName: paneId, panelId: `${paneId}-panel`, agentType: 'claude', source: 'agent', ...extra });
 
   beforeEach(() => {
-    directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-inbox-'));
-    filePath = path.join(directory, 'session-inbox.json');
+    db = new Database(':memory:');
     journal = new WorkspaceJournal();
   });
-  afterEach(() => fs.rmSync(directory, { recursive: true, force: true }));
+  afterEach(() => db.close());
 
   it('keeps reports, missing reports and questions per Session until acknowledged, across restarts', () => {
     const inbox = open();
@@ -66,27 +63,49 @@ describe('SessionInbox', () => {
     expect(heard).toBe(2);
   });
 
-  it('replays committed events after a failed inbox write without resurrecting acknowledgements', () => {
-    const journalPath = path.join(directory, 'journal.json');
-    journal = new WorkspaceJournal({ filePath: journalPath });
-    let inbox = open();
+  it('keeps its items in memory through a failed write, and refuses an acknowledgement it could not save', () => {
+    const store = new ApprovalStore(db, 'mini');
+    let failing = false;
+    const flaky: SessionInboxStore = {
+      unackedInboxItems: () => store.unackedInboxItems(),
+      saveInboxItem: (item, name) => store.saveInboxItem(item, name),
+      ackInboxItem: (id, at, decision) => store.ackInboxItem(id, at, decision),
+      dropInboxItem: (id, at) => store.dropInboxItem(id, at),
+      meta: key => store.meta(key),
+      setMeta: (key, value) => store.setMeta(key, value),
+      recordDecision: (id, decision) => store.recordDecision(id, decision),
+      transaction: (writes) => {
+        if (failing) throw new Error('disk full');
+        store.transaction(writes);
+      },
+    };
+    const inbox = new SessionInbox(flaky, { sessionIdsFor: paneId => members.get(paneId) ?? [], itemsPerSession: () => 3 });
+    inbox.attach(journal);
     journal.append(entry('agent.report', 'pane-1', { report: { state: 'done', summary: 'A done', reportedAt: '2026-10-15T10:00:00.000Z' } }));
     const [handled] = inbox.list('session-a');
     inbox.ack([handled.id], 'session-a');
-    fs.renameSync(filePath, filePath + '.saved');
-    fs.mkdirSync(filePath);
-    journal.append(entry('agent.report', 'pane-2', { report: { state: 'done', summary: 'B done', reportedAt: '2026-10-15T10:01:00.000Z' } }));
+    failing = true;
+    journal.append(entry('agent.report', 'pane-1', { report: { state: 'done', summary: 'B done', reportedAt: '2026-10-15T10:01:00.000Z' } }));
     const [pending] = inbox.list('session-a');
+    expect(pending.report?.summary).toBe('B done');
     expect(() => inbox.ack([pending.id], 'session-a')).toThrow(/remain unacknowledged/);
+    expect(inbox.list('session-a').map(item => item.id)).toEqual([pending.id]);
     inbox.dispose();
-    journal.dispose();
-    fs.rmdirSync(filePath);
-    fs.renameSync(filePath + '.saved', filePath);
-    journal = new WorkspaceJournal({ filePath: journalPath });
-    inbox = open();
-    expect(inbox.list('session-a')).toEqual([expect.objectContaining({ id: pending.id, report: expect.objectContaining({ summary: 'B done' }) })]);
+  });
+
+  it('says how a worker question left, for its card', () => {
+    const inbox = open();
+    const ended: Array<[string, string, string | undefined]> = [];
+    inbox.subscribeEnded(({ id, how, decision }) => ended.push([id, how, decision]));
+    const report = (question: string) => ({ report: { state: 'blocked' as const, question, reportedAt: '2026-10-15T10:00:00.000Z' } });
+    journal.append(entry('agent.report', 'pane-1', report('Q-1: a?')));
+    const [first] = inbox.list('session-a');
+    journal.append(entry('agent.report', 'pane-1', report('Q-2: b?')));
+    expect(ended).toEqual([[first.id, 'moved-on', undefined]]);
+    const [second] = inbox.list('session-a');
+    inbox.ack([second.id], 'session-a', 'D-9');
+    expect(ended[1]).toEqual([second.id, 'acked', 'D-9']);
     inbox.dispose();
-    journal.dispose();
   });
 
   it('replaces a missing report with the report that follows it', () => {

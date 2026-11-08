@@ -4,13 +4,14 @@ import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { originLine } from '@shared/approvalReceipts';
 import type { NotifyItem } from '@shared/types/notify';
 import type { PanePermissionRequest } from '@shared/types/permissions';
 
 import { useDaemon } from '@/daemon';
 import { AllMachinesHome, type AllMachinesFeed } from '@/features/allMachines/AllMachinesHome';
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
-import { approvalItems, itemEntry, questionDetail, sessionKey, sessionsByPane, waitingCounts, type ApprovalEntry } from '@/features/approvals/approvals';
+import { answeredItems, approvalItems, askerLine, isStale, itemEntry, questionDetail, sessionKey, sessionsByPane, staleItems, waitingCounts, type ApprovalEntry } from '@/features/approvals/approvals';
 import { openApproval } from '@/features/approvals/ApprovalScreen';
 import { AutopilotRow } from '@/features/autopilot/AutopilotRow';
 import { useAutopilot } from '@/features/autopilot/hooks';
@@ -93,7 +94,7 @@ export function PaneListScreen() {
   const others = useOtherMachines(saved.flatMap(machine => (machine.profile && !machine.current ? [machine.profile] : [])), all && focused);
 
   const waiting = Object.values(pendingByPane(permissions.data ?? []));
-  const questions = waitingQuestions(notify.data);
+  const questions = waitingQuestions(notify.data).filter(item => !isStale(item));
   const blocked = new Set([...waiting.map(request => request.sessionId), ...questions.flatMap(item => item.source.paneId ?? [])]);
   const items = buildSidebar({
     projects: projects.data ?? [],
@@ -110,42 +111,55 @@ export function PaneListScreen() {
     },
   });
   const paneNames = new Map((projects.data ?? []).flatMap(project => (project.sessions ?? []).map(session => [session.id, session.name])));
+  const projectOfPane = new Map((projects.data ?? []).flatMap(project => (project.sessions ?? []).map(session => [session.id, project.name])));
   // Wait for statuses too, so dots don't flip from "No agent" to their real status.
   const loading = projects.isPending || statuses.isPending;
   const divider = { borderColor: theme.colors.border };
-  // Approvals: questions (and answers held for Undo) and permission requests, filed under their Session.
+  // Approvals: questions (and answers held for Undo) and permission requests, in the chosen sort.
   const sessionOfPane = sessionsByPane(sessions.data?.sessions);
-  const approvals: HomeApproval[] = [
-    ...approvalItems(notify.data).map(item => ({ ...itemEntry(item, profile.id), kind: 'question' as const })),
+  const questionEntry = (item: NotifyItem): HomeApproval => ({ ...itemEntry(item, profile.id), kind: 'question' });
+  const lastRead: HomeApproval[] = [
+    ...approvalItems(notify.data).map(questionEntry),
     ...waiting.map(request => {
       const session = sessionOfPane.get(request.sessionId);
-      return { key: `${profile.id}:permission:${request.id}`, machineKey: profile.id, at: request.timestamp, waiting: true, kind: 'permission' as const, request, ...(session ? { session } : {}) };
+      const project = projectOfPane.get(request.sessionId);
+      return { key: `${profile.id}:permission:${request.id}`, machineKey: profile.id, at: request.timestamp, waiting: true, kind: 'permission' as const, request, ...(session ? { session } : {}), ...(project ? { project } : {}) };
     }),
   ];
-  const waitingCount = approvals.length;
+  // The machine isn't online: its approvals collapse to one row and leave every count.
+  const unreachable = presence === 'unreachable';
+  const approvals = unreachable ? [] : lastRead;
+  const stale = unreachable ? [] : staleItems(notify.data).map(questionEntry);
+  const answered = unreachable ? [] : answeredItems(notify.data, Date.now()).map(questionEntry);
+  const offlineCount = unreachable ? waitingCounts(lastRead).total : 0;
+  const offline = offlineCount > 0 ? [{ key: profile.id, name: profile.label, waiting: offlineCount }] : [];
   const waitingBySession = waitingCounts(approvals).bySession;
   // Autopilot's row sits above "Waiting on you" while it's on for this computer (D-75).
   const autopilotSnapshot = autopilot.data?.enabled ? autopilot.data : undefined;
 
-  const approvalsHeader = waitingCount > 0 ? (
+  const approvalsHeader = approvals.length + stale.length + answered.length + offline.length > 0 ? (
     <ApprovalGroups
       entries={approvals}
+      stale={stale}
+      answered={answered}
+      offline={offline}
       machineOf={key => (key === profile.id ? current : undefined)}
-      renderEntry={(entry, divided) => (entry.kind === 'question' ? (
+      renderEntry={(entry, divided, list) => (entry.kind === 'question' ? (
         <>
           <WaitingRow
             testID={`notify-row-${entry.item.id}`}
-            name={entry.item.source.name}
+            name={originLine(entry.item, profile.label)}
             detail={questionDetail(entry.item)}
             divided={divided}
-            onPress={() => openApproval(entry.item.id)}
+            done={list === 'answered'}
+            onPress={() => openApproval(entry.item.id, list)}
           />
-          {entry.item.state === 'waiting' ? <AgentPromptActions item={entry.item} inset={33} offline={presence === 'unreachable' ? profile.label : undefined} /> : null}
+          {entry.item.state === 'waiting' ? <AgentPromptActions item={entry.item} inset={33} /> : null}
         </>
       ) : (
         <WaitingRow
           testID={`permission-row-${entry.request.sessionId}`}
-          name={paneNames.get(entry.request.sessionId) ?? 'Pane'}
+          name={askerLine(paneNames.get(entry.request.sessionId) ?? 'Pane', entry.session)}
           detail={permissionDetail(entry.request)}
           divided={divided}
           onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: entry.request.sessionId, requestId: entry.request.id } })}
@@ -237,7 +251,7 @@ export function PaneListScreen() {
   const renderItem = ({ item, index }: { item: SidebarItem; index: number }) => {
     switch (item.type) {
       case 'section':
-        return <SidebarSectionHeader item={item} first={index === 0 && waitingCount === 0 && !autopilotSnapshot} onToggle={() => toggleSection(item.section)} />;
+        return <SidebarSectionHeader item={item} first={index === 0 && !approvalsHeader && !autopilotSnapshot} onToggle={() => toggleSection(item.section)} />;
       case 'repo':
         return (
           <SectionHeader
@@ -426,7 +440,7 @@ function NewButton({ bottom }: { bottom: number }) {
 }
 
 /** A permission request or Notify question waiting on this phone's owner. */
-function WaitingRow({ name, detail, divided, onPress, testID }: { name: string; detail: string; divided: boolean; onPress: () => void; testID: string }) {
+function WaitingRow({ name, detail, divided, done = false, onPress, testID }: { name: string; detail: string; divided: boolean; done?: boolean; onPress: () => void; testID: string }) {
   const theme = useTheme();
   return (
     <Pressable
@@ -437,7 +451,7 @@ function WaitingRow({ name, detail, divided, onPress, testID }: { name: string; 
       style={({ pressed }) => [styles.waitingRow, pressed && { backgroundColor: theme.colors.surfacePressed }]}
     >
       {divided ? <View style={[styles.waitingDivider, { backgroundColor: theme.colors.border }]} /> : null}
-      <StatusBadge status="blocked" />
+      <StatusBadge status={done ? 'idle' : 'blocked'} />
       <View style={styles.fill}>
         <Text variant="callout" numberOfLines={1} style={styles.bold}>{name}</Text>
         <Text variant="footnote" tone="muted" numberOfLines={2}>{detail}</Text>

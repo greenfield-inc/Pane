@@ -13,6 +13,8 @@ export interface OpenTarget {
   sessionId?: string;
   /** A Notify alert's Session workspace Pane (or its own Pane): the approval screen shows it while the question can't be read. */
   sessionPaneId?: string;
+  /** Which of Approvals' lists the approval screen steps through; absent: Waiting. */
+  list?: string;
 }
 
 export type IncomingLink =
@@ -195,7 +197,7 @@ export type OpenRoute =
 export function openRoute(target: Omit<OpenTarget, 'host'>): OpenRoute | null {
   if (target.notifyId) {
     const paneId = target.sessionPaneId ?? target.paneId;
-    return { pathname: '/approval/[notifyId]', params: paneId ? { notifyId: target.notifyId, paneId } : { notifyId: target.notifyId } };
+    return { pathname: '/approval/[notifyId]', params: { notifyId: target.notifyId, ...(paneId ? { paneId } : {}), ...(target.list ? { list: target.list } : {}) } };
   }
   if (target.sessionId) return { pathname: '/session/[sessionId]', params: { sessionId: target.sessionId } };
   if (target.paneId) return { pathname: '/pane/[paneId]', params: target.panelId ? { paneId: target.paneId, panelId: target.panelId } : { paneId: target.paneId } };

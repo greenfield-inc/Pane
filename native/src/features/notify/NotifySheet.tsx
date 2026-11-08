@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { originLine } from '@shared/approvalReceipts';
 import type { NotifyAnswer, NotifyItem } from '@shared/types/notify';
 
 import { useHostsStore } from '@/auth/hostsStore';
@@ -73,13 +74,13 @@ export function NotifySheet({ notifyId, host }: { notifyId: string; host?: strin
   }
 
   const answer = (value: NotifyAnswer) => command.mutate([{ type: 'answer', id: notifyId, answer: value }]);
-  return <QuestionSheet item={state.item} machine={other?.label} answer={answer} busy={command.isPending} error={error} onClose={close} />;
+  return <QuestionSheet item={state.item} machine={other?.label ?? profile.label} answer={answer} busy={command.isPending} error={error} onClose={close} />;
 }
 
 function QuestionSheet({ item, machine, answer, busy, error, onClose }: {
   item: NotifyItem;
-  /** The machine that asked, when it isn't the one the phone is on. */
-  machine?: string;
+  /** The saved name of the machine that asked. */
+  machine: string;
   answer: (value: NotifyAnswer) => void;
   busy: boolean;
   error: string | null;
@@ -98,7 +99,7 @@ function QuestionSheet({ item, machine, answer, busy, error, onClose }: {
             : <SheetButton title="Close" onPress={onClose} disabled={busy} />}
         >
           <DialogSection divided={false}>
-            <Text variant="footnote" tone="muted" numberOfLines={1}>{[item.machine ?? machine, item.source.name, item.source.agent].filter(Boolean).join(' · ')}</Text>
+            <Text variant="footnote" tone="muted" numberOfLines={1}>{originLine(item, machine)}</Text>
             <Text testID="notify-title" variant="headline" selectable>{item.title}</Text>
             {item.context ? <Text variant="subhead" tone="secondary" selectable>{item.context}</Text> : null}
             {fields}

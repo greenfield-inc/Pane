@@ -116,6 +116,8 @@ interface AllMachinesState {
   menuShown: boolean;
   /** Today's switch, registered by the sidebar that owns the machine menu. */
   switchMachine: ((machineId: string) => Promise<MachineSelectOutcome>) | null;
+  /** Today's password prompt for a machine that asks for one, registered by the same sidebar. */
+  askMachinePassword: ((machineName: string) => void) | null;
   /** Shown in place of the Pane view after opening a row on an offline machine. */
   offlineNotice: OfflineNotice | null;
   /** Bumped when a machine's offline grace ends, so its rows dim on time. */
@@ -164,6 +166,7 @@ export const useAllMachinesStore = create<AllMachinesState>((set, get) => {
   entries: [],
   menuShown: false,
   switchMachine: null,
+  askMachinePassword: null,
   offlineNotice: null,
   clock: 0,
   layout: DEFAULT_LAYOUT,

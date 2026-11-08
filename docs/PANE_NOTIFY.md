@@ -50,30 +50,30 @@ Session go under "Not in a Session". Items Autopilot asks itself go under
 - **Workers in a Session don't call `notify`.** Approvals come from the
   Session's orchestrator, not from the agents in its Panes. A worker reports
   blocked to its orchestrator (`runpane report --state blocked --question
-  "<question>"`), and the orchestrator answers it or asks you. A worker's
-  `notify` call isn't shown: it returns `unavailable`, "Not shown to the
+  "<question>"`). That question is a card at once, with an answer box, and it
+  rings once the orchestrator relays it or after 10 minutes, so the orchestrator
+  first settles what the plan already answers. Your answer goes straight to the
+  worker's tab (`answer: Q-n → <answer> (by you)`), even with the orchestrator
+  down. A worker's `notify` call isn't shown: it returns `unavailable`, "Not shown to the
   person: in a Pane Session, only the orchestrator asks the person.", with a
   `next` that says to report blocked. Claude's own permission and plan
   prompts and a chat tab's prompts on a worker tab are the tool asking, so
   they still reach you, filed under the Session.
 - **A Session orchestrator** keeps every item that waits on you posted to
   Approvals exactly once, titled with its Q-n and with the worker's files as
-  links. It posts each one with `runpane notify ... --json` as a background
-  command, so it stays free to talk: you can ask it about an item in its own
-  tab while the card waits, and its background call returns your answer. It
-  stops the call of an item that went stale, which expires the card, and it
-  posts again after a restart, because Pane keeps no approvals across one. The
+  links. It relays a worker's question into that card (`runpane notify --relays
+  <item> ...`), which gains choices, context and links, then records the decision
+  (`runpane inbox ack <item> --decision <D-n>`), and the card reads "Recorded as
+  D-n". It posts its own items with `runpane notify ... --json`. Both run as
+  background commands, so it stays free to talk: you can ask it about an item in
+  its own tab while the card waits. The
   full rule is in the orchestrator guide
   (`runpane docs read --doc skills/pane-orchestration/SKILL.md`, "What waits
-  on the person").
+  on the person"). A second card from an orchestrator on the older rules keeps
+  working for one release.
+- **Autopilot** asks with `notify` too, and can answer, close and rewrite items
+  within its rules ([AUTOPILOT.md](AUTOPILOT.md)).
 - **Any other agent** calls `notify` as before.
-- **Fallback.** When a worker's blocked question sits unacknowledged in its
-  Session's inbox for 10 minutes (the orchestrator is down, or follows an
-  older rule set), Approvals shows it read-only: "Waiting on the <Session>
-  orchestrator: <worker> asked this and it hasn't been picked up. Answer in
-  the orchestrator's tab." It has no answer buttons. It goes away when the
-  orchestrator acknowledges the inbox (`runpane inbox ack`) or the worker
-  reports again, and never shows while Approvals is off.
 
 Claude's permission prompts and chat tab prompts (below) still come straight
 from the asking tab, filed under its Session.
@@ -151,10 +151,10 @@ client:
   "Run this MCP tool?" before every call, resumes included; pick **Allowlist
   MCP Tool** once so a waiting agent doesn't stop at that prompt.
 
-If the agent stops waiting (you interrupt it, it exits, or its call times out),
-the card says "<agent> stopped waiting" and the question moves to
-**Answered** as Expired. Codex 0.164 doesn't tell Pane when you press Esc, so a question from a
-Codex panel also expires when that panel sits idle at its prompt for 10 seconds.
+If the agent stops waiting (you interrupt it, it exits, or its call times out)
+and doesn't resume within 30 seconds, the item closes ("closed: the asker stopped
+waiting"; see [When an approval goes away](#when-an-approval-goes-away)). Codex 0.164 doesn't tell Pane when you press Esc, so a question from a
+Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
 
 ## Where questions show
 
@@ -164,12 +164,15 @@ Codex panel also expires when that panel sits idle at its prompt for 10 seconds.
   screen in the main area, and clicking the row again returns you to the view
   you left. The sidebar keeps the Sessions list,
   Panes with a waiting item show an amber "Waiting", and each Session row
-  shows an amber count of the approvals waiting from it (its fallback items
-  included). The row's count is the sum of every Session's count plus items not in a
+  shows an amber count of the approvals waiting from it. The row's count is the sum of every Session's count plus items not in a
   Session, across saved machines; in the one-machine sidebar its tooltip says
   how many of them wait on other machines. Beside
-  it, the queue has **Waiting** and **Answered** tabs and groups items by
-  Session, with counts and machine marks, "Not in a Session" last. The
+  it, the queue has **Waiting** and **Answered** tabs and a sort menu,
+  remembered per device: **Most recent** (the default) lists items flat, newest
+  first, each row naming its Session and machine; **By Session** and **By
+  project** group them, with counts and machine marks, each group placed by its
+  newest item. Waiting sorts by when it was asked and Answered by when it was
+  answered. A new item never moves the selection or the selected row. The
   selected item opens in place as a card (its title, context, links and
   answer controls). Next to it is its Session, live: an orchestrator's item
   shows the Session's orchestrator tab (its chat tab where chat tabs are on,
@@ -180,7 +183,7 @@ Codex panel also expires when that panel sits idle at its prompt for 10 seconds.
   a URL as a browser tab. Another machine's item offers **Open on
   <machine>**, which switches to it. Below about 1,100px wide, the queue stacks above the Session. After
   you answer, the card shows "Sent to <agent>" with **Undo** for 3 seconds,
-  then moves to Answered, which also lists today's updates (`ui info`). Nothing is drawn over your work inside Pane: there
+  then moves to Answered, which lists the last 24 hours, updates (`ui info`) included. Nothing is drawn over your work inside Pane: there
   is no in-Pane strip, docked card or Notify row in the sidebar.
 - **The strip**: while Pane isn't in front, a borderless card at the bottom
   center of the screen with the pointer. It never takes keyboard focus when it
@@ -208,9 +211,89 @@ Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next
 switch to Pane. The clock at the bottom right of a card snoozes it for 3, 5
 or 15 minutes: it leaves the strip, then comes back in its place in the
 queue, and Approvals shows it with its return time. The agent keeps
-waiting through a snooze or reminder. Nothing is stored on disk: questions
-live only while the agent's call is open, and the Answered tab empties at
-midnight and when Pane quits.
+waiting through a snooze or reminder.
+
+## Where approvals are kept
+
+Each machine keeps one saved list: the `approvals` table in its `sessions.db`,
+one row per item from any origin (`main/src/services/approvals/approvalStore.ts`).
+Orchestrators, workers (through a blocked report), Autopilot, Claude prompts and
+Pane itself all post to it. An approval lives on the machine where its creator
+runs; devices read and answer it over the connection they already use, and
+nothing is copied (D-145, D-165). Open calls, the 3-second Undo hold and the
+alert timers stay in memory beside the table.
+
+An item survives a restart, and an answer reaches its asker whether or not its
+call is still open: an open call returns it, and otherwise Pane types `answer:
+Q-n → <answer> (by you)` into the asking tab once, when its agent is idle at
+its prompt and in the terminal's foreground process group. A wrapper and the
+agent it started share that group, so an agent-farm worker (`node
+telemetry.mjs` running `claude`) qualifies. A shell, a nested shell, `ssh` or a
+REPL there keeps the answer owed, and the card reads "not delivered to <tab>
+yet" until it goes. Where Pane can't see what runs in the tab (Windows, WSL and
+the PTY host), or the tab closed, the answer is never typed: the card reads
+"not delivered to <tab>: <why>" with Copy answer, and `runpane inbox` lists it
+as `undelivered`. The orchestrator passes on one Pane couldn't see to type; one
+whose tab closed has no one left to tell. An
+asker that posts the same question again from the same tab (same Q-n or title)
+joins the waiting card instead of adding one.
+
+On a machine's first start with this table, a one-time import moves
+`session-inbox.json` into it (`main/src/database/jsonStoreImport.ts`). It takes a
+backup first (`session-inbox.json.before-import`), runs in one transaction with a
+marker, and is safe to interrupt. The original file stays in place. If the import
+fails, Approvals says why, nothing is deleted, new approvals still work, and it
+retries on the next start.
+
+## When an approval goes away
+
+An approval exists only while you can act on it and someone can take the answer
+(D-147). The machine that owns it decides.
+
+| Situation | What happens |
+| --- | --- |
+| Its Session is closed or archived | Closes within 5 s: "closed: Session closed", "closed: Session archived". |
+| Its asker is gone: its Pane archived or deleted, its tab closed, the worker sent a newer report, or a `notify` caller stopped waiting | Closes within 5 s of Pane learning it, with the reason: "closed: the asking tab was closed", "closed: the worker moved on", "closed: the asker stopped waiting". A sweep every 60 seconds catches anything missed. |
+| Pane restarts | Items whose asking tab still exists stay waiting. |
+| Unanswered for 3 days | Stale: moved to a collapsed **Stale** group at the bottom of Waiting. It never rings or pushes again. |
+| You close one | One action on any card, with an optional reason. Its asker's open call returns "The person closed this question.", or `closed: Q-n (by you)` is typed into its tab. **Reopen** puts it back. |
+| You or Autopilot answered | Answered lists it for 24 hours. |
+
+The store keeps answered and closed items 7 days for the record and for
+orchestrators catching up on decisions (`runpane inbox`), then drops them. On the
+first start of a build with this table, a one-time cleanup closes every item
+whose asker is gone ("closed on upgrade: <reason>"), and one summary card lists
+what's left, oldest first, with **Close all** and **Keep**.
+
+## Who asked, who acted
+
+Every card names where it came from: "workos-sso in Sales Skill · Mac mini". This
+machine's own items use its name from the machine picker, or no machine at all.
+Every item is connected to its Session; outside one, to its Pane, or for
+Autopilot's own items to the Session it's about or Autopilot's chat. Opening it
+shows that, with its related files and documents.
+
+What happened to an item stays on it, on every device: "Answered by Autopilot ·
+because D-22", "Closed by Autopilot: Session archived", "Closed: Session archived",
+"Rewritten by Autopilot from Q-7", "Recorded as D-147". **Override** on an answer
+from Autopilot sends your answer to the asker as a correction (`correction: Q-n →
+<answer> (by you)`), recorded on the item. **Reopen** undoes a close by you or by
+Autopilot.
+
+## Alerts
+
+Alerts interrupt you on the device you're using (D-144):
+
+- **A computer rings** (the strip and the chime) only if it was used in the last
+  2 minutes with its screen unlocked, for its own items and other machines'. If
+  two computers are both in use, both ring. In-Pane cards still show while Pane
+  is in front.
+- **The phone** gets a push about 90 seconds after an approval arrives, only if
+  it is still waiting. Answering it, closing it or turning Approvals off cancels
+  the push.
+- A worker's question rings once its orchestrator relays it or after 10 minutes.
+- A computer can ring only for machines it has saved. Autopilot's "Can't see"
+  shows that gap, and the phone push still arrives.
 
 ## Other screens and your phone
 
@@ -221,10 +304,13 @@ the agent:
 - **A Pane desktop with saved machines** (Remote Access pairing or
   Workspaces) shows every saved machine's questions beside its own, whichever
   machine it is on: the strip over other apps, the round, the tray dot, the
-  chime, Approvals, its sidebar count and the Waiting dots. Each card names its
-  machine ("notify-remote · Claude · parsa-devbox"), and Approvals shows the
-  machine's mark in its Session's group; beside it, **Open on <machine>**
-  switches to that host instead of a live Session view. An answer, Undo, ✕, snooze or → goes to the card's own
+  chime, Approvals, its sidebar count and the Waiting dots, within the
+  [Alerts](#alerts) rules. Each card names its machine, and Approvals shows the
+  machine's mark in its Session's group; beside it are that machine's Session
+  name and linked documents, read from that machine, and **Open on <machine>**,
+  which switches to that host instead of mounting a live Session view. A document
+  that can't load is one line ("<doc> isn't on the Mac mini anymore", "Couldn't
+  reach the Mac mini"), and the card stays answerable. An answer, Undo, ✕, snooze or → goes to the card's own
   machine and clears there; nothing switches. Open in Pane shows on this
   computer's cards and on the machine the desktop is on, where it opens the
   host's Pane in this window and leaves the host's own window where it is.
@@ -233,14 +319,13 @@ the agent:
   **Undo** for the 3 seconds before the agent gets the answer. ✕, snooze, the
   reminders and → in the round apply on every screen, except "When I switch to
   Pane", which waits for the Pane you used it on.
-- **Connection loss**: while a machine can't be reached its cards stay up,
-  its mark dims, and they say "Not sent: can't reach <machine>. Try again
-  when it reconnects."; the agent keeps waiting. After reconnecting the screen
-  shows what is waiting there now. While Pane runs, an unreachable machine's
-  cards stay until it is removed from the saved machines or turns Approvals off;
-  a machine offline when Pane starts shows its questions once it connects.
-- **Your phone**: the Pane app lists Approvals grouped by Session, and an
-  item opens above its Session's tabs and chat. Each question sends one alert at once to every phone signed
+- **Connection loss**: a machine that can't be reached collapses to one row,
+  "Mac mini offline · 4 waiting · they come back when the Mac mini is online",
+  since its cards can't be answered; the agents keep waiting. After reconnecting
+  the screen shows what is waiting there now. Autopilot says "<machine> offline".
+- **Your phone**: the Pane app lists Approvals with the same sort menu, and an
+  item opens above its Session's tabs and chat. A question still waiting after
+  about 90 seconds sends one alert to every phone signed
   in to the host in the Pane app with notifications allowed and **Needs
   Input** on. The alert is titled with the Pane's name and says only "<Pane>
   has a question" (the folder name for a call from outside Pane); updates
@@ -259,9 +344,9 @@ the agent:
   it on their strips.
 
 Each screen keeps its own Position, Show outside Pane, Sound, Show details, answer-all
-shortcut and Pause. The host's Approvals switch decides whether agents can ask:
-turning it off there returns `unavailable` to every waiting agent and clears
-its questions from every screen.
+shortcut and Pause. The Approvals switch decides whether agents can ask, and it
+is one switch across your machines: turning it off returns `unavailable` to every
+waiting agent on each machine and clears its questions from every screen.
 
 ## Settings
 
@@ -269,13 +354,15 @@ its questions from every screen.
 
 | Setting | Default |
 | --- | --- |
-| Approvals | On. Off hides the sidebar's Approvals row, expires open cards, returns `unavailable` ("Approvals are off in Pane.") to every waiting agent, and drops fallback items. Agents, Session orchestrators included, then ask in their own tab. |
+| Approvals | On. Off hides the sidebar's Approvals row, expires open cards, returns `unavailable` ("Approvals are off in Pane.") to every waiting agent. Agents, Session orchestrators included, then ask in their own tab. Applies to all your machines ([how the switch travels](SHARED_CREDENTIALS.md#the-approvals-switch)). |
 | Show outside Pane | On. It controls the floating cards over other apps. Off shows no floating card; inside Pane you answer from the Approvals row and screen, and the tray dot still shows. |
 | Position | Bottom center. Also top right or bottom right. |
 | Answer-all shortcut | ⌃⇧Space. Settings says so when another app already holds it. |
 | Updates hide after | 6 seconds |
 | Sound | On, for questions only |
 | Show details | Off. Cards open with details shown when on. Showing or hiding details on a card changes it. |
+
+Only the Approvals on/off switch is shared; the other settings here stay on each machine.
 
 Pause for 1 hour (tray menu) hides strips and mutes sound while questions keep
 queueing. Strips show over full-screen apps, during screen sharing, and with
@@ -313,8 +400,8 @@ on by default. It has two parts:
   your agents at its copy.
 - **Pane Notify:** call the `pane` MCP's `notify`, or `runpane notify` when
   that tool isn't loaded (for example under Agent Farm's strict MCP mode).
-  It says who asks (in a Session, a worker reports blocked to its
-  orchestrator instead of calling `notify`, and the orchestrator posts in the
+  It says who asks (in a Session, a worker reports blocked instead of calling
+  `notify` and gets the answer in its tab, and the orchestrator posts in the
   background; any other agent calls `notify`), when to ask (only what the
   agent can't find out itself, related questions in one card, `info` rarely)
   and how to write a card for someone who has lost the thread: what the work
@@ -353,6 +440,7 @@ has no global-shortcut portal, ⌃⇧Space doesn't reach Pane from other apps;
 inside Pane it opens Approvals.
 
 The code: `main/src/services/notify/` (queue, windows, tray),
+`main/src/services/approvals/approvalStore.ts` (the store),
 `main/src/ipc/notify.ts` (including the `notify:remote-snapshot` and
 `notify:remote-command` commands and the `notify:shared-changed` event other
 screens use), `main/src/daemon/mobilePushSender.ts` (the phone alert),

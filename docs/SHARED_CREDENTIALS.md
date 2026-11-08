@@ -28,6 +28,14 @@ When two hosts disagree, the copy that was set most recently wins. Removing a ke
 
 A host that is offline keeps its own copy and catches up on the next sync. Hosts running a Pane version from before key sharing are skipped.
 
+## The Approvals switch
+
+Settings → Approvals' on/off switch (`notify.enabled`) travels the same way, on the same syncs: read every reachable host, write the newest to those behind. A change here also tells hosts that saved this one, so they sync within seconds. It has its own commands (`notify:switch:get`, `notify:switch:apply`), only desktops carry it (not the iPhone app), and only on/off is shared: position, sound, shortcut and the rest stay on each machine.
+
+The most recent change wins, by `notifyEnabledChangedAt` in `config.json`. A host applying another host's value keeps that host's time, so two hosts never trade values. A value with no time counts as time 0 and a missing value means on; at equal times off wins, so a machine turned off before sharing existed turns the others off when they first sync. A change made by hand in `config.json` while Pane runs counts as a change; one made while it's quit doesn't get a new time.
+
+Hosts running a Pane version from before this are skipped without error; their keys still sync. The same people can reach it as the keys: the owner's login or a paired device.
+
 ## Who can read the keys
 
 Only your own devices. Over Tailscale, a host answers a request for its keys only from its owner's Tailscale login, even when its workspace lets other people on the tailnet in, so a teammate's computer neither receives nor replaces your keys. With a connection code, the caller must present a valid pairing token, and the host refuses the request when it does not require pairing. Either device can already open terminals on that host, so sharing keys with it exposes nothing new.

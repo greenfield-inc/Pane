@@ -140,8 +140,28 @@ describe('a card\'s state', () => {
     expect(cardState(item({ state: 'answered', source: { name: 'Autopilot', agent: 'Claude', autopilot: true } }))).toMatchObject({ recorded: 'by you · Autopilot recorded it' });
   });
 
-  it('takes no answer for a stuck worker\'s question, a prompt only the terminal can answer, or a gone item', () => {
-    expect(cardState(item({ relay: { inboxItemId: 'i1', worker: 'csv-export', question: 'Which delimiter?' } }))).toMatchObject({ kind: 'closed', message: expect.stringContaining('Pane Fixes orchestrator') });
+  it('shows Autopilot\'s answer with its reason, and what was recorded and corrected', () => {
+    expect(cardState(item({ state: 'answered', answerSummary: 'Approve', answeredBy: { by: 'autopilot', because: 'D-22' } })))
+      .toEqual({ kind: 'answered', answer: 'Approve', recorded: 'Answered by Autopilot · because D-22' });
+    expect(cardState(item({ state: 'answered', answeredBy: { by: 'you' }, answeredOn: 'iPhone', decision: 'D-147', corrections: [{ summary: 'No', by: 'you', at: 1 }] })))
+      .toMatchObject({ recorded: 'Answered by you on iPhone · Recorded as D-147 · Corrected by you: No' });
+  });
+
+  it('shows why an item closed', () => {
+    expect(cardState(item({ state: 'expired', closed: { by: 'autopilot', reason: 'stale for a week', at: 1 } }))).toEqual({ kind: 'closed', message: 'Closed by Autopilot: stale for a week' });
+    expect(cardState(item({ state: 'expired', closed: { by: 'pane', reason: 'Session archived', at: 1 } }))).toEqual({ kind: 'closed', message: 'Closed: Session archived' });
+  });
+
+  it('answers a worker\'s question like any other', () => {
+    const asked = item({ ui: 'ask', choices: undefined, originKind: 'worker', title: 'Q-39: run the script?' });
+    expect(cardState(asked)).toEqual({ kind: 'open' });
+    expect(answerBar(decisionModel(asked), cardState(asked))).toBe('text');
+  });
+
+  it('takes no answer for an older machine\'s mirror, a prompt only the terminal can answer, or a gone item', () => {
+    const mirror = cardState(item({ relay: { inboxItemId: 'i1', worker: 'csv-export', question: 'Which delimiter?' } }));
+    expect(mirror).toMatchObject({ kind: 'closed', message: expect.stringContaining('older Pane') });
+    expect(JSON.stringify(mirror)).not.toMatch(/stuck/i);
     expect(cardState(item({ agentPrompt: { yes: '1', no: '3', inTerminal: true } }))).toMatchObject({ kind: 'closed' });
     expect(cardState(item({ state: 'expired' }))).toEqual({ kind: 'closed', message: 'Claude stopped waiting.' });
     expect(cardState(undefined)).toEqual({ kind: 'closed', message: 'No longer waiting.' });

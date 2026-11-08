@@ -41,7 +41,9 @@ import { assertNewBranchName } from '../services/worktreeManager';
 import { queuedSetupMessage } from '../services/taskQueue';
 import { assessComposerEvidence, hasConfiguredCodexScreen, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
 import { presentStoppedPanel, projectWorkspaceEntry } from '../services/workspaceJournal';
-import { SessionInbox } from '../services/sessionInbox';
+import { importSessionInboxFile, SessionInbox } from '../services/sessionInbox';
+import { ApprovalStore, thisMachineName } from '../services/approvals/approvalStore';
+import { importJsonStoreOnce } from '../database/jsonStoreImport';
 import { ExpectedReportTracker, MAX_MISSING_REPORT_OUTPUT_LENGTH, type PanelLastOutput } from '../services/expectedReports';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
 import { getManifestForAgent, CURSOR_MANIFEST } from '../services/agentStatus/manifests';
@@ -77,7 +79,8 @@ import { pausedMarkOf, type TerminalPausedMark, type BrowserPanelState, type Cre
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { withSessionFolderAccess } from '../services/agents/sessionFolderAccess';
 import { sessionWorkspacePath } from '../services/sessionWorkspace';
-import { RUNPANE_DAEMON_FEATURES } from '../../../shared/types/runpaneOrchestration';
+import { RUNPANE_DAEMON_FEATURES, type RunpaneInboxAnswer } from '../../../shared/types/runpaneOrchestration';
+import type { NotifyItem } from '../../../shared/types/notify';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
 import {
@@ -454,13 +457,45 @@ const inboxAckRequestSchema = boundary.object({
   ids: boundary.optional(boundary.array(boundary.string)),
   session: boundary.optional(boundary.nonEmptyString),
   all: boundary.optional(boundary.boolean),
+  decision: boundary.optional(boundary.nonEmptyString),
 });
+
+/** An answered item as `runpane inbox` lists it. */
+function inboxAnswer(item: NotifyItem): RunpaneInboxAnswer {
+  const answer: RunpaneInboxAnswer = {
+    id: item.id,
+    title: item.title,
+    answer: item.answerSummary ?? '',
+    by: item.answeredBy?.by ?? 'you',
+    worker: item.source.name,
+    answeredAt: new Date(item.resolvedAt ?? item.createdAt).toISOString(),
+  };
+  if (item.source.panelId) answer.panelId = item.source.panelId;
+  if (item.answeredBy?.because) answer.because = item.answeredBy.because;
+  if (item.delivered) answer.delivered = item.delivered.via;
+  if (item.undelivered) answer.undelivered = item.undelivered.reason;
+  if (item.decision) answer.decision = item.decision;
+  return answer;
+}
 const lockListRequestSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
 });
 const loopRequestSchema = boundary.object({ loopId: boundary.nonEmptyString });
 const loopSetEnabledRequestSchema = boundary.object({ loopId: boundary.nonEmptyString, enabled: boundary.boolean });
 const loopPreviewRequestSchema = boundary.object({ cron: boundary.string });
+
+/** Panels where a submit in flight is an owed answer: it is written only while an agent, not Pane's shell, has the foreground. */
+const agentOnlySubmits = new Set<string>();
+
+/** Runs `submit` (a `runpane:panels:submit` to `panelId`) so it writes nothing once Pane's own shell has the foreground (F-7). */
+export async function submitOnlyToAgent<T>(panelId: string, submit: () => Promise<T>): Promise<T> {
+  agentOnlySubmits.add(panelId);
+  try {
+    return await submit();
+  } finally {
+    agentOnlySubmits.delete(panelId);
+  }
+}
 
 export function registerRunpaneHandlers(
   _ipcMain: IpcMain,
@@ -484,9 +519,21 @@ export function registerRunpaneHandlers(
   services.workspaceStateReader = workspaceStateReader;
   services.workspaceCursorStore = workspaceCursorStore;
   if (!services.sessionInbox) {
-    const sessionInbox = new SessionInbox(path.join(getAppDirectory(), 'session-inbox.json'), {
+    const approvalStore = new ApprovalStore(databaseService.getDb(), thisMachineName());
+    const sessionName = (sessionId: string) => services.orchestrationSessionManager?.approvalSessionRecord(sessionId)?.name ?? 'Closed Session';
+    // A one-time move of the file older builds kept (D-160). A failure leaves the file alone, shows in Approvals, and retries on the next start.
+    services.approvalImport = importJsonStoreOnce(databaseService.getDb(), {
+      source: 'approvals',
+      filePath: path.join(getAppDirectory(), 'session-inbox.json'),
+      apply: parsed => importSessionInboxFile(parsed, approvalStore, sessionName),
+      // QA's interrupted-import check (J10).
+      insideTransaction: process.env.PANE_TEST_KILL_DURING_APPROVALS_IMPORT === '1' ? () => { process.kill(process.pid, 'SIGKILL'); } : undefined,
+    });
+    services.approvalStore = approvalStore;
+    const sessionInbox = new SessionInbox(approvalStore, {
       sessionIdsFor: (paneId, panelId) => services.orchestrationSessionManager?.memberSessionIds(paneId, panelId) ?? [],
       itemsPerSession: () => resolveSessionRetention(configManager.getConfig().retention).sessionInbox,
+      sessionName,
     });
     sessionInbox.attach(workspaceJournal);
     services.sessionInbox = sessionInbox;
@@ -1614,7 +1661,14 @@ export function registerRunpaneHandlers(
     }));
   });
 
-  async function submitToPanel(normalized: RunpanePanelSubmitRequest, panel: ToolPanel, reserve: (screen: RunpanePanelScreenResult) => void, beforeDelivery: () => void): Promise<RunpanePanelSubmitResult> {
+  async function submitToPanel(normalized: RunpanePanelSubmitRequest, panel: ToolPanel, reserve: (screen: RunpanePanelScreenResult) => void, deliver: () => void): Promise<RunpanePanelSubmitResult> {
+    // An owed answer goes only to an agent: re-read the foreground right before each write, since the
+    // agent may have quit back to the shell since Notify checked (F-7).
+    const shellTookOver = () => agentOnlySubmits.has(panel.id) && terminalPanelManager.getForegroundProcess(panel.id)?.isShell === true;
+    const beforeDelivery = () => {
+      if (shellTookOver()) throw new PaneError('ERR_NOTIFY_TAB_NOT_AGENT', 'The agent in this tab exited before Pane typed the answer, so Pane typed nothing.', 'Pane keeps the answer owed and tries again when an agent is at its prompt.');
+      deliver();
+    };
     const blocked = (message: string): RunpanePanelSubmitResult => ({
       ok: false, panelId: panel.id, paneId: panel.sessionId, inputBytes: 0,
       enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
@@ -1701,6 +1755,7 @@ export function registerRunpaneHandlers(
     if (stagedInput.length > 0 && stagesComposer && (agentType === 'claude' || agentType === 'codex')) {
       // Claude takes a separately written Enter while it works (it queues
       // the message), so staging never waits for it to be idle.
+      if (shellTookOver()) return blocked('The agent in this tab exited before Pane typed the answer; no input was sent.');
       const staged = await stageComposerText(panel, agentType, stagedInput);
       const submission = await submitComposerForPanel(panel, normalized.interrupt ? 'enter' : 'auto', {
         cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,
@@ -1872,7 +1927,13 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'inbox:list', {}, async () => {
       const { session } = decodeBoundary(request, inboxListRequestSchema);
       const record = await requireOrchestrationSessionManager(services).get({ sessionId: session });
-      return { ok: true, session: { id: record.id, name: record.name }, items: sessionInbox.list(record.id) };
+      return {
+        ok: true,
+        session: { id: record.id, name: record.name },
+        items: sessionInbox.list(record.id),
+        // The answers workers got, for 7 days: an orchestrator that starts records the D-n of any with no decision yet (J9).
+        answers: (services.approvalStore?.answeredRecord(record.id) ?? []).map(inboxAnswer),
+      };
     }, result => ({ resultCount: result.items.length }));
   });
 
@@ -1888,7 +1949,7 @@ export function registerRunpaneHandlers(
       }
       const ids = normalized.ids?.map(id => id.trim()).filter(Boolean) ?? [];
       if (ids.length === 0) throw new Error('Name the inbox items to clear (ids), or pass all with a session.');
-      return { ok: true, ...sessionInbox.ack(ids, sessionId) };
+      return { ok: true, ...sessionInbox.ack(ids, sessionId, normalized.decision) };
     }, result => ({ resultCount: result.acknowledged.length }));
   });
 

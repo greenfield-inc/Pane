@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, ShieldCheck, X } from 'lucide-react';
 import type { NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
+import { showActionError } from '../../stores/errorStore';
+import { canClose, canCopyAnswer, canOverride, canReopen, decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { cn } from '../../utils/cn';
 import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
@@ -16,7 +18,7 @@ export interface NotifyQueuePosition {
   next?: NotifyItem;
 }
 
-type NotifyCardView = 'question' | 'sent' | 'expired' | 'info';
+type NotifyCardView = 'question' | 'sent' | 'expired' | 'answered' | 'info';
 
 /**
  * strip: the floating window and the in-Pane strip.
@@ -55,7 +57,7 @@ export interface NotifyCardProps {
   className?: string;
 }
 
-/** One card for every Notify surface: four looks, plus sent, expired and the update line. */
+/** One card for every Notify surface: four looks, plus sent, expired, answered and the update line. */
 export function NotifyCard(props: NotifyCardProps) {
   switch (props.view) {
     case 'sent':
@@ -64,6 +66,8 @@ export function NotifyCard(props: NotifyCardProps) {
       return <InfoLine {...props} />;
     case 'expired':
       return <ExpiredCard {...props} />;
+    case 'answered':
+      return <AnsweredCard key={props.item.id} {...props} />;
     case 'question':
       // The agent stopped waiting on Pane; its terminal still asks, and answering there clears this.
       if (props.item.agentPrompt?.inTerminal) return <InTerminalCard {...props} />;
@@ -291,8 +295,8 @@ function CardHeader({ item, form, queue, onCommand, menuPlacement, machineMark }
     return (
       <div className="flex items-center gap-2 px-3.5 pt-3 text-[12px] text-text-tertiary">
         <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-text-primary text-[10px] font-bold text-bg-primary" aria-hidden="true">P</span>
-        <span className="truncate font-medium text-text-secondary">{item.source.name}</span>
-        <span className="shrink-0">· {item.source.agent}</span>
+        {/* The origin line, with the machine apart so it keeps its mark. */}
+        <span className="truncate font-medium text-text-secondary" data-testid="notify-card-origin">{originLine(item, '')}</span>
         {item.machine && (
           <span className="inline-flex min-w-0 shrink items-center gap-1" data-testid="notify-card-machine">
             · {machineMark}<span className="truncate">{item.machine}</span>
@@ -510,8 +514,8 @@ function recommendedIndex(choices: NotifyChoice[]): number {
 }
 
 function QuestionCard({
-  item, form, queue, shortcutHint, showDetails, narrow, menuPlacement, onCommand, onFieldFocusRequest, machineMark, related, onOpenInPane, className,
-}: NotifyCardProps) {
+  item, form, queue, shortcutHint, showDetails, narrow, menuPlacement, onCommand, onFieldFocusRequest, machineMark, related, onOpenInPane, className, onCancelOverride,
+}: NotifyCardProps & { onCancelOverride?: () => void }) {
   // Details: the choices with notes, or an approval's detail.
   const [expanded, setExpanded] = useState(form === 'docked' || (form === 'strip' && Boolean(showDetails)));
   const choices = item.choices ?? [];
@@ -520,6 +524,7 @@ function QuestionCard({
   const [denying, setDenying] = useState(false);
   const [text, setText] = useState('');
   const [textFocusKey, setTextFocusKey] = useState(0);
+  const [closing, setClosing] = useState(false);
   const titleClass = form === 'inbox'
     ? 'px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-primary'
     : 'px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-primary';
@@ -558,7 +563,7 @@ function QuestionCard({
   useCardKeys(rootRef, Boolean(onFieldFocusRequest), (key) => {
     const index = /^[1-9]$/.test(key) ? Number(key) - 1 : -1;
     if (item.ui === 'options') {
-      if (index >= 0 && index < (expanded ? choices.length : Math.min(choices.length, COMPACT_CHOICE_LIMIT))) {
+      if (index >= 0 && index < (expanded || onCancelOverride ? choices.length : Math.min(choices.length, COMPACT_CHOICE_LIMIT))) {
         if (expanded) setSelected(index);
         else answerChoice(index);
         return true;
@@ -622,7 +627,8 @@ function QuestionCard({
       </>
     );
   } else if (item.ui === 'options') {
-    const visible = choices.slice(0, COMPACT_CHOICE_LIMIT);
+    // An Override can't open the round (the item no longer waits), so every choice shows.
+    const visible = onCancelOverride ? choices : choices.slice(0, COMPACT_CHOICE_LIMIT);
     body = (
       <div className={cn('flex flex-wrap items-center gap-2', actionsClass)}>
         {visible.map((choice, index) => (
@@ -635,7 +641,7 @@ function QuestionCard({
             onClick={() => answerChoice(index)}
           />
         ))}
-        {choices.length > COMPACT_CHOICE_LIMIT && (
+        {choices.length > visible.length && (
           <button
             type="button"
             onClick={() => onCommand({ type: 'open-round', id: item.id })}
@@ -827,10 +833,19 @@ function QuestionCard({
       <div className={cn(titleClass, !expanded && 'line-clamp-3')} title={item.title}>{item.title}</div>
       {/* An agent prompt's context is a command or a plan: its line breaks carry meaning. */}
       {showContext && <div className={cn(contextClass, item.agentPrompt && 'max-h-[40vh] overflow-y-auto whitespace-pre-line')}>{item.context}</div>}
+      {form === 'inbox' && (onCancelOverride
+        ? <div className={contextClass} data-testid="notify-override-hint">Your answer goes to {item.source.agent} as a correction.</div>
+        : <ReceiptLines item={item} className={contextClass} />)}
       {related}
       {body}
       {item.unreachable && <UnreachableNotice item={item} className={form === 'inbox' ? 'px-3.5 pb-3' : 'px-[22px] pb-3'} />}
-      {form === 'inbox' && (
+      {form === 'inbox' && (onCancelOverride ? (
+        <div className="flex items-center justify-end px-3.5 pb-3 text-[12.5px] text-text-tertiary">
+          <FooterLink onClick={onCancelOverride}>Cancel</FooterLink>
+        </div>
+      ) : closing ? (
+        <ItemCloseForm item={item} onCommand={onCommand} onCancel={() => setClosing(false)} className="px-3.5 pb-3.5" />
+      ) : (
         <div className="flex items-center gap-3 px-3.5 pb-3 text-[12.5px] text-text-tertiary">
           {item.snoozedUntil !== undefined && <span className="min-w-0 truncate">{snoozedLabel(item.snoozedUntil)}</span>}
           <div className="ml-auto flex shrink-0 items-center gap-3">
@@ -839,11 +854,45 @@ function QuestionCard({
                 <ExternalLink className="h-3.5 w-3.5" /> Open in Pane
               </FooterLink>
             )}
+            {canClose(item) && !item.unreachable && (
+              <button type="button" onClick={() => setClosing(true)} data-testid="notify-close" title={`Close this: ${item.source.agent} is told`} className="whitespace-nowrap hover:text-text-primary">
+                Close
+              </button>
+            )}
             {snooze}
           </div>
         </div>
-      )}
+      ))}
       {footer}
+    </div>
+  );
+}
+
+/** What happened to an item so far: its receipt and the decision it was recorded as. */
+function ReceiptLines({ item, className }: { item: NotifyItem; className?: string }) {
+  const lines = [receiptLine(item), decisionLine(item)].filter(Boolean);
+  if (lines.length === 0) return null;
+  return <div className={className} data-testid="notify-receipt">{lines.join(' · ')}</div>;
+}
+
+/** Close: an optional reason, then the item ends and its asker is told. Laid out as Deny's reason is. */
+export function ItemCloseForm({ item, onCommand, onCancel, className }: { item: NotifyItem; onCommand: (command: NotifyCommand) => void; onCancel: () => void; className?: string }) {
+  const [reason, setReason] = useState('');
+  const close = () => {
+    const trimmed = reason.trim();
+    onCommand(trimmed ? { type: 'close', id: item.id, reason: trimmed } : { type: 'close', id: item.id });
+  };
+  return (
+    <div className={cn('flex items-center gap-2', className)} data-testid="notify-close-form">
+      <div className="min-w-0 flex-1">
+        <TextField value={reason} onChange={setReason} onSubmit={close} placeholder="Reason (optional)" autoFocus />
+      </div>
+      <button type="button" onClick={onCancel} className="h-[30px] rounded-[10px] px-2.5 text-[12.5px] font-medium text-text-tertiary hover:text-text-primary">
+        Cancel
+      </button>
+      <button type="button" onClick={close} className="h-[30px] rounded-[10px] bg-interactive px-3 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover">
+        Close
+      </button>
     </div>
   );
 }
@@ -920,14 +969,73 @@ function InTerminalCard({ item, form, queue, narrow, onCommand, menuPlacement, m
   );
 }
 
-function ExpiredCard({ item, form, narrow, onCommand, menuPlacement, className }: NotifyCardProps) {
+function ExpiredCard({ item, form, narrow, onCommand, menuPlacement, machineMark, related, className }: NotifyCardProps) {
+  const reopen = form === 'inbox' && canReopen(item) && !item.unreachable;
   return (
     <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-view="expired">
-      <CardHeader item={item} form={form === 'inbox' ? 'strip' : form} onCommand={onCommand} menuPlacement={menuPlacement} />
+      <CardHeader item={item} form={form} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       <div className="line-clamp-3 px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-tertiary">{item.title}</div>
       <div className="px-[22px] pb-[18px] pt-3">
-        <NoticePill>{item.source.agent} stopped waiting. Nothing to answer.</NoticePill>
+        <NoticePill testId="notify-receipt">{receiptLine(item) ?? `${item.source.agent} stopped waiting. Nothing to answer.`}</NoticePill>
       </div>
+      {related}
+      {reopen && (
+        <div className="flex items-center justify-end px-3.5 pb-3 text-[12.5px] text-text-tertiary">
+          <FooterLink onClick={() => onCommand({ type: 'reopen', id: item.id })}>Reopen</FooterLink>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** An item already answered, opened on Approvals: its receipt, and an Override with the card's own answers. */
+function AnsweredCard(props: NotifyCardProps) {
+  const { item, form, narrow, onCommand, menuPlacement, machineMark, related, className } = props;
+  const [overriding, setOverriding] = useState(false);
+  const [copied, setCopied] = useState(false);
+  if (overriding) {
+    return (
+      <QuestionCard
+        {...props}
+        view="question"
+        // The same controls as when it waited: what they answer goes out as a correction.
+        item={{ ...item, state: 'waiting' }}
+        onCommand={(command) => {
+          if (command.type !== 'answer') return;
+          setOverriding(false);
+          onCommand({ type: 'override', id: item.id, answer: command.answer });
+        }}
+        onCancelOverride={() => setOverriding(false)}
+      />
+    );
+  }
+  const correction = item.corrections?.at(-1);
+  return (
+    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-view="answered">
+      <CardHeader item={item} form={form} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
+      <div className="px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-tertiary">{item.title}</div>
+      <div className="px-3.5 pb-3 pt-2.5">
+        <NoticePill testId="notify-receipt">
+          <span className="min-w-0">
+            {[item.answerSummary, receiptLine(item) ?? (item.answeredOn ? `Answered on ${item.answeredOn}` : 'Answered'), decisionLine(item)].filter(Boolean).join(' · ')}
+            {correction && <span className="block" data-testid="notify-correction">You corrected it: {correction.summary}</span>}
+          </span>
+        </NoticePill>
+      </div>
+      {related}
+      {((canOverride(item) && !item.unreachable) || canCopyAnswer(item)) && (
+        <div className="flex items-center justify-end gap-4 px-3.5 pb-3 text-[12.5px] text-text-tertiary">
+          {canCopyAnswer(item) && (
+            <FooterLink onClick={() => {
+              void navigator.clipboard.writeText(item.answerSummary ?? '').then(() => setCopied(true)).catch(cause => showActionError('Could not copy the answer', cause));
+            }}>
+              {/* One box for both labels, so Copied doesn't shift Override. */}
+              <span className="inline-block w-[5.5rem] text-right">{copied ? 'Copied' : 'Copy answer'}</span>
+            </FooterLink>
+          )}
+          {canOverride(item) && !item.unreachable && <FooterLink onClick={() => setOverriding(true)}>Override</FooterLink>}
+        </div>
+      )}
     </div>
   );
 }

@@ -78,7 +78,13 @@ describe('NotifyQueue secret cards', () => {
       .toThrow(expect.objectContaining({ code: 'SECRET_OWNER_REQUIRED' }));
     expect(() => queue.runRemote({ type: 'answer', id, answer: { approved: false } }, 'build-mac', 'teammate@example.com'))
       .toThrow(expect.objectContaining({ code: 'SECRET_OWNER_REQUIRED' }));
+    // Nor can a teammate close it, or act as Autopilot on it.
+    expect(() => queue.runRemote({ type: 'close', id }, 'build-mac', 'teammate@example.com'))
+      .toThrow(expect.objectContaining({ code: 'SECRET_OWNER_REQUIRED' }));
+    expect(() => queue.runRemote({ type: 'agent-close', id, reason: 'not needed' }, 'build-mac', 'teammate@example.com'))
+      .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_NOT_AUTOPILOT' }));
     expect(secrets.saved.size).toBe(0);
+    expect(queue.snapshot().items.find(candidate => candidate.id === id)?.state).toBe('waiting');
 
     await queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'owner-laptop', null);
     expect(secrets.saved.get('stripe/STRIPE_SECRET_KEY')).toBe(CANARY);

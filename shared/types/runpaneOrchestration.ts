@@ -1629,13 +1629,37 @@ export interface RunpaneInboxListRequest {
   session: string;
 }
 
+/** An answer to one of the Session's workers, kept 7 days so its D-n can be recorded. */
+export interface RunpaneInboxAnswer {
+  id: string;
+  title: string;
+  answer: string;
+  /** Who answered. */
+  by: 'you' | 'autopilot' | 'orchestrator' | 'pane';
+  because?: string;
+  /** The worker that asked. */
+  worker: string;
+  panelId?: string;
+  answeredAt: string;
+  /** How it reached the worker; absent while its tab is busy. */
+  delivered?: 'call' | 'tab';
+  /** Why Pane can't type it into the worker's tab (its tab closed, or Pane can't see what runs there): pass it on yourself. */
+  undelivered?: string;
+  /** The D-n recorded for it; absent: run `runpane inbox ack <id> --decision <D-n>`. */
+  decision?: string;
+}
+
 export interface RunpaneInboxListResult {
   ok: true;
   session: { id: string; name: string };
   items: RunpaneInboxItem[];
+  /** Absent from an older Pane. */
+  answers?: RunpaneInboxAnswer[];
 }
 
 export interface RunpaneInboxAckRequest {
+  /** Records this D-n on each item (`--decision`). */
+  decision?: string;
   /** Item ids to clear. */
   ids?: string[];
   /** Session id or exact name; with `all`, clears every item of that Session. */

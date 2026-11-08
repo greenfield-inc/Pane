@@ -6,8 +6,9 @@ import { RUNPANE_CONTRACT } from './generated/contract';
  * command with result `jsonSchemas` becomes a tool; its inputs are the union of
  * the flags in its `usage` lines and its `agentContext` arguments, plus
  * `--pane-dir` for daemon commands. Arguments named `<word>` become inputs placed where the first
- * usage line puts them, and `-- <word>` the text after `--`. Inputs are strings or booleans unless
- * the argument declares a `schema`. Its output schema is the command's `*Result` schema.
+ * usage line puts them, `<word>...` an array input named `<word>s`, and `-- <word>` the text after
+ * `--`. Inputs are strings or booleans unless the argument declares a `schema`. Its output schema
+ * is the command's `*Result` schema.
  */
 export interface McpToolContract {
   commands: readonly {
@@ -48,8 +49,8 @@ interface McpToolParameter {
   takesValue: boolean;
   /** Array and object values reach the CLI as JSON text. */
   json: boolean;
-  /** `word`: a positional in the command words (`workspace <machine> exec`); `rest`: the text after `--`. */
-  positional?: 'word' | 'rest';
+  /** `word`: a positional in the command words (`workspace <machine> exec`); `words`: the same, repeated (`inbox ack <item-id>...`); `rest`: the text after `--`. */
+  positional?: 'word' | 'words' | 'rest';
 }
 
 export interface McpTool {
@@ -89,6 +90,7 @@ export interface McpTool {
 const OMITTED_FLAGS = new Set(['--json', '--follow', '--until-event', '--help']);
 const FLAG_PATTERN = /--[a-z][a-z0-9-]*/g;
 const POSITIONAL_PATTERN = /^<([a-z][a-z0-9-]*)>$/;
+const REPEATED_POSITIONAL_PATTERN = /^<([a-z][a-z0-9-]*)>\.\.\.$/;
 const REST_PATTERN = /^-- <([a-z][a-z0-9-]*)>$/;
 // Clients sometimes send numeric flags such as timeoutMs as JSON numbers.
 const flagValueSchema = boundary.union(boundary.string, boundary.number);
@@ -133,6 +135,14 @@ function buildTool(
   const properties: McpTool['inputSchema']['properties'] = {};
   const required: string[] = [];
   for (const arg of context?.arguments ?? []) {
+    const repeated = REPEATED_POSITIONAL_PATTERN.exec(arg.name);
+    if (repeated) {
+      const parameter: McpToolParameter = { flag: arg.name, property: `${toProperty(`--${repeated[1]}`)}s`, takesValue: true, json: false, positional: 'words' };
+      parameters.push(parameter);
+      properties[parameter.property] = { type: 'array', items: { type: 'string', minLength: 1 }, description: arg.description ?? '' };
+      if (arg.required === true) required.push(parameter.property);
+      continue;
+    }
     const word = POSITIONAL_PATTERN.exec(arg.name);
     const rest = REST_PATTERN.exec(arg.name);
     const name = word?.[1] ?? rest?.[1];
@@ -142,7 +152,7 @@ function buildTool(
     properties[parameter.property] = { type: 'string', description: arg.description ?? '' };
     if (arg.required === true) required.push(parameter.property);
   }
-  const wordNames = new Set(parameters.filter((parameter) => parameter.positional === 'word').map((parameter) => parameter.flag));
+  const wordNames = new Set(parameters.filter((parameter) => parameter.positional === 'word' || parameter.positional === 'words').map((parameter) => parameter.flag));
   const commandWords = new Set(command.name.split(' '));
   const usageTokens = (command.usage[0] ?? '').split(/\s+/).slice(1);
   const firstOption = usageTokens.findIndex((token) => /^[[(]?-/.test(token));
@@ -277,7 +287,8 @@ export function buildToolArgv(tool: McpTool, input: JsonObject = {}): string[] {
     return value === undefined || value === null ? undefined : String(decodeBoundary(value, flagValueSchema));
   };
   const argv = tool.words.flatMap((word) => {
-    const parameter = tool.parameters.find((candidate) => candidate.positional === 'word' && candidate.flag === word);
+    const parameter = tool.parameters.find((candidate) => (candidate.positional === 'word' || candidate.positional === 'words') && candidate.flag === word);
+    if (parameter?.positional === 'words') return decodeBoundary(input[parameter.property] ?? [], boundary.array(boundary.string));
     return parameter ? positionalValue(parameter) ?? [] : [word];
   });
   const known = new Set(tool.parameters.map((parameter) => parameter.property));

@@ -1,3 +1,4 @@
+import { prepareNotifyForQuit } from '../ipc/notify';
 import { getChatTabManager } from '../services/chatTabs';
 import { installRunpaneShimBestEffort } from '../services/runpaneShim';
 import os from 'os';
@@ -548,6 +549,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
     permissionIpcServer,
     async shutdown(): Promise<void> {
+      prepareNotifyForQuit();
       // First, so no run starts while the services it needs are closing.
       loopManager.stop();
       autoPauser.stop();

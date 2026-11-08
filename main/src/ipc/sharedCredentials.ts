@@ -1,7 +1,14 @@
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import { getPaneEventSink } from '../core/runtime';
-import { applySharedCredentials, readSharedCredentials, sharedCredentialsSchema } from '../services/sharedCredentials';
+import {
+  applyNotifySwitch,
+  applySharedCredentials,
+  readNotifySwitch,
+  readSharedCredentials,
+  sharedCredentialsSchema,
+  sharedNotifySwitchSchema,
+} from '../services/sharedCredentials';
 import { paneSecretStore, type PaneSecretStore } from '../services/paneSecrets';
 import type { AppServices } from './types';
 
@@ -32,5 +39,16 @@ export function registerSharedCredentialHandlers(
     if (changed.length + changedSecrets.length > 0) getPaneEventSink().send('remote:settings-changed');
     // The keys only, as before secrets: callers ignore the answer, so secret values never travel back.
     return readSharedCredentials(configManager.getConfig());
+  });
+  // The Approvals on/off switch, with the same callers. Their own commands, so a host too old for them refuses them plainly.
+  commandRegistry.register('notify:switch:get', (_input: PaneCommandValue, trusted: PaneCommandValue) => {
+    decodeBoundary(trusted, trustedSchema);
+    return readNotifySwitch(configManager.getConfig());
+  });
+  commandRegistry.register('notify:switch:apply', async (input: PaneCommandValue, trusted: PaneCommandValue) => {
+    decodeBoundary(trusted, trustedSchema);
+    const { notifySwitch, changed } = await applyNotifySwitch(configManager, decodeBoundary(input, sharedNotifySwitchSchema));
+    if (changed) getPaneEventSink().send('remote:settings-changed');
+    return notifySwitch;
   });
 }

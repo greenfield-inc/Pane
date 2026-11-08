@@ -290,8 +290,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         const machine = machines.find((entry) => entry.id === machineId);
         return machine ? selectMachine(machine) : { ok: false, error: 'That machine is no longer saved.' };
       },
+      askMachinePassword: onMachinePasswordRequest,
     });
-  }, [machines, selectMachine, switcherVisible]);
+  }, [machines, onMachinePasswordRequest, selectMachine, switcherVisible]);
   useEffect(() => (allMachines ? startAllMachinesFeed() : undefined), [allMachines]);
   const switcherLabel = allMachines ? 'Showing all machines. Switch machine' : `Agents run on ${activeMachine.name}. Switch machine`;
   const renderRemoteHostSwitcher = (trigger: React.ReactElement, position: 'bottom-left' | 'top-right') => (

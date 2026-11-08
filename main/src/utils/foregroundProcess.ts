@@ -39,3 +39,27 @@ export async function readForegroundProcessGroup(shellPid: number): Promise<numb
   const group = Number.parseInt(stdout.trim(), 10);
   return Number.isInteger(group) && group > 0 ? group : undefined;
 }
+
+/** The terminal's foreground process group: its id, and each member's executable (a path on macOS, a name on Linux). */
+export interface ForegroundGroup {
+  pgid: number;
+  members: string[];
+}
+
+/**
+ * Every process in the foreground process group of the terminal whose session
+ * leader is `shellPid`. A wrapper (`node telemetry.mjs`) and the agent it
+ * started share one group; an interactive shell puts each job in a group of
+ * its own. POSIX only; undefined when unknown.
+ */
+export async function readForegroundGroupMembers(shellPid: number): Promise<ForegroundGroup | undefined> {
+  const pgid = await readForegroundProcessGroup(shellPid);
+  if (pgid === undefined) return undefined;
+  const { stdout } = await execFileAsync('ps', ['-A', '-o', 'pgid=,comm='], { encoding: 'utf8', timeout: PS_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
+  const members: string[] = [];
+  for (const line of stdout.split('\n')) {
+    const match = line.match(/^\s*(\d+)\s+(.+?)\s*$/u);
+    if (match && Number(match[1]) === pgid) members.push(match[2]);
+  }
+  return { pgid, members };
+}

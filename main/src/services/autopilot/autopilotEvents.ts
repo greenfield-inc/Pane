@@ -1,4 +1,5 @@
-import type { NotifyItem } from '../../../../shared/types/notify';
+import type { NotifyActor, NotifyItem } from '../../../../shared/types/notify';
+import { receiptLine } from '../../../../shared/approvalReceipts';
 import type { RunpaneWorkspaceEntry } from '../../../../shared/types/runpaneOrchestration';
 import type { WorkspaceAgentStatus, WorkspaceJournal } from '../workspaceJournal';
 
@@ -31,7 +32,8 @@ type JournalEntry = Omit<RunpaneWorkspaceEntry, 'gen' | 'at'>;
 /**
  * Autopilot's watch kinds (package 2e), journalled for `runpane watch --as autopilot --kinds ...`:
  * `item.created` and `item.answered` when an approval or question starts or stops waiting on the
- * person (an item that expired unanswered has a `reason` starting with NO_ANSWER), `session.created` and `session.archived`, and `orchestrator.turn_ended` when a Session
+ * person (`reason` says why: an asker that stopped starts with NO_ANSWER, a close starts with its
+ * receipt, "Closed by Autopilot: <why>", and a reopened item with who brought it back), `session.created` and `session.archived`, and `orchestrator.turn_ended` when a Session
  * orchestrator goes from working to idle. The journal delivers them only to watches that list them
  * in `--kinds`, so orchestrators' watches are unchanged. Returns the disconnect function.
  */
@@ -45,7 +47,7 @@ export function connectAutopilotEvents(deps: AutopilotEventsDeps): () => void {
     const now = new Map(notify.waiting().map(item => [item.id, item]));
     for (const [id, item] of now) {
       // Autopilot's own questions are not news to Autopilot; their answers are.
-      if (!waiting.has(id) && !item.source.autopilot) append(itemEntry('item.created', item));
+      if (!waiting.has(id) && (item.reopened || (!item.source.autopilot && !item.rewrittenFrom))) append(itemEntry('item.created', item));
     }
     if ([...waiting.keys()].some(id => !now.has(id))) {
       const all = new Map(notify.items().map(item => [item.id, item]));
@@ -126,8 +128,24 @@ export function connectAutopilotEvents(deps: AutopilotEventsDeps): () => void {
 }
 
 /** The title is the reason, so a lines watch shows it; `itemId` is what `stack push --item` takes. */
-/** Starts the `reason` of an `item.answered` entry whose item expired unanswered (its asker stopped waiting). */
+/** Starts the `reason` of an `item.answered` entry whose asker stopped waiting before anyone answered. */
 export const NO_ANSWER = 'No answer (the asker stopped waiting): ';
+const ASKER_STOPPED = 'the asker stopped waiting';
+
+const ACTOR_NAMES = { you: 'you', autopilot: 'Autopilot', orchestrator: 'the orchestrator', pane: 'Pane' } satisfies Record<NotifyActor, string>;
+
+/** Why the item is news, ahead of its title: who closed it or brought it back. Only an asker that stopped reads as no answer. */
+function itemReason(kind: 'item.created' | 'item.answered', item: NotifyItem): string {
+  if (kind === 'item.created') {
+    const { reopened } = item;
+    if (!reopened) return item.title;
+    const reversed = `${ACTOR_NAMES[reopened.closedBy]} closed it${reopened.closedReason ? ` (${reopened.closedReason})` : ''}`;
+    return `Reopened by ${ACTOR_NAMES[reopened.by]}, after ${reversed}: ${item.title}`;
+  }
+  if (item.state !== 'expired') return item.title;
+  if (!item.closed || item.closed.reason === ASKER_STOPPED) return `${NO_ANSWER}${item.title}`;
+  return `${receiptLine(item) ?? 'Closed'}: ${item.title}`;
+}
 
 function itemEntry(kind: 'item.created' | 'item.answered', item: NotifyItem): JournalEntry {
   const { source } = item;
@@ -137,7 +155,7 @@ function itemEntry(kind: 'item.created' | 'item.answered', item: NotifyItem): Jo
     paneName: source.name,
     source: kind === 'item.created' ? 'agent' : 'session',
     // An item stops waiting when it is answered or when its asker stops (expired): only the first is an answer.
-    reason: kind === 'item.answered' && item.state === 'expired' ? `${NO_ANSWER}${item.title}` : item.title,
+    reason: itemReason(kind, item),
     itemId: item.id,
   };
   if (source.panelId) entry.panelId = source.panelId;

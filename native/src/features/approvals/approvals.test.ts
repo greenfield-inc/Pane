@@ -4,23 +4,35 @@ import { RemoteRequestError, RemoteUnconfirmedResultError } from '@shared/remote
 import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 
 import {
+  answeredItems,
   approvalItems,
+  approvalKindLabel,
+  approvalListOrder,
   approvalOrder,
   approvalParams,
   approvalPosition,
   approvalWorkspace,
-  groupBySession,
+  askerLine,
+  connectedLink,
+  groupApprovals,
+  isStale,
   itemEntry,
+  machineOfflineLine,
   nextApproval,
+  NO_PROJECT,
   NOT_IN_A_SESSION,
   openApprovalLink,
   openLinkCommand,
+  parseApprovalList,
+  parseApprovalSort,
   questionDetail,
-  relayLine,
+  receiptLines,
   resolveSelection,
   sessionKey,
   sessionsByPane,
+  staleItems,
   waitingCounts,
+  type ApprovalSort,
 } from './approvals';
 
 const launch = { id: 'sess-launch', name: 'Spring launch', paneId: 'ws-launch' };
@@ -46,25 +58,68 @@ const held = item('held', 6_000, { state: 'sent', answerSummary: 'Approved' });
 const state = at(later, relay, held, loose, orchestrator, worker, item('done', 500, { state: 'answered' }), item('fyi', 700, { ui: 'info', state: 'info' }));
 
 describe('Approvals grouping', () => {
-  it('groups by Session in order of each group\'s oldest item, with "Not in a Session" last', () => {
-    const groups = groupBySession(approvalItems(state).map(entry => itemEntry(entry, 'mac')));
-    expect(groups.map(group => [group.label, group.entries.map(entry => entry.item.id)])).toEqual([
-      ['Spring launch', ['worker', 'later']],
-      ['Pane Fixes', ['orch', 'relay']],
-      [NOT_IN_A_SESSION, ['loose', 'held']],
-    ]);
-    expect(groups.map(group => group.machineKey)).toEqual(['mac', 'mac', undefined]);
+  it('Most recent: one flat group with no header, newest on top', () => {
+    const groups = groupApprovals(approvalItems(state).map(entry => itemEntry(entry, 'mac')), 'recent');
+    expect(groups.map(group => [group.label, group.entries.map(entry => entry.item.id)])).toEqual([['', ['held', 'relay', 'later', 'orch', 'worker', 'loose']]]);
+    expect(groupApprovals([], 'recent')).toEqual([]);
   });
 
-  it('keeps the same Session on two machines apart, and puts both machines\' loose items in one last group', () => {
-    const groups = groupBySession([
+  it('By Session: groups in order of each group\'s newest item, newest first inside, with no fixed place for any group', () => {
+    const groups = groupApprovals(approvalItems(state).map(entry => itemEntry(entry, 'mac')), 'session');
+    expect(groups.map(group => [group.label, group.entries.map(entry => entry.item.id)])).toEqual([
+      [NOT_IN_A_SESSION, ['held', 'loose']],
+      ['Pane Fixes', ['relay', 'orch']],
+      ['Spring launch', ['later', 'worker']],
+    ]);
+    expect(groups.map(group => group.machineKey)).toEqual([undefined, 'mac', 'mac']);
+  });
+
+  it('keeps the same Session on two machines apart, and puts both machines\' loose items in one group', () => {
+    const groups = groupApprovals([
       itemEntry(worker, 'studio'),
       itemEntry({ ...worker, id: 'w2', createdAt: 2_500 }, 'build'),
       itemEntry(loose, 'build'),
       itemEntry({ ...loose, id: 'l2', createdAt: 9_000 }, 'studio'),
+    ], 'session');
+    expect(groups.map(group => group.key)).toEqual(['none', 'build:sess-launch', 'studio:sess-launch']);
+    expect(groups[0]?.entries.map(entry => entry.machineKey)).toEqual(['studio', 'build']);
+  });
+
+  it('By project: groups in order of each group\'s newest item, one per project and machine, and "No project" for the rest', () => {
+    const inProject = (id: string, createdAt: number, project: string) => item(id, createdAt, { source: { name: 'x', agent: 'Claude', project } });
+    const groups = groupApprovals([
+      itemEntry(inProject('pane-old', 1, 'Pane'), 'mac'),
+      itemEntry(inProject('doozy', 2, 'Doozy'), 'mac'),
+      itemEntry(inProject('pane-new', 3, 'Pane'), 'mac'),
+      itemEntry(inProject('pane-there', 4, 'Pane'), 'studio'),
+      itemEntry(item('none', 5), 'studio'),
+      itemEntry(inProject('blank', 0, ''), 'mac'),
+    ], 'project');
+    expect(groups.map(group => [group.label, group.machineKey, group.entries.map(entry => entry.item.id)])).toEqual([
+      [NO_PROJECT, undefined, ['none', 'blank']],
+      ['Pane', 'studio', ['pane-there']],
+      ['Pane', 'mac', ['pane-new', 'pane-old']],
+      ['Doozy', 'mac', ['doozy']],
     ]);
-    expect(groups.map(group => group.key)).toEqual(['studio:sess-launch', 'build:sess-launch', 'none']);
-    expect(groups[2]?.entries.map(entry => entry.machineKey)).toEqual(['build', 'studio']);
+  });
+
+  it('files a permission request by the project it was given, like a question', () => {
+    const request = { key: 'p1', machineKey: 'mac', at: 9, waiting: true, project: 'Pane' };
+    expect(groupApprovals([request, itemEntry(item('q', 1), 'mac')], 'project').map(group => group.label)).toEqual(['Pane', NO_PROJECT]);
+  });
+
+  it('reads a saved sort, and Most recent from anything else', () => {
+    expect(parseApprovalSort('session')).toBe('session');
+    expect(parseApprovalSort('project')).toBe('project');
+    expect(parseApprovalSort('recent')).toBe('recent');
+    expect(parseApprovalSort('nonsense')).toBe('recent');
+    expect(parseApprovalSort('toString')).toBe('recent');
+    expect(parseApprovalSort(null)).toBe('recent');
+  });
+
+  it('names who asked and its Session, for a row with no group header above it', () => {
+    expect(askerLine('api-fix', launch)).toBe('api-fix in Spring launch');
+    expect(askerLine('api-fix')).toBe('api-fix');
   });
 
   it('lists open questions, fallbacks and answers held for Undo, never answered, expired or updates', () => {
@@ -115,29 +170,38 @@ describe('waiting counts on home', () => {
 });
 
 describe('the approval screen', () => {
-  const order = approvalOrder(state);
+  const order = approvalOrder(state, 'recent');
 
   it('steps through items in home\'s order and says "1 of N"', () => {
-    expect(order).toEqual(['worker', 'later', 'orch', 'relay', 'loose', 'held']);
-    expect(approvalPosition(order, 'worker')).toBe('1 of 6');
-    expect(approvalPosition(order, 'held')).toBe('6 of 6');
+    expect(order).toEqual(['held', 'relay', 'later', 'orch', 'worker', 'loose']);
+    expect(approvalPosition(order, 'held')).toBe('1 of 6');
+    expect(approvalPosition(order, 'loose')).toBe('6 of 6');
     expect(approvalPosition(order, 'gone')).toBeNull();
-    expect(nextApproval(order, 'worker')).toBe('later');
-    expect(nextApproval(order, 'held')).toBe('worker');
+    expect(nextApproval(order, 'held')).toBe('relay');
+    expect(nextApproval(order, 'loose')).toBe('held');
     expect(nextApproval(['only'], 'only')).toBeNull();
+  });
+
+  it('follows the sort home shows, group by group', () => {
+    const shown = (sort: ApprovalSort) => groupApprovals(approvalItems(state).map(entry => itemEntry(entry, 'mac')), sort).flatMap(group => group.entries.map(entry => entry.item.id));
+    for (const sort of ['recent', 'session', 'project'] as const) {
+      expect(approvalOrder(state, sort)).toEqual(shown(sort));
+      expect(approvalListOrder(state, 'waiting', 0, sort)).toEqual(shown(sort));
+    }
+    expect(approvalOrder(state, 'session')).toEqual(['held', 'loose', 'relay', 'orch', 'later', 'worker']);
   });
 
   it('moves to the next item when its item is answered elsewhere, then back home when none is left', () => {
     expect(resolveSelection(order, 'orch', order)).toEqual({ kind: 'show', id: 'orch' });
     const answeredOnDesktop = order.filter(id => id !== 'orch');
-    expect(resolveSelection(answeredOnDesktop, 'orch', order)).toEqual({ kind: 'move', id: 'relay' });
+    expect(resolveSelection(answeredOnDesktop, 'orch', order)).toEqual({ kind: 'move', id: 'worker' });
     // The last one goes: step back to the one before it.
     expect(resolveSelection(['worker'], 'held', ['worker', 'held'])).toEqual({ kind: 'move', id: 'worker' });
     expect(resolveSelection([], 'held', ['held'])).toEqual({ kind: 'home' });
   });
 
   it('opens an old alert\'s item on the first one waiting, or says nothing is', () => {
-    expect(resolveSelection(order, 'stale', [])).toEqual({ kind: 'move', id: 'worker' });
+    expect(resolveSelection(order, 'stale', [])).toEqual({ kind: 'move', id: 'held' });
     expect(resolveSelection([], 'stale', [])).toEqual({ kind: 'gone' });
   });
 
@@ -150,10 +214,8 @@ describe('the approval screen', () => {
     expect(approvalWorkspace(undefined)).toEqual({ kind: 'none' });
   });
 
-  it('shows a fallback read-only, naming the orchestrator it waits on', () => {
-    expect(relayLine(relay)).toBe('Waiting on the Pane Fixes orchestrator: api-fix asks “Which retry limit?”');
-    expect(relayLine(worker)).toBeNull();
-    expect(questionDetail(relay)).toBe('Waiting on the orchestrator: Question relay');
+  it('says what a row is: a sent answer, or the question, with no orchestrator line', () => {
+    expect(questionDetail(relay)).toBe('Question relay');
     expect(questionDetail(held)).toBe('Sent: Approved');
     expect(questionDetail(worker)).toBe('Question worker');
   });
@@ -232,5 +294,131 @@ describe('opening a related link (F-4, F-6)', () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(readPanels).not.toHaveBeenCalled();
     expect(outcome).toEqual({ kind: 'failed', message: expect.stringContaining('Pane couldn\'t open plan.md') });
+  });
+});
+
+describe('stale items (D-147)', () => {
+  const stale = item('stale', 100, { staleSince: 5_000 });
+  const withStale = at(stale, item('fresh', 200), item('stale-2', 50, { staleSince: 6_000 }));
+
+  it('leaves Waiting for its own group, oldest first, and leaves the counts', () => {
+    expect(isStale(stale)).toBe(true);
+    expect(isStale(item('fresh', 1))).toBe(false);
+    // Stale and then answered: it isn't waiting any more.
+    expect(isStale({ ...stale, state: 'answered' })).toBe(false);
+    expect(approvalItems(withStale).map(entry => entry.id)).toEqual(['fresh']);
+    expect(staleItems(withStale).map(entry => entry.id)).toEqual(['stale-2', 'stale']);
+    expect(staleItems(undefined)).toEqual([]);
+    expect(waitingCounts(approvalItems(withStale).map(entry => itemEntry(entry, 'mac'))).total).toBe(1);
+  });
+
+  it('steps through its own group on the approval screen, so "1 of N" never mixes the two', () => {
+    expect(approvalListOrder(withStale, 'waiting', 0, 'recent')).toEqual(['fresh']);
+    // Every sort leaves Stale oldest first.
+    expect(approvalListOrder(withStale, 'stale', 0, 'project')).toEqual(['stale-2', 'stale']);
+  });
+});
+
+describe('the Answered group', () => {
+  const now = 100 * 60 * 60 * 1000;
+  const hoursAgo = (hours: number) => now - hours * 60 * 60 * 1000;
+  const answered = item('answered', 1, { state: 'answered', resolvedAt: hoursAgo(2) });
+  const closed = item('closed', 2, { state: 'expired', resolvedAt: hoursAgo(1), closed: { by: 'autopilot', reason: 'stale', at: hoursAgo(1) } });
+  const old = item('old', 3, { state: 'answered', resolvedAt: hoursAgo(25) });
+  const state = at(answered, closed, old, item('open', 4), item('fyi', 5, { state: 'info' }));
+
+  it('lists the last 24 hours\' answered and closed items, newest first', () => {
+    expect(answeredItems(state, now).map(entry => entry.id)).toEqual(['closed', 'answered']);
+    expect(approvalListOrder(state, 'answered', now, 'recent')).toEqual(['closed', 'answered']);
+    expect(answeredItems(undefined, now)).toEqual([]);
+  });
+
+  it('sorts by when each was answered, asked earlier or not, and groups the same way', () => {
+    const inProject = (project: string) => ({ source: { name: 'x', agent: 'Claude', project } });
+    const late = item('asked-first', 1, { ...inProject('Pane'), state: 'answered', resolvedAt: hoursAgo(1) });
+    const early = item('asked-last', 9, { ...inProject('Doozy'), state: 'answered', resolvedAt: hoursAgo(3) });
+    const middle = item('asked-middle', 5, { ...inProject('Pane'), state: 'answered', resolvedAt: hoursAgo(2) });
+    const answeredState = at(early, late, middle);
+    expect(groupApprovals(answeredItems(answeredState, now).map(entry => itemEntry(entry, 'mac')), 'project').map(group => [group.label, group.entries.map(entry => entry.item.id)]))
+      .toEqual([['Pane', ['asked-first', 'asked-middle']], ['Doozy', ['asked-last']]]);
+    expect(approvalListOrder(answeredState, 'answered', now, 'recent')).toEqual(['asked-first', 'asked-middle', 'asked-last']);
+    expect(approvalListOrder(answeredState, 'answered', now, 'project')).toEqual(['asked-first', 'asked-middle', 'asked-last']);
+    expect(approvalListOrder(answeredState, 'answered', now, 'session')).toEqual(['asked-first', 'asked-middle', 'asked-last']);
+  });
+
+  it('reads a route\'s list, and anything else as Waiting', () => {
+    expect(parseApprovalList('stale')).toBe('stale');
+    expect(parseApprovalList('answered')).toBe('answered');
+    expect(parseApprovalList(undefined)).toBe('waiting');
+    expect(parseApprovalList('nonsense')).toBe('waiting');
+  });
+
+  it('shows its receipt before its question on the row', () => {
+    expect(questionDetail(closed)).toBe('Closed by Autopilot: stale · Question closed');
+    expect(questionDetail(item('byYou', 1, { state: 'answered', answerSummary: 'Approved' }))).toBe('Approved · Question byYou');
+  });
+
+  it('labels a card by what happened to it', () => {
+    expect(approvalKindLabel(item('open', 1))).toBe('Needs approval');
+    expect(approvalKindLabel(item('open', 1, { ui: 'ask' }))).toBe('Needs an answer');
+    expect(approvalKindLabel(answered)).toBe('Answered');
+    expect(approvalKindLabel(closed)).toBe('Closed');
+    expect(approvalKindLabel(item('ended', 1, { state: 'expired' }))).toBe('Ended');
+  });
+});
+
+describe('a card\'s receipts (J12, J14)', () => {
+  it('lists who acted, the recorded decision and any correction', () => {
+    const byAutopilot = item('a', 1, {
+      state: 'answered',
+      answeredBy: { by: 'autopilot', because: 'D-22' },
+      decision: 'D-147',
+      corrections: [{ summary: 'First', by: 'you', at: 1 }, { summary: 'Use 5', by: 'you', at: 2 }],
+    });
+    expect(receiptLines(byAutopilot)).toEqual(['Answered by Autopilot · because D-22', 'Recorded as D-147', 'Corrected by you: Use 5']);
+  });
+
+  it('shows a rewrite on its open card, and nothing on an ordinary one', () => {
+    expect(receiptLines(item('r', 1, { rewrittenFrom: { id: 'old', title: 'Q-9: unclear', qn: 'Q-9' } }))).toEqual(['Rewritten by Autopilot from Q-9']);
+    expect(receiptLines(item('plain', 1))).toEqual([]);
+  });
+});
+
+describe('an offline machine (J20)', () => {
+  it('says how many wait and when they come back', () => {
+    expect(machineOfflineLine('Mac mini', 4)).toBe('Mac mini offline · 4 waiting · they come back when Mac mini is online');
+  });
+});
+
+describe('what an opened item is connected to (J32)', () => {
+  const source = { name: 'api-fix', agent: 'Claude' };
+
+  it('shows the Session, with its machine, and opens it', () => {
+    const inSession = item('s', 1, { source, connected: { kind: 'session', id: 's1', name: 'Sales Skill', paneId: 'ws' } });
+    expect(connectedLink(inSession, 'Mac mini')).toEqual({ kind: 'session', text: 'Session · Sales Skill · Mac mini', target: { kind: 'session', sessionId: 's1' } });
+  });
+
+  it('shows a Pane outside a Session', () => {
+    const inPane = item('p', 1, { source, connected: { kind: 'pane', id: 'p1', name: 'api-fix' } });
+    expect(connectedLink(inPane, 'Mac mini')).toEqual({ kind: 'pane', text: 'Pane · api-fix · Mac mini', target: { kind: 'pane', paneId: 'p1' } });
+  });
+
+  it('shows Autopilot for its own item about no Session, and the Session for one about a Session', () => {
+    const own = item('a', 1, { source: { ...source, autopilot: true }, connected: { kind: 'autopilot', id: 'autopilot', name: 'Autopilot' } });
+    expect(connectedLink(own, 'Mac mini')).toEqual({ kind: 'autopilot', text: 'Autopilot · Mac mini', target: { kind: 'autopilot' } });
+    const about = item('b', 1, { source: { ...source, autopilot: true }, connected: { kind: 'session', id: 's2', name: 'Infra', paneId: 'ws2' } });
+    expect(connectedLink(about, 'Mac mini').target).toEqual({ kind: 'session', sessionId: 's2' });
+  });
+
+  it('names the machine by its saved name, never what the host calls itself, and opens nothing', () => {
+    const outside = item('m', 1, { source, connected: { kind: 'machine', id: 'local', name: 'tylers-mbp.lan' } });
+    expect(connectedLink(outside, 'MacBook')).toEqual({ kind: 'machine', text: 'MacBook', target: null });
+  });
+
+  it('works from the source on an older machine\'s item', () => {
+    expect(connectedLink(item('o', 1, { source: { ...source, session: { id: 's3', name: 'Launch', paneId: 'ws3' } } }), 'Mac mini').target).toEqual({ kind: 'session', sessionId: 's3' });
+    expect(connectedLink(item('o', 1, { source: { ...source, paneId: 'p3' } }), 'Mac mini')).toMatchObject({ kind: 'pane', text: 'Pane · api-fix · Mac mini', target: { kind: 'pane', paneId: 'p3' } });
+    expect(connectedLink(item('o', 1, { source: { ...source, autopilot: true } }), 'Mac mini').kind).toBe('autopilot');
+    expect(connectedLink(item('o', 1, { source }), 'Mac mini')).toEqual({ kind: 'machine', text: 'Mac mini', target: null });
   });
 });

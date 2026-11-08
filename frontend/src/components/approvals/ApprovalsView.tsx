@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { CircleCheck, CircleHelp, ExternalLink, FileText, GitBranch, Globe, Hourglass, Inbox, MessageSquare, MessagesSquare, Navigation, ShieldAlert } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLink, FileText, Folder, GitBranch, Globe, Inbox, Laptop, MessageSquare, MessagesSquare, Navigation, ShieldAlert, WifiOff } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
+import { receiptLine } from '../../../../shared/approvalReceipts';
 import { cn } from '../../utils/cn';
 import { runNotify, useNotifyStore } from '../../stores/notifyStore';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -12,11 +13,13 @@ import { usePanelStore } from '../../stores/panelStore';
 import { showActionError } from '../../stores/errorStore';
 import { openOnMachine } from '../../utils/machineRowActions';
 import { MachineMark } from '../machines/MachineMark';
+import { Dropdown } from '../ui/Dropdown';
 import { NotifyCard } from '../notify/NotifyCard';
-import { relativeAge } from '../notify/notifyFormat';
+import { relativeAge, withMachineLabels } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import { SessionBeside } from '../PaneChatView';
-import { besideOf, groupApprovals, type ApprovalGroup, type ApprovalsTab, type Beside } from './approvalGroups';
+import { APPROVALS_SORTS, approvalRowLines, besideOf, connectedOf, groupApprovals, offlineRowText, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
+import { MachineContext } from './MachineContext';
 
 /**
  * Links open as tabs through this computer's Pane, so only for this computer's items while the
@@ -26,7 +29,6 @@ const linksOpenHere = (item: NotifyItem, activeMachineId: string) => (item.machi
 
 function ItemIcon({ item }: { item: NotifyItem }) {
   const className = 'mt-0.5 h-4 w-4 shrink-0';
-  if (item.relay) return <Hourglass className={cn(className, 'text-status-warning')} aria-hidden="true" />;
   if (item.source.autopilot) return <Navigation className={cn(className, 'text-autopilot')} aria-hidden="true" />;
   if (item.agentPrompt) return <ShieldAlert className={cn(className, 'text-status-warning')} aria-hidden="true" />;
   if (item.ui === 'approve') return <CircleCheck className={cn(className, 'text-status-warning')} aria-hidden="true" />;
@@ -43,7 +45,7 @@ function useMachineMark() {
 }
 
 function GroupHeader({ group, mark }: { group: ApprovalGroup; mark: ReactNode }) {
-  const Icon = group.autopilot ? Navigation : group.session ? MessageSquare : GitBranch;
+  const Icon = group.autopilot ? Navigation : group.project ? Folder : group.session ? MessageSquare : GitBranch;
   return (
     <div className={cn('flex items-center gap-2 px-4 pb-1.5 pt-4 text-[12.5px] font-medium', group.autopilot ? 'text-autopilot-on-tint' : 'text-text-secondary')} data-testid="approvals-group">
       <Icon className={cn('h-3.5 w-3.5 shrink-0', group.autopilot ? 'text-autopilot' : 'text-text-tertiary')} aria-hidden="true" />
@@ -60,11 +62,13 @@ function GroupHeader({ group, mark }: { group: ApprovalGroup; mark: ReactNode })
 
 function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; now: number; selected?: boolean; onSelect: () => void }) {
   const done = item.state === 'answered' || item.state === 'expired' || item.state === 'info';
+  const { acted, origin } = approvalRowLines(item);
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-current={selected || undefined}
+      data-approval-selected={selected || undefined}
       data-testid="approvals-row"
       className={cn(
         'flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle',
@@ -74,10 +78,10 @@ function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; 
     >
       {done ? <CircleCheck className="mt-0.5 h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" /> : <ItemIcon item={item} />}
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-medium text-text-primary">{item.title}</span>
+        <span className="block truncate text-[13.5px] font-medium text-text-primary">{item.relay?.question ?? item.title}</span>
+        {acted && <span className="block truncate text-[12px] text-text-tertiary" data-testid="approvals-row-receipt">{acted}</span>}
         <span className="block truncate text-[12px] text-text-tertiary">
-          {item.state === 'expired' ? 'Expired · ' : item.state === 'info' ? 'Update · ' : item.answerSummary ? `→ ${item.answerSummary} · ` : ''}
-          {item.relay ? `${item.relay.worker} asks the orchestrator` : item.source.autopilot ? 'written by Autopilot' : `${item.source.agent} · ${item.source.name}`}
+          {origin}
           {item.unreachable ? ` · ${item.machine ?? 'its machine'} can't be reached` : ''}
         </span>
       </span>
@@ -124,30 +128,47 @@ function RelatedLinks({ item, paneId }: { item: NotifyItem; paneId?: string }) {
   );
 }
 
-/** A worker's question its orchestrator hasn't picked up: read-only, answered in the orchestrator's tab. */
-function RelayCard({ item, paneId }: { item: NotifyItem; paneId?: string }) {
+/** The Session (or Pane, or Autopilot) the item belongs to: its name and machine, opening it on click. A bare name takes no action. */
+function ConnectedRow({ item, onOpen }: { item: NotifyItem; onOpen: () => void }) {
+  const connected = connectedOf(item);
+  const Icon = connected.kind === 'session' ? MessageSquare : connected.kind === 'pane' ? GitBranch : connected.kind === 'autopilot' ? Navigation : Laptop;
+  const chip = 'inline-flex max-w-full items-center gap-1.5 rounded-lg bg-surface-tertiary px-2 py-1 text-[12.5px] text-text-primary';
+  const label = (
+    <>
+      <Icon className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
+      {/* Asked outside Pane: the header already names the asker, so the chip names its machine, as the picker does. */}
+      <span className="truncate">{connected.kind === 'machine' ? item.machine ?? 'This computer' : `${connected.name}${item.machine ? ` · ${item.machine}` : ''}`}</span>
+    </>
+  );
   return (
-    <div className="rounded-[18px] bg-surface-primary p-3.5 shadow-card ring-1 ring-status-warning" data-testid="approvals-relay">
-      <div className="text-[12px] text-text-tertiary">
-        {item.source.session
-          ? <>Waiting on the {item.source.session.name} orchestrator: <b className="font-medium text-text-secondary">{item.relay?.worker}</b> asks</>
-          : <>Its Session is closed: <b className="font-medium text-text-secondary">{item.relay?.worker}</b> asks</>}
-      </div>
-      <div className="mt-1 text-[14px] font-semibold text-text-primary">{item.relay?.question ?? item.title}</div>
-      <div className="mt-1.5 text-[12.5px] text-text-tertiary">
-        {item.source.session
-          ? <>Its orchestrator hasn&rsquo;t picked this up. Answer in the orchestrator&rsquo;s tab on the right.</>
-          : <>Nobody picked this up. Answer in {item.relay?.worker}&rsquo;s tab on the right.</>}
-      </div>
-      <div className="-mx-3.5 -mb-3.5 mt-3"><RelatedLinks item={item} paneId={paneId} /></div>
+    <div className="px-3.5 pb-2 pt-2" data-testid="approvals-connected" data-connected={connected.kind}>
+      {connected.kind === 'machine'
+        ? <span className={chip}>{label}</span>
+        : <button type="button" onClick={onOpen} title={`Open ${connected.name}`} className={cn(chip, 'hover:bg-surface-hover')}>{label}</button>}
     </div>
   );
 }
 
-function SelectedItem({ item, beside, mark, onOpenInPane }: { item: NotifyItem; beside: Beside; mark: ReactNode; onOpenInPane?: () => void }) {
+function SelectedItem({ item, beside, mark, onOpenInPane, onOpenConnected }: { item: NotifyItem; beside: Beside; mark: ReactNode; onOpenInPane: () => void; onOpenConnected: () => void }) {
   const linkPane = beside.kind === 'session' || beside.kind === 'pane' ? beside.paneId : undefined;
-  if (item.relay) return <RelayCard item={item} paneId={linkPane} />;
-  const view = item.state === 'waiting' ? 'question' : item.state === 'sent' ? 'sent' : item.state === 'expired' ? 'expired' : null;
+  const related = (
+    <>
+      <ConnectedRow item={item} onOpen={onOpenConnected} />
+      <RelatedLinks item={item} paneId={linkPane} />
+    </>
+  );
+  if (item.relay) {
+    // A mirror from an older machine: it shows, but takes no answer here.
+    return (
+      <div className="rounded-[18px] bg-surface-primary shadow-card ring-1 ring-border-secondary" data-testid="approvals-read-only">
+        <div className="px-3.5 pt-3 text-[12px] font-medium text-text-secondary">{item.relay.worker}{item.machine ? ` · ${item.machine}` : ''}</div>
+        <div className="px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-primary">{item.relay.question}</div>
+        <div className="px-3.5 pt-0.5 text-[13px] text-text-tertiary">{relayReadOnlyLine(item)}</div>
+        {related}
+      </div>
+    );
+  }
+  const view = item.state === 'waiting' ? 'question' : item.state === 'sent' ? 'sent' : item.state === 'expired' ? 'expired' : item.state === 'answered' ? 'answered' : null;
   if (!view) return null;
   return (
     <div className="[&_[data-notify-view=sent]]:w-full [&_[data-notify-view=sent]]:min-w-0">
@@ -158,14 +179,42 @@ function SelectedItem({ item, beside, mark, onOpenInPane }: { item: NotifyItem; 
         menuPlacement="below"
         onCommand={runNotify}
         machineMark={mark}
-        related={<RelatedLinks item={item} paneId={linkPane} />}
+        related={related}
         onOpenInPane={onOpenInPane}
       />
+      {/* The Undo line has no room for it, and the item is still connected to its Session. */}
+      {view === 'sent' && related}
+    </div>
+  );
+}
+
+function OfflineMachineRow({ row }: { row: OfflineRow }) {
+  return (
+    <div className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-text-tertiary" data-testid="approvals-offline-row">
+      <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span className="min-w-0">{offlineRowText(row)}</span>
     </div>
   );
 }
 
 function BesideHeader({ beside, mark, onOpen }: { beside: Beside; mark: ReactNode; onOpen?: () => void }) {
+  if (beside.kind === 'machine') {
+    const { connected, machine } = beside;
+    return (
+      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border-primary px-4 text-[13px]" data-testid="approvals-machine-header">
+        {connected.kind === 'session' ? <MessageSquare className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" /> : connected.kind === 'pane' ? <GitBranch className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" /> : null}
+        {connected.kind === 'session' && <span className="text-text-tertiary">Session</span>}
+        {connected.kind === 'pane' && <span className="text-text-tertiary">Pane</span>}
+        <span className="min-w-0 truncate font-semibold text-text-primary">{connected.name}</span>
+        <span className="inline-flex shrink-0 items-center gap-1 text-text-tertiary">{mark}{machine}</span>
+        {onOpen && (
+          <button type="button" onClick={onOpen} className="ml-auto inline-flex shrink-0 items-center gap-1 text-text-tertiary hover:text-text-primary">
+            Open on {machine} <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        )}
+      </div>
+    );
+  }
   if (beside.kind !== 'session' && beside.kind !== 'pane') return null;
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border-primary px-4 text-[13px]">
@@ -182,9 +231,23 @@ function BesideHeader({ beside, mark, onOpen }: { beside: Beside; mark: ReactNod
   );
 }
 
+/** Makes another machine the one the app is on, with nothing to open there; says so when it can't. */
+async function switchToMachine(machineId: string, name: string): Promise<boolean> {
+  const { switchMachine } = useAllMachinesStore.getState();
+  if (!switchMachine) return false;
+  try {
+    const outcome = await switchMachine(machineId);
+    if (outcome.ok) return true;
+    showActionError(`Could not open ${name}`, outcome.needsPassword ? `${name} needs its password. Enter it in Remote Access settings, then try again.` : outcome.error);
+  } catch (error) {
+    showActionError(`Could not open ${name}`, error);
+  }
+  return false;
+}
+
 /**
- * Approvals: what waits on you, grouped by Session, beside the selected item's live Session or
- * Pane. `paneView` is the active Pane's own shell (SessionView's), shown for a Pane's item.
+ * Approvals: what waits on you, newest first or in groups, beside the selected item's live Session
+ * or Pane. `paneView` is the active Pane's own shell (SessionView's), shown for a Pane's item.
  */
 export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const snapshot = useNotifyStore((state) => state.snapshot);
@@ -195,11 +258,60 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const activeMachineId = useAllMachinesStore((state) => state.entries.find((entry) => entry.active)?.id ?? LOCAL_MACHINE_ID);
   const machineMark = useMachineMark();
   const now = useNow();
-  const items = useMemo(() => snapshot?.items ?? [], [snapshot]);
-  const { waiting, answered, groups } = useMemo(() => groupApprovals(items, tab), [items, tab]);
-  const shown = groups.flatMap((group) => group.items);
+  const machines = useAllMachinesStore((state) => state.entries);
+  const items = useMemo(() => withMachineLabels(snapshot?.items ?? [], machines), [snapshot, machines]);
+  const [sort, setSort] = useState<ApprovalsSort>(() => readApprovalsSort());
+  const { waiting, answered, list, groups, stale, offline } = useMemo(() => groupApprovals(items, tab, sort), [items, tab, sort]);
+  const [staleExpanded, setStaleExpanded] = useState(false);
+  // An item opened from elsewhere (a link, the strip) shows even when its group is collapsed.
+  const staleOpen = staleExpanded || stale.some((item) => item.id === selectedId);
+  const shown = [...list, ...(staleOpen ? stale : [])];
   // The selection follows its item into its Undo hold; once it leaves the tab, the first item takes over.
   const selected = shown.find((item) => item.id === selectedId) ?? (tab === 'waiting' ? shown[0] : undefined);
+  // That first item is then the selection, so a newer item arriving on top doesn't take over from it.
+  const firstToPin = selected && selected.id !== selectedId ? selected.id : undefined;
+  useEffect(() => {
+    if (firstToPin) selectApproval(firstToPin);
+  }, [firstToPin, selectApproval]);
+
+  // An item arriving above the selected row pushes it down: scroll by as much, so it stays where the
+  // person is reading it. Changing the tab, the sort or the selection moves it on purpose.
+  const listRef = useRef<HTMLDivElement>(null);
+  const listSpacerRef = useRef<HTMLDivElement>(null);
+  const lastSelected = useRef<{ id: string; tab: ApprovalsTab; sort: ApprovalsSort; offset: number; rounding: number } | null>(null);
+  const selectedRowId = selected?.id;
+  useLayoutEffect(() => {
+    const listElement = listRef.current;
+    const row = listElement?.querySelector('[data-approval-selected]');
+    if (!listElement || !row || !selectedRowId) {
+      lastSelected.current = null;
+      return;
+    }
+    // From the top of the content, so the person's own scrolling doesn't count as a move.
+    const offset = row.getBoundingClientRect().top - listElement.getBoundingClientRect().top + listElement.scrollTop;
+    const last = lastSelected.current;
+    let rounding = 0;
+    const spacer = listSpacerRef.current;
+    if (!last || last.id !== selectedRowId || last.tab !== tab || last.sort !== sort) {
+      if (spacer) spacer.style.height = '0px';
+    } else {
+      rounding = last.rounding;
+      if (offset !== last.offset) {
+        // The browser rounds scrollTop: carry what it dropped, or arrivals add up to a visible drift.
+        const wanted = listElement.scrollTop + rounding + offset - last.offset;
+        // A list too short to scroll that far gets the room, so the row holds still there too (D-176).
+        if (spacer) {
+          // Measured from the content's end: on a list shorter than the viewport, scrollHeight hides the empty space.
+          const content = spacer.getBoundingClientRect().top - listElement.getBoundingClientRect().top + listElement.scrollTop;
+          spacer.style.height = `${Math.max(spacer.offsetHeight, Math.ceil(wanted + listElement.clientHeight - content))}px`;
+        }
+        listElement.scrollTop = wanted;
+        rounding = wanted - listElement.scrollTop;
+      }
+    }
+    lastSelected.current = { id: selectedRowId, tab, sort, offset, rounding };
+  });
+
   const beside: Beside = selected ? besideOf(selected, activeMachineId) : { kind: 'none' };
   const besidePaneId = beside.kind === 'pane' ? beside.paneId : undefined;
   const besidePanelId = beside.kind === 'pane' ? beside.panelId : undefined;
@@ -207,7 +319,8 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   // or for a fallback item the Session's current orchestrator tab), not the last tab opened there.
   const orchestratorPanelId = useOrchestrationSessionStore((state) => {
     if (beside.kind !== 'session' || !selected) return undefined;
-    if (!selected.relay && selected.source.panelId) return selected.source.panelId;
+    // Autopilot's item about a Session asks from Autopilot's own tab, not one of the Session's.
+    if (!selected.relay && !selected.source.autopilot && selected.source.panelId) return selected.source.panelId;
     const record = state.sessions.find((session) => session.id === beside.sessionId);
     return record ? record.panelIds[record.agent] : undefined;
   });
@@ -231,11 +344,24 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   }, [sessionPaneId, orchestratorPanelId, shownItemId]);
 
   const navigateToAutopilot = useNavigationStore((state) => state.navigateToAutopilot);
+  const openConnected = (item: NotifyItem) => {
+    const connected = connectedOf(item);
+    const machineId = item.machineId ?? activeMachineId;
+    if (connected.kind === 'session' || connected.kind === 'pane') {
+      void openOnMachine(machineId, { kind: connected.kind, id: connected.id, name: connected.name });
+    } else if (connected.kind === 'autopilot') {
+      if (machineId === activeMachineId) navigateToAutopilot();
+      else void switchToMachine(machineId, item.machine ?? 'that machine').then((ok) => { if (ok) navigateToAutopilot(); });
+    } else if (machineId !== activeMachineId) {
+      void switchToMachine(machineId, item.machine ?? 'that machine');
+    }
+  };
   const openInPane = (item: NotifyItem, target: Beside) => {
     if (target.kind === 'autopilot') { navigateToAutopilot(); return; }
     const machineId = item.machineId ?? activeMachineId;
     if (target.kind === 'session') void openOnMachine(machineId, { kind: 'session', id: target.sessionId, name: target.name });
     else if (target.kind === 'pane') void openOnMachine(machineId, { kind: 'pane', id: target.paneId, name: target.name });
+    else if (target.kind === 'machine') openConnected(item);
   };
 
   const tabButton = (id: ApprovalsTab, label: string, count: number) => (
@@ -250,7 +376,33 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
     </button>
   );
 
+  const renderItem = (item: NotifyItem) => (
+    item.id === selected?.id && item.state !== 'info'
+      ? (
+        <div key={item.id} className="px-1 pb-2" data-approval-selected data-testid="approvals-selected">
+          <SelectedItem
+            item={item}
+            beside={beside}
+            mark={machineMark(item.machineId, item.unreachable)}
+            onOpenInPane={() => openInPane(item, beside)}
+            onOpenConnected={() => openConnected(item)}
+          />
+        </div>
+      )
+      : <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} onSelect={() => selectApproval(item.id)} />
+  );
+  const chooseSort = (next: ApprovalsSort) => {
+    setSort(next);
+    saveApprovalsSort(next);
+  };
+  const toggleStale = () => {
+    // Collapsing lets go of an item in it, or it would hold the group open.
+    if (staleOpen && stale.some((item) => item.id === selectedId)) selectApproval(null);
+    setStaleExpanded(!staleOpen);
+  };
+
   const enabled = snapshot?.settings.enabled ?? true;
+  const importError = snapshot?.importError;
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary min-[1100px]:flex-row" data-testid="notify-inbox">
       <section
@@ -265,26 +417,67 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             {tabButton('answered', 'Answered', answered)}
           </div>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-          {shown.length === 0 && (
+        {importError && (
+          <p className="shrink-0 truncate px-4 pb-1.5 text-[12px] text-status-warning" role="status" title={`${importError.message} ${importError.next}`} data-testid="approvals-import-error">
+            {importError.message} {importError.next}
+          </p>
+        )}
+        <div className="shrink-0 px-4 pb-1">
+          <Dropdown
+            className="inline-block"
+            trigger={
+              <button
+                type="button"
+                aria-label={`Sort approvals: ${APPROVALS_SORTS.find((option) => option.id === sort)?.label}`}
+                className="inline-flex items-center gap-1 rounded text-[12.5px] text-text-tertiary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+                data-testid="approvals-sort"
+              >
+                {APPROVALS_SORTS.find((option) => option.id === sort)?.label}
+                <ChevronDown className="h-3 w-3" aria-hidden="true" />
+              </button>
+            }
+            items={APPROVALS_SORTS.map((option) => ({ id: option.id, label: option.label, onClick: () => chooseSort(option.id) }))}
+            selectedId={sort}
+            selectedMark="check"
+            menuLabel="Sort approvals"
+            position="bottom-left"
+            width="sm"
+          />
+        </div>
+        {/* The browser's own scroll anchoring would add to the compensation above. */}
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 [overflow-anchor:none]">
+          {shown.length === 0 && stale.length === 0 && offline.length === 0 && (
             <p className="px-3 pt-6 text-[13px] text-text-tertiary" data-testid="notify-empty">
               {!enabled ? 'Approvals are off. Turn them on in Settings → Approvals.' : tab === 'waiting' ? 'Nothing is waiting on you.' : 'Nothing answered yet today.'}
             </p>
           )}
-          {groups.map((group) => (
-            <div key={group.key}>
-              <GroupHeader group={group} mark={machineMark(group.machineId)} />
-              {group.items.map((item) => (
-                item.id === selected?.id && item.state !== 'answered' && item.state !== 'info'
-                  ? (
-                    <div key={item.id} className="px-1 pb-2" data-testid="approvals-selected">
-                      <SelectedItem item={item} beside={beside} mark={machineMark(item.machineId, item.unreachable)} onOpenInPane={() => openInPane(item, beside)} />
-                    </div>
-                  )
-                  : <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} onSelect={() => selectApproval(item.id)} />
-              ))}
+          {groups.length > 0
+            ? groups.map((group) => (
+              <div key={group.key}>
+                <GroupHeader group={group} mark={machineMark(group.machineId)} />
+                {group.items.map(renderItem)}
+              </div>
+            ))
+            : list.map(renderItem)}
+          {offline.map((row) => <OfflineMachineRow key={row.machineId} row={row} />)}
+          {stale.length > 0 && (
+            <div data-testid="approvals-stale">
+              <button
+                type="button"
+                aria-expanded={staleOpen}
+                onClick={toggleStale}
+                className="flex w-full items-center gap-2 px-4 pb-1.5 pt-4 text-left text-[12.5px] font-medium text-text-secondary hover:text-text-primary"
+              >
+                {/* Fixed box: the chevron turns, nothing around it moves. */}
+                <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
+                  <ChevronRight className={cn('h-3.5 w-3.5 text-text-tertiary', staleOpen && 'rotate-90')} />
+                </span>
+                Stale · {stale.length}
+              </button>
+              {staleOpen && stale.map(renderItem)}
             </div>
-          ))}
+          )}
+          <div ref={listSpacerRef} aria-hidden="true" />
         </div>
       </section>
 
@@ -296,18 +489,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         />
         {beside.kind === 'session' && <SessionBeside key={beside.sessionId} sessionId={beside.sessionId} />}
         {beside.kind === 'pane' && (activePaneId === beside.paneId ? paneView : null)}
-        {beside.kind === 'machine' && (
-          <div className="m-auto max-w-sm text-center text-[13px] text-text-secondary" data-testid="approvals-elsewhere">
-            <p>This item&rsquo;s Session runs on {beside.machine}.</p>
-            <button
-              type="button"
-              onClick={() => selected && openInPane(selected, besideOf(selected, selected.machineId ?? LOCAL_MACHINE_ID))}
-              className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-interactive px-3 font-medium text-text-on-interactive hover:bg-interactive-hover"
-            >
-              Open on {beside.machine}
-            </button>
-          </div>
-        )}
+        {beside.kind === 'machine' && selected && <MachineContext key={selected.id} item={selected} machine={beside.machine} connectedName={beside.connected.name} />}
         {beside.kind === 'autopilot' && (
           <div className="m-auto max-w-sm text-center text-[13px] text-text-secondary" data-testid="approvals-autopilot">
             <p>Autopilot asks you this. Open Autopilot to see it in its chat, with any documents it wrote for it.</p>
@@ -320,7 +502,9 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         {beside.kind === 'none' && (
           <div className="m-auto flex flex-col items-center gap-2 text-[13px] text-text-tertiary">
             <Inbox className="h-5 w-5" aria-hidden="true" />
-            {selected ? `Asked from ${selected.source.name}, outside Pane.` : 'Select an approval to see its Session here.'}
+            {!selected ? 'Select an approval to see its Session here.'
+              : selected.closed ? receiptLine(selected)
+                : `Asked from ${beside.kind === 'none' && beside.name ? beside.name : selected.source.name}, outside Pane.`}
           </div>
         )}
       </section>

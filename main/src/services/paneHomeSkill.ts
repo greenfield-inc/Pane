@@ -333,9 +333,10 @@ Who asks depends on your role:
   or a parent status file) doesn't call \`notify\`. Run
   \`runpane report --state blocked --question "<question>"\` (with
   \`--summary-file <status file>\` when you keep one, after writing the
-  question there); your orchestrator asks the person for you and sends you the answer. If it
-  doesn't pick the question up within 10 minutes, Pane shows it in Approvals
-  by itself.
+  question there). It shows at once in Approvals with an answer box, and it rings when
+  your orchestrator relays it or after 10 minutes. The answer reaches this tab as
+  \`answer: Q-n → <answer> (by you)\`; \`closed: Q-n (by you)\` and
+  \`correction: Q-n → <answer> (by you)\` are the person's word too.
 - **A Session orchestrator** (\`PANE_ORCHESTRATION_SESSION_ID\` is set) keeps
   each item that waits on the person posted once, as a background
   \`runpane notify ... --links '<files>' --json\` titled with its Q-n, and

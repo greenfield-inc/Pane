@@ -29,6 +29,7 @@ export const MACHINE_READ_CHANNELS = [
   'orchestration-sessions:runtimes',
   'permission:getPending',
   'notify:remote-snapshot',
+  'autopilot:read-doc',
   'panels:agent-statuses',
   'projects:get-all',
   'projects:list-branches',

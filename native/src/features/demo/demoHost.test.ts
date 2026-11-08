@@ -90,6 +90,22 @@ describe('demo host', () => {
     client.disconnect();
   });
 
+  it('closes a question for you and reopens it', async () => {
+    const { client } = connectDemo();
+    await connected(client);
+    const snapshot = await invokeChannel<NotifySharedState>(client, 'notify:remote-snapshot');
+    const question = snapshot.items.find(item => item.state === 'waiting');
+    if (!question) throw new Error('The demo has no waiting question');
+    await invokeChannel(client, 'notify:remote-command', [{ type: 'close', id: question.id }]);
+    const closed = await invokeChannel<NotifySharedState>(client, 'notify:remote-snapshot');
+    expect(closed.items.find(item => item.id === question.id)).toMatchObject({ state: 'expired', closed: { by: 'you' } });
+    await invokeChannel(client, 'notify:remote-command', [{ type: 'reopen', id: question.id }]);
+    const reopened = await invokeChannel<NotifySharedState>(client, 'notify:remote-snapshot');
+    expect(reopened.items.find(item => item.id === question.id)?.state).toBe('waiting');
+    expect(reopened.items.find(item => item.id === question.id)?.closed).toBeUndefined();
+    client.disconnect();
+  });
+
   it('creates a Pane that later reads list, with a terminal to open', async () => {
     const { client } = connectDemo();
     await connected(client);

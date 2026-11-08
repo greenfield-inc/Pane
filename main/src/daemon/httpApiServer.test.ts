@@ -277,7 +277,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1500): Promise<void
 }
 
 describe('PaneRemoteHttpApiServer', () => {
-  it.each(['mobile:push-status', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke', 'credentials:shared:get', 'credentials:shared:apply'])(
+  it.each(['mobile:push-status', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke', 'credentials:shared:get', 'credentials:shared:apply', 'notify:switch:get', 'notify:switch:apply'])(
     'uses the authenticated client for %s even when extra arguments forge an identity', async channel => {
       const registry = new PaneCommandRegistry();
       const handler = vi.fn(async () => ({ ok: true }));
@@ -348,6 +348,23 @@ describe('PaneRemoteHttpApiServer', () => {
       await server.start();
 
       await expect(requestJson(server, 'POST', '/invoke', { channel, args: [{}] })).resolves.toMatchObject({ statusCode: 403, body: { ok: false } });
+      expect(handler).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['notify:switch:get', 'notify:switch:apply'])(
+    'refuses %s when the host does not require pairing, without telling the client its connection was rejected', async channel => {
+      const registry = new PaneCommandRegistry();
+      const handler = vi.fn(async () => ({}));
+      registry.register(channel, handler);
+      const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig({ pairingRequired: false })));
+      activeServers.push(server);
+      await server.start();
+
+      await expect(requestJson(server, 'POST', '/invoke', { channel, args: [{}] })).resolves.toMatchObject({
+        statusCode: 409,
+        body: { ok: false, error: { code: 'ERR_NOTIFY_SWITCH_PAIRING_REQUIRED', next: expect.any(String) } },
+      });
       expect(handler).not.toHaveBeenCalled();
     },
   );
@@ -1181,6 +1198,29 @@ describe('workspace identity mode', () => {
       const refused = await requestJson(server, 'POST', invokePath, request, undefined, as(teammate));
       expect(refused.statusCode).toBe(403);
       expect(refused.body).toMatchObject({ error: { code: 'ERR_SHARED_CREDENTIALS_OWNER_REQUIRED' } });
+      expect(handler).not.toHaveBeenCalled();
+
+      const allowed = await requestJson(server, 'POST', invokePath, request, undefined, as(owner.toUpperCase()));
+      expect(allowed).toEqual({ statusCode: 200, body: { ok: true, result: {} } });
+      expect(handler).toHaveBeenCalledWith({}, { clientId: `tailnet:${owner}` });
+    },
+  );
+
+  it.each(['notify:switch:get', 'notify:switch:apply'])(
+    'lets only the owner read or set the Approvals switch over %s, even when teammates can connect', async (channel) => {
+      const registry = new PaneCommandRegistry();
+      const handler = vi.fn(async () => ({}));
+      registry.register(channel, handler);
+      const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(), {
+        workspace: { listenPort: 0, pathSecret: 'serve-secret', access: () => ownerOnly({ visibility: 'tailnet' }) },
+      });
+      activeServers.push(server);
+      await server.start();
+      const request = { channel, args: [{}, { clientId: 'forged' }] };
+
+      const refused = await requestJson(server, 'POST', invokePath, request, undefined, as(teammate));
+      expect(refused.statusCode).toBe(409);
+      expect(refused.body).toMatchObject({ error: { code: 'ERR_NOTIFY_SWITCH_OWNER_REQUIRED', next: expect.any(String) } });
       expect(handler).not.toHaveBeenCalled();
 
       const allowed = await requestJson(server, 'POST', invokePath, request, undefined, as(owner.toUpperCase()));

@@ -1148,6 +1148,66 @@ test('destructive pane actions return a review link, and folder actions pass the
   }
 });
 
+test('the autopilot toolset answers, closes and rewrites, and notify and inbox_ack carry their new inputs', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:autopilot:answer': { ok: true, id: 'n-1', machine: 'Mac mini' },
+      'runpane:autopilot:close': { ok: true, id: 'n-2' },
+      'runpane:autopilot:rewrite': { ok: true, id: 'n-9' },
+      'runpane:notify': { answer: 'Yes' },
+      'runpane:inbox:ack': { ok: true, acknowledged: ['in-1'], unknown: [] },
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
+        const answer = byName.get('autopilot_answer');
+        assert.equal(answer.annotations.destructiveHint, true);
+        assert.deepEqual(Object.keys(answer.inputSchema.properties).sort(), ['approve', 'because', 'choice', 'deny', 'id', 'note', 'paneDir', 'text']);
+        assert.deepEqual(answer.inputSchema.required.sort(), ['because', 'id']);
+        assert.deepEqual(byName.get('autopilot_close').inputSchema.required.sort(), ['id', 'reason']);
+        const rewrite = byName.get('autopilot_rewrite');
+        assert.deepEqual(rewrite.inputSchema.required.sort(), ['id', 'title', 'ui']);
+        assert.deepEqual(rewrite.inputSchema.properties.ui.enum, ['options', 'approve', 'ask']);
+        assert.deepEqual(Object.keys(rewrite.inputSchema.properties).sort(), ['choices', 'context', 'id', 'links', 'paneDir', 'suggestions', 'title', 'ui']);
+
+        const calls = [
+          ['autopilot_answer', { id: 'n-1', choice: 'Yes', because: 'D-22', paneDir }],
+          ['autopilot_close', { id: 'n-2', reason: 'The PR merged', paneDir }],
+          ['autopilot_rewrite', { id: 'n-3', ui: 'options', title: 'Which?', choices: [{ label: 'A' }], paneDir }],
+        ];
+        for (const [name, args] of calls) {
+          const result = await client.callTool({ name, arguments: args });
+          assert.notEqual(result.isError, true, result.content[0].text);
+          assertMatchesAdvertisedSchema(byName.get(name), result.structuredContent);
+        }
+      }, { args: ['--toolsets', 'autopilot'] });
+      await withMcpClient(async (client) => {
+        const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
+        assert.ok(byName.get('notify').inputSchema.properties.relays);
+        assert.ok(byName.get('notify').inputSchema.properties.aboutSession);
+        const relayed = await client.callTool({ name: 'notify', arguments: { relays: 'in-1', aboutSession: 'Release', ui: 'ask', title: 'Q-39: Run it?', paneDir } });
+        assert.notEqual(relayed.isError, true, relayed.content[0].text);
+        assert.deepEqual(byName.get('inbox_ack').inputSchema.properties.itemIds.type, 'array');
+        const acked = await client.callTool({ name: 'inbox_ack', arguments: { itemIds: ['in-1', 'in-2'], decision: 'D-147', paneDir } });
+        assert.notEqual(acked.isError, true, acked.content[0].text);
+        assertMatchesAdvertisedSchema(byName.get('inbox_ack'), acked.structuredContent);
+      }, { args: ['--toolsets', 'all'] });
+      const sent = requests.map(({ channel, args }) => ({ channel, args }));
+      assert.deepEqual(sent.slice(0, 3), [
+        { channel: 'runpane:autopilot:answer', args: [{ id: 'n-1', answer: { choice: 'Yes' }, because: 'D-22' }] },
+        { channel: 'runpane:autopilot:close', args: [{ id: 'n-2', reason: 'The PR merged' }] },
+        { channel: 'runpane:autopilot:rewrite', args: [{ id: 'n-3', ui: 'options', title: 'Which?', choices: [{ label: 'A' }] }] },
+      ]);
+      assert.equal(sent[3].channel, 'runpane:notify');
+      assert.equal(sent[3].args[0].relays, 'in-1');
+      assert.equal(sent[3].args[0].aboutSession, 'Release');
+      assert.deepEqual(sent[4], { channel: 'runpane:inbox:ack', args: [{ ids: ['in-1', 'in-2'], decision: 'D-147' }] });
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('the autopilot toolset serves Autopilot\'s reads and stack push, whose results match their schemas', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   const entry = { id: 'e-1', ref: { kind: 'item', notifyId: 'n-1' }, title: 'Ship it?', tabs: [{ kind: 'item', label: 'Approval', notifyId: 'n-1' }], addedAt: 1 };
@@ -1161,7 +1221,7 @@ test('the autopilot toolset serves Autopilot\'s reads and stack push, whose resu
     }, async (requests) => {
       await withMcpClient(async (client) => {
         const tools = (await client.listTools()).tools;
-        assert.deepEqual(tools.map((tool) => tool.name).sort(), ['autopilot_stack', 'autopilot_stack_push', 'autopilot_status', 'autopilot_waiting']);
+        assert.deepEqual(tools.map((tool) => tool.name).sort(), ['autopilot_answer', 'autopilot_close', 'autopilot_rewrite', 'autopilot_stack', 'autopilot_stack_push', 'autopilot_status', 'autopilot_waiting']);
         const byName = new Map(tools.map((tool) => [tool.name, tool]));
         assert.ok(['autopilot_status', 'autopilot_waiting', 'autopilot_stack'].every((name) => byName.get(name).annotations.readOnlyHint));
         const push = byName.get('autopilot_stack_push');

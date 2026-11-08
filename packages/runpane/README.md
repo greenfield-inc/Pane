@@ -282,11 +282,18 @@ example `--until-event --kinds
 agent.report,agent.report.missing,agent.blocked,panel.exited,pane.gone`.
 `runpane inbox [--session <id|name>]` lists the reports, missing reports, and
 on-screen questions a Session has not acknowledged (an orchestrator reads it
-when it starts or resumes), and `runpane inbox ack <id>...` clears them.
+when it starts or resumes), plus the answers its workers got, and `runpane inbox
+ack <id>...` clears them; `--decision <D-n>` records an answer's decision. An
+orchestrator relays a worker's question into its card with `runpane notify
+--relays <item> ...`.
 
 Autopilot (experimental) reads `runpane autopilot status|waiting|stack` and adds
 to its stack with `runpane autopilot stack push (--item <id>|--file <path>|--url
-<url>|--session <id|name>) [--tab <path-or-url>]... [--next]`. It waits with
+<url>|--session <id|name>) [--tab <path-or-url>]... [--next]`. It acts on waiting
+items with `runpane autopilot answer <id> (--choice <label>|--approve|--deny|--text
+<text>) --because <why>`, `runpane autopilot close <id> --reason <why>` and
+`runpane autopilot rewrite <id> --ui <options|approve|ask> --title <text> ...`,
+recorded "by Autopilot"; permission prompts stay the person's. It waits with
 `runpane watch --as autopilot --kinds
 item.created,item.answered,session.created,session.archived,orchestrator.turn_ended
 --until-event --json`; like `agent.report.missing`, these kinds reach only

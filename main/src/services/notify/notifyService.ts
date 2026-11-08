@@ -1,5 +1,6 @@
 import { app, BrowserWindow, globalShortcut } from 'electron';
 import { AUTOPILOT_OWNER_PANE_PREFIX } from '../../../../shared/types/autopilot';
+import { randomUUID } from 'crypto';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import type { ConfigManager } from '../configManager';
@@ -7,7 +8,9 @@ import type { AppConfig } from '../../types/config';
 import {
   DEFAULT_NOTIFY_SETTINGS,
   type NotifyCaller,
+  type NotifyAgentAction,
   type NotifyCommand,
+  type NotifyConnected,
   type NotifyInstructionsFile,
   type NotifyItem,
   type NotifyLink,
@@ -22,13 +25,17 @@ import {
   type NotifySource,
   type NotifyWindowSize,
 } from '../../../../shared/types/notify';
-import { type NotifyQueueEnvironment, NotifyQueue } from './notifyQueue';
+import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed } from './notifyQueue';
 import { PaneError } from '../../../../shared/paneError';
+import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
 import { syncNotifyInstructions, syncWslNotifyInstructions } from './notifyInstructions';
 import { isPaneHomeSkillEnabled } from '../paneHomeSkill';
 import type { RunpaneInboxItem } from '../../../../shared/types/runpaneOrchestration';
+import type { ApprovalStore } from '../approvals/approvalStore';
+import type { JsonStoreImportOutcome } from '../../database/jsonStoreImport';
+import type { SessionInboxEnded } from '../sessionInbox';
 
 const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
 const agentName = (agentType: string | undefined): string => (agentType ? AGENT_NAMES.get(agentType) : undefined) ?? 'Agent';
@@ -54,24 +61,48 @@ export interface NotifyServiceDependencies {
   sendToMachine: (machineId: string, command: NotifyRemoteCommand) => Promise<void>;
   /** Reads a saved machine's state again, after it refused or missed a command. */
   refreshMachine: (machineId: string) => void;
-  /** Hears each new question once and each one that stops waiting (the phone alert). */
+  /** The phone alert: sent about 90 s after a question starts ringing if it's still waiting, cleared when it stops (D-144). */
   onQuestion?: (event: { item: NotifyItem; open: boolean }) => void;
   /** WSL distros Pane runs agents in (its WSL projects'), whose homes get the instructions too. */
   wslDistros?: () => string[];
   /** The Session a Pane (and tab) works in; Approvals files each item under it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
+  /** The project a Pane belongs to. */
+  projectOf?: (paneId: string) => string | undefined;
   /** Every open Session by id, read once per fallback refresh. */
   sessionsById?: () => Map<string, NotifySession>;
-  /** Hears Session changes (archived, renamed), which move or rename fallback items. */
+  /** A Session's name and state, archived too; undefined once it's gone. */
+  sessionRecord?: (sessionId: string) => { name: string; paneId: string; archived: boolean } | undefined;
+  /** Hears Session changes, which can end their items. */
   onSessionsChanged?: (listener: () => void) => () => void;
-  /** Every Session's unacknowledged worker reports (Approvals' fallback reads the blocked ones). */
-  inbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void };
+  /** Every Session's unacknowledged worker reports; a blocked one's question is a card. */
+  inbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void; subscribeEnded(listener: (ended: SessionInboxEnded) => void): () => void; ack?(ids: readonly string[]): void };
+  /** This machine's approvals table. */
+  store?: ApprovalStore;
+  /** How moving the saved inbox into the table went on this start. */
+  importOutcome?: JsonStoreImportOutcome;
+  /** Why this item's Pane or tab can no longer take an answer. */
+  askerPaneGone?: (item: NotifyItem) => string | undefined;
+  /** Hears Panes and tabs closing, which can end their items. */
+  onAskersChanged?: (listener: () => void) => () => void;
+  /** Types into an asker's tab once an agent is at its prompt; outcomes as NotifyQueueEnvironment's. */
+  typeIntoTab?: NotifyQueueEnvironment['typeIntoTab'];
+  /** Seconds since the person last used this computer; Infinity while its screen is locked. Absent: in use. */
+  idleSeconds?: () => number;
 }
 
-/** A worker's blocked question shows in Approvals once its orchestrator has left it this long (tests shorten it). */
-function relayAfterMs(): number {
-  const configured = Number(process.env.PANE_APPROVALS_RELAY_AFTER_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : 10 * 60_000;
+/** A computer rings only if used in the last 2 minutes (D-144). */
+const IN_USE_SECONDS = 120;
+/** How often Pane re-reads that, while something waits. */
+const IN_USE_POLL_MS = 5_000;
+const SWEEP_MS = 60_000;
+/** Bursts of Pane and Session events settle before one sweep. */
+const SWEEP_SETTLE_MS = 500;
+
+/** The phone is pushed for what's still waiting after this long (D-144; tests shorten it). */
+function pushAfterMs(): number {
+  const configured = Number(process.env.PANE_APPROVALS_PUSH_AFTER_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 90_000;
 }
 
 /**
@@ -92,11 +123,13 @@ export class NotifyService {
   /** One WSL sync at a time, in the order the settings changed. */
   private wslSync: Promise<void> = Promise.resolve();
   private lastShared = '';
-  private lastStates = new Map<string, NotifyItem['state']>();
-  private relayTimer?: ReturnType<typeof setTimeout>;
+  private lastStates = new Map<string, boolean>();
+  private readonly pushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly pushed = new Set<string>();
   private mainWindowFocused = false;
-  private stopInbox?: () => void;
-  private stopSessions?: () => void;
+  private readonly stoppers: Array<() => void> = [];
+  private readonly timers: Array<ReturnType<typeof setInterval>> = [];
+  private sweepTimer?: ReturnType<typeof setTimeout>;
 
   constructor(private readonly deps: NotifyServiceDependencies) {
     this.lastSettings = this.settings();
@@ -110,6 +143,18 @@ export class NotifyService {
       machine: deps.machine,
       secrets: deps.secrets,
       sessionOf: deps.sessionOf,
+      projectOf: deps.projectOf,
+      store: deps.store,
+      askerGone: (item) => this.askerGone(item),
+      inUse: deps.idleSeconds ? () => (deps.idleSeconds?.() ?? 0) < IN_USE_SECONDS : undefined,
+      typeIntoTab: deps.typeIntoTab,
+      workerQuestionGone: (inboxId) => {
+        try {
+          deps.inbox?.ack?.([inboxId]);
+        } catch (error) {
+          console.warn('[Notify] Could not clear a closed question from its inbox; the orchestrator can still ack it:', error);
+        }
+      },
     });
     this.windows = new NotifyWindows({
       rendererArguments: deps.rendererArguments,
@@ -148,61 +193,78 @@ export class NotifyService {
     });
     this.applyShortcut(this.lastSettings);
     this.syncInstructions(this.lastSettings.enabled);
-    this.stopInbox = deps.inbox?.subscribe(() => this.refreshRelays());
-    this.stopSessions = deps.onSessionsChanged?.(() => this.refreshRelays());
-    deps.configManager.on('config-updated', () => this.refreshRelays());
-    this.refreshRelays();
+    if (deps.inbox) {
+      this.stoppers.push(deps.inbox.subscribe(() => this.addWorkerQuestions()));
+      this.stoppers.push(deps.inbox.subscribeEnded((ended) => this.workerQuestionEnded(ended)));
+    }
+    this.addWorkerQuestions();
+    const outcome = deps.importOutcome;
+    if (outcome?.status === 'failed') this.queue.setImportError({ code: outcome.error.code ?? 'ERR_JSON_STORE_IMPORT', message: outcome.error.message, next: outcome.error.next ?? 'Restart Pane to retry.' });
+    // Today's backlog, once, on the first start of this build (J25).
+    if (outcome?.status === 'imported') this.queue.upgradeCleanup();
+    for (const subscribe of [deps.onSessionsChanged, deps.onAskersChanged]) {
+      const stop = subscribe?.(() => this.scheduleSweep());
+      if (stop) this.stoppers.push(stop);
+    }
+    this.timers.push(setInterval(() => this.queue.sweep(), SWEEP_MS));
+    this.timers.push(setInterval(() => this.queue.pollInUse(), IN_USE_POLL_MS));
+    for (const timer of this.timers) timer.unref?.();
+    this.queue.sweep();
     this.scheduleBroadcast();
   }
 
-  /**
-   * Approvals' fallback: each worker's blocked question that its orchestrator has left
-   * unacknowledged for 10 minutes shows read-only, so it is never invisible while the
-   * orchestrator is down. It goes when the inbox item does (an ack, or the worker reports again),
-   * and none show while Approvals is off.
-   */
-  private refreshRelays(): void {
-    clearTimeout(this.relayTimer);
-    this.relayTimer = undefined;
+  /** Each worker's blocked question is a card from the start (J7). */
+  private addWorkerQuestions(): void {
     const inbox = this.deps.inbox;
     if (!inbox) return;
-    const now = Date.now();
-    const after = relayAfterMs();
-    let nextDue = Infinity;
-    const relays: NotifyItem[] = [];
-    let sessions: Map<string, NotifySession> | undefined;
-    for (const entry of this.settings().enabled ? inbox.all() : []) {
+    const carded = new Set<string>();
+    for (const entry of inbox.all()) {
       const question = entry.kind === 'report' && entry.report?.state === 'blocked' ? entry.report.question?.trim() : undefined;
       const at = Date.parse(entry.at);
       if (!question || !Number.isFinite(at)) continue;
-      if (at + after > now) {
-        nextDue = Math.min(nextDue, at + after);
-        continue;
-      }
-      // The Session the report was filed in, even if the worker has moved since; none once it's gone.
-      sessions ??= this.deps.sessionsById?.() ?? new Map();
-      const session = sessions.get(entry.sessionId);
+      // One card per tab's question, however many Sessions the worker's Pane is in.
+      const once = `${entry.panelId}:${entry.at}`;
+      if (carded.has(once)) continue;
+      carded.add(once);
+      const session = this.deps.sessionRecord?.(entry.sessionId);
       const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: entry.paneName, agent: agentName(entry.agentType) };
-      if (session) source.session = session;
-      const relay: NotifyItem = {
-        id: `relay:${entry.id}`,
-        ui: 'info',
-        title: question,
-        // With its Session closed there is no orchestrator to answer it; the worker's own tab shows beside it.
-        context: session
-          ? `Waiting on the ${session.name} orchestrator: ${entry.paneName} asked this and it hasn't been picked up. Answer in the orchestrator's tab.`
-          : `Its Session is closed: ${entry.paneName} asked this and nobody picked it up. Answer in ${entry.paneName}'s tab on the right.`,
+      if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };
+      this.queue.addWorkerQuestion({
+        id: entry.id,
+        question,
         source,
-        state: 'waiting',
-        createdAt: at,
-        relay: { inboxItemId: entry.id, worker: entry.paneName, question },
-      };
-      // D-81: the worker's status file, which its report named, opens beside the card.
-      if (entry.report?.summaryPath) relay.links = [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }];
-      relays.push(relay);
+        at,
+        // The Session it was filed in, even after the worker has moved or the Session closed.
+        connected: { kind: 'session', id: entry.sessionId, name: session?.name ?? 'Closed Session', paneId: session?.paneId ?? '' },
+        // D-81: the worker's status file, which its report named, opens beside the card.
+        links: entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : undefined,
+      });
     }
-    this.queue.setRelays(relays);
-    if (nextDue < Infinity) this.relayTimer = setTimeout(() => this.refreshRelays(), Math.max(0, nextDue - now));
+  }
+
+  private workerQuestionEnded({ id, how, decision }: SessionInboxEnded): void {
+    if (decision) this.queue.recordDecision(id, decision);
+    this.queue.endWorkerQuestion(id, how === 'moved-on' ? 'the worker moved on' : 'its orchestrator dealt with it');
+  }
+
+  /** The liveness rule (D-147): connected Session first, then the Pane and the tab that asked. */
+  private askerGone(item: NotifyItem): string | undefined {
+    const connected = item.connected;
+    if (connected?.kind === 'session' && this.deps.sessionRecord) {
+      const session = this.deps.sessionRecord(connected.id);
+      if (!session) return 'Session closed';
+      if (session.archived) return 'Session archived';
+    }
+    return this.deps.askerPaneGone?.(item);
+  }
+
+  private scheduleSweep(): void {
+    if (this.sweepTimer) return;
+    this.sweepTimer = setTimeout(() => {
+      this.sweepTimer = undefined;
+      this.queue.sweep();
+    }, SWEEP_SETTLE_MS);
+    this.sweepTimer.unref?.();
   }
 
   settings(): NotifySettings {
@@ -211,12 +273,12 @@ export class NotifyService {
 
   /** The `runpane:notify` daemon command. */
   ask(request: NotifyRequest, signal?: AbortSignal): Promise<NotifyResult> {
-    const { resume, returnAfterMs, caller, ...question } = request;
+    const { resume, relays, aboutSession, returnAfterMs, caller, ...question } = request;
     const source = this.describeSource(caller);
     // D-79: in a Pane Session only the orchestrator asks the person; a worker asks its orchestrator.
     // Claude's and chat tabs' own prompts (the tool asking) don't come through here, so they still reach you.
     const session = !resume && source.paneId ? this.deps.sessionOf?.(source.paneId, source.panelId) : undefined;
-    if (session && !session.orchestrator && this.settings().enabled) {
+    if (session && !session.orchestrator && !relays && this.settings().enabled) {
       return Promise.resolve({
         unavailable: 'Not shown to the person: in a Pane Session, only the orchestrator asks the person.',
         next: `Ask the ${session.name} orchestrator instead: run runpane report --state blocked --question "<your question>", then wait for its answer or carry on with anything that doesn't depend on it.`,
@@ -225,13 +287,48 @@ export class NotifyService {
     return this.queue.ask({
       question: question.ui && question.title !== undefined ? { ...question, ui: question.ui, title: question.title } : undefined,
       resume,
+      relays,
       returnAfterMs,
       source,
+      connected: source.autopilot ? this.aboutSession(aboutSession) : undefined,
     }, signal);
+  }
+
+  /** Autopilot's own item links to the Session it's about, or to its chat (D-168). */
+  private aboutSession(about: string | undefined): NotifyConnected | undefined {
+    const wanted = about?.trim();
+    if (!wanted) return undefined;
+    for (const session of this.deps.sessionsById?.().values() ?? []) {
+      if (session.id === wanted || session.name === wanted) return { kind: 'session', id: session.id, name: session.name, paneId: session.paneId };
+    }
+    throw new PaneError('ERR_NOTIFY_INVALID', `Pane can't link this notify call to the Session "${wanted}": no open Session has that id or name. Nothing was shown.`, 'Pass a Session from runpane sessions list, or leave aboutSession out.');
   }
 
   snapshot(): NotifySnapshot {
     return this.queue.snapshot();
+  }
+
+  /**
+   * Autopilot acts on an item, wherever it lives (D-165): this machine's it applies here; another
+   * machine's goes there, which applies it and records "by Autopilot". Nothing is queued.
+   */
+  async agentAct(action: NotifyAgentAction): Promise<NotifyAgentActed & { machine?: string }> {
+    const target = this.queue.remoteTarget(action.id);
+    if (!target) return this.queue.agentAct({ ...action, machine: this.deps.machine });
+    if (!target.online) {
+      throw new PaneError('ERR_APPROVALS_MACHINE_OFFLINE', `${target.machine} is offline, so Autopilot can't change its items. Nothing was sent.`, `Try again when ${target.machine} is back; its items return by themselves.`);
+    }
+    const sent: NotifyAgentAction = action.type === 'agent-rewrite' ? { ...action, newId: randomUUID() } : action;
+    try {
+      await this.deps.sendToMachine(target.machineId, { ...sent, id: target.id, machine: this.deps.machine });
+    } catch (error) {
+      this.deps.refreshMachine(target.machineId);
+      const code = error instanceof Error && 'code' in error ? String(error.code) : '';
+      if (code.startsWith('ERR_NOTIFY') || code.startsWith('AUTOPILOT') || UNREACHABLE_CODES.has(code)) throw error;
+      // A machine too old for these commands refuses them when it decodes them.
+      throw new PaneError('ERR_APPROVALS_OWNER_TOO_OLD', `${target.machine} refused this (${error instanceof Error ? error.message : String(error)}). It may run an older Pane that can't take Autopilot's answers. Nothing was changed there.`, `Update Pane on ${target.machine}.`);
+    }
+    return { id: sent.type === 'agent-rewrite' && sent.newId ? `${target.machineId}:${sent.newId}` : action.id, machine: target.machine };
   }
 
   async run(command: NotifyCommand): Promise<void> {
@@ -254,6 +351,19 @@ export class NotifyService {
       await this.openLink(command.id, command.index, command.paneId);
       return;
     }
+    // A phone on Autopilot's machine answers an item another machine holds (D-165): this machine passes it on.
+    const target = this.queue.remoteTarget(command.id);
+    if (target) {
+      // The other machine sees this one as the sender, so a teammate's answer to a secret card stops here,
+      // and so does a teammate acting as Autopilot, which it would record as Autopilot's (F-8).
+      if (teammate && command.type.startsWith('agent-')) {
+        throw new PaneError('ERR_NOTIFY_NOT_AUTOPILOT', `${teammate} can't act as Autopilot on ${target.machine}. Nothing was sent.`, 'Answer or close it as yourself instead.');
+      }
+      if (teammate && target.ui === 'secret') throw teammateSecretRefusal(teammate, 'answer a secret card');
+      if (!target.online) throw new PaneError('ERR_APPROVALS_MACHINE_OFFLINE', `${target.machine} is offline, so this item can't change. Nothing was sent.`, `Try again when ${target.machine} is back.`);
+      await this.deps.sendToMachine(target.machineId, { ...command, id: target.id });
+      return;
+    }
     await this.queue.runRemote(command, device, teammate);
   }
 
@@ -268,6 +378,17 @@ export class NotifyService {
   private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' }>): Promise<void> {
     const target = this.queue.remoteTarget(command.id);
     if (!target) return;
+    if (command.type === 'close' || command.type === 'reopen' || command.type === 'override') {
+      if (!target.online) {
+        throw new PaneError('ERR_APPROVALS_MACHINE_OFFLINE', `${target.machine} is offline, so this item can't change. Nothing was sent.`, `Try again when ${target.machine} is back.`);
+      }
+      try {
+        await this.deps.sendToMachine(target.machineId, { ...command, id: target.id });
+      } finally {
+        this.deps.refreshMachine(target.machineId);
+      }
+      return;
+    }
     if (command.type === 'hover-info') {
       this.queue.run(command);
       return;
@@ -289,7 +410,11 @@ export class NotifyService {
       this.queue.run(command);
       return;
     }
-    if (!target.online) return;
+    if (!target.online) {
+      // The person typed an answer: say it went nowhere, rather than let the card fold away (F-2).
+      if (command.type === 'answer') throw new PaneError('ERR_APPROVALS_MACHINE_OFFLINE', `Not sent: ${target.machine} is offline, so your answer didn't reach it.`, `Answer again when ${target.machine} is back.`);
+      return;
+    }
     // Before the send: the machine's next state can arrive before its reply does.
     if (command.type === 'answer') this.queue.noteAnsweredHere(command.id, true);
     try {
@@ -302,6 +427,11 @@ export class NotifyService {
       if (UNREACHABLE_CODES.has(code)) this.queue.setRemote(target.machineId, { machine: target.machine, online: false });
       // Refused (another screen got there first, or the hold ended): the machine's state says how.
       this.deps.refreshMachine(target.machineId);
+      if (command.type === 'answer') {
+        throw UNREACHABLE_CODES.has(code)
+          ? new PaneError('ERR_APPROVALS_MACHINE_OFFLINE', `Not sent: ${target.machine} went offline, so your answer didn't reach it.`, `Answer again when ${target.machine} is back.`)
+          : error;
+      }
     }
   }
 
@@ -329,9 +459,10 @@ export class NotifyService {
   }
 
   dispose(): void {
-    clearTimeout(this.relayTimer);
-    this.stopInbox?.();
-    this.stopSessions?.();
+    for (const stop of this.stoppers) stop();
+    for (const timer of this.timers) clearInterval(timer);
+    clearTimeout(this.sweepTimer);
+    for (const timer of this.pushTimers.values()) clearTimeout(timer);
     this.queue.dispose();
     if (this.shortcut) globalShortcut.unregister(this.shortcut);
     this.tray.destroy();
@@ -493,7 +624,7 @@ export class NotifyService {
     if (!this.windows.isRoundOpen()) this.queue.setRoundOpen(false);
     this.tray.update({
       settings: snapshot.settings,
-      waiting: this.queue.waitingItems(),
+      waiting: this.queue.waitingItems().filter(item => item.staleSince === undefined && !item.quiet),
       paused: snapshot.pausedUntil !== null,
       showOutsideSupported: snapshot.showOutsideSupported,
     });
@@ -510,15 +641,48 @@ export class NotifyService {
     if (key === this.lastShared) return;
     const previous = this.lastStates;
     this.lastShared = key;
-    this.lastStates = new Map(state.items.map(item => [item.id, item.state]));
+    this.lastStates = new Map(state.items.map(item => [item.id, ringing(item)]));
     this.deps.publish(state);
+    this.followPush(state, previous);
+  }
+
+  /**
+   * The machine holding an item pushes the phone (it can't wake itself), about 90 s after the item
+   * starts ringing and only if it's still waiting (D-144). Quiet and stale items never push.
+   */
+  private followPush(state: NotifySharedState, previous: Map<string, boolean>): void {
     if (!this.deps.onQuestion) return;
+    const onQuestion = this.deps.onQuestion;
     for (const item of state.items) {
       if (item.state === 'info') continue;
-      const before = previous.get(item.id);
-      const open = item.state === 'waiting';
-      const wasOpen = before === 'waiting';
-      if (before === undefined ? open : open !== wasOpen) this.deps.onQuestion({ item, open });
+      const open = ringing(item);
+      if (open === previous.get(item.id)) continue;
+      if (open) {
+        if (item.pushed || this.pushTimers.has(item.id)) continue;
+        const left = Math.max(0, item.createdAt + pushAfterMs() - Date.now());
+        const timer = setTimeout(() => {
+          this.pushTimers.delete(item.id);
+          this.pushed.add(item.id);
+          this.queue.markPushed(item.id);
+          onQuestion({ item, open: true });
+          // A question that just started ringing (out of its orchestrator's first call) gets the whole wait.
+        }, previous.has(item.id) ? pushAfterMs() : left);
+        timer.unref?.();
+        this.pushTimers.set(item.id, timer);
+        continue;
+      }
+      const timer = this.pushTimers.get(item.id);
+      if (timer) {
+        clearTimeout(timer);
+        this.pushTimers.delete(item.id);
+      }
+      // Only an alert that went out needs taking back.
+      if (this.pushed.delete(item.id) || item.pushed) onQuestion({ item, open: false });
+    }
+    for (const [id, timer] of this.pushTimers) {
+      if (state.items.some(item => item.id === id)) continue;
+      clearTimeout(timer);
+      this.pushTimers.delete(id);
     }
   }
 
@@ -530,6 +694,11 @@ export class NotifyService {
 
 /** Failures that mean the machine wasn't reached, as opposed to the machine refusing the command. */
 const UNREACHABLE_CODES = new Set(['ERR_REMOTE_OFFLINE', 'ERR_REMOTE_TRANSPORT', 'ERR_MACHINE_OFFLINE', 'ERR_MACHINE_UNKNOWN']);
+
+/** Waiting on the person, and allowed to interrupt them. */
+function ringing(item: NotifyItem): boolean {
+  return item.state === 'waiting' && !item.quiet && item.staleSince === undefined;
+}
 
 function notifySettings(config: AppConfig): NotifySettings {
   return { ...DEFAULT_NOTIFY_SETTINGS, ...config.notify };

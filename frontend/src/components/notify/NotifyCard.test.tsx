@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { NotifyCard, type NotifyCardProps } from './NotifyCard';
-import { acceleratorFromKeys, shortcutLabel } from './notifyFormat';
+import { acceleratorFromKeys, askedBy, machineLabel, originOf, shortcutLabel, withMachineLabels } from './notifyFormat';
 
 const base: Omit<NotifyItem, 'ui' | 'title'> = {
   id: 'q1',
@@ -31,7 +31,7 @@ describe('NotifyCard', () => {
   it("names another machine's question with its mark in the inbox, and offers Open in Pane only on the machine the app is on", () => {
     const item: NotifyItem = { ...base, id: 'studio:q1', ui: 'approve', title: 'Ship the hotfix tonight?', machine: 'mac-studio', machineId: 'studio' };
     const away = render({ ...item, elsewhere: true }, { form: 'inbox', machineMark: <span data-mark="studio" /> });
-    expect(text(away)).toContain('auth-refactor · Claude · mac-studio');
+    expect(text(away)).toContain('auth-refactor · mac-studio');
     expect(away).toMatch(/data-testid="notify-card-machine">· <span data-mark="studio"><\/span>/);
     expect(text(away)).not.toContain('Open in Pane');
     expect(text(render({ ...item, elsewhere: true }))).not.toContain('Open in Pane');
@@ -206,5 +206,88 @@ describe('Notify shortcuts', () => {
     expect(acceleratorFromKeys({ ...chord, code: 'KeyN', metaKey: true }, false)).toBe('Super+N');
     expect(acceleratorFromKeys({ ...chord, code: 'KeyN' }, true)).toBeNull();
     expect(acceleratorFromKeys({ ...chord, code: 'ShiftLeft', shiftKey: true }, true)).toBeNull();
+  });
+});
+
+describe('machine labels', () => {
+  const item: NotifyItem = { ...base, ui: 'approve', title: 't', machine: 'tylers-mbp.lan', machineId: 'local' };
+  const machines = [{ id: 'local', name: 'mini' }, { id: 'studio', name: 'Mac Studio' }];
+
+  it("never shows this machine's raw hostname: its picker name, or no label", () => {
+    expect(machineLabel(item, machines)).toBe('mini');
+    expect(machineLabel(item, [{ id: 'local', name: 'This computer' }])).toBeUndefined();
+    expect(machineLabel(item, [])).toBeUndefined();
+    expect(machineLabel(item)).toBeUndefined();
+    expect(askedBy(item)).toBe('auth-refactor · Claude');
+    expect(originOf(item, [])).toBe('auth-refactor');
+  });
+
+  it("names another machine by its saved name, falling back on the item's", () => {
+    const other = { ...item, machine: 'studio-host', machineId: 'studio' };
+    expect(machineLabel(other, machines)).toBe('Mac Studio');
+    expect(machineLabel(other, [])).toBe('studio-host');
+    expect(machineLabel({ ...item, machine: 'parsa-devbox', machineId: undefined }, machines)).toBe('parsa-devbox');
+  });
+
+  it('relabels a list, leaving an item with the right label as it was', () => {
+    const fine = { ...item, id: 'b', machine: 'Mac Studio', machineId: 'studio' };
+    const [local, other] = withMachineLabels([item, fine], [{ id: 'studio', name: 'Mac Studio' }]);
+    expect(local.machine).toBeUndefined();
+    expect('machine' in local).toBe(false);
+    expect(other).toBe(fine);
+  });
+});
+
+describe('receipts and actions on an inbox card', () => {
+  const worker: NotifyItem = { ...base, ui: 'ask', title: 'Q-39: run the script?', source: { paneId: 'p', panelId: 't', name: 'workos-sso', agent: 'Claude', session: { id: 's', name: 'Sales Skill', paneId: 'sp' } } };
+  const inbox = { form: 'inbox' } as const;
+
+  it("shows a worker's question with its origin and an answer box, and offers Close", () => {
+    const visible = text(render({ ...worker, machine: 'Mac mini', machineId: 'mini' }, inbox));
+    expect(visible).toContain('workos-sso in Sales Skill · Mac mini');
+    expect(visible).toContain('Q-39: run the script?');
+    expect(render(worker, inbox)).toContain('placeholder="Type your answer"');
+    expect(visible).toContain('Close');
+  });
+
+  it('offers no Close on a permission prompt or on an offline machine', () => {
+    const prompt: NotifyItem = { ...worker, ui: 'options', choices: [{ label: 'Yes' }, { label: 'No' }], agentPrompt: { yes: 'Yes', no: 'No' } };
+    expect(render(prompt, inbox)).not.toContain('data-testid="notify-close"');
+    expect(render({ ...worker, unreachable: true }, inbox)).not.toContain('data-testid="notify-close"');
+    expect(render(worker, inbox)).toContain('data-testid="notify-close"');
+  });
+
+  it('shows a rewrite on the new card', () => {
+    expect(text(render({ ...worker, rewrittenFrom: { id: 'o', title: 'x', qn: 'Q-3' } }, inbox))).toContain('Rewritten by Autopilot from Q-3');
+  });
+
+  it("shows an Autopilot answer's receipt and an Override", () => {
+    const answered: NotifyItem = { ...worker, state: 'answered', answerSummary: 'Yes', answeredBy: { by: 'autopilot', because: 'D-22' }, decision: 'D-147' };
+    const visible = text(render(answered, { form: 'inbox', view: 'answered' }));
+    expect(visible).toContain('Yes · Answered by Autopilot · because D-22');
+    expect(visible).toContain('Recorded as D-147');
+    expect(visible).toContain('Override');
+    expect(text(render({ ...answered, answeredBy: { by: 'you' } }, { form: 'inbox', view: 'answered' }))).not.toContain('Override');
+    expect(text(render({ ...answered, corrections: [{ summary: 'No', by: 'you', at: 1 }] }, { form: 'inbox', view: 'answered' }))).toContain('You corrected it: No');
+  });
+
+  it("offers Copy answer while an answer hasn't reached its tab, and says why when it never will", () => {
+    const owed: NotifyItem = { ...worker, state: 'answered', answerSummary: 'eu-west', answeredBy: { by: 'you' } };
+    expect(text(render(owed, { form: 'inbox', view: 'answered' }))).toContain('Copy answer');
+    const closedTab = text(render({ ...owed, undelivered: { reason: 'its tab closed', at: 2 } }, { form: 'inbox', view: 'answered' }));
+    expect(closedTab).toContain('not delivered to');
+    expect(closedTab).toContain('its tab closed');
+    expect(closedTab).toContain('Copy answer');
+    expect(text(render({ ...owed, delivered: { via: 'tab', at: 2 } }, { form: 'inbox', view: 'answered' }))).not.toContain('Copy answer');
+  });
+
+  it('shows why an item closed and a Reopen when it takes one', () => {
+    const closed: NotifyItem = { ...worker, state: 'expired', closed: { by: 'autopilot', reason: 'Session archived', at: 1 } };
+    const visible = text(render(closed, { form: 'inbox', view: 'expired' }));
+    expect(visible).toContain('Closed by Autopilot: Session archived');
+    expect(visible).toContain('Reopen');
+    expect(visible).not.toContain('stopped waiting');
+    expect(text(render({ ...closed, closed: { by: 'pane', reason: 'Session archived', at: 1 } }, { form: 'inbox', view: 'expired' }))).not.toContain('Reopen');
+    expect(text(render({ ...worker, state: 'expired' }, { form: 'inbox', view: 'expired' }))).toContain('Claude stopped waiting');
   });
 });

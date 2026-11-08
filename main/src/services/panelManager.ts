@@ -26,6 +26,14 @@ function logsPanelState(panel: ToolPanel): LogsPanelState {
 }
 
 class PanelManager {
+  private readonly deletedListeners = new Set<(panelId: string) => void>();
+
+  /** Hears a tab closing for good (not a move to another Pane). */
+  onPanelDeleted(listener: (panelId: string) => void): () => void {
+    this.deletedListeners.add(listener);
+    return () => { this.deletedListeners.delete(listener); };
+  }
+
   private panels = new Map<string, ToolPanel>();
   // Sessions that have been archived during this process lifetime.
   // Used by getPanel / getPanelsForSession to skip re-caching from DB
@@ -306,6 +314,7 @@ class PanelManager {
 
       // Emit IPC event to notify frontend
       this.sendRendererEvent('panel:deleted', { panelId, sessionId: panel.sessionId });
+      for (const listener of this.deletedListeners) listener(panelId);
 
       // Track panel closure
       if (this.analyticsManager) {

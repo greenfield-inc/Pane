@@ -1,3 +1,4 @@
+import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppConfig } from '../types/config';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -49,6 +50,33 @@ function tailnetProfileId(domain: string, name: string): string {
   return `tailnet-${domain.toLowerCase()}-${name.toLowerCase()}`;
 }
 
+type ConfigManager = AppServices['configManager'];
+
+/** Your Tailscale network's machines, each marked with its saved connection if it has one. */
+export async function listTailnetMachines(
+  configManager: Pick<ConfigManager, 'getConfig'>,
+  dependencies: Pick<WorkspaceAccessDependencies, 'readStatus' | 'probe'> = { readStatus: readTailscaleStatus, probe: probeWorkspace },
+): Promise<TailnetMachineList> {
+  const profiles = normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client.profiles;
+  const codeless = profiles.flatMap((profile) => (profile.tailnetMachine && profile.tailnetDomain
+    ? [{ id: profile.id, key: savedSecretKey(profile.tailnetDomain, profile.tailnetMachine) }]
+    : []));
+  const list = await discoverTailnetMachines({
+    ...dependencies,
+    savedSecrets: savedWorkspaceSecrets(profiles),
+    includeRefused: true,
+  });
+  if (!list.ok) return list;
+  const saved = new Map(codeless.map((profile) => [profile.key, profile.id]));
+  return {
+    ...list,
+    machines: list.machines.map((machine) => {
+      const profileId = saved.get(savedSecretKey(list.domain, machine.name));
+      return profileId ? { ...machine, profileId } : machine;
+    }),
+  };
+}
+
 /**
  * Settings → Remote Access on this machine: who may connect to it (visibility and password), and
  * the machines it can connect to without a code. These always act on this machine, even while the
@@ -68,25 +96,7 @@ export function registerWorkspaceAccessHandlers(
   ipcMain.handle('remote-daemon:update-workspace-access', (_event, update) => respond('change remote access settings', () =>
     commandRegistry.invoke('runpane:workspaces:set-access', [update])));
 
-  ipcMain.handle('remote-daemon:list-tailnet-machines', () => respond('list your machines', async (): Promise<TailnetMachineList> => {
-    const codeless = profiles().flatMap((profile) => (profile.tailnetMachine && profile.tailnetDomain
-      ? [{ id: profile.id, key: savedSecretKey(profile.tailnetDomain, profile.tailnetMachine) }]
-      : []));
-    const list = await discoverTailnetMachines({
-      ...dependencies,
-      savedSecrets: savedWorkspaceSecrets(profiles()),
-      includeRefused: true,
-    });
-    if (!list.ok) return list;
-    const saved = new Map(codeless.map((profile) => [profile.key, profile.id]));
-    return {
-      ...list,
-      machines: list.machines.map((machine) => {
-        const profileId = saved.get(savedSecretKey(list.domain, machine.name));
-        return profileId ? { ...machine, profileId } : machine;
-      }),
-    };
-  }));
+  ipcMain.handle('remote-daemon:list-tailnet-machines', () => respond('list your machines', () => listTailnetMachines(configManager, dependencies)));
 
   // Glasses paired with this machine, and the Even app origins it accepts for them.
   ipcMain.handle('remote-daemon:get-glasses', () => respond('read glasses access', () =>

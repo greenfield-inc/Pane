@@ -88,15 +88,18 @@ test.describe('Approvals in the main window', () => {
     await expect(row('sms-retry')).not.toContainText('Waiting');
   });
 
-  test('Approvals groups by Session, opens the selected item in place, and answers it', async ({ page }) => {
+  test('Approvals lists newest first, sorts by Session, opens the selected item in place, and answers it', async ({ page }) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();
     const queue = page.getByTestId('approvals-queue');
     await expect(queue.getByRole('heading', { name: 'Approvals' })).toBeVisible();
     await expect(queue.getByRole('tab', { name: 'Waiting 3' })).toHaveAttribute('aria-selected', 'true');
+    await expect(queue.getByTestId('approvals-group')).toHaveCount(0);
+    await queue.getByTestId('approvals-sort').click();
+    await page.getByRole('menuitemradio', { name: 'By Session' }).click();
     await expect(queue.getByTestId('approvals-group')).toHaveText([/Launch\s*1/, /Not in a Session\s*2/]);
 
-    // The oldest waiting item is selected first; others are rows.
+    // The newest waiting item is selected first; others are rows.
     const selected = queue.getByTestId('approvals-selected');
     await expect(selected).toContainText('Which session store should the refactor use?');
     await expect(selected.getByTestId('approvals-related').getByRole('button')).toHaveText(['plan.html', 'PR #812']);

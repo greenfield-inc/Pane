@@ -14,8 +14,8 @@ import { Button, EmptyState } from '@/ui';
  */
 export default function OpenScreen() {
   const theme = useTheme();
-  const { host, paneId, panelId, notifyId, sessionId, sessionPaneId } = useLocalSearchParams<{
-    host?: string; paneId?: string; panelId?: string; notifyId?: string; sessionId?: string; sessionPaneId?: string;
+  const { host, paneId, panelId, notifyId, sessionId, sessionPaneId, list } = useLocalSearchParams<{
+    host?: string; paneId?: string; panelId?: string; notifyId?: string; sessionId?: string; sessionPaneId?: string; list?: string;
   }>();
   const profiles = useHostsStore(state => state.profiles);
   const activeId = useHostsStore(state => state.activeId);
@@ -35,9 +35,9 @@ export default function OpenScreen() {
     // Start from the host's pane list, so Back never lands on another host's screens.
     router.dismissTo('/');
     // A Notify alert opens its approval screen over the pane list.
-    const route = openRoute({ paneId, panelId, notifyId, sessionId, sessionPaneId });
+    const route = openRoute({ paneId, panelId, notifyId, sessionId, sessionPaneId, list });
     if (route) router.push(route);
-  }, [hostId, switchHost, paneId, panelId, notifyId, sessionId, sessionPaneId, setActive]);
+  }, [hostId, switchHost, paneId, panelId, notifyId, sessionId, sessionPaneId, list, setActive]);
 
   if (resolved.type === 'unknown-host') {
     return (
