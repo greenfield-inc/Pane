@@ -54,6 +54,14 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
+  // With Chat tabs off, a key saved earlier still sits on this machine: it stays removable.
+  const chatTabsOn = isChatTabsEnabled(config);
+  const [keySavedWhileOff, setKeySavedWhileOff] = useState(false);
+  useEffect(() => {
+    if (chatTabsOn) return;
+    void window.electronAPI.chatTab.keys().then((status) => setKeySavedWhileOff(Boolean(status.claude || status.codex)), () => undefined);
+  }, [chatTabsOn]);
+
   const applyClaudePath = async () => {
     const saved = await persistence.saveConfig('claude-executable', { claudeExecutablePath: claudePath.trim() });
     if (saved) onDirtyChange(sessionDirty);
@@ -62,7 +70,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
   return (
     <SettingsPage title="AI & Agents" description="Application-wide defaults for Sessions and coding-agent integrations.">
       <SettingsSection title="Agent defaults">
-        {isChatTabsEnabled(config) && <SettingRow settingId="chat-tab-keys" label="Chat tab sign-in" description="Chat tabs use your own Claude Code or Codex sign-in on this machine; Pane never sees or copies it. Sign in with claude auth login or codex login in a terminal tab, or save an API key here." saveState={persistence.saveStates['chat-tab-keys']} details={<ChatTabKeys />}>
+        {(chatTabsOn || keySavedWhileOff) && <SettingRow settingId="chat-tab-keys" label="Chat tab sign-in" description={chatTabsOn ? 'Chat tabs use your own Claude Code or Codex sign-in on this machine; Pane never sees or copies it. Sign in with claude auth login or codex login in a terminal tab, or save an API key here.' : 'Chat tabs are off, and a key saved for them is still on this machine. Remove it here, or turn Chat tabs back on to change it.'} saveState={persistence.saveStates['chat-tab-keys']} details={<ChatTabKeys removeOnly={!chatTabsOn} onRemovedAll={() => setKeySavedWhileOff(false)} />}>
           {null}
         </SettingRow>}
 
