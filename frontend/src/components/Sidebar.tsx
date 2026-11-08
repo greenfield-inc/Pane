@@ -1,6 +1,6 @@
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { NewDialog } from './NewDialog';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
@@ -51,6 +51,8 @@ import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
 import { useAnyLoopRunning } from './loops/loopRunView';
 import { useRestartToUpdateStore } from '../stores/restartToUpdateStore';
+import { RestoreRegionButton } from './RestoreRegionButton';
+import { useRegionActions } from '../hooks/useRegionNavigation';
 import { RESTART_PILL_LABELS, restartPillDescription, restartPillLabel } from './restartToUpdateCopy';
 
 // --- Collapsed sidebar tooltip content ---
@@ -113,6 +115,8 @@ function CompactSessionTooltip({
 }
 
 interface SidebarProps {
+  /** Spread across the main area (P4); the header shows a pressed restore button. */
+  maximized?: boolean;
   onAboutClick: () => void;
   onSettingsClick: () => void;
   onRemoteSettingsClick: () => void;
@@ -147,8 +151,15 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onAddMachineClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
+export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onAddMachineClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
+  // Maximize spreads the sidebar over the main area; minimize collapses it to its rail (P4).
+  const shellRef = useRef<HTMLDivElement>(null);
+  const setMaximizedRegion = useNavigationStore((s) => s.setMaximizedRegion);
+  useRegionActions(shellRef, {
+    toggleMaximize: () => setMaximizedRegion(maximized ? null : 'sidebar'),
+    minimize: () => { if (!collapsed) onToggleCollapse?.(); },
+  });
   const showFooterHomeLabel = width >= 230;
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
@@ -907,10 +918,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   return (
     <>
       <div
+        ref={shellRef}
         data-testid="sidebar"
         data-focus-region="sidebar"
         className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
-        style={{ width: `${width}px` }}
+        style={{ width: maximized ? '100%' : `${width}px` }}
       >
         {/* Resize handle */}
         <div
@@ -922,6 +934,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           {/* Larger grab area */}
           <div className="absolute -left-2 -right-2 top-0 bottom-0" />
         </div>
+        {maximized && (
+          <div className="absolute right-2 top-1 z-20">
+            <RestoreRegionButton onRestore={() => setMaximizedRegion(null)} />
+          </div>
+        )}
         {titleBarControlsSlot
           ? createPortal(headerControls, titleBarControlsSlot)
           : (

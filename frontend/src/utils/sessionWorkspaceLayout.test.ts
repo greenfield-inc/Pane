@@ -31,6 +31,7 @@ import {
   showSessionInLayout,
   splitSessionTile,
   tiledSessionIds,
+  toggleMaximizedTile,
 } from './sessionWorkspaceLayout';
 
 // ---------------------------------------------------------------------------
@@ -352,5 +353,40 @@ describe('decodeSessionWorkspaceLayout', () => {
   it('drops a focus marker that names no tile', () => {
     const decoded = decodeSessionWorkspaceLayout({ version: 1, root: tile('t1', 's1'), focusedTileId: 'gone' });
     expect(decoded).toEqual({ version: 1, root: tile('t1', 's1') });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Maximize (P4)
+// ---------------------------------------------------------------------------
+
+describe('toggleMaximizedTile', () => {
+  const two = () => layoutOf(split('x', 'row', [tile('t1', 's1'), tile('t2', 's2')]), 't1');
+
+  it('maximizes a tile, focuses it, and restores on the second toggle', () => {
+    const maximized = toggleMaximizedTile(two(), 't2');
+    expect(maximized.maximizedTileId).toBe('t2');
+    expect(maximized.focusedTileId).toBe('t2');
+    expect(toggleMaximizedTile(maximized, 't2').maximizedTileId).toBeUndefined();
+  });
+
+  it('does nothing for a single tile or an unknown one', () => {
+    const single = layoutOf(tile('t1', 's1'));
+    expect(toggleMaximizedTile(single, 't1')).toBe(single);
+    expect(toggleMaximizedTile(two(), 'nope').maximizedTileId).toBeUndefined();
+  });
+
+  it('restores when focus moves to another tile or the tiles change', () => {
+    const maximized = toggleMaximizedTile(two(), 't1');
+    expect(focusSessionTile(maximized, 't2').maximizedTileId).toBeUndefined();
+    expect(closeSessionTile(maximized, 't2').maximizedTileId).toBeUndefined();
+    expect(dropSessionOnTile(maximized, 't1', 's3', 'right').maximizedTileId).toBeUndefined();
+  });
+
+  it('survives a save and load, and an older layout simply lacks it', () => {
+    const maximized = toggleMaximizedTile(two(), 't1');
+    expect(decodeSessionWorkspaceLayout(JSON.parse(JSON.stringify(maximized)))?.maximizedTileId).toBe('t1');
+    expect(decodeSessionWorkspaceLayout({ ...maximized, maximizedTileId: 'gone' })?.maximizedTileId).toBeUndefined();
+    expect(decodeSessionWorkspaceLayout(two())?.maximizedTileId).toBeUndefined();
   });
 });

@@ -35,6 +35,14 @@ export interface SessionTileContext {
   isFocused: boolean;
   /** False only while the window shows a single Session. */
   tiled: boolean;
+  /** This tile is maximized over the others (P4). */
+  maximized: boolean;
+  /** Another tile is maximized: this one stays mounted and live, only hidden. */
+  hidden: boolean;
+}
+
+function containsTile(node: SessionLayoutNode, tileId: string): boolean {
+  return node.type === 'session' ? node.id === tileId : node.children.some(child => containsTile(child, tileId));
 }
 
 export const SessionTileLayout: React.FC<SessionTileLayoutProps> = React.memo(({
@@ -45,10 +53,16 @@ export const SessionTileLayout: React.FC<SessionTileLayoutProps> = React.memo(({
 }) => {
   const recordLiveSizes = useAllotmentSizeSync<SessionTileNode>(layout.root, onSizesChange);
   const tiled = layout.root.type === 'split';
+  const maximizedTileId = tiled ? layout.maximizedTileId ?? null : null;
 
   const renderNode = useCallback((node: SessionLayoutNode): React.ReactNode => {
     if (node.type === 'session') {
-      return renderTile(node, { isFocused: node.id === focusedTileId, tiled });
+      return renderTile(node, {
+        isFocused: node.id === focusedTileId,
+        tiled,
+        maximized: node.id === maximizedTileId,
+        hidden: maximizedTileId !== null && node.id !== maximizedTileId,
+      });
     }
 
     // Sizes persist on drag end only: onChange fires per pointer move, and a
@@ -64,13 +78,13 @@ export const SessionTileLayout: React.FC<SessionTileLayoutProps> = React.memo(({
         onDragEnd={sizes => onSizesChange(node.id, sizes)}
       >
         {node.children.map(child => (
-          <Allotment.Pane key={child.id} minSize={MIN_TILE_PX}>
+          <Allotment.Pane key={child.id} minSize={MIN_TILE_PX} visible={!maximizedTileId || containsTile(child, maximizedTileId)}>
             {renderNode(child)}
           </Allotment.Pane>
         ))}
       </Allotment>
     );
-  }, [renderTile, focusedTileId, tiled, onSizesChange, recordLiveSizes]);
+  }, [renderTile, focusedTileId, tiled, maximizedTileId, onSizesChange, recordLiveSizes]);
 
   return useMemo(() => <>{renderNode(layout.root)}</>, [renderNode, layout.root]);
 });

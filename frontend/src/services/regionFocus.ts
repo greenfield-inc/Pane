@@ -227,6 +227,55 @@ function focusMainArea(): void {
   if (target) focusStop(target);
 }
 
+// --- Maximize and minimize (P4) ---
+
+export interface RegionActions {
+  /** Maximize the region over the main area, or restore it (⌘K ⌘M). */
+  toggleMaximize?: () => void;
+  /** Collapse a side region: the sidebar to its rail, the right panel, the terminal (⌘⇧M). */
+  minimize?: () => void;
+}
+
+const regionActions = new WeakMap<Element, RegionActions>();
+
+/** A region element says what maximize and minimize do for it; returns the unregister. */
+export function registerRegionActions(element: Element, actions: RegionActions): () => void {
+  regionActions.set(element, actions);
+  return () => {
+    if (regionActions.get(element) === actions) regionActions.delete(element);
+  };
+}
+
+function actionsAtFocus(): RegionActions | null {
+  const stops = collectFocusStops();
+  let element: Element | null = currentStop(stops)?.ref ?? null;
+  // A maximized side region covers the main area; it may not be a stop of its own then.
+  if (!element && document.activeElement) element = document.activeElement;
+  while (element) {
+    const actions = regionActions.get(element);
+    if (actions) return actions;
+    element = element.parentElement?.closest('[data-panel-group-id], [data-focus-region]') ?? null;
+  }
+  return null;
+}
+
+/** ⌘K ⌘M: maximize the focused region (a split, a Session tile, the sidebar or the right panel), or restore it. */
+export function toggleMaximizeAtFocus(): boolean {
+  const actions = actionsAtFocus();
+  if (!actions?.toggleMaximize) return false;
+  actions.toggleMaximize();
+  return true;
+}
+
+/** ⌘⇧M: minimize the focused side region and move focus to the main area. A split does nothing. */
+export function minimizeAtFocus(): boolean {
+  const actions = actionsAtFocus();
+  if (!actions?.minimize) return false;
+  actions.minimize();
+  requestAnimationFrame(() => requestAnimationFrame(focusMainArea));
+  return true;
+}
+
 // --- The sidebar as a keyboard list ---
 
 function expandableFor(item: HTMLElement): HTMLElement | null {
