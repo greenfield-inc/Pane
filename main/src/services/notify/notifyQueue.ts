@@ -2003,7 +2003,7 @@ function replySummary(reply: NotifyReply): string {
 
 /** What a reader with an open call does with a reply. */
 function tookNext(item: NotifyItem): string {
-  return `The person replied. If it answers ${refOf(item)}, run runpane notify --took ${item.id} answer. If it asks about it, run runpane notify --took ${item.id} question, find out, then runpane notify --update ${item.id} --asked "<their question>" --what-changed "<one line per change>".`;
+  return `The person replied. If it answers ${refOf(item)}, run \`runpane notify --took ${item.id} answer\`. If it asks about it, run \`runpane notify --took ${item.id} question\`, find out, then \`runpane notify --update ${item.id} --asked "<their question>" --what-changed "<one line per change>"\`.`;
 }
 
 /** A reply is with its reader, or its reader took it as a question: the pager and strip move past it. */

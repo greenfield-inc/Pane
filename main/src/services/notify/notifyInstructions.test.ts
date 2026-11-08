@@ -55,6 +55,11 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     expect(written).toContain("doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"`");
     expect(written).toContain('posts each item that waits on the person once, as a background `runpane notify ... --json`');
     expect(written).toContain('- For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`.\r\n');
+    // A typed reply is an answer or a question: the agent says which, and updates the card for a question.
+    expect(written).toContain('- A `reply:` line (or a `{reply}` result) is the person\'s typed reply: an answer or a question. If it answers, run `runpane notify --took <id|Q-n> answer`.');
+    expect(written).toContain('then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"`');
+    expect(written).toContain('A `correction:` line fixes how it was taken.\r\n');
+    expect(written).toContain('- Write the card as its Summary: a title of about 80 characters; context saying why it matters;');
     expect(written.endsWith(`${END}\r\n`)).toBe(true);
     // Codex's folder had no AGENTS.md, so Pane created one holding only the block.
     expect(text(codexFile).startsWith(BEGIN)).toBe(true);

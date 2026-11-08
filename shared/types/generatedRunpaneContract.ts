@@ -1466,7 +1466,9 @@ export const RUNPANE_CONTRACT = {
       "name": "notify",
       "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
       "usage": [
-        "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
+        "runpane notify --update <id|Q-n> --asked <text> --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "runpane notify --resume <id> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
@@ -2527,7 +2529,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--choices",
         "value": "<json>",
-        "description": "notify --ui options: 1 to 9 choices as a JSON array of {label, detail?, recommended?}."
+        "description": "notify --ui options: 1 to 9 choices as a JSON array of {label, detail?, recommended?}; with --update a reworded choice adds \"was\", its old label."
       },
       {
         "name": "--detail",
@@ -2552,7 +2554,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--links",
         "value": "<json>",
-        "description": "notify: up to 6 related files or pages as a JSON array of {label, path} or {label, url}; any ui."
+        "description": "notify: up to 6 related files, pages or approvals as a JSON array of {label, path}, {label, url} or {label, approval}; any ui."
       },
       {
         "name": "--content",
@@ -2583,6 +2585,41 @@ export const RUNPANE_CONTRACT = {
         "name": "--about-session",
         "value": "<id|name>",
         "description": "notify only, for Autopilot's own items: the Session the item is about."
+      },
+      {
+        "name": "--questions",
+        "value": "<json>",
+        "description": "notify --ui options, instead of --choices: 2 to 4 questions as a JSON array of {title, choices}, each with 1 to 9 choices and one pick."
+      },
+      {
+        "name": "--took",
+        "value": "<id|Q-n>",
+        "description": "notify only: say how you took the person's reply to this approval; answer or question follows the id."
+      },
+      {
+        "name": "--took-as",
+        "value": "<answer|question>",
+        "description": "notify --took: the word after the id, as a flag (the MCP tool's tookAs)."
+      },
+      {
+        "name": "--status",
+        "value": "<text>",
+        "description": "notify --took <id> question: what you are doing about it, shown on the approval. Defaults to \"Getting more context…\"."
+      },
+      {
+        "name": "--update",
+        "value": "<id|Q-n>",
+        "description": "notify only: save a new version of this approval after the person's question, and wait on it."
+      },
+      {
+        "name": "--asked",
+        "value": "<text>",
+        "description": "notify --update: the person's question, as they typed it."
+      },
+      {
+        "name": "--what-changed",
+        "value": "<text>",
+        "description": "notify --update: what changed, one line per change."
       },
       {
         "name": "--decision",
@@ -2834,7 +2871,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
         "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--json]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
         "  runpane autopilot status|waiting|stack [--json]",
@@ -4058,33 +4095,49 @@ export const RUNPANE_CONTRACT = {
       ],
       "notify": [
         "Usage:",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
+        "  runpane notify --update <id|Q-n> --asked <text> --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
         "",
         "Asks the person a question, or tells them something, on screen wherever they are, and",
         "prints their answer. The call waits until they answer; --ui info returns at once.",
         "Inside a Pane terminal the question names its Pane from PANE_SESSION_ID and PANE_PANEL_ID.",
         "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
+        "A typed reply comes back as a reply result (or a `reply:` line in your tab): it may answer",
+        "the question or ask one. Say which with --took; for a question, find out, then --update.",
         "",
         "Options:",
         "  --ui <ui>                      options, approve, ask, or info",
-        "  --title <text>                 The question or update in one line",
-        "  --context <text>               Background shown under Details",
+        "  --title <text>                 The question or update in one line, about 80 characters",
+        "  --context <text>               Why it matters, shown under Details",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
+        "  --questions <json>             options, instead of --choices: 2 to 4 of [{\"title\":\"...\",\"choices\":[...]}], one pick each",
         "  --detail <text>                approve: the command or SQL to approve",
         "  --detail-label <text>          approve: label of the disclosure for --detail (default Show details)",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --action <json>                info: one button, such as {\"label\":\"Open PR\",\"url\":\"https://...\"}",
-        "  --links <json>                 Any ui: up to 6 related files or pages, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
+        "  --links <json>                 Any ui: up to 6 related files, pages or approvals, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
+        "                                 or [{\"label\":\"Q-19\",\"approval\":\"Q-19\"}]",
         "  --relays <item>                Session orchestrator: improve this worker's waiting card (an id from runpane inbox)",
         "                                 instead of posting a second one; the call waits on it, and the answer goes to the worker's tab",
         "  --about-session <id|name>      Autopilot's own item: the Session it is about",
+        "  --took <id|Q-n> <answer|question>",
+        "                                 Say how you took the person's reply: answer records it as the answer;",
+        "                                 question shows that you are getting more context",
+        "  --status <text>                With --took question: what you are doing (default Getting more context…)",
+        "  --update <id|Q-n>              Save a new version of the approval after the person's question, and wait on it;",
+        "                                 pass only what changed, and mark a reworded choice with \"was\" (its old label)",
+        "  --asked <text>                 With --update: the person's question, as they typed it",
+        "  --what-changed <text>          With --update: one line per change",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "",
-        "Example:",
-        "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'"
+        "Examples:",
+        "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'",
+        "  runpane notify --took Q-20 answer",
+        "  runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: it can be undone from Settings\" --context \"...\""
       ],
       "panels resume": [
         "Usage:",
@@ -4746,7 +4799,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
         "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--json]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
         "  runpane autopilot status|waiting|stack [--json]",
@@ -5928,33 +5981,49 @@ export const RUNPANE_CONTRACT = {
       ],
       "notify": [
         "Usage:",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
+        "  runpane notify --update <id|Q-n> --asked <text> --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
         "",
         "Asks the person a question, or tells them something, on screen wherever they are, and",
         "prints their answer. The call waits until they answer; --ui info returns at once.",
         "Inside a Pane terminal the question names its Pane from PANE_SESSION_ID and PANE_PANEL_ID.",
         "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
+        "A typed reply comes back as a reply result (or a `reply:` line in your tab): it may answer",
+        "the question or ask one. Say which with --took; for a question, find out, then --update.",
         "",
         "Options:",
         "  --ui <ui>                      options, approve, ask, or info",
-        "  --title <text>                 The question or update in one line",
-        "  --context <text>               Background shown under Details",
+        "  --title <text>                 The question or update in one line, about 80 characters",
+        "  --context <text>               Why it matters, shown under Details",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
+        "  --questions <json>             options, instead of --choices: 2 to 4 of [{\"title\":\"...\",\"choices\":[...]}], one pick each",
         "  --detail <text>                approve: the command or SQL to approve",
         "  --detail-label <text>          approve: label of the disclosure for --detail (default Show details)",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --action <json>                info: one button, such as {\"label\":\"Open PR\",\"url\":\"https://...\"}",
-        "  --links <json>                 Any ui: up to 6 related files or pages, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
+        "  --links <json>                 Any ui: up to 6 related files, pages or approvals, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
+        "                                 or [{\"label\":\"Q-19\",\"approval\":\"Q-19\"}]",
         "  --relays <item>                Session orchestrator: improve this worker's waiting card (an id from runpane inbox)",
         "                                 instead of posting a second one; the call waits on it, and the answer goes to the worker's tab",
         "  --about-session <id|name>      Autopilot's own item: the Session it is about",
+        "  --took <id|Q-n> <answer|question>",
+        "                                 Say how you took the person's reply: answer records it as the answer;",
+        "                                 question shows that you are getting more context",
+        "  --status <text>                With --took question: what you are doing (default Getting more context…)",
+        "  --update <id|Q-n>              Save a new version of the approval after the person's question, and wait on it;",
+        "                                 pass only what changed, and mark a reworded choice with \"was\" (its old label)",
+        "  --asked <text>                 With --update: the person's question, as they typed it",
+        "  --what-changed <text>          With --update: one line per change",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "",
-        "Example:",
-        "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'"
+        "Examples:",
+        "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'",
+        "  runpane notify --took Q-20 answer",
+        "  runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: it can be undone from Settings\" --context \"...\""
       ],
       "panels resume": [
         "Usage:",
@@ -6692,7 +6761,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
       "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
-      "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}` or `{label, url}`), shown as chips on the card. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
+      "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab): the reply may answer the question or ask one. `runpane notify --took <id|Q-n> answer` records it as the answer; `--took <id|Q-n> question [--status <text>]` shows that the agent is getting more context, and `runpane notify --update <id|Q-n> --asked <text> --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
       "Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.",
       "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. A send with --no-expect-report is a reply (an answer, or an addition to the current work): it is delivered while a report is outstanding and leaves that expectation in place. Then watch for the original result.",
       "`runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on), plus `answers`, what its workers were told, kept 7 days; an answer with no `decision` still needs its D-n. `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items, and `runpane inbox ack <item-id>... --decision <D-n>` records the D-n, even on an item already cleared. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.",
@@ -8201,6 +8270,40 @@ export const RUNPANE_CONTRACT = {
         "Why",
         "--choices=[{\"label\":\"A\"}]",
         "--links=[{\"label\":\"Notes\",\"url\":\"https://example.com\"}]",
+        "--json"
+      ],
+      [
+        "notify",
+        "--took",
+        "Q-20",
+        "answer",
+        "--json"
+      ],
+      [
+        "notify",
+        "--took=n-1",
+        "question",
+        "--status",
+        "Checking the logs",
+        "--json"
+      ],
+      [
+        "notify",
+        "--took",
+        "Q-20",
+        "--took-as",
+        "answer"
+      ],
+      [
+        "notify",
+        "--update",
+        "Q-20",
+        "--asked",
+        "Can it be undone?",
+        "--what-changed",
+        "- Added: it can be undone",
+        "--questions",
+        "[{\"title\":\"A\",\"choices\":[{\"label\":\"x\"}]},{\"title\":\"B\",\"choices\":[{\"label\":\"y\"}]}]",
         "--json"
       ]
     ],
@@ -15248,6 +15351,34 @@ export const RUNPANE_CONTRACT = {
         "recommended": {
           "type": "boolean",
           "description": "Shade this choice as the one you recommend."
+        },
+        "was": {
+          "type": "string",
+          "minLength": 1,
+          "description": "--update only: the label this choice had before it was reworded. A choice whose label stays but whose detail changed may repeat its label here."
+        }
+      },
+      "additionalProperties": false
+    },
+    "notifySubQuestion": {
+      "description": "One question of an options approval that asks several at once; the person picks one choice.",
+      "type": "object",
+      "required": [
+        "title",
+        "choices"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 9,
+          "items": {
+            "$ref": "#/jsonSchemas/notifyChoice"
+          }
         }
       },
       "additionalProperties": false
@@ -15271,7 +15402,7 @@ export const RUNPANE_CONTRACT = {
       "additionalProperties": false
     },
     "notifyLink": {
-      "description": "A related file or page shown as a chip on the card: a label and exactly one of path or url.",
+      "description": "A related file, page or approval shown as a chip on the card: a label and exactly one of path, url or approval.",
       "type": "object",
       "required": [
         "label"
@@ -15294,12 +15425,17 @@ export const RUNPANE_CONTRACT = {
           "type": "string",
           "pattern": "^https?://\\S+$",
           "description": "An http or https page."
+        },
+        "approval": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Another approval, by its id or Q-n; it opens in place, with Back."
         }
       },
       "additionalProperties": false
     },
     "notifyRequest": {
-      "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, with relays or aboutSession when they apply, or resume alone. Only `secrets request` sends ui secret.",
+      "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, with relays or aboutSession when they apply; resume alone; took with tookAs (and status); or update with asked, whatChanged and the changed fields. Only `secrets request` sends ui secret.",
       "type": "object",
       "required": [
         "caller"
@@ -15328,6 +15464,15 @@ export const RUNPANE_CONTRACT = {
           "items": {
             "$ref": "#/jsonSchemas/notifyChoice"
           }
+        },
+        "questions": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/jsonSchemas/notifySubQuestion"
+          },
+          "description": "ui options, instead of choices: several questions, one pick each."
         },
         "detail": {
           "type": "string"
@@ -15376,6 +15521,38 @@ export const RUNPANE_CONTRACT = {
           "type": "string",
           "minLength": 1
         },
+        "took": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The approval (id or Q-n) whose reply the reader took; sent with tookAs and nothing but status."
+        },
+        "tookAs": {
+          "enum": [
+            "answer",
+            "question"
+          ],
+          "description": "answer records the reply as the answer; question shows the reader is getting more context."
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "description": "tookAs question: what the reader is doing, shown on the approval."
+        },
+        "update": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The approval (id or Q-n) to save a new version of; the question fields sent replace those fields. No ui."
+        },
+        "asked": {
+          "type": "string",
+          "minLength": 1,
+          "description": "update: the person's question, as they typed it."
+        },
+        "whatChanged": {
+          "type": "string",
+          "minLength": 1,
+          "description": "update: what changed, one line per change."
+        },
         "relays": {
           "type": "string",
           "minLength": 1,
@@ -15421,11 +15598,73 @@ export const RUNPANE_CONTRACT = {
           "properties": {
             "answer": {
               "type": "string",
-              "description": "options: the chosen label. ask: the typed answer."
+              "description": "options: the chosen label (with questions, the picks joined with \" · \"). ask: the typed answer."
             },
             "note": {
               "type": "string",
               "description": "What the person typed with their answer."
+            },
+            "answers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "options with questions: one pick per question, in order."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "The person typed a reply: it may answer the question or ask one. The approval keeps waiting; say which with `runpane notify --took <id> answer|question` (see next).",
+          "required": [
+            "reply",
+            "id",
+            "next"
+          ],
+          "properties": {
+            "reply": {
+              "type": "string",
+              "description": "What the person typed."
+            },
+            "picks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "What they picked with it, one label per question."
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The approval, for --took and --update."
+            },
+            "next": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "--took: how the reply was recorded.",
+          "required": [
+            "took",
+            "id"
+          ],
+          "properties": {
+            "took": {
+              "enum": [
+                "answer",
+                "question"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "next": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -22540,7 +22779,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--ui",
             "value": "<options|approve|ask|info>",
             "required": false,
-            "description": "options: pick one of choices. approve: Approve or Deny. ask: a typed answer. info: an update that returns at once. Required unless resume.",
+            "description": "options: pick one of choices. approve: Approve or Deny. ask: a typed answer. info: an update that returns at once. Required unless resume, took or update.",
             "schema": {
               "type": "string",
               "enum": [
@@ -22555,19 +22794,19 @@ export const RUNPANE_CONTRACT = {
             "name": "--title",
             "value": "<text>",
             "required": false,
-            "description": "The question or update in one line; long titles wrap to 3 lines. Required unless resume."
+            "description": "The question or update in one line, about 80 characters; long titles wrap to 3 lines. Required unless resume, took or update."
           },
           {
             "name": "--context",
             "value": "<text>",
             "required": false,
-            "description": "Background the person can open under Details."
+            "description": "Why it matters, shown under Details."
           },
           {
             "name": "--choices",
             "value": "<json>",
             "required": false,
-            "description": "ui options only, and required there: 1 to 9 choices. The answer is the chosen label. Mark at most the one you recommend.",
+            "description": "ui options only, and required there unless questions: 1 to 9 choices. The answer is the chosen label. Say what each does in detail, and mark the one you recommend. With update, a reworded choice adds was, its old label.",
             "schema": {
               "type": "array",
               "minItems": 1,
@@ -22619,7 +22858,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--links",
             "value": "<json>",
             "required": false,
-            "description": "Any ui: up to 6 related files or pages, shown as chips on the card. A file is {label, path}, on this machine; a relative path resolves against the working directory. A page is {label, url}, http or https.",
+            "description": "Any ui: up to 6 related files, pages or approvals, shown as chips on the card. A file is {label, path}, on this machine; a relative path resolves against the working directory. A page is {label, url}, http or https. Another approval is {label, approval}, its id or Q-n.",
             "schema": {
               "type": "array",
               "maxItems": 6,
@@ -22639,6 +22878,63 @@ export const RUNPANE_CONTRACT = {
             "value": "<id|name>",
             "required": false,
             "description": "Autopilot's own item: the Session it is about, shown as its connected Session. Without it, the item links to Autopilot's chat."
+          },
+          {
+            "name": "--questions",
+            "value": "<json>",
+            "required": false,
+            "description": "ui options only, instead of choices: 2 to 4 questions asked at once, each with 1 to 9 choices and one pick. The result's answers holds one label per question; answer joins them with \" · \".",
+            "schema": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 4,
+              "items": {
+                "$ref": "#/jsonSchemas/notifySubQuestion"
+              }
+            }
+          },
+          {
+            "name": "--took",
+            "value": "<id|Q-n>",
+            "required": false,
+            "description": "After a reply result or a `reply:` line: the approval's id or Q-n, with tookAs answer (record the reply as the answer) or question (it asked something; find out, then call update). Pass no question fields."
+          },
+          {
+            "name": "--took-as",
+            "value": "<answer|question>",
+            "required": false,
+            "description": "With took: answer or question. On the command line it can follow the id instead (`--took Q-20 answer`).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "answer",
+                "question"
+              ]
+            }
+          },
+          {
+            "name": "--status",
+            "value": "<text>",
+            "required": false,
+            "description": "With took question: what you are doing about it, shown on the approval. Defaults to \"Getting more context…\"."
+          },
+          {
+            "name": "--update",
+            "value": "<id|Q-n>",
+            "required": false,
+            "description": "After you took a reply as a question and found out: the approval's id or Q-n. Saves a new version with any of title, context, choices, questions and links you pass (the rest stay), shows it as updated, and waits on it like any notify call. Needs asked and whatChanged; takes no ui."
+          },
+          {
+            "name": "--asked",
+            "value": "<text>",
+            "required": false,
+            "description": "With update: the person's question, as they typed it."
+          },
+          {
+            "name": "--what-changed",
+            "value": "<text>",
+            "required": false,
+            "description": "With update: what changed, one line per change."
           },
           {
             "name": "--resume",
@@ -22665,6 +22961,10 @@ export const RUNPANE_CONTRACT = {
           "runpane notify --ui info --title \"PR #812 is ready for review\" --action '{\"label\":\"Open PR\",\"url\":\"https://github.com/org/repo/pull/812\"}' --json",
           "runpane notify --ui approve --title \"Ship the release notes?\" --links '[{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"},{\"label\":\"PR #812\",\"url\":\"https://github.com/org/repo/pull/812\"}]' --json",
           "runpane notify --relays in-1a2b3c4d --ui options --title \"Q-39: Run the script?\" --choices '[{\"label\":\"Run it\",\"recommended\":true},{\"label\":\"Hold\"}]' --json",
+          "runpane notify --ui options --title \"Ship 2.5 today: which parts go out?\" --questions '[{\"title\":\"Release notes\",\"choices\":[{\"label\":\"Ship as written\",\"recommended\":true},{\"label\":\"Hold\"}]},{\"title\":\"Intel Mac build\",\"choices\":[{\"label\":\"Include it\"},{\"label\":\"Skip it\"}]}]' --json",
+          "runpane notify --took Q-20 answer --json",
+          "runpane notify --took Q-20 question --status \"Checking whether it can be undone\" --json",
+          "runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: Settings > Search turns it off again\" --context \"Search takes 4 s; the index brings it under 100 ms. It can be undone from Settings.\" --json",
           "runpane notify --resume n-4f2a --json"
         ],
         "jsonSchemas": [
@@ -22673,13 +22973,15 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Write the card the way the pane MCP server's instructions say: in plain words, what the work is for, what just happened, and what you need.",
-          "Results: options returns {answer: <chosen label>, note?}; approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
+          "Results: options returns {answer: <chosen label>, note?}, with questions also answers (one label per question); approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
+          "A result of {reply, picks?, id, next} means the person typed a reply instead of only picking: it may answer the question or ask one. Read it, then call `runpane notify --took <id> answer` to record it as the answer, or `runpane notify --took <id> question` and find out, then `runpane notify --update <id> --asked \"<their question>\" --what-changed \"<one line per change>\"` with whatever changed, instead of asking again. With no open call the reply reaches your tab as a `reply:` line; `correction:` lines fix how it was taken. --took returns {took, id, next?}.",
+          "Only the reply's reader may run took and update: the asker, the orchestrator that relayed it, or Autopilot. Anyone else gets ERR_NOTIFY_NOT_READER.",
           "A result of {waiting: true, id} means the question is still on screen and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting. After 15 minutes on this loop Pane gives up and returns unavailable.",
           "A result of {unavailable, next} means nobody can answer through Pane right now (Pane is not running, Notify is off, or the wait ended): ask in the terminal instead. It is a result, not an error.",
           "Inside a Pane terminal the question names its Pane and panel (PANE_SESSION_ID and PANE_PANEL_ID); elsewhere it names the working directory.",
           "An older Pane ignores links and shows the card without them.",
           "With relays the call waits on the worker's card as on any notify, and the answer also goes straight to the worker's tab as `answer: Q-n → <answer> (by you)`. Then record it: `runpane inbox ack <item> --decision <D-n>`.",
-          "Invalid input, such as choices with ui ask or 10 choices, fails with a message naming the field, and nothing is shown."
+          "Invalid input, such as choices with ui ask, 10 choices, or ui with took or update, fails with a message naming the field, and nothing is shown."
         ]
       },
       "autopilot status": {
@@ -23086,7 +23388,8 @@ export const RUNPANE_CONTRACT = {
         "Ask only what you can't find out yourself.",
         "Put related questions in one card.",
         "Send `info` rarely, only for what the person must know now.",
-        "Keep titles short and choices to a few words.",
+        "Write the card as its Summary: a title of about 80 characters; context saying why it matters; each choice saying what it does, with one recommended; links to every file, page or approval it mentions.",
+        "A `reply:` line (or a `{reply}` result) is the person's typed reply: an answer or a question. If it answers, run `runpane notify --took <id|Q-n> answer`. If it asks, run `--took <id|Q-n> question`, find out, then `runpane notify --update <id|Q-n> --asked \"<their question>\" --what-changed \"<one line per change>\"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` (a reworded choice adds `\"was\"`, its old label) instead of asking again. A `correction:` line fixes how it was taken.",
         "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`."
       ],
       "cardRule": "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",

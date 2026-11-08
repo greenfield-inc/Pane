@@ -148,6 +148,11 @@ NOTIFY_VALUE_FLAGS = {
     "--links": "notify_links",
     "--relays": "notify_relays",
     "--about-session": "notify_about_session",
+    "--questions": "notify_questions",
+    "--status": "notify_status",
+    "--update": "notify_update",
+    "--asked": "notify_asked",
+    "--what-changed": "notify_what_changed",
 }
 # Autopilot's commands that take a waiting item's id as their first word.
 AUTOPILOT_ITEM_COMMANDS = {"autopilot answer", "autopilot close", "autopilot rewrite"}
@@ -156,6 +161,13 @@ AUTOPILOT_ITEM_COMMANDS = {"autopilot answer", "autopilot close", "autopilot rew
 FLAG_OWNERS = {
     "--relays": ("notify",),
     "--about-session": ("notify",),
+    "--questions": ("notify",),
+    "--took": ("notify",),
+    "--took-as": ("notify",),
+    "--status": ("notify", "update"),
+    "--update": ("notify",),
+    "--asked": ("notify",),
+    "--what-changed": ("notify",),
     "--decision": ("inbox ack",),
     "--choice": ("autopilot answer",),
     "--approve": ("autopilot answer",),
@@ -323,6 +335,15 @@ class ParsedArgs:
     notify_links: Optional[str] = None
     notify_relays: Optional[str] = None
     notify_about_session: Optional[str] = None
+    notify_questions: Optional[str] = None
+    # `notify --took <id|Q-n> answer|question`: the approval, and the word after it (or `--took-as`).
+    notify_took: Optional[str] = None
+    notify_took_as: Optional[str] = None
+    notify_status: Optional[str] = None
+    # `notify --update <id|Q-n> --asked <text> --what-changed <text>`
+    notify_update: Optional[str] = None
+    notify_asked: Optional[str] = None
+    notify_what_changed: Optional[str] = None
     loop_id: Optional[str] = None
     cron: Optional[str] = None
     paused: bool = False
@@ -835,6 +856,13 @@ def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
             parsed.wait_for_result = True
         elif is_local_command and arg in FLAG_OWNERS and parsed.command not in FLAG_OWNERS[arg]:
             raise ValueError(f"{arg} is only valid with runpane {' or runpane '.join(FLAG_OWNERS[arg])}.")
+        elif parsed.command == "notify" and arg == "--took":
+            # `notify --took <id|Q-n> answer|question`: the word after the id says how the reply was taken.
+            index += 1
+            parsed.notify_took = read_value(args, index, arg, literal_values)
+            if index + 1 < len(args) and not args[index + 1].startswith("-"):
+                index += 1
+                set_notify_took_as(parsed, args[index])
         elif is_local_command and arg in LOCAL_BOOLEAN_FLAGS:
             parse_local_boolean_flag(parsed, arg)
         elif is_local_command and arg in LOCAL_VALUE_FLAGS:
@@ -1322,6 +1350,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--loop":
         parsed.loop_id = value
         return
+    if flag == "--took-as":
+        set_notify_took_as(parsed, value)
+        return
     if flag in NOTIFY_VALUE_FLAGS:
         setattr(parsed, NOTIFY_VALUE_FLAGS[flag], value)
         return
@@ -1361,6 +1392,12 @@ def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None
 REPO_SETTING_FLAGS = {"--build-script", "--run-script", "--archive-script", "--worktree-folder", "--open-ide-command", "--system-prompt"}
 
 
+def set_notify_took_as(parsed: ParsedArgs, value: str) -> None:
+    if parsed.notify_took_as is not None:
+        raise ValueError("Say answer or question once: after --took <id|Q-n>, or as --took-as.")
+    parsed.notify_took_as = value
+
+
 def read_value(args: List[str], index: int, flag: str, literal_values: Set[int]) -> str:
     if index in literal_values:
         return args[index]
@@ -1370,7 +1407,7 @@ def read_value(args: List[str], index: int, flag: str, literal_values: Set[int])
     if clearable and index < len(args) and args[index] == "":
         return ""
     bare_flag = index < len(args) and re.fullmatch(r"--[a-z][a-z-]*", args[index]) is not None
-    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains", "--because", "--reason", "--choice"}
+    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains", "--because", "--reason", "--choice", "--asked", "--what-changed"}
     if index >= len(args) or not args[index] or (not free_text and args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]
