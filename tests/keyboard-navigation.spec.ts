@@ -39,11 +39,12 @@ const layout = {
 };
 
 async function openFixture(page: Page, { approvals = false }: { approvals?: boolean } = {}): Promise<void> {
-  await installElectronApiMock(page, {
+  const options: Parameters<typeof installElectronApiMock>[1] = {
     initialProjects: [project], initialSessions: sessions, initialPanels: panels, initialLayout: layout,
     activeProjectId: project.id,
-    ...(approvals ? { notifySnapshot: notifyFixture() } : {}),
-  });
+  };
+  if (approvals) options.notifySnapshot = notifyFixture();
+  await installElectronApiMock(page, options);
   await page.addInitScript(() => localStorage.setItem('pane-detail-panel-visible', 'true'));
   await page.goto('/');
   await page.getByRole('button', { name: 'Expand project Nav fixture', exact: true }).click();
@@ -314,4 +315,36 @@ test('Esc leaves Approvals for where you were, but not while an answer is being 
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('approvals-queue')).toHaveCount(0);
   await expect.poll(() => focusPlace(page)).toMatchObject({ group: 'g-left' });
+});
+
+test('the palette shows a command\'s key, and its Actions change it, reset it and show it in Keyboard Shortcuts', async ({ page }) => {
+  await openFixture(page);
+  await page.keyboard.press('ControlOrMeta+Shift+P');
+  const input = page.getByRole('combobox').or(page.getByPlaceholder('Search')).first();
+  await input.fill('>maximize');
+  const row = page.getByRole('option', { name: /Maximize or Restore Focused Region/ }).first();
+  await expect(row).toContainText(/K.*M/);
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(page.getByRole('option', { name: 'Change key…' })).toBeVisible();
+  await expect(page.getByRole('option', { name: 'Show in Keyboard Shortcuts' })).toBeVisible();
+  await page.getByRole('option', { name: 'Change key…' }).click();
+  await expect(page.getByTestId('palette-key-recorder')).toBeVisible();
+
+  // ⌘B is Toggle Sidebar: refused, and recording carries on.
+  await page.keyboard.press('ControlOrMeta+b');
+  await expect(page.getByTestId('palette-key-recorder')).toContainText('Toggle Sidebar');
+  await page.keyboard.press('ControlOrMeta+Shift+Enter');
+  await expect(page.getByTestId('palette-key-status')).toContainText('Maximize');
+  await input.fill('>maximize');
+  await expect(page.getByRole('option', { name: /Maximize or Restore Focused Region/ }).first()).toContainText(/Enter|↩/);
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByRole('option', { name: 'Reset to default' }).click();
+  await input.fill('>maximize');
+  await expect(page.getByRole('option', { name: /Maximize or Restore Focused Region/ }).first()).toContainText(/K.*M/);
+
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByRole('option', { name: 'Show in Keyboard Shortcuts' }).click();
+  await expect(page.getByRole('textbox', { name: 'Search shortcuts' })).toHaveValue(/Maximize/);
 });
