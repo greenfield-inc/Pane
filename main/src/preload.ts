@@ -290,6 +290,14 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
+  // A browser tab's page took keyboard focus (a click inside it never reaches this DOM).
+  ipcRenderer.on('browser-panel:page-focused', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:page-focused', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:page-focused to window:', e);
+    }
+  });
   // Escape pressed in a browser tab's page while its Pane find bar is open.
   ipcRenderer.on('browser-panel:find-escape', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
     try {
@@ -913,6 +921,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Event listeners for real-time updates
   events: {
+    /** Config changed in main (Settings, another window, or a hand edit of config.json). */
+    onConfigUpdated: (callback: (config: AppConfig) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config);
+      ipcRenderer.on('config:updated', wrappedCallback);
+      return () => ipcRenderer.removeListener('config:updated', wrappedCallback);
+    },
     onPermissionRequest: (callback: (request: PermissionRequest) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, request: PermissionRequest) => callback(request);
       ipcRenderer.on('permission:request', wrappedCallback);

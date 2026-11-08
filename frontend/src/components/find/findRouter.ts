@@ -111,7 +111,6 @@ export function useFindHotkeys(): void {
   useHotkey({
     id: 'find-in-tab',
     label: 'Find',
-    keys: 'mod+f',
     category: 'view',
     enabled: () => resolveFocusedFindPanelId() !== null,
     action: () => {
@@ -123,7 +122,6 @@ export function useFindHotkeys(): void {
   useHotkey({
     id: 'find-next',
     label: 'Find Next',
-    keys: 'mod+g',
     category: 'view',
     enabled: canStep,
     action: () => {
@@ -135,7 +133,6 @@ export function useFindHotkeys(): void {
   useHotkey({
     id: 'find-previous',
     label: 'Find Previous',
-    keys: 'mod+shift+g',
     category: 'view',
     enabled: canStep,
     action: () => {

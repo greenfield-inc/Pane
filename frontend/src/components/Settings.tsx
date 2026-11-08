@@ -221,7 +221,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       case 'secrets':
         return <SecretsSettings />;
       case 'shortcuts':
-        return <ShortcutsSettings persistence={persistence} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
+        return <ShortcutsSettings persistence={persistence} platform={platform} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
       case 'privacy':
         return <PrivacySettings persistence={persistence} />;
       case 'import-export':

@@ -328,10 +328,26 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 
 ## Keyboard Shortcuts
 
+Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ctrl+K Ctrl+S`) for **Keyboard Shortcuts**, or pick **Change key…** in a command's Actions (`⌘K`) in Search. Two-step keys such as `⌘K ⌘S` are pressed one after the other; a small hint waits for the second key.
+
 | Shortcut | Action |
 |----------|--------|
-| `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command |
-| `⌘K` / `Ctrl+K` | Clear terminal scrollback |
+| `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command, and see or change its key |
+| `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Keyboard Shortcuts |
+| `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
+| `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel or sidebar in that direction |
+| `F6` / `⇧F6` | Next / previous region (sidebar, splits, right panel, terminal) |
+| `⌘K ⌘M` / `Ctrl+K Ctrl+M` | Maximize the focused split, Session tile, sidebar or right panel; again to restore |
+| `⌘⇧M` / `Ctrl+Shift+M` | Minimize the focused sidebar, right panel or terminal |
+| `⌘B` / `Ctrl+B` | Toggle sidebar |
+| `⌘⌥B` / `Ctrl+Alt+B` | Toggle right panel |
+| `` ⌃` `` / `` Ctrl+` `` | Toggle terminal |
+| `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab |
+| `⌃⇧Space` | Approvals, and back to exactly where you were (also `Esc`); change it in Settings → Notify |
+| `⌘⌥O` / `Ctrl+Alt+O` | Machine switcher (then `0` for All machines, `1-9` for a machine) |
+| `⌃⌘]` `⌃⌘[` / `Ctrl+Alt+Shift+]` `[` | Next / previous machine |
+| `⌃⌘0` / `Ctrl+Alt+Shift+0` | All machines ⇄ the last machine |
+| `⌘K` / `Ctrl+K` | Clear the focused terminal |
 | `⌘F` / `Ctrl+F` | Find in the focused tab (terminal, browser, file preview, Logs) |
 | `⌘G` / `Ctrl+G` | Find next |
 | `⌘⇧G` / `Ctrl+Shift+G` | Find previous |
@@ -340,9 +356,9 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 | `⌘1-9` / `Ctrl+1-9` | Switch pane |
 | `⌘,` / `Ctrl+,` | Open settings |
 | `⌘⌥<key>` / `Ctrl+Alt+<key>` | Paste a clipboard shortcut into the active terminal |
-| `⌘⌥/` / `Ctrl+Alt+/` | Open Settings → Shortcuts |
 | `⌘⌥` (hold) / `Ctrl+Alt` (hold) | Show all configured shortcuts as an overlay |
-| `⌘B` / `Ctrl+B` | Toggle sidebar |
+
+On macOS, Control+letter keys (`⌃A`, `⌃E`, `⌃K`, `⌃W`…) always reach the terminal. View → Actual Size is `⌘⇧0`, since `⌘0` focuses the sidebar.
 
 ---
 

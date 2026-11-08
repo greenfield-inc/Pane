@@ -58,6 +58,7 @@ import {
   focusedSessionTile,
   resizeSessionSplit,
   showSessionInLayout,
+  toggleMaximizedTile,
 } from '../utils/sessionWorkspaceLayout';
 
 function responseError(response: { success: boolean; error?: string }, fallback: string): Error | null {
@@ -304,7 +305,6 @@ function SessionWorkspace() {
   useHotkey({
     id: 'focus-session-tile-left',
     label: 'Focus Session Left',
-    keys: '',
     category: 'view',
     enabled: () => isTiled,
     action: () => focusDirection('left'),
@@ -313,7 +313,6 @@ function SessionWorkspace() {
   useHotkey({
     id: 'focus-session-tile-right',
     label: 'Focus Session Right',
-    keys: '',
     category: 'view',
     enabled: () => isTiled,
     action: () => focusDirection('right'),
@@ -322,7 +321,6 @@ function SessionWorkspace() {
   useHotkey({
     id: 'focus-session-tile-up',
     label: 'Focus Session Up',
-    keys: '',
     category: 'view',
     enabled: () => isTiled,
     action: () => focusDirection('up'),
@@ -331,7 +329,6 @@ function SessionWorkspace() {
   useHotkey({
     id: 'focus-session-tile-down',
     label: 'Focus Session Down',
-    keys: '',
     category: 'view',
     enabled: () => isTiled,
     action: () => focusDirection('down'),
@@ -340,7 +337,6 @@ function SessionWorkspace() {
   useHotkey({
     id: 'close-session-tile',
     label: 'Stop tiling this Session',
-    keys: '',
     category: 'view',
     enabled: () => isTiled,
     action: () => {
@@ -350,17 +346,27 @@ function SessionWorkspace() {
     showInPalette: true,
   });
 
+  const toggleTileMaximize = useCallback((tileId: string) => {
+    const current = currentLayout();
+    if (!current) return;
+    const next = toggleMaximizedTile(current, tileId);
+    if (next !== current) commitLayout(next);
+  }, [commitLayout, currentLayout]);
+
   const renderTile = useCallback((tile: SessionTileNode, context: SessionTileContext) => (
     <SessionTile
       tile={tile}
       isFocused={context.isFocused}
       tiled={context.tiled}
+      maximized={context.maximized}
+      hidden={context.hidden}
+      onToggleMaximize={context.tiled ? toggleTileMaximize : undefined}
       draggedSessionId={draggedSessionId}
       onFocus={focusTile}
       onDropSession={dropSession}
       onClose={context.tiled ? closeTile : undefined}
     />
-  ), [closeTile, dropSession, draggedSessionId, focusTile]);
+  ), [closeTile, dropSession, draggedSessionId, focusTile, toggleTileMaximize]);
 
   if (!layout) {
     return (
@@ -392,6 +398,12 @@ interface SessionTileProps {
   tile: SessionTileNode;
   isFocused: boolean;
   tiled: boolean;
+  /** This tile is maximized over the others (P4). */
+  maximized?: boolean;
+  /** Another tile is maximized over this one. */
+  hidden?: boolean;
+  /** Maximize this tile over the others, or restore; absent while it is the only tile. */
+  onToggleMaximize?: (tileId: string) => void;
   draggedSessionId: string | null;
   onFocus: (tileId: string) => void;
   onDropSession: (tileId: string, sessionId: string, zone: DropZone) => void;
@@ -424,6 +436,9 @@ function SessionTile({
   onDropSession,
   onClose,
   inline,
+  maximized = false,
+  hidden = false,
+  onToggleMaximize,
 }: SessionTileProps) {
   const sessionId = tile.sessionId;
   const hostId = useConfigStore(state => state.config ? getActiveRemoteHostId(state.config.remoteDaemon) : undefined);
@@ -516,9 +531,12 @@ function SessionTile({
     tiled,
     inline,
     isFocused,
+    maximized,
+    hidden,
+    onToggleMaximize: onToggleMaximize ? () => onToggleMaximize(tile.id) : undefined,
     onDragStart: handleDragStart,
     onClose: onClose ? () => onClose(tile.id) : undefined,
-  }), [handleDragStart, inline, isFocused, onClose, tile.id, tiled]);
+  }), [handleDragStart, hidden, inline, isFocused, maximized, onClose, onToggleMaximize, tile.id, tiled]);
 
   // A tile already showing the dragged Session has nothing to offer it.
   const isDragSource = draggedSessionId === sessionId;
@@ -529,7 +547,6 @@ function SessionTile({
         // h-full/w-full fills an Allotment pane; flex-1 fills the plain flex
         // row a single tile sits in. A tile is never content-sized.
         'relative flex h-full w-full flex-1 min-w-0 min-h-0 flex-col overflow-hidden bg-bg-primary',
-        tiled && isFocused && 'ring-1 ring-inset ring-[color-mix(in_srgb,var(--color-interactive-primary)_30%,transparent)]',
       )}
       data-session-tile={sessionId}
       data-session-focused={isFocused}
@@ -608,6 +625,12 @@ interface SessionTileChrome {
   /** Shown beside something else (Approvals): its tab controls stay inside it, with no tile header. */
   inline?: boolean;
   isFocused: boolean;
+  /** Maximized over the other tiles (P4). */
+  maximized?: boolean;
+  /** Hidden under a maximized tile: stays live, but its terminals deactivate. */
+  hidden?: boolean;
+  /** Maximize the tile or restore it; absent while it is the only tile. */
+  onToggleMaximize?: () => void;
   onDragStart: (event: React.DragEvent) => void;
   /** Absent for the last tile. */
   onClose?: () => void;
@@ -871,6 +894,9 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
             }}
             chromeInline={chrome.tiled || chrome.inline}
             focusWithin={chrome.isFocused}
+            hidden={chrome.hidden}
+            tileMaximized={chrome.maximized}
+            onToggleTileMaximize={chrome.onToggleMaximize}
             overviewContent={<SessionOverviewPanel
             record={view.session}
             folderSessionId={view.panel.sessionId}

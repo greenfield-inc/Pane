@@ -9,7 +9,9 @@ import { PermissionDialog } from '../PermissionDialog';
 import { SessionSwitchToChatDialog, useSessionSwitchPreview } from '../SessionSwitchToChat';
 import type { SessionChatSwitchPreview } from '../../../../shared/types/chatTab';
 import { MachineBadge } from './MachineBadge';
-import { MachineMark } from './MachineMark';
+import { MachineMark, MachineRowMark, machineMarkTitle } from './MachineMark';
+import { Tooltip } from '../ui/Tooltip';
+import { machineLetter } from '../../../../shared/utils/machineMarks';
 import { AutopilotNavRow } from '../autopilot/AutopilotNavRow';
 import {
   LoopsNavRow,
@@ -40,7 +42,7 @@ function formatClock(iso: string | null): string {
 export function MachineOfflineBanner({ machine, since, onRetry }: { machine: MachineRef; since: string | null; onRetry: () => void }) {
   return (
     <div role="status" className="mx-2 mt-2 flex items-center gap-2.5 rounded-md border border-border-primary bg-surface-primary px-2.5 py-2">
-      <MachineMark os={machine.os} slot={machine.slot} presence="dimmed" size="md" />
+      <MachineMark letters={machine.letters} slot={machine.slot} presence="dimmed" size="md" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[12px] font-semibold text-text-primary">{machine.name} went offline at {formatClock(since)}</p>
         <p className="truncate text-[11px] text-text-tertiary">Its rows are from then.</p>
@@ -130,19 +132,25 @@ function PinnedMark() {
   );
 }
 
-/** The badge, and on hover or keyboard focus the actions button in the same box, so neither shifts the row. */
-function BadgeSlot({ machine, label, onMenu }: { machine: MachineRef; label: string; onMenu: (x: number, y: number) => void }) {
+/**
+ * The machine's mark, and on hover or keyboard focus the actions button in the same 18px box,
+ * so neither shifts the row. Hovering or focusing the box names the machine and its OS.
+ */
+function MarkSlot({ machine, label, onMenu }: { machine: MachineRef; label: string; onMenu: (x: number, y: number) => void }) {
   return (
-    <span className="group/slot relative z-10 flex h-[18px] w-[60px] flex-none items-center">
-      <MachineBadge machine={machine} className="group-hover/row:invisible group-has-[:focus-visible]/slot:invisible" />
-      <button
-        type="button"
-        aria-label={`Actions for ${label}`}
-        onClick={(event) => { event.stopPropagation(); onMenu(event.clientX, event.clientY); }}
-        className="absolute inset-0 flex items-center justify-center rounded text-text-muted opacity-0 hover:bg-surface-hover hover:text-text-primary focus-visible:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive group-hover/row:opacity-100"
-      >
-        <MoreHorizontal className="h-3.5 w-3.5" />
-      </button>
+    <span data-testid="all-machines-mark-slot" className="group/slot relative z-10 flex h-[18px] w-[18px] flex-none items-center">
+      <MachineRowMark machine={machine} className="group-hover/row:invisible group-has-[:focus-visible]/slot:invisible" />
+      {/* The button covers the mark, so it carries the mark's tooltip for hover and keyboard focus. */}
+      <Tooltip content={machineMarkTitle(machine)} side="bottom">
+        <button
+          type="button"
+          aria-label={`Actions for ${label}`}
+          onClick={(event) => { event.stopPropagation(); onMenu(event.clientX, event.clientY); }}
+          className="absolute inset-0 flex items-center justify-center rounded text-text-muted opacity-0 hover:bg-surface-hover hover:text-text-primary focus-visible:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive group-hover/row:opacity-100"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </button>
+      </Tooltip>
     </span>
   );
 }
@@ -164,11 +172,14 @@ function PaneRow({ row, active, nested, onMenu, reorder }: { row: AllMachinesPan
         active ? 'bg-surface-selected' : 'hover:bg-surface-hover',
         row.offline && 'opacity-50',
       )}
+      data-sidebar-selected={active || undefined}
     >
       <DropLine edge={reorder?.indicator ?? null} />
       <button
         type="button"
         data-row-open
+        data-sidebar-item
+        data-sidebar-key={`machine-pane-${row.key}`}
         onClick={() => void openOnMachine(machine.id, { kind: 'pane', id: pane.id, name: label })}
         aria-current={active ? 'page' : undefined}
         aria-label={`${label} on ${machine.name}`}
@@ -192,7 +203,7 @@ function PaneRow({ row, active, nested, onMenu, reorder }: { row: AllMachinesPan
         />
       </div>
       {pane.isFavorite && <PinnedMark />}
-      <BadgeSlot machine={machine} label={label} onMenu={openMenu} />
+      <MarkSlot machine={machine} label={label} onMenu={openMenu} />
     </div>
   );
 }
@@ -213,6 +224,8 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
       <DropLine edge={reorder.indicator} />
       <div
         data-testid="all-machines-session-row"
+        data-sidebar-row
+        data-sidebar-selected={active || undefined}
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
         className={cn(
           'group/row relative mx-2 flex min-h-7 w-[calc(100%-1rem)] items-center gap-1.5 rounded-md py-0.5 pl-1 pr-2 transition-colors',
@@ -222,6 +235,8 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
         <button
           type="button"
           data-row-open
+          data-sidebar-item
+          data-sidebar-key={`machine-session-${row.key}`}
           onClick={() => void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name })}
           aria-current={active ? 'page' : undefined}
           aria-label={`Session ${session.name} on ${machine.name}`}
@@ -247,7 +262,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           otherwise={row.panes.length > 0 && <span className="text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
         />
         {session.isPinned && <PinnedMark />}
-        <BadgeSlot machine={machine} label={session.name} onMenu={openMenu} />
+        <MarkSlot machine={machine} label={session.name} onMenu={openMenu} />
       </div>
       {expanded && row.panes.map(renderPane)}
     </div>
@@ -273,7 +288,7 @@ function ProjectMachineMarks({ entries }: { entries: ReadonlyArray<{ machine: Ma
       className="flex flex-none items-center gap-1"
     >
       {machines.map(({ machine, offline }) => (
-        <MachineMark key={machine.id} os={machine.os} slot={machine.slot} size="logo" presence={offline ? 'dimmed' : 'solid'} />
+        <MachineMark key={machine.id} letters={machine.letters} slot={machine.slot} size="logo" presence={offline ? 'dimmed' : 'solid'} />
       ))}
     </span>
   );
@@ -282,7 +297,7 @@ function ProjectMachineMarks({ entries }: { entries: ReadonlyArray<{ machine: Ma
 function SectionHeader({ label, expanded, onToggle }: { label: string; expanded: boolean; onToggle: () => void }) {
   return (
     <div className={SIDEBAR_SECTION_ROW}>
-      <button type="button" onClick={onToggle} aria-expanded={expanded} className={SIDEBAR_SECTION_TOGGLE}>
+      <button type="button" data-sidebar-item onClick={onToggle} aria-expanded={expanded} className={SIDEBAR_SECTION_TOGGLE}>
         <span className={SIDEBAR_SECTION_LABEL}>{label}</span>
         <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
           {expanded ? <ChevronDown className="h-3.5 w-3.5 text-current" /> : <ChevronRight className="h-3.5 w-3.5 text-current" />}
@@ -397,6 +412,8 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
               <div key={project.key} data-testid="all-machines-project">
                 <button
                   type="button"
+                  data-sidebar-item
+                  data-sidebar-key={`machine-project-${project.key}`}
                   onClick={() => toggleOpen(`project:${project.key}`)}
                   aria-expanded={expanded}
                   aria-label={`${expanded ? 'Collapse' : 'Expand'} project ${project.name}`}
@@ -474,11 +491,11 @@ export function MachineOfflineView({ onMachineDetails }: { onMachineDetails: () 
   }, [notice]);
   if (!notice) return null;
   const view = views.find((item) => item.machine.id === notice.machineId);
-  const machine = view?.machine ?? { id: notice.machineId, name: notice.machineId, os: null, slot: 0 };
+  const machine = view?.machine ?? { id: notice.machineId, name: notice.machineId, os: null, slot: 0, letters: machineLetter(notice.machineId) };
   const since = machines.find((state) => state.id === notice.machineId)?.offlineSince ?? null;
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-bg-primary px-8 text-center" data-testid="machine-offline-view">
-      <MachineMark os={machine.os} slot={machine.slot} presence="dimmed" size="lg" />
+      <MachineMark letters={machine.letters} slot={machine.slot} presence="dimmed" size="lg" />
       <h2 className="text-lg font-semibold text-text-primary">{machine.name} is offline</h2>
       <p className="max-w-md text-sm text-text-secondary">
         It stopped answering at {formatClock(since)}.

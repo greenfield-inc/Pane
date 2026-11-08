@@ -86,6 +86,16 @@ export interface SplitLayoutProps {
   keepPermanentTabsInGroups?: boolean;
   /** Replaces each group strip's "+" button (see PanelGroupView). */
   renderAddTool?: (groupId: string) => React.ReactNode;
+  /**
+   * Maximize a group over the others, or restore (P4). Absent where maximize
+   * means nothing (a single group with nowhere to grow).
+   */
+  onToggleMaximize?: (groupId: string) => void;
+  /**
+   * Every group is hidden (a maximized Session tile covers this one), so its
+   * terminals deactivate and their reveal runs the masked activation refresh.
+   */
+  hidden?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +125,8 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   alwaysShowClose,
   keepPermanentTabsInGroups,
   renderAddTool,
+  onToggleMaximize,
+  hidden = false,
 }) => {
   // Inject allotment theme CSS on first render
   React.useEffect(() => { injectTheme(); }, []);
@@ -180,6 +192,9 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           alwaysShowClose={alwaysShowClose}
           keepPermanentTabsInGroups={keepPermanentTabsInGroups}
           renderAddTool={renderAddTool}
+          isMaximized={zoomedGroupId === node.id}
+          isHidden={hidden || (zoomedGroupId !== null && zoomedGroupId !== node.id)}
+          onToggleMaximize={multiGroup ? onToggleMaximize : undefined}
         />
       );
     }
@@ -227,6 +242,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
     onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
     showAddTool, alwaysShowClose, keepPermanentTabsInGroups, renderAddTool,
+    onToggleMaximize, hidden,
   ]);
 
   return <>{renderNode(layout.root, true)}</>;

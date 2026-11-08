@@ -8,12 +8,20 @@ import type { SerializeAddon } from '@xterm/addon-serialize';
 import { useSession } from '../../contexts/SessionContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TerminalPanelProps } from '../../types/panelComponents';
-import { isHotkeyEnabledForEvent } from '../../stores/hotkeyStore';
+import {
+  armKeySequence,
+  chordForEvent,
+  isHotkeyEnabledForEvent,
+  isKeySequencePending,
+  isTuiReleasableChordForEvent,
+  startsKeySequence,
+} from '../../stores/hotkeyStore';
 import { renderLog, devLog } from '../../utils/console';
 import { getTerminalTheme, buildTerminalFontFamily, getMinimumContrastRatio, DEFAULT_TERMINAL_FONT_FAMILY } from '../../utils/terminalTheme';
 import {
   isFineSurfaceScrollKey,
   isPageSurfaceScrollKey,
+  isTerminalClearKey,
   resolveTerminalKeyHandling,
   terminalClaimsFineSurfaceScroll,
 } from '../../utils/terminalKeyHandling';
@@ -51,6 +59,8 @@ import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/config
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
+import { onTerminalReflow } from '../../utils/terminalReflow';
+import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';
 
 interface DropdownPosition {
@@ -883,6 +893,27 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     void reconcileMountedTerminal();
   }, [reconcileMountedTerminal]);
 
+  // Maximize and restore resize this terminal in one step: refit behind the
+  // loading overlay instead of the debounced, unmasked resize (P4).
+  useEffect(() => onTerminalReflow(() => {
+    if (!isActiveRef.current || !xtermRef.current) return;
+    // The layout change that follows comes from a store and renders at once,
+    // so the overlay must be on screen first, not a frame later.
+    flushSync(() => {
+      setIsRefreshing(true);
+      setOverlayVisible(true);
+    });
+    void (async () => {
+      // Let the new layout (Allotment shows or hides panes) settle first.
+      await waitForNextPaint();
+      await waitForNextPaint();
+      await resizePtyToFit();
+      repaintTerminal();
+      await waitForNextPaint();
+      setIsRefreshing(false);
+    })();
+  }), [resizePtyToFit, repaintTerminal]);
+
   const getDropdownPosition = useCallback((): DropdownPosition => {
     const container = terminalRef.current;
     const terminal = xtermRef.current;
@@ -1106,15 +1137,26 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             return !isHotkeyEnabledForEvent(e);
           }
 
-          // Ctrl/Cmd+K: clear xterm scrollback without writing ^K to the PTY.
-          if (ctrlOrMeta && e.key.toLowerCase() === 'k') {
+          // Cmd+K (Ctrl+K off macOS): clear xterm scrollback without writing ^K
+          // to the PTY. When a two-step key starts with it (⌘K ⌘M), the clear
+          // waits: a second step held with Cmd runs that command instead, and
+          // releasing Cmd, another key or the timeout clears (D-250).
+          if (isTerminalClearKey(e, isMac()) && !isKeySequencePending()) {
             if (e.type === 'keydown') {
-              xtermRef.current?.clear();
-              window.electronAPI
-                .invoke('terminal:clearScrollback', panel.id)
-                .catch((error) => {
-                  console.warn('[TerminalPanel] Failed to persist scrollback clear:', error);
-                });
+              const clear = () => {
+                xtermRef.current?.clear();
+                window.electronAPI
+                  .invoke('terminal:clearScrollback', panel.id)
+                  .catch((error) => {
+                    console.warn('[TerminalPanel] Failed to persist scrollback clear:', error);
+                  });
+              };
+              if (startsKeySequence(e)) {
+                e.stopPropagation();
+                armKeySequence(chordForEvent(e), { onUnmatched: clear, cancelOnModifierRelease: true });
+              } else {
+                clear();
+              }
             }
             return false;
           }
@@ -1125,6 +1167,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             isMac: isMac(),
             keyboardShortcutsEnabled: keyboardShortcutsEnabledRef.current,
             findOpen: findOpenRef.current,
+            releasableFromTui: isTuiReleasableChordForEvent(e),
+            keySequencePending: isKeySequencePending(),
           });
 
           // Shift+Enter sends the same ESC+CR sequence as Alt+Enter for CLI

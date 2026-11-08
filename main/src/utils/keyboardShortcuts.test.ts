@@ -29,13 +29,22 @@ describe('areKeyboardShortcutsEnabled', () => {
 
   it('forwards only the exact Command Palette chord from embedded panels', () => {
     const config = { keyboardShortcutsEnabled: false, commandPaletteShortcutEnabled: true };
-    expect(shouldForwardCommandPaletteShortcut(config, { shift: true, alt: false, code: 'KeyP' })).toBe(true);
-    expect(shouldForwardCommandPaletteShortcut(config, { shift: false, alt: false, code: 'KeyP' })).toBe(false);
-    expect(shouldForwardCommandPaletteShortcut(config, { shift: true, alt: true, code: 'KeyP' })).toBe(false);
-    expect(shouldForwardCommandPaletteShortcut(config, { shift: true, alt: false, code: 'KeyW' })).toBe(false);
+    const press = (code: string, mods: { shift?: boolean; alt?: boolean }) => ({
+      key: code.slice(3).toLowerCase(), code, control: false, meta: true, shift: mods.shift ?? false, alt: mods.alt ?? false,
+    });
+    expect(shouldForwardCommandPaletteShortcut(config, press('KeyP', { shift: true }), 'mac')).toBe(true);
+    expect(shouldForwardCommandPaletteShortcut(config, press('KeyP', {}), 'mac')).toBe(false);
+    expect(shouldForwardCommandPaletteShortcut(config, press('KeyP', { shift: true, alt: true }), 'mac')).toBe(false);
+    expect(shouldForwardCommandPaletteShortcut(config, press('KeyW', { shift: true }), 'mac')).toBe(false);
     expect(shouldForwardCommandPaletteShortcut(
       { keyboardShortcutsEnabled: false, commandPaletteShortcutEnabled: false },
-      { shift: true, alt: false, code: 'KeyP' },
+      press('KeyP', { shift: true }),
+      'mac',
     )).toBe(false);
+    expect(shouldForwardCommandPaletteShortcut(
+      { ...config, keyboardShortcutOverrides: { 'open-command-palette': 'mod+alt+p' } },
+      press('KeyP', { alt: true }),
+      'mac',
+    )).toBe(true);
   });
 });

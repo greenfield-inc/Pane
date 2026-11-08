@@ -576,7 +576,11 @@ export interface NotifyFixCommand {
 }
 
 /** Where main sends the main window: Approvals (optionally on one item) or its settings. */
-export type NotifyNavigateTarget = 'inbox' | 'settings' | { approval: string };
+/**
+ * Where main asks the window to go. `toggle-inbox` is the Notify shortcut
+ * pressed while Pane is in front: Approvals, or back to where you were (D-251).
+ */
+export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string };
 
 /** The floating windows report their card's size so main can fit and place them. */
 export interface NotifyWindowSize {

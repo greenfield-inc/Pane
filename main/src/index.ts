@@ -80,8 +80,8 @@ import * as path from 'path';
 import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
 import type { ConfigManager } from './services/configManager';
-import { areKeyboardShortcutsEnabled } from './utils/keyboardShortcuts';
-import { shouldForwardWebviewKey } from './utils/webviewKeyForwarding';
+import { areKeyboardShortcutsEnabled, isCloseTabInput } from './utils/keyboardShortcuts';
+import { createWebviewSequenceState, webviewKeysToForward } from './utils/webviewKeyForwarding';
 import {
   parseStoredOverlayColors,
   shouldEnableWindowControlsOverlay,
@@ -619,14 +619,24 @@ async function createWindow() {
     // keys (Cmd/Ctrl+F, Cmd/Ctrl+G, Shift+Cmd/Ctrl+G) are taken from browser
     // tabs only, and Escape only while that tab's find bar is open; the Docs
     // dialog webview and every other key stay with the page.
+    // A page keeps the first step of a two-step key (⌘K is many sites' search);
+    // this remembers it so ⌘K ⌘M still reaches Pane (D-250).
+    // Clicks inside a page never reach Pane's DOM, so the split it sits in
+    // learns it is the active one from here (P3: keys act on the split you are in).
+    wvContents.on('focus', () => {
+      const context = webviewContextMap.get(wvContents.id);
+      if (context) mainWindow?.webContents.send('browser-panel:page-focused', { panelId: context.panelId });
+    });
+    const keySequence = createWebviewSequenceState();
     wvContents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
       const isBrowserTab = webviewContextMap.has(wvContents.id);
-      if (!shouldForwardWebviewKey(input, {
+      const forwarded = webviewKeysToForward(input, {
         config: configManager.getConfig(),
         isBrowserTab,
         findActive: isBrowserTab && findActiveWebviews.has(wvContents.id),
-      })) return;
+      }, keySequence);
+      if (forwarded.length === 0) return;
 
       event.preventDefault();
       if (input.key === 'Escape') {
@@ -635,14 +645,16 @@ async function createWindow() {
         if (context) mainWindow?.webContents.send('browser-panel:find-escape', { panelId: context.panelId });
         return;
       }
-      mainWindow?.webContents.send('synthetic-keydown', {
-        key: input.key,
-        code: input.code,
-        ctrlKey: input.control,
-        metaKey: input.meta,
-        shiftKey: input.shift,
-        altKey: input.alt,
-      });
+      for (const press of forwarded) {
+        mainWindow?.webContents.send('synthetic-keydown', {
+          key: press.key,
+          code: press.code,
+          ctrlKey: press.control,
+          metaKey: press.meta,
+          shiftKey: press.shift,
+          altKey: press.alt,
+        });
+      }
     });
 
     // Apply the same localhost header-stripping to the webview's session/partition.
@@ -745,8 +757,9 @@ async function createWindow() {
   // can use it to close tabs. We intercept at before-input-event and re-emit
   // the key as a DOM keydown via IPC so the renderer's hotkey system sees it.
   mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (!areKeyboardShortcutsEnabled(configManager.getConfig())) return;
-    if ((input.control || input.meta) && input.key.toLowerCase() === 'w' && input.type === 'keyDown') {
+    const config = configManager.getConfig();
+    if (!areKeyboardShortcutsEnabled(config)) return;
+    if (input.type === 'keyDown' && isCloseTabInput(config, input)) {
       event.preventDefault();
       mainWindow?.webContents.send('synthetic-keydown', {
         key: input.key,

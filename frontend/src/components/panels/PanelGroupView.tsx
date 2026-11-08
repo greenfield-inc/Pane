@@ -12,7 +12,7 @@
  * - A drag shield to intercept mouse events from webviews/xterm during drags.
  */
 
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Plus } from 'lucide-react';
 import { PanelTabStrip } from './PanelTabStrip';
 import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
@@ -20,7 +20,10 @@ import { PanelContainer } from './PanelContainer';
 import type { ToolPanel, PanelGroupNode } from '../../../../shared/types/panels';
 import { subsetInsertIndex, type DropZone } from '../../utils/panelLayout';
 import { DropOverlay } from './DropOverlay';
-import { cn } from '../../utils/cn';
+import { RestoreRegionButton } from '../RestoreRegionButton';
+import { useRegionActions } from '../../hooks/useRegionNavigation';
+import { noteFocusIn } from '../../services/regionFocus';
+import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +70,12 @@ export interface PanelGroupViewProps {
   keepPermanentTabsInGroups?: boolean;
   /** Replaces the strip's "+" button, for views with their own Add tool menu. */
   renderAddTool?: (groupId: string) => React.ReactNode;
+  /** This group is maximized over the others (P4); its strip shows a pressed restore button. */
+  isMaximized?: boolean;
+  /** Another group is maximized, or the whole layout is covered: terminals here deactivate. */
+  isHidden?: boolean;
+  /** Maximize this group or restore it; absent where there is nothing to grow over. */
+  onToggleMaximize?: (groupId: string) => void;
 }
 
 export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
@@ -93,7 +102,29 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   alwaysShowClose = false,
   keepPermanentTabsInGroups = false,
   renderAddTool,
+  isMaximized = false,
+  isHidden = false,
+  onToggleMaximize,
 }) => {
+  const rootRef = useRef<HTMLDivElement>(null);
+  // A click inside a browser page reaches main, not this DOM: main says which
+  // tab's page took focus, and its split becomes the active one.
+  const panelIdsKey = group.panelIds.join('|');
+  useEffect(() => {
+    const handler = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const panelId = decodeOptionalBoundary(event.detail, boundary.object({ panelId: boundary.string }))?.panelId;
+      if (!panelId || !panelIdsKey.split('|').includes(panelId)) return;
+      if (!isFocusedGroup) onFocusGroup(group.id);
+      noteFocusIn(rootRef.current);
+    };
+    window.addEventListener('browser-panel:page-focused', handler);
+    return () => window.removeEventListener('browser-panel:page-focused', handler);
+  }, [panelIdsKey, isFocusedGroup, onFocusGroup, group.id]);
+  useRegionActions(rootRef, {
+    toggleMaximize: onToggleMaximize ? () => onToggleMaximize(group.id) : undefined,
+  });
+
   const handleMouseDownCapture = useCallback(() => {
     onFocusGroup(group.id);
   }, [onFocusGroup, group.id]);
@@ -144,12 +175,16 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
 
   return (
     <div
+      ref={rootRef}
       data-panel-group-id={group.id}
+      data-group-focused={isFocusedGroup}
       className={cn(
         "h-full flex flex-col",
         multiGroup && isFocusedGroup && "ring-1 ring-inset ring-[color-mix(in_srgb,var(--color-interactive-primary)_30%,transparent)]",
       )}
       onMouseDownCapture={handleMouseDownCapture}
+      // Keyboard focus arriving in a group (⌘⌥+arrows, F6, Tab) makes it the active split.
+      onFocusCapture={isFocusedGroup ? undefined : handleMouseDownCapture}
     >
       {/* Once the pane is split each group owns a full tab strip — its working
           tabs plus a "+" that opens the add-tool menu for this group. The row
@@ -165,6 +200,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             onPanelClose={onPanelClose}
             isPrimary={isPrimary}
             isFocused={isFocusedGroup}
+            quietFocus
             showShortcutHints={false}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}
@@ -184,6 +220,9 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
           >
             <Plus className="w-4 h-4" />
           </button>}
+          {isMaximized && onToggleMaximize && (
+            <RestoreRegionButton className="ml-auto" onRestore={() => onToggleMaximize(group.id)} />
+          )}
         </div>
       )}
 
@@ -212,8 +251,8 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             >
               <PanelContainer
                 panel={panel}
-                isActive={isActiveTab}
-                autoFocus={isFocusedGroup && isActiveTab}
+                isActive={isActiveTab && !isHidden}
+                autoFocus={isFocusedGroup && isActiveTab && !isHidden}
                 isMainRepo={isMainRepo}
               />
             </div>
