@@ -281,10 +281,14 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
   const recordingRef = useRef(recordingKey);
   useEffect(() => { recordingRef.current = recordingKey; }, [recordingKey]);
   const [keyStatus, setKeyStatus] = useState('');
-  useEffect(() => {
+  // Closing the launcher ends any recording and clears its status, adjusted
+  // during render rather than in an effect, so a reopen never shows the old one.
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (wasOpen !== isOpen) {
+    setWasOpen(isOpen);
     if (!isOpen) { setRecordingKey(null); setKeyStatus(''); }
-  }, [isOpen]);
-  const actionContext: ActionContext = {
+  }
+  const actionContext = useMemo<ActionContext>(() => ({
     onNewPane,
     isRemote,
     onChangeKey: (id, label) => { setKeyStatus(''); setRecordingKey({ id, label }); },
@@ -298,7 +302,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
       useShortcutMapQueryStore.setState({ query: label });
       setTimeout(() => useHotkeyStore.getState().hotkeys.get('open-shortcut-settings')?.action(), AFTER_CLOSE_MS);
     },
-  };
+  }), [onNewPane, isRemote]);
   const finishRecorded = (outcome: Promise<string | null>, done: string) => {
     const target = recordingRef.current;
     void outcome.then(conflict => {
@@ -375,7 +379,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
     if (!actionsItem) return [];
     const all = actionsFor(actionsItem, actionContext);
     return actionQuery.trim() ? matchSorter(all, actionQuery.trim(), { keys: ['label'] }) : all;
-  }, [actionQuery, actionsItem, isRemote, onNewPane]);
+  }, [actionContext, actionQuery, actionsItem, isRemote, onNewPane]);
 
   const rows = useMemo(() => buildRows(results.sections, actionsItem ? actions : null), [actions, actionsItem, results.sections]);
   const selectable = useMemo(() => rows.filter((row): row is Exclude<Row, { type: 'header' }> => row.type !== 'header'), [rows]);

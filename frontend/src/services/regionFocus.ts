@@ -92,8 +92,7 @@ function collectFocusStops(): FocusStop<HTMLElement>[] {
 
   const mains = queryShown('[data-focus-region="main"]');
   const groups = mains.flatMap(main => Array.from(main.querySelectorAll<HTMLElement>('[data-panel-group-id]')))
-    .filter(isShown)
-    .filter(group => regionOf(group) === 'main');
+    .filter(group => isShown(group) && regionOf(group) === 'main');
   for (const group of new Set(groups)) {
     stops.push(asStop(group, 'group', group.getAttribute('data-group-focused') === 'true'));
   }
