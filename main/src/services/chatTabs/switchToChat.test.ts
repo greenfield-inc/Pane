@@ -224,7 +224,7 @@ describe('which conversation a terminal is running (review F-9)', () => {
 
 describe('whether a Claude conversation can be reopened (QA on #1274)', () => {
   it('is refused until Claude has saved it, which it does after the first message', async () => {
-    expect(await savedConversation({ id: 'conv-a' }, 'claude', async () => false)).toEqual({ problem: expect.stringContaining('has not saved this conversation yet') });
+    expect(await savedConversation({ id: 'conv-a' }, 'claude', async () => false)).toEqual({ problem: expect.stringContaining('has not saved this conversation yet'), unsaved: true });
     expect(await savedConversation({ id: 'conv-a' }, 'claude', async () => true)).toEqual({ id: 'conv-a' });
   });
 

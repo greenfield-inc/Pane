@@ -3,7 +3,7 @@ import type { ToolPanel, TerminalPanelState } from '../../../../shared/types/pan
 import { PaneError } from '../../../../shared/paneError';
 import { previewSessionSwitch, switchSessionToChat, type SessionSwitchPorts } from './switchSession';
 
-interface Tab { id: string; pane: string; state: Partial<TerminalPanelState>; busy?: boolean; noConversation?: string; chatFails?: string }
+interface Tab { id: string; pane: string; state: Partial<TerminalPanelState>; busy?: boolean; noConversation?: string; unsaved?: boolean; chatFails?: string }
 
 /** A Session whose own Pane and two member Panes hold these terminal tabs; Switch to chat runs for real over fakes. */
 function session(tabs: Tab[]) {
@@ -22,7 +22,11 @@ function session(tabs: Tab[]) {
     paneDirectory: () => '/work',
     terminal: {
       busy: async id => byId.get(id)?.busy === true,
-      conversationId: async id => { const tab = byId.get(id); return tab?.noConversation ? { problem: tab.noConversation } : { id: `conv-${id}` }; },
+      conversationId: async id => {
+        const tab = byId.get(id);
+        if (tab?.unsaved) return { problem: 'Claude has not saved this conversation yet. It saves it after the first message', unsaved: true };
+        return tab?.noConversation ? { problem: tab.noConversation } : { id: `conv-${id}` };
+      },
       stop: async id => { log.push(`stop ${id}`); },
       restart: async id => { log.push(`restart ${id}`); },
       close: async id => { log.push(`close ${id}`); panels.delete(id); },
@@ -109,6 +113,13 @@ describe('switching a whole Session to chat', () => {
     ]);
     expect(result.items[0].skip?.reason).toMatch(/not on the list when you confirmed/);
     expect(log).toEqual(['stop auth', 'started auth', 'close auth']);
+  });
+
+  it('skips a Claude tab that has never had a message, saying why in plain words', async () => {
+    const { ports, log } = session([{ id: 'fresh', pane: 'auth-fix', state: claude, unsaved: true }]);
+    const preview = await previewSessionSwitch('s-1', ports);
+    expect(preview.items[0].skip).toEqual({ kind: 'no-conversation', reason: 'Claude has not saved this conversation yet. It saves it after the first message.' });
+    expect(log).toEqual([]);
   });
 
   it('refuses a Session that does not exist', async () => {
