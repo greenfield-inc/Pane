@@ -551,6 +551,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       {!collapsed && switcherVisible && renderRemoteHostSwitcher(
         <button
           type="button"
+          data-sidebar-item
+          data-sidebar-key="machine-switcher"
+          data-focus-region="sidebar"
           aria-label={switcherLabel}
           style={{ maxWidth: hostPillMaxWidth }}
           className="ml-1 flex h-6 min-w-0 shrink items-center gap-1.5 rounded-full border border-border-primary bg-surface-secondary pl-1 pr-1.5 text-[12px] font-medium text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
@@ -571,6 +574,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       <>
         <div
           data-testid="sidebar"
+          data-focus-region="sidebar"
           className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-secondary text-text-primary h-full flex flex-col flex-shrink-0"
           style={{ width: '48px' }}
         >
@@ -904,6 +908,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     <>
       <div
         data-testid="sidebar"
+        data-focus-region="sidebar"
         className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
         style={{ width: `${width}px` }}
       >
@@ -927,6 +932,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
         <button
           type="button"
+          data-sidebar-item
+          data-sidebar-key="search"
           onClick={openSearch}
           className="mx-2 mt-1 flex h-[30px] flex-shrink-0 items-center gap-2 rounded-input border border-border-primary bg-surface-primary px-2 text-[13px] text-text-muted hover:border-border-hover hover:text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
         >
@@ -936,6 +943,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
         <button
           type="button"
+          data-sidebar-item
+          data-sidebar-key="new"
           onClick={() => setShowNewDialog(true)}
           className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
         >

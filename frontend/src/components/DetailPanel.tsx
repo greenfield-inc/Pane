@@ -144,6 +144,8 @@ export function DetailPanel({
   return (
     <div
       ref={detailPanelRef}
+      data-focus-region="right-panel"
+      data-region-open={contentActive}
       className={`pane-detail-panel pane-detail-panel-vertical flex-shrink-0 min-w-0 bg-surface-primary flex flex-col overflow-visible relative ${isVisible && !immersiveMode && width > 0 ? 'border-l border-border-primary' : ''}`}
       style={{ width: isVisible && !immersiveMode ? `${width}px` : '0px' }}
     >

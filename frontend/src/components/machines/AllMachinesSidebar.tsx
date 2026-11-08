@@ -160,11 +160,14 @@ function PaneRow({ row, active, nested, onMenu, reorder }: { row: AllMachinesPan
         active ? 'bg-surface-selected' : 'hover:bg-surface-hover',
         row.offline && 'opacity-50',
       )}
+      data-sidebar-selected={active || undefined}
     >
       <DropLine edge={reorder?.indicator ?? null} />
       <button
         type="button"
         data-row-open
+        data-sidebar-item
+        data-sidebar-key={`machine-pane-${row.key}`}
         onClick={() => void openOnMachine(machine.id, { kind: 'pane', id: pane.id, name: label })}
         aria-current={active ? 'page' : undefined}
         aria-label={`${label} on ${machine.name}`}
@@ -209,6 +212,8 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
       <DropLine edge={reorder.indicator} />
       <div
         data-testid="all-machines-session-row"
+        data-sidebar-row
+        data-sidebar-selected={active || undefined}
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
         className={cn(
           'group/row relative mx-2 flex min-h-7 w-[calc(100%-1rem)] items-center gap-1.5 rounded-md py-0.5 pl-1 pr-2 transition-colors',
@@ -218,6 +223,8 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
         <button
           type="button"
           data-row-open
+          data-sidebar-item
+          data-sidebar-key={`machine-session-${row.key}`}
           onClick={() => void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name })}
           aria-current={active ? 'page' : undefined}
           aria-label={`Session ${session.name} on ${machine.name}`}
@@ -278,7 +285,7 @@ function ProjectMachineMarks({ entries }: { entries: ReadonlyArray<{ machine: Ma
 function SectionHeader({ label, expanded, onToggle }: { label: string; expanded: boolean; onToggle: () => void }) {
   return (
     <div className={SIDEBAR_SECTION_ROW}>
-      <button type="button" onClick={onToggle} aria-expanded={expanded} className={SIDEBAR_SECTION_TOGGLE}>
+      <button type="button" data-sidebar-item onClick={onToggle} aria-expanded={expanded} className={SIDEBAR_SECTION_TOGGLE}>
         <span className={SIDEBAR_SECTION_LABEL}>{label}</span>
         <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
           {expanded ? <ChevronDown className="h-3.5 w-3.5 text-current" /> : <ChevronRight className="h-3.5 w-3.5 text-current" />}
@@ -393,6 +400,8 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
               <div key={project.key} data-testid="all-machines-project">
                 <button
                   type="button"
+                  data-sidebar-item
+                  data-sidebar-key={`machine-project-${project.key}`}
                   onClick={() => toggleOpen(`project:${project.key}`)}
                   aria-expanded={expanded}
                   aria-label={`${expanded ? 'Collapse' : 'Expand'} project ${project.name}`}

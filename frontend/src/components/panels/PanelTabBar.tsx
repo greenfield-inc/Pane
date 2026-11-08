@@ -532,6 +532,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           onPanelClose={handlePanelClose}
           isPrimary
           isFocused={primaryGroupFocused ?? true}
+          quietFocus
           showShortcutHints={!tabsInGroups}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}

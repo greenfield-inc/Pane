@@ -522,7 +522,6 @@ function SessionTile({
         // h-full/w-full fills an Allotment pane; flex-1 fills the plain flex
         // row a single tile sits in. A tile is never content-sized.
         'relative flex h-full w-full flex-1 min-w-0 min-h-0 flex-col overflow-hidden bg-bg-primary',
-        tiled && isFocused && 'ring-1 ring-inset ring-[color-mix(in_srgb,var(--color-interactive-primary)_30%,transparent)]',
       )}
       data-session-tile={sessionId}
       data-session-focused={isFocused}
