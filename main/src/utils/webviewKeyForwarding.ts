@@ -25,7 +25,7 @@ export interface WebviewKeyInput {
   alt: boolean;
 }
 
-export type WebviewKeyConfig = Pick<
+type WebviewKeyConfig = Pick<
   AppConfig,
   'keyboardShortcutsEnabled' | 'commandPaletteShortcutEnabled' | 'keyboardShortcutOverrides' | 'terminalShortcuts' | 'customCommands'
 >;
