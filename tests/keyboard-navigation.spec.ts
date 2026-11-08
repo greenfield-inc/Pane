@@ -445,3 +445,44 @@ test('⌘A and ⌘⇧Z stay with a text field: Select All and Redo, not a Pane k
   await expect(input).toHaveValue('');
   await expect(page.getByTestId('restore-region')).toHaveCount(0);
 });
+
+test('the tab keys move focus into the tab they show', async ({ page }) => {
+  const withGamma = { ...layout, root: { ...layout.root, children: [
+    { type: 'group', id: 'g-left', panelIds: ['alpha', 'gamma'], activePanelId: 'alpha' },
+    layout.root.children[1],
+  ] } };
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: sessions,
+    initialPanels: [...panels, terminal('gamma', 'Gamma', 3)], initialLayout: withGamma, activeProjectId: project.id,
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Expand project Nav fixture', exact: true }).click();
+  await page.getByRole('button', { name: 'auth-refactor', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  await page.locator('[data-panel-group-id="g-left"] [role="tabpanel"]:not([aria-hidden="true"]) .xterm-helper-textarea').focus();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+BracketRight' : 'Control+PageDown');
+  await expect(page.locator('[data-panel-group-id="g-left"]').getByRole('tab', { name: 'Gamma', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => page.evaluate(() => {
+    const panel = document.activeElement?.closest('[role="tabpanel"]');
+    return panel ? document.getElementById(panel.getAttribute('aria-labelledby') ?? '')?.getAttribute('aria-label') ?? null : null;
+  })).toBe('Gamma');
+});
+
+test('maximize and restore refit a visible terminal behind its loading overlay', async ({ page }) => {
+  await openFixture(page);
+  await page.evaluate(() => {
+    const seen = { overlay: false };
+    Object.assign(window, { __overlaySeen: seen });
+    new MutationObserver(() => {
+      if (document.querySelector('[data-panel-group-id="g-left"] [role="status"][aria-label="Loading terminal"]')) seen.overlay = true;
+    }).observe(document.body, { subtree: true, childList: true, attributes: true });
+  });
+  await page.locator('[data-panel-group-id="g-left"] .xterm-helper-textarea').focus();
+  await maximizeKey(page);
+  await expect(page.locator('[data-panel-group-id="g-right"]')).toBeHidden();
+  await expect.poll(() => page.evaluate(() => {
+    // SAFETY: the observer above stored this flag on window.
+    return (window as typeof window & { __overlaySeen: { overlay: boolean } }).__overlaySeen.overlay;
+  })).toBe(true);
+  await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+});

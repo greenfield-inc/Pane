@@ -59,6 +59,7 @@ import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/config
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
+import { onTerminalReflow } from '../../utils/terminalReflow';
 import '@xterm/xterm/css/xterm.css';
 
 interface DropdownPosition {
@@ -890,6 +891,22 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const repaintTerminal = useCallback(() => {
     void reconcileMountedTerminal();
   }, [reconcileMountedTerminal]);
+
+  // Maximize and restore resize this terminal in one step: refit behind the
+  // loading overlay instead of the debounced, unmasked resize (P4).
+  useEffect(() => onTerminalReflow(() => {
+    if (!isActiveRef.current || !xtermRef.current) return;
+    setIsRefreshing(true);
+    void (async () => {
+      // Let the new layout (Allotment shows or hides panes) settle first.
+      await waitForNextPaint();
+      await waitForNextPaint();
+      await resizePtyToFit();
+      repaintTerminal();
+      await waitForNextPaint();
+      setIsRefreshing(false);
+    })();
+  }), [resizePtyToFit, repaintTerminal]);
 
   const getDropdownPosition = useCallback((): DropdownPosition => {
     const container = terminalRef.current;
