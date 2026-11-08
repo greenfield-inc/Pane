@@ -32,10 +32,25 @@ orchestrator in a terminal. Open chat tabs keep working.
 
 ## Switching a terminal tab to chat
 
-**Switch to chat** (the speech-bubble button beside a terminal Claude or Codex
-tab's actions, the same button in a Session's toolbar, or the command palette)
-reopens the same conversation in a chat tab, or fails cleanly (D-129, D-184). It
-shows only with chat tabs on, and it never sends anything to your agent.
+**Switch to chat** (right-click a terminal Claude or Codex tab, or the command
+palette) reopens the same conversation in a chat tab, or fails cleanly (D-129,
+D-184, D-229). It shows only with chat tabs on, and it never sends anything to
+your agent.
+
+Right-click a Session in the sidebar (or on All machines, where it runs on the
+Session's own machine) and choose **Switch to chat…** to switch every terminal
+agent tab in it: the orchestrator, and the agent tabs of each Pane in it (all of
+a Pane's tabs when the whole Pane is in the Session, otherwise only the tabs
+added to it). A dialog
+first lists the tabs that will switch and the ones it will skip, with why (busy
+mid-turn, plain Codex with no conversation ID yet, a Claude tab with no saved
+conversation, not an agent, a launch chat can't run). A Pane's terminal dock is
+not a tab and isn't listed. Pane then switches them one at a time the same way
+as one tab, so a tab that fails gets its terminal back and the others carry on,
+and the dialog ends with a summary such as "4 switched, 1 skipped: busy". Each
+tab is checked again just before it switches; one that wasn't on the confirmed
+list (busy then, or opened since) is left as it is. The item is left out when
+nothing in the Session can switch.
 
 Nothing is touched when:
 
@@ -51,7 +66,9 @@ Nothing is touched when:
   its launch reported (Agent Farm). It never guesses from the folder, since
   another terminal there can be writing a different conversation. A running Codex
   reports its ID only when it exits, so a Codex terminal Pane didn't start with
-  an ID usually can't switch.
+  an ID usually can't switch;
+- Claude hasn't saved the conversation yet. Claude saves it after the first
+  message, so a Claude tab that has never had one can't switch.
 
 Otherwise Pane stops the terminal agent, opens the chat tab and loads the
 conversation with ACP `session/load`, so the history shows, then closes the

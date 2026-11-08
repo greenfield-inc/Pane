@@ -3579,3 +3579,47 @@ test('Not now hides the Pane Chat offer for the rest of the run', async ({ page 
   await expect(offer).toHaveCount(0);
   expect((await paneChatOfferRecord(page)).creates).toEqual([]);
 });
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`Switch to chat on a Session lists what will switch and skip, then sums up (${scheme})`, async ({ page }, testInfo) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await installSessionsFixture(page, [
+      sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
+    ], [], { initialConfig: { chatTabsEnabled: true, appearanceMode: 'system' } });
+    await page.addInitScript(() => {
+      const items = [
+        { panelId: 'orch', paneName: 'Session', title: 'Claude' },
+        { panelId: 'a', paneName: 'auth-fix', title: 'Claude' },
+        { panelId: 'b', paneName: 'auth-fix', title: 'Review' },
+        { panelId: 'c', paneName: 'docs', title: 'Claude' },
+        { panelId: 'd', paneName: 'docs', title: 'QA', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn. Nothing was switched.' } },
+      ];
+      const calls: unknown[] = [];
+      Object.assign(window, { __sessionSwitchCalls: calls });
+      Object.assign(window.electronAPI, { chatTab: {
+        previewSessionSwitch: async (sessionId: string) => ({ sessionId, items }),
+        switchSession: async (sessionId: string, panelIds: string[]) => {
+          calls.push({ sessionId, panelIds });
+          return { sessionId, items: items.map(item => ({ ...item, result: item.skip ? 'skipped' : 'switched' })) };
+        },
+      } });
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await dismissStartupDialogs(page);
+
+    await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Switch to chat…' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`session-switch-menu-${scheme}.png`) });
+    await page.getByRole('menuitem', { name: 'Switch to chat…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Switch Session to chat' });
+    await expect(dialog).toContainText('Will switch (4)');
+    await expect(dialog).toContainText('busy: Claude is in the middle of a turn.');
+    await page.screenshot({ path: testInfo.outputPath(`session-switch-confirm-${scheme}.png`) });
+    await dialog.getByRole('button', { name: 'Switch 4 tabs' }).click();
+    await expect(dialog.getByTestId('session-switch-summary')).toHaveText('4 switched, 1 skipped: busy');
+    await page.screenshot({ path: testInfo.outputPath(`session-switch-summary-${scheme}.png`) });
+    // SAFETY: the init script above defines it.
+    expect(await page.evaluate(() => (window as typeof window & { __sessionSwitchCalls: unknown[] }).__sessionSwitchCalls))
+      .toEqual([{ sessionId: 'alpha', panelIds: ['orch', 'a', 'b', 'c'] }]);
+  });
+}

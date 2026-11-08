@@ -96,6 +96,19 @@ describe('MachineConnections', () => {
     expect(result).toEqual({ machineId: 'build-box', data: { success: true } });
   });
 
+  it('previews and switches a Session to chat on that machine, with the tabs the person confirmed', async () => {
+    const { machines, client, connect } = setup(['build-box']);
+    connect('build-box');
+
+    await machines.run('build-box', { type: 'preview-switch-to-chat', sessionId: 's-1' });
+    await machines.run('build-box', { type: 'switch-to-chat', sessionId: 's-1', panelIds: ['p-1', 'p-2'] });
+
+    expect(client('build-box').invoke.mock.calls).toEqual([
+      ['chat-tab:preview-session-switch', ['s-1']],
+      ['chat-tab:switch-session', ['s-1', ['p-1', 'p-2']]],
+    ]);
+  });
+
   it('sets a Pane\'s pin to the requested state in one host call', async () => {
     const { machines, client, connect } = setup(['build-box']);
     connect('build-box');
