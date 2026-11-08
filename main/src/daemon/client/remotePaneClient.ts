@@ -72,6 +72,8 @@ interface RemotePaneClientOptions {
     metadata?: RemoteConnectionStateMetadata,
   ) => void;
   onResyncRequired?: () => void | Promise<void>;
+  /** Resolves the host's name before the Tailscale fallback; the system resolver unless a test fakes it. */
+  dnsLookup?: LookupFunction;
 }
 
 interface RemotePaneClientConnectOptions {
@@ -200,6 +202,7 @@ export class RemotePaneClient {
     metadata?: RemoteConnectionStateMetadata,
   ) => void;
   private readonly onResyncRequired?: () => void | Promise<void>;
+  private readonly dnsLookup: LookupFunction;
   private eventParser = new PaneSseParser();
   private eventRequest: http.ClientRequest | null = null;
   private eventResponse: IncomingMessage | null = null;
@@ -242,6 +245,7 @@ export class RemotePaneClient {
     this.recovery = new RecoveryCycle(Math.random, this.writeResendBudgetMs, this.maxRetryDelayMs);
     this.onConnectionStateChange = options.onConnectionStateChange;
     this.onResyncRequired = options.onResyncRequired;
+    this.dnsLookup = options.dnsLookup ?? defaultLookup;
   }
 
   /** A codeless profile without a password relies on Tailscale identity alone. */
@@ -333,7 +337,7 @@ export class RemotePaneClient {
   /** One raw byte stream to a forwarded port on the host, signed in like every other request. */
   openPortStream(port: number): WebSocket {
     const endpoint = new URL(`ports/${port}`, this.normalizedBaseUrl);
-    const lookup = createTailscaleFallbackLookup(this.profile, endpoint);
+    const lookup = createTailscaleFallbackLookup(this.profile, endpoint, this.dnsLookup);
     const options: ClientOptions & { lookup?: LookupFunction } = { headers: this.authorizationHeader() };
     if (lookup) options.lookup = lookup;
     endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -773,7 +777,7 @@ export class RemotePaneClient {
   }
 
   private buildRequestOptions(endpoint: URL, options: RequestOptions): RemoteRequestOptions {
-    const lookup = createTailscaleFallbackLookup(this.profile, endpoint);
+    const lookup = createTailscaleFallbackLookup(this.profile, endpoint, this.dnsLookup);
     const requestOptions: RemoteRequestOptions = { ...options };
     if (lookup) {
       requestOptions.lookup = lookup;
@@ -914,6 +918,8 @@ interface RemotePaneClientControllerOptions {
   checkDependencies?: Partial<ConnectionCheckDependencies>;
   /** Pane started just after the computer did, before Tailscale could reach the saved host. */
   freshBoot?: boolean;
+  /** Passed to each RemotePaneClient; see its `dnsLookup`. */
+  dnsLookup?: LookupFunction;
 }
 
 const defaultCheckDependencies: ConnectionCheckDependencies = {
@@ -960,6 +966,7 @@ export class RemotePaneClientController extends EventEmitter {
   private remoteRuntimeUsageTracked = false;
   private appVersion: string | undefined;
   private checkDependencies = defaultCheckDependencies;
+  private dnsLookup: LookupFunction | undefined;
   /** The checklist of the latest connect the user started, or of a connection that failed. */
   private check: RemoteConnectionCheck | null = null;
   private checkProfile: RemotePaneConnectionProfile | null = null;
@@ -994,6 +1001,7 @@ export class RemotePaneClientController extends EventEmitter {
     this.resolveTailnetMachineUrl = options.resolveTailnetMachineUrl;
     this.appVersion = options.appVersion;
     this.checkDependencies = { ...defaultCheckDependencies, ...options.checkDependencies };
+    this.dnsLookup = options.dnsLookup;
     this.configManager.on('config-updated', this.configUpdatedListener);
     this.configListenerAttached = true;
 
@@ -1217,7 +1225,7 @@ export class RemotePaneClientController extends EventEmitter {
     }
     const deadline = Date.now() + HOST_FIX_SETTLE_MS;
     while (Date.now() < deadline && this.check?.id === checkId) {
-      const outcome = await probeHost(profile, new RemotePaneClient(profile), this.checkDependencies, () => {});
+      const outcome = await probeHost(profile, new RemotePaneClient(profile, { dnsLookup: this.dnsLookup }), this.checkDependencies, () => {});
       if (outcome.failedCheck !== 'pane_not_running' && outcome.failedCheck !== 'host_unreachable') break;
       await new Promise((resolve) => setTimeout(resolve, HOST_FIX_POLL_MS));
     }
@@ -1337,6 +1345,7 @@ export class RemotePaneClientController extends EventEmitter {
 
     let hostChanged = options.resolveOnReady === true;
     const client = new RemotePaneClient(profile, {
+      dnsLookup: this.dnsLookup,
       eventSink: {
         send: (channel, ...args) => {
           if (this.activeClient !== client) return;
@@ -1597,7 +1606,7 @@ export class RemotePaneClientController extends EventEmitter {
       hostVersion: sighting?.version ?? null,
     };
     this.publishState();
-    const outcome = await probeHost(profile, new RemotePaneClient(profile), this.checkDependencies, (rows) => this.updateCheck(id, { rows }));
+    const outcome = await probeHost(profile, new RemotePaneClient(profile, { dnsLookup: this.dnsLookup }), this.checkDependencies, (rows) => this.updateCheck(id, { rows }));
     if (this.check?.id !== id) {
       throw new PaneError('ERR_REMOTE_CHECK_SUPERSEDED', `The connection to ${profile.label} was replaced by a newer one.`, 'Wait for the newer connection to finish.');
     }
@@ -1747,6 +1756,7 @@ function buildRemoteEndpoint(baseUrl: URL, path: 'invoke' | 'events'): URL {
 function createTailscaleFallbackLookup(
   profile: RemotePaneConnectionProfile,
   endpoint: URL,
+  dnsLookup: LookupFunction,
 ): LookupFunction | undefined {
   const hostname = normalizeLookupHostname(endpoint.hostname);
   if (isIP(hostname) !== 0) {
@@ -1762,7 +1772,7 @@ function createTailscaleFallbackLookup(
   }
 
   return (lookupHostname, options, callback) => {
-    defaultLookup(lookupHostname, options, (error, address, family) => {
+    dnsLookup(lookupHostname, options, (error, address, family) => {
       if (!error) {
         callback(null, address, family);
         return;
