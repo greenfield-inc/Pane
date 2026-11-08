@@ -7,7 +7,9 @@ set -euo pipefail
 attempts="${CI_FETCH_ELECTRON_ATTEMPTS:-4}"
 delay=10
 for attempt in $(seq 1 "$attempts"); do
-  if node node_modules/electron/install.js; then
+  # PROBE (C3, throwaway): the first attempt downloads from a mirror that does not exist.
+  mirror=""; [ "$attempt" -eq 1 ] && mirror="https://probe.invalid/"
+  if ELECTRON_MIRROR="${mirror:-${ELECTRON_MIRROR:-}}" node node_modules/electron/install.js; then
     # require('electron') must now resolve without downloading anything.
     node -e "require('fs').accessSync(require('electron'))"
     exit 0

@@ -51,3 +51,4 @@ export function toAssistantMessage(message: AgentChatMessage): ChatDisplayMessag
   });
   return { id: message.id, role: message.role, content };
 }
+// probe: C2 shared-only change (throwaway, never merged)
