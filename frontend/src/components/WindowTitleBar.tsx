@@ -8,6 +8,10 @@ import type { Project } from '../types/project';
 import { APP_WINDOW_TITLE, formatPaneTitle, resolvePaneStatusPills, resolvePaneTitle } from '../utils/paneTitle';
 import { isMac } from '../utils/platformUtils';
 import { isWindowControlsOverlayEnabled } from '../utils/titleBarOverlay';
+import { useApprovalsBackStore } from './approvals/approvalsNavigation';
+import { Kbd } from './ui/Kbd';
+import { useNotifyStore } from '../stores/notifyStore';
+import { shortcutLabel } from './notify/notifyFormat';
 import { Badge } from './ui/Badge';
 
 const GUTTER = 8;
@@ -181,6 +185,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
         style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_RIGHT : OVERLAY_CONTROLS_RIGHT) }}
         data-testid="window-title-bar-trailing-controls"
       />
+      {activeView === 'notify' && !offlineNotice && <ApprovalsBackHint />}
       {offlineNotice && (
         <div className="relative flex min-w-0 items-center gap-1.5 text-xs" data-testid="window-title-bar-label">
           <span className="truncate font-medium text-text-secondary">{offlineNotice.title}</span>
@@ -246,6 +251,24 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Approvals' title bar names where "back" goes (D-239): Esc, or the Notify
+ * shortcut again (D-251).
+ */
+function ApprovalsBackHint() {
+  const label = useApprovalsBackStore(state => state.label);
+  const shortcut = useNotifyStore(state => state.snapshot?.settings.enabled ? state.snapshot.settings.shortcut : null);
+  if (!label) return null;
+  return (
+    <div className="relative flex min-w-0 items-center gap-1.5 rounded-md border border-border-primary bg-surface-primary px-2 py-0.5 text-xs text-text-secondary" data-testid="approvals-back-hint" style={NO_DRAG}>
+      <Kbd size="xs" variant="muted">esc</Kbd>
+      {shortcut && <><span className="text-text-tertiary">or</span><Kbd size="xs" variant="muted">{shortcutLabel(shortcut, isMac())}</Kbd></>}
+      <span className="flex-shrink-0 text-text-tertiary">back to</span>
+      <span className="min-w-0 truncate font-medium text-text-primary">{label}</span>
     </div>
   );
 }
