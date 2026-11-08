@@ -420,6 +420,8 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       refocus(item);
       return;
     case 'Escape': {
+      // In Approvals, Esc goes back to where you were before Approvals (D-251).
+      if (useNavigationStore.getState().activeView === 'notify') return;
       event.preventDefault();
       releaseCursorHold?.();
       const back = returnTarget;
