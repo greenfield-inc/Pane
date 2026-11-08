@@ -531,7 +531,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         {beside.kind === 'none' && (
           <div className="m-auto flex flex-col items-center gap-2 text-[13px] text-text-tertiary">
             <Inbox className="h-5 w-5" aria-hidden="true" />
-            {!selected ? 'Select an approval to see its Session here.'
+            {!selected ? (shown.length === 0 ? 'When an agent asks you something, its Session shows here.' : 'Select an approval to see its Session here.')
               : selected.closed ? receiptLine(selected)
                 : `Asked from ${beside.kind === 'none' && beside.name ? beside.name : selected.source.name}, outside Pane.`}
           </div>
