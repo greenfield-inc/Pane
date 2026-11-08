@@ -31,6 +31,9 @@ function choices(options: Array<{ const: string; title?: string; description?: s
   return values?.length ? values.map(value => ({ value, title: value })) : undefined;
 }
 
+/** What every field has, whatever its kind. */
+type QuestionFieldBase = Pick<QuestionField, 'key' | 'title' | 'description' | 'required'>;
+
 /** The fields Pane can show for a requested schema, in order. Fields it cannot show are left out. */
 export function questionFields(schema: JsonValue): QuestionField[] {
   const decoded = decodeOptionalBoundary(schema, form);
@@ -39,7 +42,8 @@ export function questionFields(schema: JsonValue): QuestionField[] {
     const field = decodeOptionalBoundary(value, property);
     if (!field) return [];
     const title = field.title ?? key;
-    const base = { key, title, ...(field.description ? { description: field.description } : {}), required: required.has(key) };
+    const base: QuestionFieldBase = { key, title, required: required.has(key) };
+    if (field.description) base.description = field.description;
     if (field.type === 'array') {
       const list = choices(field.items?.anyOf ?? field.items?.oneOf, field.items?.enum);
       return list ? [{ ...base, kind: 'multiple', choices: list }] : [];
