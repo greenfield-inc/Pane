@@ -469,7 +469,7 @@ function QueueSegments({ queue }: { queue: NotifyQueuePosition }) {
 /**
  * Keys for the card the person is acting on: the pointer is over it, or (the floating strip) it
  * was clicked and its window has the keyboard. Runs before the page's own handlers, such as a
- * terminal's, and ignores keys typed into the card's fields and chords with modifiers.
+ * terminal's, and ignores keys typed into any field and chords with modifiers.
  */
 function useCardKeys(rootRef: RefObject<HTMLDivElement | null>, floating: boolean, onKey: (key: string) => boolean): void {
   const handler = useRef(onKey);
@@ -491,8 +491,9 @@ function useCardKeys(rootRef: RefObject<HTMLDivElement | null>, floating: boolea
     const keydown = (event: KeyboardEvent) => {
       if (!hovering && !clicked) return;
       if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.repeat) return;
+      // A field has the keyboard (the card's own, a terminal, a chat composer): the keys are its.
       const target = event.target;
-      if (target instanceof HTMLElement && root.contains(target) && target.closest('input, textarea')) return;
+      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
       if (!handler.current(event.key)) return;
       event.preventDefault();
       event.stopPropagation();
