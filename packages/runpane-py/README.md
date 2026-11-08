@@ -252,6 +252,18 @@ ack <id>...` clears them; `--decision <D-n>` records an answer's decision. An
 orchestrator relays a worker's question into its card with `runpane notify
 --relays <item> ...`.
 
+When the person types a reply on an approval, `runpane notify` returns
+`{reply, picks?, id, next}` (or, with no open call, Pane types a `reply:` line
+into the asking tab). The reply may answer the question or ask one: `runpane
+notify --took <id|Q-n> answer` records it as the answer, and `--took <id|Q-n>
+question [--status <text>]` shows that you are getting more context. Then
+`runpane notify --update <id|Q-n> --asked <text> --what-changed <text>` with
+any changed `--title`, `--context`, `--choices` (a reworded choice adds
+`"was"`, its old label), `--questions` or `--links` saves a new version and
+waits on it. `--ui options` may ask 2 to 4 `--questions` (`[{title, choices}]`)
+at once instead of `--choices`, and `--links` may name another approval as
+`{label, approval}`.
+
 Autopilot (experimental) reads `runpane autopilot status|waiting|stack` and adds
 to its stack with `runpane autopilot stack push (--item <id>|--file <path>|--url
 <url>|--session <id|name>) [--tab <path-or-url>]... [--next]`. It acts on waiting

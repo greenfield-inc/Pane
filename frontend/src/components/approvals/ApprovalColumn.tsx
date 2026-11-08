@@ -37,6 +37,8 @@ export interface ApprovalColumnProps {
   inChat?: string;
   /** The chat where it was asked, for the origin tab. */
   renderOrigin?: (item: NotifyItem) => ReactNode;
+  /** The items to read instead of the Notify store's (tests). */
+  items?: readonly NotifyItem[];
 }
 
 const TONE_TEXT: Record<ReplyLine['tone'], string> = {
@@ -52,8 +54,9 @@ const TONE_BOX: Record<ReplyLine['tone'], string> = {
   info: 'bg-status-info/10',
 };
 
-export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, closeLabel, onClose, inChat, renderOrigin }: ApprovalColumnProps) {
-  const items = useNotifyStore((state) => state.snapshot?.items);
+export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, closeLabel, onClose, inChat, renderOrigin, items: given }: ApprovalColumnProps) {
+  const stored = useNotifyStore((state) => state.snapshot?.items);
+  const items = given ?? stored;
   const byId = useMemo(() => new Map((items ?? []).map((item) => [item.id, item])), [items]);
   const open = useApprovalColumnStore((state) => state.open[surface]);
   const setTab = useApprovalColumnStore((state) => state.setTab);

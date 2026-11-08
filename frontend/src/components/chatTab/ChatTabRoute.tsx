@@ -11,6 +11,7 @@ import { useSessionWorkers, type SessionWorkerSource } from './sessionWorkers';
 import { savedFilePath } from './chatAttachments';
 import type { ChatTurnActions } from './ChatTurns';
 import { onSessionOverviewChange } from '../../utils/sessionOverviewEvents';
+import { SessionApprovalCards } from '../approvals/SessionApprovalCards';
 
 /** The desktop reads the Session overview over IPC and hears its updates as window events. */
 const DESKTOP_WORKERS: SessionWorkerSource = {
@@ -53,5 +54,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     machine={machine}
     placeholder={state?.orchestrationSessionId ? 'Ask the Session anything' : undefined}
     actions={actions}
+    // A Session's orchestrator chat shows its approvals as light cards above the composer (P5).
+    dock={state?.orchestrationSessionId ? <SessionApprovalCards sessionId={state.orchestrationSessionId} /> : undefined}
   />;
 }
