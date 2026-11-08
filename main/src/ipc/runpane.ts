@@ -315,6 +315,7 @@ const RUNPANE_CHANNELS = [
   'runpane:sessions:resume',
   'runpane:panels:last-message',
   'runpane:report',
+  'runpane:panels:conversation',
   'runpane:workspace:state',
   'runpane:workspace:wait',
   'runpane:agents:doctor',
@@ -386,12 +387,23 @@ const MUTATING_RUNPANE_ACTIONS = new Set([
   'panels:submit',
   'panels:submit-composer',
   'report',
+  'panels:conversation',
   'sessions:create',
   'sessions:update',
   'sessions:set-agent',
   'sessions:associate',
   'sessions:detach',
 ]);
+
+const conversationReportSchema = boundary.object({
+  panelId: boundary.nonEmptyString,
+  paneId: boundary.optional(boundary.nonEmptyString),
+  conversationId: boundary.nonEmptyString,
+  source: boundary.optional(boundary.string),
+});
+const CONVERSATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
+const CONVERSATION_SOURCE = /^[a-z_-]{1,32}$/u;
+interface RunpaneConversationReportResult { ok: true; paneId: string; panelId: string; conversationId: string; source?: string; sure: boolean }
 
 const orchestrationSelectorSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
@@ -1906,6 +1918,27 @@ export function registerRunpaneHandlers(
       });
       const sessionIds = await services.orchestrationSessionManager?.recordAgentReport(panel.id, report) ?? [];
       return { ok: true, paneId: panel.sessionId, panelId: panel.id, report, sessionIds, liveWatchers };
+    }, result => ({ paneId: result.paneId, panelId: result.panelId, ok: result.ok }));
+  });
+
+  /**
+   * A Claude SessionStart hook says which conversation its tab is on (D-269). Recorded on a running
+   * terminal tab; a chat tab keeps the conversation it opened, so its report changes nothing. No watch event.
+   */
+  commandRegistry.register('runpane:panels:conversation', async (request: PaneCommandValue): Promise<RunpaneConversationReportResult> => {
+    return withRunpaneAction(services, 'panels:conversation', {}, async () => {
+      const input = decodeBoundary(request, conversationReportSchema);
+      if (!CONVERSATION_ID.test(input.conversationId) || (input.source !== undefined && !CONVERSATION_SOURCE.test(input.source))) {
+        throw new PaneError('ERR_CONVERSATION_ID', 'That is not a conversation ID or hook source Pane accepts. Nothing was recorded.', 'Pass the session_id and source from Claude Code\'s SessionStart hook.');
+      }
+      const panel = resolveAgentPanel(input.panelId);
+      if (input.paneId && input.paneId !== panel.sessionId) {
+        throw new PaneError('ERR_CONVERSATION_PANEL', `Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${input.paneId}. Nothing was recorded.`, 'Pass the panel\'s own Pane, or leave out --pane.');
+      }
+      const recorded = panel.type === 'terminal' && await terminalPanelManager.recordConversationReport(panel.id, input.conversationId, input.source);
+      const base = { ok: true as const, paneId: panel.sessionId, panelId: panel.id, conversationId: input.conversationId };
+      // Key order matches the CLIs' printed --json: source before sure.
+      return input.source ? { ...base, source: input.source, sure: recorded } : { ...base, sure: recorded };
     }, result => ({ paneId: result.paneId, panelId: result.panelId, ok: result.ok }));
   });
 
