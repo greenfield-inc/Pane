@@ -534,6 +534,30 @@ describe('AutopilotManager: Sentinel (package 7)', () => {
     expect(again.snapshot()).toMatchObject({ sentinel: true, state: 'running' });
   });
 
+  it('saying yes after a restart when Autopilot cannot start tells the person why', async () => {
+    const f = fake();
+    const manager = new AutopilotManager(f.ports);
+    await manager.setEnabled(true);
+    await manager.setSentinel(true);
+    manager.dispose();
+    const again = new AutopilotManager(f.ports);
+    await again.initialize();
+    f.chatTabs = false;
+    f.asks[0].resolve({ answer: 'Turn Sentinel back on' });
+    await settle(); await settle();
+    expect(again.snapshot()).toMatchObject({ sentinel: false, state: 'stopped' });
+    expect(f.asks[1]?.title).toBe('Sentinel did not start');
+  });
+
+  it('Start pressed twice at once (the Sentinel switch, the phone) sends Start once', async () => {
+    const f = fake();
+    const manager = new AutopilotManager(f.ports);
+    await manager.setEnabled(true);
+    await Promise.all([manager.start(), manager.setSentinel(true), manager.start()]);
+    expect(f.sent.filter(line => !line.text.startsWith('[Pane · Sentinel')).length).toBe(1);
+    expect(f.ticks.length).toBe(1);
+  });
+
   it('turning Autopilot off turns Sentinel off', async () => {
     const f = fake();
     const manager = new AutopilotManager(f.ports);

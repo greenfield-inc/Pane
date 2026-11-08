@@ -158,6 +158,8 @@ export class AutopilotManager extends EventEmitter {
   private stopWatchingInstructions: (() => void) | undefined;
   /** Pane is stopping the agent itself (off, a new run): the tab stopping then is expected. */
   private stoppingAgent = false;
+  /** A Start in flight: a second press (the Sentinel switch, the phone) joins it instead of sending Start twice. */
+  private starting: Promise<AutopilotSnapshot> | undefined;
   private readonly unsubscribe: Array<() => void> = [];
   private readonly now: () => number;
   private emitScheduled = false;
@@ -272,10 +274,19 @@ export class AutopilotManager extends EventEmitter {
         context,
         choices: [{ label: question.on, recommended: true }, { label: question.off }],
       });
-      if ('answer' in result && result.answer === question.on) await this.setSentinel(true);
+      if ('answer' in result && result.answer === question.on) await this.setSentinel(true).catch(error => this.tellCouldNotStart(error));
     } catch (error) {
       this.log(`could not ask about Sentinel (${question.title}): ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /** The person said yes from their phone, and Start failed: they hear why, where they answered. */
+  private async tellCouldNotStart(error: unknown): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    const next = error instanceof PaneError ? error.next : undefined;
+    this.log(`could not turn Sentinel back on: ${message}`);
+    await this.ports.notify.ask({ ui: 'info', title: 'Sentinel did not start', context: [message, next].filter(Boolean).join(' ') })
+      .catch(() => { /* Logged above; Autopilot's view shows Start. */ });
   }
 
   snapshot(): AutopilotSnapshot {
@@ -327,6 +338,12 @@ export class AutopilotManager extends EventEmitter {
     this.requireOn('Start');
     assertAutopilotEntitled('Start');
     this.requireChatTabs('Start');
+    if (this.state !== 'stopped') return this.snapshot();
+    this.starting ??= this.startAgent().finally(() => { this.starting = undefined; });
+    return this.starting;
+  }
+
+  private async startAgent(): Promise<AutopilotSnapshot> {
     const run = this.run ?? this.createRun();
     await this.ensureAgentTab(run);
     const panelId = panelIdOf(run.id);
@@ -436,6 +453,8 @@ export class AutopilotManager extends EventEmitter {
     if (on === this.sentinel) return this.snapshot();
     if (on) {
       if (this.state === 'stopped') await this.start();
+      // Another press turned it on while Start ran.
+      if (this.sentinel) return this.snapshot();
       // From Pause, the Sentinel line itself says to carry on; a Go on line too would queue a second turn.
       else if (this.state === 'paused') this.setState('running');
       const run = this.requireRun();
