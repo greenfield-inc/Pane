@@ -148,12 +148,11 @@ owner too old for these commands is reported as needing an update.
 - **The right side shows only the current item's context**, as tabs: its
   documents (HTML renders as a page, any other file as text), the app (a
   URL), a Session's overview. It never holds the question or answer buttons.
-  A page follows Pane's theme, not the Mac's (D-163): its
-  `prefers-color-scheme` follows Electron's `nativeTheme`, which Pane points at
-  its own light or dark. Where they still differ (System mode with a dark
-  palette for the Mac's light setting, or the reverse), Pane swaps the page's
-  `prefers-color-scheme` rules (`guestColorScheme.ts`), so a document with dark
-  styles shows dark whenever Pane does. Pane never attaches a DevTools
+  A page follows Pane's theme, not the Mac's (D-163): whenever the page's
+  `prefers-color-scheme` differs from Pane's light or dark, Pane swaps dark and
+  light in the page's `prefers-color-scheme` rules (`guestColorScheme.ts`), so
+  a document with dark styles shows dark whenever Pane does. Script in the page
+  that asks `matchMedia` still gets the Mac's answer. Pane never attaches a DevTools
   debugger for this: one that stays attached crashes Electron 43 when the page
   closes (electron/electron#53376, D-216); any debugger goes through
   `attachDebugger` (`main/src/services/debuggerLifetime.ts`).

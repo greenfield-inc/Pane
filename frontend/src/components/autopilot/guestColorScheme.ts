@@ -12,11 +12,11 @@ export interface SchemeGuestWindow {
 }
 
 /**
- * D-163: a page in a <webview> follows Pane's light or dark, not the Mac's. Pane points Electron's
- * nativeTheme at its theme, which every guest's prefers-color-scheme follows, so this usually does
- * nothing. When the two differ (System mode with, say, a dark palette for the Mac's light setting),
- * it swaps dark and light in the page's prefers-color-scheme rules, and swaps back when they agree
- * again, including when the Mac changes while the page is open.
+ * D-163: a page in a <webview> follows Pane's light or dark, not the Mac's. The page's own
+ * prefers-color-scheme follows the Mac whatever Pane chose, so when it differs from Pane's this
+ * swaps dark and light in the page's prefers-color-scheme rules, and swaps back when they agree
+ * again, including when the Mac changes while the page is open. Script in the page that asks
+ * matchMedia, and stylesheets from another origin, still see the Mac's scheme.
  *
  * It runs inside the guest page (serialised into executeJavaScript), so it must not use anything
  * from outside its own body. It replaces an attached webContents.debugger, which crashed Pane when
