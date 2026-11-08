@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { chatLaunchForTerminal, chatLaunchFromCommand, sessionChatLaunch, sessionFolderMeta } from './launch';
+import { afterEach, describe, expect, it } from 'vitest';
+import path from 'path';
+import { chatLaunchForTerminal, chatLaunchFromCommand, chatTabEnv, sessionChatLaunch, sessionFolderMeta } from './launch';
+import { resetPaneRuntimeForTests, setPaneRuntime } from '../../core/runtime';
+import { ConfigManager } from '../configManager';
+import { getAppDirectory } from '../../utils/appDirectory';
+import type { ToolPanel } from '../../../../shared/types/panels';
 import { AGENT_FARM_RESUME } from '../../../../shared/types/customCommandResume';
 import { withSessionFolderAccess } from '../agents/sessionFolderAccess';
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
@@ -93,5 +98,26 @@ describe('Session folder access in a switched Session Pane chat (D-161)', () => 
     expect(sessionFolderMeta({ agent: 'codex', cwd: '/work/pane', sessionFolder: folder }, 'darwin')).toBeUndefined();
     expect(sessionFolderMeta({ agent: 'claude', cwd: '/work/pane', sessionFolder: folder }, 'win32')).toBeUndefined();
     expect(sessionFolderMeta({ agent: 'claude', cwd: '/work/pane' }, 'darwin')).toBeUndefined();
+  });
+});
+
+describe('the environment a chat tab agent starts with', () => {
+  const panel: ToolPanel = { id: 'p-1', sessionId: 's-1', type: 'chat', title: 'Claude', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
+  const runtime = () => setPaneRuntime({ eventSink: { send: () => undefined }, getConfigManager: () => new ConfigManager(), getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map() });
+  afterEach(() => resetPaneRuntimeForTests());
+
+  it('carries the project\'s variables, with Pane\'s own winning', () => {
+    runtime();
+    const env = chatTabEnv(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: '/work/tree', status: 'starting' }, { API_BASE: 'https://staging.example', PANE_SESSION_ID: 'from-project' });
+    expect(env.API_BASE).toBe('https://staging.example');
+    expect(env.PANE_SESSION_ID).toBe('s-1');
+  });
+
+  it('keeps git from finding a repository above a Session orchestrator\'s folder', () => {
+    runtime();
+    const folder = path.join(getAppDirectory(), 'sessions', 'o-1');
+    const env = chatTabEnv(panel, { agent: 'claude', launch: { kind: 'agent' }, cwd: folder, status: 'starting', orchestrationSessionId: 'o-1' });
+    expect(env.GIT_CEILING_DIRECTORIES).toBe(path.dirname(folder));
+    expect(env.PANE_ORCHESTRATION_SESSION_ID).toBe('o-1');
   });
 });
