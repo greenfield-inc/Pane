@@ -71,6 +71,18 @@ describe('runpane on a chat tab', () => {
     expect(chatTabLastMessage(manager, panel, 1000)).toMatchObject({ text: 'You said: instead' });
   });
 
+  it('waits for text in the reply, not in the prompt that asked for it', async () => {
+    const { manager, panel } = setup();
+    await manager.ensure(panel.id);
+    await submitChatTab(manager, panel, 'hello', { interrupt: false });
+    await expect(waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'You said: hello', timeoutMs: 10_000 }))
+      .resolves.toMatchObject({ ok: true, matched: true });
+    // "slow" streams dots until cancelled, so only the prompt itself contains "slow".
+    await submitChatTab(manager, panel, 'slow', { interrupt: false });
+    await expect(waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'slow', timeoutMs: 500 }))
+      .resolves.toMatchObject({ ok: false, matched: false, timedOut: true });
+  });
+
   it('refuses raw terminal input with a clear next step', () => {
     const { panel } = setup();
     const error = chatTabNoTerminal(panel, 'input');

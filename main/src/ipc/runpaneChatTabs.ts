@@ -49,6 +49,17 @@ function transcriptTail(manager: ChatTabManager, panelId: string, chars: number)
   return { text: text.slice(-chars), hasMore: length > chars || before > 0 };
 }
 
+/** Whether a message from index `since` up to `count` contains `text`, read a page at a time. */
+function textSince(manager: ChatTabManager, panelId: string, since: number, count: number, text: string): boolean {
+  for (let before = count; before > since;) {
+    const page = manager.history(panelId, before, before - since);
+    if (!page.length) return false;
+    if (page.some(message => messageText(message).includes(text))) return true;
+    before -= page.length;
+  }
+  return false;
+}
+
 function chatTabState(view: ChatTabView): RunpanePanelStateSummary {
   const running = view.status !== 'stopped';
   return {
@@ -117,13 +128,17 @@ export async function waitForChatTab(manager: ChatTabManager, panel: ToolPanel, 
   const timeout = request.timeoutMs ?? 30_000;
   const interval = Math.max(25, request.intervalMs ?? 250);
   const condition = request.condition ?? 'idle';
+  // Text waits search only what arrives after the wait starts, plus a reply still streaming then,
+  // so the prompt that asked for the text never matches and no poll rereads the whole transcript.
+  const count = manager.view(panel.id, 0, false).messageCount;
+  const since = count > 0 && manager.history(panel.id, count, 1)[0]?.role === 'assistant' ? count - 1 : count;
   while (true) {
     const view = manager.view(panel.id, 0);
     const state = chatTabState(view);
     const blocked = blockedState(panel, view);
     const idle = view.status === 'idle' && view.queue.length === 0;
     const matched = condition === 'text'
-      ? transcriptTail(manager, panel.id, 200_000).text.includes(request.contains ?? '')
+      ? textSince(manager, panel.id, since, view.messageCount, request.contains ?? '')
       : condition === 'initialized' ? state.initialized : idle;
     const timedOut = !matched && Date.now() - started >= timeout;
     if (matched || timedOut || blocked || view.status === 'stopped') {
