@@ -131,6 +131,7 @@ function App() {
   const activeProjectId = useNavigationStore(s => s.activeProjectId);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
   const sidebarCollapsed = useNavigationStore(s => s.sidebarCollapsed);
+  const sidebarMaximized = useNavigationStore(s => s.maximizedRegion === 'sidebar' && !s.sidebarCollapsed);
   const [titleBarControlsSlot, setTitleBarControlsSlot] = useState<HTMLDivElement | null>(null);
   const setSidebarCollapsed = useNavigationStore(s => s.setSidebarCollapsed);
 
@@ -975,9 +976,14 @@ function App() {
           />
         )}
         <div className={isSettingsOpen ? 'hidden' : 'contents'}>
+        {/* Maximized (P4), the sidebar spreads over the main area while this
+            placeholder keeps the main area's size, so no terminal refits. */}
+        {sidebarMaximized && <div aria-hidden="true" className="flex-shrink-0" style={{ width: `${sidebarWidth}px` }} />}
         <div
-          className="pane-sidebar-slot pane-reveal flex-shrink-0 overflow-hidden transition-[width] duration-reveal ease-out-strong"
-          style={{ width: sidebarCollapsed ? '48px' : `${sidebarWidth}px` }}
+          className={sidebarMaximized
+            ? 'pane-sidebar-slot absolute inset-y-0 left-0 right-0 z-30 overflow-hidden'
+            : 'pane-sidebar-slot pane-reveal flex-shrink-0 overflow-hidden transition-[width] duration-reveal ease-out-strong'}
+          style={sidebarMaximized ? undefined : { width: sidebarCollapsed ? '48px' : `${sidebarWidth}px` }}
         >
           <Sidebar
             onAboutClick={() => setIsAboutOpen(true)}
@@ -986,6 +992,7 @@ function App() {
             onAddMachineClick={() => openSettings({ category: 'remote-access', setting: 'remote-add-code' })}
             onMachinePasswordRequest={(machine) => openSettings({ category: 'remote-access', setting: 'remote-machines', machine })}
             width={sidebarWidth}
+            maximized={sidebarMaximized}
             onResize={startResize}
             collapsed={sidebarCollapsed}
             onToggleCollapse={handleToggleSidebar}
@@ -1001,7 +1008,7 @@ function App() {
           />
         </div>
         {/* The checklist carries its own fix buttons, so it never dims. */}
-        <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck}>
+        <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck} covered={sidebarMaximized}>
           {shownConnectionCheck
             ? <ConnectionChecklist check={shownConnectionCheck} onOpenSettings={openSettings} onUpdatePane={() => void updatePane()} />
             : offlineMachineShown

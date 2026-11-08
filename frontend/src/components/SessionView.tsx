@@ -80,6 +80,7 @@ import { LivePreviewPrompt } from './LivePreviewPrompt';
 import { ApprovalsView } from './approvals/ApprovalsView';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
 import { CUSTOM_COMMAND_KEYS, type CustomCommandId } from '../../../shared/constants/keyboardShortcuts';
+import { useRegionActions } from '../hooks/useRegionNavigation';
 import { useLoopsStore } from '../stores/loopsStore';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
@@ -744,6 +745,9 @@ export const SessionView = memo(() => {
     localStorage.setItem('pane-loop-run-detail-panel-visible', String(loopRunDetailVisible));
   }, [loopRunDetailVisible]);
   const detailVisible = loopRun ? loopRunDetailVisible : paneDetailVisible;
+  // Maximized (P4), the right panel covers the splits and terminal, which keep their size.
+  const setMaximizedRegion = useNavigationStore(state => state.setMaximizedRegion);
+  const rightPanelMaximized = useNavigationStore(state => state.maximizedRegion === 'right-panel') && detailVisible;
   const setDetailVisible = loopRun ? setLoopRunDetailVisible : setPaneDetailVisible;
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(() => {
     const stored = localStorage.getItem('pane-inspector-tab');
@@ -989,26 +993,16 @@ export const SessionView = memo(() => {
     showInPalette: true,
   });
 
-  // Mod+Shift+Z: zoom toggle
-  useHotkey({
-    id: 'zoom-toggle',
-    label: 'Toggle Zoom',
-    category: 'tabs',
-    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
-    action: () => {
-      if (!activeSession || !sessionLayout) return;
-      const sid = activeSession.id;
-      const currentLayout = usePanelStore.getState().layouts[sid];
-      if (!currentLayout) return;
-      const isZoomed = !!currentLayout.zoomedGroupId;
-      const next: SessionPanelLayout = {
-        ...currentLayout,
-        zoomedGroupId: isZoomed ? null : focusedGroupId,
-      };
-      applyLayout(sid, next);
-    },
-    showInPalette: true,
-  });
+  // Maximize a split over the others, or restore (P4). ⌘K ⌘M reaches it
+  // through the focused group (useRegionNavigation); its strip shows Restore.
+  const toggleGroupMaximize = useCallback((groupId: string) => {
+    if (!activeSession) return;
+    const sid = activeSession.id;
+    const currentLayout = usePanelStore.getState().layouts[sid];
+    if (!currentLayout || allGroups(currentLayout.root).length < 2) return;
+    const isZoomed = currentLayout.zoomedGroupId === groupId;
+    applyLayout(sid, { ...currentLayout, focusedGroupId: groupId, zoomedGroupId: isZoomed ? null : groupId });
+  }, [activeSession, applyLayout]);
 
   const handlePanelClose = useCallback(
     async (panel: ToolPanel) => {
@@ -1366,9 +1360,11 @@ export const SessionView = memo(() => {
         onStripDrop={handleStripDrop}
         getPanelTabPresentation={getPanelTabPresentation}
         emptyState={emptyStage}
+        onToggleMaximize={toggleGroupMaximize}
       />
     );
   }, [
+    toggleGroupMaximize,
     sessionLayout, activeSession, tabBarPanels, focusedGroupId,
     handleSizesChange, handleGroupPanelSelect, handlePanelClose, handleFocusGroup,
     isTabDragging, draggedPanelId, dropZones, handleDropZoneChange,
@@ -1676,6 +1672,9 @@ export const SessionView = memo(() => {
   const toggleTerminalCollapse = useCallback(() => {
     setIsTerminalCollapsed(prev => !prev);
   }, []);
+  // ⌘⇧M with focus in the terminal dock collapses it to its strip (P4).
+  const terminalDockRef = useRef<HTMLDivElement>(null);
+  useRegionActions(terminalDockRef, { minimize: () => { if (!isTerminalCollapsed) toggleTerminalCollapse(); } });
 
   const sessionContentBox = useObservedContentBox<HTMLDivElement>();
   const centerColumnBox = useObservedContentBox<HTMLDivElement>();
@@ -1988,7 +1987,7 @@ export const SessionView = memo(() => {
         />
 
         {/* Content area: center panels + right detail */}
-        <div ref={sessionContentBox.ref} className="pane-session-content flex-1 flex flex-row min-h-0 min-w-0">
+        <div ref={sessionContentBox.ref} className="pane-session-content relative flex-1 flex flex-row min-h-0 min-w-0">
           {swappedLayoutRendered && defaultTerminalPanel ? (
             <>
               {/* SWAPPED LAYOUT: Center column with panels on top, horizontal detail panel on bottom */}
@@ -2076,7 +2075,7 @@ export const SessionView = memo(() => {
           ) : (
             <>
               {/* DEFAULT LAYOUT: Center column with panels on top, terminal on bottom */}
-              <div ref={centerColumnBox.ref} className="pane-center-column flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+              <div ref={centerColumnBox.ref} className="pane-center-column flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" inert={rightPanelMaximized ? true : undefined}>
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
                   {editorStageElement || emptyStage}
@@ -2086,6 +2085,7 @@ export const SessionView = memo(() => {
                 {/* Bottom: persistent terminal (collapsible) */}
                 {defaultTerminalPanel && (
                   <div
+                    ref={terminalDockRef}
                     data-focus-region="terminal"
                     data-region-open={!isTerminalCollapsed && terminalResize.bodyActive}
                     className={`pane-terminal-dock flex-shrink-0 flex flex-col relative overflow-visible ${
@@ -2152,6 +2152,9 @@ export const SessionView = memo(() => {
 
               {/* Right: detail panel */}
               <DetailPanel
+                maximized={rightPanelMaximized}
+                onToggleMaximize={() => setMaximizedRegion(rightPanelMaximized ? null : 'right-panel')}
+                onMinimize={() => { setMaximizedRegion(null); if (detailVisible) handleToggleDetailPanel(); }}
                 isVisible={detailVisible}
                 onToggle={() => setDetailVisible(v => !v)}
                 width={detailResize.renderedPx}

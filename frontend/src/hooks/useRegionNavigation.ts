@@ -1,10 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { useHotkey } from './useHotkey';
 import {
   focusSidebar,
   handleSidebarListKey,
+  minimizeAtFocus,
   moveFocus,
   noteFocusIn,
+  registerRegionActions,
+  toggleMaximizeAtFocus,
+  type RegionActions,
   stepFocus,
 } from '../services/regionFocus';
 import type { FocusDirection } from '../utils/focusStops';
@@ -46,4 +50,25 @@ export function useRegionNavigation(): void {
   useDirectionHotkey(DIRECTIONS[3]);
   useHotkey({ id: 'focus-next-region', label: 'Focus Next Region', category: 'navigation', action: () => stepFocus(1) });
   useHotkey({ id: 'focus-previous-region', label: 'Focus Previous Region', category: 'navigation', action: () => stepFocus(-1) });
+  useHotkey({ id: 'zoom-toggle', label: 'Maximize or Restore Focused Region', category: 'view', action: () => { toggleMaximizeAtFocus(); } });
+  useHotkey({ id: 'minimize-region', label: 'Minimize Focused Side Region', category: 'view', action: () => { minimizeAtFocus(); } });
+}
+
+/**
+ * Says what maximize and minimize mean for the region rendered at `ref`. The
+ * latest callbacks are used, so callers need not memoize them.
+ */
+export function useRegionActions(ref: RefObject<Element | null>, actions: RegionActions): void {
+  const latest = useRef(actions);
+  useEffect(() => { latest.current = actions; });
+  const canMaximize = Boolean(actions.toggleMaximize);
+  const canMinimize = Boolean(actions.minimize);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || (!canMaximize && !canMinimize)) return undefined;
+    return registerRegionActions(element, {
+      toggleMaximize: canMaximize ? () => latest.current.toggleMaximize?.() : undefined,
+      minimize: canMinimize ? () => latest.current.minimize?.() : undefined,
+    });
+  }, [ref, canMaximize, canMinimize]);
 }

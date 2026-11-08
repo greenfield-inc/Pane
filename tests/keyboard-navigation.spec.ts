@@ -151,3 +151,109 @@ test('F6 and ⇧F6 cycle the sidebar, the splits and the right panel', async ({ 
   await page.keyboard.press('Shift+F6');
   await expect.poll(async () => (await focusPlace(page)).region).toBe('right-panel');
 });
+
+const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
+
+/**
+ * Two-step maximize: ⌘K, then ⌘M (D-250), with ⌘ held throughout. In a
+ * terminal, letting go of ⌘ after ⌘K means "clear", as in VS Code.
+ */
+async function maximizeKey(page: Page): Promise<void> {
+  await page.keyboard.down(MOD);
+  await page.keyboard.press('k');
+  await page.keyboard.press('m');
+  await page.keyboard.up(MOD);
+}
+
+test('⌘K ⌘M maximizes the focused split with a pressed restore button, and restores', async ({ page }) => {
+  await openFixture(page);
+  await page.keyboard.press('ControlOrMeta+0');
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ group: 'g-left' });
+
+  await page.keyboard.down(MOD);
+  await page.keyboard.press('k');
+  await expect(page.getByTestId('key-sequence-hint')).toBeVisible();
+  await page.keyboard.press('m');
+  await page.keyboard.up(MOD);
+  await expect(page.getByTestId('key-sequence-hint')).toHaveCount(0);
+  await expect(page.locator('[data-panel-group-id="g-right"]')).toBeHidden();
+  const restore = page.locator('[data-panel-group-id="g-left"]').getByTestId('restore-region');
+  await expect(restore).toHaveAttribute('aria-pressed', 'true');
+  await expect(restore).toHaveAttribute('aria-label', /Restore \(.+K.+M\)/);
+  // The sidebar and right panel stay.
+  await expect(page.getByTestId('sidebar')).toBeVisible();
+  await expect(page.locator('.pane-detail-panel-vertical')).toBeVisible();
+
+  await maximizeKey(page);
+  await expect(page.locator('[data-panel-group-id="g-right"]')).toBeVisible();
+  await expect(page.getByTestId('restore-region')).toHaveCount(0);
+
+  // The button restores too.
+  await maximizeKey(page);
+  await page.getByTestId('restore-region').click();
+  await expect(page.locator('[data-panel-group-id="g-right"]')).toBeVisible();
+});
+
+test('the right panel and the sidebar maximize over the main area and restore', async ({ page }) => {
+  await openFixture(page);
+  const splitWidth = await page.locator('[data-panel-group-id="g-left"]').evaluate(element => element.getBoundingClientRect().width);
+  await page.keyboard.press('ControlOrMeta+0');
+  for (let step = 0; step < 3; step += 1) await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'right-panel' });
+  await maximizeKey(page);
+  const panel = page.locator('.pane-detail-panel-inner').first();
+  await expect.poll(() => panel.evaluate(element => element.getBoundingClientRect().left)).toBeLessThan(400);
+  // The splits keep their size underneath, so no terminal refits.
+  expect(await page.locator('[data-panel-group-id="g-left"]').evaluate(element => element.getBoundingClientRect().width)).toBe(splitWidth);
+  await maximizeKey(page);
+  await expect.poll(() => panel.evaluate(element => element.getBoundingClientRect().left)).toBeGreaterThan(900);
+
+  await page.keyboard.press('ControlOrMeta+0');
+  await maximizeKey(page);
+  await expect.poll(() => page.getByTestId('sidebar').evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(1000);
+  await expect(page.getByTestId('sidebar').getByTestId('restore-region')).toBeVisible();
+  await maximizeKey(page);
+  await expect.poll(() => page.getByTestId('sidebar').evaluate(element => element.getBoundingClientRect().width)).toBeLessThan(500);
+});
+
+test('⌘⇧M minimizes the focused side region and moves focus to the main area; on a split it does nothing', async ({ page }) => {
+  await openFixture(page);
+  await page.keyboard.press('ControlOrMeta+0');
+  for (let step = 0; step < 3; step += 1) await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'right-panel' });
+  await page.keyboard.press('ControlOrMeta+Shift+M');
+  await expect.poll(() => page.locator('.pane-detail-panel-vertical').evaluate(element => element.getBoundingClientRect().width)).toBe(0);
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'main' });
+
+  await page.keyboard.press('ControlOrMeta+Shift+M');
+  await expect(page.locator('[data-panel-group-id="g-right"]')).toBeVisible();
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'main' });
+
+  await page.keyboard.press('ControlOrMeta+0');
+  await page.keyboard.press('ControlOrMeta+Shift+M');
+  await expect(page.getByRole('button', { name: 'Expand sidebar' }).first()).toBeVisible();
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'main' });
+});
+
+test('⌘K alone in a focused terminal still clears it; ⌘K ⌘M held does not', async ({ page }) => {
+  await openFixture(page);
+  await page.evaluate(() => {
+    const calls: string[] = [];
+    Object.assign(window, { __clears: calls });
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = (channel: string, ...args: unknown[]) => {
+      if (channel === 'terminal:clearScrollback') calls.push(String(args[0]));
+      return invoke(channel, ...args);
+    };
+  });
+  const clears = () => page.evaluate(() => (window as unknown as { __clears: string[] }).__clears.length);
+  await page.locator('[data-panel-group-id="g-left"] .xterm-helper-textarea').focus();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect.poll(clears).toBe(1);
+  await expect(page.getByTestId('key-sequence-hint')).toHaveCount(0);
+
+  await maximizeKey(page);
+  await expect(page.locator('[data-panel-group-id="g-right"]')).toBeHidden();
+  expect(await clears()).toBe(1);
+});
