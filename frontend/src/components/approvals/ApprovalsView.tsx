@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLink, FileText, Folder, GitBranch, Globe, Inbox, Laptop, MessageSquare, MessagesSquare, Navigation, ShieldAlert, WifiOff } from 'lucide-react';
+import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLink, FileText, Folder, GitBranch, Globe, Inbox, Laptop, MessageSquare, MessagesSquare, Navigation, ShieldAlert, WifiOff } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { receiptLine } from '../../../../shared/approvalReceipts';
@@ -316,7 +316,17 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
       }
     }
     lastSelected.current = { id: selectedRowId, tab, sort, offset, rounding };
+    countAbove();
   });
+
+  // Holding the selected card still can carry newer rows out of view above it: say so, one click from the top.
+  const [rowsAbove, setRowsAbove] = useState(0);
+  const countAbove = () => {
+    const listElement = listRef.current;
+    if (!listElement) return;
+    const top = listElement.getBoundingClientRect().top;
+    setRowsAbove([...listElement.querySelectorAll('[data-testid="approvals-row"]')].filter((row) => row.getBoundingClientRect().bottom <= top + 1).length);
+  };
 
   const beside: Beside = selected ? besideOf(selected, activeMachineId) : { kind: 'none' };
   const besidePaneId = beside.kind === 'pane' ? beside.paneId : undefined;
@@ -451,7 +461,19 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
           />
         </div>
         {/* The browser's own scroll anchoring would add to the compensation above. */}
-        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 [overflow-anchor:none]">
+        <div className="relative flex min-h-0 flex-1 flex-col">
+        {rowsAbove > 0 && (
+          <button
+            type="button"
+            onClick={() => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+            className="absolute left-1/2 top-1 z-10 inline-flex h-6 -translate-x-1/2 items-center gap-1 rounded-full bg-surface-primary px-2.5 text-[12px] font-medium text-text-secondary shadow-card ring-1 ring-border-secondary hover:text-text-primary"
+            data-testid="approvals-rows-above"
+          >
+            <ArrowUp className="h-3 w-3" aria-hidden="true" />
+            {rowsAbove} more above
+          </button>
+        )}
+        <div ref={listRef} onScroll={countAbove} className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 [overflow-anchor:none]">
           {shown.length === 0 && stale.length === 0 && offline.length === 0 && (
             <p className="px-3 pt-6 text-[13px] text-text-tertiary" data-testid="notify-empty">
               {!enabled ? 'Approvals are off. Turn them on in Settings → Approvals.' : tab === 'waiting' ? 'Nothing is waiting on you.' : 'Nothing answered yet today.'}
@@ -484,6 +506,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             </div>
           )}
           <div ref={listSpacerRef} aria-hidden="true" />
+        </div>
         </div>
       </section>
 
