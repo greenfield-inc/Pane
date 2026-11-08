@@ -3,9 +3,8 @@ import { LegendList } from '@legendapp/list/react-native';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Keyboard, StyleSheet, View } from 'react-native';
 
-import { permissionToolId } from '@shared/agentChatPresentation';
 import { arrangeComposerControls, choiceName, isRiskyMode, triggerLabels } from '@shared/chatComposerControls';
-import { chatTurns, type ChatWorkerLine } from '@shared/chatTabPresentation';
+import { chatTurns, waitingToolIds, type ChatWorkerLine } from '@shared/chatTabPresentation';
 import { rejectOption } from '@shared/chatTabPermissions';
 import type { ChatTabCommand, ChatTabSend } from '@shared/types/chatTab';
 
@@ -67,7 +66,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
   const [settings, setSettings] = useState(false);
   const working = view?.status === 'working' || view?.status === 'blocked';
   const messages = snapshot.transcript?.messages ?? [];
-  const waiting = new Set((view?.permissions ?? []).flatMap(permission => { const id = permissionToolId(permission); return id ? [id] : []; }));
+  const waiting = waitingToolIds(view?.permissions, view?.questions);
   const rows = chatRows(chatTurns(messages, { running: working }), { open, workers, waiting, blocks: new Set(Object.keys(blocks ?? {})), notice: userNotice });
   const agent = view ? AGENT_NAMES[view.agent] : 'the agent';
   const disabled = !connected || !view || view.status === 'stopped';

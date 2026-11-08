@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { chatTurns } from '@shared/chatTabPresentation';
+import { chatTurns, waitingToolIds } from '@shared/chatTabPresentation';
 import type { AgentChatMessage } from '@shared/types/agentChat';
 
 import { chatRows, splitFencedBlocks } from './chatRows';
@@ -40,6 +40,14 @@ describe('phone chat rows', () => {
     const running = chatTurns([...messages.slice(0, 2), { id: 'tool:x', role: 'assistant', parts: [{ type: 'tool', id: 'x', title: 'Run', status: 'pending', kind: 'execute', input: { command: 'echo hi' } }] }], { running: true });
     const rows = chatRows(running, { open: new Set(), waiting: new Set(['x']) });
     expect(rows[1]).toMatchObject({ kind: 'fold', summary: 'Waiting for you · Running echo hi', waiting: true });
+  });
+
+  it('says a running turn waits for the person while the agent asks a question', () => {
+    const running = chatTurns([...messages.slice(0, 2), { id: 'tool:q', role: 'assistant', parts: [{ type: 'tool', id: 'q', title: 'AskUserQuestion', status: 'pending', kind: 'other' }] }], { running: true });
+    const waiting = waitingToolIds([], [{ id: 'question-1', generation: 1, message: 'Which colour?', schema: {}, toolCallId: 'q' }]);
+    const rows = chatRows(running, { open: new Set(), waiting });
+    expect(rows[1]).toMatchObject({ kind: 'fold', waiting: true });
+    expect(rows[1].kind === 'fold' && rows[1].summary).toMatch(/^Waiting for you · /);
   });
 
   it('mentions only a worker the latest turn has news of (D-201)', () => {

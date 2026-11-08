@@ -1,5 +1,7 @@
 import { boundary, decodeOptionalBoundary, type JsonValue } from './validation/boundaryDecoder';
-import type { AgentChatMessage, AgentChatPart } from './types/agentChat';
+import type { AgentChatMessage, AgentChatPart, AgentChatPermission } from './types/agentChat';
+import type { ChatTabQuestion } from './types/chatTab';
+import { permissionToolId } from './agentChatPresentation';
 
 /**
  * How a chat tab's conversation reads, shared by desktop, the PWA and the phone:
@@ -288,6 +290,12 @@ export interface TurnDisplayOptions {
   waiting?: ReadonlySet<string>;
   now?: Date;
   locale?: string;
+}
+
+/** The tool calls waiting on the person: open approvals and questions (AskUserQuestion, ExitPlanMode). */
+export function waitingToolIds(permissions: readonly AgentChatPermission[] = [], questions: readonly ChatTabQuestion[] = []): Set<string> {
+  const ids = permissions.flatMap(permission => { const id = permissionToolId(permission); return id ? [id] : []; });
+  return new Set([...ids, ...questions.flatMap(question => question.toolCallId ? [question.toolCallId] : [])]);
 }
 
 export function turnDisplay(turn: ChatTurn, options: TurnDisplayOptions = {}): TurnDisplay {

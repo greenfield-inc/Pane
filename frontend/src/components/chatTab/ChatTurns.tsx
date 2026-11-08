@@ -3,8 +3,7 @@ import { ChatBlocksContext } from './chatRendering';
 import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Terminal, Wrench, XCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { AgentChatPermission } from '../../../../shared/types/agentChat';
-import { describeChatContent, permissionToolId } from '../../../../shared/agentChatPresentation';
+import { describeChatContent } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { imageOf, messageTime, planEntryKeys, stoppedText, turnDisplay, type WorkerNote, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 import { responseText, userMarkdown } from '../../../../shared/chatTabMarkdown';
@@ -54,7 +53,7 @@ Markdown.displayName = 'Markdown';
 const VERBS = { explore: ['Exploring', 'Explored'], edit: ['Edit', 'Edited'], run: ['Run', 'Ran'], think: ['Thinking', 'Thought'], other: ['Using', 'Used'] } satisfies Record<ChatStep['kind'], [string, string]>;
 const ICONS = { explore: Eye, edit: Pencil, run: Terminal, think: Brain, other: Wrench };
 
-function groupState(group: StepGroup, waiting: Set<string>): 'waiting' | 'running' | 'failed' | 'done' {
+function groupState(group: StepGroup, waiting: ReadonlySet<string>): 'waiting' | 'running' | 'failed' | 'done' {
   if (group.steps.some(step => waiting.has(step.id))) return 'waiting';
   if (group.steps.some(step => step.status === 'pending' || step.status === 'in_progress')) return 'running';
   if (group.steps.some(step => step.status === 'failed')) return 'failed';
@@ -73,7 +72,7 @@ function Output({ text, live }: { text: string; live: boolean }) {
   return <pre className="chat-step-output" aria-live={live ? 'polite' : undefined}>{shown}</pre>;
 }
 
-function StepGroupRow({ group, waiting, actions }: { group: StepGroup; waiting: Set<string>; actions: ChatTurnActions }) {
+function StepGroupRow({ group, waiting, actions }: { group: StepGroup; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
   const state = groupState(group, waiting);
   const [open, setOpen] = useState(false);
   const single = group.steps.length === 1 ? group.steps[0] : undefined;
@@ -117,7 +116,7 @@ function TodoList({ entries }: { entries: PlanEntry[] }) {
   </section>;
 }
 
-function Item({ item, waiting, actions }: { item: TurnItem; waiting: Set<string>; actions: ChatTurnActions }) {
+function Item({ item, waiting, actions }: { item: TurnItem; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
   switch (item.type) {
     case 'text': return <div data-anchor-id={item.id}><Markdown text={item.text} /></div>;
     case 'thought': return <details className="chat-thought"><summary><Brain aria-hidden="true" />Thinking</summary><div className="whitespace-pre-wrap">{item.text}</div></details>;
@@ -161,9 +160,8 @@ export function WorkerNoteLine({ note, onOpen }: { note: WorkerNote; onOpen?: (p
  * One turn (D-192): the agent's text, with its activity folded into one row. While
  * the turn runs the row says what it's doing now; afterwards, how long it worked.
  */
-export const ChatTurnView = memo(function ChatTurnView({ turn, permissions, actions, latest = false }: { turn: ChatTurn; permissions: AgentChatPermission[]; actions: ChatTurnActions; latest?: boolean }) {
+export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions, latest = false }: { turn: ChatTurn; waiting: ReadonlySet<string>; actions: ChatTurnActions; latest?: boolean }) {
   const [open, setOpen] = useState(false);
-  const waiting = new Set(permissions.flatMap(permission => { const id = permissionToolId(permission); return id ? [id] : []; }));
   // D-202: the latest turn says when it finished; every message shows its time on hover.
   const { before, after, activity, fold: row, ended } = turnDisplay(turn, { latest, waiting });
   // The icon box stays after the turn ends, so the label never shifts.

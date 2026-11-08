@@ -6,7 +6,7 @@ import {
 import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns, workerNotes, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import { chatTurns, waitingToolIds, workerNotes, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -153,7 +153,6 @@ export interface ChatTabPanelProps {
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
 const NO_ACTIONS: ChatTurnActions = {};
 const NO_RENDERING: ChatRendering = {};
-const NO_PERMISSIONS: AgentChatPermission[] = [];
 
 export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
@@ -181,6 +180,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   };
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
+  const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const [copying, setCopying] = useState(0);
   const canAttachImages = !!view?.canAttachImages;
@@ -340,7 +340,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           </button>}
           {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
           <ChatBlocksContext.Provider value={rendering}>
-            {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} permissions={view?.permissions ?? NO_PERMISSIONS} actions={actions} />)}
+            {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
           </ChatBlocksContext.Provider>
           {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}
           {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
