@@ -137,7 +137,7 @@ export function nextAfterSend(order: readonly string[], sentId: string, items: R
  */
 export function canSend(item: NotifyItem, picks: readonly string[], text: string): boolean {
   if (item.state !== 'waiting') return false;
-  if (text.trim() && !item.agentPrompt) return true;
+  if (text.trim() && !item.agentPrompt && !item.optionsOnly) return true;
   const questions = questionsOf(item);
   return questions.length > 0 && questions.every((_, index) => Boolean(picks[index]));
 }

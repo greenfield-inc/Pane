@@ -88,6 +88,11 @@ export interface NotifyQuestion {
    * answer itself, since the paused turn resumes with it. It reads "Sent to <agent>", with no fix.
    */
   replyIsAnswer?: boolean;
+  /**
+   * Set by the chat tab bridge for a built-in question that takes only its own choices: typed text
+   * can't answer it and nobody could read it as a reply, so it has no reply box.
+   */
+  optionsOnly?: boolean;
 }
 
 /** A prompt an agent shows in its terminal, asked here too; the first answer from either place wins. */

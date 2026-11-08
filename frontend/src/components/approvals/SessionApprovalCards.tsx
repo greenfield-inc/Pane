@@ -62,7 +62,7 @@ function LightCard({ item, sessionId, open }: { item: NotifyItem; sessionId: str
           ))}
         </div>
       )}
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         {chip && <ApprovalChip chip={chip} />}
         <button type="button" onClick={() => openSessionApproval(sessionId, item.id)}
           className="ml-auto inline-flex shrink-0 items-center gap-0.5 text-[13.5px] font-medium text-interactive hover:underline" data-testid="session-approval-card-open">

@@ -110,8 +110,10 @@ export class ChatTabNotifyBridge {
     const step = steps[index];
     const queueId = index === 0 && attempt === 0 ? id : `${id}#${index + 1}.${attempt}`;
     const prompt = stepQuestion(question.message, step, index, steps.length);
-    // The paused turn resumes with the person's typed words: a reply is the answer (J12).
-    prompt.replyIsAnswer = true;
+    // The paused turn resumes with the person's typed words: a reply is the answer (J12). A field
+    // that takes only its choices can't take words, and nobody could read them, so it has no box.
+    if (takesText(step)) prompt.replyIsAnswer = true;
+    else prompt.optionsOnly = true;
     if (retry) prompt.context = [retry, prompt.context].filter(Boolean).join('\n');
     this.ask(id, queueId, prompt, source, answer => {
       if (spoken(answer) === spoken(SKIP)) { this.options.answerQuestion(view.panelId, question.id, { action: 'decline' }); return; }
@@ -172,6 +174,11 @@ function stepQuestion(message: string, { field }: Step, index: number, total: nu
   const text = context.filter(Boolean).join('\n');
   if (text) question.context = text;
   return question;
+}
+
+/** Whether typed words can answer this step: a text, number or multi-choice field, or a choice with its free-text companion. */
+function takesText({ field, companion }: Step): boolean {
+  return field.kind === 'text' || field.kind === 'number' || field.kind === 'multiple' || companion !== undefined;
 }
 
 /** The form content one answer gives, or undefined when it fits neither the field nor its free-text companion. */
