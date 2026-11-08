@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderOpen, MoreHorizontal, Navigation, Pause, Play, Plus, Shield } from 'lucide-react';
 import type { AutopilotSnapshot } from '../../../../shared/types/autopilot';
 import { cn } from '../../utils/cn';
@@ -7,6 +7,10 @@ import { useNotifyStore } from '../../stores/notifyStore';
 import { useActiveMachineStore } from '../../stores/activeMachineStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import type { ChatRendering } from '../chatTab/chatRendering';
+import type { ChatTurnActions } from '../chatTab/ChatTurns';
+import { useManySessionWorkers } from '../chatTab/sessionWorkers';
+import { DESKTOP_WORKERS, useOpenWorkerTab } from '../chatTab/desktopSessionWorkers';
+import { workingAgents } from '../../../../shared/chatTabPresentation';
 import { AutopilotItemRows } from './AutopilotItemRows';
 import { AutopilotDecisionCard } from './AutopilotDecisionCard';
 import { SentinelAwayCard, SentinelLogRows } from './AutopilotSentinelLog';
@@ -259,6 +263,12 @@ export function AutopilotView() {
   const machine = useActiveMachineStore((state) => state.machine);
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
   useStackKeys();
+  // "N working" above the chat box counts the agents working in every Session Autopilot walks (D-276).
+  const walkIds = useMemo(() => snapshot?.walk.sessions.map(session => session.id) ?? [], [snapshot?.walk.sessions]);
+  const walkWorkers = useManySessionWorkers(DESKTOP_WORKERS, walkIds);
+  const working = useMemo(() => workingAgents(walkWorkers), [walkWorkers]);
+  const openWorker = useOpenWorkerTab();
+  const actions = useMemo<ChatTurnActions>(() => ({ onOpenWorker: openWorker }), [openWorker]);
   // The chat's width is the person's (drag its edge; double-click resets). Too narrow for the chat
   // and the stack at their minimums, the chat keeps its fluid width.
   const viewBox = useObservedContentBox<HTMLDivElement>();
@@ -304,6 +314,8 @@ export function AutopilotView() {
                 // Stopped on purpose (before Start): the Start card above stands in for the stopped notice.
                 stoppedNotice={<span hidden />}
                 dock={<CurrentDock snapshot={snapshot} />}
+                working={working}
+                actions={actions}
               />
             </Suspense>
           ) : <StartCard snapshot={snapshot} pending={pending} />}

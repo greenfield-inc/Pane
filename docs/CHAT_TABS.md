@@ -145,11 +145,17 @@ says, and after running the chat tab suites against it.
   a check and On/Off settings are switches. A mode that never asks (Bypass)
   leaves a small shield on the row. The `/` menu lists
   the agent's own commands and skills, plus Pane's own **/clear**; **Stop** (or Esc in the composer) cancels the turn.
-- **Status bar** (D-222, D-253, D-267): one muted line just above the composer,
+- **Status bar** (D-222, D-253, D-267, D-276): one muted line just above the composer,
   items split by dots, each opening what it names:
   - **Context left** ("Ctx 41%", amber at 20% or less) opens the tokens used,
     a meter and **Clear conversation**; it is absent when the adapter reports no
     usage;
+  - **Agents working** ("3 working"), in a Session orchestrator's chat and in
+    Autopilot's: how many of the Session's agents are working right now (for
+    Autopilot, across every Session it walks), counted from the Session
+    overview. Agents waiting, idle or finished don't count, and the item is
+    hidden when none is working. It opens a list of each one with its tab; a
+    row opens that tab (the PWA opens its Pane);
   - **Pull request** ("#1272 · Open", the chat's Pane's PR) opens it on GitHub;
   - **Background tasks** ("2 tasks") lists them, with Stop where the adapter
     allows it;
@@ -157,7 +163,7 @@ says, and after running the chat tab suites against it.
 
   Items with nothing to say stay out. **…** picks which items show; the choice
   is remembered on this device (`pane-chat-status-items:v1` in local storage),
-  and **Reset to default** brings all four back. While a turn runs the bar ends
+  and **Reset to default** brings all five back. While a turn runs the bar ends
   with the send-now keys. At phone width it is compact (the percentage and PR
   number alone) and scrolls sideways instead of wrapping. The phone app has no
   status bar yet.

@@ -44,3 +44,30 @@ export function useSessionWorkers(source: SessionWorkerSource, sessionId: string
   }, [source, sessionId]);
   return workers;
 }
+
+/**
+ * Keeps the worker lines of several Sessions current, such as the ones Autopilot walks
+ * (D-276): each Session is watched on its own and the lines arrive merged, in the order
+ * of `sessionIds`. Returns the stop.
+ */
+export function watchManySessionWorkers(source: SessionWorkerSource, sessionIds: readonly string[], onWorkers: (workers: ChatWorkerLine[]) => void, burstMs = 300): () => void {
+  const ids = [...new Set(sessionIds)];
+  const bySession = new Map<string, ChatWorkerLine[]>();
+  const stops = ids.map(id => watchSessionWorkers(source, id, workers => {
+    bySession.set(id, workers);
+    onWorkers(ids.flatMap(sessionId => bySession.get(sessionId) ?? []));
+  }, burstMs));
+  return () => stops.forEach(stop => stop());
+}
+
+/** The worker lines of several Sessions; `sessionIds` is compared by value, so a new array with the same ids keeps the watches. */
+export function useManySessionWorkers(source: SessionWorkerSource, sessionIds: readonly string[]): ChatWorkerLine[] {
+  const key = sessionIds.join('\n');
+  const [workers, setWorkers] = useState<ChatWorkerLine[]>([]);
+  useEffect(() => {
+    setWorkers([]);
+    if (!key) return;
+    return watchManySessionWorkers(source, key.split('\n'), setWorkers);
+  }, [source, key]);
+  return workers;
+}
