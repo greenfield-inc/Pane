@@ -11,7 +11,13 @@ export function ClampedText({ text, className, testId }: { text: string; classNa
   const [clamped, setClamped] = useState(false);
   useLayoutEffect(() => {
     const element = ref.current;
-    if (element && !open) setClamped(element.scrollHeight > element.clientHeight + 1);
+    if (!element || open) return;
+    const measure = () => setClamped(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    // A narrower column (Approvals beside a Pane, a window resize) can clamp text that fit before.
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, [text, open]);
   return (
     <div className={className} data-testid={testId}>
