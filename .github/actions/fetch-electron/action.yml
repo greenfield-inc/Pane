@@ -1,0 +1,30 @@
+name: Fetch Electron
+description: >-
+  Puts Electron's binary in node_modules/electron once per job, from the
+  Actions cache when it can. Run it after an install with --ignore-scripts.
+# Electron 42+ downloads its binary the first time anything asks for it. With
+# no install script, every Vitest worker that loads the electron package would
+# download it at once (they collide on Windows), and GitHub's release
+# downloads fail for hours at a time (504s, Nov 6-8). The cache holds
+# @electron/get's zip, keyed on the exact Electron version, OS and arch, so a
+# key never serves another version. electron_config_cache stays set for the
+# rest of the job, so a later fetch reads the same cache.
+runs:
+  using: composite
+  steps:
+    - name: Read the Electron version
+      id: version
+      shell: bash
+      run: |
+        echo "version=$(node -p "require('./node_modules/electron/package.json').version")" >> "$GITHUB_OUTPUT"
+        echo "electron_config_cache=$RUNNER_TEMP/electron-cache" >> "$GITHUB_ENV"
+
+    - name: Restore the Electron download
+      uses: actions/cache@v5
+      with:
+        path: ${{ runner.temp }}/electron-cache
+        key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
+
+    - name: Install the Electron binary
+      shell: bash
+      run: scripts/ci-fetch-electron.sh
