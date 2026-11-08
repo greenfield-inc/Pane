@@ -44,6 +44,11 @@ export interface ApprovalColumnProps {
 
 const NO_PICKS: string[] = [];
 
+/** "the Infra orchestrator" opens a sentence as "The Infra orchestrator". */
+function capitalized(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** Below this width the header keeps the pager and ✕, and drops the group's name, the dots and the chip. */
 const NARROW_PX = 520;
 
@@ -388,7 +393,7 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
             <div className="mt-2 flex items-center gap-3">
               <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary">
                 {item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
-                  : replyBeingRead(item) ? `${item.reply?.reader?.name ?? 'Its reader'} is reading your last reply. You can send another once it says how it took it, or pick an option now.` : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
+                  : replyBeingRead(item) ? `${capitalized(item.reply?.reader?.name ?? 'its reader')} is reading your last reply. You can send another once it says how it took it, or pick an option now.` : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
               </p>
               {!item.agentPrompt && (
                 <button type="button" onClick={() => setClosing(true)} className="shrink-0 text-[12.5px] text-text-tertiary hover:text-text-primary" data-testid="approval-close-item">Close…</button>

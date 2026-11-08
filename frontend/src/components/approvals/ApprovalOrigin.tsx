@@ -37,7 +37,11 @@ export function ApprovalOrigin({ item }: { item: NotifyItem }) {
   if (beside.kind === 'pane') {
     return (
       <div className="absolute inset-0 flex flex-col" data-testid="approval-origin">
-        <OriginHeader icon="pane" name={beside.name} onOpen={() => void openOnMachine(machineId, { kind: 'pane', id: beside.paneId, name: beside.name })} />
+        <OriginHeader icon="pane" name={beside.name} onOpen={() => {
+          // The Pane opens on the tab that asked, not the one it showed last.
+          if (beside.panelId) usePanelStore.getState().requestActivation({ sessionId: beside.paneId, panelId: beside.panelId });
+          void openOnMachine(machineId, { kind: 'pane', id: beside.paneId, name: beside.name });
+        }} />
         <AskingTab paneId={beside.paneId} panelId={beside.panelId} />
       </div>
     );
