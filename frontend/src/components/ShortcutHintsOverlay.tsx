@@ -1,6 +1,7 @@
 import type { TerminalShortcut } from '../types/config';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { Kbd } from './ui/Kbd';
+import { useHotkeyStore } from '../stores/hotkeyStore';
 
 interface ShortcutHintsOverlayProps {
   isVisible: boolean;
@@ -8,6 +9,7 @@ interface ShortcutHintsOverlayProps {
 }
 
 export function ShortcutHintsOverlay({ isVisible, shortcuts }: ShortcutHintsOverlayProps) {
+  const shortcutsKey = useHotkeyStore((state) => state.hotkeys.get('open-shortcut-settings')?.keys ?? '');
   if (!isVisible) return null;
 
   const enabledShortcuts = shortcuts.filter((s) => s.enabled && s.key);
@@ -25,9 +27,7 @@ export function ShortcutHintsOverlay({ isVisible, shortcuts }: ShortcutHintsOver
           <div className="text-center py-4">
             <p className="text-sm text-text-tertiary">No shortcuts configured</p>
             <p className="text-xs text-text-tertiary mt-2">
-              Press <Kbd>
-                {formatKeyDisplay('mod+alt+/')}
-              </Kbd> to add some
+              {shortcutsKey ? <>Press <Kbd>{formatKeyDisplay(shortcutsKey)}</Kbd> to add some</> : 'Add some in Settings › Shortcuts'}
             </p>
           </div>
         ) : (

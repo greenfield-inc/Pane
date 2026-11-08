@@ -32,6 +32,31 @@ describe('ConfigManager appearance persistence', () => {
     });
   });
 
+  it('tells existing configs once about the moved keys, and never a fresh install (D-236)', async () => {
+    const fresh = new ConfigManager();
+    await fresh.initialize();
+    expect(fresh.getConfig().keymapNotice).toBe('seen');
+
+    await fs.writeFile(configPath, JSON.stringify({ theme: 'folio' }));
+    const existing = new ConfigManager();
+    await existing.initialize();
+    expect(existing.getConfig().keymapNotice).toBe('pending');
+    await existing.updateConfig({ keymapNotice: 'seen' });
+    const relaunched = new ConfigManager();
+    await relaunched.initialize();
+    expect(relaunched.getConfig().keymapNotice).toBe('seen');
+  });
+
+  it('keeps keyboard overrides, drops an empty map, and keeps unknown ids for a downgrade', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    await manager.updateConfig({ keyboardShortcutOverrides: { 'focus-sidebar': 'mod+shift+e', 'from-a-newer-pane': 'mod+x' } });
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).keyboardShortcutOverrides)
+      .toEqual({ 'focus-sidebar': 'mod+shift+e', 'from-a-newer-pane': 'mod+x' });
+    await manager.updateConfig({ keyboardShortcutOverrides: {} });
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).keyboardShortcutOverrides).toBeUndefined();
+  });
+
   it('preserves the OpenCode default orchestrator agent across reload', async () => {
     const manager = new ConfigManager();
     await manager.initialize();

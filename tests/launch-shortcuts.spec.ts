@@ -46,6 +46,11 @@ const terminalPanels = (sessionId: string, prefix: string) => ['Bottom Terminal'
 }));
 const allPanels = [...terminalPanels(worktreeSession.id, 'wt'), ...terminalPanels(mainSession.id, 'main')];
 
+/** A catalog key such as `mod+alt+3` as a Playwright press: `mod` is Command on macOS and Control elsewhere. */
+function pressFor(binding: string): string {
+  return binding.split('+').map((part) => part === 'mod' ? 'ControlOrMeta' : part === 'alt' ? 'Alt' : part.toUpperCase()).join('+');
+}
+
 async function panelCreates(page: Page): Promise<JsonObject[]> {
   // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
   return page.evaluate(() => (window as typeof window & { __paneTestElectronMock: LaunchMock }).__paneTestElectronMock.getPanelCreates());
@@ -64,7 +69,7 @@ for (const preset of AGENT_LAUNCH_PRESETS) {
     test(`remapped ${preset.title} launch creates exactly one terminal in ${view.isMainRepo ? 'the main-repo view' : 'a worktree pane'}`, async ({ page }) => {
       await installElectronApiMock(page, {
         platform: 'linux',
-        initialConfig: { keyboardShortcutOverrides: { [preset.hotkeyId]: 'mod+alt+7' } },
+        initialConfig: { keyboardShortcutOverrides: { [preset.hotkeyId]: 'mod+alt+y' } },
         initialProjects: [project],
         initialSessions: [worktreeSession, mainSession],
         initialPanels: allPanels,
@@ -75,11 +80,11 @@ for (const preset of AGENT_LAUNCH_PRESETS) {
       const before = (await panelCreates(page)).length;
 
       // The default chord no longer launches the agent.
-      await page.keyboard.press(`Control+Alt+${preset.hotkeyId === 'add-tool-terminal-claude' ? '3' : preset.hotkeyId === 'add-tool-terminal-codex' ? '4' : '5'}`);
+      await page.keyboard.press(pressFor(preset.hotkey));
       await page.waitForTimeout(300);
       expect((await panelCreates(page)).length).toBe(before);
 
-      await page.keyboard.press('Control+Alt+7');
+      await page.keyboard.press(pressFor('mod+alt+y'));
       await expect.poll(async () => (await panelCreates(page)).length).toBe(before + 1);
       const created = (await panelCreates(page)).at(-1);
       expect(created).toMatchObject({
@@ -95,10 +100,11 @@ for (const preset of AGENT_LAUNCH_PRESETS) {
 }
 
 for (const alternateScreen of [false, true]) {
-  test(`Alt+F6 remap launches once with focus in ${alternateScreen ? 'a TUI' : 'a terminal'}`, async ({ page }) => {
+  // F6 is Focus Next Region by default, so the bare function-key remap uses the free F7.
+  test(`Alt+F7 remap launches once with focus in ${alternateScreen ? 'a TUI' : 'a terminal'}`, async ({ page }) => {
     await installElectronApiMock(page, {
       platform: 'linux',
-      initialConfig: { keyboardShortcutOverrides: { 'add-tool-terminal-claude': 'alt+F6' } },
+      initialConfig: { keyboardShortcutOverrides: { 'add-tool-terminal-claude': 'alt+F7' } },
       initialProjects: [project], initialSessions: [worktreeSession],
       initialPanels: terminalPanels(worktreeSession.id, 'wt'),
       initialTerminalStates: {
@@ -110,7 +116,7 @@ for (const alternateScreen of [false, true]) {
     await openSession(page, worktreeSession.name);
     await page.locator('.xterm-helper-textarea').last().focus();
     const before = (await panelCreates(page)).length;
-    await page.keyboard.press('Alt+F6');
+    await page.keyboard.press('Alt+F7');
     await expect.poll(async () => (await panelCreates(page)).length).toBe(before + 1);
     expect((await panelCreates(page)).at(-1)).toMatchObject({
       title: AGENT_LAUNCH_PRESETS[0].title, state: { customState: { initialCommand: AGENT_LAUNCH_PRESETS[0].command } },

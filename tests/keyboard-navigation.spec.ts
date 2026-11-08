@@ -38,12 +38,15 @@ const layout = {
   },
 };
 
-async function openFixture(page: Page, { approvals = false }: { approvals?: boolean } = {}): Promise<void> {
-  const options: Parameters<typeof installElectronApiMock>[1] = {
+type MockOptions = NonNullable<Parameters<typeof installElectronApiMock>[1]>;
+
+async function openFixture(page: Page, { approvals = false, initialConfig }: { approvals?: boolean; initialConfig?: MockOptions['initialConfig'] } = {}): Promise<void> {
+  const options: MockOptions = {
     initialProjects: [project], initialSessions: sessions, initialPanels: panels, initialLayout: layout,
     activeProjectId: project.id,
   };
   if (approvals) options.notifySnapshot = notifyFixture();
+  if (initialConfig) options.initialConfig = initialConfig;
   await installElectronApiMock(page, options);
   await page.addInitScript(() => localStorage.setItem('pane-detail-panel-visible', 'true'));
   await page.goto('/');
@@ -347,4 +350,97 @@ test('the palette shows a command\'s key, and its Actions change it, reset it an
   await page.keyboard.press('ControlOrMeta+k');
   await page.getByRole('option', { name: 'Show in Keyboard Shortcuts' }).click();
   await expect(page.getByRole('textbox', { name: 'Search shortcuts' })).toHaveValue(/Maximize/);
+});
+
+type ConfigUpdate = NonNullable<MockOptions['initialConfig']>;
+
+interface ConfigMock {
+  getConfigUpdates: () => ConfigUpdate[];
+}
+
+async function configUpdates(page: Page): Promise<ConfigUpdate[]> {
+  return page.evaluate(() => {
+    // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+    return (window as typeof window & { __paneTestElectronMock: ConfigMock }).__paneTestElectronMock.getConfigUpdates();
+  });
+}
+
+test('a key changed in Keyboard Shortcuts works at once and after a relaunch; a taken key blocks Apply', async ({ page, browser }) => {
+  await openFixture(page);
+  // ⌘K ⌘S with ⌘ held, since a terminal has focus (⌘K alone would clear it).
+  await page.keyboard.down(MOD);
+  await page.keyboard.press('k');
+  await page.keyboard.press('s');
+  await page.keyboard.up(MOD);
+  const search = page.getByRole('textbox', { name: 'Search shortcuts' });
+  await search.fill('sidebar');
+  const row = page.locator('[data-shortcut-id="focus-sidebar"]');
+  await row.getByRole('button', { name: /Record shortcut for Focus Sidebar/ }).click();
+  await page.keyboard.press('ControlOrMeta+Shift+E');
+  await expect(row).toContainText(/E/);
+
+  // ⌘B is Toggle Sidebar's: the table names it and Apply stays blocked.
+  const toggle = page.locator('[data-shortcut-id="toggle-sidebar"]');
+  await row.getByRole('button', { name: /Record shortcut for Focus Sidebar/ }).click();
+  await page.keyboard.press('ControlOrMeta+b');
+  await expect(row.getByRole('alert')).toContainText('Toggle Sidebar');
+  await expect(page.getByRole('button', { name: 'Apply', exact: true }).first()).toBeDisabled();
+  await row.getByRole('button', { name: /Record shortcut for Focus Sidebar/ }).click();
+  await page.keyboard.press('ControlOrMeta+Shift+E');
+  await expect(toggle.getByRole('alert')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Apply', exact: true }).first().click();
+  await expect.poll(async () => (await configUpdates(page)).some(update => JSON.stringify(update).includes('"focus-sidebar":"mod+shift+e"'))).toBe(true);
+
+  await page.getByTestId('settings-page').getByRole('button', { name: /Close|Back/ }).first().click();
+  await expect(page.getByTestId('settings-page')).toHaveCount(0);
+  await page.locator('[data-panel-group-id="g-left"]').click();
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'main' });
+  // ⌘0 no longer focuses the sidebar; ⌘⇧E does.
+  await page.keyboard.press('ControlOrMeta+0');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'main' });
+  await page.keyboard.press('ControlOrMeta+Shift+E');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'sidebar' });
+
+  // A relaunch reads the saved override.
+  const relaunched = await browser.newPage();
+  await openFixture(relaunched, { initialConfig: { keyboardShortcutOverrides: { 'focus-sidebar': 'mod+shift+e' } } });
+  await relaunched.keyboard.press('ControlOrMeta+Shift+E');
+  await expect.poll(() => focusPlace(relaunched)).toMatchObject({ region: 'sidebar' });
+  await relaunched.close();
+});
+
+test('existing configs get one notice of the moved keys; it stays dismissed; a fresh install sees none', async ({ page }) => {
+  await openFixture(page, { initialConfig: { keymapNotice: 'pending' } });
+  const notice = page.getByTestId('keymap-notice');
+  await expect(notice).toBeVisible();
+  for (const moved of ['Previous / next tab', 'Toggle right panel', 'Maximize', 'Focus sidebar']) {
+    await expect(notice).toContainText(moved);
+  }
+  await notice.getByRole('button', { name: 'Got it' }).click();
+  await expect(notice).toHaveCount(0);
+  expect(await configUpdates(page)).toContainEqual({ keymapNotice: 'seen' });
+
+  const fresh = await page.context().newPage();
+  await openFixture(fresh, { initialConfig: { keymapNotice: 'seen' } });
+  await expect(fresh.getByTestId('keymap-notice')).toHaveCount(0);
+  await fresh.close();
+});
+
+test('⌘A and ⌘⇧Z stay with a text field: Select All and Redo, not a Pane key', async ({ page }) => {
+  await openFixture(page);
+  await page.keyboard.press('ControlOrMeta+Shift+P');
+  const input = page.getByPlaceholder('Search');
+  await input.fill('hello world');
+  await page.keyboard.press('ControlOrMeta+a');
+  expect(await input.evaluate(element => {
+    // SAFETY: the Search placeholder belongs to the palette's text input.
+    const field = element as HTMLInputElement;
+    return [field.selectionStart, field.selectionEnd];
+  })).toEqual([0, 11]);
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  // Redo ran in the field, and no Pane command took the key.
+  await expect(input).toHaveValue('');
+  await expect(page.getByTestId('restore-region')).toHaveCount(0);
 });
