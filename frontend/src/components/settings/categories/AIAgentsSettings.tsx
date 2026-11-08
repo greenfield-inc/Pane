@@ -62,7 +62,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
   return (
     <SettingsPage title="AI & Agents" description="Application-wide defaults for Sessions and coding-agent integrations.">
       <SettingsSection title="Agent defaults">
-        {isChatTabsEnabled(config) && <SettingRow settingId="chat-tab-keys" label="Chat tab sign-in" description="How Claude and Codex chat tabs sign in on this machine." saveState={persistence.saveStates['chat-tab-keys']} details={<ChatTabKeys />}>
+        {isChatTabsEnabled(config) && <SettingRow settingId="chat-tab-keys" label="Chat tab sign-in" description="Chat tabs use your own Claude Code or Codex sign-in on this machine; Pane never sees or copies it. Sign in with claude auth login or codex login in a terminal tab, or save an API key here." saveState={persistence.saveStates['chat-tab-keys']} details={<ChatTabKeys />}>
           {null}
         </SettingRow>}
 

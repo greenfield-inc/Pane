@@ -1,5 +1,5 @@
 import { responseText } from '@shared/chatTabMarkdown';
-import { messageTime, stoppedText, turnDisplay, turnFooter, turnSummary, workerNotes, type ChatTurn, type ChatWorkerLine, type WorkerNote, type PlanEntry, type StepGroup, type TurnItem } from '@shared/chatTabPresentation';
+import { messageTime, stoppedText, turnDisplay, workerNotes, type ChatTurn, type ChatWorkerLine, type WorkerNote, type PlanEntry, type StepGroup, type TurnItem } from '@shared/chatTabPresentation';
 import type { AgentChatMessage } from '@shared/types/agentChat';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
 
@@ -9,7 +9,8 @@ export type ChatRow =
   | { key: string; kind: 'text' | 'thought'; text: string; at?: string }
   | { key: string; kind: 'image'; mimeType: string; data: string }
   | { key: string; kind: 'steps'; group: StepGroup }
-  | { key: string; kind: 'fold'; turnId: string; summary: string; open: boolean; running: boolean; expandable: boolean }
+  /** `waiting`: the running step waits on an approval. */
+  | { key: string; kind: 'fold'; turnId: string; summary: string; open: boolean; running: boolean; waiting: boolean; expandable: boolean }
   | { key: string; kind: 'plan'; entries: PlanEntry[] }
   | { key: string; kind: 'content'; content: JsonValue }
   | { key: string; kind: 'stopped'; text: string }
@@ -26,7 +27,10 @@ export type ChatRow =
 export interface ChatRowOptions {
   open: ReadonlySet<string>;
   workers?: readonly ChatWorkerLine[];
+  /** Tool call ids with an approval pending: the fold row says "Waiting for you". */
+  waiting?: ReadonlySet<string>;
   now?: Date;
+  locale?: string;
   /** Fenced-block languages that become `block` rows instead of code. */
   blocks?: ReadonlySet<string>;
   /** A person's text as a notice, '' to hide it, or undefined to keep it a message. */
@@ -59,55 +63,72 @@ function userText(message: AgentChatMessage): string | undefined {
   return message.parts.length === 1 && message.parts[0].type === 'text' ? message.parts[0].text : undefined;
 }
 
+/** What a turn's rows depend on besides the turn itself; equal inputs hand back the same rows, so memoized rows skip them. */
+interface TurnRowsSource { inputs: unknown[]; rows: ChatRow[] }
+const builtRows = new WeakMap<ChatTurn, TurnRowsSource>();
+
+function cachedTurnRows(turn: ChatTurn, latest: boolean, options: ChatRowOptions): ChatRow[] {
+  // `waiting` only changes what a running turn says.
+  const waiting = turn.running ? [...options.waiting ?? []].join('\n') : '';
+  const inputs = [latest, options.open.has(turn.id), waiting, [...options.blocks ?? []].join('\n'), options.notice, options.now?.getTime(), options.locale];
+  const before = builtRows.get(turn);
+  if (before && before.inputs.every((input, index) => input === inputs[index])) return before.rows;
+  const rows = turnRows(turn, latest, options);
+  builtRows.set(turn, { inputs, rows });
+  return rows;
+}
+
+function turnRows(turn: ChatTurn, latest: boolean, options: ChatRowOptions): ChatRow[] {
+  const rows: ChatRow[] = [];
+  // D-202: a long press shows a message's full time.
+  if (turn.user) {
+    const text = userText(turn.user);
+    const notice = text === undefined ? undefined : options.notice?.(text);
+    // An empty notice hides the line: Pane's own wake-ups for the agent show nothing.
+    if (notice) rows.push({ key: `${turn.id}:notice`, kind: 'notice', text: notice });
+    else if (notice === undefined) rows.push({ key: `${turn.id}:user`, kind: 'user', message: turn.user, at: messageTime(turn.startedAt, options.now, options.locale)?.full });
+  }
+  const { before, after, activity, fold, ended } = turnDisplay(turn, { latest, waiting: options.waiting, now: options.now, locale: options.locale });
+  const pushItem = (item: TurnItem) => {
+    if (item.type === 'text' && options.blocks?.size) {
+      const segments = splitFencedBlocks(item.text, options.blocks);
+      segments.forEach((segment, index) => {
+        const key = segments.length === 1 ? item.id : `${item.id}:${index}`;
+        rows.push(segment.kind === 'text' ? { key, kind: 'text', text: segment.text, at: ended?.full } : { key, kind: 'block', language: segment.language, content: segment.content });
+      });
+    } else if (item.type === 'text') rows.push({ key: item.id, kind: 'text', text: item.text, at: ended?.full });
+    else if (item.type === 'image') rows.push({ key: item.id, kind: 'image', mimeType: item.mimeType, data: item.data });
+  };
+  before.forEach(pushItem);
+  if (fold) {
+    const open = options.open.has(turn.id);
+    rows.push({ key: `${turn.id}:fold`, kind: 'fold', turnId: turn.id, summary: fold.label, open, running: turn.running, waiting: fold.waiting, expandable: activity.length > 0 });
+    if (open) for (const item of activity) {
+      if (item.type === 'steps') for (const group of item.groups) rows.push({ key: `${item.id}:${group.id}`, kind: 'steps', group });
+      else if (item.type === 'thought') rows.push({ key: item.id, kind: 'thought', text: item.text });
+      else if (item.type === 'plan') rows.push({ key: item.id, kind: 'plan', entries: item.entries });
+      else if (item.type === 'content') rows.push({ key: item.id, kind: 'content', content: item.content });
+    }
+  }
+  after.forEach(pushItem);
+  const response = turn.running ? '' : responseText(turn);
+  if (response) rows.push({ key: `${turn.id}:copy`, kind: 'copy', text: response });
+  if (latest && !turn.running && !activity.length && ended) rows.push({ key: `${turn.id}:time`, kind: 'time', short: ended.short, full: ended.full });
+  const stopped = stoppedText(turn);
+  if (stopped) rows.push({ key: `${turn.id}:stopped`, kind: 'stopped', text: stopped });
+  return rows;
+}
+
 /**
  * The conversation as rows (D-192): the agent's text, with each turn's activity
  * folded into one row that `open` expands. While a turn runs the row says what it's
  * doing now. A Session's workers appear only when the latest turn has news of them
  * (D-201): one line each for a worker that finished, reported or is asking.
+ * A turn that comes back as the same object, with the same options, keeps the same
+ * row objects, so memoized rows skip it while the latest turn streams.
  */
 export function chatRows(turns: readonly ChatTurn[], options: ChatRowOptions): ChatRow[] {
-  const rows: ChatRow[] = [];
-  for (const turn of turns) {
-    const latest = turn === turns.at(-1);
-    // D-202: a long press shows a message's full time.
-    if (turn.user) {
-      const text = userText(turn.user);
-      const notice = text === undefined ? undefined : options.notice?.(text);
-      // An empty notice hides the line: Pane's own wake-ups for the agent show nothing.
-      if (notice) rows.push({ key: `${turn.id}:notice`, kind: 'notice', text: notice });
-      else if (notice === undefined) rows.push({ key: `${turn.id}:user`, kind: 'user', message: turn.user, at: messageTime(turn.startedAt, options.now)?.full });
-    }
-    const ended = messageTime(turn.endedAt, options.now);
-    const { shown, activity, foldAt } = turnDisplay(turn);
-    const pushItem = (item: TurnItem) => {
-      if (item.type === 'text' && options.blocks?.size) {
-        const segments = splitFencedBlocks(item.text, options.blocks);
-        segments.forEach((segment, index) => {
-          const key = segments.length === 1 ? item.id : `${item.id}:${index}`;
-          rows.push(segment.kind === 'text' ? { key, kind: 'text', text: segment.text, at: ended?.full } : { key, kind: 'block', language: segment.language, content: segment.content });
-        });
-      } else if (item.type === 'text') rows.push({ key: item.id, kind: 'text', text: item.text, at: ended?.full });
-      else if (item.type === 'image') rows.push({ key: item.id, kind: 'image', mimeType: item.mimeType, data: item.data });
-    };
-    const before = foldAt < 0 ? shown.length : Math.min(foldAt, shown.length);
-    shown.slice(0, before).forEach(pushItem);
-    if (turn.running || activity.length) {
-      const open = options.open.has(turn.id);
-      rows.push({ key: `${turn.id}:fold`, kind: 'fold', turnId: turn.id, summary: latest ? turnFooter(turn, activity.length > 0, options.now) ?? turnSummary(turn) : turnSummary(turn), open, running: turn.running, expandable: activity.length > 0 });
-      if (open) for (const item of activity) {
-        if (item.type === 'steps') for (const group of item.groups) rows.push({ key: `${item.id}:${group.id}`, kind: 'steps', group });
-        else if (item.type === 'thought') rows.push({ key: item.id, kind: 'thought', text: item.text });
-        else if (item.type === 'plan') rows.push({ key: item.id, kind: 'plan', entries: item.entries });
-        else if (item.type === 'content') rows.push({ key: item.id, kind: 'content', content: item.content });
-      }
-    }
-    shown.slice(before).forEach(pushItem);
-    const response = turn.running ? '' : responseText(turn);
-    if (response) rows.push({ key: `${turn.id}:copy`, kind: 'copy', text: response });
-    if (latest && !turn.running && !activity.length && ended) rows.push({ key: `${turn.id}:time`, kind: 'time', short: ended.short, full: ended.full });
-    const stopped = stoppedText(turn);
-    if (stopped) rows.push({ key: `${turn.id}:stopped`, kind: 'stopped', text: stopped });
-  }
+  const rows = turns.flatMap((turn, index) => cachedTurnRows(turn, index === turns.length - 1, options));
   for (const note of workerNotes(turns, options.workers ?? [])) rows.push({ key: `worker:${note.worker.paneId}`, kind: 'worker', note });
   return rows;
 }

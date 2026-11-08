@@ -160,7 +160,8 @@ class PanelManager {
         lastActiveAt: new Date().toISOString(),
         position: this.getNextPosition(request.sessionId),
         ...request.metadata, // Apply any metadata overrides (like permanent flag)
-        teammate: teammatePaneCaller() ?? undefined,
+        // A caller may add the teammate tag (Switch to chat keeps the terminal's), never clear one.
+        teammate: teammatePaneCaller() ?? request.metadata?.teammate,
       };
       
       // Create panel object

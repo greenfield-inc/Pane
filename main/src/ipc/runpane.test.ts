@@ -9860,6 +9860,8 @@ describe('runpane IPC handlers', () => {
       ['a tab with no opener (opened before this change, or from the UI)', panelWith({ type: 'browser', state: { isActive: false } }), 'opened-by-user'],
       ['a tab the person opened through runpane', panelWith({ type: 'browser', state: { isActive: false }, openedBy: { source: 'user' } }), 'opened-by-user'],
       ['a permanent tab', panelWith({ type: 'diff', state: { isActive: false }, metadata: { ...terminalPanel.metadata, permanent: true }, openedBy: agentOpened }), 'permanent'],
+      // Not "opened-by-user", whose next step suggests --force, which a permanent tab refuses too.
+      ['a permanent tab the person has (the Diff tab)', panelWith({ type: 'diff', state: { isActive: false }, metadata: { ...terminalPanel.metadata, permanent: true } }), 'permanent'],
       ['an editor with unsaved edits', panelWith({ type: 'editor', state: { isActive: false, customState: { filePath: 'plan.md', isDirty: true } }, openedBy: agentOpened }), 'unsent-input'],
     ])('refuses %s without closing it', async (_label, panel, code) => {
       const { registry, deletePanel } = closeRegistry(panel);

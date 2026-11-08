@@ -201,7 +201,7 @@ export class ChatTabRuntime {
   async cancel(): Promise<void> {
     this.withdraw();
     if (!this.sessionId || !this.process.running) return;
-    if (this.ownTurn && !this.running) { await this.agent().request(ASYNC_TASK_STOP, { sessionId: this.sessionId, asyncTaskId: this.ownTurn }).catch(error => { throw chatFailure(error); }); return; }
+    if (this.ownTurn && !this.running) { await this.bounded(this.agent().request(ASYNC_TASK_STOP, { sessionId: this.sessionId, asyncTaskId: this.ownTurn })).catch(error => { throw chatFailure(error); }); return; }
     await this.agent().notify(methods.agent.session.cancel, { sessionId: this.sessionId });
   }
 

@@ -244,7 +244,7 @@ export class RemoteRuntimeAdapter {
   }
 
   createOrchestrationSession(input: OrchestrationSessionCreateInput): Promise<OrchestrationSessionView<Session>> {
-    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:create', [input]);
+    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:create', [input, { chatTabs: true }]);
   }
 
   updateOrchestrationSession(sessionId: string, input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> {

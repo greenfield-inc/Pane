@@ -6,6 +6,7 @@ import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_O
 import { ShortcutCap, UnreachableNotice } from './NotifyCard';
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
+import { ClampedText } from './ClampedText';
 
 interface NotifyRoundProps {
   snapshot: NotifySnapshot;
@@ -207,7 +208,7 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
         <span className="truncate">{askedBy(item)} · {relativeAge(item.createdAt, now)}</span>
       </div>
       {item.unreachable && <UnreachableNotice item={item} className="px-[26px] pt-2" />}
-      {item.context && <div className="px-[26px] py-1.5 text-[14.5px] text-text-tertiary">{item.context}</div>}
+      {item.context && <ClampedText text={item.context} className="px-[26px] py-1.5 text-[14.5px] text-text-tertiary" />}
       {item.ui === 'approve' && item.detail && (
         <pre className="mx-[26px] mb-1 mt-1.5 max-h-40 overflow-auto rounded-xl bg-surface-tertiary px-3.5 py-2.5 font-mono text-[12px] leading-relaxed text-text-secondary">{item.detail}</pre>
       )}

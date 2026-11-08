@@ -1,5 +1,7 @@
 import { boundary, decodeOptionalBoundary, type JsonValue } from './validation/boundaryDecoder';
-import type { AgentChatMessage, AgentChatPart } from './types/agentChat';
+import type { AgentChatMessage, AgentChatPart, AgentChatPermission } from './types/agentChat';
+import type { ChatTabQuestion } from './types/chatTab';
+import { permissionToolId } from './agentChatPresentation';
 
 /**
  * How a chat tab's conversation reads, shared by desktop, the PWA and the phone:
@@ -123,7 +125,18 @@ function outputText(output: JsonValue | undefined, content: JsonValue[] | undefi
   return parts.length ? parts.join('\n') : undefined;
 }
 
-export function toStep(part: Extract<AgentChatPart, { type: 'tool' }>): ChatStep {
+type ToolPart = Extract<AgentChatPart, { type: 'tool' }>;
+
+/** Steps by the part they came from: a part that kept its identity is not parsed again (its diff line counts are the costly part). */
+const builtSteps = new WeakMap<ToolPart, ChatStep>();
+
+function cachedStep(part: ToolPart): ChatStep {
+  let step = builtSteps.get(part);
+  if (!step) { step = toStep(part); builtSteps.set(part, step); }
+  return step;
+}
+
+function toStep(part: ToolPart): ChatStep {
   const kind = stepKind(part.kind);
   const step: ChatStep = { id: part.id, kind, title: part.title, status: part.status };
   const input = decodeOptionalBoundary(part.input, commandInput);
@@ -181,9 +194,17 @@ export function groupSteps(steps: ChatStep[]): StepGroup[] {
   return groups;
 }
 
-/** The conversation as turns. `running` marks the last turn as still in progress. */
+/** Where each built turn came from, so a rebuild hands back the same object for a turn whose messages kept their identity. */
+interface TurnSource { turn: ChatTurn; messages: AgentChatMessage[]; fromPart: number }
+const builtTurns = new WeakMap<AgentChatMessage, TurnSource>();
+
+/**
+ * The conversation as turns. `running` marks the last turn as still in progress.
+ * A turn whose messages are the same objects as on the last call comes back as the
+ * same object, so memoized rows skip it while the latest turn streams.
+ */
 export function chatTurns(messages: readonly AgentChatMessage[], options: { running: boolean }): ChatTurn[] {
-  const turns: ChatTurn[] = [];
+  const sources: TurnSource[] = [];
   let turn: ChatTurn | undefined;
   let pending: ChatStep[] = [];
   const flush = () => {
@@ -191,21 +212,23 @@ export function chatTurns(messages: readonly AgentChatMessage[], options: { runn
     turn.items.push({ type: 'steps', id: `steps:${pending[0].id}`, groups: groupSteps(pending) });
     pending = [];
   };
-  const open = (id: string, user?: AgentChatMessage) => {
+  const open = (id: string, message: AgentChatMessage, fromPart: number, user?: AgentChatMessage) => {
     flush();
     turn = { id, user, items: [], running: false };
-    turns.push(turn);
+    sources.push({ turn, messages: [message], fromPart });
     return turn;
   };
   for (const message of messages) {
-    if (message.role === 'user') { open(`turn:${message.id}`, message); continue; }
+    if (message.role === 'user') { open(`turn:${message.id}`, message, -1, message); continue; }
     for (const [index, part] of message.parts.entries()) {
       const id = `${message.id}:${index}`;
       const end = part.type === 'content' ? decodeOptionalBoundary(part.content, marker) : undefined;
       // A finished turn stays finished: what the agent does afterwards, with no prompt open, is a turn of its own.
       if (end && turn?.endedAt) continue;
-      const current: ChatTurn = turn && !turn.endedAt ? turn : open(`turn:start:${message.id}`);
-      if (part.type === 'tool') { pending.push(toStep(part)); continue; }
+      const current: ChatTurn = turn && !turn.endedAt ? turn : open(`turn:start:${message.id}`, message, index);
+      const used = sources.at(-1)!.messages;
+      if (used.at(-1) !== message) used.push(message);
+      if (part.type === 'tool') { pending.push(cachedStep(part)); continue; }
       if (end) { flush(); current.startedAt = end.startedAt; current.endedAt = end.endedAt; current.stopReason = end.stopReason; continue; }
       flush();
       if (part.type === 'text' || part.type === 'thought') {
@@ -221,13 +244,20 @@ export function chatTurns(messages: readonly AgentChatMessage[], options: { runn
     }
   }
   flush();
-  const last = turns.at(-1);
+  const last = sources.at(-1)?.turn;
   if (last && options.running && !last.endedAt) {
     last.running = true;
     const steps = last.items.flatMap(item => item.type === 'steps' ? item.groups.flatMap(group => group.steps) : []);
     last.current = steps.at(-1);
   }
-  return turns;
+  return sources.map(source => {
+    const before = builtTurns.get(source.messages[0]);
+    const same = before && before.turn.id === source.turn.id && before.turn.running === source.turn.running && before.fromPart === source.fromPart
+      && before.messages.length === source.messages.length && before.messages.every((message, index) => message === source.messages[index]);
+    if (same) return before.turn;
+    builtTurns.set(source.messages[0], source);
+    return source.turn;
+  });
 }
 
 const STOPPED = new Map([
@@ -252,15 +282,46 @@ export function formatDuration(ms: number): string {
 /**
  * A turn as it reads by default (D-192): the agent's text and pictures, with
  * everything it did in between (steps, thinking, notices, to-do lists) folded into
- * one row at `foldAt`. While the turn runs, the row sits below the text so far.
+ * one row between `before` and `after`. While the turn runs, the row sits below the
+ * text so far. The latest finished turn's row ends with when it finished (D-202).
  */
-export interface TurnDisplay { shown: TurnItem[]; activity: TurnItem[]; foldAt: number }
+export interface TurnDisplay {
+  before: TurnItem[];
+  after: TurnItem[];
+  activity: TurnItem[];
+  /** The fold row, when the turn is running or did more than write. `waiting`: its current step waits on an approval. */
+  fold?: { label: string; waiting: boolean };
+  ended?: MessageTime;
+}
 
-export function turnDisplay(turn: ChatTurn): TurnDisplay {
+export interface TurnDisplayOptions {
+  /** The conversation's last turn. */
+  latest?: boolean;
+  /** Tool call ids with an approval pending. */
+  waiting?: ReadonlySet<string>;
+  now?: Date;
+  locale?: string;
+}
+
+/** The tool calls waiting on the person: open approvals and questions (AskUserQuestion, ExitPlanMode). */
+export function waitingToolIds(permissions: readonly AgentChatPermission[] = [], questions: readonly ChatTabQuestion[] = []): Set<string> {
+  const ids = permissions.flatMap(permission => { const id = permissionToolId(permission); return id ? [id] : []; });
+  return new Set([...ids, ...questions.flatMap(question => question.toolCallId ? [question.toolCallId] : [])]);
+}
+
+export function turnDisplay(turn: ChatTurn, options: TurnDisplayOptions = {}): TurnDisplay {
   const isShown = (item: TurnItem) => item.type === 'text' || item.type === 'image';
   const shown = turn.items.filter(isShown);
   const activity = turn.items.filter(item => !isShown(item));
-  return { shown, activity, foldAt: turn.running ? shown.length : turn.items.findIndex(item => !isShown(item)) };
+  const firstActivity = turn.items.findIndex(item => !isShown(item));
+  const foldAt = turn.running || firstActivity < 0 ? shown.length : Math.min(firstActivity, shown.length);
+  const ended = messageTime(turn.endedAt, options.now, options.locale);
+  const display: TurnDisplay = { before: shown.slice(0, foldAt), after: shown.slice(foldAt), activity, ended };
+  if (turn.running || activity.length) {
+    const label = options.latest && !turn.running ? turnFooter(turn, true, options.now, options.locale) ?? turnSummary(turn) : turnSummary(turn, options.waiting);
+    display.fold = { label, waiting: !!turn.running && !!turn.current && !!options.waiting?.has(turn.current.id) };
+  }
+  return display;
 }
 
 const ACTIVITY_VERBS = { explore: 'Reading', edit: 'Editing', run: 'Running', think: 'Thinking', other: 'Using' } satisfies Record<StepKind, string>;
@@ -277,7 +338,7 @@ export function currentActivity(turn: ChatTurn, waiting: ReadonlySet<string> = n
 }
 
 /** The fold row's words: "Worked for 27s", or what the turn is doing while it runs. */
-export function turnSummary(turn: ChatTurn, waiting?: ReadonlySet<string>): string {
+function turnSummary(turn: ChatTurn, waiting?: ReadonlySet<string>): string {
   if (turn.running) return currentActivity(turn, waiting);
   const duration = turn.startedAt && turn.endedAt ? formatDuration(Date.parse(turn.endedAt) - Date.parse(turn.startedAt)) : undefined;
   if (duration) return `Worked for ${duration}`;
@@ -341,21 +402,38 @@ export interface MessageTime { short: string; full: string }
  * "2:04 PM" today, "Yesterday 4:12 PM", "Nov 3, 4:12 PM" this year, with the year
  * before that; in the person's locale. Undefined when the time is unknown.
  */
+const formatters = new Map<string, { time: Intl.DateTimeFormat; date: Intl.DateTimeFormat; dateYear: Intl.DateTimeFormat; full: Intl.DateTimeFormat }>();
+
+/** Intl formatters are slow to build: one set per locale, built on first use. */
+function formattersFor(locale: string | undefined) {
+  const key = locale ?? '';
+  let set = formatters.get(key);
+  if (!set) {
+    set = {
+      time: new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }),
+      date: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
+      dateYear: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', year: 'numeric' }),
+      full: new Intl.DateTimeFormat(locale, { dateStyle: 'full', timeStyle: 'medium' }),
+    };
+    formatters.set(key, set);
+  }
+  return set;
+}
+
 export function messageTime(iso: string | undefined, now = new Date(), locale?: string): MessageTime | undefined {
   const at = iso ? new Date(iso) : undefined;
   if (!at || Number.isNaN(at.getTime())) return undefined;
-  const time = at.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+  const format = formattersFor(locale);
+  const time = format.time.format(at);
   const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const daysAgo = Math.round((day(now) - day(at)) / 86_400_000);
-  const dateFormat: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
-  if (at.getFullYear() !== now.getFullYear()) dateFormat.year = 'numeric';
-  const date = at.toLocaleDateString(locale, dateFormat);
-  const short = daysAgo === 0 ? time : daysAgo === 1 ? `Yesterday ${time}` : `${date}, ${time}`;
-  return { short, full: at.toLocaleString(locale, { dateStyle: 'full', timeStyle: 'medium' }) };
+  const date = () => (at.getFullYear() === now.getFullYear() ? format.date : format.dateYear).format(at);
+  const short = daysAgo === 0 ? time : daysAgo === 1 ? `Yesterday ${time}` : `${date()}, ${time}`;
+  return { short, full: format.full.format(at) };
 }
 
 /** The footer of the latest finished turn: "Worked for 27s · 2:04 PM", or the time alone with no activity. */
-export function turnFooter(turn: ChatTurn, hasActivity: boolean, now?: Date, locale?: string): string | undefined {
+function turnFooter(turn: ChatTurn, hasActivity: boolean, now?: Date, locale?: string): string | undefined {
   const time = messageTime(turn.endedAt, now, locale);
   if (turn.running || !time) return hasActivity ? turnSummary(turn) : undefined;
   return hasActivity ? `${turnSummary(turn)} · ${time.short}` : time.short;

@@ -17,6 +17,8 @@ import { panePortFor } from '../panePort';
 import type { ChatTabLauncher, ResolvedLaunch } from './manager';
 import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { claudeSessionFolderSettings, isSessionFolderSettings } from '../agents/sessionFolderAccess';
+import type { ResolvedProjectEnv } from '../projectEnvVars';
+import { sessionGitCeiling } from '../sessionWorkspace';
 
 /** API keys a person may set for chat tabs on this machine, kept in the OS secure store. */
 export interface ChatTabSecrets { apiKey(agent: ChatAgent): string | undefined }
@@ -27,6 +29,8 @@ export interface ChatProfileResolver { resolve(panel: ToolPanel, state: ChatPane
 export interface ChatLaunchContext {
   /** Whether the tab's Pane runs in WSL or on an SSH host, where chat tabs are not offered. */
   unsupportedHost(panel: ToolPanel): string | undefined;
+  /** The variables of the project that owns the tab's Pane, for whoever opened the tab. */
+  projectEnv(panel: ToolPanel): Promise<ResolvedProjectEnv>;
 }
 
 const AGENT_NAMES = { claude: 'Claude Code', codex: 'Codex' } satisfies Record<ChatAgent, string>;
@@ -36,9 +40,10 @@ export type ChatAgentEnv = Record<string, string>;
 
 /**
  * The same Pane environment a terminal agent tab gets (PANE_*, runpane on PATH,
- * git attribution), so runpane report and Notify work from inside a chat tab.
+ * git attribution, the project's variables), so runpane report and Notify work from
+ * inside a chat tab. The project's variables override the inherited environment; Pane's own win.
  */
-export function chatTabEnv(panel: ToolPanel, state: ChatPanelState): ChatAgentEnv {
+export function chatTabEnv(panel: ToolPanel, state: ChatPanelState, projectEnv: Record<string, string> = {}): ChatAgentEnv {
   const inherited = interactiveTerminalEnv();
   delete inherited.PANE_ORCHESTRATION_SESSION_ID;
   delete inherited.PANE_SESSION_DIR;
@@ -48,6 +53,7 @@ export function chatTabEnv(panel: ToolPanel, state: ChatPanelState): ChatAgentEn
   const env = {
     ...inherited,
     ...getGitAttributionEnv(config),
+    ...projectEnv,
     PATH: process.platform === 'linux' ? (process.env.PATH ?? '') : getShellPath(),
     LANG: process.env.LANG || 'en_US.UTF-8',
     WORKTREE_PATH: state.cwd,
@@ -59,7 +65,11 @@ export function chatTabEnv(panel: ToolPanel, state: ChatPanelState): ChatAgentEn
     PANE_NOTES_FILE: config.notesEnabled === true ? noteContextPath(path.join(getAppDirectory(), 'notes'), panel.sessionId) : '',
   } satisfies ChatAgentEnv;
   const session: ChatAgentEnv = {};
-  if (state.orchestrationSessionId) session.PANE_ORCHESTRATION_SESSION_ID = state.orchestrationSessionId;
+  if (state.orchestrationSessionId) {
+    session.PANE_ORCHESTRATION_SESSION_ID = state.orchestrationSessionId;
+    // Git must not find a repository above the Session folder, as in Session terminals.
+    session.GIT_CEILING_DIRECTORIES = sessionGitCeiling();
+  }
   if (state.sessionFolder) session.PANE_SESSION_DIR = state.sessionFolder;
   // Autopilot's tab: its run folder, for its documents (D-67). Never a Session (D-69).
   if (state.autopilotRunId) { session.PANE_AUTOPILOT_RUN_ID = state.autopilotRunId; session.PANE_AUTOPILOT_DIR = state.cwd; }
@@ -73,7 +83,10 @@ export class AgentChatLauncher implements ChatTabLauncher {
   async resolve(panel: ToolPanel, state: ChatPanelState): Promise<ResolvedLaunch> {
     const unsupported = this.options.context.unsupportedHost(panel);
     if (unsupported) throw new PaneError('CHAT_UNSUPPORTED_HOST', unsupported, 'Open "Claude in Terminal" or "Codex in Terminal" from the + menu instead.');
-    const env = chatTabEnv(panel, state);
+    // A Session orchestrator's Pane belongs to no project, as in terminals.
+    const project = state.orchestrationSessionId ? { env: {}, warnings: [] } : await this.options.context.projectEnv(panel);
+    for (const warning of project.warnings) console.warn(`[ChatTabs] ${panel.id}: ${warning}`);
+    const env = chatTabEnv(panel, state, project.env);
     const executable = findExecutableInPath(state.agent);
     if (!executable) {
       throw new PaneError('CHAT_AGENT_NOT_INSTALLED', `${AGENT_NAMES[state.agent]} is not installed on this machine, or not on its PATH.`, `Install ${AGENT_NAMES[state.agent]}, then press Retry. Pane never uses a bundled copy.`);
@@ -81,7 +94,8 @@ export class AgentChatLauncher implements ChatTabLauncher {
     // Claude chat tabs always run the person's installed, unmodified claude.
     if (state.agent === 'claude') env.CLAUDE_CODE_EXECUTABLE = providerScript(executable, 'claude') ?? executable;
     else env.CODEX_PATH = executable;
-    const key = this.options.secrets.apiKey(state.agent);
+    // The owner's key is a Pane secret: a tab a teammate opened signs in on its own.
+    const key = panel.metadata?.teammate ? undefined : this.options.secrets.apiKey(state.agent);
     if (key && state.agent === 'claude') env.ANTHROPIC_API_KEY = key;
     if (key && state.agent === 'codex') { env.OPENAI_API_KEY = key; env.CODEX_API_KEY = key; }
     if (state.launch.kind === 'profile') {

@@ -1,6 +1,7 @@
 import type { IpcMain } from 'electron';
 import path from 'path';
-import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
+import { teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import type { AppServices } from './types';
 import type { ChatAgent, ChatPanelState, ChatTabAnswer, ChatTabCreate } from '../../../shared/types/chatTab';
 import type { CreatePanelRequest, PanelOpener, ToolPanel } from '../../../shared/types/panels';
@@ -67,6 +68,7 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
         if (context?.pathResolver.environment === 'wsl' || context?.commandRunner.wslContext) return 'Chat tabs do not run in WSL projects yet.';
         return undefined;
       },
+      projectEnv: panel => services.sessionManager.resolveProjectEnv(panel.sessionId, panel.metadata?.teammate ?? null),
     },
   });
   const manager = getChatTabManager();
@@ -91,6 +93,9 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   });
   registry.register('chat-tab:restart', async (id: string) => { await manager.restart(panelId(id)); });
   registry.register('chat-tab:sign-in', async (id: string) => {
+    // Sign-in sets the owner's own agent account on this machine.
+    const teammate = teammatePaneCaller();
+    if (teammate) throw teammateSecretRefusal(teammate, 'sign a chat tab in');
     const panel = panelManager.getPanel(panelId(id));
     const state = manager.view(panelId(id), 0, false);
     if (!panel) throw new PaneError('CHAT_PANEL_MISSING', 'This chat tab no longer exists.', 'Open another chat tab.');
@@ -102,7 +107,12 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   });
   registry.register('chat-tab:keys', () => chatTabSecrets.status());
   registry.register('chat-tab:set-key', (agent: string, key: PaneCommandValue) => {
-    chatTabSecrets.set(decodeBoundary(agent, agentSchema), decodeBoundary(key, boundary.nullable(boundary.string)));
+    const teammate = teammatePaneCaller();
+    if (teammate) throw teammateSecretRefusal(teammate, 'change a chat tab key');
+    const decoded = decodeBoundary(key, boundary.nullable(boundary.string));
+    // Removing a key always works; saving one needs chat tabs on, like opening a tab.
+    if (decoded !== null && !chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine, so the key was not saved.', 'Turn on Chat tabs in Settings > Advanced > Experimental, then save the key.');
+    chatTabSecrets.set(decodeBoundary(agent, agentSchema), decoded);
     return chatTabSecrets.status();
   });
   for (const operation of CHAT_TAB_CHANNELS) registry.bindChannel(ipcMain, `chat-tab:${operation}`);
@@ -167,7 +177,7 @@ function switchPorts(services: AppServices, registry: PaneCommandRegistry): Swit
       },
     },
     chat: {
-      create: async (replaces, state) => (await panelManager.createPanel({ sessionId: replaces.sessionId, type: 'chat', title: replaces.title, initialState: { customState: state }, metadata: { position: replaces.metadata.position, replacesPanelId: replaces.id }, activate: false, announceActivation: false })).id,
+      create: async (replaces, state) => (await panelManager.createPanel({ sessionId: replaces.sessionId, type: 'chat', title: replaces.title, initialState: { customState: state }, metadata: { position: replaces.metadata.position, replacesPanelId: replaces.id, teammate: replaces.metadata.teammate }, activate: false, announceActivation: false })).id,
       start: id => {
         let timer: ReturnType<typeof setTimeout> | undefined;
         const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PaneError('CHAT_SWITCH_TIMEOUT', 'The agent did not reopen the conversation within 3 minutes.', 'Keep working in the terminal, then try again.')), REOPEN_LIMIT_MS); });

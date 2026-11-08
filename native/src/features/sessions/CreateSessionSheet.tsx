@@ -38,7 +38,7 @@ export function CreateSessionForm({ machine, onCreated }: { machine: RemotePaneC
     mutationFn: (input: OrchestrationSessionCreateInput) => send<OrchestrationSessionView<{ id: string; name: string }>>(
       machine,
       'orchestration-sessions:create',
-      [input],
+      [input, { chatTabs: true }],
       `The connection dropped before ${machine.label} answered. Check its Sessions before trying again: the Session may already exist.`,
       CREATE_TIMEOUT_MS,
     ),

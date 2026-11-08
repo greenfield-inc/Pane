@@ -19,8 +19,8 @@ With [chat tabs](CHAT_TABS.md) on (Settings → Advanced → Chat tabs), a new C
 or Codex Session runs its orchestrator in a chat tab instead of a terminal, from
 the plain agent or the Session's `agent-farm run <profile>` launch, and sends its
 opening prompt once. Like every chat, finished turns fold to one row. A worker
-Pane shows up as one line with **Open** only when it finished, reported or is
-asking the person in the latest turn; the sidebar lists the rest. Workers the orchestrator
+Pane shows up as one line with **Open** while it is asking the person, and when
+it finished, failed or reported during the latest turn; the sidebar lists the rest. Workers the orchestrator
 starts stay terminal tabs. Agent Farm's standard resume template
 (`{command} --resume {sessionId}`, which the dialog saves) doesn't stop a chat,
 since a chat reopens through ACP. Sessions that resume or promote a terminal
@@ -759,12 +759,13 @@ The daemon and Electron IPC channels are:
 `orchestration-sessions:overview`.
 
 Selectors accept a stable Session ID or an exact Session name. Phone apps
-released before chat tabs crash on a tab kind they don't know, so
-`orchestration-sessions:get` returns a Session whose orchestrator is a chat tab
-only to a client that passes `{ chatTabs: true }` as a second argument (desktop,
-the PWA and current phone apps do). Any other client gets
-`CHAT_TAB_CLIENT_OUTDATED`, which says to update Pane on the phone; `panels:list`
-leaves chat tabs out for those clients in the same way. The existing
+released before chat tabs crash on a tab kind they don't know, so clients that
+show chat tabs pass `{ chatTabs: true }` as a second argument to
+`orchestration-sessions:create`, `orchestration-sessions:get` and `panels:list`
+(desktop, the PWA and current phone apps do). For any other client, `create`
+starts the orchestrator in a terminal, `get` of a Session whose orchestrator is a
+chat tab fails with `CHAT_TAB_CLIENT_OUTDATED`, which says to update Pane on the
+phone, and `panels:list` leaves chat tabs out. The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy
 conversation.
 
@@ -1366,7 +1367,9 @@ default), a Session has one voice to the person: its orchestrator.
   worker's `notify` call isn't shown to the person; it returns `unavailable`
   with a `next` that says to report blocked.
 - **A worker's question is a card at once.** Its blocked report shows in
-  Approvals straight away with an answer box. It rings once the orchestrator
+  Approvals straight away with an answer box, under one line of what the worker
+  was doing: from a JSON status file, its question's `why`, else its `summary`
+  or `step`; the file itself opens as the worker's status link. It rings once the orchestrator
   relays it or after 10 minutes, so the orchestrator first settles what the plan
   already answers (D-79). The answer goes straight to the asking tab, whether or
   not the orchestrator is running: `answer: Q-n → <answer> (by you)`, once its
@@ -1556,7 +1559,7 @@ worktree defaults and existing historical pins are unchanged.
 Session instructions and documents live under `<PANE_DIR>/sessions/<id>/`,
 outside the project. While the Session agent shows its folder-trust prompt, a
 banner across the top of the chat says the folder is Pane's own, holding the
-Session's notes and no project code. Session terminals set `GIT_CEILING_DIRECTORIES` to
+Session's notes and no project code. Session terminals and chats set `GIT_CEILING_DIRECTORIES` to
 `<PANE_DIR>/sessions`, so git run in a Session folder never picks up a repository
 above it, such as a home directory tracked as a dotfiles repo. Do not configure
 PANE_DIR inside a project repository.

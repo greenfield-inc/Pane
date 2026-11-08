@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { canClose, canOverride, canReopen } from '@shared/approvalReceipts';
 import type { NotifyItem } from '@shared/types/notify';
@@ -10,7 +10,7 @@ import { useNotifyCommand } from '@/features/notify/hooks';
 import { QuestionForm, type QuestionAction } from '@/features/notify/NotifySheet';
 import { Notice } from '@/features/panes/PaneKit';
 import { useTheme } from '@/theme';
-import { Button, Icon, Text } from '@/ui';
+import { Button, Icon, Text, TextField } from '@/ui';
 
 import type { ConnectedLink, ConnectedTarget } from './approvals';
 
@@ -42,9 +42,13 @@ export function QuestionActions({ actions }: { actions: readonly QuestionAction[
  */
 export function ApprovalActions({ item, style }: { item: NotifyItem; style?: StyleProp<ViewStyle> }) {
   const [overriding, setOverriding] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [reason, setReason] = useState('');
   const command = useNotifyCommand(sent => {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     if (sent.type === 'override') setOverriding(false);
+    // Cleared once the close went through; a failed close keeps the reason to try again.
+    if (sent.type === 'close') { setClosing(false); setReason(''); }
   });
   const closable = canClose(item);
   const overridable = canOverride(item);
@@ -52,11 +56,11 @@ export function ApprovalActions({ item, style }: { item: NotifyItem; style?: Sty
   if (!closable && !overridable && !reopenable) return null;
   const pending = command.isPending ? command.variables[0].type : null;
 
-  const confirmClose = () => {
-    Alert.alert('Close this question?', `${item.source.agent} is told you closed it. You can reopen it from Answered.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Close it', style: 'destructive', onPress: () => command.mutate([{ type: 'close', id: item.id }]) },
-    ]);
+  // Reopen needs the tab that asked (canReopen); a question asked from a plain shell has none.
+  const closeNote = `${item.source.agent} is told you closed it${item.source.panelId ? '. You can reopen it from Answered.' : ', with your reason if you give one.'}`;
+  const close = () => {
+    const trimmed = reason.trim();
+    command.mutate([trimmed ? { type: 'close', id: item.id, reason: trimmed } : { type: 'close', id: item.id }]);
   };
 
   return (
@@ -71,8 +75,18 @@ export function ApprovalActions({ item, style }: { item: NotifyItem; style?: Sty
           )}
         </QuestionForm>
       ) : null}
+      {closing ? (
+        <View style={styles.stack} testID="approval-close-form">
+          <TextField testID="approval-close-reason" placeholder="Reason (optional)" value={reason} onChangeText={setReason} autoFocus returnKeyType="done" onSubmitEditing={close} />
+          <Text variant="footnote" tone="secondary">{closeNote}</Text>
+          <View style={styles.actions}>
+            <View style={styles.action}><Button testID="approval-close-cancel" title="Cancel" variant="secondary" onPress={() => { setClosing(false); setReason(''); }} /></View>
+            <View style={styles.action}><Button testID="approval-close-confirm" title="Close it" variant="destructive" loading={pending === 'close'} disabled={command.isPending} onPress={close} /></View>
+          </View>
+        </View>
+      ) : null}
       <View style={styles.actions}>
-        {closable ? <View style={styles.action}><Button testID="approval-close" title="Close" variant="secondary" loading={pending === 'close'} disabled={command.isPending} onPress={confirmClose} /></View> : null}
+        {closable && !closing ? <View style={styles.action}><Button testID="approval-close" title="Close" variant="secondary" loading={pending === 'close'} disabled={command.isPending} onPress={() => setClosing(true)} /></View> : null}
         {overridable ? <View style={styles.action}><Button testID="approval-override" title={overriding ? 'Cancel' : 'Override'} variant="secondary" disabled={command.isPending} onPress={() => setOverriding(!overriding)} /></View> : null}
         {reopenable ? <View style={styles.action}><Button testID="approval-reopen" title="Reopen" variant="secondary" loading={pending === 'reopen'} disabled={command.isPending} onPress={() => command.mutate([{ type: 'reopen', id: item.id }])} /></View> : null}
       </View>

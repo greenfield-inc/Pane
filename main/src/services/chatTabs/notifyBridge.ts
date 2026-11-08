@@ -2,7 +2,7 @@ import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import type { ChatTabAnswer, ChatTabQuestion, ChatTabView } from '../../../../shared/types/chatTab';
 import type { NotifyQuestion, NotifyResult, NotifySource } from '../../../../shared/types/notify';
 import { permissionSummary, rejectOption } from '../../../../shared/chatTabPermissions';
-import { questionFields, type QuestionChoice, type QuestionField } from '../../../../shared/chatTabQuestions';
+import { questionFields, unshownRequiredFields, type QuestionChoice, type QuestionField } from '../../../../shared/chatTabQuestions';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { reasonOf } from '../../../../shared/paneError';
 
@@ -57,7 +57,8 @@ export class ChatTabNotifyBridge {
       for (const question of view.questions) {
         const id = `chat:${view.panelId}:${question.id}`;
         const steps = questionSteps(question);
-        if (!steps.length) continue;
+        // Only the chat can say why a form with a field Pane can't show is skip-only.
+        if (!steps.length || unshownRequiredFields(question.schema).length) continue;
         open.add(id);
         if (!this.asked.has(id)) this.askQuestion(id, view, question, steps);
       }
@@ -89,7 +90,8 @@ export class ChatTabNotifyBridge {
       ui: 'options', title: summary.heading,
       choices: permission.options.slice(0, 9).map(option => ({ label: option.name, recommended: option.name === yes || undefined })),
     };
-    if (detail) { question.detail = detail; question.detailLabel = summary.kind === 'plan' ? 'Show the plan' : summary.kind === 'command' ? 'Show the command' : 'Show details'; }
+    // An options card shows its context, as for a terminal agent's prompt; `detail` is for approve cards only.
+    if (detail) question.context = detail;
     if (yes && no) question.agentPrompt = { yes, no };
     this.ask(id, id, question, source, answer => {
       const option = permission.options.find(entry => entry.name === answer);

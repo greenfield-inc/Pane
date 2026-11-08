@@ -258,7 +258,11 @@ export class ChatTranscript {
     return buffer.toString('utf8').split('\n').filter(Boolean).map(line => decodeBoundary(JSON.parse(line), chatMessageSchema));
   }
 
-  dispose(): void { rmSync(this.options.spoolFile, { force: true }); }
+  /** Best-effort: a spool file left behind is only wasted space, and the next start replaces it, so it never stops a tab from closing. */
+  dispose(): void {
+    try { rmSync(this.options.spoolFile, { force: true }); }
+    catch (error) { console.warn(`[ChatTabs] A chat tab's transcript spool was not deleted (${this.options.spoolFile}): ${error instanceof Error ? error.message : String(error)}.`); }
+  }
 }
 
 function estimateSize(message: AgentChatMessage): number {

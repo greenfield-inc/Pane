@@ -7,6 +7,7 @@ import { cn } from '../../utils/cn';
 import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
+import { ClampedText } from './ClampedText';
 
 /** The compact strip shows this many choices, then More. */
 const COMPACT_CHOICE_LIMIT = 4;
@@ -302,7 +303,8 @@ function CardHeader({ item, form, queue, onCommand, menuPlacement, machineMark }
             · {machineMark}<span className="truncate">{item.machine}</span>
           </span>
         )}
-        <span className="ml-auto shrink-0">{relativeAge(item.createdAt, now)}</span>
+        {/* The same time as the item's row in the list: when it ended, else when it was asked. */}
+        <span className="ml-auto shrink-0">{relativeAge(item.resolvedAt ?? item.createdAt, now)}</span>
       </div>
     );
   }
@@ -832,7 +834,10 @@ function QuestionCard({
       <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       <div className={cn(titleClass, !expanded && 'line-clamp-3')} title={item.title}>{item.title}</div>
       {/* An agent prompt's context is a command or a plan: its line breaks carry meaning. */}
-      {showContext && <div className={cn(contextClass, item.agentPrompt && 'max-h-[40vh] overflow-y-auto whitespace-pre-line')}>{item.context}</div>}
+      {/* An agent prompt's context is a command or plan to read whole; any other is clamped with Show more. */}
+      {showContext && item.context && (item.agentPrompt
+        ? <div className={cn(contextClass, 'max-h-[40vh] overflow-y-auto whitespace-pre-line')}>{item.context}</div>
+        : <ClampedText text={item.context} className={contextClass} testId="notify-card-context" />)}
       {form === 'inbox' && (onCancelOverride
         ? <div className={contextClass} data-testid="notify-override-hint">Your answer goes to {item.source.agent} as a correction.</div>
         : <ReceiptLines item={item} className={contextClass} />)}
@@ -974,8 +979,9 @@ function ExpiredCard({ item, form, narrow, onCommand, menuPlacement, machineMark
   return (
     <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-view="expired">
       <CardHeader item={item} form={form} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
-      <div className="line-clamp-3 px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-tertiary">{item.title}</div>
-      <div className="px-[22px] pb-[18px] pt-3">
+      {/* On Approvals, the same type and inset as the answered and waiting cards beside it. */}
+      <div className={form === 'inbox' ? 'line-clamp-3 px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-tertiary' : 'line-clamp-3 px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-tertiary'}>{item.title}</div>
+      <div className={form === 'inbox' ? 'px-3.5 pb-3 pt-2.5' : 'px-[22px] pb-[18px] pt-3'}>
         <NoticePill testId="notify-receipt">{receiptLine(item) ?? `${item.source.agent} stopped waiting. Nothing to answer.`}</NoticePill>
       </div>
       {related}

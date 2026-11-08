@@ -528,6 +528,14 @@ const DAEMON_PANEL_CHANNELS = [
   'terminal:upload-cancel',
 ] as const;
 
+/**
+ * Phone apps released before chat tabs crash on a tab kind they do not know and send no
+ * options (D-100, D-203). Newer clients pass `{ chatTabs: true }` to say they show chat tabs.
+ */
+export function clientShowsChatTabs(options: PaneCommandValue | undefined): boolean {
+  return decodeOptionalBoundary(options, boundary.object({ chatTabs: boundary.optional(boundary.boolean) }))?.chatTabs === true;
+}
+
 export function registerPanelHandlers(
   ipcMain: IpcMain,
   services: AppServices,
@@ -553,12 +561,16 @@ export function registerPanelHandlers(
   // Panel CRUD operations
   commandRegistry.register('panels:create', async (request: CreatePanelRequest) => {
     try {
+      // A chat tab's state is written only by the host, after chat-tab:create checks the setting and the Pane.
+      if (request.type === 'chat') {
+        throw new PaneError('CHAT_TAB_CREATE_CHANNEL', 'No tab was created: chat tabs open only through chat-tab:create, which checks the Chat tabs setting and the Pane.', 'Call chat-tab:create with the Pane\'s id and the agent.');
+      }
       // A client's own new tab moves no other client.
       const panel = await panelManager.createPanel({ ...request, announceActivation: false });
       return { success: true, data: panel };
     } catch (error) {
       console.error('[IPC] Failed to create panel:', error);
-      return { success: false, error: error instanceof Error ? error.message : String(error) };
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : String(error) };
     }
   });
   
@@ -638,11 +650,10 @@ export function registerPanelHandlers(
     return { success: true, data: statuses };
   });
 
-  // Phone apps released before chat tabs crash on a tab kind they do not know, and
-  // send no version: clients list chat tabs only when they say they understand them.
+  // Clients list chat tabs only when they say they understand them (`clientShowsChatTabs`).
   commandRegistry.register('panels:list', async (sessionId: string, options?: PaneCommandValue) => {
     try {
-      const chatTabs = decodeOptionalBoundary(options, boundary.object({ chatTabs: boundary.optional(boundary.boolean) }))?.chatTabs === true;
+      const chatTabs = clientShowsChatTabs(options);
       const panels = panelManager.getPanelsForSession(sessionId).filter(panel => chatTabs || panel.type !== 'chat');
       return { success: true, data: panels };
     } catch (error) {

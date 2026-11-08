@@ -2363,15 +2363,16 @@ function panelUnsentInput(panel: ToolPanel, screen: RunpanePanelScreenResult | u
  */
 async function panelCloseRefusal(panel: ToolPanel, force: boolean): Promise<RunpanePanelCloseRefusal | undefined> {
   const keep = `Leave panel ${panel.id} open; the person can close it in Pane.`;
+  // Checked first: `--force` can't close a permanent tab, so no refusal may suggest it for one.
+  if (panel.metadata.permanent) {
+    return { code: 'permanent', message: `Panel ${panel.id} is a permanent tab and cannot be closed.`, next: keep };
+  }
   if (!force && panel.metadata.openedBy?.source !== 'agent') {
     return {
       code: 'opened-by-user',
       message: `Panel ${panel.id} was not opened by an agent (the person opened it, or it predates Pane recording who opened tabs), so it was not closed.`,
       next: `${keep} Only tabs opened with \`--source agent\` can be closed by runpane, unless the person asked you to close it: then rerun with \`--force\`.`,
     };
-  }
-  if (panel.metadata.permanent) {
-    return { code: 'permanent', message: `Panel ${panel.id} is a permanent tab and cannot be closed.`, next: keep };
   }
   if (force) return undefined;
   const chat = panel.type === 'chat' && getChatTabManager().isRunning(panel.id);

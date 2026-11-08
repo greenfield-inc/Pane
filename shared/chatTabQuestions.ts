@@ -2,10 +2,13 @@ import { boundary, decodeOptionalBoundary, type JsonValue } from './validation/b
 
 export interface QuestionChoice { value: string; title: string; description?: string }
 
-/** One field of an agent's question form, in the shapes ACP form elicitation allows. */
+/**
+ * One field of an agent's question form, in the shapes ACP form elicitation allows.
+ * `required` comes from the schema's `required` list.
+ */
 export type QuestionField =
-  | { key: string; kind: 'single' | 'multiple'; title: string; description?: string; choices: QuestionChoice[] }
-  | { key: string; kind: 'text' | 'number' | 'boolean'; title: string; description?: string };
+  | { key: string; kind: 'single' | 'multiple'; title: string; description?: string; required: boolean; choices: QuestionChoice[] }
+  | { key: string; kind: 'text' | 'number' | 'boolean'; title: string; description?: string; required: boolean };
 
 const option = boundary.object({ const: boundary.string, title: boundary.optional(boundary.string), description: boundary.optional(boundary.string) });
 const property = boundary.object({
@@ -17,7 +20,7 @@ const property = boundary.object({
   enum: boundary.optional(boundary.array(boundary.string)),
   items: boundary.optional(boundary.object({ anyOf: boundary.optional(boundary.array(option)), oneOf: boundary.optional(boundary.array(option)), enum: boundary.optional(boundary.array(boundary.string)) })),
 });
-const form = boundary.object({ properties: boundary.record(boundary.json) });
+const form = boundary.object({ properties: boundary.record(boundary.json), required: boundary.optional(boundary.array(boundary.string)) });
 
 function choices(options: Array<{ const: string; title?: string; description?: string }> | undefined, values: string[] | undefined): QuestionChoice[] | undefined {
   if (options?.length) return options.map(entry => {
@@ -28,14 +31,19 @@ function choices(options: Array<{ const: string; title?: string; description?: s
   return values?.length ? values.map(value => ({ value, title: value })) : undefined;
 }
 
+/** What every field has, whatever its kind. */
+type QuestionFieldBase = Pick<QuestionField, 'key' | 'title' | 'description' | 'required'>;
+
 /** The fields Pane can show for a requested schema, in order. Fields it cannot show are left out. */
 export function questionFields(schema: JsonValue): QuestionField[] {
-  const properties = decodeOptionalBoundary(schema, form)?.properties ?? {};
-  return Object.entries(properties).flatMap(([key, value]): QuestionField[] => {
+  const decoded = decodeOptionalBoundary(schema, form);
+  const required = new Set(decoded?.required);
+  return Object.entries(decoded?.properties ?? {}).flatMap(([key, value]): QuestionField[] => {
     const field = decodeOptionalBoundary(value, property);
     if (!field) return [];
     const title = field.title ?? key;
-    const base = field.description ? { key, title, description: field.description } : { key, title };
+    const base: QuestionFieldBase = { key, title, required: required.has(key) };
+    if (field.description) base.description = field.description;
     if (field.type === 'array') {
       const list = choices(field.items?.anyOf ?? field.items?.oneOf, field.items?.enum);
       return list ? [{ ...base, kind: 'multiple', choices: list }] : [];
@@ -49,4 +57,37 @@ export function questionFields(schema: JsonValue): QuestionField[] {
     if (field.type === 'number' || field.type === 'integer') return [{ ...base, kind: 'number' }];
     return [];
   });
+}
+
+/**
+ * Required fields Pane cannot show (an object, say), by title. A form with any can only be
+ * skipped here: an Answer without them would send the agent invalid content.
+ */
+export function unshownRequiredFields(schema: JsonValue): string[] {
+  const decoded = decodeOptionalBoundary(schema, form);
+  const shown = new Set(questionFields(schema).map(field => field.key));
+  return (decoded?.required ?? []).filter(key => !shown.has(key)).map(key => {
+    const title = decodeOptionalBoundary(decoded?.properties[key] ?? null, property)?.title;
+    return title ?? key;
+  });
+}
+
+/**
+ * The form's answer, or undefined while Answer would be incomplete. Every required
+ * field needs a value, and a form with choices needs something chosen or typed:
+ * Claude's AskUserQuestion marks nothing required, and an Answer with no pick tells
+ * the agent nothing (Skip declines). A form with no fields answers `{}`, and an
+ * untouched checkbox answers `false`.
+ */
+export function questionAnswer(fields: readonly QuestionField[], values: Readonly<Record<string, JsonValue>>): Record<string, JsonValue> | undefined {
+  const content: Record<string, JsonValue> = {};
+  for (const field of fields) {
+    const value = values[field.key];
+    if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
+      if (field.required && field.kind !== 'boolean') return undefined;
+    } else content[field.key] = value;
+  }
+  if (!Object.keys(content).length && fields.some(field => field.kind === 'single' || field.kind === 'multiple')) return undefined;
+  for (const field of fields) if (field.kind === 'boolean' && !(field.key in content)) content[field.key] = false;
+  return content;
 }

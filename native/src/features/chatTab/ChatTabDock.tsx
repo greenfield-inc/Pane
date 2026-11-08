@@ -4,7 +4,7 @@ import { Linking, Pressable, StyleSheet, TextInput, View, type StyleProp, type V
 import { useMarkdown } from 'react-native-marked';
 
 import { permissionSummary } from '@shared/chatTabPermissions';
-import { questionFields } from '@shared/chatTabQuestions';
+import { questionAnswer, questionFields, unshownRequiredFields } from '@shared/chatTabQuestions';
 import type { AgentChatPermission } from '@shared/types/agentChat';
 import type { ChatTabAnswer, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt } from '@shared/types/chatTab';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
@@ -61,6 +61,8 @@ export function QuestionCard({ question, disabled, onAnswer }: { question: ChatT
   const fields = questionFields(question.schema);
   const [values, setValues] = useState<Record<string, JsonValue>>({});
   const set = (key: string, value: JsonValue) => setValues(current => ({ ...current, [key]: value }));
+  const unshown = unshownRequiredFields(question.schema);
+  const content = unshown.length ? undefined : questionAnswer(fields, values);
   return <View testID="chat-question" style={[styles.card, { borderColor: theme.chat.border, backgroundColor: theme.chat.card }]}>
     <Text variant="headline" style={{ color: theme.chat.foreground }}>{question.message}</Text>
     {fields.map(field => <View key={field.key} style={styles.field}>
@@ -74,11 +76,12 @@ export function QuestionCard({ question, disabled, onAnswer }: { question: ChatT
             else { const list = Array.isArray(current) ? current : []; set(field.key, chosen ? list.filter(entry => entry !== choice.value) : [...list, choice.value]); }
           }} />;
         })}</View>
-        : <TextInput testID={`chat-field-${field.key}`} accessibilityLabel={field.title} placeholder="Your own answer (optional)" placeholderTextColor={theme.chat.mutedForeground} editable={!disabled}
+        : <TextInput testID={`chat-field-${field.key}`} accessibilityLabel={field.title} placeholder={field.required ? 'Your answer' : 'Your own answer (optional)'} placeholderTextColor={theme.chat.mutedForeground} editable={!disabled}
           value={typeof values[field.key] === 'string' ? String(values[field.key]) : ''} onChangeText={text => set(field.key, text)} style={[styles.input, { color: theme.chat.foreground, borderColor: theme.chat.border }]} />}
     </View>)}
+    {unshown.length > 0 && <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Pane can't show {unshown.join(', ')}, so you can only skip this question.</Text>}
     <View style={styles.row}>
-      <DockButton testID="chat-question-answer" title="Answer" primary disabled={disabled} onPress={() => onAnswer({ action: 'accept', content: Object.fromEntries(Object.entries(values).filter(([, value]) => value !== '' && !(Array.isArray(value) && !value.length))) })} />
+      <DockButton testID="chat-question-answer" title="Answer" primary disabled={disabled || !content} onPress={() => { if (content) onAnswer({ action: 'accept', content }); }} />
       <DockButton testID="chat-question-skip" title="Skip" disabled={disabled} onPress={() => onAnswer({ action: 'decline' })} />
     </View>
   </View>;

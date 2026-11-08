@@ -22,7 +22,7 @@ const store: ChatTabStore = {
 };
 
 let manager: ChatTabManager | undefined;
-let context: ChatLaunchContext = { unsupportedHost: () => undefined };
+let context: ChatLaunchContext = { unsupportedHost: () => undefined, projectEnv: async () => ({ env: {}, warnings: [] }) };
 let profiles: ChatProfileResolver | undefined;
 let notifyBridge: ChatTabNotifyBridge | undefined;
 
@@ -57,7 +57,7 @@ export function getChatTabManager(): ChatTabManager {
     store,
     launcher: scriptedAgentLauncher() ?? new AgentChatLauncher({
       secrets: chatTabSecrets,
-      context: { unsupportedHost: panel => context.unsupportedHost(panel) },
+      context: { unsupportedHost: panel => context.unsupportedHost(panel), projectEnv: panel => context.projectEnv(panel) },
       profiles: { resolve: (panel, state, env) => {
         if (!profiles) throw new PaneError('CHAT_PROFILE_UNSUPPORTED', 'This Pane cannot start Agent Farm profiles in chat tabs yet.', 'Start the profile in a terminal tab.');
         return profiles.resolve(panel, state, env);
@@ -69,6 +69,7 @@ export function getChatTabManager(): ChatTabManager {
     // update holds and keep-awake follow chat tabs too.
     onStatus: event => terminalPanelManager.emit('agent-status', event),
     onView: view => notifyBridge?.observe(view),
+    onClosed: panelId => notifyBridge?.forget(panelId),
   });
   return manager;
 }

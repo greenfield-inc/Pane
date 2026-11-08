@@ -71,6 +71,33 @@ describe('runpane on a chat tab', () => {
     expect(chatTabLastMessage(manager, panel, 1000)).toMatchObject({ text: 'You said: instead' });
   });
 
+  it('waits for text in the reply, not in the prompt that asked for it', async () => {
+    const { manager, panel } = setup();
+    await manager.ensure(panel.id);
+    await submitChatTab(manager, panel, 'hello', { interrupt: false });
+    await expect(waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'You said: hello', timeoutMs: 10_000 }))
+      .resolves.toMatchObject({ ok: true, matched: true });
+    // "slow" streams dots until cancelled, so only the prompt itself contains "slow".
+    await submitChatTab(manager, panel, 'slow', { interrupt: false });
+    await expect(waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'slow', timeoutMs: 500 }))
+      .resolves.toMatchObject({ ok: false, matched: false, timedOut: true });
+  });
+
+  it('does not match a queued prompt, and matches the reply that follows it', async () => {
+    const { manager, panel } = setup();
+    await manager.ensure(panel.id);
+    await submitChatTab(manager, panel, 'slow', { interrupt: false });
+    await expect.poll(() => manager.view(panel.id, 0).status).toBe('working');
+    // "steps" replies "Done.", so only the queued prompt contains QUEUED-ONLY.
+    expect((await submitChatTab(manager, panel, 'steps 2 QUEUED-ONLY', { interrupt: false })).delivery.state).toBe('queued');
+    const prompt = waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'QUEUED-ONLY', timeoutMs: 3_000 });
+    const reply = waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'Done.', timeoutMs: 10_000 });
+    await manager.cancel(panel.id);
+    await expect(reply).resolves.toMatchObject({ ok: true, matched: true });
+    await expect(prompt).resolves.toMatchObject({ matched: false, timedOut: true });
+    expect(chatTabScreen(manager, panel, 80).text).toContain('user: steps 2 QUEUED-ONLY');
+  });
+
   it('refuses raw terminal input with a clear next step', () => {
     const { panel } = setup();
     const error = chatTabNoTerminal(panel, 'input');

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
 import { useMarkdown } from 'react-native-marked';
@@ -138,7 +138,8 @@ function WorkerNoteRow({ note, onOpen }: { note: WorkerNote; onOpen?: (paneId: s
   </View>;
 }
 
-export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowActions }) {
+/** Memoized: an unchanged row object (chatRows keeps them per turn) skips rendering. */
+export const ChatRowView = memo(function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowActions }) {
   const theme = useTheme();
   switch (row.kind) {
     case 'user': {
@@ -159,7 +160,10 @@ export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowAc
     case 'image': return <Image accessibilityLabel="Image from the agent" source={{ uri: `data:${row.mimeType};base64,${row.data}` }} style={styles.image} />;
     case 'steps': return <StepLine group={row.group} actions={actions} />;
     case 'fold': return <Pressable testID="chat-fold" accessibilityRole="button" accessibilityState={{ expanded: row.open }} disabled={!row.expandable} onPress={() => actions.onToggleTurn(row.turnId)} style={styles.stepLine}>
-      {row.running && <View style={styles.stepIcon}><ActivityIndicator size="small" color={theme.chat.mutedForeground} /></View>}
+      {/* The icon box stays after the turn ends, so the summary never shifts. */}
+      <View style={styles.stepIcon}>{row.waiting
+        ? <Icon ios="exclamationmark.shield" android="shield" size={15} color={theme.colors.warning} />
+        : row.running ? <ActivityIndicator size="small" color={theme.chat.mutedForeground} /> : null}</View>
       <Text variant="subhead" numberOfLines={1} style={{ color: theme.chat.mutedForeground, flexShrink: 1 }}>{row.summary}</Text>
       {row.expandable && <Icon ios={row.open ? 'chevron.down' : 'chevron.right'} android={row.open ? 'expand_more' : 'chevron_right'} size={13} color={theme.chat.mutedForeground} />}
     </Pressable>;
@@ -170,7 +174,7 @@ export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowAc
     case 'notice': return <Text testID="chat-notice" variant="footnote" style={[styles.notice, { color: theme.chat.mutedForeground }]}>{row.text}</Text>;
     case 'content': return <Text variant="footnote" numberOfLines={2} style={{ color: theme.chat.mutedForeground }}>{describeChatContent(row.content).label}</Text>;
   }
-}
+});
 
 const styles = StyleSheet.create({
   userRow: { alignSelf: 'flex-end', alignItems: 'flex-end', maxWidth: '88%', gap: 2 },

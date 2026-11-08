@@ -194,7 +194,8 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
-  async create(input: OrchestrationSessionCreateInput, sourcePanelId?: string): Promise<OrchestrationSessionView<Session>> {
+  /** `terminal`: start the orchestrator in a terminal even with chat tabs on, for a client that can't show a chat (D-203). */
+  async create(input: OrchestrationSessionCreateInput, sourcePanelId?: string, { terminal = false } = {}): Promise<OrchestrationSessionView<Session>> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       validateCreateInput(input);
@@ -320,7 +321,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         // Persist the durable record before creating/publishing its hidden
         // terminal owner so a process exit can be repaired during startup.
         this.createInternalSession(record);
-        const panel = await this.ensurePanelForAgent(record);
+        const panel = await this.ensurePanelForAgent(record, terminal);
         const view = await this.viewFromRecord(record, panel);
         this.emitChanged(record, 'created');
         return view;
@@ -1069,7 +1070,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     }
   }
 
-  private async ensurePanelForAgent(record: OrchestrationSessionRecord): Promise<ToolPanel> {
+  private async ensurePanelForAgent(record: OrchestrationSessionRecord, terminal = false): Promise<ToolPanel> {
     if (!Object.values(record.panelIds).some(id => this.agentStarted(id))) {
       prepareSessionWorkspace(record.id, record.profile, record);
     }
@@ -1082,7 +1083,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       await this.refreshPanelLaunchState(existing, record);
       return panelManager.getPanel(panelId) ?? existing;
     }
-    const chat = this.chatLaunch(record);
+    const chat = terminal ? undefined : this.chatLaunch(record);
     if (chat && 'launch' in chat && (record.agent === 'claude' || record.agent === 'codex')) {
       const workspace = sessionRuntimePath(sessionWorkspacePath(record.id), record);
       const state: ChatPanelState = { agent: record.agent, launch: chat.launch, cwd: workspace, status: 'starting', orchestrationSessionId: record.id, sessionFolder: workspace };
@@ -1123,7 +1124,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   private terminalReason(record: OrchestrationSessionRecord): string | undefined {
     const result = this.chatLaunch(record);
     if (!result || panelManager.getPanel(record.panelIds[record.agent])?.type !== 'terminal') return undefined;
-    return 'terminalReason' in result ? result.terminalReason : 'It started in a terminal, and a Session keeps the kind of tab it started with. A new Session opens as a chat.';
+    return 'terminalReason' in result ? result.terminalReason : 'It started in a terminal, because Chat tabs were off then or a Pane app that cannot show chat tabs created it, and a Session keeps the kind of tab it started with.';
   }
 
   private chatTabPort?: SessionChatTabs;

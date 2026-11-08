@@ -87,6 +87,27 @@ export function ApprovalScreen({ notifyId, hintPaneId, list = 'waiting' }: { not
 }
 
 /** The card above the workspace: a Session's (with its chat), a Pane's tabs, or nothing for a question asked outside Pane. */
+const CONTEXT_LINES = 4;
+
+/** A card's context, four lines at most until Show more, so the answers stay in view. */
+function ClampedContext({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  return (
+    <View>
+      <Text testID="approval-context" variant="subhead" tone="secondary" selectable numberOfLines={open ? undefined : CONTEXT_LINES}
+        onTextLayout={event => { if (!open) setClamped(event.nativeEvent.lines.length >= CONTEXT_LINES); }}>
+        {text}
+      </Text>
+      {clamped || open ? (
+        <Pressable testID="approval-context-more" accessibilityRole="button" hitSlop={8} onPress={() => setOpen(!open)}>
+          <Text variant="footnote" tone="secondary">{open ? 'Show less' : 'Show more'}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 function Workspace({ workspace, topBar, card, quiet }: { workspace: ApprovalWorkspace; topBar: ReactNode; card: ReactNode; quiet: boolean }) {
   if (workspace.kind === 'session') return <SessionWorkspace key={workspace.sessionId} sessionId={workspace.sessionId} paneId={workspace.paneId} topBar={topBar} card={card} />;
   if (workspace.kind === 'pane') return <TerminalScreen key={workspace.paneId} paneId={workspace.paneId} initialPanelId={workspace.panelId} topBar={topBar} above={card} />;
@@ -264,7 +285,7 @@ function ApprovalCard({ item, shared, onNext }: { item: NotifyItem; shared: Noti
         <Text testID="notify-title" variant="headline" selectable numberOfLines={collapsed ? 1 : undefined}>{item.title}</Text>
         {collapsed ? null : (
           <>
-            {item.context ? <Text variant="subhead" tone="secondary" selectable>{item.context}</Text> : null}
+            {item.context ? <ClampedContext text={item.context} /> : null}
             <ConnectedRow link={connectedLink(item, profile.label)} />
             <LinkChips item={item} shownPaneId={shownPaneId} />
             {body}

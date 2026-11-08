@@ -1,6 +1,6 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { router } from 'expo-router';
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -42,6 +42,13 @@ export function AutopilotScreen() {
   const { profile } = useDaemon();
   const snapshot = autopilot.data;
   useAutopilotOpened();
+  const panelId = snapshot?.panelId ?? '';
+  // Stable across renders, so the chat's memoized rows skip when this screen re-renders.
+  const blocks = useMemo(() => ({
+    [ITEMS_BLOCK]: (content: string) => <ItemCards content={content} />,
+    [LOG_BLOCK]: (content: string) => <SentinelLogRows content={content} />,
+    [AWAY_BLOCK]: (content: string) => <SentinelAwayCard content={content} panelId={panelId} />,
+  }), [panelId]);
 
   let body: ReactNode;
   if (autopilot.unsupported) {
@@ -61,11 +68,7 @@ export function AutopilotScreen() {
         key={snapshot.panelId}
         panelId={snapshot.panelId}
         placeholder={composerPlaceholder(snapshot, items, decisionModel)}
-        blocks={{
-          [ITEMS_BLOCK]: content => <ItemCards content={content} />,
-          [LOG_BLOCK]: content => <SentinelLogRows content={content} />,
-          [AWAY_BLOCK]: content => <SentinelAwayCard content={content} panelId={snapshot.panelId ?? ''} />,
-        }}
+        blocks={blocks}
         userNotice={controlLine}
         queuedLabel={queuedControlLabel}
         settings={false}

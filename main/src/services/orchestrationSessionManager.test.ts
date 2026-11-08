@@ -28,7 +28,9 @@ import { sessionWorkspacePath, prepareSessionWorkspace } from './sessionWorkspac
 import { OrchestrationSessionManager } from './orchestrationSessionManager';
 import { normalizeAgentReport } from './agentReport';
 import { serializeJsonTransport } from '../daemon/jsonTransport';
-import { boundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
+import { registerOrchestrationSessionHandlers } from '../ipc/orchestrationSessions';
 import * as wslUtils from '../utils/wslUtils';
 import { PaneError, toPaneDaemonError } from '../../../shared/paneError';
 
@@ -297,6 +299,26 @@ describe('OrchestrationSessionManager', () => {
       expect(chatEnsure).toHaveBeenCalledWith(created.panel.id);
       const resumed = await fixture.manager.create({ name: 'Resumed stays a terminal', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
       expect(resumed.panel.type).toBe('terminal');
+    } finally {
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+    }
+  });
+
+  it('starts a Session created by a phone app too old for chat tabs in a terminal (D-203)', async () => {
+    const fixture = createFixture();
+    fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+    const registry = new PaneCommandRegistry();
+    // SAFETY: The handlers only call ipcMain.handle; the create channel reads only orchestrationSessionManager.
+    registerOrchestrationSessionHandlers({ handle: () => undefined } as never, { orchestrationSessionManager: fixture.manager } as never, registry);
+    const panelType = async (args: PaneCommandValue[]) => decodeBoundary(
+      await registry.invoke('orchestration-sessions:create', args),
+      boundary.object({ data: boundary.object({ panel: boundary.object({ type: boundary.string }) }) }),
+    ).data.panel.type;
+    try {
+      // Apps released before chat tabs send no options, and crash on a tab kind they do not know.
+      expect(await panelType([{ name: 'From an old phone', agent: 'claude' }])).toBe('terminal');
+      expect(await panelType([{ name: 'From a current client', agent: 'claude' }, { chatTabs: true }])).toBe('chat');
     } finally {
       Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
     }

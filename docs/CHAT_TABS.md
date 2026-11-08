@@ -91,6 +91,12 @@ relays a Claude or ChatGPT login, and never copies one between machines.
   Anthropic or OpenAI key in the OS secure store on that machine (Electron
   `safeStorage`) and passes it only as env (`ANTHROPIC_API_KEY`;
   `OPENAI_API_KEY` and `CODEX_API_KEY`). It is never synced or sent to clients.
+  The key is the owner's: a teammate (another login on the tailnet, when the
+  host is set to "Everyone on tailnet") cannot save or remove it, and a chat
+  tab a teammate opens starts without it or the project's secret variables,
+  including after the owner switches that teammate's terminal to chat.
+  A teammate cannot run Sign in for a chat tab either. Saving a key needs Chat
+  tabs on; removing one always works.
 
 Chat tabs don't run in WSL projects or on SSH hosts.
 
@@ -178,12 +184,13 @@ through the adapter's `asyncTasks` capability: the tab shows as working, the tur
 gets its own row, and a message sent meanwhile waits in the queue until the turn
 ends, like one sent during any other turn. Stop ends it.
 
-In a Session orchestrator's chat, a worker appears only when the latest turn has
-news of it (D-201): one line, "approvals-global finished · **Open**" when it
-finished or reported, or "switch-to-chat is asking you · **Open**" when it waits
-on the person. Idle, running and unchanged workers stay out of the chat; the
-sidebar lists every Pane. This comes from Pane's own Session state (its Panes,
-their agent states and `runpane report`s), never from what the agent wrote.
+In a Session orchestrator's chat, a worker Pane shows up as one line with
+**Open** while it is asking the person, and when it finished, failed or reported
+during the latest turn (D-201), for example "switch-to-chat is asking you ·
+**Open**" or "approvals-global finished · **Open**". Other workers stay out of
+the chat; the sidebar lists every Pane. This comes from Pane's own Session state
+(its Panes, their agent states and `runpane report`s), never from what the agent
+wrote.
 
 Approvals and questions are also asked in Pane's Approvals and on the phone (see
 [PANE_NOTIFY.md](PANE_NOTIFY.md)), a question form one field at a time. The
@@ -222,13 +229,16 @@ loads the same conversation.
 
 `panels submit` sends an ACP prompt and returns an `acp-receipt` (queued while
 the agent works). `panels wait` is ready when a turn ended and nothing is queued,
-and returns at once as blocked while an approval or question waits. `screen`
+and returns at once as blocked while an approval or question waits. A text
+wait (`--for text`) searches only what the agent writes after the wait starts,
+plus a reply still streaming then, never the person's prompts. `screen`
 and `output` read the transcript (`source: acpTranscript`), `last-message` the
 newest reply, `report` is kept in the tab's state, and `resume` restarts the
 agent and loads the conversation. `panels input` and `submit-composer` fail with
 `CHAT_TAB_NO_TERMINAL`: a chat tab has no terminal. The agent gets the same
-`PANE_*` env as a terminal agent tab, so `runpane report` and `notify` work from
-inside it.
+env as a terminal agent tab: `PANE_*`, so `runpane report` and `notify` work from
+inside it, the project's environment variables, and `GIT_CEILING_DIRECTORIES`
+for a Session orchestrator.
 
 ## Agent Farm profiles
 
@@ -246,11 +256,12 @@ CONFIGURATION.md, *ACP sessions*.
 ## Older clients
 
 Phone apps released before chat tabs would crash on a tab kind they don't know,
-and send no version. `panels:list` lists chat tabs only to clients that pass
-`{ chatTabs: true }` (this desktop, the PWA and the current phone app), so older
-apps don't show chat tabs at all; to use them, update Pane on the phone (D-100).
-Released apps have no channel that could say so: their "Update Pane" notices
-are about an older computer, and Notify `info` items are not pushed.
+and send no version. Clients that show chat tabs pass `{ chatTabs: true }` (this
+desktop, the PWA and the current phone app). For any other client, `panels:list`
+leaves chat tabs out, a Session it creates starts its orchestrator in a
+terminal, and `orchestration-sessions:get` of a Session whose orchestrator is a
+chat tab fails with `CHAT_TAB_CLIENT_OUTDATED`, which says to update Pane on the
+phone (D-100).
 
 ## Code
 

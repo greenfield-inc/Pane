@@ -104,10 +104,12 @@ export function stackPositionLabel(stack: AutopilotStack): string {
   return `${Math.max(0, index) + 1} of ${stack.entries.length}`;
 }
 
-/** The row's state: "start" before Start, "Sentinel" while it keeps Sessions moving, "paused", or how many stack entries are open. */
+/** The row's state: "Start" before Start, "Sentinel" while it keeps Sessions moving, "Paused", or how many stack entries are open ("Running" while none are). */
 export function autopilotRowLabel(snapshot: AutopilotSnapshot): string {
-  if (snapshot.state === 'stopped') return 'start';
+  if (snapshot.state === 'stopped') return 'Start';
   if (snapshot.sentinel) return 'Sentinel';
-  if (snapshot.state === 'paused') return 'paused';
-  return `${openStackCount(snapshot)} open`;
+  if (snapshot.state === 'paused') return 'Paused';
+  const open = openStackCount(snapshot);
+  // Nothing open reads as running, like the header, not as a count of zero.
+  return open ? `${open} open` : 'Running';
 }

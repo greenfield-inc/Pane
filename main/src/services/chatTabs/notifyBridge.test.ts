@@ -29,7 +29,7 @@ describe('chat tab prompts in Notify', () => {
     bridge.observe({ ...base, permissions: [permission] });
     bridge.observe({ ...base, permissions: [permission] });
     expect(asked).toHaveLength(1);
-    expect(asked[0].question).toMatchObject({ ui: 'options', title: 'Claude wants to run a command', detail: 'pnpm test', agentPrompt: { yes: 'Yes', no: 'No' } });
+    expect(asked[0].question).toMatchObject({ ui: 'options', title: 'Claude wants to run a command', context: 'pnpm test', agentPrompt: { yes: 'Yes', no: 'No' } });
     expect(asked[0].question.choices?.map(choice => choice.label)).toEqual(['Yes', 'Yes, always', 'No']);
     asked[0].answer({ answer: 'Yes, always' });
     await Promise.resolve(); await Promise.resolve();
@@ -135,6 +135,14 @@ describe('chat tab prompts in Notify', () => {
     const { queue, asked } = fakeQueue();
     const bridge = new ChatTabNotifyBridge({ queue, enabled: () => false, source: () => ({ name: 'pane', agent: 'Claude' }), answerPermission: () => undefined, answerQuestion: () => undefined });
     bridge.observe({ ...base, permissions: [permission] });
+    expect(asked).toEqual([]);
+  });
+
+  it('leaves a form with a required field Pane cannot show to the chat, which says it is skip-only', () => {
+    const { queue, asked } = fakeQueue();
+    const bridge = new ChatTabNotifyBridge({ queue, enabled: () => true, source: () => ({ name: 'pane', agent: 'Claude' }), answerPermission: () => undefined, answerQuestion: () => undefined });
+    const form = { id: '1:q8', generation: 1, message: 'Pick a target', schema: { properties: { target: { type: 'object' }, note: { type: 'string' } }, required: ['target'] } };
+    bridge.observe({ ...base, questions: [form] });
     expect(asked).toEqual([]);
   });
 });

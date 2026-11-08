@@ -612,8 +612,8 @@ describe('glasses starting a Session', () => {
     host.advance(30_000);
     expect((await create({ name: 'Just a name' })).status).toBe(200);
     expect(host.calls).toEqual([
-      { channel: 'orchestration-sessions:create', args: [{ name: 'Double charges', goal: 'Find why checkout charges some carts twice' }] },
-      { channel: 'orchestration-sessions:create', args: [{ name: 'Just a name' }] },
+      { channel: 'orchestration-sessions:create', args: [{ name: 'Double charges', goal: 'Find why checkout charges some carts twice' }, { chatTabs: true }] },
+      { channel: 'orchestration-sessions:create', args: [{ name: 'Just a name' }, { chatTabs: true }] },
     ]);
 
     const pane = await host.invoke('runpane:panes:create', [{ projectId: 1, prompt: 'x' }], host.fromGlasses(token));
@@ -659,7 +659,7 @@ describe('glasses limits on Sessions, vouches and revokes', () => {
     const host = await setup();
     const { token } = await host.pair();
     await host.invoke('orchestration-sessions:create', [{ name: '\uFB01x \uFF23heckout' }], host.fromGlasses(token));
-    expect(host.calls).toEqual([{ channel: 'orchestration-sessions:create', args: [{ name: 'fix Checkout' }] }]);
+    expect(host.calls).toEqual([{ channel: 'orchestration-sessions:create', args: [{ name: 'fix Checkout' }, { chatTabs: true }] }]);
   });
 
   it('starts at most one Session every 30 seconds per pair of glasses, without counting toward a lockout', async () => {

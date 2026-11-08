@@ -72,7 +72,7 @@ function StartCard({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending
     return (
       <div className="flex shrink-0 items-center gap-2.5 border-b border-border-primary bg-autopilot-subtle px-4 py-2 text-[13px]" data-testid="autopilot-start" role="status">
         <Navigation className="h-4 w-4 shrink-0 text-autopilot" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-text-primary">{blocked ?? 'Autopilot is stopped. Start picks the walk up where it was.'}</span>
+        <span className="min-w-0 flex-1 leading-snug text-text-primary">{blocked ?? 'Autopilot is stopped. Start picks the walk up where it was.'}</span>
         <button type="button" disabled={pending || !!blocked} onClick={() => void runAutopilot('start')} data-testid="autopilot-start-button"
           className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg bg-interactive px-3 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50">
           <Play className="h-3.5 w-3.5" aria-hidden="true" /> Start
@@ -135,7 +135,7 @@ function SentinelToggle({ snapshot, pending }: { snapshot: AutopilotSnapshot; pe
       .finally(() => setBusy(false));
   };
   return (
-    <button type="button" role="switch" aria-checked={snapshot.sentinel} disabled={pending || busy || (blocked && !snapshot.sentinel)} onClick={toggle} data-testid="autopilot-sentinel"
+    <button type="button" role="switch" aria-checked={snapshot.sentinel} aria-label="Sentinel" disabled={pending || busy || (blocked && !snapshot.sentinel)} onClick={toggle} data-testid="autopilot-sentinel"
       title={snapshot.sentinel ? 'Sentinel keeps your Sessions moving while you are away. Turn it off when you are back.' : 'Keep Sessions moving while you are away: answers only what a plan or decision settles, nudges stalls, pushes the rest to your phone.'}
       className={cn('inline-flex h-8 shrink-0 items-center gap-2 rounded-full border px-2.5 text-[12.5px] font-medium disabled:opacity-50',
         snapshot.sentinel ? 'border-autopilot-border bg-autopilot-subtle text-autopilot-on-tint' : 'border-border-secondary text-text-secondary hover:bg-surface-hover')}>
