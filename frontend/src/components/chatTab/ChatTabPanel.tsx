@@ -20,7 +20,8 @@ import { ChatBlocksContext, type ChatRendering } from './chatRendering';
 import { ChatCommandMenu } from './ChatCommandMenu';
 import { CLEAR_COMMAND, isClearCommand, matchingCommands, withPaneCommands } from './chatCommands';
 import { ChatQueue } from './ChatQueue';
-import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
+import { ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
+import { ChatStatusBar, sendNowKeys, useStatusItems, type ChatStatusPullRequest } from './ChatStatusBar';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
 import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
 import { ChatCopyButton } from './ChatCopyButton';
@@ -127,8 +128,6 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
 }
 
 const AGENT_NAMES = { claude: 'Claude', codex: 'Codex' } as const;
-/** How Send now is pressed on this device. */
-const sendNowKeys = () => /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘↵' : 'Ctrl+Enter';
 
 /** Where a fresh conversation started after /clear: "Cleared · 2:04 PM". */
 function ClearedDivider({ at }: { at: string }) {
@@ -162,6 +161,8 @@ export interface ChatTabPanelProps {
    * holds what Start told it; a fresh one would carry on without it.
    */
   clearable?: boolean;
+  /** The Pane's pull request, for the status bar. */
+  pr?: ChatStatusPullRequest;
 }
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
@@ -171,7 +172,7 @@ const PASTE_LIMIT = 1024 * 1024;
 const NO_ACTIONS: ChatTurnActions = {};
 const NO_RENDERING: ChatRendering = {};
 
-export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
@@ -222,6 +223,14 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const settingsLocked = disabled || view?.status !== 'idle';
   const actionsRef = useRef<HTMLDivElement>(null);
   const phone = usePhoneWidth(actionsRef);
+  const statusShowsMode = useStatusItems().includes('mode');
+  const footerRef = useRef<HTMLDivElement>(null);
+  /** The bar's "2 queued": brings the queue into view and puts focus on its first row. */
+  const showQueue = () => {
+    const queue = footerRef.current?.querySelector<HTMLElement>('.chat-queue');
+    queue?.scrollIntoView({ block: 'nearest' });
+    queue?.querySelector<HTMLElement>('button')?.focus();
+  };
 
   /** True when the host took the message. */
   const settle = (receipt: AgentChatReceipt): boolean => {
@@ -412,7 +421,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           {!snapshot.hasNewer && view?.notice && <p role="status" className="chat-notice">{view.notice}</p>}
         </div>
       </ThreadPrimitive.Viewport>
-      <div className="chat-composer-footer">
+      <div ref={footerRef} className="chat-composer-footer">
         <ScrollToLatest viewer={viewer} hasNewer={snapshot.hasNewer} follow={followLiveEnd} />
         {dock}
         {snapshot.pendingDelivery && <div className="chat-dock" role="status">
@@ -432,6 +441,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           onRemove={operationId => void act(() => client.unqueue(panelId, operationId))}
           onSendNow={operationId => void act(() => client.sendNow(panelId, operationId))}
           onEdit={editQueued} />
+        {view && <ChatStatusBar controls={composerRow} settingsLocked={settingsLocked} configure={configure} context={view.context} tasks={view.tasks}
+          queued={view.queue.length} pr={pr} working={working} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
+          onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
         <ComposerPrimitive.Root className="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
@@ -484,13 +496,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             className="chat-input" />
           <div ref={actionsRef} className="chat-composer-actions" data-layout={phone ? 'phone' : 'desktop'} data-working={working || undefined}>
             {attachments && <ComposerPrimitive.AddAttachment aria-label={saveFile ? 'Attach files' : 'Attach image'} title={saveFile ? 'Attach photos or files' : 'Attach image'} className="chat-icon"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
-            {phone
-              ? <ChatRiskyModeMarker mode={composerRow.mode} />
-              : composerRow.mode && <ChatModeChip control={composerRow.mode} disabled={settingsLocked} configure={configure} />}
+            {/* Model and mode live in the status bar (D-254); a mode that never asks stays marked here when the bar hides it. */}
+            {!statusShowsMode && <ChatRiskyModeMarker mode={composerRow.mode} />}
             <div className="chat-composer-end">
-              {phone
-                ? <ChatPhoneModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />
-                : <ChatModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />}
               {working
                 ? <>
                   <ComposerPrimitive.Send aria-label="Queue message" title={`Queue message: sends after this turn (Enter). Send now: ${sendNowKeys()}`} className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>

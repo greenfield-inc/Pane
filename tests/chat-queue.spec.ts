@@ -38,7 +38,7 @@ test('queued messages show in order and can be sent now, edited and removed', as
   const rows = page.getByRole('list', { name: 'Queued messages' }).getByRole('listitem');
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toContainText('Sends next');
-  await expect(rows.nth(1)).toContainText('2 in queue');
+  await expect(rows.nth(1)).toContainText('Queued');
   await rows.nth(1).getByRole('button', { name: 'Send now' }).click();
   await rows.nth(0).getByRole('button', { name: 'Edit queued message' }).click();
   const editor = page.getByRole('textbox', { name: 'Edit queued message' });

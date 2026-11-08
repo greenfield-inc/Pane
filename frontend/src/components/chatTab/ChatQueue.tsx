@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { CornerDownLeft, Pencil, X } from 'lucide-react';
+import { Pencil, X, Zap } from 'lucide-react';
 import type { ChatTabQueuedPrompt } from '../../../../shared/types/chatTab';
 
 /** The host keeps this many characters of a queued message as its preview; a longer one cannot be edited from it. */
@@ -32,7 +32,7 @@ export function ChatQueue({ queue, working, disabled, label, onRemove, onSendNow
     {queue.map((item, index) => {
       const shown = label?.(item.text);
       const editable = shown === undefined && item.text.length < PREVIEW_LIMIT;
-      const order = index === 0 ? 'Sends next' : `${index + 1} in queue`;
+      const order = index === 0 ? 'Sends next' : 'Queued';
       if (editing?.operationId === item.operationId) {
         return <li key={item.operationId} className="chat-queue-editing">
           <textarea className="chat-queue-input" aria-label="Edit queued message" autoFocus rows={2} value={editing.text}
@@ -52,9 +52,9 @@ export function ChatQueue({ queue, working, disabled, label, onRemove, onSendNow
         <span className="chat-queue-text">{shown ?? (item.text || 'Image')}</span>
         {!!item.imageCount && shown === undefined && !!item.text && <span className="chat-queue-label">+{item.imageCount} image{item.imageCount === 1 ? '' : 's'}</span>}
         <span className="chat-queue-label">{order}</span>
-        {working && <button type="button" className="chat-button chat-button-outline chat-queue-now" disabled={disabled}
+        {working && <button type="button" className="chat-queue-now" disabled={disabled} aria-label="Send now"
           title="Stop the current turn and send this now" onClick={() => onSendNow(item.operationId)}>
-          <CornerDownLeft className="h-3.5 w-3.5" aria-hidden />Send now
+          <Zap className="h-3.5 w-3.5" aria-hidden /><span className="chat-queue-now-label">Send now</span>
         </button>}
         {editable && <button type="button" className="chat-icon" aria-label="Edit queued message" title="Edit" disabled={disabled}
           onClick={() => setEditing({ operationId: item.operationId, text: item.text })}><Pencil className="h-3.5 w-3.5" /></button>}

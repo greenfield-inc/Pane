@@ -12,7 +12,7 @@ const text = (markup: string) => markup.replace(/<[^>]+>/g, ' ').replace(/\s+/g,
 describe('ChatQueue', () => {
   it('lists queued messages in order, each with Send now while a turn runs', () => {
     const markup = render({ working: true, queue: [item('a', 'first'), item('b', 'second')] });
-    expect(text(markup)).toBe('first Sends next Send now second 2 in queue Send now');
+    expect(text(markup)).toBe('first Sends next Send now second Queued Send now');
     expect(markup.match(/aria-label="Edit queued message"/g)).toHaveLength(2);
     expect(markup.match(/aria-label="Remove from queue"/g)).toHaveLength(2);
   });
