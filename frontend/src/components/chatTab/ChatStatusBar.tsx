@@ -5,6 +5,7 @@ import {
   contextLeft, DEFAULT_STATUS_ITEMS, prStateName, readStatusItems, STATUS_ITEM_NAMES, STATUS_ITEMS, taskAge, writeStatusItems, type StatusItem,
 } from '../../../../shared/chatStatusBar';
 import { Dropdown } from '../ui/Dropdown';
+import { sendNowKeys } from './chatKeys';
 
 /** The pull request of the chat's Pane, when it has one. */
 export interface ChatStatusPullRequest { number: number; url?: string; state?: string; draft?: boolean }
@@ -135,9 +136,4 @@ export function ChatStatusBar({ context, tasks = [], queued, pr, working, phone,
     {customize}
     {working && !phone && <span className="chat-status-hint" title="Send now: stops this turn and sends your message"><kbd>{sendNowKeys()}</kbd><span className="chat-status-hint-text"> send now</span></span>}
   </div>;
-}
-
-/** The keys that send now on this computer. */
-export function sendNowKeys(): string {
-  return /mac|iphone|ipad/i.test(navigator.platform) ? '⌘↵' : 'Ctrl+↵';
 }

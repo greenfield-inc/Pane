@@ -5,6 +5,8 @@
 .chat-problem-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 .chat-notice { margin:8px auto 0; width:100%; max-width:var(--thread-max-width); padding:0 24px; font-size:13px; color:var(--chat-muted-foreground); }
 .chat-dock { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:13px; }
+/* The /clear confirm is a native dialog shown in place; drop the browser's dialog box styles. */
+dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; margin:0; padding:0; border:0; background:transparent; color:inherit; }
 .chat-queue { display:flex; flex-direction:column; gap:4px; margin:0; padding:0; list-style:none; }
 .chat-queue-now { display:inline-flex; align-items:center; height:28px; padding:0 6px; gap:4px; border-radius:6px; font-size:13px; flex-shrink:0; color:var(--chat-foreground); }
 .chat-queue-now:hover:not(:disabled) { background:var(--chat-muted); }

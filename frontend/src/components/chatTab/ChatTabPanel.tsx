@@ -21,7 +21,8 @@ import { ChatCommandMenu } from './ChatCommandMenu';
 import { CLEAR_COMMAND, isClearCommand, matchingCommands, withPaneCommands } from './chatCommands';
 import { ChatQueue } from './ChatQueue';
 import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
-import { ChatStatusBar, sendNowKeys, type ChatStatusPullRequest } from './ChatStatusBar';
+import { ChatStatusBar, type ChatStatusPullRequest } from './ChatStatusBar';
+import { sendNowKeys } from './chatKeys';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
 import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
 import { ChatCopyButton } from './ChatCopyButton';
@@ -431,11 +432,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         {view?.questions.map(question => <ChatQuestionCard key={question.id} question={question} disabled={disabled || busy} onAnswer={answer => void act(() => client.answer(panelId, question.id, answer))} />)}
         {view?.permissions.map(permission => <ChatPermissionCard key={permission.id} permission={permission} agent={agentName} machine={machine && !machine.local ? machine.name : undefined}
           disabled={disabled || busy} composerEmpty={!snapshot.draft.trim()} onAnswer={answerPermission} />)}
-        {confirmClear && <div className="chat-dock" role="alertdialog" aria-label="Clear the conversation?">
+        {/* A non-modal dialog inside the footer: the conversation above stays readable. */}
+        {confirmClear && <dialog open className="chat-dock chat-confirm" role="alertdialog" aria-label="Clear the conversation?">
           <span>{agentName} is working. Clearing stops this turn and starts a fresh conversation.</span>
           <button type="button" className="chat-button chat-button-outline" onClick={() => setConfirmClear(false)}>Cancel</button>
           <button type="button" className="chat-button chat-button-primary" disabled={disabled} onClick={clearConversation}>Clear</button>
-        </div>}
+        </dialog>}
         <ChatQueue queue={view?.queue ?? []} working={working} disabled={disabled} label={rendering.queued}
           onRemove={operationId => void act(() => client.unqueue(panelId, operationId))}
           onSendNow={operationId => void act(() => client.sendNow(panelId, operationId))}
