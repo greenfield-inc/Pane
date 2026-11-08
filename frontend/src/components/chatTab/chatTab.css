@@ -239,7 +239,7 @@ a.chat-status-item:hover,button.chat-status-item:hover:not(:disabled),.chat-stat
 .chat-status-panel-title { font-weight:600; }
 .chat-status-panel-heading { font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--color-text-secondary); }
 .chat-status-panel-muted { color:var(--color-text-secondary); }
-.chat-status-panel-foot { display:flex; white-space:nowrap; align-items:center; justify-content:space-between; gap:12px; padding-top:8px; border-top:1px solid var(--color-border-primary); font-size:12px; }
+.chat-status-panel-foot { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding-top:8px; border-top:1px solid var(--color-border-primary); font-size:12px; }
 .chat-status-link { color:var(--color-interactive, var(--chat-primary)); font-size:12px; }
 .chat-status-link:hover { text-decoration:underline; }
 .chat-status-check { display:flex; align-items:center; gap:10px; min-height:28px; cursor:pointer; }
@@ -266,3 +266,4 @@ a.chat-status-item:hover,button.chat-status-item:hover:not(:disabled),.chat-stat
 /* A narrow column drops the send-now hint before any item truncates. */
 @container chat-footer (max-width:560px) { .chat-status-hint-text { display:none; } }
 @container chat-footer (max-width:520px) { .chat-status-hint { display:none; } }
+.chat-status-panel-foot > * { white-space:nowrap; }
