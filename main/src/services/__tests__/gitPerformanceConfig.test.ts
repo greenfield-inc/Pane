@@ -106,7 +106,7 @@ describe('removePaneFsmonitorConfig', () => {
     expect(localConfig(cwd, 'core.fsmonitor')).toBe('/usr/local/bin/watchman-hook');
   });
 
-  it.each([['2.4.216'], ['2.4.216-canary.202611090101.abc1234.40.1'], ['2.5.0'], [null]])('does nothing when the last recorded version is %s', async lastVersion => {
+  it.each([['2.4.216'], ['2.4.215-canary.202611090101.abc1234.40.1'], ['2.5.0'], [null]])('does nothing when the last recorded version is %s', async lastVersion => {
     const cwd = repository();
     git(cwd, 'config', '--local', 'core.fsmonitor', 'true');
 

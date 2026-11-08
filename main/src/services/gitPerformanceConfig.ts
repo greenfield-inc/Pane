@@ -1,8 +1,8 @@
 import type { CommandRunner } from '../utils/commandRunner';
 import { compareVersions } from './agentChat/adapterSetup';
 
-/** The first Pane release that no longer writes `core.fsmonitor=true`. */
-const FIRST_VERSION_WITHOUT_FSMONITOR = '2.4.216';
+/** The last Pane release that wrote `core.fsmonitor=true`. */
+const LAST_VERSION_WITH_FSMONITOR = '2.4.215';
 
 const configuredRepositories = new Map<string, Promise<void>>();
 const fsmonitorSupport = new Map<string, Promise<boolean>>();
@@ -54,7 +54,7 @@ async function applyFastGitConfig(repoPath: string, commandRunner: CommandRunner
 }
 
 /**
- * Pane releases before FIRST_VERSION_WITHOUT_FSMONITOR wrote
+ * Pane releases up to LAST_VERSION_WITH_FSMONITOR wrote
  * `core.fsmonitor=true` into each project's local config, and Git then keeps a
  * daemon running in every worktree. On the first launch after upgrading from
  * one of them, remove that exact value and stop the daemons in the repository's
@@ -64,8 +64,7 @@ export async function removePaneFsmonitorConfig(
   lastVersion: string | null,
   repositories: Array<{ path: string; commandRunner: CommandRunner }>,
 ): Promise<void> {
-  // A canary records `2.4.216-canary.<date>.<sha>…`; compare its release part.
-  if (!lastVersion || compareVersions(lastVersion.split('-')[0], FIRST_VERSION_WITHOUT_FSMONITOR) >= 0) return;
+  if (!lastVersion || !wroteFsmonitor(lastVersion)) return;
   console.log(`[GitPerformanceConfig] Removing core.fsmonitor that Pane ${lastVersion} wrote, in ${repositories.length} repositories`);
   let removed = 0;
   for (const { path, commandRunner } of repositories) {
@@ -78,13 +77,24 @@ export async function removePaneFsmonitorConfig(
   console.log(`[GitPerformanceConfig] Removed core.fsmonitor from ${removed} of ${repositories.length} repositories`);
 }
 
+/**
+ * A canary carries the release it follows (`2.4.215-canary.<date>.<sha>…` is
+ * built after 2.4.215), so a prerelease of the last writing release already
+ * has this change.
+ */
+function wroteFsmonitor(version: string): boolean {
+  const [release, prerelease] = version.split('-');
+  const order = compareVersions(release, LAST_VERSION_WITH_FSMONITOR);
+  return order < 0 || (order === 0 && prerelease === undefined);
+}
+
 async function removeLocalFsmonitor(repoPath: string, commandRunner: CommandRunner): Promise<boolean> {
   const { stdout, exitCode } = await commandRunner.execFile(
     'git', ['config', '--local', '--get-all', 'core.fsmonitor'], repoPath, { silent: true, okExitCodes: [1] });
   if (exitCode === 1 || stdout.trim() !== 'true') return false;
   await commandRunner.execFile('git', ['config', '--local', '--unset', 'core.fsmonitor'], repoPath, { silent: true });
-  const { stdout: list } = await commandRunner.execFile('git', ['worktree', 'list', '--porcelain'], repoPath, { silent: true });
-  const worktrees = list.split('\n').filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
+  const { stdout: list } = await commandRunner.execFile('git', ['worktree', 'list', '--porcelain', '-z'], repoPath, { silent: true });
+  const worktrees = list.split('\0').filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
   for (const worktree of worktrees) await stopFsmonitorDaemon(worktree, commandRunner);
   return true;
 }
