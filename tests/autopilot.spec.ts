@@ -110,7 +110,7 @@ test('Autopilot: switch, Start, the walk on the stack, answers by you, never by 
     expect(listed).not.toContain('Autopilot');
 
     // Items waiting in A (two) and B (one), raised by their orchestrators, oldest first.
-    writeFileSync(path.join(root, 'cover-sheet.html'), '<!doctype html><title>Cover</title><body style="font-family:sans-serif"><h1>Chat tabs for agents, on ACP</h1><p>' + '<p>Package detail, one paragraph of the plan.</p>'.repeat(300) + '</p></body>');
+    writeFileSync(path.join(root, 'cover-sheet.html'), '<!doctype html><title>Cover</title><style>body{background:rgb(255,255,255)}@media (prefers-color-scheme: dark){body{background:rgb(0,0,0)}}</style><body style="font-family:sans-serif"><h1>Chat tabs for agents, on ACP</h1><p>' + '<p>Package detail, one paragraph of the plan.</p>'.repeat(300) + '</p></body>');
     const waitingCount = () => page.evaluate(async () => (await window.electronAPI.notify.getSnapshot()).items.filter(item => item.state === 'waiting').length);
     const q14 = ask(paneDir, a, ['--ui', 'approve', '--title', 'Q-14 Approve the chat tabs plan (r7)?', '--context', 'Six packages, about 7½ weeks.', '--links', JSON.stringify([{ label: 'cover-sheet.html', path: path.join(root, 'cover-sheet.html') }])]);
     askers.push(q14);
@@ -188,8 +188,9 @@ test('Autopilot: switch, Start, the walk on the stack, answers by you, never by 
     // D-70: the page's scrollbar is Pane's (classic, the theme's tokens), not the OS overlay one.
     await expect.poll(() => page.getByTestId('autopilot-webview').evaluate((element: Electron.WebviewTag) => element.executeJavaScript('innerWidth - document.documentElement.clientWidth')), { timeout: 10_000 }).toBeGreaterThan(0);
     expect(await tabsY()).toBe(firstY);
-    // D-163: the page follows Pane's theme, not the Mac's: its prefers-color-scheme is Pane's.
-    const guestDark = () => page.getByTestId('autopilot-webview').evaluate((element: Electron.WebviewTag) => element.executeJavaScript("matchMedia('(prefers-color-scheme: dark)').matches"));
+    // D-163: the page follows Pane's theme, not the Mac's: its prefers-color-scheme styles are Pane's.
+    // No debugger does this (D-216), so read the styles the person sees rather than the page's matchMedia.
+    const guestDark = () => page.getByTestId('autopilot-webview').evaluate((element: Electron.WebviewTag) => element.executeJavaScript('getComputedStyle(document.body).backgroundColor === "rgb(0, 0, 0)"'));
     const startTheme = await page.evaluate(async () => (await window.electronAPI.config.get()).data!);
     for (const value of ['dark', 'light'] as const) {
       await page.evaluate(async theme => { await window.electronAPI.config.update({ appearanceMode: 'fixed', theme }); }, value);

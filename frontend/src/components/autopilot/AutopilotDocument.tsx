@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import type { AutopilotDocument as AutopilotDocumentContent } from '../../../../shared/types/autopilot';
 import { SHARED_BROWSER_PARTITION } from '../../../../shared/constants/browserPartitions';
+import { guestColorSchemeScript } from './guestColorScheme';
 
 /**
  * A page shown in a stack tab keeps Pane's scrollbars (D-70): the theme's own scrollbar tokens,
@@ -41,7 +42,7 @@ export function AutopilotWebPage({ src, title }: { src: string; title: string })
       if (!ready) return;
       const root = document.documentElement.classList;
       const scheme = root.contains('dark') || root.contains('oled') ? 'dark' : 'light';
-      void window.electronAPI?.invoke('webview:color-scheme', webview.getWebContentsId(), scheme)?.catch(() => undefined);
+      void webview.executeJavaScript(guestColorSchemeScript(scheme)).catch(() => undefined);
       const css = scrollbarCss();
       inserted = inserted.then(async (key) => {
         if (key) await webview.removeInsertedCSS(key).catch(() => undefined);
