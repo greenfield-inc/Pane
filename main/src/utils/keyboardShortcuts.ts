@@ -20,7 +20,7 @@ export function isCommandPaletteShortcutEnabled(
 }
 
 /** The binding a catalog command answers to on this computer, with the person's overrides. */
-export function effectiveChordFor(
+function effectiveChordFor(
   config: Pick<AppConfig, 'keyboardShortcutOverrides'>,
   id: string,
   platform: KeyPlatform = keyPlatformFor(process.platform),
