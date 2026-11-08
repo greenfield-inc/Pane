@@ -18,9 +18,10 @@ import { NotifyCard } from '../notify/NotifyCard';
 import { relativeAge, withMachineLabels } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import { SessionBeside } from '../PaneChatView';
-import { APPROVALS_SORTS, approvalRowLines, besideOf, connectedOf, groupApprovals, offlineRowText, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
+import { APPROVALS_SORTS, approvalRowLines, besideOf, connectedOf, groupApprovals, groupCountText, offlineRowText, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
 import { MachineContext } from './MachineContext';
 import { toggleApprovals } from './approvalsNavigation';
+import { useSidebarSessionOrder } from './useSidebarSessionOrder';
 
 /**
  * Links open as tabs through this computer's Pane, so only for this computer's items while the
@@ -45,10 +46,10 @@ function useMachineMark() {
   };
 }
 
-function GroupHeader({ group, mark }: { group: ApprovalGroup; mark: ReactNode }) {
+function GroupHeader({ group, mark, count }: { group: ApprovalGroup; mark: ReactNode; count: string }) {
   const Icon = group.autopilot ? Navigation : group.project ? Folder : group.session ? MessageSquare : GitBranch;
   return (
-    <div className={cn('flex items-center gap-2 px-4 pb-1.5 pt-4 text-[12.5px] font-medium', group.autopilot ? 'text-autopilot-on-tint' : 'text-text-secondary')} data-testid="approvals-group">
+    <div className={cn('flex items-center gap-2 border-b border-border-secondary bg-surface-secondary px-3 py-2 text-[12.5px] font-semibold', group.autopilot ? 'text-autopilot-on-tint' : 'text-text-primary')} data-testid="approvals-group">
       <Icon className={cn('h-3.5 w-3.5 shrink-0', group.autopilot ? 'text-autopilot' : 'text-text-tertiary')} aria-hidden="true" />
       <span className="min-w-0 truncate">{group.label}</span>
       {group.machine && (
@@ -56,7 +57,7 @@ function GroupHeader({ group, mark }: { group: ApprovalGroup; mark: ReactNode })
           {mark}{group.machine}
         </span>
       )}
-      <span className="ml-auto shrink-0 tabular-nums text-text-tertiary">{group.items.length}</span>
+      <span className="ml-auto shrink-0 rounded-full bg-surface-tertiary px-2 py-px text-[11.5px] font-medium tabular-nums text-text-secondary" data-testid="approvals-group-count">{count}</span>
     </div>
   );
 }
@@ -283,7 +284,8 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const machines = useAllMachinesStore((state) => state.entries);
   const items = useMemo(() => withMachineLabels(snapshot?.items ?? [], machines), [snapshot, machines]);
   const [sort, setSort] = useState<ApprovalsSort>(() => readApprovalsSort());
-  const { waiting, answered, list, groups, stale, offline } = useMemo(() => groupApprovals(items, tab, sort), [items, tab, sort]);
+  const sidebarOrder = useSidebarSessionOrder(sort === 'sidebar');
+  const { waiting, answered, list, groups, stale, offline } = useMemo(() => groupApprovals(items, tab, sort, sidebarOrder), [items, tab, sort, sidebarOrder]);
   const [staleExpanded, setStaleExpanded] = useState(false);
   // An item opened from elsewhere (a link, the strip) shows even when its group is collapsed.
   const staleOpen = staleExpanded || stale.some((item) => item.id === selectedId);
@@ -470,14 +472,15 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             {importError.message} {importError.next}
           </p>
         )}
-        <div className="shrink-0 px-4 pb-1">
+        <div className="flex shrink-0 items-center gap-2 px-4 pb-1">
+          <span className="text-[12.5px] text-text-tertiary" aria-hidden="true">Group by</span>
           <Dropdown
             className="inline-block"
             trigger={
               <button
                 type="button"
-                aria-label={`Sort approvals: ${APPROVALS_SORTS.find((option) => option.id === sort)?.label}`}
-                className="inline-flex items-center gap-1 rounded text-[12.5px] text-text-tertiary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+                aria-label={`Group by: ${APPROVALS_SORTS.find((option) => option.id === sort)?.label}`}
+                className="inline-flex items-center gap-1 rounded text-[12.5px] font-medium text-text-secondary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
                 data-testid="approvals-sort"
               >
                 {APPROVALS_SORTS.find((option) => option.id === sort)?.label}
@@ -487,7 +490,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             items={APPROVALS_SORTS.map((option) => ({ id: option.id, label: option.label, onClick: () => chooseSort(option.id) }))}
             selectedId={sort}
             selectedMark="check"
-            menuLabel="Sort approvals"
+            menuLabel="Group by"
             position="bottom-left"
             width="sm"
           />
@@ -502,12 +505,16 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             </p>
           )}
           {groups.length > 0
-            ? groups.map((group) => (
-              <div key={group.key}>
-                <GroupHeader group={group} mark={machineMark(group.machineId)} />
-                {group.items.map(renderItem)}
+            ? (
+              <div className="flex flex-col gap-3 pt-1">
+                {groups.map((group) => (
+                  <div key={group.key} className="overflow-hidden rounded-xl border border-border-secondary bg-surface-primary" data-testid="approvals-group-box">
+                    <GroupHeader group={group} mark={machineMark(group.machineId)} count={groupCountText(group, tab)} />
+                    <div className="p-1">{group.items.map(renderItem)}</div>
+                  </div>
+                ))}
               </div>
-            ))
+            )
             : list.map(renderItem)}
           {offline.map((row) => <OfflineMachineRow key={row.machineId} row={row} />)}
           {stale.length > 0 && (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { approvalRowLines, besideOf, connectedOf, groupApprovals, offlineRows, offlineRowText, parseApprovalsSort, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort } from './approvalGroups';
+import { approvalIdsInListOrder, approvalRowLines, besideOf, connectedOf, groupApprovals, groupCountText, offlineRows, offlineRowText, parseApprovalsSort, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort, sidebarSessionKeys } from './approvalGroups';
 
 const launch = { id: 'session-1', name: 'Pane Fixes', paneId: 'session-pane' };
 const infra = { id: 'session-2', name: 'Infra', paneId: 'infra-pane' };
@@ -146,11 +146,91 @@ describe('By project', () => {
   });
 });
 
+describe('Sidebar order', () => {
+  const docs = { id: 'session-3', name: 'Docs', paneId: 'docs-pane' };
+  const from = (session: typeof launch, extra: Partial<NotifyItem> = {}) => ({ source: { name: session.name, agent: 'Claude', session }, ...extra });
+  const items = [
+    item('fixes-old', 1, from(launch)),
+    item('infra', 2, from(infra)),
+    item('fixes-new', 3, from(launch)),
+    item('docs', 4, from(docs)),
+    item('studio-infra', 5, from(infra, { machine: 'studio', machineId: 'studio' })),
+    item('loose', 6),
+    item('autopilot', 7, { source: { name: 'Autopilot', agent: 'Claude', autopilot: true } }),
+    item('done', 8, { state: 'answered', resolvedAt: 9, ...from(infra) }),
+  ];
+  const labels = (queue: ReturnType<typeof groupApprovals>) => queue.groups.map(group => `${group.machine ?? ''}${group.label}`);
+
+  it('puts Session groups in the sidebar\'s order, newest first inside, and leaves out Sessions with nothing listed', () => {
+    const order = ['local:session-2', 'local:session-9', 'local:session-1', 'local:session-3'];
+    const queue = groupApprovals(items, 'waiting', 'sidebar', order);
+    expect(labels(queue).slice(0, 3)).toEqual(['Infra', 'Pane Fixes', 'Docs']);
+    expect(queue.groups[1].items.map(entry => entry.id)).toEqual(['fixes-new', 'fixes-old']);
+    expect(queue.groups.some(group => group.session?.id === 'session-9')).toBe(false);
+  });
+
+  it('lists groups the sidebar doesn\'t show last, the one with the newest item first', () => {
+    const queue = groupApprovals(items, 'waiting', 'sidebar', ['local:session-1']);
+    expect(labels(queue)).toEqual(['Pane Fixes', 'Autopilot', 'Not in a Session', 'studioInfra', 'Docs', 'Infra']);
+  });
+
+  it('follows the sidebar when a Session is dragged to a new place', () => {
+    const before = groupApprovals(items, 'waiting', 'sidebar', ['local:session-1', 'local:session-2', 'local:session-3']);
+    const after = groupApprovals(items, 'waiting', 'sidebar', ['local:session-3', 'local:session-1', 'local:session-2']);
+    expect(labels(before).slice(0, 3)).toEqual(['Pane Fixes', 'Infra', 'Docs']);
+    expect(labels(after).slice(0, 3)).toEqual(['Docs', 'Pane Fixes', 'Infra']);
+  });
+
+  it('keys another machine\'s Session by that machine, as All machines does', () => {
+    const queue = groupApprovals(items, 'waiting', 'sidebar', ['studio:session-2', 'local:session-2']);
+    expect(labels(queue).slice(0, 2)).toEqual(['studioInfra', 'Infra']);
+  });
+
+  it('with no order (nothing in the sidebar yet) lists every group newest first, as By Session does', () => {
+    expect(labels(groupApprovals(items, 'waiting', 'sidebar'))).toEqual(labels(groupApprovals(items, 'waiting', 'session')));
+  });
+
+  it('gives the pager the grouped order of ids, Stale after them only when asked', () => {
+    const stale = item('stale', 0, { staleSince: 1 });
+    const queue = groupApprovals([...items, stale], 'waiting', 'sidebar', ['local:session-3', 'local:session-1']);
+    const ids = ['docs', 'fixes-new', 'fixes-old', 'autopilot', 'loose', 'studio-infra', 'infra'];
+    expect(approvalIdsInListOrder(queue)).toEqual(ids);
+    expect(approvalIdsInListOrder(queue, { withStale: true })).toEqual([...ids, 'stale']);
+  });
+
+  it('counts each group\'s waiting items, leaving out an answer in its Undo hold', () => {
+    const queue = groupApprovals([item('a', 1, from(launch)), item('b', 2, from(launch, { state: 'sent' }))], 'waiting', 'sidebar', ['local:session-1']);
+    expect(groupCountText(queue.groups[0], 'waiting')).toBe('1 waiting');
+    expect(groupCountText(groupApprovals(items, 'answered', 'sidebar', []).groups[0], 'answered')).toBe('1 answered');
+  });
+
+  it('reads the one-machine sidebar as Pinned, then the rest, without archived Sessions', () => {
+    const sessions = [{ id: 'a' }, { id: 'b', isPinned: true }, { id: 'c', archived: true }, { id: 'd' }];
+    expect(sidebarSessionKeys(sessions, 'local')).toEqual(['local:b', 'local:a', 'local:d']);
+  });
+
+  it('groups 300 waiting approvals across 60 Sessions in under 50 ms', () => {
+    const many = Array.from({ length: 300 }, (_, index) => item(`q-${index}`, index, {
+      source: { name: 'w', agent: 'Claude', session: { id: `s-${index % 60}`, name: `S${index % 60}`, paneId: `p-${index % 60}` } },
+      machineId: index % 3 === 0 ? 'studio' : undefined,
+    }));
+    const order = Array.from({ length: 60 }, (_, index) => `local:s-${59 - index}`);
+    groupApprovals(many, 'waiting', 'sidebar', order);
+    const started = performance.now();
+    const queue = groupApprovals(many, 'waiting', 'sidebar', order);
+    const ids = approvalIdsInListOrder(queue);
+    const took = performance.now() - started;
+    expect(ids).toHaveLength(300);
+    expect(took).toBeLessThan(50);
+  });
+});
+
 describe('the sort, remembered on this computer', () => {
   it('reads each sort back, and Most recent from anything else', () => {
     expect(parseApprovalsSort('session')).toBe('session');
     expect(parseApprovalsSort('project')).toBe('project');
     expect(parseApprovalsSort('recent')).toBe('recent');
+    expect(parseApprovalsSort('sidebar')).toBe('sidebar');
     expect(parseApprovalsSort('nonsense')).toBe('recent');
     expect(parseApprovalsSort('toString')).toBe('recent');
     expect(parseApprovalsSort(null)).toBe('recent');
