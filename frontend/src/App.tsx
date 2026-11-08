@@ -346,6 +346,7 @@ function App() {
   // Load config on app startup
   useEffect(() => {
     fetchConfig();
+    return useConfigStore.getState().subscribeToUpdates();
   }, [fetchConfig]);
 
   // Remember where the user is on the active host, so a host switch can return here.

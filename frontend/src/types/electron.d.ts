@@ -557,6 +557,8 @@ interface ElectronAPI {
 
   // Event listeners for real-time updates
   events: {
+    /** Config changed in main (Settings, another window, or a hand edit of config.json). */
+    onConfigUpdated: (callback: (config: AppConfig) => void) => () => void;
     onPermissionRequest: (callback: (request: PanePermissionRequest) => void) => () => void;
     onPermissionResolved: (callback: (event: PanePermissionResolvedEvent) => void) => () => void;
     onSessionCreationFailed: (callback: (failure: { name: string; error: string }) => void) => () => void;
