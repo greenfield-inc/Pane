@@ -101,7 +101,8 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
         await panelManager.createPanel({ id: panelId, sessionId: ownerPaneId, type: 'chat', title, initialState: { customState: state }, metadata: { permanent: true } });
       },
       ensure: (panelId) => chatTabs().ensure(panelId),
-      isRunning: (panelId) => chatTabs().isRunning(panelId),
+      // A /clear swaps the agent for a fresh conversation; Autopilot must not read that as its agent stopping.
+      isRunning: (panelId) => chatTabs().isRunning(panelId) || chatTabs().isClearing(panelId),
       send: (panelId, text) => { chatTabs().send(panelId, { operationId: `autopilot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text }); },
       stop: (panelId, message, next) => chatTabs().stop(panelId, { message, next }),
       resume: async (panelId) => {

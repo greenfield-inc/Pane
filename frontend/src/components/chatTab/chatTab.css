@@ -5,7 +5,19 @@
 .chat-problem-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 .chat-notice { margin:8px auto 0; width:100%; max-width:var(--thread-max-width); padding:0 24px; font-size:13px; color:var(--chat-muted-foreground); }
 .chat-dock { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:13px; }
-.chat-queue { display:flex; flex-direction:column; gap:4px; }
+/* The /clear confirm is a native dialog shown in place; drop the browser's dialog box styles. */
+dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; margin:0; padding:0; border:0; background:transparent; color:inherit; }
+.chat-queue { display:flex; flex-direction:column; gap:4px; margin:0; padding:0; list-style:none; }
+.chat-queue-now { display:inline-flex; align-items:center; height:28px; padding:0 6px; gap:4px; border-radius:6px; font-size:13px; flex-shrink:0; color:var(--chat-foreground); }
+.chat-queue-now:hover:not(:disabled) { background:var(--chat-muted); }
+.chat-queue-now:disabled { opacity:.55; }
+/* Phone width: Send now is its icon alone, and the order label gives way to the text. */
+@container chat-footer (max-width:480px) { .chat-queue-now-label,.chat-queue-label { display:none; } }
+.chat-queue li.chat-queue-editing { flex-direction:column; align-items:stretch; padding:6px; border-style:solid; }
+.chat-queue-input { width:100%; resize:vertical; min-height:44px; padding:6px 8px; border-radius:8px; border:1px solid var(--chat-border); background:var(--chat-background); color:inherit; font:inherit; font-size:13px; }
+.chat-queue-actions { display:flex; justify-content:flex-end; gap:6px; }
+.chat-divider { display:flex; align-items:center; gap:12px; margin:8px 0; font-size:12px; color:var(--chat-muted-foreground); }
+.chat-divider::before, .chat-divider::after { content:''; flex:1; border-top:1px solid var(--chat-border); }
 .chat-queue li { display:flex; align-items:center; gap:8px; padding:6px 6px 6px 12px; border:1px dashed var(--chat-border); border-radius:12px; font-size:13px; }
 .chat-queue-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .chat-queue-label { flex-shrink:0; font-size:12px; color:var(--chat-muted-foreground); }
@@ -18,7 +30,20 @@
 .chat-question-choice { display:flex; align-items:flex-start; gap:8px; cursor:pointer; }
 .chat-question-choice input { margin-top:4px; accent-color:var(--chat-primary); }
 .chat-question-input { width:100%; padding:6px 10px; border:1px solid var(--chat-border); border-radius:8px; background:var(--chat-background); color:var(--chat-foreground); }
-.chat-question-actions { display:flex; gap:8px; }
+.chat-question-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.chat-question-head { display:flex; align-items:baseline; gap:12px; }
+.chat-question-head .chat-question-message { flex:1; min-width:0; }
+.chat-question-count { flex-shrink:0; font-size:12px; font-variant-numeric:tabular-nums; color:var(--chat-muted-foreground); }
+.chat-question-step { display:flex; flex-direction:column; gap:12px; }
+.chat-question-step:focus { outline:none; }
+.chat-question-heading { font-weight:600; }
+.chat-question-review { display:flex; flex-direction:column; gap:2px; margin:0; padding:8px 0 0; list-style:none; border-top:1px solid var(--chat-border); }
+.chat-question-review-row { display:flex; width:100%; gap:12px; padding:4px 6px; border-radius:6px; text-align:left; font-size:13px; }
+.chat-question-review-row:hover { background:color-mix(in oklab,var(--chat-muted) 70%,transparent); }
+.chat-question-review-title { flex-shrink:0; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--chat-muted-foreground); }
+.chat-question-review-pick { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-question-keys { margin-left:auto; font-size:12px; color:var(--chat-muted-foreground); }
+@media (hover:none) { .chat-question-keys { display:none; } }
 
 /* Turns and steps (round 2 · Option 1; quiet turns per round 3 · A). */
 .chat-turn { display:flex; flex-direction:column; gap:10px; }
@@ -105,6 +130,7 @@
 .chat-chip { display:inline-flex; align-items:center; gap:6px; height:28px; min-width:0; max-width:15rem; padding:0 8px; border-radius:999px; font-size:13px; color:var(--chat-muted-foreground); }
 .chat-chip:hover:not(:disabled),.chat-chip[aria-expanded=true] { background:var(--chat-muted); color:var(--chat-foreground); }
 .chat-chip:disabled { opacity:.55; }
+.chat-chip[data-tone=warning],.chat-chip[data-tone=warning]:hover:not(:disabled) { color:var(--color-status-warning); }
 .chat-chip-icon,.chat-chip-chevron { flex-shrink:0; }
 .chat-chip-icon { width:14px; height:14px; }
 .chat-chip-chevron { width:12px; height:12px; }
@@ -197,3 +223,50 @@
 }
 @media (prefers-reduced-motion:reduce) { .chat-message-actions .chat-copy,.chat-code .chat-code-copy { transition:none; } }
 @media (hover:none) { .chat-message-actions .chat-copy,.chat-code .chat-code-copy { min-width:44px; height:44px; justify-content:center; } }
+/* The status bar above the composer (D-222, D-253): one muted footer line, items split by a dot. */
+.chat-statusline { display:flex; align-items:center; gap:4px; min-width:0; padding:0 6px; font-size:13px; line-height:20px; color:var(--chat-muted-foreground); }
+.chat-status-items { display:flex; align-items:center; min-width:0; flex:0 1 auto; overflow:hidden; }
+.chat-status-cell { display:flex; align-items:center; min-width:0; flex:0 1 auto; }
+.chat-status-cell + .chat-status-cell::before { content:'·'; padding:0 6px; flex-shrink:0; opacity:.7; }
+.chat-status-anchor { display:flex; min-width:0; }
+.chat-status-item { display:inline-flex; align-items:center; min-width:0; max-width:16rem; height:24px; padding:0 4px; border-radius:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:inherit; text-decoration:none; font-size:inherit; }
+.chat-status-item .chat-chip-label { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+a.chat-status-item:hover,button.chat-status-item:hover:not(:disabled),.chat-status-item[aria-expanded=true] { background:var(--chat-muted); color:var(--chat-foreground); }
+.chat-status-item:disabled { opacity:.55; }
+.chat-status-item[data-tone=warning] { color:var(--color-status-warning); }
+.chat-status-more { flex-shrink:0; }
+.chat-status-hint { margin-left:auto; flex-shrink:0; white-space:nowrap; font-size:12px; }
+.chat-status-hint kbd { display:inline-block; margin-right:4px; padding:0 5px; border:1px solid var(--chat-border); border-radius:5px; font-family:inherit; font-size:11px; line-height:16px; }
+.chat-status-panel { display:flex; flex-direction:column; gap:8px; padding:8px 10px; font-size:13px; color:var(--color-text-primary); }
+.chat-status-panel p { margin:0; }
+.chat-status-panel-title { font-weight:600; }
+.chat-status-panel-heading { font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--color-text-secondary); }
+.chat-status-panel-muted { color:var(--color-text-secondary); }
+.chat-status-panel-foot { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding-top:8px; border-top:1px solid var(--color-border-primary); font-size:12px; }
+.chat-status-link { color:var(--color-interactive, var(--chat-primary)); font-size:12px; }
+.chat-status-link:hover { text-decoration:underline; }
+.chat-status-check { display:flex; align-items:center; gap:10px; min-height:28px; cursor:pointer; }
+.chat-status-check input { width:15px; height:15px; accent-color:var(--color-interactive, var(--chat-primary)); }
+.chat-status-meter { height:6px; border-radius:999px; background:var(--color-border-primary); overflow:hidden; }
+.chat-status-meter span { display:block; height:100%; border-radius:inherit; background:var(--color-text-secondary); }
+.chat-status-meter span[data-tone=warning] { background:var(--color-status-warning); }
+.chat-status-tasks { display:flex; flex-direction:column; gap:6px; margin:0; padding:0; list-style:none; }
+.chat-status-tasks li { display:flex; align-items:center; gap:8px; min-width:0; }
+.chat-status-task-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* The menus render outside the chat, so they use the app's tokens, not the chat's. */
+.chat-status-button { display:inline-flex; align-items:center; height:26px; padding:0 10px; border:1px solid var(--color-border-primary); border-radius:8px; font-size:12px; color:var(--color-text-primary); }
+.chat-status-button:hover { background:var(--color-surface-hover); }
+/* Phone (D-118 width): the same line, compact; it scrolls sideways rather than wrap, "…" stays put. */
+.chat-statusline[data-layout=phone] { font-size:13px; padding:0 2px; }
+.chat-statusline[data-layout=phone] .chat-status-items { overflow-x:auto; scrollbar-width:none; }
+.chat-statusline[data-layout=phone] .chat-status-items::-webkit-scrollbar { display:none; }
+.chat-statusline[data-layout=phone] .chat-status-cell { flex-shrink:0; }
+.chat-statusline[data-layout=phone] .chat-status-item { height:32px; max-width:11rem; }
+.chat-statusline[data-layout=phone] .chat-status-cell + .chat-status-cell::before { padding:0 3px; }
+/* The bar sits closer to the queue and the composer than the footer's other blocks do. */
+.chat-tab .chat-composer-footer { container:chat-footer / inline-size; }
+.chat-tab .chat-statusline { margin:-8px 0 -10px; }
+/* A narrow column drops the send-now hint before any item truncates. */
+@container chat-footer (max-width:560px) { .chat-status-hint-text { display:none; } }
+@container chat-footer (max-width:520px) { .chat-status-hint { display:none; } }
+.chat-status-panel-foot > * { white-space:nowrap; }

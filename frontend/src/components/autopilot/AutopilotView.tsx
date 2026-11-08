@@ -19,6 +19,10 @@ import { offlineRows, offlineRowText } from '../approvals/approvalGroups';
 import { withMachineLabels } from '../notify/notifyFormat';
 import { AutopilotReach } from './AutopilotReach';
 import { AutopilotStack } from './AutopilotStack';
+import { useObservedContentBox } from '../../hooks/useObservedContentBox';
+import { useOuterPanelResize } from '../../hooks/useOuterPanelResize';
+import { OuterResizeSeparator } from '../ui/OuterResizeSeparator';
+import { OUTER_PANEL_CONFIGS } from '../../utils/outerPanelSizing';
 import { AWAY_BLOCK, controlLine, ITEMS_BLOCK, LOG_BLOCK, queuedControlLabel } from '../../../../shared/autopilotTranscript';
 
 const ChatTabPanel = lazy(() => import('../chatTab/ChatTabPanel'));
@@ -260,6 +264,11 @@ export function AutopilotView() {
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
   const approvalOpen = useApprovalColumnStore((state) => state.open.autopilot !== undefined);
   useStackKeys(approvalOpen);
+  // The chat's width is the person's (drag its edge; double-click resets). Too narrow for the chat
+  // and the stack at their minimums, the chat keeps its fluid width.
+  const viewBox = useObservedContentBox<HTMLDivElement>();
+  const chatResize = useOuterPanelResize({ config: OUTER_PANEL_CONFIGS.autopilotChat, containerPx: viewBox.width, enabled: !!snapshot });
+  const chatSized = chatResize.separatorVisible;
   // Opening Autopilot, or coming back to Pane on it, is how the person returns while Sentinel stays on (J29).
   useEffect(() => {
     markAutopilotOpened();
@@ -272,8 +281,15 @@ export function AutopilotView() {
   if (!snapshot) return <div className="flex flex-1 items-center justify-center bg-bg-primary text-[13px] text-text-tertiary">Loading Autopilot…</div>;
 
   return (
-    <div className="autopilot-view flex min-h-0 min-w-0 flex-1 bg-bg-primary" data-testid="autopilot-view" data-state={snapshot.state}>
-      <section aria-label="Autopilot chat" className="flex min-h-0 w-[44%] min-w-[340px] max-w-[720px] flex-col border-r border-border-primary">
+    <div ref={viewBox.ref} className="autopilot-view flex min-h-0 min-w-0 flex-1 bg-bg-primary" data-testid="autopilot-view" data-state={snapshot.state}>
+      <section aria-label="Autopilot chat"
+        className={cn('relative flex min-h-0 flex-col border-r border-border-primary', chatSized ? 'shrink-0' : 'w-[44%] min-w-[340px] max-w-[720px]')}
+        style={chatSized ? { width: chatResize.renderedPx } : undefined}>
+        {/* On the chat's right edge, over its border. */}
+        {chatSized && (
+          <OuterResizeSeparator label="Resize Autopilot chat" orientation="vertical" value={chatResize.effectivePx}
+            minimum={chatResize.floor} maximum={chatResize.cap} className="!left-auto -right-1" {...chatResize.separatorHandlers} />
+        )}
         <Header snapshot={snapshot} pending={pending} />
         <WalkBar snapshot={snapshot} />
         <AutopilotReach snapshot={snapshot} />
@@ -283,6 +299,7 @@ export function AutopilotView() {
           {snapshot.panelId ? (
             <Suspense fallback={null}>
               <ChatTabPanel
+                clearable={false}
                 key={snapshot.panelId}
                 panelId={snapshot.panelId}
                 client={window.electronAPI.chatTab}
