@@ -12,6 +12,7 @@ type MachinesMock = {
   emitMachineEvent: (event: MachineConnectionsEvent, reads?: Record<string, Record<string, JsonValue>>) => void;
   getNavigationMemory: (hostId: string | null) => JsonValue;
   emitRemoteDaemonResyncRequested: (event: { hostChanged: boolean }) => void;
+  getConfig: () => { machineMarks?: JsonObject };
 };
 
 const mock = (page: Page) => page.evaluateHandle(() => {
@@ -135,10 +136,10 @@ test('All machines lists every machine\'s rows, one project per repository, and 
 
   await expect(page.getByTestId('all-machines-project')).toHaveCount(4);
   // acme-web is open on studio-mac and build-box: one project, each Pane with its machine.
-  await expect(projectRows(page, 'acme-web')).toHaveText([/fix-checkout-race.*studi/, /add-dark-mode.*studi/, /load-test-checkout.*build/]);
+  await expect(projectRows(page, 'acme-web')).toHaveText([/fix-checkout-race.*S$/, /add-dark-mode.*S$/, /load-test-checkout.*B$/]);
   await expect(page.getByRole('button', { name: 'fix-checkout-race on studio-mac' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'load-test-checkout on build-box' })).toBeVisible();
-  await expect(page.getByTestId('all-machines-session-row')).toHaveText([/Spring sale launch.*2.*studi/, /Backup rotation.*1.*build/]);
+  await expect(page.getByTestId('all-machines-session-row')).toHaveText([/Spring sale launch.*2.*S$/, /Backup rotation.*1.*B$/]);
   await expect(page.getByRole('status').filter({ hasText: 'travel-laptop went offline at 9:14' })).toContainText('Its rows are from then.');
   await expect(page.getByRole('button', { name: 'trip-notes on travel-laptop' })).toBeVisible();
   expect(await (await mock(page)).evaluate(api => api.getPreferences().sidebar_all_machines)).toBe('true');
@@ -294,7 +295,7 @@ for (const scheme of ['light', 'dark'] as const) test(`one project row per repos
   await expect(projects.getByTestId('all-machines-project-machines').nth(2)).toHaveAccessibleName('On parsa-devbox');
 
   await projects.nth(0).getByRole('button', { name: 'Expand project acme-web' }).click();
-  await expect(projects.nth(0).getByTestId('all-machines-pane-row')).toHaveText([/fix-checkout-race.*studi/, /load-test-checkout.*build/]);
+  await expect(projects.nth(0).getByTestId('all-machines-pane-row')).toHaveText([/fix-checkout-race.*S$/, /load-test-checkout.*B$/]);
   await page.screenshot({ path: testInfo.outputPath(`all-machines-repositories-${scheme}.png`) });
 });
 
@@ -342,7 +343,7 @@ test('a pinned Pane shows its pin at rest and sorts first in its project', async
     { build },
   ), { 'sessions:get-all-with-projects': { success: true, data: [project(1, 'acme-web', [pinned])] } });
 
-  await expect(projectRows(page, 'acme-web').first()).toHaveText(/load-test-checkout.*build/);
+  await expect(projectRows(page, 'acme-web').first()).toHaveText(/load-test-checkout.*B$/);
   await expect(projectRows(page, 'acme-web').first().getByRole('img', { name: 'Pinned' })).toBeVisible();
   await expect(projectRows(page, 'acme-web').getByRole('img', { name: 'Pinned' })).toHaveCount(1);
   await page.screenshot({ path: testInfo.outputPath('all-machines-pinned-light.png') });
@@ -405,4 +406,62 @@ for (const scheme of ['light', 'dark'] as const) test(`All machines shows the Au
   await sidebar.getByTestId('autopilot-nav').click();
   await expect(sidebar.getByTestId('autopilot-nav')).toHaveAttribute('aria-current', 'page');
   await expect(page.getByTestId('all-machines-sidebar')).toBeVisible();
+});
+
+// P6, journey 10: every row ends with an 18px letter mark on the machine's colour.
+for (const scheme of ['light', 'dark'] as const) test(`each row ends with an 18px letter mark that names its machine and OS (${scheme})`, async ({ page }, testInfo) => {
+  await openAllMachines(page, scheme);
+  const tripNotes = page.getByTestId('all-machines-pane-row').filter({ hasText: 'trip-notes' });
+  await expect(tripNotes.getByRole('img', { name: 'on travel-laptop', exact: true })).toHaveText('T');
+  await expect(page.getByTestId('all-machines-session-row').getByTestId('machine-row-mark')).toHaveText(['S', 'B']);
+  // The mark and the actions button share one 18px box.
+  for (const box of [await tripNotes.getByTestId('all-machines-mark-slot').boundingBox(), await tripNotes.getByRole('button', { name: 'Actions for trip-notes' }).boundingBox()]) {
+    expect(box).toMatchObject({ width: 18, height: 18 });
+  }
+  // Project rows show one bare letter per machine.
+  await expect(page.getByTestId('all-machines-project-machines').first()).toHaveText('SB');
+  await page.screenshot({ path: testInfo.outputPath(`p6-all-machines-${scheme}.png`), clip: { x: 0, y: 0, width: 720, height: 700 } });
+
+  // Focusing the box (Tab from the row reaches its actions button) names the machine and its OS.
+  await page.getByRole('button', { name: 'trip-notes on travel-laptop' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(tripNotes.getByRole('button', { name: 'Actions for trip-notes' })).toBeFocused();
+  await expect(page.getByRole('tooltip')).toHaveText('travel-laptop · macOS');
+  await page.screenshot({ path: testInfo.outputPath(`p6-all-machines-tooltip-${scheme}.png`), clip: { x: 0, y: 0, width: 720, height: 700 } });
+});
+
+test('the switcher\'s pencil changes a machine\'s letter and colour on this computer, kept across a relaunch until reset', async ({ page, browser }, testInfo) => {
+  await openAllMachines(page);
+  await page.getByRole('button', { name: 'Showing all machines. Switch machine' }).click();
+  await expect(page.getByRole('menuitemradio', { name: /travel-laptop/ }).getByTestId('machine-mark')).toHaveText('T');
+  await page.getByRole('menuitemradio', { name: /travel-laptop/ }).hover();
+  await page.getByRole('button', { name: 'Change the mark for travel-laptop' }).click();
+  const popover = page.getByRole('dialog', { name: 'Mark for travel-laptop' });
+  await expect(popover.getByLabel('Letter for travel-laptop')).toBeFocused();
+  await popover.getByLabel('Letter for travel-laptop').fill('tl');
+  await popover.getByRole('radio', { name: 'Lime' }).click();
+  await expect(popover.getByRole('radio', { name: 'Lime' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('menuitemradio', { name: /travel-laptop/ }).getByTestId('machine-mark')).toHaveText('TL');
+  await page.screenshot({ path: testInfo.outputPath('p6-switcher-popover-light.png'), clip: { x: 0, y: 0, width: 720, height: 700 } });
+  const saved = await (await mock(page)).evaluate(api => api.getConfig().machineMarks ?? null);
+  expect(saved).toEqual({ 'travel-laptop': { letters: 'TL', color: 'Lime' } });
+
+  // Escape closes the popover first, then the menu.
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await expect(page.getByRole('menu', { name: 'Agents run on' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('img', { name: 'on travel-laptop', exact: true })).toHaveText('TL');
+
+  // A relaunch on this computer keeps it; Reset to automatic brings back T.
+  const relaunched = await browser.newPage();
+  await openAllMachines(relaunched, 'light', { extra: { initialConfig: { appearanceMode: 'system', machineMarks: saved } } });
+  await expect(relaunched.getByRole('img', { name: 'on travel-laptop', exact: true })).toHaveText('TL');
+  await relaunched.getByRole('button', { name: 'Showing all machines. Switch machine' }).click();
+  await relaunched.getByRole('menuitemradio', { name: /travel-laptop/ }).hover();
+  await relaunched.getByRole('button', { name: 'Change the mark for travel-laptop' }).click();
+  await relaunched.getByRole('button', { name: 'Reset to automatic' }).click();
+  await expect(relaunched.getByRole('menuitemradio', { name: /travel-laptop/ }).getByTestId('machine-mark')).toHaveText('T');
+  expect(await (await mock(relaunched)).evaluate(api => api.getConfig().machineMarks ?? null)).toEqual({});
+  await relaunched.close();
 });
