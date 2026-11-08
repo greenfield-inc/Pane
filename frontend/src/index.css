@@ -243,6 +243,12 @@ body.understory {
   --tab-indicator-color: transparent;
 }
 
+/* Fill themes mark the active tab with a background; an inactive split's keeps
+   it fainter, so the focused split still reads at a glance. */
+:root:not(.forge):not(.ember):not(.night-owl):not(.night-owl-oled):not(.terracotta):not(.synthwave):not(.acid):not(.tokyo-rain):not(.folio):not(.newsprint):not(.walnut):not(.amber-crt):not(.teletype):not(.dot-matrix):not(.abyss):not(.understory):not(.colorblind-safe):not(.low-fatigue):not(.high-legibility) .panel-tab-strip-dimmed [aria-selected="true"] {
+  background-color: color-mix(in srgb, var(--color-bg-primary) 45%, transparent);
+}
+
 /* Theme-aware structural shells.
    Folio, Newsprint and Walnut are intentionally absent from the shell selector
    lists below — the print themes use the flat base layout with rule-line
