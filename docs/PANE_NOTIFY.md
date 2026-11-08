@@ -188,18 +188,35 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   sidebar doesn't show last, newest first. Each group is boxed under a header
   with its name, machine mark and waiting count. Waiting sorts by when it was asked and Answered by when it was
   answered. A new item never moves the selection or the selected row. The
-  selected item opens in place as a card (its title, context, links and
-  answer controls). Next to it is its Session, live: an orchestrator's item
-  shows the Session's orchestrator tab (its chat tab where chat tabs are on,
-  its terminal where they are off), so you can ask it about the item in its
-  own composer; a worker's prompt or a standalone item shows the asking Pane's
-  tabs. A link opens as a tab there: a file inside that Pane's worktree in an
-  editor, any other file as a page (`file://`, as orchestrators show pages),
-  a URL as a browser tab. Another machine's item offers **Open on
-  <machine>**, which switches to it. Below about 1,100px wide, the queue stacks above the Session. After
-  you answer, the card shows "Sent to <agent>" with **Undo** for 3 seconds,
-  then moves to Answered, which lists the last 24 hours, updates (`ui info`) included. Nothing is drawn over your work inside Pane: there
-  is no in-Pane strip, docked card or Notify row in the sidebar.
+  list stays compact rows, each with a chip for "Reading your reply…",
+  "Getting more context…" or "Updated · ready again". The selected item opens
+  in **the approval column** beside the list (see below); its pager follows
+  the list as grouped. The column's last tab is the chat where it was asked,
+  live: an orchestrator's item shows the Session's orchestrator tab, so you
+  can ask it about the item in its own composer; a worker's prompt or a
+  standalone item shows the asking Pane's tabs, with **Open in Pane** (or
+  **Open on <machine>** for another machine's item). Below about 1,100px wide,
+  the list stacks above the column. After a pick, the column shows "Sent:
+  …" with **Undo** for 3 seconds; the item then moves to Answered, which lists
+  the last 24 hours, updates (`ui info`) included. Inside Pane there is no
+  floating strip and no Notify row in the sidebar.
+- **The approval column**: one tabbed column for an approval, the same on
+  every surface. Its header pages through what's waiting (‹ n of N ›, dots, ←
+  and → while it has focus) and ✕ closes it. Its tabs are **Questions &
+  answers** (the options and one reply box), **Summary** (written by Pane from
+  the approval), each linked file (in the document viewer), URL (in the
+  in-app browser) or other approval (in place, with Back), and the chat where
+  it was asked, left out when you're already in it. In a **Session**, the
+  column lays over the Session's right split view without resizing it, and ✕
+  ("Back to <tab>") shows the split again as it was; with no split open it
+  opens a split of its own, and ✕ ("Close split") collapses it. The right
+  sidebar (Overview, Files, Changes) is never covered. The Session's title
+  bar shows **Approvals n · n ready**, and a Session row's count in the
+  sidebar opens the newest ready-again approval, or the first waiting one. A
+  Session's orchestrator chat docks light cards above its composer: title,
+  one line, a one-question approval's options as buttons, and **Open on the
+  right**. In **Autopilot**, the column covers the Stack (✕ "Back to the
+  Stack"), and Autopilot's decision cards gain **Open**.
 - **The strip**: while Pane isn't in front, a borderless card at the bottom
   center of the screen with the pointer. It never takes keyboard focus when it
   appears; click a choice to answer, or click its text field to type. After
@@ -280,9 +297,18 @@ correction: Q-20 → that was a question: "…" (by you)
 correction: Q-20 → that was your answer: "…" (by you)
 ```
 
-`(picked: …)` is there only when something was picked. Without a Q-n the line
-names the title in quotes, and adds `[id <item id>]` before `(by you)`. Each
-reply has an id and is delivered once.
+`(picked: …)` is there only when something was picked. Picks keep their
+question's place: one left unpicked reads `—` (`picked: — · One train`), and
+the result's `picks` holds `''` there. Without a Q-n the line names the title
+in quotes, and adds `[id <item id>]` before `(by you)`. Each reply has an id
+and is delivered once.
+
+One reply at a time: while its reader is reading a reply (it has the line but
+hasn't run `--took`), a second typed reply is refused, with your words left in
+the box; picks still answer. A reply still waiting for a busy tab is replaced
+by a newer one, and only the newer line is typed. The same rule holds on every
+surface: the floating strip and the round send anything typed as a reply too,
+except on a permission prompt, whose note stays a note.
 
 **Who reads a reply**, in order:
 
@@ -351,7 +377,7 @@ An approval exists only while you can act on it and someone can take the answer
 | Situation | What happens |
 | --- | --- |
 | Its Session is closed or archived | Closes within 5 s: "closed: Session closed", "closed: Session archived". |
-| Its asker is gone: its Pane archived or deleted, its tab closed, the worker sent a newer report, or a `notify` caller stopped waiting | Closes within 5 s of Pane learning it, with the reason: "closed: the asking tab was closed", "closed: the worker moved on", "closed: the asker stopped waiting". A sweep every 60 seconds catches anything missed. |
+| Its asker is gone: its Pane archived or deleted, its tab closed, the worker sent a newer report, or a `notify` caller stopped waiting | Closes within 5 s of Pane learning it, with the reason: "closed: the asking tab was closed", "closed: the worker moved on", "closed: the asker stopped waiting". A sweep every 60 seconds catches anything missed. One exception: when only its tab closed and the orchestrator that relayed it, or Autopilot, can still read a reply for it, it stays open. |
 | Pane restarts | Items whose asking tab still exists stay waiting. |
 | Unanswered for 3 days | Stale: moved to a collapsed **Stale** group at the bottom of Waiting. It never rings or pushes again. |
 | You close one | One action on any card, with an optional reason. Its asker's open call returns "The person closed this question.", or `closed: Q-n (by you)` is typed into its tab. **Reopen** puts it back. |

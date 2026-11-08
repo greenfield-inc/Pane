@@ -1380,7 +1380,9 @@ default), a Session has one voice to the person: its orchestrator.
   not the orchestrator is running: `answer: Q-n → <answer> (by you)`, once its
   agent is at its prompt ([docs/PANE_NOTIFY.md](PANE_NOTIFY.md) has the rule).
   An answer Pane can't type shows in `runpane inbox` as `undelivered`; the
-  orchestrator passes it on unless its tab closed. The tab can
+  orchestrator passes it on unless its tab closed. A relayed question stays
+  open after its worker's tab closes, since its orchestrator can still read a
+  reply to it (the reply goes to the orchestrator). The tab can
   also receive `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)`;
   workers and orchestrators treat those as the person's word.
 - **Typed replies.** Anything the person types on an approval arrives as

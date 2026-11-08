@@ -173,7 +173,8 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
   record it with \`runpane inbox ack <item> --decision <D-n>\`. When
   \`runpane inbox\` lists the answer with \`undelivered\`, Pane can't type it
   there: pass it on with \`runpane panels submit\`, unless the reason is that
-  its tab closed (no worker is left to tell). A tab can also
+  its tab closed (no worker is left to tell). A question you relayed stays
+  open after its worker's tab closes: a reply to it comes to you. A tab can also
   receive \`closed: Q-n (by you)\` or \`correction: Q-n → <answer> (by you)\`: that
   is the person's word.
 - A typed reply comes back as your open call's result \`{reply, picks?, id,
