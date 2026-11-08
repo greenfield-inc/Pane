@@ -667,7 +667,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                   {shortcut('add-tool-terminal')}
                 </button>
               )}
-              {/* Explorer */}
+              {/* Explorer and Browser are not terminals: with chat tabs they sit apart from "In a terminal". */}
+              {chatTabs && session && (availablePanelTypes.includes('explorer') || availablePanelTypes.includes('browser')) && separator}
               {availablePanelTypes.includes('explorer') && (
                 <button
                   type="button"
