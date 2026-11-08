@@ -12,8 +12,8 @@ import { ChatCopyButton } from './ChatCopyButton';
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
   onViewDiff?: (path: string) => void;
-  /** Opens a Session worker's Pane. */
-  onOpenWorker?: (paneId: string) => void;
+  /** Opens a Session worker's Pane, at the given tab when one is named. */
+  onOpenWorker?: (paneId: string, panelId?: string) => void;
 }
 
 /** A code block keeps its own copy button, for the code alone. */

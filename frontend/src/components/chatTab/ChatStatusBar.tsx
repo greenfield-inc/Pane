@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import type { ChatTabContextUsage, ChatTabTask } from '../../../../shared/types/chatTab';
+import type { ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 import {
   contextLeft, DEFAULT_STATUS_ITEMS, prStateName, readStatusItems, STATUS_ITEM_NAMES, STATUS_ITEMS, taskAge, writeStatusItems, type StatusItem,
 } from '../../../../shared/chatStatusBar';
@@ -48,6 +49,10 @@ export interface ChatStatusBarProps {
   tasks?: readonly ChatTabTask[];
   queued: number;
   pr?: ChatStatusPullRequest;
+  /** The Session's agents actively working (D-276): in a Session orchestrator's or Autopilot's chat. */
+  agents?: readonly ChatWorkerLine[];
+  /** Opens an agent's tab, or its Pane when the tab is unknown. */
+  onOpenAgent?: (paneId: string, panelId?: string) => void;
   working: boolean;
   phone: boolean;
   /** Offered beside the context left, when the tab can /clear. */
@@ -57,12 +62,12 @@ export interface ChatStatusBarProps {
 }
 
 /**
- * The line above the composer (D-222, D-253, D-267): context left, the Pane's pull request,
- * background tasks and queued messages, each opening what it names. Model and mode stay on the
+ * The line above the composer (D-222, D-253, D-267, D-276): context left, the agents working in
+ * the Session, the Pane's pull request, background tasks and queued messages, each opening what it names. Model and mode stay on the
  * composer row.
  * "…" picks which items show, remembered on this device. Items with nothing to say stay out.
  */
-export function ChatStatusBar({ context, tasks = [], queued, pr, working, phone, onClear, onStopTask, onShowQueue }: ChatStatusBarProps) {
+export function ChatStatusBar({ context, tasks = [], queued, pr, agents = [], onOpenAgent, working, phone, onClear, onStopTask, onShowQueue }: ChatStatusBarProps) {
   const shown = useStatusItems();
   const now = useNow(tasks.length > 0);
   const left = contextLeft(context);
@@ -95,6 +100,22 @@ export function ChatStatusBar({ context, tasks = [], queued, pr, working, phone,
           ? <a className="chat-status-item" href={pr.url} target="_blank" rel="noreferrer" title={`Open pull request #${pr.number}${state ? ` (${state})` : ''}`}>{label}</a>
           : <span className="chat-status-item">{label}</span>;
       }
+      case 'agents':
+        if (!agents.length) return null;
+        return <Dropdown className="chat-status-anchor" position="top-left" width="lg" items={[]} formLabel="Agents working"
+          trigger={<button type="button" className="chat-status-item" title="Agents working in this Session">{agents.length} working</button>}
+          footer={({ close }) => <div className="chat-status-panel">
+            <p className="chat-status-panel-title">Working now</p>
+            <ul className="chat-status-agents">
+              {agents.map(agent => <li key={agent.paneId}>
+                <button type="button" disabled={!onOpenAgent} onClick={() => { close(); onOpenAgent?.(agent.paneId, agent.tab?.panelId); }}
+                  title={onOpenAgent ? `Open ${agent.tab?.title ? `${agent.name} › ${agent.tab.title}` : agent.name}` : undefined}>
+                  <span className="chat-status-agent-name">{agent.name}</span>
+                  {agent.tab?.title && <span className="chat-status-panel-muted">{agent.tab.title}</span>}
+                </button>
+              </li>)}
+            </ul>
+          </div>} />;
       case 'tasks':
         if (!tasks.length) return null;
         return <Dropdown className="chat-status-anchor" position="top-left" width="lg" items={[]} formLabel="Background tasks"

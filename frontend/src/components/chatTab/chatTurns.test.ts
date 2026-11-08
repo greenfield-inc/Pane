@@ -100,6 +100,19 @@ describe('worker lines in the Session chat', () => {
     ]);
   });
 
+  it('counts only the agents actively working, each with the tab that is working (D-276)', async () => {
+    const { workerLines, workingAgents } = await import('../../../../shared/chatTabPresentation');
+    const lines = workerLines([
+      { paneId: 'a', name: 'csv-export', missing: false, archived: false, panels: [{ state: 'idle', panelId: 'a1', title: 'Codex' }, { state: 'working', panelId: 'a2', title: 'Claude Code' }] },
+      { paneId: 'b', name: 'asks', missing: false, archived: false, panels: [{ state: 'blocked', panelId: 'b1', title: 'Claude Code' }] },
+      { paneId: 'c', name: 'done', missing: false, archived: false, panels: [{ state: 'working', panelId: 'c1', title: 'Review' }], report: { state: 'done' } },
+      { paneId: 'd', name: 'idle', missing: false, archived: false, panels: [{ state: 'idle', panelId: 'd1', title: 'Claude Code' }] },
+    ]);
+    expect(workingAgents(lines).map(line => [line.name, line.tab])).toEqual([['csv-export', { panelId: 'a2', title: 'Claude Code' }]]);
+    expect(lines.find(line => line.name === 'asks')?.tab).toBeUndefined();
+    expect(workingAgents(undefined)).toEqual([]);
+  });
+
   it('mentions a worker only when it finished or failed during the latest finished turn, never one asking (D-223)', () => {
     const turns: ChatTurn[] = [
       { id: 't1', items: [], running: false, startedAt: '2026-11-03T11:40:00.000Z', endedAt: '2026-11-03T11:41:00.000Z' },

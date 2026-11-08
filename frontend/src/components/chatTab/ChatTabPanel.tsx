@@ -6,7 +6,7 @@ import {
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns, messageTime, waitingToolIds, workerNotes, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import { chatTurns, messageTime, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -164,6 +164,11 @@ export interface ChatTabPanelProps {
   clearable?: boolean;
   /** The Pane's pull request, for the status bar. */
   pr?: ChatStatusPullRequest;
+  /**
+   * The agents working, for the status bar's "N working" (D-276). Defaults to the `workers`
+   * that are working; Autopilot passes the workers of every Session it walks.
+   */
+  working?: readonly ChatWorkerLine[];
 }
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
@@ -173,7 +178,7 @@ const PASTE_LIMIT = 1024 * 1024;
 const NO_ACTIONS: ChatTurnActions = {};
 const NO_RENDERING: ChatRendering = {};
 
-export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
@@ -201,6 +206,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
+  const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);
   const [copying, setCopying] = useState(0);
   const canAttachImages = !!view?.canAttachImages;
   const attachments = useMemo(() => {
@@ -443,7 +449,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           onSendNow={operationId => void act(() => client.sendNow(panelId, operationId))}
           onEdit={editQueued} />
         {view && <ChatStatusBar context={view.context} tasks={view.tasks}
-          queued={view.queue.length} pr={pr} working={working} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
+          queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
         <ComposerPrimitive.Root className="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
