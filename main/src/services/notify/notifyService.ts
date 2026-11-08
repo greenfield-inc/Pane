@@ -144,6 +144,7 @@ export class NotifyService {
       machine: deps.machine,
       secrets: deps.secrets,
       sessionOf: deps.sessionOf,
+      savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.profiles ?? []).map(profile => profile.id),
       projectOf: deps.projectOf,
       store: deps.store,
       askerGone: (item) => this.askerGone(item),
@@ -420,14 +421,15 @@ export class NotifyService {
     }
     if (command.type === 'answer') {
       // A second press before the machine replies: the first answer is already on its way.
-      if (this.queue.answeredHereAlready(command.id)) return;
+      if (this.queue.isSendingHere(command.id)) return;
       // Before the send: the machine's next state can arrive before its reply does.
-      this.queue.noteAnsweredHere(command.id, true);
+      this.queue.startSendingHere(command.id);
     }
     try {
       await this.deps.sendToMachine(target.machineId, machineCommand);
+      if (command.type === 'answer') this.queue.endSendingHere(command.id, true);
     } catch (error) {
-      if (command.type === 'answer') this.queue.noteAnsweredHere(command.id, false);
+      if (command.type === 'answer') this.queue.endSendingHere(command.id, false);
       const code = error instanceof Error && 'code' in error ? String(error.code) : '';
       console.warn(`[Notify] ${command.type} was not sent to ${target.machine}:`, error);
       // The cards say so until a read of the machine succeeds: now, if the link is back, or on reconnect.

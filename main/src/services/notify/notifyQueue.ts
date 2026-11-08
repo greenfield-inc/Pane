@@ -129,6 +129,8 @@ export interface NotifyQueueEnvironment {
   };
   /** The Session a Pane (and tab) works in, filed on each new item; Approvals groups by it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
+  /** The machines saved on this screen (Settings → Remote), read from config: listed before their connections start. */
+  savedMachineIds?: () => string[];
   /** The project a Pane belongs to, filed on each new item. */
   projectOf?: (paneId: string) => string | undefined;
   /** This machine's table. Without one the queue only remembers while it runs. */
@@ -202,8 +204,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly answeredHere = new Set<string>();
   /** Other machines' questions reminded "when I switch to Pane", by key: hidden on this screen only. */
   private readonly remindedHere = new Set<string>();
-  /** Saved machines whose questions this screen hasn't read since launch: their cards aren't gone, just not here yet. */
-  private readonly unreadMachines = new Set<string>();
+  /** Other machines' questions this screen is answering right now, by key: "Sent to" until the machine replies. */
+  private readonly sendingHere = new Set<string>();
   private importError: { code: string; message: string; next: string } | undefined;
   private quitting = false;
   private tabMessages: TabMessage[] = [];
@@ -908,15 +910,27 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** This screen is sending (or failed to send) an answer for another machine's question; its card reads "Sent to". */
-  noteAnsweredHere(key: string, answered: boolean): void {
-    if (answered) this.answeredHere.add(key);
-    else this.answeredHere.delete(key);
+  startSendingHere(key: string): void {
+    this.sendingHere.add(key);
+    this.answeredHere.add(key);
+    // As a local answer does: the strip says "Sent" now, not when the machine's next state arrives.
+    this.setTransient({ kind: 'sent', itemId: key }, NOTIFY_UNDO_MS);
     this.changed();
   }
 
-  /** An answer from this screen to another machine's question is on its way or in. */
-  answeredHereAlready(key: string): boolean {
-    return this.answeredHere.has(key);
+  /** The machine replied: from here on its own state drives the card. A refused or lost send leaves the card waiting. */
+  endSendingHere(key: string, delivered: boolean): void {
+    this.sendingHere.delete(key);
+    if (!delivered) {
+      this.answeredHere.delete(key);
+      if (this.transient?.view.itemId === key) this.clearTransient();
+    }
+    this.changed();
+  }
+
+  /** An answer from this screen to another machine's question is still on its way. */
+  isSendingHere(key: string): boolean {
+    return this.sendingHere.has(key);
   }
 
   /** "When I switch to Pane" for another machine's question: hidden here until this Pane comes to the front. */
@@ -933,15 +947,9 @@ export class NotifyQueue extends EventEmitter {
     this.changed();
   }
 
-  /** A saved machine this screen will read; until it does, its cards count as not read yet. */
-  expectRemote(machineId: string): void {
-    if (!this.remotes.has(machineId)) this.unreadMachines.add(machineId);
-  }
-
   /** Another machine's card this screen can't see yet: that machine is saved, but its questions haven't been read since launch. */
   notReadYet(key: string): boolean {
-    for (const machineId of this.unreadMachines) if (key.startsWith(`${machineId}:`)) return true;
-    return false;
+    return (this.env.savedMachineIds?.() ?? []).some(machineId => !this.remotes.has(machineId) && key.startsWith(`${machineId}:`));
   }
 
   /**
@@ -954,7 +962,6 @@ export class NotifyQueue extends EventEmitter {
     const previous = this.remotes.get(machineId) ?? null;
     // A saved machine that is this computer (the same running Pane): its cards already show once.
     if (next?.state?.epoch === this.epoch) next = null;
-    if (!next || next.state) this.unreadMachines.delete(machineId);
     if (!next) {
       if (!previous) return;
       if (this.transient && previous.items.has(this.transient.view.itemId)) this.clearTransient();
@@ -1006,6 +1013,7 @@ export class NotifyQueue extends EventEmitter {
       }
       if (before.quiet && !item.quiet && item.state === 'waiting' && item.staleSince === undefined) this.chime();
       if (before.state === 'waiting' && item.state === 'sent' && (this.answeredHere.has(item.id) || stripId === item.id)) {
+        if (this.transient?.view.kind === 'sent' && this.transient.view.itemId === item.id) continue;
         this.setTransient({ kind: 'sent', itemId: item.id }, NOTIFY_UNDO_MS);
       } else if (before.state === 'sent' && item.state === 'waiting') {
         this.answeredHere.delete(item.id);
@@ -1155,15 +1163,14 @@ export class NotifyQueue extends EventEmitter {
         ? [
           ...local.map(item => ({ ...withDeviceLabels(item, device => this.deviceLabel(device)), machine: this.machine(), machineId: LOCAL_MACHINE })),
           ...remotes.flatMap(remote => [...remote.items.values()].map(item => {
-            const sentHere = this.answeredHere.has(item.id);
             const shown: NotifyItem = {
               ...withDeviceLabels(item, device => this.deviceLabel(device)),
-              answeredOn: sentHere ? undefined : this.deviceLabel(item.answeredOn),
+              answeredOn: this.answeredHere.has(item.id) ? undefined : this.deviceLabel(item.answeredOn),
               unreachable: remote.online ? undefined : true,
               elsewhere: remote.machineId === this.activeMachineId ? undefined : true,
             };
             // Sent from here, before the machine says so: the card reads "Sent to" and can't be answered twice.
-            if (sentHere && item.state === 'waiting') shown.state = 'sent';
+            if (this.sendingHere.has(item.id) && item.state === 'waiting') shown.state = 'sent';
             return shown;
           })),
         ]
@@ -1487,7 +1494,7 @@ export class NotifyQueue extends EventEmitter {
 
   /** Every machine's waiting questions, oldest first; each machine keeps its own order (skip moves one back). */
   private allQueued(): string[] {
-    const queues = [this.localQueue(), ...[...this.remotes.values()].map(remote => remote.queue.filter(id => !this.answeredHere.has(id)))].filter(queue => queue.length > 0);
+    const queues = [this.localQueue(), ...[...this.remotes.values()].map(remote => remote.queue.filter(id => !this.sendingHere.has(id)))].filter(queue => queue.length > 0);
     if (queues.length <= 1) return [...queues[0] ?? []];
     const heads = queues.map(() => 0);
     const merged: string[] = [];

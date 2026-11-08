@@ -555,7 +555,6 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
       listed.add(machine.id);
       const before = known.get(machine.id);
       known.set(machine.id, { ...machine });
-      if (!before) queue.expectRemote(machine.id);
       if (machine.status === 'offline') queue.setRemote(machine.id, { machine: machine.label, online: false });
       // A stream can recover without a resync here yet: read the machine again.
       else if (!before || (machine.status === 'online' && before.status !== 'online')) void read(machine.id);

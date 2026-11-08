@@ -8,6 +8,7 @@ import { followSavedMachines, registerNotifyHandlers, type NotifyMachines, tabTa
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ConfigManager } from '../services/configManager';
+import { MachineConnections } from '../services/machineConnections';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { NotifyItem, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
 import type { MachineConnectionsEvent, MachineState } from '../../../shared/types/machineConnections';
@@ -24,7 +25,7 @@ async function startPane() {
   // Show outside Pane off: no floating windows in a test.
   await configManager.updateConfig({ notify: { showOutsidePane: false } });
   const services = { configManager, sessionManager: { getSession: () => undefined }, getMainWindow: () => null };
-  return { registry, notify: registerNotifyHandlers(ipcMain, services, registry) };
+  return { registry, configManager, notify: registerNotifyHandlers(ipcMain, services, registry) };
 }
 
 const connected: RemotePaneConnectionState = {
@@ -146,9 +147,9 @@ describe('Notify across machines, through the registered handlers', () => {
   it("sends one answer when another machine's card is answered twice before that machine replies", async () => {
     const pane = await startPane();
     const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)) });
-    let reply: () => void = () => undefined;
+    const replies: Array<() => void> = [];
     const run = saved.machines.run;
-    saved.machines.run = (machineId, command) => new Promise(resolve => { reply = () => resolve(run(machineId, command)); });
+    saved.machines.run = (machineId, command) => new Promise(resolve => { replies.push(() => resolve(run(machineId, command))); });
     followSavedMachines(saved.machines);
     await flush();
 
@@ -158,7 +159,7 @@ describe('Notify across machines, through the registered handlers', () => {
     expect(pane.notify.snapshot().items.find(item => item.id === 'studio:q-1')?.state).toBe('sent');
     expect(pane.notify.snapshot().queue).toEqual([]);
     await expect(pane.notify.run({ type: 'answer', id: 'studio:q-1', answer: { approved: false } })).resolves.toBeUndefined();
-    reply();
+    for (const reply of replies) reply();
     await first;
 
     expect(saved.sent).toEqual([['studio', { type: 'notify', command: { type: 'answer', id: 'q-1', answer: { approved: true } } }]]);
@@ -215,18 +216,62 @@ describe('Notify across machines, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
-  it("counts a saved machine's questions as not read yet while it has been offline since launch", async () => {
+  it("counts a saved machine's questions as not read yet from launch, before its connection starts, until it is read", async () => {
     const pane = await startPane();
-    const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)) }, 'offline');
-    followSavedMachines(saved.machines);
-    await flush();
+    await pane.configManager.updateConfig({ remoteDaemon: { client: { activeProfileId: null, profiles: [{ id: 'studio', label: 'mac-studio', baseUrl: 'http://127.0.0.1:1', token: 'x', transport: 'http+sse' }] } } });
+    // As index.ts does: the connections are followed at once and started after the window opens.
+    followSavedMachines(new MachineConnections({ configManager: pane.configManager, invokeLocal: async () => null }));
+    let changes = 0;
+    pane.notify.queue.on('change', () => { changes += 1; });
+    pane.notify.setMainWindowFocused(true);
+    expect(changes).toBeGreaterThan(0);
     expect(pane.notify.queue.notReadYet('studio:q-1')).toBe(true);
     expect(pane.notify.queue.notReadYet('q-1')).toBe(false);
 
-    saved.setStatus('studio', 'online');
+    const saved = savedMachines({ studio: stateOf('mac-studio', question('q-2', 'Ship it?', 1_000)) });
+    followSavedMachines(saved.machines);
     await flush();
-    expect(pane.notify.snapshot().items.map(item => item.id)).toEqual(['studio:q-1']);
-    expect(pane.notify.queue.notReadYet('studio:q-2')).toBe(false);
+    expect(pane.notify.queue.notReadYet('studio:q-1')).toBe(false);
+    pane.notify.dispose();
+  });
+
+  it('takes a second answer once the machine has the card waiting again, even when this screen missed its Sent state', async () => {
+    const pane = await startPane();
+    const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)) });
+    followSavedMachines(saved.machines);
+    await flush();
+    await pane.notify.run({ type: 'answer', id: 'studio:q-1', answer: { approved: true } });
+    // The machine held it as sent (revision 2), then Undo there put it back (revision 3); this screen sees only revision 3.
+    saved.emit({ type: 'event', machineId: 'studio', channel: 'notify:shared-changed', args: [{ ...stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)), revision: 3 }] });
+    await flush();
+    expect(pane.notify.snapshot().items.find(item => item.id === 'studio:q-1')?.state).toBe('waiting');
+    await pane.notify.run({ type: 'answer', id: 'studio:q-1', answer: { approved: false } });
+    expect(saved.sent.map(([, command]) => command)).toEqual([
+      { type: 'notify', command: { type: 'answer', id: 'q-1', answer: { approved: true } } },
+      { type: 'notify', command: { type: 'answer', id: 'q-1', answer: { approved: false } } },
+    ]);
+    pane.notify.dispose();
+  });
+
+  it("keeps the strip on Sent from answering another machine's card until that machine says so", async () => {
+    const pane = await startPane();
+    const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000), question('q-2', 'And this?', 2_000)) });
+    const replies: Array<() => void> = [];
+    const run = saved.machines.run;
+    saved.machines.run = (machineId, command) => new Promise(resolve => { replies.push(() => resolve(run(machineId, command))); });
+    followSavedMachines(saved.machines);
+    await flush();
+    const strip = () => { const view = pane.notify.snapshot().strip; return view && `${view.kind}:${view.itemId}`; };
+    expect(strip()).toBe('question:studio:q-1');
+
+    const answering = pane.notify.run({ type: 'answer', id: 'studio:q-1', answer: { approved: true } });
+    await flush();
+    expect(strip()).toBe('sent:studio:q-1');
+    saved.emit({ type: 'event', machineId: 'studio', channel: 'notify:shared-changed', args: [{ ...stateOf('mac-studio', { ...question('q-1', 'Ship it?', 1_000), state: 'sent' }, question('q-2', 'And this?', 2_000)), revision: 2 }] });
+    for (const reply of replies) reply();
+    await answering;
+    await flush();
+    expect(strip()).toBe('sent:studio:q-1');
     pane.notify.dispose();
   });
 

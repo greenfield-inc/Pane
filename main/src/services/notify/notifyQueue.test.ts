@@ -377,8 +377,9 @@ describe('NotifyQueue across machines', () => {
     expect(laptop.remoteTarget(hostKey)).toEqual({ machineId: 'studio', machine: 'mac-studio', online: true, id: hostId, ui: 'options' });
     expect(laptop.remoteTarget(laptopId)).toBeNull();
 
-    laptop.noteAnsweredHere(hostKey, true);
+    laptop.startSendingHere(hostKey);
     host.runRemote({ type: 'answer', id: hostId, answer: { choice: 'Keep Redis' } }, 'parsa-devbox', null);
+    laptop.endSendingHere(hostKey, true);
     laptop.run({ type: 'answer', id: laptopId, answer: { approved: true } });
     await vi.advanceTimersByTimeAsync(3_000);
 
@@ -394,8 +395,9 @@ describe('NotifyQueue across machines', () => {
     const call = ask(host, migration, claude);
     const id = onlyId(host);
 
-    answering.noteAnsweredHere(onStudio(id), true);
+    answering.startSendingHere(onStudio(id));
     host.runRemote({ type: 'answer', id, answer: { approved: true } }, 'parsa-devbox', null);
+    answering.endSendingHere(onStudio(id), true);
     expect(host.snapshot().strip).toEqual({ kind: 'sent', itemId: id });
     for (const screen of [answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'sent', itemId: onStudio(id) });
     expect(host.snapshot().items[0].answeredOn).toBe('parsa-devbox');
