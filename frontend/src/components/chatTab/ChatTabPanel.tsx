@@ -396,6 +396,14 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             }}
             onChange={event => { viewer.setDraft(event.target.value); setCommandIndex(0); }}
             onKeyDown={event => {
+              // Keys that pick an IME candidate are the input method's.
+              if (event.nativeEvent.isComposing) return;
+              // Esc stops the turn, as it does for the agent in a terminal.
+              if (event.key === 'Escape' && working && !activeCommand) {
+                event.preventDefault();
+                void act(() => client.cancel(panelId));
+                return;
+              }
               if (!activeCommand) return;
               if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                 event.preventDefault();
