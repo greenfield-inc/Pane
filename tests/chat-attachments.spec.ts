@@ -79,7 +79,7 @@ test('a pasted image attaches as an image chip', async ({ page }) => {
   expect(await page.evaluate(() => window.qaCopied)).toEqual([]);
 });
 
-test('text pasted past the 8 MiB send limit is refused with the reason, and shorter text pastes', async ({ page }) => {
+test('text over 1 MiB is refused with the reason, and a paste up to 1 MiB goes in', async ({ page }) => {
   await open(page, 'files=1');
   const paste = (length: number) => page.getByRole('textbox', { name: 'Message Claude' }).evaluate((input, length) => {
     const clipboardData = new DataTransfer();
@@ -88,10 +88,10 @@ test('text pasted past the 8 MiB send limit is refused with the reason, and shor
     input.dispatchEvent(event);
     return event.defaultPrevented;
   }, length);
-  expect(await paste(1024)).toBe(false);
+  expect(await paste(1024 * 1024)).toBe(false);
   await expect(page.getByRole('alert')).toHaveCount(0);
-  expect(await paste(8 * 1024 * 1024 + 1)).toBe(true);
-  await expect(page.getByRole('alert')).toContainText('Nothing was pasted: the message would be larger than 8 MiB');
+  expect(await paste(1024 * 1024 + 1)).toBe(true);
+  await expect(page.getByRole('alert')).toContainText('Nothing was pasted: the text is larger than 1 MiB');
 });
 
 test('every refusal is shown and nothing is attached for it', async ({ page }) => {

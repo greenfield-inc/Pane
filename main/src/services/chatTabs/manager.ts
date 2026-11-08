@@ -4,7 +4,7 @@ import type { ContentBlock, McpServer, NewSessionRequest } from '@agentclientpro
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ToolPanel } from '../../../../shared/types/panels';
-import { CHAT_PROMPT_LIMIT, type ChatPanelState, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabView } from '../../../../shared/types/chatTab';
+import type { ChatPanelState, ChatTabEvent, ChatTabAnswer, ChatTabProblem, ChatTabQueuedPrompt, ChatTabSend, ChatTabStatus, ChatTabView } from '../../../../shared/types/chatTab';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
@@ -73,6 +73,7 @@ interface Tab {
 
 const DEFAULT_VIEW_LIMIT = 200;
 const RECEIPT_LIMIT = 256;
+const PROMPT_BYTES_LIMIT = 8 * 1024 * 1024;
 /** Characters of a queued prompt kept in the tab's saved state for the queue list. */
 const QUEUE_PREVIEW = 500;
 
@@ -167,7 +168,7 @@ export class ChatTabManager {
     }
     if (!request.operationId || request.operationId.length > 128) throw new PaneError('CHAT_PROMPT_INVALID', 'The message has no valid send ID. Nothing was sent.', 'Send it again.');
     if (!request.text.trim() && !request.images?.length) throw new PaneError('CHAT_PROMPT_EMPTY', 'The message is empty. Nothing was sent.', 'Type a message or attach an image.');
-    if (request.text.length + (request.images ?? []).reduce((sum, image) => sum + image.data.length, 0) > CHAT_PROMPT_LIMIT) {
+    if (request.text.length + (request.images ?? []).reduce((sum, image) => sum + image.data.length, 0) > PROMPT_BYTES_LIMIT) {
       throw new PaneError('CHAT_PROMPT_TOO_LARGE', 'The message is larger than 8 MiB. Nothing was sent.', 'Send a shorter message or a smaller image.');
     }
     if (request.images?.some(image => !/^image\/(png|jpeg|webp|gif)$/.test(image.mimeType) || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.data))) {
