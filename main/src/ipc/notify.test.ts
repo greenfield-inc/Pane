@@ -513,11 +513,12 @@ describe('Approvals related links, through the registered handlers', () => {
 });
 
 describe('tabTakesText', () => {
-  it('types only at a live agent prompt, never at a shell', () => {
-    expect(tabTakesText('idle', { isShell: false }, undefined)).toBe(true);
-    expect(tabTakesText('idle', { isShell: true }, true)).toBe(false);
-    expect(tabTakesText('working', { isShell: false }, undefined)).toBe(false);
-    expect(tabTakesText(undefined, { isShell: false }, true)).toBe(false);
+  it('types only at a live agent prompt, never at a shell or another program', () => {
+    expect(tabTakesText('idle', { isAgent: true }, undefined)).toBe(true);
+    expect(tabTakesText('working', { isAgent: true }, undefined)).toBe(false);
+    expect(tabTakesText(undefined, { isAgent: true }, true)).toBe(false);
+    // Pane's own shell, a nested `bash`, `ssh` or a REPL: an agent's old frame on screen proves nothing.
+    expect(tabTakesText('idle', { isAgent: false }, true)).toBe(false);
   });
 
   it('where the foreground can\'t be read, needs the agent\'s composer on screen', () => {

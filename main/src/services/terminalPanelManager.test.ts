@@ -2208,7 +2208,7 @@ describe('TerminalPanelManager wrapper launches', () => {
 });
 
 type DetectionAccess = AgentStatusAccess & {
-  getForegroundProcess(panelId: string): { name: string; isShell: boolean } | undefined;
+  getForegroundProcess(panelId: string): { name: string; isShell: boolean; isAgent: boolean } | undefined;
 };
 
 describe('TerminalPanelManager wrapper agent detection', () => {
@@ -2327,7 +2327,7 @@ describe('TerminalPanelManager wrapper agent detection', () => {
     manager.pollAgentStatus();
 
     expect(terminal.agentType).toBeUndefined();
-    expect(manager.getForegroundProcess(terminal.panelId)).toEqual({ name: '-zsh', isShell: true });
+    expect(manager.getForegroundProcess(terminal.panelId)).toEqual({ name: '-zsh', isShell: true, isAgent: false });
     manager.destroyTerminal(terminal.panelId);
   });
 
@@ -2335,7 +2335,25 @@ describe('TerminalPanelManager wrapper agent detection', () => {
     wrapperPanel();
     const { manager, terminal } = attachWrapper('bash');
 
-    expect(manager.getForegroundProcess(terminal.panelId)).toEqual({ name: 'bash', isShell: false });
+    expect(manager.getForegroundProcess(terminal.panelId)).toEqual({ name: 'bash', isShell: false, isAgent: false });
+    manager.destroyTerminal(terminal.panelId);
+  });
+
+  it.skipIf(process.platform === 'win32')('names an agent in the foreground only from its executable or its versioned binary', () => {
+    wrapperPanel();
+    const { manager, terminal } = attachWrapper('codex');
+    expect(manager.getForegroundProcess(terminal.panelId)?.isAgent).toBe(true);
+
+    terminal.pty.process = '2.1.289';
+    expect(manager.getForegroundProcess(terminal.panelId)?.isAgent).toBe(false);
+    terminal.agentType = 'claude';
+    expect(manager.getForegroundProcess(terminal.panelId)?.isAgent).toBe(true);
+
+    // A program started in an agent's tab after it exited: a nested shell, ssh, a REPL.
+    for (const name of ['bash', 'ssh', 'python3']) {
+      terminal.pty.process = name;
+      expect(manager.getForegroundProcess(terminal.panelId)?.isAgent).toBe(false);
+    }
     manager.destroyTerminal(terminal.panelId);
   });
 

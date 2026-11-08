@@ -232,13 +232,13 @@ function idleSeconds(): number {
 }
 
 /**
- * Whether Pane may type an owed answer into a terminal tab: only at a live agent's prompt. A shell
- * prompt would run it, and `$(…)` in an answer would execute (QA N1), so a tab with no evidence of
- * an agent keeps what it's owed. Not knowing the foreground is not evidence: it needs the composer.
+ * Whether Pane may type an owed answer into a terminal tab: only at a live agent's prompt. Typed at
+ * a shell, a nested shell, `ssh` or a REPL, `$(…)` in an answer would run (QA N1), so where the
+ * foreground can be read it must be an agent. Where it can't, only the agent's composer on screen counts.
  */
-export function tabTakesText(status: AgentState | undefined, foreground: { isShell: boolean } | undefined, composerPresent: boolean | undefined): boolean {
+export function tabTakesText(status: AgentState | undefined, foreground: { isAgent: boolean } | undefined, composerPresent: boolean | undefined): boolean {
   if (status !== 'idle') return false;
-  return foreground ? !foreground.isShell : composerPresent === true;
+  return foreground ? foreground.isAgent : composerPresent === true;
 }
 
 const panelScreenComposerSchema = boundary.object({ composer: boundary.object({ isPresent: boundary.boolean }) });

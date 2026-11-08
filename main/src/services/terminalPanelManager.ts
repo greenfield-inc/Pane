@@ -389,6 +389,8 @@ export interface TerminalForegroundProcess {
   name: string;
   /** The foreground is Pane's own interactive shell, not a program started from it. */
   isShell: boolean;
+  /** The foreground is an agent: its executable's name, or Claude's versioned binary in a tab Pane identified. */
+  isAgent: boolean;
 }
 /**
  * Whether a viewer's answer to a terminal query reached the PTY.
@@ -2840,7 +2842,8 @@ export class TerminalPanelManager extends EventEmitter {
     if (!terminal || terminal.destroying) return undefined;
     const name = this.readForegroundProcessName(terminal);
     if (!name) return undefined;
-    return { name, isShell: this.isInteractiveShellProcess(terminal, name) };
+    const isAgent = resolveAgentTypeFromProcessName(name) !== undefined || (terminal.agentType !== undefined && isVersionedExecutableName(name));
+    return { name, isShell: this.isInteractiveShellProcess(terminal, name), isAgent };
   }
 
   /**
