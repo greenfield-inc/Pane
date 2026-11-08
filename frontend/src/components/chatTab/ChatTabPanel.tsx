@@ -5,7 +5,7 @@ import {
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
-import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
+import type { ChatTabClient, ChatTabSend } from '../../../../shared/types/chatTab';
 import { chatTurns, waitingToolIds, workerNotes, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
@@ -18,7 +18,9 @@ import { ChatPermissionCard } from './ChatPermissionCard';
 import { ChatTurnView, WorkerNoteLine, type ChatTurnActions } from './ChatTurns';
 import { ChatBlocksContext, type ChatRendering } from './chatRendering';
 import { ChatCommandMenu } from './ChatCommandMenu';
-import { matchingCommands } from './chatCommands';
+import { isResumeCommand, matchingCommands, type ChatMenuCommand } from './chatCommands';
+import { ChatSwitchBanner } from './ChatSwitchBanner';
+import { ConversationPicker } from './ConversationPicker';
 import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
 import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
@@ -165,6 +167,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   /** Paged with Earlier or Newer messages: stay put until the reader scrolls back to the live end, even once the window reaches it. */
   const [paged, setPaged] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
+  /** "Continue a past conversation", from /resume or the Switch to chat banner's "Pick another" (D-277). */
+  const [picking, setPicking] = useState(false);
+  const loadConversations = useCallback(() => client.conversations(panelId), [client, panelId]);
+  const resumeConversation = useCallback((sessionId: string) => client.resume(panelId, sessionId), [client, panelId]);
   const messages = useMemo(() => snapshot.transcript?.messages ?? [], [snapshot.transcript?.messages]);
   const followLiveEnd = useRef<(() => void) | undefined>(undefined);
   /** The sent message's transcript ID: when the host's copy of it renders, the chat follows the live end once more. */
@@ -245,6 +251,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     onNew: async message => {
       const parts = [...message.content, ...(message.attachments ?? []).flatMap(attachment => attachment.content)];
       const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
+      // Exactly /resume is Pane's: it opens the picker and never reaches the agent.
+      if (isResumeCommand(text) && !message.attachments?.length) { openPicker(); return; }
       const imageParts = parts.flatMap(part => {
         if (part.type !== 'image') return [];
         const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/s.exec(part.image);
@@ -320,7 +328,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   };
   const configure = (id: string, value: string) => void act(() => client.configure(panelId, id, value));
   const answerPermission = (permission: AgentChatPermission, optionId: string) => void act(() => client.permission(panelId, permission.id, optionId));
-  const pickCommand = (command: ChatTabCommand) => {
+  function openPicker() {
+    viewer.setDraft('');
+    runtime.thread.composer.setText('');
+    setCommandIndex(0);
+    setPicking(true);
+  }
+  const pickCommand = (command: ChatMenuCommand) => {
+    // Pane's own command runs at once; the agent's is completed in the composer for its arguments.
+    if (command.source === 'pane') { openPicker(); return; }
     const text = `/${command.name} `;
     viewer.setDraft(text);
     runtime.thread.composer.setText(text);
@@ -343,7 +359,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         onRestart={() => void act(() => client.restart(panelId))}
         onSignIn={() => void act(() => client.signIn(panelId))}
         onInstall={url => void window.electronAPI?.openExternal(url)} />}
+      {view?.banner && <ChatSwitchBanner banner={view.banner} busy={busy || !connected}
+        onPickAnother={() => setPicking(true)} onDismiss={() => void act(() => client.dismissBanner(panelId))} />}
       {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}
+      {picking && <ConversationPicker load={loadConversations} onResume={resumeConversation} onClose={() => setPicking(false)} />}
       {!!attachProblems.length && <div role="alert" className="chat-alert chat-attach-alert">
         <ul>{attachProblems.map((problem, index) => <li key={index}>{problem}</li>)}</ul>
         <button type="button" className="chat-icon" aria-label="Dismiss" title="Dismiss" onClick={() => setAttachProblems([])}><X className="h-3.5 w-3.5" /></button>
@@ -407,6 +426,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             onKeyDown={event => {
               // Keys that pick an IME candidate are the input method's.
               if (event.nativeEvent.isComposing) return;
+              // Sending exactly /resume opens the picker, also while sending is off (a stopped chat).
+              if (event.key === 'Enter' && !event.shiftKey && isResumeCommand(snapshot.draft) && !runtime.thread.composer.getState().attachments.length) {
+                event.preventDefault();
+                openPicker();
+                return;
+              }
               // Esc stops the turn, as it does for the agent in a terminal.
               if (event.key === 'Escape' && working && !activeCommand) {
                 event.preventDefault();

@@ -1,6 +1,6 @@
 import { boundary, decodeBoundary, type BoundarySchema } from '../validation/boundaryDecoder';
 import type { AgentChatMessage, AgentChatPart, AgentChatReceipt } from './agentChat';
-import type { ChatTabEvent, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt, ChatTabView, ChatToolPatch } from './chatTab';
+import type { ChatTabConversation, ChatTabEvent, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt, ChatTabSwitchBanner, ChatTabView, ChatToolPatch } from './chatTab';
 
 const status = boundary.enumeration('pending', 'in_progress', 'completed', 'failed');
 const part: BoundarySchema<AgentChatPart> = boundary.union(
@@ -35,6 +35,14 @@ const problem: BoundarySchema<ChatTabProblem> = boundary.object({
 const image = boundary.object({ mimeType: boundary.string, data: boundary.string });
 const queued: BoundarySchema<ChatTabQueuedPrompt> = boundary.object({ operationId: boundary.string, text: boundary.string, images: boundary.optional(boundary.array(image)), queuedAt: boundary.string, stored: boundary.optional(boundary.literal(true)), imageCount: boundary.optional(boundary.number) });
 const question: BoundarySchema<ChatTabQuestion> = boundary.object({ id: boundary.string, generation: boundary.number, message: boundary.string, schema: boundary.json, toolCallId: boundary.optional(boundary.string) });
+const banner: BoundarySchema<ChatTabSwitchBanner> = boundary.union(
+  boundary.object({ kind: boundary.enumeration('most-recent', 'none', 'known-empty') }),
+  boundary.object({ kind: boundary.literal('list-failed'), reason: boundary.string }),
+);
+const conversation: BoundarySchema<ChatTabConversation> = boundary.object({
+  sessionId: boundary.string, title: boundary.optional(boundary.string), updatedAt: boundary.optional(boundary.string),
+  current: boundary.optional(boundary.literal(true)), openIn: boundary.optional(boundary.object({ panelId: boundary.string, title: boundary.string })),
+});
 const view: BoundarySchema<ChatTabView> = boundary.object({
   panelId: boundary.string, agent: boundary.enumeration('claude', 'codex'), generation: boundary.number,
   status: boundary.enumeration('starting', 'idle', 'working', 'blocked', 'stopped'),
@@ -46,6 +54,7 @@ const view: BoundarySchema<ChatTabView> = boundary.object({
   queue: boundary.array(queued),
   transcript: boundary.optional(boundary.object({ panelId: boundary.string, generation: boundary.number, revision: boundary.number, start: boundary.number, messages: boundary.array(chatMessageSchema) })),
   messageCount: boundary.number,
+  banner: boundary.optional(banner),
 });
 const receipt: BoundarySchema<AgentChatReceipt> = boundary.object({
   operationId: boundary.string, generation: boundary.number, fingerprint: boundary.string,
@@ -58,5 +67,7 @@ export function decodeChatTabView(value: unknown): ChatTabView { return decodeBo
 export function decodeChatTabEvent(value: unknown): ChatTabEvent { return decodeBoundary(value, event); }
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the message schema.
 export function decodeChatMessages(value: unknown): AgentChatMessage[] { return decodeBoundary(value, boundary.array(chatMessageSchema)); }
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the conversation schema.
+export function decodeChatConversations(value: unknown): ChatTabConversation[] { return decodeBoundary(value, boundary.array(conversation)); }
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the receipt schema.
 export function decodeChatReceipt(value: unknown): AgentChatReceipt | undefined { return value === undefined || value === null ? undefined : decodeBoundary(value, receipt); }
