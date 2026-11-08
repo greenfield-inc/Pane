@@ -60,6 +60,7 @@ import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import { onTerminalReflow } from '../../utils/terminalReflow';
+import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';
 
 interface DropdownPosition {
@@ -896,7 +897,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   // loading overlay instead of the debounced, unmasked resize (P4).
   useEffect(() => onTerminalReflow(() => {
     if (!isActiveRef.current || !xtermRef.current) return;
-    setIsRefreshing(true);
+    // The layout change that follows comes from a store and renders at once,
+    // so the overlay must be on screen first, not a frame later.
+    flushSync(() => {
+      setIsRefreshing(true);
+      setOverlayVisible(true);
+    });
     void (async () => {
       // Let the new layout (Allotment shows or hides panes) settle first.
       await waitForNextPaint();
