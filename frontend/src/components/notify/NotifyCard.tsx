@@ -975,8 +975,9 @@ function ExpiredCard({ item, form, narrow, onCommand, menuPlacement, machineMark
   return (
     <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-view="expired">
       <CardHeader item={item} form={form} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
-      <div className="line-clamp-3 px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-tertiary">{item.title}</div>
-      <div className="px-[22px] pb-[18px] pt-3">
+      {/* On Approvals, the same type and inset as the answered and waiting cards beside it. */}
+      <div className={form === 'inbox' ? 'line-clamp-3 px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-tertiary' : 'line-clamp-3 px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-tertiary'}>{item.title}</div>
+      <div className={form === 'inbox' ? 'px-3.5 pb-3 pt-2.5' : 'px-[22px] pb-[18px] pt-3'}>
         <NoticePill testId="notify-receipt">{receiptLine(item) ?? `${item.source.agent} stopped waiting. Nothing to answer.`}</NoticePill>
       </div>
       {related}
