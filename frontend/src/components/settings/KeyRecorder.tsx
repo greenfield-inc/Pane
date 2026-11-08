@@ -39,7 +39,7 @@ const RECORDER_COPY = {
 } as const satisfies Record<ChordParseFailureReason | 'modifierOnly' | 'altgr' | 'cancelled' | 'unassigned' | 'reserved-by-terminal' | 'bare-navigation-key', string>;
 
 /** After a first chord with Ctrl/⌘, how long the recorder waits for a second step (D-250). */
-export const SECOND_STEP_WAIT_MS = 1200;
+const SECOND_STEP_WAIT_MS = 1200;
 
 const MODIFIER_KEYS = new Set(['Control', 'Meta', 'Alt', 'Shift', 'AltGraph', 'CapsLock']);
 

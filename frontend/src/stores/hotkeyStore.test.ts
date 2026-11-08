@@ -9,8 +9,11 @@ import {
   useKeySequenceStore,
 } from './hotkeyStore';
 
-const platform = vi.hoisted(() => ({ mac: false }));
-vi.mock('../utils/platformUtils', () => ({ isMac: () => platform.mac, isWindows: () => false }));
+const platform = {
+  set mac(value: boolean) {
+    vi.stubGlobal('navigator', { platform: value ? 'MacIntel' : 'Linux x86_64' });
+  },
+};
 
 interface HotkeyTestTarget {
   tagName: string;
@@ -54,7 +57,6 @@ describe('hotkeyStore keyboard shortcut preference', () => {
   let captureListener: ((event: HotkeyTestEvent) => void) | undefined;
 
   beforeEach(() => {
-    platform.mac = false;
     vi.stubGlobal('window', {
       addEventListener: (type: string, listener: (event: HotkeyTestEvent) => void, capture?: boolean) => {
         if (type === 'keydown' && capture) captureListener = listener;
@@ -62,6 +64,7 @@ describe('hotkeyStore keyboard shortcut preference', () => {
       },
       removeEventListener: vi.fn(),
     });
+    platform.mac = false;
   });
 
   /** A press as the window sees it: capture listeners first, then bubble. */

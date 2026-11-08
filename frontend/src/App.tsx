@@ -258,7 +258,6 @@ function App() {
   useHotkey({
     id: 'open-command-palette',
     label: 'Open Search',
-    keys: 'mod+shift+p',
     category: 'navigation',
     action: () => {
       setSearchOpenCount(count => count + 1);
@@ -269,7 +268,6 @@ function App() {
   useHotkey({
     id: 'toggle-sidebar',
     label: 'Toggle Sidebar',
-    keys: 'mod+b',
     category: 'view',
     action: handleToggleSidebar,
   });
@@ -277,7 +275,6 @@ function App() {
   useHotkey({
     id: 'open-settings',
     label: 'Open Settings',
-    keys: 'mod+,',
     category: 'navigation',
     action: () => openSettings(),
   });
@@ -285,7 +282,6 @@ function App() {
   useHotkey({
     id: 'focus-sidebar',
     label: 'Focus Sidebar',
-    keys: 'mod+shift+e',
     category: 'navigation',
     action: () => {
       if (sidebarCollapsed) handleToggleSidebar();
@@ -301,18 +297,16 @@ function App() {
 
   useHotkey({
     id: 'open-shortcut-settings',
-    label: 'Open Shortcut Settings',
-    keys: 'mod+alt+/',
+    label: 'Open Keyboard Shortcuts',
     category: 'shortcuts',
     action: () => {
-      openSettings({ category: 'shortcuts', setting: 'terminal-shortcuts' });
+      openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' });
     },
   });
 
   useHotkey({
     id: 'new-session',
     label: 'New Pane',
-    keys: 'mod+n',
     category: 'session',
     action: () => {
       if (activeProject) setShowCreateSessionDialog(true);
@@ -324,7 +318,6 @@ function App() {
   useHotkey({
     id: 'new-orchestration-session',
     label: 'New Session',
-    keys: '',
     category: 'navigation',
     action: () => window.dispatchEvent(new Event('open-create-orchestration-session')),
   });
@@ -332,7 +325,6 @@ function App() {
   useHotkey({
     id: 'new-project',
     label: 'New Project',
-    keys: 'mod+shift+n',
     category: 'navigation',
     action: () => setShowAddProjectDialog(true),
   });

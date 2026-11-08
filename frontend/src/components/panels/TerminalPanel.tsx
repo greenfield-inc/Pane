@@ -8,12 +8,20 @@ import type { SerializeAddon } from '@xterm/addon-serialize';
 import { useSession } from '../../contexts/SessionContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TerminalPanelProps } from '../../types/panelComponents';
-import { isHotkeyEnabledForEvent } from '../../stores/hotkeyStore';
+import {
+  armKeySequence,
+  chordForEvent,
+  isHotkeyEnabledForEvent,
+  isKeySequencePending,
+  isTuiReleasableChordForEvent,
+  startsKeySequence,
+} from '../../stores/hotkeyStore';
 import { renderLog, devLog } from '../../utils/console';
 import { getTerminalTheme, buildTerminalFontFamily, getMinimumContrastRatio, DEFAULT_TERMINAL_FONT_FAMILY } from '../../utils/terminalTheme';
 import {
   isFineSurfaceScrollKey,
   isPageSurfaceScrollKey,
+  isTerminalClearKey,
   resolveTerminalKeyHandling,
   terminalClaimsFineSurfaceScroll,
 } from '../../utils/terminalKeyHandling';
@@ -1106,15 +1114,26 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             return !isHotkeyEnabledForEvent(e);
           }
 
-          // Ctrl/Cmd+K: clear xterm scrollback without writing ^K to the PTY.
-          if (ctrlOrMeta && e.key.toLowerCase() === 'k') {
+          // Cmd+K (Ctrl+K off macOS): clear xterm scrollback without writing ^K
+          // to the PTY. When a two-step key starts with it (⌘K ⌘M), the clear
+          // waits: a second step held with Cmd runs that command instead, and
+          // releasing Cmd, another key or the timeout clears (D-250).
+          if (isTerminalClearKey(e, isMac()) && !isKeySequencePending()) {
             if (e.type === 'keydown') {
-              xtermRef.current?.clear();
-              window.electronAPI
-                .invoke('terminal:clearScrollback', panel.id)
-                .catch((error) => {
-                  console.warn('[TerminalPanel] Failed to persist scrollback clear:', error);
-                });
+              const clear = () => {
+                xtermRef.current?.clear();
+                window.electronAPI
+                  .invoke('terminal:clearScrollback', panel.id)
+                  .catch((error) => {
+                    console.warn('[TerminalPanel] Failed to persist scrollback clear:', error);
+                  });
+              };
+              if (startsKeySequence(e)) {
+                e.stopPropagation();
+                armKeySequence(chordForEvent(e), { onUnmatched: clear, cancelOnModifierRelease: true });
+              } else {
+                clear();
+              }
             }
             return false;
           }
@@ -1125,6 +1144,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             isMac: isMac(),
             keyboardShortcutsEnabled: keyboardShortcutsEnabledRef.current,
             findOpen: findOpenRef.current,
+            releasableFromTui: isTuiReleasableChordForEvent(e),
+            keySequencePending: isKeySequencePending(),
           });
 
           // Shift+Enter sends the same ESC+CR sequence as Alt+Enter for CLI
