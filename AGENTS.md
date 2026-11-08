@@ -51,6 +51,8 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   `PaneError` (main) or `RunpaneError` (CLI) with a `code` and `next`. See
   [How Pane reports errors](CONTRIBUTING.md#how-pane-reports-errors).
 - Commits: present tense, focused, reference issues.
+- Merge on `CI result` only; stacks merge bottom-up with merge commits and no
+  rebase, and only when the person asks: see [Merging](CONTRIBUTING.md#merging).
 
 ## Docs
 

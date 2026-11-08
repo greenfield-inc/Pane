@@ -302,6 +302,32 @@ release); images already there keep working.
 
 Releases, CI and deploys are covered in [RUNBOOK.md](RUNBOOK.md).
 
+### Merging
+
+A pull request is ready to merge when `CI result` is green and its review is
+done. Watch only the required check (`gh pr checks <number> --required`). The
+other checks (Native Android Build, Native OTA Updates, Native Runtime, React
+Doctor, Notes Native QA, the package builds) are advisory: look at them when
+they fail, but they never hold a merge.
+
+A single pull request is squash-merged.
+
+A stack (each pull request based on the one below) is merged bottom-up with
+**Create a merge commit**, never squash, and nothing is rebased between merges:
+
+1. Before the first merge, bring the stack up to date once: each branch must
+   contain the final head of the branch below it. If one does not, rebase the
+   stack bottom to top in one pass and let CI run on all of them at the same
+   time.
+2. Merge the bottom pull request with a merge commit.
+3. Point the next one at `main` (`gh pr edit <number> --base main`; branches
+   are not deleted on merge here, so GitHub does not do it). Its diff now shows
+   only its own commits, and the green `CI result` on its head still counts.
+   Do not rebase or push it.
+4. Merge it with a merge commit, and repeat up the stack.
+
+Agents merge only when the person asks for that pull request.
+
 ### Manual Testing
 
 Test UI and packaging changes in a packaged build for your platform

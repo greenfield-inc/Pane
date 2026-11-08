@@ -175,8 +175,18 @@ describe('PR monitoring through the journal', () => {
     expect(s.journal.readAfter(0, { kinds: ['pr.base_changed', 'pr.base_deleted'] }).entries).toEqual([]);
     const wake = s.journal.waitAfter(s.journal.generation, { kinds: ['pr.base_changed'] }, 1000);
     s.set({ baseRefName: 'main' }); await s.monitor.pollOnce(); await s.monitor.pollOnce();
-    expect((await wake).entries).toMatchObject([{ kind: 'pr.base_changed', base: { from: 'release/monday', to: 'main' }, reason: expect.stringContaining('Rebase onto main') }]);
+    expect((await wake).entries).toMatchObject([{ kind: 'pr.base_changed', base: { from: 'release/monday', to: 'main' } }]);
     expect(s.journal.readAfter(0, { kinds: ['pr.base_changed', 'pr.base_deleted'] }).entries).toHaveLength(1);
+  });
+
+  it('tells a stacked PR not to rebase when the PR below merged with a merge commit, and anything else to rebase', async () => {
+    // GitHub reports only the new base name, so one message covers both causes.
+    const s = setup(); s.monitor.watch('worker', url); await s.monitor.pollOnce();
+    s.set({ baseRefName: 'main' }); await s.monitor.pollOnce();
+    const [entry] = s.journal.readAfter(0, { kinds: ['pr.base_changed'] }).entries;
+    expect(entry.reason).toBe('The base changed from release/monday to main. If the PR for release/monday merged into main with a merge commit '
+      + '(a stack merging bottom-up), the retarget is done: confirm the diff shows only this PR\'s commits and recheck required checks '
+      + '(gh pr checks 7 --required); do not rebase or push. Otherwise rebase onto main, resolve conflicts, and recheck CI.');
   });
 
   it('reports a deleted base before GitHub closes the PR, and a later retarget as a change', async () => {

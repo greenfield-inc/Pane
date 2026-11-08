@@ -1,6 +1,6 @@
 ---
 name: babysit-pr
-description: Use after a pull request is open to watch its CI and review-bot comments until it is ready. Fixes real findings, replies with a reason to false positives, rebases when the base moves, and stops when bots and required checks are green. Merges only when the person asked.
+description: Use after a pull request is open to watch its CI and review-bot comments until it is ready. Fixes real findings, replies with a reason to false positives, rebases when the base moves (not when the PR below in a stack merged with a merge commit), and stops when bots and required checks are green. Merges only when the person asked.
 ---
 
 # Babysit PR
@@ -13,7 +13,7 @@ Run it once the PR is open, when the person says "ready", or when your own instr
 
 Match the effort to the change: a docs-only or few-line PR skips the watching below and the green-checks condition under Stop, and reports as soon as it's open.
 
-Watch the PR instead of checking once. In Claude Code, run `gh pr checks <pr> --watch` in the background or use a monitor, so you respond when checks or comments arrive. In Codex, or wherever nothing can wake you, poll `gh pr checks <pr>` and the review threads every few minutes.
+Watch the PR instead of checking once. In Claude Code, run `gh pr checks <pr> --required --watch` in the background or use a monitor, so you respond when checks or comments arrive. In Codex, or wherever nothing can wake you, poll `gh pr checks <pr> --required` and the review threads every few minutes. Only required checks hold a merge; look at an advisory check only when it fails.
 
 Only act on checks and comments newer than the latest push. Compare their timestamps with the head commit:
 
@@ -41,7 +41,7 @@ Every reply is posted under the person's account. Write it the way they would: s
 
 Screenshots and videos help reviewers. Host them where the repository's workflow says (the document destination your workspace instructions name, or a release asset, for example) and link them. Never commit evidence files.
 
-Keep an eye on the base branch and rebase when needed. If an overlapping PR makes this one obsolete, stop monitoring, tell the person, and ask before closing it unless closing was explicitly authorized.
+Keep an eye on the base branch and rebase when needed. The exception is a stack merging bottom-up: when the PR below merged with a merge commit and this PR was retargeted to the branch it merged into (`gh pr edit <pr> --base <branch>` if GitHub did not do it), the retarget is done. Confirm the diff shows only this PR's commits and recheck required checks (`gh pr checks <pr> --required`); do not rebase or push, since a push would start CI again for nothing. If an overlapping PR makes this one obsolete, stop monitoring, tell the person, and ask before closing it unless closing was explicitly authorized.
 
 Fix every finding within the PR's goal, including small in-scope improvements a reviewer or bot raises; don't dismiss an in-scope finding as out of scope. For a suggestion beyond the goal, don't grow the PR: capture it with [create-ticket](../create-ticket/SKILL.md) (or in the PR's findings or handoff file when ticket creation isn't authorized) and reply on the thread with the link. When you decline a finding as wrong, reply with the reason.
 
