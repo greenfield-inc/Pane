@@ -263,9 +263,11 @@ export function refusePersonOnly(manager: Pick<AutopilotManager, 'isAutopilotCal
     case 'notify:remote-command': {
       const type = decodeBoundary(args[0] ?? {}, remoteCommandTypeSchema).type;
       // Autopilot's own commands carry its name and the machine that holds the item checks them; these would read as the person's.
-      if (type === 'answer' || type === 'undo' || type === 'close' || type === 'reopen' || type === 'override') manager.refuseAnswerFrom(caller, 'an approval or question as if it were the person');
       // Hiding, skipping or snoozing a card takes it from the person, which is just as much theirs.
       if (type === 'dismiss' || type === 'skip' || type === 'remind') manager.refuseAnswerFrom(caller, 'an approval or question (hiding or putting off its card)');
+      // Anything else but its own agent-* commands and opening a link would read as the person's:
+      // an answer, an Undo, a close or reopen, an Override, or the fix of how a reply was taken.
+      if (!type.startsWith('agent-') && type !== 'open-link') manager.refuseAnswerFrom(caller, 'an approval or question as if it were the person');
       return;
     }
     case 'permission:respond':
