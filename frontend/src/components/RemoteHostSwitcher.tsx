@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { Plus, Radio, Settings } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
@@ -74,6 +74,29 @@ export function RemoteHostSwitcher({
   }
   const active = machines.find((machine) => machine.active);
 
+  // While the switcher is open, 0 picks All machines and 1 to 9 the machines
+  // in its order (P6), by choosing that row as a click would.
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      const digit = /^(?:Digit|Numpad)([0-9])$/.exec(event.code)?.[1];
+      if (digit === undefined) return;
+      const index = digit === '0' ? (allMachines ? 0 : -1) : (allMachines ? 0 : -1) + Number(digit);
+      const row = items[index];
+      if (!row || row.disabled) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const menu = document.querySelector('[role="menu"][aria-label="Agents run on"]');
+      const element = menu?.querySelector<HTMLElement>(`[data-dropdown-item-index="${index}"]`);
+      if (element) element.click();
+      else row.onClick?.();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [open, items, allMachines]);
+
   return (
     <Dropdown
       trigger={trigger}
@@ -85,7 +108,7 @@ export function RemoteHostSwitcher({
       width="auto"
       menuClassName="w-[300px]"
       menuLabel="Agents run on"
-      onOpenChange={onOpenChange}
+      onOpenChange={(next) => { setOpen(next); onOpenChange?.(next); }}
       itemClassName="py-1.5"
       footer={({ close }) => (
         <>
