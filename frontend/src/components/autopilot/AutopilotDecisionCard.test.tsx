@@ -33,7 +33,7 @@ describe('AutopilotDecisionCard', () => {
   });
 
   it("shows an Autopilot answer's receipt and an Override, and the decision it became", () => {
-    const answered: NotifyItem = { ...worker, state: 'answered', answerSummary: 'Yes', answeredBy: { by: 'autopilot', because: 'D-22' }, decision: 'D-147' };
+    const answered: NotifyItem = { ...worker, state: 'answered', answerSummary: 'Yes', answeredBy: { by: 'autopilot', because: 'D-22' }, decision: 'D-147', delivered: { via: 'tab', at: 2 } };
     const markup = render(answered);
     expect(text(markup)).toContain('Yes · Answered by Autopilot · because D-22 · Recorded as D-147');
     expect(markup).toContain('data-testid="autopilot-decision-override"');

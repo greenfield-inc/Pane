@@ -136,7 +136,8 @@ function ConnectedRow({ item, onOpen }: { item: NotifyItem; onOpen: () => void }
   const label = (
     <>
       <Icon className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
-      <span className="truncate">{connected.name}{item.machine ? ` · ${item.machine}` : ''}</span>
+      {/* Asked outside Pane: the header already names the asker, so the chip names its machine, as the picker does. */}
+      <span className="truncate">{connected.kind === 'machine' ? item.machine ?? 'This computer' : `${connected.name}${item.machine ? ` · ${item.machine}` : ''}`}</span>
     </>
   );
   return (

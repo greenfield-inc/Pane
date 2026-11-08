@@ -280,6 +280,12 @@ describe('approvalRowLines', () => {
       .toBe('→ Yes · Answered by Autopilot · because D-22 · Recorded as D-147');
   });
 
+  it('says so while an answer has yet to reach the tab that asked', () => {
+    const owed = item('a', 1, { source: { ...source, paneId: 'p', panelId: 'tab' }, state: 'answered', answerSummary: 'USD', answeredBy: { by: 'you' } });
+    expect(approvalRowLines(owed).acted).toBe('→ USD · Answered by you · not delivered to workos-sso yet');
+    expect(approvalRowLines({ ...owed, delivered: { via: 'tab', at: 2 } }).acted).toBe('→ USD · Answered by you');
+  });
+
   it('reads Closed in place of Expired once closed, and Expired only when it just ended', () => {
     expect(approvalRowLines(item('a', 1, { source, state: 'expired', closed: { by: 'pane', reason: 'Session archived', at: 2 } })).acted).toBe('Closed: Session archived');
     expect(approvalRowLines(item('a', 1, { source, state: 'expired' })).acted).toBe('Expired');

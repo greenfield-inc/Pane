@@ -31,13 +31,19 @@ export function receiptLine(item: NotifyItem): string | undefined {
   }
   const receipt = item.answeredBy;
   if (receipt && (item.state === 'answered' || item.state === 'sent')) {
-    if (receipt.by === 'autopilot') return receipt.because ? `Answered by Autopilot · because ${receipt.because}` : 'Answered by Autopilot';
-    if (receipt.by === 'orchestrator') return 'Answered by the orchestrator';
-    return item.answeredOn ? `Answered by you on ${item.answeredOn}` : 'Answered by you';
+    const answered = receipt.by === 'autopilot' ? (receipt.because ? `Answered by Autopilot · because ${receipt.because}` : 'Answered by Autopilot')
+      : receipt.by === 'orchestrator' ? 'Answered by the orchestrator'
+        : item.answeredOn ? `Answered by you on ${item.answeredOn}` : 'Answered by you';
+    return awaitsTab(item) ? `${answered} · not delivered to ${asker(item) === 'orchestrator' ? 'the orchestrator' : asker(item)} yet` : answered;
   }
   if (item.reopened && item.state === 'waiting') return item.reopened.device ? `Reopened by you on ${item.reopened.device}` : 'Reopened by you';
   if (item.rewrittenFrom) return `Rewritten by Autopilot from ${item.rewrittenFrom.qn ?? leadingQn(item.rewrittenFrom.title) ?? `"${item.rewrittenFrom.title}"`}`;
   return undefined;
+}
+
+/** An answer Pane still owes the tab that asked: it types it only once that tab's agent is at its prompt. */
+function awaitsTab(item: NotifyItem): boolean {
+  return item.state === 'answered' && !item.delivered && item.source.panelId !== undefined && !item.agentPrompt && !item.relay;
 }
 
 /** "Recorded as D-147", once the orchestrator has. */
