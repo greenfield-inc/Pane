@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { questionAnswer, questionFields } from '../../../../shared/chatTabQuestions';
+import { questionAnswer, questionFields, unshownRequiredFields } from '../../../../shared/chatTabQuestions';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 describe('question form fields', () => {
@@ -51,5 +51,12 @@ describe('question form fields', () => {
     const fields = questionFields({ type: 'object', required: ['name', 'mode'], properties: { name: { type: 'string' }, mode: { type: 'string', enum: ['a', 'b'] }, note: { type: 'string' } } });
     expect(questionAnswer(fields, { name: 'x' })).toBeUndefined();
     expect(questionAnswer(fields, { name: 'x', mode: 'b' })).toEqual({ name: 'x', mode: 'b' });
+  });
+
+  it('names a required field Pane cannot show, so the form is skip-only', () => {
+    const schema: JsonValue = { type: 'object', properties: { target: { type: 'object', title: 'Target' }, note: { type: 'string' } }, required: ['target'] };
+    expect(unshownRequiredFields(schema)).toEqual(['Target']);
+    expect(unshownRequiredFields({ type: 'object', properties: { target: { type: 'object' } } })).toEqual([]);
+    expect(unshownRequiredFields({ type: 'object', properties: {} })).toEqual([]);
   });
 });

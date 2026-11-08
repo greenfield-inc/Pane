@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ChatTabAnswer, ChatTabQuestion } from '../../../../shared/types/chatTab';
-import { questionAnswer, questionFields, type QuestionField } from '../../../../shared/chatTabQuestions';
+import { questionAnswer, questionFields, unshownRequiredFields, type QuestionField } from '../../../../shared/chatTabQuestions';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 /**
@@ -11,13 +11,15 @@ export function ChatQuestionCard({ question, disabled, onAnswer }: { question: C
   const fields = questionFields(question.schema);
   const [values, setValues] = useState<Record<string, JsonValue>>({});
   const set = (key: string, value: JsonValue) => setValues(current => ({ ...current, [key]: value }));
-  const content = questionAnswer(fields, values);
+  const unshown = unshownRequiredFields(question.schema);
+  const content = unshown.length ? undefined : questionAnswer(fields, values);
   const submit = () => { if (content) onAnswer({ action: 'accept', content }); };
   return <section aria-label="Agent question" className="chat-question" onKeyDown={event => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); submit(); }
   }}>
     <p className="chat-question-message">{question.message}</p>
     {fields.map(field => <Field key={field.key} field={field.title === question.message ? { ...field, title: '' } : field} value={values[field.key]} disabled={disabled} onChange={value => set(field.key, value)} />)}
+    {unshown.length > 0 && <p className="text-[13px] text-text-tertiary">Pane can't show {unshown.join(', ')}, so this question can only be skipped here.</p>}
     <div className="chat-question-actions">
       <button type="button" className="chat-button chat-button-primary" disabled={disabled || !content} onClick={submit}>Answer</button>
       <button type="button" className="chat-button chat-button-outline" disabled={disabled} onClick={() => onAnswer({ action: 'decline' })}>Skip</button>

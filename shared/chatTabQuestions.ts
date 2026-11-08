@@ -60,6 +60,19 @@ export function questionFields(schema: JsonValue): QuestionField[] {
 }
 
 /**
+ * Required fields Pane cannot show (an object, say), by title. A form with any can only be
+ * skipped here: an Answer without them would send the agent invalid content.
+ */
+export function unshownRequiredFields(schema: JsonValue): string[] {
+  const decoded = decodeOptionalBoundary(schema, form);
+  const shown = new Set(questionFields(schema).map(field => field.key));
+  return (decoded?.required ?? []).filter(key => !shown.has(key)).map(key => {
+    const title = decodeOptionalBoundary(decoded?.properties[key] ?? null, property)?.title;
+    return title ?? key;
+  });
+}
+
+/**
  * The form's answer, or undefined while Answer would be incomplete. Every required
  * field needs a value, and a form with choices needs something chosen or typed:
  * Claude's AskUserQuestion marks nothing required, and an Answer with no pick tells
