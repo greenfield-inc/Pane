@@ -83,6 +83,20 @@ describe('chat tab runtime against a scripted ACP agent', () => {
     expect(runtime.isRunning()).toBe(false);
   });
 
+  it('keeps the latest context usage and the background tasks the agent reports', async () => {
+    const store = scratch();
+    const { runtime } = await start(store);
+    await runtime.create({ cwd: store, mcpServers: [] });
+    expect(runtime.usage()).toBeUndefined();
+    await runtime.prompt([{ type: 'text', text: 'usage' }]);
+    expect(runtime.usage()).toEqual({ used: 1234, size: 200000 });
+    await runtime.prompt([{ type: 'text', text: 'task' }]);
+    expect(runtime.tasks()).toEqual([expect.objectContaining({ kind: 'bash', title: 'npm run watch' })]);
+    await runtime.stopTask(runtime.tasks()[0].id);
+    await expect.poll(() => runtime.tasks()).toEqual([]);
+    await expect(runtime.stopTask('nope')).rejects.toMatchObject({ code: 'CHAT_TASK_NOT_RUNNING' });
+  });
+
   it('reports an unexpected exit once, with the turn ended', async () => {
     const store = scratch();
     const { runtime, exits } = await start(store);

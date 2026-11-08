@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { questionAnswer, questionFields, unshownRequiredFields } from '../../../../shared/chatTabQuestions';
+import { answeredFields, questionAnswer, questionFields, questionSteps, steppedAnswer, stepSummary, unshownRequiredFields } from '../../../../shared/chatTabQuestions';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 describe('question form fields', () => {
@@ -58,5 +58,45 @@ describe('question form fields', () => {
     expect(unshownRequiredFields(schema)).toEqual(['Target']);
     expect(unshownRequiredFields({ type: 'object', properties: { target: { type: 'object' } } })).toEqual([]);
     expect(unshownRequiredFields({ type: 'object', properties: {} })).toEqual([]);
+  });
+});
+
+describe('one question at a time (D-230)', () => {
+  const schema: JsonValue = {
+    type: 'object',
+    properties: {
+      question_0: { type: 'string', title: '#1491 P1', description: 'Start the agent review?', oneOf: [{ const: 'Ready', title: 'Ready: start agent review' }, { const: 'Wait', title: 'Wait for plan v9' }] },
+      question_0_custom: { type: 'string', title: 'Other', description: 'Type your own answer (optional).' },
+      question_1: { type: 'string', title: 'Versioning', oneOf: [{ const: 'All', title: 'Take all four' }, { const: 'Some', title: 'Change some' }] },
+      question_1_custom: { type: 'string', title: 'Other' },
+    },
+  };
+  const fields = questionFields(schema);
+
+  it('groups each choice with the Other box after it', () => {
+    expect(questionSteps(fields).map(step => step.map(field => field.key))).toEqual([['question_0', 'question_0_custom'], ['question_1', 'question_1_custom']]);
+  });
+
+  it('keeps a form with no choices as one step, and leading text fields as a step of their own', () => {
+    const plain = questionFields({ properties: { name: { type: 'string' }, age: { type: 'integer' } } });
+    expect(questionSteps(plain).map(step => step.map(field => field.key))).toEqual([['name', 'age']]);
+    const leading = questionFields({ properties: { why: { type: 'string' }, pick: { type: 'string', enum: ['a'] } } });
+    expect(questionSteps(leading).map(step => step.map(field => field.key))).toEqual([['why'], ['pick']]);
+  });
+
+  it('sums a step up for the review: the pick, the note, or skipped', () => {
+    const [first, second] = questionSteps(fields);
+    expect(stepSummary(first, { question_0: 'Ready', question_0_custom: 'after lunch' })).toBe('Ready: start agent review · after lunch');
+    expect(stepSummary(first, { question_0_custom: 'Do it Friday' })).toBe('Do it Friday');
+    expect(stepSummary(second, {})).toBeUndefined();
+  });
+
+  it('answers only the questions given something, and nothing when every one is skipped', () => {
+    const steps = questionSteps(fields);
+    expect(questionAnswer(answeredFields(steps, new Set([1])), { question_0: 'Ready', question_1: 'All' })).toEqual({ question_0: 'Ready' });
+    expect(steppedAnswer(steps, { question_1: 'All' })).toEqual({ question_1: 'All' });
+    expect(steppedAnswer(steps, {})).toBeUndefined();
+    const required = questionSteps(questionFields({ required: ['a', 'b'], properties: { a: { type: 'string', enum: ['x'] }, b: { type: 'string', enum: ['y'] } } }));
+    expect(steppedAnswer(required, { b: 'y' })).toEqual({ b: 'y' });
   });
 });

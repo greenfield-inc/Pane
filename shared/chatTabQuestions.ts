@@ -91,3 +91,49 @@ export function questionAnswer(fields: readonly QuestionField[], values: Readonl
   for (const field of fields) if (field.kind === 'boolean' && !(field.key in content)) content[field.key] = false;
   return content;
 }
+
+/**
+ * The form as questions asked one at a time (D-230): each choice starts a question, and the
+ * fields after it (Claude's "Other" box) belong to it. Fields before the first choice are a
+ * question of their own; a form with no choices is a single question.
+ */
+export function questionSteps(fields: readonly QuestionField[]): QuestionField[][] {
+  const steps: QuestionField[][] = [];
+  for (const field of fields) {
+    const current = steps.at(-1);
+    if (!current || field.kind === 'single' || field.kind === 'multiple') steps.push([field]);
+    else current.push(field);
+  }
+  return steps;
+}
+
+/** What was given for one question, for the review before Answer: "Ready · after lunch", or undefined when nothing was. */
+export function stepSummary(step: readonly QuestionField[], values: Readonly<Record<string, JsonValue>>): string | undefined {
+  const parts = step.flatMap(field => {
+    const value = values[field.key];
+    if (value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length)) return [];
+    if (field.kind === 'single' || field.kind === 'multiple') {
+      const picked = Array.isArray(value) ? value : [value];
+      return [picked.map(entry => field.choices.find(choice => choice.value === entry)?.title ?? String(entry)).join(', ')];
+    }
+    if (field.kind === 'boolean') return value === true ? [field.title] : [];
+    return [String(value).trim()].filter(Boolean);
+  });
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
+/** The fields of the questions the person did not skip, to answer with. */
+export function answeredFields(steps: readonly QuestionField[][], skipped: ReadonlySet<number>): QuestionField[] {
+  return steps.flatMap((step, index) => skipped.has(index) ? [] : step);
+}
+
+/**
+ * The answer to a form taken one question at a time: the questions given something, each
+ * with its fields; a question with nothing given is skipped, even a required one. Undefined
+ * while nothing at all is given, since an empty answer tells the agent nothing (Skip declines).
+ */
+export function steppedAnswer(steps: readonly QuestionField[][], values: Readonly<Record<string, JsonValue>>): Record<string, JsonValue> | undefined {
+  const skipped = new Set(steps.flatMap((step, index) => stepSummary(step, values) ? [] : [index]));
+  if (skipped.size === steps.length) return undefined;
+  return questionAnswer(answeredFields(steps, skipped), values);
+}

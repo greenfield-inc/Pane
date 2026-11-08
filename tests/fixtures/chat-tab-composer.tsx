@@ -1,7 +1,8 @@
 import { createRoot } from 'react-dom/client';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
 import type { AgentChatConfigOption } from '../../shared/types/agentChat';
-import type { ChatTabClient, ChatTabSend, ChatTabView } from '../../shared/types/chatTab';
+import type { ChatTabAnswer, ChatTabClient, ChatTabSend, ChatTabView } from '../../shared/types/chatTab';
+import type { JsonValue } from '../../shared/validation/boundaryDecoder';
 import '../../frontend/src/index.css';
 
 // A chat tab's composer in a column of a chosen width (?width=360), with Claude's settings.
@@ -35,10 +36,30 @@ const view: ChatTabView = {
     { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Nothing is waiting on you right now.' }] },
   ] },
 };
+// ?queue=2: messages waiting behind a running turn (D-211); ?cleared=1: the conversation started fresh with /clear.
+const queued = Number(params.get('queue') ?? 0);
+view.queue = Array.from({ length: queued }, (_, index) => ({ operationId: `q${index + 1}`, text: ['Also run the linter before you push', 'Then open a draft PR'][index] ?? `Queued ${index + 1}`, queuedAt: '2026-11-08T10:00:00.000Z', stored: true }));
+// ?questions=2: Claude's AskUserQuestion with two questions, taken one at a time (D-230); ?questions=1 asks one.
+const asked = Number(params.get('questions') ?? 0);
+if (asked) {
+  const properties: Record<string, JsonValue> = {
+    question_0: { type: 'string', title: '#1491 P1', description: 'Workspaces P1 is validated. Start the agent review? (Nothing merges.)', oneOf: [{ const: 'Ready', title: 'Ready: start agent review (Recommended)', description: 'A reviewer posts findings on #1491.' }, { const: 'Wait', title: 'Wait for plan v9' }, { const: 'Changes', title: 'I have changes first' }] },
+    question_0_custom: { type: 'string', title: 'Other', description: 'Type your own answer, or add a note to the option you chose above (optional).' },
+  };
+  if (asked > 1) Object.assign(properties, {
+    question_1: { type: 'string', title: 'Versioning', description: "Take the planner's four revised recommendations?", oneOf: [{ const: 'All', title: 'Take all four (Recommended)' }, { const: 'Some', title: 'Change some' }] },
+    question_1_custom: { type: 'string', title: 'Other', description: 'Type your own answer, or add a note to the option you chose above (optional).' },
+  });
+  view.questions = [{ id: 'q', generation: 1, message: asked > 1 ? 'Please answer the following questions.' : '#1491 P1', schema: { type: 'object', properties } }];
+  view.status = 'blocked';
+}
+if (params.has('cleared')) view.clearedAt = '2026-11-08T14:04:00.000Z';
 // ?files=1 copies dropped files "to the host" (D-139); what was copied and sent is kept for the test.
-declare global { interface Window { qaCopied: string[]; qaSent: ChatTabSend[]; qaReleaseCopies?: () => void } }
+declare global { interface Window { qaCopied: string[]; qaSent: ChatTabSend[]; qaCalls: string[]; qaAnswers: ChatTabAnswer[]; qaReleaseCopies?: () => void } }
 window.qaCopied = [];
 window.qaSent = [];
+window.qaCalls = [];
+window.qaAnswers = [];
 const holdCopies = params.has('holdCopies');
 let release: Promise<void> = Promise.resolve();
 if (holdCopies) release = new Promise(resolve => { window.qaReleaseCopies = resolve; });
@@ -50,7 +71,8 @@ const saveFile = params.has('files') ? async ({ name }: { name: string; dataUrl:
 } : undefined;
 const client: ChatTabClient = {
   get: async () => structuredClone(view), history: async () => [], send: async (_panel, request) => { window.qaSent.push(request); return { operationId: request.operationId, state: 'accepted' }; }, receipt: async () => undefined,
-  unqueue: async () => {}, cancel: async () => {}, permission: async () => {}, answer: async () => {}, restart: async () => {}, signIn: async () => ({ panelId: 'composer' }),
+  unqueue: async (_panel, id) => { window.qaCalls.push(`unqueue:${id}`); }, sendNow: async (_panel, id) => { window.qaCalls.push(`sendNow:${id}`); },
+  editQueued: async (_panel, id, text) => { window.qaCalls.push(`edit:${id}:${text}`); }, clear: async () => { window.qaCalls.push('clear'); }, stopTask: async () => {}, cancel: async () => {}, permission: async () => {}, answer: async (_panel, _id, response) => { window.qaAnswers.push(response); }, restart: async () => {}, signIn: async () => ({ panelId: 'composer' }),
   configure: async () => {}, onEvent: () => () => {}, onState: () => () => {},
 };
 const width = Number(params.get('width') ?? 360);

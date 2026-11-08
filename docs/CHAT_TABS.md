@@ -143,9 +143,25 @@ says, and after running the chat tab suites against it.
   **Permissions**, below Model, Effort and the other settings; each choice shows
   a check and On/Off settings are switches. A mode that never asks (Bypass)
   leaves a small shield on the row. The `/` menu lists
-  the agent's own commands and skills; **Stop** (or Esc in the composer) cancels the turn. A message sent
-  while the agent works is queued and sent next; **Remove** takes it out of the
-  queue.
+  the agent's own commands and skills, plus Pane's own **/clear**; **Stop** (or Esc in the composer) cancels the turn.
+- **Queue and Send now** (D-211): a message sent while the agent works (Enter)
+  waits in the queue, listed in the order it will be sent. Each queued message
+  can be edited (its images are kept), removed, or sent now. **Send now**, or
+  Cmd/Ctrl+Enter in the composer, puts the message first and interrupts the
+  running turn (including one blocked on an approval or question), so it is
+  sent as soon as the turn stops (`chat-tab:send` with `now`, `chat-tab:send-now`,
+  `chat-tab:edit-queued`).
+- **/clear** (or **Clear** above the thread) ends the agent and starts a fresh
+  conversation in the same tab, with the same agent, launch and settings
+  (`chat-tab:clear`). It asks first while a turn runs; a turn cut off this way is
+  marked failed. Queued messages are kept and go to the new conversation, which
+  starts with a "Cleared · 2:04 PM" divider. A stopped tab refuses it, and
+  Autopilot's chat does not offer it (its conversation holds what Start told it).
+- **Context and background work**: the view carries the adapter's last
+  `usage_update` (`context: { used, size }`, from Claude and Codex alike) and the
+  background tasks it runs (`tasks`, Claude's background shells and subagents;
+  `chat-tab:stop-task` stops one). Usage is kept in memory, so a reopened chat has
+  none until its next turn, and viewers show nothing rather than a guess.
 - **Copying**: message text can be selected and copied like any page. Each
   message and each finished response has a copy button (on hover with a mouse,
   always on touch) that copies what was written, as Markdown, without the
@@ -185,16 +201,22 @@ gets its own row, and a message sent meanwhile waits in the queue until the turn
 ends, like one sent during any other turn. Stop ends it.
 
 In a Session orchestrator's chat, a worker Pane shows up as one line with
-**Open** while it is asking the person, and when it finished, failed or reported
-during the latest turn (D-201), for example "switch-to-chat is asking you ·
-**Open**" or "approvals-global finished · **Open**". Other workers stay out of
+**Open** when it finished or failed during the latest turn, once that turn has
+ended (D-201, narrowed by D-223), for example "approvals-global finished ·
+**Open**". A worker's question reaches the person as an approval the
+orchestrator relays (D-220), never as a line here. Other workers stay out of
 the chat; the sidebar lists every Pane. This comes from Pane's own Session state
 (its Panes, their agent states and `runpane report`s), never from what the agent
 wrote.
 
 Approvals and questions are also asked in Pane's Approvals and on the phone (see
 [PANE_NOTIFY.md](PANE_NOTIFY.md)), a question form one field at a time. The
-first answer wins everywhere.
+first answer wins everywhere. In the chat, a form that asks several questions
+(Claude's AskUserQuestion with more than one) takes them one at a time (D-230):
+"1 of 2", each question with its options and its Other box, Next and Back, and
+on the last one a review of the picks beside **Answer**. Number keys pick an
+option and Enter goes on; **Skip** passes over one question, and skipping every
+one declines the form. A form with one question has no steps.
 
 ## Restart and resume
 

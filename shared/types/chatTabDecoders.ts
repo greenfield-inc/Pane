@@ -46,6 +46,9 @@ const view: BoundarySchema<ChatTabView> = boundary.object({
   queue: boundary.array(queued),
   transcript: boundary.optional(boundary.object({ panelId: boundary.string, generation: boundary.number, revision: boundary.number, start: boundary.number, messages: boundary.array(chatMessageSchema) })),
   messageCount: boundary.number,
+  context: boundary.optional(boundary.object({ used: boundary.number, size: boundary.number })),
+  tasks: boundary.optional(boundary.array(boundary.object({ id: boundary.string, kind: boundary.string, title: boundary.optional(boundary.string), startedAt: boundary.string, canStop: boundary.optional(boundary.literal(false)) }))),
+  clearedAt: boundary.optional(boundary.string),
 });
 const receipt: BoundarySchema<AgentChatReceipt> = boundary.object({
   operationId: boundary.string, generation: boundary.number, fingerprint: boundary.string,

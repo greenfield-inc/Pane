@@ -443,19 +443,22 @@ function turnFooter(turn: ChatTurn, hasActivity: boolean, now?: Date, locale?: s
 export interface WorkerNote { worker: ChatWorkerLine; text: string }
 
 /**
- * Which workers the Session chat mentions (D-201): one blocked or waiting on the person,
- * or one that finished or reported in the latest turn. Idle, running and unchanged
- * workers stay out of the chat; the sidebar lists every Pane.
+ * Which workers the Session chat mentions (D-201, narrowed by D-223): one that finished or
+ * failed while the latest turn ran, once that turn has ended, so the line belongs to the turn
+ * that reported it. A worker's question reaches the person as an approval the orchestrator
+ * relays (D-220), never as a line here; idle, running and unchanged workers stay out too.
  */
 export function workerNotes(turns: readonly ChatTurn[], workers: readonly ChatWorkerLine[]): WorkerNote[] {
   const latest = turns.at(-1);
-  // A running turn has no start time yet; it began after the turn before it ended.
-  const since = Date.parse(latest?.startedAt ?? turns.at(-2)?.endedAt ?? '');
-  const changed = (at?: string) => !!at && !Number.isNaN(since) && Date.parse(at) >= since;
+  if (!latest || latest.running) return [];
+  const since = Date.parse(latest.startedAt ?? turns.at(-2)?.endedAt ?? '');
+  const until = Date.parse(latest.endedAt ?? '');
+  const during = (at?: string) => {
+    const time = Date.parse(at ?? '');
+    return !Number.isNaN(time) && !Number.isNaN(since) && time >= since && (Number.isNaN(until) || time <= until);
+  };
   return workers.flatMap(worker => {
-    if (worker.state === 'waiting') return [{ worker, text: `${worker.name} is asking you` }];
-    if (!changed(worker.reportedAt)) return [];
-    const verb = worker.state === 'done' ? 'finished' : worker.state === 'failed' ? 'failed' : 'reported';
-    return [{ worker, text: `${worker.name} ${verb}` }];
+    if ((worker.state !== 'done' && worker.state !== 'failed') || !during(worker.reportedAt)) return [];
+    return [{ worker, text: `${worker.name} ${worker.state === 'done' ? 'finished' : 'failed'}` }];
   });
 }

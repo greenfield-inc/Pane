@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -52,6 +52,8 @@ function harness(store = new MemoryStore(), env: NodeJS.ProcessEnv = {}, directo
 }
 
 const replyText = (view: ChatTabView) => view.transcript?.messages.flatMap(message => message.role === 'assistant' ? message.parts.flatMap(part => part.type === 'text' ? [part.text] : []) : []).join('|') ?? '';
+const userTexts = (view: ChatTabView) => view.transcript?.messages.flatMap(message => message.role === 'user' ? message.parts.flatMap(part => part.type === 'text' ? [part.text] : []) : []) ?? [];
+const turnEnds = (view: ChatTabView) => view.transcript?.messages.flatMap(message => message.parts.flatMap(part => part.type === 'content' && JSON.stringify(part.content).includes('pane_turn') ? [JSON.parse(JSON.stringify(part.content)).stopReason] : [])) ?? [];
 const newTab = (cwd: string): ChatPanelState => ({ agent: 'claude', launch: { kind: 'agent' }, cwd, status: 'starting' });
 
 describe('chat tab manager', () => {
@@ -398,6 +400,163 @@ describe('chat tab manager', () => {
     await expect(manager.close('p1')).resolves.toBeUndefined();
     warn.mockRestore();
     expect(manager.isRunning('p1')).toBe(false);
+  });
+
+  it('Send now interrupts the running turn and delivers that message before older queued ones', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'slow' });
+    await expect.poll(() => manager.view('p1').status).toBe('working');
+    manager.send('p1', { operationId: 'op-2', text: 'second' });
+    manager.send('p1', { operationId: 'op-3', text: 'urgent', now: true });
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 5000 }).toBe('completed');
+    expect(manager.receipt('p1', 'op-3')?.state).toBe('completed');
+    expect(userTexts(manager.view('p1'))).toEqual(['slow', 'urgent', 'second']);
+    expect(turnEnds(manager.view('p1'))).toEqual(['cancelled', 'end_turn', 'end_turn']);
+  });
+
+  it('Send now ends a turn blocked on an approval, withdrawing it', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'permission' });
+    await expect.poll(() => manager.view('p1').permissions.length).toBe(1);
+    manager.send('p1', { operationId: 'op-2', text: 'urgent', now: true });
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 5000 }).toBe('completed');
+    expect(manager.view('p1').permissions).toEqual([]);
+    expect(replyText(manager.view('p1'))).toBe('You said: urgent');
+  });
+
+  it('Send now on an idle tab sends at once, and its flag is not part of the message', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    const first = manager.send('p1', { operationId: 'op-1', text: 'hello', now: true });
+    expect(manager.send('p1', { operationId: 'op-1', text: 'hello' })).toEqual(first);
+    await expect.poll(() => manager.receipt('p1', 'op-1')?.state).toBe('completed');
+  });
+
+  it('sendNow moves a queued message to the front and interrupts the turn', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'slow' });
+    await expect.poll(() => manager.view('p1').status).toBe('working');
+    manager.send('p1', { operationId: 'op-2', text: 'second' });
+    manager.send('p1', { operationId: 'op-3', text: 'third' });
+    manager.sendNow('p1', 'op-3');
+    expect(manager.view('p1').queue.map(item => item.operationId)).toEqual(['op-3', 'op-2']);
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 5000 }).toBe('completed');
+    expect(userTexts(manager.view('p1'))).toEqual(['slow', 'third', 'second']);
+    expect(() => manager.sendNow('p1', 'op-3')).toThrow(expect.objectContaining({ code: 'CHAT_NOT_QUEUED' }));
+  });
+
+  it('editQueued changes what is delivered and keeps the message\'s images', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'permission' });
+    await expect.poll(() => manager.view('p1').permissions.length).toBe(1);
+    const data = Buffer.from('png').toString('base64');
+    manager.send('p1', { operationId: 'op-2', text: 'before', images: [{ mimeType: 'image/png', data }] });
+    manager.editQueued('p1', 'op-2', 'after');
+    expect(manager.view('p1').queue).toEqual([expect.objectContaining({ operationId: 'op-2', text: 'after', imageCount: 1 })]);
+    expect(() => manager.editQueued('p1', 'op-2', '  ')).not.toThrow();
+    manager.editQueued('p1', 'op-2', 'after');
+    // The original send, retried, still finds its receipt.
+    expect(manager.send('p1', { operationId: 'op-2', text: 'before', images: [{ mimeType: 'image/png', data }] }).state).toBe('accepted');
+    const [permission] = manager.view('p1').permissions;
+    manager.answerPermission('p1', permission.id, 'allow');
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state).toBe('completed');
+    const delivered = manager.view('p1').transcript!.messages.filter(message => message.role === 'user').at(-1)!;
+    expect(delivered.parts[0]).toEqual({ type: 'text', text: 'after' });
+    expect(JSON.stringify(delivered.parts[1])).toContain(data);
+    expect(replyText(manager.view('p1'))).toContain('You said: after');
+    expect(() => manager.editQueued('p1', 'op-2', 'late')).toThrow(expect.objectContaining({ code: 'CHAT_NOT_QUEUED' }));
+  });
+
+  it('editQueued refuses to empty a text-only message', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'permission' });
+    await expect.poll(() => manager.view('p1').permissions.length).toBe(1);
+    manager.send('p1', { operationId: 'op-2', text: 'second' });
+    expect(() => manager.editQueued('p1', 'op-2', ' ')).toThrow(expect.objectContaining({ code: 'CHAT_PROMPT_EMPTY' }));
+    expect(manager.view('p1').queue.map(item => item.text)).toEqual(['second']);
+    await manager.cancel('p1');
+  });
+
+  it('clear starts a fresh conversation with the same settings, fails the cut-off turn and keeps the queue', async () => {
+    const { manager, store, directory, states } = harness();
+    store.add('p1', { ...newTab(directory), initialInput: 'opening' });
+    await manager.ensure('p1');
+    await expect.poll(() => manager.receipt('p1', 'initial:p1')?.state).toBe('completed');
+    await manager.configure('p1', 'model', 'fast');
+    const before = store.state('p1')!.acpSessionId;
+    manager.send('p1', { operationId: 'op-1', text: 'slow' });
+    await expect.poll(() => manager.view('p1').status).toBe('working');
+    manager.send('p1', { operationId: 'op-2', text: 'waiting' });
+    await manager.clear('p1');
+    const after = store.state('p1')!;
+    expect(after.acpSessionId).toBeTruthy();
+    expect(after.acpSessionId).not.toBe(before);
+    expect(after.clearedAt).toBeTruthy();
+    expect(manager.receipt('p1', 'op-1')).toMatchObject({ state: 'failed', error: 'Cleared before the turn finished.' });
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state).toBe('completed');
+    const view = manager.view('p1');
+    expect(view.clearedAt).toBe(after.clearedAt);
+    expect(states().at(-1)?.clearedAt).toBe(after.clearedAt);
+    // Nothing of the old conversation is shown or sent again.
+    expect(userTexts(view)).toEqual(['waiting']);
+    expect(replyText(view)).toBe('You said: waiting');
+    expect(view.controls.find(control => control.id === 'model')?.currentValue).toBe('fast');
+    // The new session was created, not loaded: the agent never saw the old messages in it.
+    const saved = JSON.parse(readFileSync(path.join(directory, 'agent', `${after.acpSessionId}.json`), 'utf8'));
+    expect(JSON.stringify(saved.updates)).not.toContain('opening');
+  });
+
+  it('refuses to clear a stopped tab', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    await manager.stop('p1', { message: 'Autopilot is off.', next: 'Turn Autopilot on.' });
+    await expect(manager.clear('p1')).rejects.toMatchObject({ code: 'CHAT_STOPPED' });
+    expect(manager.isRunning('p1')).toBe(false);
+  });
+
+  it('shows the context usage the agent reports, and none after clear', async () => {
+    const { manager, store, directory, states } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    expect(manager.view('p1').context).toBeUndefined();
+    manager.send('p1', { operationId: 'op-1', text: 'usage' });
+    await expect.poll(() => manager.receipt('p1', 'op-1')?.state).toBe('completed');
+    expect(manager.view('p1').context).toEqual({ used: 1234, size: 200000 });
+    expect(states().at(-1)?.context).toEqual({ used: 1234, size: 200000 });
+    await manager.clear('p1');
+    expect(manager.view('p1').context).toBeUndefined();
+  });
+
+  it('lists background tasks until they end, and stops one on request', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'task' });
+    await expect.poll(() => manager.view('p1').tasks?.length).toBe(1);
+    const [task] = manager.view('p1').tasks!;
+    expect(task).toMatchObject({ kind: 'bash', title: 'npm run watch' });
+    expect(task.canStop).toBeUndefined();
+    await expect.poll(() => manager.receipt('p1', 'op-1')?.state).toBe('completed');
+    // A background task is not a turn: the tab is free for the next message.
+    expect(manager.view('p1').status).toBe('idle');
+    await manager.stopTask('p1', task.id);
+    await expect.poll(() => manager.view('p1').tasks).toBeUndefined();
+    await expect(manager.stopTask('p1', task.id)).rejects.toMatchObject({ code: 'CHAT_TASK_NOT_RUNNING' });
+    manager.send('p1', { operationId: 'op-2', text: 'task quick' });
+    await expect.poll(() => manager.view('p1').tasks?.length).toBe(1);
+    await expect.poll(() => manager.view('p1').tasks).toBeUndefined();
   });
 
   it('keeps chosen settings across a restart', async () => {
