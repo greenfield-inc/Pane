@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { Plus, Radio, Settings } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
+import { MachineMarkEditor } from './machines/MachineMarkEditor';
 import { showActionError } from '../stores/errorStore';
 import type { MachineEntry } from '../utils/machineList';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
@@ -56,6 +57,8 @@ export function RemoteHostSwitcher({
     description: machine.subtitle,
     // A disabled row is dimmed as a whole, so its mark stays solid inside it.
     leading: <MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
+    // Its letters and colour can change on this computer, whether or not it can be picked now.
+    trailing: <MachineMarkEditor machine={machine} />,
     disabled: switching || unpickable(machine),
     onClick: () => void pick(machine),
   }));
