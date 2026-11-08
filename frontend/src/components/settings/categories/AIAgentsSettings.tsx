@@ -59,7 +59,10 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
   const [keySavedWhileOff, setKeySavedWhileOff] = useState(false);
   useEffect(() => {
     if (chatTabsOn) return;
-    void window.electronAPI.chatTab.keys().then((status) => setKeySavedWhileOff(Boolean(status.claude || status.codex)), () => undefined);
+    // A host without chat tabs (an older one, a test double) has no key to remove.
+    const keys = window.electronAPI.chatTab?.keys;
+    if (!keys) return;
+    void keys().then((status) => setKeySavedWhileOff(Boolean(status.claude || status.codex)), () => undefined);
   }, [chatTabsOn]);
 
   const applyClaudePath = async () => {
