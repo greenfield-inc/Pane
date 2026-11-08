@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { create } from 'zustand';
 import { Search } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -16,6 +17,9 @@ import {
   type ShortcutMap,
   type ShortcutMapRow,
 } from '../../utils/shortcutMap';
+
+/** A search to start the table with, set by the palette's Show in Keyboard Shortcuts (P7). */
+export const useShortcutMapQueryStore = create<{ query: string }>(() => ({ query: '' }));
 
 interface KeyboardShortcutMapProps {
   map: ShortcutMap;
@@ -45,7 +49,9 @@ const STATE_LABELS = {
 export function KeyboardShortcutMap({
   map, draft, dirty, terminalShortcuts, customCommands, onDraftChange, onApply, applyBlockedReason = null,
 }: KeyboardShortcutMapProps) {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(() => useShortcutMapQueryStore.getState().query);
+  // The palette's search is used once, by the table it opened.
+  useEffect(() => { useShortcutMapQueryStore.setState({ query: '' }); }, []);
   const [confirmResetAll, setConfirmResetAll] = useState(false);
   const visible = useMemo(() => filterShortcutRows(map.rows, query), [map.rows, query]);
   const grouped = useMemo(() => {

@@ -100,7 +100,7 @@ function nav(input: EntryInput): ShortcutCatalogEntry {
 }
 
 const APP_ENTRIES: readonly ShortcutCatalogEntry[] = [
-  nav({ id: 'open-command-palette', label: 'Open Command Palette', category: 'navigation', scope: 'app', defaultChord: 'mod+shift+p' }),
+  nav({ id: 'open-command-palette', label: 'Open Search', category: 'navigation', scope: 'app', defaultChord: 'mod+shift+p' }),
   entry({ id: 'toggle-sidebar', label: 'Toggle Sidebar', category: 'view', scope: 'app', defaultChord: 'mod+b' }),
   entry({ id: 'open-settings', label: 'Open Settings', category: 'navigation', scope: 'app', defaultChord: 'mod+,' }),
   nav({ id: 'focus-sidebar', label: 'Focus Sidebar', category: 'navigation', scope: 'app', defaultChord: 'mod+0' }),
