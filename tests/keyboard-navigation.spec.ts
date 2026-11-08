@@ -1,5 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
+import { notifyFixture } from './fixtures/notifySnapshot';
+
+declare global {
+  interface Window {
+    __clears?: string[];
+  }
+}
 
 // Keyboard navigation across the window (P3, journeys 3 to 5): ⌘0 walks the
 // sidebar, ⌘⌥+arrows cross region edges, F6 cycles, and focus shows quietly.
@@ -31,10 +38,11 @@ const layout = {
   },
 };
 
-async function openFixture(page: Page): Promise<void> {
+async function openFixture(page: Page, { approvals = false }: { approvals?: boolean } = {}): Promise<void> {
   await installElectronApiMock(page, {
     initialProjects: [project], initialSessions: sessions, initialPanels: panels, initialLayout: layout,
     activeProjectId: project.id,
+    ...(approvals ? { notifySnapshot: notifyFixture() } : {}),
   });
   await page.addInitScript(() => localStorage.setItem('pane-detail-panel-visible', 'true'));
   await page.goto('/');
@@ -240,14 +248,14 @@ test('⌘K alone in a focused terminal still clears it; ⌘K ⌘M held does not'
   await openFixture(page);
   await page.evaluate(() => {
     const calls: string[] = [];
-    Object.assign(window, { __clears: calls });
+    window.__clears = calls;
     const invoke = window.electronAPI.invoke;
     window.electronAPI.invoke = (channel: string, ...args: unknown[]) => {
       if (channel === 'terminal:clearScrollback') calls.push(String(args[0]));
       return invoke(channel, ...args);
     };
   });
-  const clears = () => page.evaluate(() => (window as unknown as { __clears: string[] }).__clears.length);
+  const clears = () => page.evaluate(() => window.__clears?.length ?? 0);
   await page.locator('[data-panel-group-id="g-left"] .xterm-helper-textarea').focus();
   await page.keyboard.press('ControlOrMeta+k');
   await expect.poll(clears).toBe(1);
@@ -256,4 +264,54 @@ test('⌘K alone in a focused terminal still clears it; ⌘K ⌘M held does not'
   await maximizeKey(page);
   await expect(page.locator('[data-panel-group-id="g-right"]')).toBeHidden();
   expect(await clears()).toBe(1);
+});
+
+interface NavigateMock {
+  emitNotifyNavigate: (target: 'toggle-inbox') => void;
+}
+
+/** The Notify shortcut pressed while Pane is in front: main sends `toggle-inbox` (D-251). */
+async function pressApprovalsKey(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+    (window as typeof window & { __paneTestElectronMock: NavigateMock }).__paneTestElectronMock.emitNotifyNavigate('toggle-inbox');
+  });
+}
+
+test('the Approvals key goes to Approvals, names where back goes, and returns to the same split and tab', async ({ page }) => {
+  await openFixture(page, { approvals: true });
+  await page.keyboard.press('ControlOrMeta+0');
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ group: 'g-right' });
+
+  await pressApprovalsKey(page);
+  await expect(page.getByTestId('approvals-queue')).toBeVisible();
+  await expect(page.getByTestId('approvals-back-hint')).toContainText('back to');
+  await expect(page.getByTestId('approvals-back-hint')).toContainText('Beta');
+
+  await pressApprovalsKey(page);
+  await expect(page.getByTestId('approvals-queue')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'auth-refactor', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ group: 'g-right' });
+  await expect(page.locator('[data-panel-group-id="g-right"]').getByRole('tab', { name: 'Beta', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('Esc leaves Approvals for where you were, but not while an answer is being typed', async ({ page }) => {
+  await openFixture(page, { approvals: true });
+  await page.locator('[data-panel-group-id="g-left"] .xterm-helper-textarea').focus();
+  await page.getByTestId('approvals-nav').click();
+  await expect(page.getByTestId('approvals-queue')).toBeVisible();
+
+  // Typing an answer: Esc belongs to the field and Approvals stays.
+  await page.getByTestId('approvals-queue').getByRole('button', { name: 'Details' }).click();
+  const field = page.getByTestId('notify-inbox').getByRole('textbox').first();
+  await field.focus();
+  await page.keyboard.type('Postgres');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('approvals-queue')).toBeVisible();
+  await page.getByTestId('approvals-queue').getByRole('heading', { name: 'Approvals' }).click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('approvals-queue')).toHaveCount(0);
+  await expect.poll(() => focusPlace(page)).toMatchObject({ group: 'g-left' });
 });

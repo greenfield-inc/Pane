@@ -20,6 +20,7 @@ import { useNow } from '../notify/useNow';
 import { SessionBeside } from '../PaneChatView';
 import { APPROVALS_SORTS, approvalRowLines, besideOf, connectedOf, groupApprovals, offlineRowText, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
 import { MachineContext } from './MachineContext';
+import { handleApprovalsEscape } from './approvalsNavigation';
 import { toggleApprovals } from './approvalsNavigation';
 
 /**
@@ -270,6 +271,11 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const snapshot = useNotifyStore((state) => state.snapshot);
   // Approvals turned off (here, or saved off and restored on launch): back to the view you left, as the row would.
   const turnedOff = snapshot?.settings.enabled === false;
+  // Esc goes back to where you were, unless an answer is being typed (D-251).
+  useEffect(() => {
+    window.addEventListener('keydown', handleApprovalsEscape);
+    return () => window.removeEventListener('keydown', handleApprovalsEscape);
+  }, []);
   useEffect(() => {
     if (turnedOff) toggleApprovals();
   }, [turnedOff]);

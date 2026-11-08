@@ -589,9 +589,9 @@ export class NotifyService {
     if (this.deps.headless || !settings.enabled || !settings.shortcut) return;
     try {
       // register() returns false when another app already holds the shortcut.
-      // While Pane is in front the shortcut opens Approvals; over other apps it opens the round.
+      // While Pane is in front the shortcut goes to Approvals and back (D-251); over other apps it opens the round.
       this.shortcutRegistered = globalShortcut.register(settings.shortcut, () => {
-        if (this.mainWindowFocused) this.navigate('inbox');
+        if (this.mainWindowFocused) this.navigate('toggle-inbox');
         else this.openRound();
       });
     } catch (error) {
