@@ -139,6 +139,12 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
     skillPath: path.join(services.skillCacheManager?.paneChatSkillsRoot ?? path.join(getAppDirectory(), 'skills', 'pane-chat', 'skills'), 'pane-autopilot', 'SKILL.md'),
   });
   manager.on('changed', (snapshot: AutopilotSnapshot) => getPaneEventSink().send('autopilot:changed', snapshot));
+  // While it's on, Autopilot reads the replies no asker or relaying orchestrator can (D-258).
+  notify.setAutopilotReader(() => {
+    if (services.configManager.getConfig().autopilotEnabled !== true) return undefined;
+    const { state, panelId } = manager.snapshot();
+    return state !== 'stopped' && panelId ? { panelId } : undefined;
+  });
   // The snapshot carries both switches: Start and Settings follow Chat tabs turning on or off.
   let switches = '';
   services.configManager.on('config-updated', (config: { chatTabsEnabled?: boolean; autopilotEnabled?: boolean }) => {
