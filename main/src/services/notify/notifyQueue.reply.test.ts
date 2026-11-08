@@ -270,19 +270,19 @@ describe('NotifyQueue replies (the reply contract)', () => {
     const queue = restoredQ20();
     queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'why?' } });
     await vi.advanceTimersByTimeAsync(1);
-    const refused = (run: () => unknown) => {
+    const refused = (run: () => void): PaneError | undefined => {
       try {
         run();
       } catch (error) {
-        return error;
+        if (error instanceof PaneError) return error;
+        throw error;
       }
       return undefined;
     };
     const took = refused(() => queue.took({ panelId: 'stranger' }, 'Q-20', 'answer'));
-    expect(took).toBeInstanceOf(PaneError);
     expect(took).toMatchObject({ code: 'ERR_NOTIFY_NOT_READER' });
-    expect((took as PaneError).next).toBeTruthy();
-    const updated = refused(() => queue.update({ panelId: 'stranger' }, 'Q-20', { asked: 'x', whatChanged: 'y' }));
+    expect(took?.next).toBeTruthy();
+    const updated = refused(() => { void queue.update({ panelId: 'stranger' }, 'Q-20', { asked: 'x', whatChanged: 'y' }); });
     expect(updated).toMatchObject({ code: 'ERR_NOTIFY_NOT_READER' });
     expect(item(queue, 'q20')).toMatchObject({ state: 'waiting', reply: { state: 'reading' } });
     expect(item(queue, 'q20')?.version).toBeUndefined();

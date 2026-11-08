@@ -2,6 +2,7 @@ import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './C
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MessageSquare, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { SessionApprovalsCount } from './approvals/ApprovalsCount';
+import { openApprovalsFromCount } from './approvals/SessionApprovals';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import {
@@ -441,7 +442,7 @@ export function OrchestrationSessionNav({
         // as dragging a tab, or reorders it within its own list. Repository
         // rows carry only text/plain, so the drags never answer each other.
         {...drag.source}
-        onClick={() => { resumeChatOnOpen(session); void openSession(session.id); }}
+        onClick={event => { openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
         onContextMenu={event => handleSessionContextMenu(event, session)}
         onKeyDown={event => handleSessionKeyDown(event, session, placement)}
         className="flex min-w-0 flex-1 items-center gap-2 rounded pl-2 pr-2 py-1 text-left focus:outline-none"
@@ -545,7 +546,7 @@ export function OrchestrationSessionNav({
               title={session.name}
               {...drag.source}
               {...drag.target}
-              onClick={() => { resumeChatOnOpen(session); void openSession(session.id); }}
+              onClick={event => { openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
               onContextMenu={event => handleSessionContextMenu(event, session)}
               onKeyDown={event => handleSessionKeyDown(event, session, 'rail')}
               className={cn(
