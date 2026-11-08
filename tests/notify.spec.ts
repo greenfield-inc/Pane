@@ -121,6 +121,25 @@ test.describe('Approvals in the main window', () => {
     await expect(rows.filter({ hasText: 'PR #812 checks passed' })).toContainText('Update');
   });
 
+  test("an Autopilot answer is overridden with a click on a choice, and its notes don't hide Send behind Details", async ({ page }) => {
+    const fixture = notifyFixture();
+    const [options] = fixture.items;
+    await boot(page, {
+      ...fixture,
+      items: [...fixture.items, { ...options, id: 'q-overridable', title: 'Which cache should staging use?', state: 'answered', answerSummary: 'Postgres table', answeredBy: { by: 'autopilot', because: 'D-22' } }],
+    });
+    await page.getByTestId('approvals-nav').click();
+    const queue = page.getByTestId('approvals-queue');
+    await queue.getByRole('tab', { name: /Answered/ }).click();
+    await queue.getByTestId('approvals-row').filter({ hasText: 'Which cache should staging use?' }).click();
+    const selected = queue.getByTestId('approvals-selected');
+    await selected.getByRole('button', { name: 'Override' }).click();
+    await expect(selected.getByRole('button', { name: 'Details' })).toHaveCount(0);
+    await expect(selected.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    await selected.getByRole('button', { name: /Keep Redis/ }).click();
+    await expect.poll(() => commands(page)).toContainEqual({ type: 'override', id: 'q-overridable', answer: { choice: 'Keep Redis' } });
+  });
+
   test('a worker item shows its Pane beside it', async ({ page }) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();

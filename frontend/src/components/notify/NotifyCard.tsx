@@ -634,7 +634,8 @@ function QuestionCard({
     // An Override can't open the round (the item no longer waits), so every choice shows.
     const visible = onCancelOverride ? choices : choices.slice(0, COMPACT_CHOICE_LIMIT);
     // On Approvals the card opens in place: the round holds only fresh waiting items, and choices' notes need room.
-    const opensInPlace = form === 'inbox';
+    // An Override shows every choice already, and answers on a click: nothing to open.
+    const opensInPlace = form === 'inbox' && !onCancelOverride;
     const more = choices.length > visible.length ? 'More' : opensInPlace && choices.some((choice) => choice.detail) ? 'Details' : undefined;
     body = (
       <div className={cn('flex flex-wrap items-center gap-2', actionsClass)}>
@@ -785,6 +786,16 @@ function QuestionCard({
   let footer: ReactNode = null;
   // On Approvals an opened card keeps its one row of actions below (Send joins it there).
   const sendInRow = form === 'inbox' && item.ui === 'options' && expanded;
+  const send = (
+    <button
+      type="button"
+      disabled={selected < 0}
+      onClick={() => answerChoice(selected, note)}
+      className="h-[30px] rounded-[10px] bg-interactive px-3 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50"
+    >
+      Send
+    </button>
+  );
   if (form !== 'inbox' && item.ui === 'options' && expanded) {
     footer = (
       <CardFooter
@@ -793,14 +804,7 @@ function QuestionCard({
           <>
             <FooterLink onClick={() => showDetailsChange(false)}>Hide details</FooterLink>
             {openInPane && !narrow && <FooterLink onClick={openInPane}>Open in Pane</FooterLink>}
-            <button
-              type="button"
-              disabled={selected < 0}
-              onClick={() => answerChoice(selected, note)}
-              className="h-[30px] rounded-[10px] bg-interactive px-3 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50"
-            >
-              Send
-            </button>
+            {send}
             {snooze}
           </>
         )}
@@ -860,6 +864,7 @@ function QuestionCard({
       ) : (
         <div className="flex items-center gap-3 px-3.5 pb-3 text-[12.5px] text-text-tertiary">
           {sendInRow && <FooterLink onClick={() => showDetailsChange(false)}>Hide details</FooterLink>}
+          {sendInRow && selected < 0 && <span className="min-w-0 truncate">Pick a choice</span>}
           {item.snoozedUntil !== undefined && <span className="min-w-0 truncate">{snoozedLabel(item.snoozedUntil)}</span>}
           <div className="ml-auto flex shrink-0 items-center gap-3">
             {item.source.paneId && !item.elsewhere && (!item.source.autopilot || onOpenInPane) && (
@@ -872,17 +877,9 @@ function QuestionCard({
                 Close
               </button>
             )}
+            {/* Send before Snooze, as on the floating strip. */}
+            {sendInRow && send}
             {snooze}
-            {sendInRow && (
-              <button
-                type="button"
-                disabled={selected < 0}
-                onClick={() => answerChoice(selected, note)}
-                className="h-[30px] rounded-[10px] bg-interactive px-3 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50"
-              >
-                Send
-              </button>
-            )}
           </div>
         </div>
       ))}
