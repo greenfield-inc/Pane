@@ -20,8 +20,8 @@ import { ChatBlocksContext, type ChatRendering } from './chatRendering';
 import { ChatCommandMenu } from './ChatCommandMenu';
 import { CLEAR_COMMAND, isClearCommand, matchingCommands, withPaneCommands } from './chatCommands';
 import { ChatQueue } from './ChatQueue';
-import { ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
-import { ChatStatusBar, sendNowKeys, useStatusItems, type ChatStatusPullRequest } from './ChatStatusBar';
+import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
+import { ChatStatusBar, sendNowKeys, type ChatStatusPullRequest } from './ChatStatusBar';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
 import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
 import { ChatCopyButton } from './ChatCopyButton';
@@ -223,7 +223,6 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const settingsLocked = disabled || view?.status !== 'idle';
   const actionsRef = useRef<HTMLDivElement>(null);
   const phone = usePhoneWidth(actionsRef);
-  const statusShowsMode = useStatusItems().includes('mode');
   const footerRef = useRef<HTMLDivElement>(null);
   /** The bar's "2 queued": brings the queue into view and puts focus on its first row. */
   const showQueue = () => {
@@ -441,7 +440,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           onRemove={operationId => void act(() => client.unqueue(panelId, operationId))}
           onSendNow={operationId => void act(() => client.sendNow(panelId, operationId))}
           onEdit={editQueued} />
-        {view && <ChatStatusBar controls={composerRow} settingsLocked={settingsLocked} configure={configure} context={view.context} tasks={view.tasks}
+        {view && <ChatStatusBar context={view.context} tasks={view.tasks}
           queued={view.queue.length} pr={pr} working={working} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
         <ComposerPrimitive.Root className="chat-composer">
@@ -496,9 +495,14 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             className="chat-input" />
           <div ref={actionsRef} className="chat-composer-actions" data-layout={phone ? 'phone' : 'desktop'} data-working={working || undefined}>
             {attachments && <ComposerPrimitive.AddAttachment aria-label={saveFile ? 'Attach files' : 'Attach image'} title={saveFile ? 'Attach photos or files' : 'Attach image'} className="chat-icon"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
-            {/* Model and mode live in the status bar (D-254); a mode that never asks stays marked here when the bar hides it. */}
-            {!statusShowsMode && <ChatRiskyModeMarker mode={composerRow.mode} />}
+            {/* Model and mode stay on the composer row (D-267). */}
+            {phone
+              ? <ChatRiskyModeMarker mode={composerRow.mode} />
+              : composerRow.mode && <ChatModeChip control={composerRow.mode} disabled={settingsLocked} configure={configure} />}
             <div className="chat-composer-end">
+              {phone
+                ? <ChatPhoneModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />
+                : <ChatModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />}
               {working
                 ? <>
                   <ComposerPrimitive.Send aria-label="Queue message" title={`Queue message: sends after this turn (Enter). Send now: ${sendNowKeys()}`} className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>

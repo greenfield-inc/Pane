@@ -15,8 +15,8 @@ describe('status bar items', () => {
   it('shows every default item until the person changes them, and remembers a change in the bar\'s order', () => {
     const storage = memory();
     expect(readStatusItems(storage)).toEqual([...DEFAULT_STATUS_ITEMS]);
-    writeStatusItems(storage, ['queue', 'model']);
-    expect(readStatusItems(storage)).toEqual(['model', 'queue']);
+    writeStatusItems(storage, ['queue', 'context']);
+    expect(readStatusItems(storage)).toEqual(['context', 'queue']);
     writeStatusItems(storage, [...DEFAULT_STATUS_ITEMS]);
     expect(storage.values.has(STATUS_ITEMS_KEY)).toBe(false);
   });
@@ -27,6 +27,8 @@ describe('status bar items', () => {
     expect(readStatusItems(storage)).toEqual([]);
     expect(readStatusItems(memory({ [STATUS_ITEMS_KEY]: '{oops' }))).toEqual([...DEFAULT_STATUS_ITEMS]);
     expect(readStatusItems(memory({ [STATUS_ITEMS_KEY]: '["pr","nonsense"]' }))).toEqual(['pr']);
+    // Model and mode left the bar for the composer row (D-267); a saved choice naming them keeps the rest.
+    expect(readStatusItems(memory({ [STATUS_ITEMS_KEY]: '["model","context","mode","queue"]' }))).toEqual(['context', 'queue']);
     expect(readStatusItems(undefined)).toEqual([...DEFAULT_STATUS_ITEMS]);
   });
 });

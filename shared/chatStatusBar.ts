@@ -1,19 +1,18 @@
 import type { ChatTabContextUsage } from './types/chatTab';
 
 /**
- * The line above the chat's composer (D-222, D-253): one muted footer line of the
- * chat's state, each item clickable. Which items show is remembered per device.
+ * The line above the chat's composer (D-222, D-253, D-267): one muted footer line of the
+ * chat's state, context left first, each item clickable. Model and mode stay on the
+ * composer row (D-267). Which items show is remembered per device.
  */
-export const STATUS_ITEMS = ['model', 'context', 'mode', 'pr', 'tasks', 'queue'] as const;
+export const STATUS_ITEMS = ['context', 'pr', 'tasks', 'queue'] as const;
 export type StatusItem = typeof STATUS_ITEMS[number];
 
 /** Every item shows until the person turns it off (D-255). */
 export const DEFAULT_STATUS_ITEMS: readonly StatusItem[] = STATUS_ITEMS;
 
 export const STATUS_ITEM_NAMES = {
-  model: 'Model and effort',
   context: 'Context left',
-  mode: 'Permission mode',
   pr: 'Pull request',
   tasks: 'Background tasks',
   queue: 'Queued messages',

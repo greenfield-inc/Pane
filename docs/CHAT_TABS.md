@@ -127,37 +127,40 @@ says, and after running the chat tab suites against it.
 - **Questions** (ACP form elicitation, such as Claude's AskUserQuestion) dock
   as a form. Pane declares `elicitation.form`; without it Claude turns
   AskUserQuestion off.
-- The composer is the input over one row: attach, then send (and, while the
-  agent works, queue and **Stop**). Model, effort and permission mode live in the
-  **status bar** just above it (D-222, D-253, D-254): one muted line of
-  clickable items, split by dots, in this order:
-  - **Model and effort** ("Opus 5.5 · Medium"; a trailing "(recommended)" and an
-    effort of "Default" are left off, never from the menu) opens a menu with
-    every setting the adapter offers (such as Claude's Fast mode, Ultracode and
-    Agent), each under its own name;
+- The composer is the input over one row of controls: attach image, the
+  permission mode chip, then one menu showing model and effort together
+  ("Opus 5.5 · Medium"; a trailing "(recommended)" and an effort of "Default"
+  are left off the button, never from the menu). A mode that never asks
+  (Bypass, Full access) shows its chip in amber. The row never overflows a
+  narrow column: the model label truncates and the mode chip drops to its icon
+  first, while attach and send keep their size. In a window dragged very
+  narrow the row drops the model button, then attach, and keeps send. That menu also holds every other setting the adapter
+  offers (such as Claude's Fast mode, Ultracode and Agent), each under its own
+  name. Pane places a setting by its ACP category (`mode`, `model`,
+  `thought_level`), or by its id when the adapter sends none. At phone width
+  (the phone app, and the PWA when the composer is under 480px) the row is
+  sparer: **+**, then the model as plain text with its effort muted ("Opus 5.5
+  Medium"), then send. The permission mode moves into that button's sheet as
+  **Permissions**, below Model, Effort and the other settings; each choice shows
+  a check and On/Off settings are switches. A mode that never asks (Bypass)
+  leaves a small shield on the row. The `/` menu lists
+  the agent's own commands and skills, plus Pane's own **/clear**; **Stop** (or Esc in the composer) cancels the turn.
+- **Status bar** (D-222, D-253, D-267): one muted line just above the composer,
+  items split by dots, each opening what it names:
   - **Context left** ("Ctx 41%", amber at 20% or less) opens the tokens used,
     a meter and **Clear conversation**; it is absent when the adapter reports no
     usage;
-  - **Permission mode** opens the mode list; a mode that never asks (Bypass,
-    Full access) is amber;
   - **Pull request** ("#1272 · Open", the chat's Pane's PR) opens it on GitHub;
   - **Background tasks** ("2 tasks") lists them, with Stop where the adapter
     allows it;
   - **Queued messages** ("2 queued") moves focus to the queue.
 
-  Items with nothing to say stay out. Settings are locked while a turn runs.
-  **…** picks which items show; the choice is remembered on this device
-  (`pane-chat-status-items:v1` in local storage), and **Reset to default** brings
-  all six back. While a turn runs a wide bar ends with the send-now keys. Pane
-  places a setting by its ACP category (`mode`, `model`, `thought_level`), or by
-  its id when the adapter sends none. At phone width (the PWA when the composer
-  is under 480px) the bar is compact: the percentage and PR number alone, and it
-  scrolls sideways instead of wrapping; the model's sheet lists Model, Effort,
-  the other settings and **Permissions**, each choice with a check and On/Off
-  settings as switches. With the mode hidden from the bar, a mode that never
-  asks leaves a small shield on the composer row. The phone app keeps its own
-  composer row for now. The `/` menu lists the agent's own commands and skills,
-  plus Pane's own **/clear**; **Stop** (or Esc in the composer) cancels the turn.
+  Items with nothing to say stay out. **…** picks which items show; the choice
+  is remembered on this device (`pane-chat-status-items:v1` in local storage),
+  and **Reset to default** brings all four back. While a turn runs the bar ends
+  with the send-now keys. At phone width it is compact (the percentage and PR
+  number alone) and scrolls sideways instead of wrapping. The phone app has no
+  status bar yet.
 - **Queue and Send now** (D-211): a message sent while the agent works (Enter)
   waits in the queue, listed in the order it will be sent. Each queued message
   can be edited (its images are kept), removed, or sent now. **Send now**, or

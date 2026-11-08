@@ -1,8 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
 
-// D-222, D-253 to D-255: one footer line above the composer with model and effort, context left,
-// permission mode, the Pane's PR, background tasks and queued messages; each opens what it names,
+// D-222, D-253, D-255, D-267: one footer line above the composer with context left, the Pane's PR, background tasks and queued messages; each opens what it names,
 // and "…" picks which show, remembered on this device.
 const fixture = path.resolve('tests/fixtures/chat-tab-composer.tsx');
 const shots = process.env.PANE_VERIFY_DIR;
@@ -29,7 +28,10 @@ test('the bar shows every default item, in order', async ({ page }) => {
   });
   const phone = test.info().project.name === 'phone';
   // The phone's line is compact: the percentage alone, the PR's number alone.
-  const expected = phone ? ['Opus 5.5', 'Medium', '41%', 'Accept edits', '#1272', '2 tasks', '2 queued'] : ['Opus 5.5 · Medium', 'Ctx 41%', 'Accept edits', '#1272 · Open', '2 tasks', '2 queued'];
+  const expected = phone ? ['41%', '#1272', '2 tasks', '2 queued'] : ['Ctx 41%', '#1272 · Open', '2 tasks', '2 queued'];
+  // Model and mode stay on the composer row, not in the bar (D-267).
+  expect(text).not.toContain('Opus 5.5');
+  expect(text).not.toContain('Accept edits');
   let at = -1;
   for (const part of expected) {
     const next = text.indexOf(part, at + 1);
@@ -67,16 +69,22 @@ test('tasks list what runs in the background, with Stop where the adapter allows
   await expect.poll(() => calls(page)).toEqual(['stopTask:t1']);
 });
 
-test('the PR opens on GitHub, the queue count goes to the queue, and the mode menu changes the mode', async ({ page }) => {
+test('the PR opens on GitHub, the queue count goes to the queue, and the composer\'s mode menu still changes the mode', async ({ page }) => {
   await open(page, `status=1&working=1&queue=2&mode=acceptEdits&width=${width()}`);
   await expect(bar(page).getByRole('link', { name: /#1272/ })).toHaveAttribute('href', 'https://github.com/greenfield-inc/Pane/pull/1272');
   await bar(page).getByRole('button', { name: '2 queued' }).click();
   await expect(page.getByRole('list', { name: 'Queued messages' }).getByRole('button').first()).toBeFocused();
   // Settings are locked while a turn runs; between turns the mode item changes the mode.
-  await expect(bar(page).getByRole('button', { name: /Mode: Accept edits/ })).toBeDisabled();
+  // The mode is on the composer row again (D-267); on the phone it sits in the model sheet as Permissions.
   await open(page, `status=1&mode=acceptEdits&width=${width()}`);
-  await bar(page).getByRole('button', { name: /Mode: Accept edits/ }).click();
-  await page.getByRole('menuitemradio', { name: 'Plan mode' }).click();
+  const composer = page.locator('.chat-composer');
+  if (test.info().project.name === 'phone') {
+    await composer.getByRole('button', { name: /Model and options/ }).click();
+    await page.getByRole('group', { name: 'Permissions' }).getByText('Plan mode').click();
+  } else {
+    await composer.getByRole('button', { name: /Mode: Accept edits/ }).click();
+    await page.getByRole('menuitemradio', { name: 'Plan mode' }).click();
+  }
   await expect.poll(() => calls(page)).toEqual(['configure:mode:plan']);
 });
 

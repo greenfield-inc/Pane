@@ -1,12 +1,10 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import type { ChatTabContextUsage, ChatTabTask } from '../../../../shared/types/chatTab';
-import type { ComposerControls } from '../../../../shared/chatComposerControls';
 import {
   contextLeft, DEFAULT_STATUS_ITEMS, prStateName, readStatusItems, STATUS_ITEM_NAMES, STATUS_ITEMS, taskAge, writeStatusItems, type StatusItem,
 } from '../../../../shared/chatStatusBar';
 import { Dropdown } from '../ui/Dropdown';
-import { ChatModeItem, ChatModelMenu, ChatPhoneModelMenu } from './ChatComposerControls';
 
 /** The pull request of the chat's Pane, when it has one. */
 export interface ChatStatusPullRequest { number: number; url?: string; state?: string; draft?: boolean }
@@ -27,7 +25,7 @@ function setStatusItems(items: readonly StatusItem[]) {
   listeners.forEach(listener => listener());
 }
 /** The status items this device shows. */
-export function useStatusItems(): readonly StatusItem[] {
+function useStatusItems(): readonly StatusItem[] {
   return useSyncExternalStore(subscribe, () => current, () => current);
 }
 
@@ -44,9 +42,6 @@ function useNow(active: boolean): number {
 }
 
 export interface ChatStatusBarProps {
-  controls: ComposerControls;
-  settingsLocked: boolean;
-  configure: (id: string, value: string) => void;
   context?: ChatTabContextUsage;
   tasks?: readonly ChatTabTask[];
   queued: number;
@@ -60,11 +55,12 @@ export interface ChatStatusBarProps {
 }
 
 /**
- * The line above the composer (D-222, D-253): model and effort, context left, permission mode,
- * the Pane's pull request, background tasks and queued messages, each opening what it names.
+ * The line above the composer (D-222, D-253, D-267): context left, the Pane's pull request,
+ * background tasks and queued messages, each opening what it names. Model and mode stay on the
+ * composer row.
  * "…" picks which items show, remembered on this device. Items with nothing to say stay out.
  */
-export function ChatStatusBar({ controls, settingsLocked, configure, context, tasks = [], queued, pr, working, phone, onClear, onStopTask, onShowQueue }: ChatStatusBarProps) {
+export function ChatStatusBar({ context, tasks = [], queued, pr, working, phone, onClear, onStopTask, onShowQueue }: ChatStatusBarProps) {
   const shown = useStatusItems();
   const now = useNow(tasks.length > 0);
   const left = contextLeft(context);
@@ -76,10 +72,6 @@ export function ChatStatusBar({ controls, settingsLocked, configure, context, ta
 
   function statusItem(id: StatusItem): ReactNode {
     switch (id) {
-      case 'model':
-        return phone
-          ? <ChatPhoneModelMenu arranged={controls} disabled={settingsLocked} configure={configure} />
-          : <ChatModelMenu arranged={controls} disabled={settingsLocked} configure={configure} />;
       case 'context':
         if (!left) return null;
         return <Dropdown className="chat-status-anchor" position="top-left" width="lg" items={[]} formLabel="Context left"
@@ -93,8 +85,6 @@ export function ChatStatusBar({ controls, settingsLocked, configure, context, ta
             <p className="chat-status-panel-muted">{left.detail}.{left.low ? ' The agent will compact or stop soon.' : ''}</p>
             {onClear && <button type="button" className="chat-status-button self-start" onClick={() => { close(); onClear(); }}>Clear conversation</button>}
           </div>} />;
-      case 'mode':
-        return controls.mode ? <ChatModeItem control={controls.mode} disabled={settingsLocked} configure={configure} /> : null;
       case 'pr': {
         if (!pr) return null;
         const state = prStateName(pr.state, pr.draft);

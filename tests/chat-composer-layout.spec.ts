@@ -32,23 +32,15 @@ for (const width of [300, 360, 440, 520, 640]) for (const labels of ['default', 
     await open(page, `width=${width}&labels=${labels}`);
     const composer = await page.locator('.chat-composer').boundingBox();
     if (!composer) throw new Error('No composer');
-    for (const name of ['Send message', 'Attach image']) {
+    for (const name of ['Send message', 'Attach image', /Model and options/]) {
       const control = await box(page, name);
       expect(control.x, `${name} starts inside`).toBeGreaterThanOrEqual(composer.x);
       expect(control.x + control.width, `${name} ends inside`).toBeLessThanOrEqual(composer.x + composer.width);
       expect(control.y + control.height, `${name} is on the composer's row`).toBeLessThanOrEqual(composer.y + composer.height);
     }
-    // Model and mode sit in the status bar above the composer (D-254), inside the column.
-    const column = await page.getByTestId('column').boundingBox();
-    if (!column) throw new Error('No column');
-    for (const name of [/Model and options/, /Customize|Choose what the status bar shows/]) {
-      const control = await box(page, name);
-      expect(control.x + control.width, `${name} ends inside the column`).toBeLessThanOrEqual(column.x + column.width);
-      expect(control.y + control.height, `${name} is above the composer`).toBeLessThanOrEqual(composer.y);
-    }
     const send = await box(page, 'Send message');
     expect(send.width, 'send never shrinks').toBeGreaterThanOrEqual(28);
-    // One row: attach and send share a line.
+    // One row: attach, model menu and send share a line.
     const attach = await box(page, 'Attach image');
     expect(Math.abs((attach.y + attach.height / 2) - (send.y + send.height / 2))).toBeLessThan(4);
   });
@@ -76,13 +68,9 @@ for (const working of [false, true]) for (const width of [120, 150, 170, 200, 24
   });
 }
 
-test('Codex Full access stays marked: amber in the bar, or on the composer row when the bar hides the mode (F-17)', async ({ page }) => {
+test('Codex Full access keeps its marker on the phone row (F-17)', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 700 });
   await open(page, 'width=390&labels=opus&mode=agent-full-access');
-  await expect(page.getByRole('button', { name: /Mode: Full access/ })).toHaveAttribute('data-tone', 'warning');
-  await expect(page.getByRole('img', { name: 'Permissions: Full access' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Choose what the status bar shows' }).click();
-  await page.getByRole('checkbox', { name: 'Permission mode' }).uncheck();
   await expect(page.getByRole('img', { name: 'Permissions: Full access' })).toBeVisible();
 });
 
@@ -99,7 +87,7 @@ test('the model button drops "(recommended)" and a Default effort, keeping the f
 test('a long model name truncates with an ellipsis instead of growing the row', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 700 });
   await open(page, 'width=640&labels=long');
-  const clipped = await page.locator('.chat-status-item .chat-chip-label, .chat-status-item .chat-phone-model-name').first().evaluate(label => label.scrollWidth > label.clientWidth && getComputedStyle(label).textOverflow === 'ellipsis');
+  const clipped = await page.locator('.chat-model .chat-chip-label, .chat-phone-model-name').first().evaluate(label => label.scrollWidth > label.clientWidth && getComputedStyle(label).textOverflow === 'ellipsis');
   expect(clipped).toBe(true);
 });
 
@@ -107,4 +95,12 @@ test('a wide column keeps "Opus 5.5 · Medium"', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 700 });
   await open(page, 'width=640&labels=opus');
   await expect(page.getByRole('button', { name: /Model and options/ })).toHaveAccessibleName('Model and options: Opus 5.5 · Medium');
+});
+
+test('a mode that never asks is amber on the desktop row (D-267)', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await open(page, 'width=640&labels=opus&mode=bypassPermissions');
+  await expect(page.getByRole('button', { name: /Mode: Bypass permissions/ })).toHaveAttribute('data-tone', 'warning');
+  await open(page, 'width=640&labels=opus&mode=acceptEdits');
+  await expect(page.getByRole('button', { name: /Mode: Accept edits/ })).not.toHaveAttribute('data-tone', 'warning');
 });
