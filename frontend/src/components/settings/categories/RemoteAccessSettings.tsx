@@ -213,7 +213,7 @@ function ActiveMachineCard({ machine, local, lastError, connectedOverTailscale, 
   return (
     <div className="rounded-lg border border-border-secondary bg-surface-primary p-4" data-testid="active-machine">
       <div className="flex flex-wrap items-center gap-3">
-        <MachineMark os={machine.os} slot={machine.slot} presence={machine.presence} size="lg" />
+        <MachineMark letters={machine.letters} slot={machine.slot} presence={machine.presence} size="lg" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-semibold text-text-primary">{machine.name}</p>
           <p className="truncate text-xs text-text-tertiary">{detail}</p>
@@ -271,7 +271,7 @@ function MachineRow({ machine, disabled, busy, password, onPasswordChange, onPas
       data-testid={`machine-${machine.name}`}
     >
       <div className={cn('flex min-w-0 flex-1 basis-48 items-center gap-3', machine.presence === 'dimmed' && 'text-text-tertiary')}>
-        <MachineMark os={machine.os} slot={machine.slot} presence={machine.presence} size="md" />
+        <MachineMark letters={machine.letters} slot={machine.slot} presence={machine.presence} size="md" />
         <div className="min-w-0">
           <p className={cn('flex items-center gap-2 truncate text-sm font-medium', machine.presence === 'dimmed' ? 'text-text-tertiary' : 'text-text-primary')}>
             <span className="truncate">{machine.name}</span>

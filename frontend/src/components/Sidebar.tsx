@@ -270,10 +270,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const machineName = activeMachine?.name;
   const machineOs = activeMachine?.os ?? null;
   const machineSlot = activeMachine?.slot ?? 0;
+  const machineLetters = activeMachine?.letters ?? '?';
   const machineLocal = activeMachine?.kind === 'local';
   useEffect(() => {
-    setActiveMachine(machineId && machineName ? { id: machineId, name: machineName, os: machineOs, slot: machineSlot, local: machineLocal } : null);
-  }, [machineId, machineName, machineOs, machineSlot, machineLocal, setActiveMachine]);
+    setActiveMachine(machineId && machineName ? { id: machineId, name: machineName, os: machineOs, slot: machineSlot, letters: machineLetters, local: machineLocal } : null);
+  }, [machineId, machineName, machineOs, machineSlot, machineLetters, machineLocal, setActiveMachine]);
   // Hidden only while no other machine is saved or on Tailscale.
   const switcherVisible = machines.length > 1 || remoteConnectionState.mode === 'remote';
   const paneSort = usePaneSort({ id: machineId, local: machineLocal });
@@ -284,7 +285,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   useEffect(() => { void useAllMachinesStore.getState().hydrate(); }, []);
   useEffect(() => {
     useAllMachinesStore.setState({
-      entries: machines.map(({ id, name, os, slot, active }) => ({ id, name, os, slot, active })),
+      entries: machines.map(({ id, name, os, slot, letters, active }) => ({ id, name, os, slot, letters, active })),
       menuShown: switcherVisible,
       switchMachine: async (machineId) => {
         const machine = machines.find((entry) => entry.id === machineId);
@@ -323,7 +324,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
     >
       {switcherVisible
-        ? <MachineMark os={activeMachine.os} slot={activeMachine.slot} presence={activeMachine.presence} size="rail" />
+        ? <MachineMark letters={activeMachine.letters} slot={activeMachine.slot} presence={activeMachine.presence} size="rail" />
         : <span className={`h-2.5 w-2.5 rounded-full ${remoteFooterStatus.dotClassName}`} />}
     </button>
   );
@@ -556,7 +557,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         >
           {allMachines
             ? <MachineMarkStack machines={savedMachines} />
-            : <MachineMark os={activeMachine.os} slot={activeMachine.slot} presence={activeMachine.presence} size="sm" className="rounded-full" />}
+            : <MachineMark letters={activeMachine.letters} slot={activeMachine.slot} presence={activeMachine.presence} size="sm" className="rounded-full" />}
           {showHostPillLabel && <span className="min-w-0 truncate">{allMachines ? 'All machines' : activeMachine.name}</span>}
           <ChevronDown className="h-3 w-3 shrink-0 text-text-tertiary" />
         </button>,

@@ -1283,7 +1283,7 @@ body.understory {
   .pane-changes-list-row { grid-template-columns: 16px minmax(0, 1fr) 18px; }
 }
 
-/* Machine marks (components/machines/MachineMark.tsx). The logo pulses while
+/* Machine marks (components/machines/MachineMark.tsx). The letters pulse while
    its machine reconnects, on the phone's 1.6 s period; a machine that cannot be
    reached is dimmed. Reduce Motion dims instead of pulsing. */
 @keyframes pane-machine-pulse {
@@ -1291,7 +1291,7 @@ body.understory {
   50% { opacity: 0.35; }
 }
 
-.pane-machine-mark[data-presence='pulsing'] .pane-machine-logo {
+.pane-machine-mark[data-presence='pulsing'] .pane-machine-letters {
   animation: pane-machine-pulse 1.6s ease-in-out infinite;
 }
 
@@ -1299,7 +1299,7 @@ body.understory {
 
 @media (prefers-reduced-motion: reduce) {
   .pane-machine-mark[data-presence='pulsing'] { opacity: 0.45; }
-  .pane-machine-mark[data-presence='pulsing'] .pane-machine-logo { animation: none; }
+  .pane-machine-mark[data-presence='pulsing'] .pane-machine-letters { animation: none; }
 }
 
 /* Pane find (Cmd/Ctrl+F) in file previews and other page text. Drawn with the

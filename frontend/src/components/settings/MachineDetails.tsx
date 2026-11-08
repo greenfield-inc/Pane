@@ -74,7 +74,7 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
   return (
     <DetailsFrame onBack={onBack}>
       <div className="flex items-center gap-4">
-        <MachineMark os={machine.os} slot={machine.slot} presence={machine.presence} size="lg" />
+        <MachineMark letters={machine.letters} slot={machine.slot} presence={machine.presence} size="lg" />
         <div className="min-w-0">
           <h2 className="truncate text-xl font-semibold text-text-primary">{machine.name}</h2>
           <p className="truncate text-sm text-text-tertiary">{header}</p>

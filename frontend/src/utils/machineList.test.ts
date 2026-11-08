@@ -144,6 +144,31 @@ describe('buildMachineList', () => {
     const mine = ['studio-mac', 'build-box', 'office-pc', 'travel-laptop'].map((name) => byName(list, name).slot);
     expect(new Set(mine).size).toBe(4);
   });
+
+  it('marks each machine with its letters, two each where first letters are shared', () => {
+    const list = buildMachineList(input());
+    expect(list.map((machine) => [machine.name, machine.letters])).toEqual([
+      ['studio-mac', 'S'],
+      ['build-box', 'B'],
+      ['office-pc', 'O'],
+      ['travel-laptop', 'T'],
+      ['alex-mini', 'A'],
+      ['cloud-vm', 'C'],
+    ]);
+    const crowded = buildMachineList(input({ localName: 'olive-mac' }));
+    expect(byName(crowded, 'olive-mac').letters).toBe('OM');
+    expect(byName(crowded, 'office-pc').letters).toBe('OP');
+  });
+
+  it('applies marks saved on this computer: this computer by `local`, others by name', () => {
+    const plain = buildMachineList(input());
+    const list = buildMachineList(input({
+      marks: { local: { letters: 'me', color: 'Lime' }, 'travel-laptop': { color: 'Violet' } },
+    }));
+    expect(byName(list, 'studio-mac')).toMatchObject({ letters: 'ME', slot: 3, customMark: true, markKey: 'local' });
+    expect(byName(list, 'travel-laptop')).toMatchObject({ letters: 'T', slot: 0, customMark: true, markKey: 'travel-laptop' });
+    expect(byName(list, 'build-box')).toMatchObject({ letters: 'B', slot: byName(plain, 'build-box').slot, customMark: false });
+  });
 });
 
 describe('getHostingSummary', () => {

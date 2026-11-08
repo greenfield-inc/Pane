@@ -34,6 +34,7 @@ function errorText(cause: unknown, fallback: string): string {
  */
 export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMachinesOptions) {
   const profiles = useConfigStore((state) => state.config?.remoteDaemon?.client.profiles);
+  const marks = useConfigStore((state) => state.config?.machineMarks);
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const [tailnet, setTailnet] = useState<TailnetMachineList | null>(null);
   const [localName, setLocalName] = useState<string | null>(null);
@@ -81,8 +82,8 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
   // The active machine pulses through the grace window and dims after it, like every other connection dot.
   const { presence: connectionPresence } = useConnectionPresence(connectionState);
   const machines = useMemo(
-    () => buildMachineList({ connectionState, profiles: profiles ?? [], tailnet, localName, localOs, connectionPresence }),
-    [connectionState, profiles, tailnet, localName, localOs, connectionPresence],
+    () => buildMachineList({ connectionState, profiles: profiles ?? [], tailnet, localName, localOs, connectionPresence, marks }),
+    [connectionState, profiles, tailnet, localName, localOs, connectionPresence, marks],
   );
 
   const select = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {

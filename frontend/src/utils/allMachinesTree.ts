@@ -8,12 +8,13 @@ import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import type { MachineOs } from './machineList';
 
-/** Who a row belongs to: a machine's id (`local` or a saved profile id), name, OS and colour slot. */
+/** Who a row belongs to: a machine's id (`local` or a saved profile id), name, OS, colour slot and letters. */
 export interface MachineRef {
   id: string;
   name: string;
   os: MachineOs | null;
   slot: number;
+  letters: string;
 }
 
 /** One machine's lists, as its `machines:read` answers gave them. */
