@@ -29,7 +29,7 @@ describe('chat tab prompts in Notify', () => {
     bridge.observe({ ...base, permissions: [permission] });
     bridge.observe({ ...base, permissions: [permission] });
     expect(asked).toHaveLength(1);
-    expect(asked[0].question).toMatchObject({ ui: 'options', title: 'Claude wants to run a command', detail: 'pnpm test', agentPrompt: { yes: 'Yes', no: 'No' } });
+    expect(asked[0].question).toMatchObject({ ui: 'options', title: 'Claude wants to run a command', context: 'pnpm test', agentPrompt: { yes: 'Yes', no: 'No' } });
     expect(asked[0].question.choices?.map(choice => choice.label)).toEqual(['Yes', 'Yes, always', 'No']);
     asked[0].answer({ answer: 'Yes, always' });
     await Promise.resolve(); await Promise.resolve();
