@@ -1367,7 +1367,9 @@ default), a Session has one voice to the person: its orchestrator.
   worker's `notify` call isn't shown to the person; it returns `unavailable`
   with a `next` that says to report blocked.
 - **A worker's question is a card at once.** Its blocked report shows in
-  Approvals straight away with an answer box. It rings once the orchestrator
+  Approvals straight away with an answer box, under one line of what the worker
+  was doing: from a JSON status file, its question's `why`, else its `summary`
+  or `step`; the file itself opens as the worker's status link. It rings once the orchestrator
   relays it or after 10 minutes, so the orchestrator first settles what the plan
   already answers (D-79). The answer goes straight to the asking tab, whether or
   not the orchestrator is running: `answer: Q-n → <answer> (by you)`, once its
