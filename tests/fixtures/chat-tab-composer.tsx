@@ -64,6 +64,15 @@ if (params.has('status')) {
   const started = new Date(Date.now() - 95_000).toISOString();
   view.tasks = [{ id: 't1', kind: 'bash', title: 'pnpm --filter frontend test --watch', startedAt: started }, { id: 't2', kind: 'subagent', title: 'Explore: find the queue code', startedAt: started, canStop: false }];
 }
+// ?agents=3: a Session orchestrator's chat with 3 workers working, plus one waiting and one idle, which don't count (D-276).
+const agentCount = Number(params.get('agents') ?? 0);
+const workingNames = ['csv-export', 'switch-to-chat', 'onboarding-copy', 'docs-pass'];
+const workers = params.has('agents') ? [
+  ...workingNames.slice(0, agentCount).map((name, index) => ({ paneId: `p${index + 1}`, name, state: 'running' as const, label: 'Running', tab: { panelId: `t${index + 1}`, title: index === 1 ? 'Codex' : 'Claude Code' } })),
+  { paneId: 'pw', name: 'approvals-global', state: 'waiting' as const, label: 'Waiting' },
+  { paneId: 'pi', name: 'release-notes', state: 'idle' as const, label: 'Idle' },
+] : undefined;
+const actions = { onOpenWorker: (paneId: string, panelId?: string) => { window.qaCalls.push(`open:${paneId}:${panelId ?? ''}`); } };
 const pr = params.has('status') ? { number: 1272, url: 'https://github.com/greenfield-inc/Pane/pull/1272', state: 'OPEN' } : undefined;
 if (params.has('cleared')) view.clearedAt = '2026-11-08T14:04:00.000Z';
 // ?files=1 copies dropped files "to the host" (D-139); what was copied and sent is kept for the test.
@@ -91,7 +100,7 @@ const width = Number(params.get('width') ?? 360);
 createRoot(document.getElementById('root')!).render(
   <div className="bg-bg-secondary" style={{ height: '100vh', display: 'flex' }}>
     <div data-testid="column" className="bg-bg-primary" style={{ width, height: '100%', borderRight: '1px solid var(--color-border-primary)' }}>
-      <ChatTabPanel panelId="composer" client={client} saveFile={saveFile} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} pr={pr} />
+      <ChatTabPanel panelId="composer" client={client} saveFile={saveFile} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} pr={pr} workers={workers} actions={actions} />
     </div>
   </div>,
 );

@@ -359,6 +359,8 @@ export interface ChatWorkerLine {
   attachedAt?: string;
   /** When its report last changed. */
   reportedAt?: string;
+  /** The tab whose agent is working, when one is (D-276). */
+  tab?: { panelId: string; title: string };
 }
 
 export interface WorkerPaneInput {
@@ -366,7 +368,7 @@ export interface WorkerPaneInput {
   name: string;
   missing: boolean;
   archived: boolean;
-  panels: Array<{ state: string; missing?: boolean }>;
+  panels: Array<{ state: string; missing?: boolean; panelId?: string; title?: string }>;
   report?: { state: string; pr?: number; summary?: string; question?: string; reportedAt?: string };
   git?: { prNumber?: number };
 }
@@ -391,8 +393,15 @@ export function workerLines(panes: readonly WorkerPaneInput[], attachedAt: Reado
     const at = attachedAt.get(pane.paneId);
     if (at) line.attachedAt = at;
     if (report?.reportedAt) line.reportedAt = report.reportedAt;
+    const working = state === 'running' ? pane.panels.find(panel => panel.state === 'working' && panel.panelId) : undefined;
+    if (working?.panelId) line.tab = { panelId: working.panelId, title: working.title ?? '' };
     return line;
   });
+}
+
+/** The agents actively working (D-276): only workers whose tab is working, never waiting, idle or finished ones. */
+export function workingAgents(workers: readonly ChatWorkerLine[] | undefined): ChatWorkerLine[] {
+  return (workers ?? []).filter(worker => worker.state === 'running');
 }
 
 /** When something happened, short for the chat and full for a tooltip (D-202). */

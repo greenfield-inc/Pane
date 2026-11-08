@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatWorkerLine } from '../../../../shared/chatTabPresentation';
-import { watchSessionWorkers, type SessionWorkerSource, type SessionWorkersOverview } from './sessionWorkers';
+import { watchManySessionWorkers, watchSessionWorkers, type SessionWorkerSource, type SessionWorkersOverview } from './sessionWorkers';
 
 function overview(state: 'done' | 'blocked', attachedAt = '2026-11-01T10:00:00.000Z'): SessionWorkersOverview {
   return {
@@ -71,5 +71,30 @@ describe('watchSessionWorkers', () => {
     fake.emit();
     await vi.runAllTimersAsync();
     expect(seen).toHaveLength(1);
+  });
+});
+
+describe('watchManySessionWorkers (D-276)', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('merges every Session\'s workers in Session order, each Session read on its own, and stops them all', async () => {
+    const panes = new Map<string, SessionWorkersOverview>([
+      ['s1', { session: { associations: [] }, panes: [{ paneId: 'a', name: 'csv-export', missing: false, archived: false, panels: [{ state: 'working', panelId: 'a1', title: 'Claude Code' }] }] }],
+      ['s2', { session: { associations: [] }, panes: [{ paneId: 'b', name: 'docs', missing: false, archived: false, panels: [{ state: 'idle' }] }] }],
+    ]);
+    const listeners = new Set<() => void>();
+    const source: SessionWorkerSource = {
+      overview: vi.fn(async (id: string) => panes.get(id)),
+      onChange: callback => { listeners.add(callback); return () => listeners.delete(callback); },
+    };
+    const seen: string[][] = [];
+    const stop = watchManySessionWorkers(source, ['s2', 's1', 's2'], workers => seen.push(workers.map(worker => `${worker.name}:${worker.state}`)));
+    await vi.runAllTimersAsync();
+    expect(source.overview).toHaveBeenCalledTimes(2);
+    expect(seen.at(-1)).toEqual(['docs:idle', 'csv-export:running']);
+    expect(listeners.size).toBe(2);
+    stop();
+    expect(listeners.size).toBe(0);
   });
 });
