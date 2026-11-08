@@ -194,25 +194,30 @@ jobs:
     - name: Finish Playwright browser dependencies install
       run: scripts/ci-background.sh wait playwright
 
-    - name: Finish native module rebuild for Electron
-      run: scripts/ci-background.sh wait electron-rebuild
-
     - name: Verify renderer selection races
       run: pnpm test:renderer-selection
       env:
         PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
 
+    - name: Run maintained functional smoke tests
+      run: pnpm test:ci:minimal
+
+    # The two suites above need no native module, so the rebuild finishes
+    # behind them; only the Electron launches below wait for it.
+    - name: Finish native module rebuild for Electron
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh wait electron-rebuild
+
     - name: Verify sandboxed Electron preload
+      if: ${{ !cancelled() }}
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
     # Launches Electron from the build above with a scripted ACP agent; never a real account.
     - name: Run chat tab journeys
+      if: ${{ !cancelled() }}
       run: xvfb-run -a pnpm test:chat-tabs
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
-
-    - name: Run maintained functional smoke tests
-      run: pnpm test:ci:minimal
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
   # change on a PR; always runs on pushes to main. Each OS is tested once at
