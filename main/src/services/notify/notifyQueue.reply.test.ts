@@ -145,7 +145,10 @@ describe('NotifyQueue replies (the reply contract)', () => {
     // Not by the approval's id or Q-n alone: that names the approval, not the reader.
     expect(() => queue.took({}, 'q50', 'question')).toThrow(/Only the agent reading/);
     expect(() => queue.took({ panelId: 'some-tab' }, 'Q-50', 'question')).toThrow(/Only the agent reading/);
-    expect(queue.took({}, result.replyId, 'question')).toMatchObject({ took: 'question', id: 'q50' });
+    const took = queue.took({}, result.replyId, 'question');
+    expect(took).toMatchObject({ took: 'question', id: 'q50' });
+    // Its next step names the reply id too, since that's what this reader is known by.
+    expect('next' in took && took.next).toContain(`--update ${result.replyId} `);
     const updated = queue.update({}, result.replyId, { asked: 'What goes in it?', whatChanged: 'Listed the commits', context: 'Eight commits since 2.4.215.' });
     expect(item(queue, 'q50')).toMatchObject({ version: 2, context: 'Eight commits since 2.4.215.' });
     queue.run({ type: 'answer', id: 'q50', answer: { picks: ['Tag it'] } });

@@ -879,7 +879,9 @@ export class NotifyQueue extends EventEmitter {
     entry.item.reply = { ...reply, state: 'question', status: status?.trim() || ASKING_STATUS };
     this.save(entry);
     this.changed();
-    return { took: 'question', id: entry.item.id, next: `Find out, then run runpane notify --update ${entry.item.id} --asked "<their question>" --what-changed "<one line per change>" with any changed --title, --context, --choices, --questions or --links. It waits for the answer.` };
+    // A reader with no tab is known by its reply id, so its next step names that (D-294).
+    const nextRef = reply.reader && !reply.reader.panelId ? reply.id : entry.item.id;
+    return { took: 'question', id: entry.item.id, next: `Find out, then run runpane notify --update ${nextRef} --asked "<their question>" --what-changed "<one line per change>" with any changed --title, --context, --choices, --questions or --links. It waits for the answer.` };
   }
 
   /** Records the reply (its picks and words) as the person's answer. */
