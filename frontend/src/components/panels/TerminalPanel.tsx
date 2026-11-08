@@ -843,6 +843,14 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     }
   }, [handleRefreshTerminal]);
 
+  // Main restarted this tab's process in place: rebuild from the new launch behind the loading overlay,
+  // now when it is showing, otherwise at its next activation.
+  useEffect(() => window.electronAPI.events.onTerminalRelaunched(data => {
+    if (data.panelId !== panel.id) return;
+    needsFullActivationRefreshRef.current = true;
+    if (activationVisible) void handleManualRefresh();
+  }), [panel.id, activationVisible, handleManualRefresh]);
+
   useEffect(() => registerRemoteTerminalRestore(panel.id, async () => {
     if (!isRemoteMode) return;
     needsFullActivationRefreshRef.current = true;

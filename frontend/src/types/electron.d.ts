@@ -604,6 +604,8 @@ interface ElectronAPI {
     
     onTerminalOutput: (callback: (output: import('../../../shared/types/panels').TerminalOutputEvent) => void) => () => void;
     onTerminalCliReady: (callback: (data: { panelId: string }) => void) => () => void;
+    /** The panel's terminal started a new process in place (a failed Switch to chat, Resume); its view should redraw. */
+    onTerminalRelaunched: (callback: (data: { sessionId: string; panelId: string }) => void) => () => void;
     onTerminalExited: (callback: (data: { sessionId: string; panelId: string; exitCode: number; signal: number | null }) => void) => () => void;
     onTerminalAlternateScreen: (callback: (data: { panelId: string; active: boolean }) => void) => () => void;
     /**
