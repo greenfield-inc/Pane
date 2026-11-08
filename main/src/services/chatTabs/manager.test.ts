@@ -155,7 +155,9 @@ describe('chat tab manager', () => {
     const busy = after.manager.view('busy');
     expect(busy.status).toBe('idle');
     expect(busy.problem).toBeUndefined();
-    expect(busy.notice).toMatch(/stopped when Pane closed/);
+    const busyEnds = busy.transcript!.messages.flatMap(message => message.parts.flatMap(part => part.type === 'content' && JSON.stringify(part.content).includes('pane_turn') ? [JSON.parse(JSON.stringify(part.content)).stopReason] : []));
+    expect(busyEnds.at(-1)).toBe('interrupted');
+    expect(busy.notice).toBeUndefined();
     expect(after.manager.receipt('busy', 'b')?.state).toBe('failed');
     after.manager.send('busy', { operationId: 'c', text: 'next' });
     await expect.poll(() => after.manager.receipt('busy', 'c')?.state).toBe('completed');

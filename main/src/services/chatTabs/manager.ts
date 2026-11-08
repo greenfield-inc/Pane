@@ -318,8 +318,8 @@ export class ChatTabManager {
       await this.applySettings(panelId, runtime);
       const interrupted = this.required(panelId).turn;
       if (interrupted) {
+        // The turn's own row reads "Stopped when Pane closed."
         transcript.endTurn({ type: 'pane_turn', stopReason: 'interrupted', startedAt: interrupted.startedAt, endedAt: new Date().toISOString() });
-        tab.notice = 'The last turn stopped when Pane closed. Send a message to continue.';
         this.update(panelId, current => ({
           ...current, turn: undefined,
           receipts: current.receipts?.map(receipt => receipt.operationId === interrupted.operationId && receipt.state === 'accepted' ? { ...receipt, state: 'failed', error: 'Pane closed before the turn finished.' } : receipt),
