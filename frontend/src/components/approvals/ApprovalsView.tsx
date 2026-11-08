@@ -20,6 +20,7 @@ import { useNow } from '../notify/useNow';
 import { SessionBeside } from '../PaneChatView';
 import { APPROVALS_SORTS, approvalRowLines, besideOf, connectedOf, groupApprovals, offlineRowText, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
 import { MachineContext } from './MachineContext';
+import { toggleApprovals } from './approvalsNavigation';
 
 /**
  * Links open as tabs through this computer's Pane, so only for this computer's items while the
@@ -251,6 +252,11 @@ async function switchToMachine(machineId: string, name: string): Promise<boolean
  */
 export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const snapshot = useNotifyStore((state) => state.snapshot);
+  // Approvals turned off (here, or saved off and restored on launch): back to the view you left, as the row would.
+  const turnedOff = snapshot?.settings.enabled === false;
+  useEffect(() => {
+    if (turnedOff) toggleApprovals();
+  }, [turnedOff]);
   const [tab, setTab] = useState<ApprovalsTab>('waiting');
   const selectedId = useNavigationStore((state) => state.selectedApprovalId);
   const selectApproval = useNavigationStore((state) => state.selectApproval);
