@@ -190,6 +190,21 @@ function SelectedItem({ item, beside, mark, onOpenInPane, onOpenConnected }: { i
   );
 }
 
+/** Newer rows held out of view above the selected card, one click from the top. */
+function RowsAbove({ count, onTop }: { count: number; onTop: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onTop}
+      className="absolute left-1/2 top-1 z-10 inline-flex h-6 -translate-x-1/2 items-center gap-1 rounded-full bg-surface-primary px-2.5 text-[12px] font-medium text-text-secondary shadow-card ring-1 ring-border-secondary hover:text-text-primary"
+      data-testid="approvals-rows-above"
+    >
+      <ArrowUp className="h-3 w-3" aria-hidden="true" />
+      {count} more above
+    </button>
+  );
+}
+
 function OfflineMachineRow({ row }: { row: OfflineRow }) {
   return (
     <div className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-text-tertiary" data-testid="approvals-offline-row">
@@ -479,17 +494,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         </div>
         {/* The browser's own scroll anchoring would add to the compensation above. */}
         <div className="relative flex min-h-0 flex-1 flex-col">
-        {rowsAbove > 0 && (
-          <button
-            type="button"
-            onClick={() => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
-            className="absolute left-1/2 top-1 z-10 inline-flex h-6 -translate-x-1/2 items-center gap-1 rounded-full bg-surface-primary px-2.5 text-[12px] font-medium text-text-secondary shadow-card ring-1 ring-border-secondary hover:text-text-primary"
-            data-testid="approvals-rows-above"
-          >
-            <ArrowUp className="h-3 w-3" aria-hidden="true" />
-            {rowsAbove} more above
-          </button>
-        )}
+        {rowsAbove > 0 && <RowsAbove count={rowsAbove} onTop={() => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />}
         <div ref={listRef} onScroll={countAbove} className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 [overflow-anchor:none]">
           {shown.length === 0 && stale.length === 0 && offline.length === 0 && (
             <p className="px-3 pt-6 text-[13px] text-text-tertiary" data-testid="notify-empty">
