@@ -7,6 +7,7 @@ import { registerFileHandlers } from './file';
 import { registerConfigHandlers } from './config';
 import { registerGitHandlers } from './git';
 import { registerPanelHandlers } from './panels';
+import { panelManager } from '../services/panelManager';
 import { registerPaneChatHandlers } from './paneChat';
 import { registerSshHostHandlers } from './sshHosts';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
@@ -558,7 +559,7 @@ describe('daemon registry IPC bindings', () => {
       .resolves.toMatchObject({ success: true, data: { agent: 'opencode' } });
     await expect(registry.invoke('orchestration-sessions:update', [{ sessionId: 'session-1' }, { agent: 'opencode' }]))
       .resolves.toMatchObject({ success: true, data: { agent: 'opencode' } });
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Coordinator', agent: 'opencode' }));
+    expect(create.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ name: 'Coordinator', agent: 'opencode' }));
     expect(update).toHaveBeenCalledWith({ sessionId: 'session-1' }, expect.objectContaining({ agent: 'opencode' }));
   });
 
@@ -656,6 +657,17 @@ describe('daemon registry IPC bindings', () => {
       ).sort(),
     ).toEqual([...PANEL_CHANNELS].sort());
     expect(registry.has('terminal:clipboard-paste-image')).toBe(false);
+  });
+
+  it('creates no chat tab through panels:create, which skips the Chat tabs setting', async () => {
+    const registry = new PaneCommandRegistry();
+    registerPanelHandlers(createIpcMainStub(), createServicesStub(), registry);
+    const createPanel = vi.spyOn(panelManager, 'createPanel');
+
+    await expect(registry.invoke('panels:create', [{ sessionId: 'pane-1', type: 'chat', initialState: { customState: { agent: 'claude', launch: { kind: 'agent' }, cwd: '/any/dir', status: 'starting' } } }]))
+      .resolves.toEqual({ success: false, error: expect.stringContaining('Next: Call chat-tab:create') });
+    expect(createPanel).not.toHaveBeenCalled();
+    createPanel.mockRestore();
   });
 
   it('clears browser data on the machine showing the browser, never on a remote host', () => {

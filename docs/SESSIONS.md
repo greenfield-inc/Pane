@@ -759,12 +759,13 @@ The daemon and Electron IPC channels are:
 `orchestration-sessions:overview`.
 
 Selectors accept a stable Session ID or an exact Session name. Phone apps
-released before chat tabs crash on a tab kind they don't know, so
-`orchestration-sessions:get` returns a Session whose orchestrator is a chat tab
-only to a client that passes `{ chatTabs: true }` as a second argument (desktop,
-the PWA and current phone apps do). Any other client gets
-`CHAT_TAB_CLIENT_OUTDATED`, which says to update Pane on the phone; `panels:list`
-leaves chat tabs out for those clients in the same way. The existing
+released before chat tabs crash on a tab kind they don't know, so clients that
+show chat tabs pass `{ chatTabs: true }` as a second argument to
+`orchestration-sessions:create`, `orchestration-sessions:get` and `panels:list`
+(desktop, the PWA and current phone apps do). For any other client, `create`
+starts the orchestrator in a terminal, `get` of a Session whose orchestrator is a
+chat tab fails with `CHAT_TAB_CLIENT_OUTDATED`, which says to update Pane on the
+phone, and `panels:list` leaves chat tabs out. The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy
 conversation.
 
@@ -1556,7 +1557,7 @@ worktree defaults and existing historical pins are unchanged.
 Session instructions and documents live under `<PANE_DIR>/sessions/<id>/`,
 outside the project. While the Session agent shows its folder-trust prompt, a
 banner across the top of the chat says the folder is Pane's own, holding the
-Session's notes and no project code. Session terminals set `GIT_CEILING_DIRECTORIES` to
+Session's notes and no project code. Session terminals and chats set `GIT_CEILING_DIRECTORIES` to
 `<PANE_DIR>/sessions`, so git run in a Session folder never picks up a repository
 above it, such as a home directory tracked as a dotfiles repo. Do not configure
 PANE_DIR inside a project repository.

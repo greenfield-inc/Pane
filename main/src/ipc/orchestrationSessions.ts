@@ -8,9 +8,10 @@ import type {
   OrchestrationSessionArchiveResult,
   OrchestrationSessionSelector,
 } from '../../../shared/types/orchestrationSession';
-import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { previewOrchestrationSessionArchive, updateOrchestrationSession } from './runpane';
+import { clientShowsChatTabs } from './panels';
 import {
   decodeOrchestrationSessionPayload,
   orchestrationExpectedRevisionSchema,
@@ -117,19 +118,22 @@ export function registerOrchestrationSessionHandlers(
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:select');
 
-  commandRegistry.register('orchestration-sessions:create', async (value: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().create(decodeOrchestrationSessionPayload(value, createSchema, 'create')));
+  // Phone apps released before chat tabs crash on a tab kind they do not know (D-100, D-203):
+  // their new Sessions start in a terminal, and a Session whose orchestrator is a chat tells them to update.
+  commandRegistry.register('orchestration-sessions:create', async (value: PaneCommandValue, options?: PaneCommandValue) => {
+    return invokeSafely(() => requireManager().create(
+      decodeOrchestrationSessionPayload(value, createSchema, 'create'),
+      undefined,
+      { terminal: !clientShowsChatTabs(options) },
+    ));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:create');
 
-  // Phone apps released before chat tabs crash on a tab kind they do not know and send
-  // no options (D-100, D-203). A Session whose orchestrator is a chat tells them to update instead.
   commandRegistry.register('orchestration-sessions:get', async (value: PaneCommandValue, options?: PaneCommandValue) => {
     return invokeSafely(async () => {
       const view = await requireManager().getView(decodeSelector(value));
-      const chatTabs = decodeOptionalBoundary(options, boundary.object({ chatTabs: boundary.optional(boundary.boolean) }))?.chatTabs === true;
-      if (view.panel.type === 'chat' && !chatTabs) {
-        throw new PaneError('CHAT_TAB_CLIENT_OUTDATED', 'This Session runs as a chat, which this version of Pane on your phone can\'t open. Nothing changed.', 'Update Pane on your phone, then open the Session again.');
+      if (view.panel.type === 'chat' && !clientShowsChatTabs(options)) {
+        throw new PaneError('CHAT_TAB_CLIENT_OUTDATED', 'This Session runs as a chat, which this version of Pane on your phone can\'t open.', 'Update Pane on your phone, then open the Session again.');
       }
       return view;
     });

@@ -280,7 +280,8 @@ function toInvocation(command: PaneCommandValue): Invocation {
       case 'create-pane':
         return { channel: 'sessions:create', args: [decodeBoundary(command, commandSchemas['create-pane']).request] };
       case 'create-session':
-        return { channel: 'orchestration-sessions:create', args: [decodeBoundary(command, commandSchemas['create-session']).input] };
+        // This desktop shows chat tabs, so the Session may start as one (D-203).
+        return { channel: 'orchestration-sessions:create', args: [decodeBoundary(command, commandSchemas['create-session']).input, { chatTabs: true }] };
     }
   } catch (error) {
     throw new PaneError('ERR_MACHINE_COMMAND_INVALID',

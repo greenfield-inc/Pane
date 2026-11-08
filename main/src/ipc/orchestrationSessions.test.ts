@@ -19,7 +19,7 @@ describe('orchestration-sessions:create', () => {
 
     await registry.invokeRemote('orchestration-sessions:create', [{ name: 'New chat', nameFromFirstMessage: true, agent: 'codex', isPinned: true }]);
 
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'New chat', nameFromFirstMessage: true, isPinned: true }));
+    expect(create.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ name: 'New chat', nameFromFirstMessage: true, isPinned: true }));
   });
 });
 
