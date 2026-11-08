@@ -4,7 +4,7 @@ import {
   useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
-import type { AgentChatPermission } from '../../../../shared/types/agentChat';
+import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
 import { chatTurns, waitingToolIds, workerNotes, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
@@ -202,16 +202,30 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const actionsRef = useRef<HTMLDivElement>(null);
   const phone = usePhoneWidth(actionsRef);
 
-  const deliver = async (request: ChatTabSend, retry: boolean) => {
+  /** True when the host took the message. */
+  const settle = (receipt: AgentChatReceipt): boolean => {
+    viewer.setPendingDelivery(undefined);
+    viewer.setError(receipt.state === 'failed' ? receipt.error : undefined);
+    if (receipt.state === 'failed') return false;
+    viewer.setDraft('');
+    runtime.thread.composer.setText('');
+    return true;
+  };
+  const deliver = async (request: ChatTabSend, retry: boolean): Promise<boolean> => {
     viewer.setPendingDelivery(request);
     try {
       const receipt = retry ? await client.send(panelId, request) : await client.receipt(panelId, request.operationId);
-      if (!receipt) { viewer.setError('Pane has no record of that message yet. Retry sends it once, with the same ID.'); return; }
-      viewer.setPendingDelivery(undefined);
-      viewer.setError(receipt.state === 'failed' ? receipt.error : undefined);
-      if (receipt.state !== 'failed') { viewer.setDraft(''); runtime.thread.composer.setText(''); }
+      if (!receipt) { viewer.setError('Pane has no record of that message yet. Retry sends it once, with the same ID.'); return false; }
+      return settle(receipt);
     } catch (error) {
-      viewer.setError(`${ipcErrorMessage(error, 'The message may not have been sent.')} Check delivery before sending again.`);
+      const reason = ipcErrorMessage(error, 'The message may not have been sent.');
+      // Pane refused it (too large, the chat stopped): with no record of it, nothing was sent, so the
+      // composer is free again with the message still in it. Unreachable, it may have gone through.
+      const known = await client.receipt(panelId, request.operationId).then(receipt => ({ receipt }), () => undefined);
+      if (known && !known.receipt) { viewer.setPendingDelivery(undefined); viewer.setError(reason); return false; }
+      if (known?.receipt) return settle(known.receipt);
+      viewer.setError(`${reason} Check delivery before sending again.`);
+      return false;
     }
   };
 
@@ -237,18 +251,19 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       viewer.setDraft(text);
       // The composer clears before onNew; keep the text until the host confirms it.
       runtime.thread.composer.setText(text);
-      // Typing while an approval waits tells the agent what to do instead (round 2).
-      await Promise.all((view?.permissions ?? []).map(permission => {
-        const reject = rejectOption(permission);
-        return reject ? client.permission(panelId, permission.id, reject).catch(() => undefined) : undefined;
-      }));
+      const waitingPermissions = view?.permissions ?? [];
       // Sending returns to the live end, wherever the reader had paged to.
       setPaged(false);
       if (viewer.snapshot().hasNewer) await viewer.jumpToLatest();
       requestAnimationFrame(() => followLiveEnd.current?.());
       const operationId = crypto.randomUUID();
       followSent.current = `user:${operationId}`;
-      await deliver({ operationId, text, images: imageParts }, true);
+      if (!await deliver({ operationId, text, images: imageParts }, true)) return;
+      // Typing while an approval waits tells the agent what to do instead (round 2): once the message is in.
+      await Promise.all(waitingPermissions.map(permission => {
+        const reject = rejectOption(permission);
+        return reject ? client.permission(panelId, permission.id, reject).catch(() => undefined) : undefined;
+      }));
     },
   });
   useEffect(() => { runtime.thread.composer.setText(viewer.snapshot().draft); }, [runtime, viewer]);
