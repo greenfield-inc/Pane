@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { ArrowUp, ChevronRight, CircleCheck, CircleHelp, Navigation, PanelRight, ShieldAlert } from 'lucide-react';
 import type { NotifyAnswer, NotifyItem } from '../../../../shared/types/notify';
 import { canClose, canOverride, canReopen, decisionLine, receiptLine } from '../../../../shared/approvalReceipts';
@@ -168,12 +169,17 @@ export function AutopilotDecisionCard({ item, current, onMakeCurrent }: { item: 
       {closing ? (
         <ItemCloseForm item={item} onCommand={runNotify} onCancel={() => setClosing(false)} className="border-t border-border-primary px-3.5 py-2.5" />
       ) : (
-        (!current || contextShown || (canClose(item) && !item.unreachable)) && <div className="flex items-center gap-1.5 border-t border-border-primary px-3.5 py-2 text-[12.5px] text-text-tertiary">
+        (!current || contextShown || model.state === 'waiting' || (canClose(item) && !item.unreachable)) && <div className="flex items-center gap-1.5 border-t border-border-primary px-3.5 py-2 text-[12.5px] text-text-tertiary">
           {(!current || contextShown) && <PanelRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
           {!current ? <button type="button" onClick={onMakeCurrent} className="min-w-0 truncate hover:text-text-primary">{model.contextLabel} and related docs ›</button>
             : contextShown && <span className="min-w-0 truncate">{model.contextLabel} and related docs are on the right</span>}
           {canClose(item) && !item.unreachable && (
             <button type="button" onClick={() => setClosing(true)} data-testid="autopilot-decision-close" className="ml-auto shrink-0 hover:text-text-primary">Close</button>
+          )}
+          {/* The approval column covers the Stack (J16); ✕ shows the Stack again. */}
+          {model.state === 'waiting' && (
+            <button type="button" onClick={() => useApprovalColumnStore.getState().openApproval('autopilot', item.id)} data-testid="autopilot-decision-open"
+              className={cn('shrink-0 font-medium text-interactive hover:underline', !(canClose(item) && !item.unreachable) && 'ml-auto')}>Open ›</button>
           )}
         </div>
       )}

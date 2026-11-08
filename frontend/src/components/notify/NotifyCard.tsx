@@ -19,7 +19,7 @@ export interface NotifyQueuePosition {
   next?: NotifyItem;
 }
 
-type NotifyCardView = 'question' | 'sent' | 'expired' | 'answered' | 'info';
+type NotifyCardView = 'question' | 'sent' | 'expired' | 'answered' | 'info' | 'updated';
 
 /**
  * strip: the floating window and the in-Pane strip.
@@ -65,6 +65,8 @@ export function NotifyCard(props: NotifyCardProps) {
       return <SentLine {...props} />;
     case 'info':
       return <InfoLine {...props} />;
+    case 'updated':
+      return <UpdatedLine {...props} />;
     case 'expired':
       return <ExpiredCard {...props} />;
     case 'answered':
@@ -1083,6 +1085,33 @@ function Countdown({ hideAt, hideAfterMs }: { hideAt: number | null; hideAfterMs
           ? { transform: `scaleX(${fraction})` }
           : { transform: `scaleX(${fraction})`, animation: `pane-notify-countdown ${remaining}ms linear forwards` }}
       />
+    </div>
+  );
+}
+
+/** The quiet notice when an approval comes back after the person's question (D-244): no chime, and Open it. */
+function UpdatedLine({ item, onCommand, hideAt = null, hideAfterMs = 6000 }: NotifyCardProps) {
+  return (
+    <div
+      className="w-max min-w-[360px] max-w-[560px] overflow-hidden rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary"
+      data-testid="notify-card"
+      data-notify-view="updated"
+      onMouseEnter={() => onCommand({ type: 'hover-info', id: item.id, hovering: true })}
+      onMouseLeave={() => onCommand({ type: 'hover-info', id: item.id, hovering: false })}
+    >
+      <div className="flex items-center gap-2 py-3 pl-4 pr-3.5 text-[13px] text-text-tertiary">
+        <span className="shrink-0 rounded-full bg-status-info/10 px-2 py-px text-[12px] font-medium text-status-info-on-tint">Updated · ready again</span>
+        <span className="min-w-0 truncate text-[14px] font-semibold text-text-primary">{item.title}</span>
+        <button
+          type="button"
+          onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}
+          className="ml-auto h-[30px] shrink-0 rounded-[10px] bg-surface-tertiary px-2.5 text-[12.5px] font-medium text-text-primary hover:bg-surface-hover"
+          data-testid="notify-updated-open"
+        >
+          Open it
+        </button>
+      </div>
+      <Countdown hideAt={hideAt} hideAfterMs={hideAfterMs} />
     </div>
   );
 }

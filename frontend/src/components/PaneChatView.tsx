@@ -1,4 +1,6 @@
 import { registerRemoteWorkspaceRestore } from '../utils/remoteRestoration';
+import { useApprovalColumnStore } from '../stores/approvalColumnStore';
+import { SessionApprovalColumn, SessionApprovalsButton } from './approvals/SessionApprovals';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Info, List, PanelRight, Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
@@ -838,7 +840,9 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
     return record;
   }, [onOverviewUpdate]);
 
+  const approvalOpen = useApprovalColumnStore(state => state.open[`session:${view.session.id}`] !== undefined);
   const sessionControls = (<>
+    <SessionApprovalsButton sessionId={view.session.id} />
     <SwitchToChatButton key={view.panel.id} panel={view.panel} palette={chrome.isFocused ? 'session' : undefined} className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary" />
     <Tooltip content="Session settings" side="bottom">
       <button type="button" aria-label="Session settings" onClick={() => setShowSettings(true)}
@@ -858,6 +862,13 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
           <SessionWorkspacePanels agentPanel={view.panel} agentPanelIds={Object.values(view.session.panelIds)}
             toolbarActions={sessionControls}
             stageNotice={showsTrustPrompt && <FolderTrustNotice />}
+            approval={{
+              open: approvalOpen,
+              onClose: () => useApprovalColumnStore.getState().close(`session:${view.session.id}`),
+              render: (closeLabel, onClose) => (
+                <SessionApprovalColumn sessionId={view.session.id} sessionName={view.session.name} inChat={view.panel.id} closeLabel={closeLabel} onClose={onClose} />
+              ),
+            }}
             chromeInline={chrome.tiled || chrome.inline}
             focusWithin={chrome.isFocused}
             overviewContent={<SessionOverviewPanel

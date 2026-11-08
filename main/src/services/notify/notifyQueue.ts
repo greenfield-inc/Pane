@@ -1784,9 +1784,11 @@ export class NotifyQueue extends EventEmitter {
 
   private hoverInfo(id: string, hovering: boolean): void {
     const view = this.transient?.view;
-    if (view?.kind !== 'info' || view.itemId !== id) return;
-    if (hovering) this.setTransient({ kind: 'info', itemId: id, hideAt: null });
-    else this.showInfo(id);
+    if ((view?.kind !== 'info' && view?.kind !== 'updated') || view.itemId !== id) return;
+    const hideAfterMs = this.env.settings().updatesHideAfterSeconds * 1000;
+    if (hovering) this.setTransient({ kind: view.kind, itemId: id, hideAt: null });
+    else if (view.kind === 'info') this.showInfo(id);
+    else this.setTransient({ kind: 'updated', itemId: id, hideAt: Date.now() + hideAfterMs }, hideAfterMs);
     this.changed();
   }
 
