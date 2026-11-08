@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DEFAULT_APPEARANCE } from '../../shared/types/appearance';
 import { ThemeProvider } from '../src/contexts/ThemeProvider';
@@ -12,6 +12,8 @@ import { useOrchestrationSessionStore } from '../src/stores/orchestrationSession
 import { useNavigationStore } from '../src/stores/navigationStore';
 import { useSessionStore } from '../src/stores/sessionStore';
 import { useConfigStore } from '../src/stores/configStore';
+import { useErrorStore } from '../src/stores/errorStore';
+import { NewDialog } from '../src/components/NewDialog';
 import { startHostNavigationMemoryWrites } from '../src/utils/hostNavigationMemory';
 import { createDefaultRemoteDaemonConfig, createDefaultRemotePaneConnectionState, type RemotePaneConnectionState } from '../../shared/types/remoteDaemon';
 import type { OrchestrationSessionRecord } from '../../shared/types/orchestrationSession';
@@ -30,6 +32,7 @@ import '../src/index.css';
 //   layoutR / layoutL  stored Session layout for R / local: tiles in order, the last one focused
 //   pickR / pickL      the host's shared last-used Session (any client's pick)
 //   chat               mount PaneChatView, whose Session workspace reads the stored layout
+//   new                open the New dialog, which can create a Session on R and then switch there
 type HostKey = 'local' | 'R';
 const query = new URLSearchParams(location.search);
 const record = (id: string): OrchestrationSessionRecord => ({ id, name: id.toUpperCase(), internalSessionId: `internal-${id}`, agent: 'codex', panelIds: { claude: `claude-${id}`, codex: `codex-${id}`, cursor: `cursor-${id}`, opencode: `opencode-${id}` }, goal: '', context: '', decisions: [], nextAction: '', evidence: [], outputs: [], associations: [], blockers: [], activity: [], revision: 1, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
@@ -50,6 +53,10 @@ for (const [param, host] of [['layoutR', 'R'], ['layoutL', 'local']] as const) {
 }
 const memories = new Map<HostKey, HostNavigationMemory>();
 const hostKey = (hostId: string | null): HostKey => hostId === 'R' ? 'R' : 'local';
+const machineStates = [
+  { id: 'local', label: 'This computer', kind: 'local' as const, status: 'online' as const, offlineSince: null },
+  { id: 'R', label: 'Remote R', kind: 'remote' as const, status: 'online' as const, offlineSince: null },
+];
 const profiles = [{ id: 'R', label: 'Remote R', token: 't', baseUrl: 'https://r.example', transport: 'http+sse' as const }];
 
 type TransportCall = { method: string; host: HostKey; sessionId?: string; refused?: boolean };
@@ -127,7 +134,23 @@ const api = {
       return Promise.resolve(ok(listOf(host)));
     },
   },
-  machines: methods,
+  machines: {
+    list: () => Promise.resolve(machineStates),
+    onEvent: () => () => {},
+    read: (machineId: string) => Promise.resolve({ machineId, data: ok(listOf(hostKey(machineId))) }),
+    /** New creates a Session on R through R's own connection, whatever the app is on. */
+    run: (machineId: string, command: { type: string; input?: { name?: string } }) => {
+      const host = hostKey(machineId);
+      if (command.type !== 'create-session') return Promise.resolve({ machineId, data: { success: false, error: `The fixture does not run ${command.type}` } });
+      const created = record('n');
+      created.name = command.input?.name ?? 'N';
+      hostSessions.set(host, [created, ...(hostSessions.get(host) ?? [])]);
+      calls.push({ method: 'create-session', host, sessionId: created.id });
+      // R's live feed would list it next; the fixture's snapshot stands in for that feed.
+      useAllMachinesStore.setState(state => ({ snapshots: { ...state.snapshots, [host]: snapshot(host) } }));
+      return Promise.resolve({ machineId, data: ok({ session: created }) });
+    },
+  },
   preferences: { ...methods, get: () => Promise.resolve(null) },
 };
 // SAFETY: The fixture implements the Electron methods the mounted production
@@ -187,6 +210,7 @@ Object.assign(window, { allMachinesTest: {
     selectionError: useOrchestrationSessionStore.getState().selectionError,
     availability: useOrchestrationSessionStore.getState().availability,
     highlighted: highlighted(),
+    shownError: useErrorStore.getState().currentError?.error ?? null,
   }),
 } });
 
@@ -198,10 +222,7 @@ useNavigationStore.setState({ activeView: 'pane-chat' });
 const snapshot = (host: HostKey) => ({ projects: [], sessions: hostSessions.get(host) ?? [], statuses: [], notify: null, permissions: [] });
 useAllMachinesStore.setState({
   enabled: true,
-  machines: [
-    { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
-    { id: 'R', label: 'Remote R', kind: 'remote', status: 'online', offlineSince: null },
-  ],
+  machines: machineStates,
   snapshots: { local: snapshot('local'), R: snapshot('R') },
 });
 
@@ -220,7 +241,8 @@ function MachinesHost() {
       askMachinePassword: () => undefined,
     });
   }, [machines, selectMachine]);
-  return null;
+  const [newOpen, setNewOpen] = useState(query.has('new'));
+  return newOpen ? <NewDialog projects={[]} machines={machines} onSwitchMachine={selectMachine} onClose={() => setNewOpen(false)} /> : null;
 }
 function RuntimeEvents() { useIPCEvents(); useEffect(() => startHostNavigationMemoryWrites(), []); return null; }
 createRoot(document.getElementById('root')!).render(<ThemeProvider><RuntimeEvents /><MachinesHost /><div style={{ display: 'flex', height: 700 }}><aside style={{ width: 300 }}><AllMachinesSidebar onNew={() => undefined} /></aside>{query.has('chat') && <main style={{ flex: 1 }}><PaneChatView /></main>}</div></ThemeProvider>);

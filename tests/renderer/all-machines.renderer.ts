@@ -20,7 +20,7 @@ declare global {
       storedLayout: (host: HostKey) => Layout | null;
       sharedPick: (host: HostKey) => string | null;
       switchMachine: (machineId: string) => void;
-      state: () => { activeMachine: string | null; selectedSessionId: string | null; selectionError: string | null; availability: string; highlighted: Array<string | null> };
+      state: () => { activeMachine: string | null; selectedSessionId: string | null; selectionError: string | null; availability: string; highlighted: Array<string | null>; shownError: string | null };
     };
   }
 }
@@ -38,7 +38,8 @@ const fixture = (page: Page) => ({
 /** Opens the fixture on this computer, showing `showing`: Session X, or the focus of its stored layout. */
 async function open(page: Page, query: string, showing = 'x') {
   await page.goto(`/renderer-tests/all-machines.html?${query}`);
-  await expect(page.getByRole('button', { name: 'Session B on Remote R', exact: true })).toBeVisible();
+  // An open modal hides the sidebar from the accessibility tree, so look for the row itself.
+  await expect(page.locator('[aria-label="Session B on Remote R"]')).toBeAttached();
   await expect.poll(() => fixture(page).state()).toMatchObject({ selectedSessionId: showing });
 }
 
@@ -72,7 +73,7 @@ test('S6a: a click on Session B on R opens B, though this desktop last focused D
   await landOnRemote(page);
   await settle(page);
 
-  expect(await f.state()).toEqual({ activeMachine: 'R', selectedSessionId: 'b', selectionError: null, availability: 'ready', highlighted: ['Session B on Remote R'] });
+  expect(await f.state()).toEqual({ activeMachine: 'R', selectedSessionId: 'b', selectionError: null, availability: 'ready', highlighted: ['Session B on Remote R'], shownError: null });
   expect(await f.memory('R'), 'R remembers the clicked Session').toBe('b');
   // The selection never passes through another Session on the way.
   expect((await f.trail()).map(step => step.selected).filter(id => id !== null)).toEqual(['b']);
@@ -119,7 +120,7 @@ test('S6d: from R, a click on Session X on this computer opens X, though its lay
   await landOnLocal(page, 2);
   await settle(page);
 
-  expect(await f.state()).toEqual({ activeMachine: 'local', selectedSessionId: 'x', selectionError: null, availability: 'ready', highlighted: ['Session X on laptop-L'] });
+  expect(await f.state()).toEqual({ activeMachine: 'local', selectedSessionId: 'x', selectionError: null, availability: 'ready', highlighted: ['Session X on laptop-L'], shownError: null });
   expect(await f.memory('local')).toBe('x');
   expect((await f.trail()).map(step => step.selected).filter(id => id !== null)).toEqual(['x']);
   // Opening X here is this desktop's own choice; it does not move this computer's shared pick.
@@ -162,4 +163,24 @@ test('a plain switch to a host this desktop remembers nothing for uses its store
 
   expect(await f.state()).toMatchObject({ activeMachine: 'R', selectedSessionId: 'd' });
   expect((await f.storedLayout('R'))?.root.children?.map(tile => tile.sessionId)).toEqual(['c', 'd']);
+});
+
+// D-266: New creates the Session on R, then switches there. The renderer's
+// restore finishes before main marks R connected, so a select() sent then is refused.
+test('a Session created on R from New opens there once the switch lands, with no error', async ({ page }) => {
+  await open(page, 'chat&new&layoutR=d&pickR=c');
+  const f = fixture(page);
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('radio', { name: /Remote R/ }).click();
+  await dialog.getByLabel('Session name (optional)').fill('Doozy');
+  await page.evaluate(() => window.allMachinesTest.reset());
+  await dialog.getByRole('button', { name: 'Create Session on Remote R', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await landOnRemote(page);
+  await settle(page);
+
+  expect(await f.state()).toEqual({ activeMachine: 'R', selectedSessionId: 'n', selectionError: null, availability: 'ready', highlighted: ['Session Doozy on Remote R'], shownError: null });
+  expect(await f.memory('R'), 'R remembers the new Session').toBe('n');
+  expect((await f.calls()).filter(call => call.method === 'select' && call.refused)).toEqual([]);
+  expect((await f.storedLayout('R'))?.root).toMatchObject({ type: 'session', sessionId: 'n' });
 });
