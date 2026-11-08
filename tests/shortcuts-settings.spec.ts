@@ -70,6 +70,12 @@ async function openShortcuts(page: Page) {
   return map;
 }
 
+/** Opens Settings › Shortcuts with its default two-step key; `mod` is Control off macOS. */
+async function pressOpenShortcutSettings(page: Page, mod: 'Control' | 'ControlOrMeta') {
+  await page.keyboard.press(`${mod}+K`);
+  await page.keyboard.press(`${mod}+S`);
+}
+
 async function configUpdates(page: Page): Promise<JsonObject[]> {
   // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
   return page.evaluate(() => (window as typeof window & { __paneTestElectronMock: ShortcutsMock }).__paneTestElectronMock.getConfigUpdates());
@@ -122,7 +128,8 @@ test('shows the same inventory from a Project view with a WSL project on a Windo
   await page.getByRole('button', { name: /^Expand project Shortcut settings fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tabpanel').locator('.xterm-screen').first()).toBeVisible({ timeout: 15_000 });
-  await page.keyboard.press('Control+Alt+/');
+  // navigator.platform reads Win32 here, so mod is Control.
+  await pressOpenShortcutSettings(page, 'Control');
   await expect(page.getByTestId('settings-page')).toBeVisible();
   const map = page.locator('[data-setting-id="keyboard-shortcut-map"]');
 
@@ -141,7 +148,7 @@ test('marks Cursor unavailable but still editable on a native Windows host', asy
   // A remap onto Cursor's chord still conflicts: bindings are validated globally.
   const push = map.locator('[data-shortcut-id="git-push"]');
   await push.getByRole('button', { name: 'Record shortcut for Git: Push' }).click();
-  await page.keyboard.press('Control+Alt+5');
+  await page.keyboard.press('ControlOrMeta+Alt+5');
   await expect(push.getByRole('alert')).toContainText('is also bound to Add Cursor');
   await expect(map.getByRole('button', { name: 'Apply' })).toBeDisabled();
 });
@@ -179,13 +186,14 @@ test('names both owners for a snippet conflict and a custom-command conflict, th
   const codex = map.locator('[data-shortcut-id="add-tool-terminal-codex"]');
 
   await codex.getByRole('button', { name: 'Record shortcut for Add Codex' }).click();
-  await page.keyboard.press('Control+Alt+L');
+  await page.keyboard.press('ControlOrMeta+Alt+L');
   await expect(codex.getByRole('alert')).toContainText('is also bound to Lint snippet (edit in Terminal snippets below)');
   await expect(map.locator('[data-shortcut-id="terminal-shortcut-snip"]').getByRole('alert')).toContainText('is also bound to Add Codex');
   await expect(apply).toBeDisabled();
 
   await codex.getByRole('button', { name: 'Record shortcut for Add Codex' }).click();
-  await page.keyboard.press('Control+Alt+6');
+  // The first configured custom command takes the first custom slot, mod+alt+7.
+  await page.keyboard.press('ControlOrMeta+Alt+7');
   await expect(codex.getByRole('alert')).toContainText('is also bound to Add Deploy');
   await expect(apply).toBeDisabled();
 
@@ -200,7 +208,7 @@ test('recording a row default removes the override instead of storing it', async
   const row = map.locator('[data-shortcut-id="add-tool-terminal-claude"]');
   await expect(row.getByText('Customized')).toBeVisible();
   await row.getByRole('button', { name: 'Record shortcut for Add Claude Code' }).click();
-  await page.keyboard.press('Control+Alt+3');
+  await page.keyboard.press('ControlOrMeta+Alt+3');
   await expect(row.getByText('Customized')).toHaveCount(0);
   await map.getByRole('button', { name: 'Apply' }).click();
   expect(await configUpdates(page)).toContainEqual({ keyboardShortcutOverrides: {} });
@@ -211,7 +219,8 @@ test('a failed Apply keeps the draft, reports the error, and stays retryable', a
   const map = await openShortcuts(page);
   const row = map.locator('[data-shortcut-id="git-pull"]');
   await row.getByRole('button', { name: 'Record shortcut for Git: Pull' }).click();
-  await page.keyboard.press('Control+Alt+J');
+  await page.keyboard.press('ControlOrMeta+Alt+J');
+  await expect(row.getByText('Customized')).toBeVisible();
   // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
   await page.evaluate(() => (window as typeof window & { __paneTestElectronMock: ShortcutsMock }).__paneTestElectronMock.failNextConfigUpdate('disk full'));
   await map.getByRole('button', { name: 'Apply' }).click();
@@ -245,7 +254,8 @@ test('Help and the Add Tool menu show the effective chord after a remap and afte
   await expect(page.getByRole('menuitem', { name: /Codex/ })).toContainText('Ctrl+Alt+Y');
   await page.keyboard.press('Escape');
 
-  await page.keyboard.press('Control+Alt+/');
+  // navigator.platform reads Linux here, so mod is Control.
+  await pressOpenShortcutSettings(page, 'Control');
   await expect(page.getByTestId('settings-page')).toBeVisible();
   const map = page.locator('[data-setting-id="keyboard-shortcut-map"]');
   await map.getByRole('button', { name: 'Reset all to defaults' }).click();
@@ -257,24 +267,27 @@ test('Help and the Add Tool menu show the effective chord after a remap and afte
   await page.getByRole('button', { name: 'View all Pane keyboard shortcuts' }).click();
   const help = page.getByRole('dialog', { name: 'Keyboard Shortcuts' });
   await expect(help).toBeVisible();
-  await expect(help.getByText('Add Codex')).toBeVisible();
-  await expect(help.locator('kbd', { hasText: /^Y$/ })).toHaveCount(0);
+  const helpCodex = help.locator('[data-shortcut-id="add-tool-terminal-codex"]');
+  await expect(helpCodex).toContainText('Add Codex');
+  await expect(helpCodex).toContainText('Ctrl+Alt+4');
+  await expect(helpCodex).not.toContainText('Y');
   await expect(help.getByText('Send Input / Continue Conversation')).toBeVisible();
 });
 
 
 test('remapped continuous scrolling stops when the remapped key is released', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await mock(page, { keyboardShortcutOverrides: { 'scroll-focused-surface-down': 'alt+F6' } });
+  await mock(page, { keyboardShortcutOverrides: { 'scroll-focused-surface-down': 'alt+F7' } });
   await openShortcuts(page);
   const content = page.getByTestId('settings-content');
   await content.focus();
   const scrollTop = () => content.evaluate(element => element.scrollTop);
   const before = await scrollTop();
   await page.keyboard.down('Alt');
-  await page.keyboard.down('F6');
+  // F6 is Focus Next Region by default, so the remap uses the free F7.
+  await page.keyboard.down('F7');
   await expect.poll(scrollTop).toBeGreaterThan(before + 2);
-  await page.keyboard.up('F6');
+  await page.keyboard.up('F7');
   const released = await scrollTop();
   await page.waitForTimeout(250);
   expect(await scrollTop()).toBe(released);

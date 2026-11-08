@@ -335,6 +335,7 @@ describe('daemon registry IPC bindings', () => {
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
     registerConfigHandlers(ipcMain, createServicesStub({
       configManager: {
+        on: vi.fn(),
         getConfig: () => ({
           anthropicApiKey: 'secret-api-key',
           terminalShortcuts: [{
