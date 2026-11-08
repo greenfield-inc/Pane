@@ -418,8 +418,12 @@ export class NotifyService {
       if (command.type === 'answer') throw new PaneError('ERR_APPROVALS_MACHINE_OFFLINE', `Not sent: ${target.machine} is offline, so your answer didn't reach it.`, `Answer again when ${target.machine} is back.`);
       return;
     }
-    // Before the send: the machine's next state can arrive before its reply does.
-    if (command.type === 'answer') this.queue.noteAnsweredHere(command.id, true);
+    if (command.type === 'answer') {
+      // A second press before the machine replies: the first answer is already on its way.
+      if (this.queue.answeredHereAlready(command.id)) return;
+      // Before the send: the machine's next state can arrive before its reply does.
+      this.queue.noteAnsweredHere(command.id, true);
+    }
     try {
       await this.deps.sendToMachine(target.machineId, machineCommand);
     } catch (error) {

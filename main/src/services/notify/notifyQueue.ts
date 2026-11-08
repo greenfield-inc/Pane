@@ -909,6 +909,12 @@ export class NotifyQueue extends EventEmitter {
   noteAnsweredHere(key: string, answered: boolean): void {
     if (answered) this.answeredHere.add(key);
     else this.answeredHere.delete(key);
+    this.changed();
+  }
+
+  /** An answer from this screen to another machine's question is on its way or in. */
+  answeredHereAlready(key: string): boolean {
+    return this.answeredHere.has(key);
   }
 
   /** "When I switch to Pane" for another machine's question: hidden here until this Pane comes to the front. */
@@ -1136,7 +1142,8 @@ export class NotifyQueue extends EventEmitter {
           ...local.map(item => ({ ...withDeviceLabels(item, device => this.deviceLabel(device)), machine: this.machine(), machineId: LOCAL_MACHINE })),
           ...remotes.flatMap(remote => [...remote.items.values()].map(item => ({
             ...withDeviceLabels(item, device => this.deviceLabel(device)),
-            answeredOn: this.answeredHere.has(item.id) ? undefined : this.deviceLabel(item.answeredOn),
+            // Sent from here, before the machine says so: the card reads "Sent to" and can't be answered twice.
+            ...(this.answeredHere.has(item.id) ? { answeredOn: undefined, ...(item.state === 'waiting' ? { state: 'sent' as const } : {}) } : { answeredOn: this.deviceLabel(item.answeredOn) }),
             unreachable: remote.online ? undefined : true,
             elsewhere: remote.machineId === this.activeMachineId ? undefined : true,
           }))),
@@ -1461,7 +1468,7 @@ export class NotifyQueue extends EventEmitter {
 
   /** Every machine's waiting questions, oldest first; each machine keeps its own order (skip moves one back). */
   private allQueued(): string[] {
-    const queues = [this.localQueue(), ...[...this.remotes.values()].map(remote => remote.queue)].filter(queue => queue.length > 0);
+    const queues = [this.localQueue(), ...[...this.remotes.values()].map(remote => remote.queue.filter(id => !this.answeredHere.has(id)))].filter(queue => queue.length > 0);
     if (queues.length <= 1) return [...queues[0] ?? []];
     const heads = queues.map(() => 0);
     const merged: string[] = [];

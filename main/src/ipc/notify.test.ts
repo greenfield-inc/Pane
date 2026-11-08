@@ -143,6 +143,28 @@ describe('Notify across machines, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it("sends one answer when another machine's card is answered twice before that machine replies", async () => {
+    const pane = await startPane();
+    const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)) });
+    let reply = () => undefined as void;
+    const run = saved.machines.run;
+    saved.machines.run = (machineId, command) => new Promise(resolve => { reply = () => resolve(run(machineId, command)); });
+    followSavedMachines(saved.machines);
+    await flush();
+
+    const first = pane.notify.run({ type: 'answer', id: 'studio:q-1', answer: { approved: true } });
+    await flush();
+    // Before the machine replies: the card reads "Sent to" and leaves the round.
+    expect(pane.notify.snapshot().items.find(item => item.id === 'studio:q-1')?.state).toBe('sent');
+    expect(pane.notify.snapshot().queue).toEqual([]);
+    await expect(pane.notify.run({ type: 'answer', id: 'studio:q-1', answer: { approved: false } })).resolves.toBeUndefined();
+    reply();
+    await first;
+
+    expect(saved.sent).toEqual([['studio', { type: 'notify', command: { type: 'answer', id: 'q-1', answer: { approved: true } } }]]);
+    pane.notify.dispose();
+  });
+
   it('keeps the same question id on two machines as two cards, and an answer reaches only its own machine', async () => {
     const pane = await startPane();
     const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)), devbox: stateOf('parsa-devbox', question('q-1', 'Ship it?', 2_000)) });
