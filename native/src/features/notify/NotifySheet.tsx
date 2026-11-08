@@ -143,7 +143,8 @@ export function QuestionForm({ item, answer, busy, children }: {
   const [picks, setPicks] = useState<string[]>([]);
   const trimmedNote = note.trim();
   // A permission prompt stays options only: its note rides on the choice, never as a reply.
-  const replies = item.ui === 'options' && !item.agentPrompt;
+  // A permission prompt and a choice-only chat question take only their options (F-10).
+  const replies = item.ui === 'options' && !item.agentPrompt && !item.optionsOnly;
   const choose = (label: string) => {
     if (!replies) return answer(withNote({ choice: label }));
     const value = optionsAnswer(item, [label], note);

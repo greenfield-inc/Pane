@@ -127,6 +127,12 @@ describe('optionsAnswer', () => {
     expect(isReply({ choice: 'Yes' })).toBe(false);
   });
 
+  it('F-10: a choice-only question takes its pick and never typed words', () => {
+    const choiceOnly: NotifyItem = { ...one, optionsOnly: true };
+    expect(optionsAnswer(choiceOnly, ['Yes'], 'Teal')).toEqual({ choice: 'Yes' });
+    expect(optionsAnswer(choiceOnly, [], 'Teal')).toBeNull();
+  });
+
   it('sends anything typed as a reply, with the pick or an empty string', () => {
     expect(optionsAnswer(one, ['Yes'], ' Only if it can be undone ')).toEqual({ picks: ['Yes'], text: 'Only if it can be undone' });
     expect(optionsAnswer(one, [], 'Can it be undone?')).toEqual({ picks: [''], text: 'Can it be undone?' });
