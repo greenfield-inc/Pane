@@ -11,6 +11,7 @@ import { relayReadOnlyLine } from '../approvals/approvalGroups';
 import { ItemCloseForm } from '../notify/NotifyCard';
 import { machineLabel, originOf, relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
+import { ClampedText } from '../notify/ClampedText';
 
 function KindIcon({ model }: { model: DecisionModel }) {
   const className = 'h-4 w-4 shrink-0';
@@ -148,7 +149,7 @@ export function AutopilotDecisionCard({ item, current, onMakeCurrent }: { item: 
       <div className="px-3.5 pb-2.5 pt-3">
         <Meta model={model} origin={origin} now={now} />
         <h3 className="mt-1 text-[15px] font-semibold leading-snug text-text-primary">{model.title}</h3>
-        {model.why && <p className="mt-1 text-[13.5px] leading-relaxed text-text-secondary">{model.why}</p>}
+        {model.why && <ClampedText text={model.why} className="mt-1 text-[13.5px] leading-relaxed text-text-secondary" />}
         {receiptLine(item) && <p className="mt-1 text-[12.5px] text-text-tertiary" data-testid="autopilot-decision-receipt">{receiptLine(item)}</p>}
       </div>
       {model.state === 'sent' ? (

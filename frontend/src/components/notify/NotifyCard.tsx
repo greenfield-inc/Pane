@@ -7,6 +7,7 @@ import { cn } from '../../utils/cn';
 import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
+import { ClampedText } from './ClampedText';
 
 /** The compact strip shows this many choices, then More. */
 const COMPACT_CHOICE_LIMIT = 4;
@@ -833,7 +834,10 @@ function QuestionCard({
       <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       <div className={cn(titleClass, !expanded && 'line-clamp-3')} title={item.title}>{item.title}</div>
       {/* An agent prompt's context is a command or a plan: its line breaks carry meaning. */}
-      {showContext && <div className={cn(contextClass, item.agentPrompt && 'max-h-[40vh] overflow-y-auto whitespace-pre-line')}>{item.context}</div>}
+      {/* An agent prompt's context is a command or plan to read whole; any other is clamped with Show more. */}
+      {showContext && item.context && (item.agentPrompt
+        ? <div className={cn(contextClass, 'max-h-[40vh] overflow-y-auto whitespace-pre-line')}>{item.context}</div>
+        : <ClampedText text={item.context} className={contextClass} testId="notify-card-context" />)}
       {form === 'inbox' && (onCancelOverride
         ? <div className={contextClass} data-testid="notify-override-hint">Your answer goes to {item.source.agent} as a correction.</div>
         : <ReceiptLines item={item} className={contextClass} />)}
