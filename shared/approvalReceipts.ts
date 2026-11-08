@@ -34,7 +34,9 @@ export function receiptLine(item: NotifyItem): string | undefined {
     const answered = receipt.by === 'autopilot' ? (receipt.because ? `Answered by Autopilot · because ${receipt.because}` : 'Answered by Autopilot')
       : receipt.by === 'orchestrator' ? 'Answered by the orchestrator'
         : item.answeredOn ? `Answered by you on ${item.answeredOn}` : 'Answered by you';
-    return awaitsTab(item) ? `${answered} · not delivered to ${asker(item) === 'orchestrator' ? 'the orchestrator' : asker(item)} yet` : answered;
+    const to = asker(item) === 'orchestrator' ? 'the orchestrator' : asker(item);
+    if (item.undelivered) return `${answered} · not delivered to ${to}: ${item.undelivered.reason}`;
+    return answerOwed(item) ? `${answered} · not delivered to ${to} yet` : answered;
   }
   if (item.reopened && item.state === 'waiting') return item.reopened.device ? `Reopened by you on ${item.reopened.device}` : 'Reopened by you';
   if (item.rewrittenFrom) return `Rewritten by Autopilot from ${item.rewrittenFrom.qn ?? leadingQn(item.rewrittenFrom.title) ?? `"${item.rewrittenFrom.title}"`}`;
@@ -42,8 +44,13 @@ export function receiptLine(item: NotifyItem): string | undefined {
 }
 
 /** An answer Pane still owes the tab that asked: it types it only once that tab's agent is at its prompt. */
-function awaitsTab(item: NotifyItem): boolean {
-  return item.state === 'answered' && !item.delivered && item.source.panelId !== undefined && !item.agentPrompt && !item.relay;
+function answerOwed(item: NotifyItem): boolean {
+  return item.state === 'answered' && !item.delivered && !item.undelivered && item.source.panelId !== undefined && !item.agentPrompt && !item.relay;
+}
+
+/** An answer that hasn't reached its tab, owed or never to be typed, takes a Copy answer so the person can pass it on. */
+export function canCopyAnswer(item: NotifyItem): boolean {
+  return item.answerSummary !== undefined && (item.undelivered !== undefined || answerOwed(item));
 }
 
 /** "Recorded as D-147", once the orchestrator has. */
@@ -56,9 +63,12 @@ export function canOverride(item: NotifyItem): boolean {
   return item.state === 'answered' && item.answeredBy?.by === 'autopilot';
 }
 
-/** A closed item takes a Reopen, unless Pane closed it because its asker is gone or it was replaced by a rewrite. */
+/**
+ * A closed item takes a Reopen, unless Pane closed it because its asker is gone, it was replaced by a
+ * rewrite, or it was asked from outside Pane (no tab to take the answer once its call ended).
+ */
 export function canReopen(item: NotifyItem): boolean {
-  return item.state === 'expired' && !item.rewrittenAs && (item.closed?.by === 'autopilot' || item.closed?.by === 'you');
+  return item.state === 'expired' && !item.rewrittenAs && item.source.panelId !== undefined && (item.closed?.by === 'autopilot' || item.closed?.by === 'you');
 }
 
 /** Any waiting item takes a Close, except a mirror from an older machine and a permission prompt, which only its answer ends. */

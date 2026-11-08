@@ -189,7 +189,7 @@ describe('Notify across machines, through the registered handlers', () => {
 
     saved.setStatus('studio', 'offline');
     expect(pane.notify.snapshot().items).toMatchObject([{ id: 'studio:q-1', state: 'waiting', unreachable: true, elsewhere: true }]);
-    await pane.notify.run({ type: 'answer', id: 'studio:q-1', answer: { approved: true } });
+    await expect(pane.notify.run({ type: 'answer', id: 'studio:q-1', answer: { approved: true } })).rejects.toMatchObject({ code: 'ERR_APPROVALS_MACHINE_OFFLINE' });
     expect(saved.sent).toEqual([]);
 
     saved.setStatus('studio', 'online');
@@ -421,10 +421,12 @@ describe('Approvals items, through the registered handlers', () => {
       // The worker's status file, which its report named, opens beside the card.
       links: [{ label: 'api-fix status', path: '/work/api-fix/status.json' }],
     });
-    expect(pane.notify.snapshot().queue).toEqual(['in-1']);
+    // Quiet: answerable in Approvals, but not yet in the round or the strip.
+    expect(pane.notify.snapshot().queue).toEqual([]);
     expect(pane.notify.snapshot().strip).toBeNull();
     await new Promise(resolve => setTimeout(resolve, 120));
     expect(pane.notify.snapshot().items[0].quiet).toBeUndefined();
+    expect(pane.notify.snapshot().queue).toEqual(['in-1']);
     expect((await pane.registry.invoke<NotifySharedState>('notify:remote-snapshot', [])).items).toMatchObject([{ id: 'in-1', originKind: 'worker' }]);
 
     inbox.end({ id: 'in-1', how: 'acked', decision: 'D-9' });
@@ -513,17 +515,11 @@ describe('Approvals related links, through the registered handlers', () => {
 });
 
 describe('tabTakesText', () => {
-  it('types only at a live agent prompt, never at a shell or another program', () => {
-    expect(tabTakesText('idle', { isAgent: true }, undefined)).toBe(true);
-    expect(tabTakesText('working', { isAgent: true }, undefined)).toBe(false);
-    expect(tabTakesText(undefined, { isAgent: true }, true)).toBe(false);
-    // Pane's own shell, a nested `bash`, `ssh` or a REPL: an agent's old frame on screen proves nothing.
-    expect(tabTakesText('idle', { isAgent: false }, true)).toBe(false);
-  });
-
-  it('where the foreground can\'t be read, needs the agent\'s composer on screen', () => {
-    expect(tabTakesText('idle', undefined, true)).toBe(true);
-    expect(tabTakesText('idle', undefined, false)).toBe(false);
-    expect(tabTakesText('idle', undefined, undefined)).toBe(false);
+  it('types only at a live agent prompt, with an agent in the foreground', () => {
+    expect(tabTakesText('idle', true)).toBe(true);
+    expect(tabTakesText('working', true)).toBe(false);
+    expect(tabTakesText(undefined, true)).toBe(false);
+    // A shell, a nested shell, ssh or a REPL in the foreground: an agent frame on screen proves nothing.
+    expect(tabTakesText('idle', false)).toBe(false);
   });
 });

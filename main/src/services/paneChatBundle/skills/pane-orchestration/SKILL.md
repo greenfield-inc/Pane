@@ -358,7 +358,9 @@ approval, a PR ready to merge, and a next step only they can take.
   a card: `runpane notify --relays <item>`, with the id from `runpane inbox`,
   improves that card with your choices, context and links, and rings it. The
   answer goes straight to the worker's tab (`answer: Q-n → <answer> (by you)`),
-  whether or not your call is still open, so don't forward it.
+  whether or not your call is still open, so don't forward it. When `runpane
+  inbox` lists that answer with `undelivered` (its tab closed, or Pane can't
+  see what runs there), pass it on yourself with `runpane panels submit`.
 - **Post your own item when it appears**, titled with its Q-n, with the files
   it is about (the worker's status file, plan or page) and its PR as `--links`.
   Post or relay with the CLI as a background command, one per item, so you stay

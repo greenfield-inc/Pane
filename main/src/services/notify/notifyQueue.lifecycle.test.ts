@@ -15,7 +15,7 @@ describe('NotifyQueue with its store', () => {
   let store: ApprovalStore;
   let typed: Array<[string, string]>;
   let gone: Map<string, string>;
-  let tabState: 'delivered' | 'busy' | 'gone';
+  let tabState: 'delivered' | 'busy' | 'gone' | 'unsupported';
   let using: boolean;
 
   const queueWith = (extra: Partial<NotifyQueueEnvironment> = {}) => new NotifyQueue({
@@ -82,6 +82,35 @@ describe('NotifyQueue with its store', () => {
     expect(item(queue, 'in-1')?.delivered?.via).toBe('tab');
   });
 
+  it('ends an answer that can never be typed, says why, and does not try again after a restart', async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-7: which region?', source: worker, at: Date.now() });
+    tabState = 'gone';
+    queue.run({ type: 'answer', id: 'in-1', answer: { text: 'eu-west' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(item(queue, 'in-1')?.delivered).toBeUndefined();
+    expect(item(queue, 'in-1')?.undelivered?.reason).toBe('its tab closed');
+    queue.dispose();
+
+    let tries = 0;
+    const after = queueWith({ typeIntoTab: async () => { tries += 1; return 'delivered'; } });
+    after.sweep();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(tries).toBe(0);
+    after.dispose();
+  });
+
+  it("says when Pane can't see what runs in the asking tab", async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-8: retry?', source: worker, at: Date.now() });
+    tabState = 'unsupported';
+    queue.run({ type: 'answer', id: 'in-1', answer: { text: 'Yes' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(typed).toEqual([]);
+    expect(item(queue, 'in-1')?.undelivered?.reason).toBe("Pane can't see what runs in its tab");
+    queue.dispose();
+  });
+
   it('does not spin on a tab that stays busy: two messages owed wait for its next idle', async () => {
     const queue = queueWith();
     queue.addWorkerQuestion({ id: 'in-1', question: 'Q-1: a?', source: worker, at: Date.now() });
@@ -141,7 +170,8 @@ describe('NotifyQueue with its store', () => {
     queue.on('chime', chimes);
     queue.addWorkerQuestion({ id: 'in-1', question: 'Q-39: run?', source: worker, at: Date.now() });
     const first = queue.snapshot();
-    expect(first.queue).toEqual(['in-1']);
+    // Quiet until it rings: answerable in Approvals, not in the round (F-6).
+    expect(first.queue).toEqual([]);
     expect(first.hidden).toEqual(['in-1']);
     expect(first.strip).toBeNull();
     expect(item(queue, 'in-1')).toMatchObject({ ui: 'ask', originKind: 'worker', quiet: true });
@@ -245,6 +275,9 @@ describe('NotifyQueue with its store', () => {
     expect(item(queue, id)?.staleSince).toBeDefined();
     expect(queue.snapshot().hidden).toEqual([id]);
     expect(queue.snapshot().strip).toBeNull();
+    // The Answer-all round and its shortcut skip it, as the counts do.
+    expect(queue.snapshot().queue).toEqual([]);
+    expect(queue.hasWaiting()).toBe(false);
     queue.run({ type: 'answer', id, answer: { text: 'x' } });
     expect(item(queue, id)?.state).toBe('sent');
   });
@@ -317,6 +350,41 @@ describe('NotifyQueue with its store', () => {
     expect(item(queue, 'in-1')).toMatchObject({ state: 'waiting' });
     expect(item(queue, 'in-1')?.closed).toBeUndefined();
     expect(queue.snapshot().queue).toEqual(['in-1']);
+  });
+
+  it('a stale item the person reopens waits in the open, and counts its three days from the Reopen', async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-40: still needed?', source: worker, at: Date.now() });
+    await vi.advanceTimersByTimeAsync(4 * DAY);
+    queue.sweep();
+    queue.agentAct({ type: 'agent-close', id: 'in-1', reason: 'stale' });
+    queue.run({ type: 'reopen', id: 'in-1' });
+    queue.sweep();
+    expect(item(queue, 'in-1')?.staleSince).toBeUndefined();
+    expect(queue.snapshot().hidden).toEqual([]);
+    await vi.advanceTimersByTimeAsync(3 * DAY);
+    queue.sweep();
+    expect(item(queue, 'in-1')?.staleSince).toBeDefined();
+  });
+
+  it('refuses to reopen an item asked from outside Pane: its call ended, so no one would get the answer', () => {
+    const queue = queueWith();
+    const controller = new AbortController();
+    void queue.ask({ question: ask('Q-41: outside?'), source: { name: 'scripts', agent: 'Claude' } }, controller.signal);
+    const [{ id }] = queue.snapshot().items;
+    queue.run({ type: 'close', id });
+    expect(() => queue.run({ type: 'reopen', id })).toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_ASKER_GONE' }));
+    expect(item(queue, id)?.state).toBe('expired');
+  });
+
+  it('refuses a teammate acting as Autopilot, so no receipt reads "by Autopilot" for someone else', () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-42: deploy?', source: worker, at: Date.now() });
+    expect(() => queue.runRemote({ type: 'agent-answer', id: 'in-1', answer: { text: 'yes' }, because: 'trust me' }, 'build-mac', 'teammate@example.com'))
+      .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_NOT_AUTOPILOT' }));
+    expect(item(queue, 'in-1')?.state).toBe('waiting');
+    queue.runRemote({ type: 'agent-answer', id: 'in-1', answer: { text: 'yes' }, because: 'D-9' }, 'mini', null);
+    expect(item(queue, 'in-1')?.answeredBy).toMatchObject({ by: 'autopilot', because: 'D-9' });
   });
 
   it('a reopened item says who reopened it and what it reversed, and a device names where', () => {
@@ -454,7 +522,7 @@ describe('NotifyQueue with its store', () => {
     expect(queue.snapshot().queue).toEqual([]);
     expect(item(queue, 'in-1')).toBeUndefined();
     enabled = true;
-    expect(queue.snapshot().queue).toEqual(['in-1']);
+    expect(item(queue, 'in-1')?.state).toBe('waiting');
   });
 
   it('stays inside the sweep budget with 5,000 waiting items', () => {

@@ -85,8 +85,8 @@ export interface NotifyServiceDependencies {
   askerPaneGone?: (item: NotifyItem) => string | undefined;
   /** Hears Panes and tabs closing, which can end their items. */
   onAskersChanged?: (listener: () => void) => () => void;
-  /** Types into an asker's tab, once it's at its prompt. */
-  typeIntoTab?: (panelId: string, text: string) => Promise<'delivered' | 'busy' | 'gone'>;
+  /** Types into an asker's tab once an agent is at its prompt; outcomes as NotifyQueueEnvironment's. */
+  typeIntoTab?: NotifyQueueEnvironment['typeIntoTab'];
   /** Seconds since the person last used this computer; Infinity while its screen is locked. Absent: in use. */
   idleSeconds?: () => number;
 }
@@ -406,7 +406,11 @@ export class NotifyService {
       this.queue.run(command);
       return;
     }
-    if (!target.online) return;
+    if (!target.online) {
+      // The person typed an answer: say it went nowhere, rather than let the card fold away (F-2).
+      if (command.type === 'answer') throw new PaneError('ERR_APPROVALS_MACHINE_OFFLINE', `Not sent: ${target.machine} is offline, so your answer didn't reach it.`, `Answer again when ${target.machine} is back.`);
+      return;
+    }
     // Before the send: the machine's next state can arrive before its reply does.
     if (command.type === 'answer') this.queue.noteAnsweredHere(command.id, true);
     try {
@@ -419,6 +423,11 @@ export class NotifyService {
       if (UNREACHABLE_CODES.has(code)) this.queue.setRemote(target.machineId, { machine: target.machine, online: false });
       // Refused (another screen got there first, or the hold ended): the machine's state says how.
       this.deps.refreshMachine(target.machineId);
+      if (command.type === 'answer') {
+        throw UNREACHABLE_CODES.has(code)
+          ? new PaneError('ERR_APPROVALS_MACHINE_OFFLINE', `Not sent: ${target.machine} went offline, so your answer didn't reach it.`, `Answer again when ${target.machine} is back.`)
+          : error;
+      }
     }
   }
 

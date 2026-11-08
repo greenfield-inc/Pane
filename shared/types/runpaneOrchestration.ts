@@ -1643,6 +1643,8 @@ export interface RunpaneInboxAnswer {
   answeredAt: string;
   /** How it reached the worker; absent while its tab is busy. */
   delivered?: 'call' | 'tab';
+  /** Why Pane can't type it into the worker's tab (its tab closed, or Pane can't see what runs there): pass it on yourself. */
+  undelivered?: string;
   /** The D-n recorded for it; absent: run `runpane inbox ack <id> --decision <D-n>`. */
   decision?: string;
 }

@@ -14847,6 +14847,10 @@ export const RUNPANE_CONTRACT = {
                 ],
                 "description": "How it reached the worker; absent while its tab is busy."
               },
+              "undelivered": {
+                "type": "string",
+                "description": "Why Pane can't type it into the worker's tab (its tab closed, or Pane can't see what runs there): pass it on yourself."
+              },
               "decision": {
                 "type": "string",
                 "description": "The D-n recorded for it; absent: run `runpane inbox ack <id> --decision <D-n>`."

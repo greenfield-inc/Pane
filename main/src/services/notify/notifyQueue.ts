@@ -137,8 +137,11 @@ export interface NotifyQueueEnvironment {
   inUse?: () => boolean;
   /** A worker's question closed because its asker is gone: its inbox item goes with it. */
   workerQuestionGone?: (inboxId: string) => void;
-  /** Types into a tab when it's at its prompt. `busy`: try again later. `gone`: the tab is no more. */
-  typeIntoTab?: (panelId: string, text: string) => Promise<'delivered' | 'busy' | 'gone'>;
+  /**
+   * Types into a tab when an agent is at its prompt. `busy`: try again later. `gone`: the tab is no
+   * more. `unsupported`: Pane can't see what runs in that terminal (Windows, WSL, the PTY host).
+   */
+  typeIntoTab?: (panelId: string, text: string) => Promise<'delivered' | 'busy' | 'gone' | 'unsupported'>;
 }
 
 /**
@@ -237,7 +240,7 @@ export class NotifyQueue extends EventEmitter {
       if (item.quiet) this.armRing(entry);
     }
     for (const { item } of this.entries.values()) {
-      if (item.state === 'answered' && !item.delivered && item.source.panelId && !item.agentPrompt) this.enqueueTabMessage(item, answerLine(item), true);
+      if (item.state === 'answered' && !item.delivered && !item.undelivered && item.source.panelId && !item.agentPrompt) this.enqueueTabMessage(item, answerLine(item), true);
     }
   }
 
@@ -358,6 +361,13 @@ export class NotifyQueue extends EventEmitter {
     if (!entry) {
       throw new PaneError('ERR_NOTIFY_GONE', `That question is no longer on ${this.machine()}: it finished earlier. Nothing was sent.`, 'Nothing to do: the agent is no longer waiting on it.');
     }
+    // Only the person's own machines pass on Autopilot's calls; a teammate would be recorded as Autopilot (F-8).
+    if (teammate && command.type.startsWith('agent-')) {
+      throw new PaneError('ERR_NOTIFY_NOT_AUTOPILOT', `${teammate} can't act as Autopilot on ${this.machine()}. Nothing was changed.`, 'Answer or close it as yourself instead.');
+    }
+    if (teammate && entry.item.ui === 'secret' && command.type !== 'dismiss' && command.type !== 'skip' && command.type !== 'remind') {
+      throw teammateSecretRefusal(teammate, command.type === 'answer' ? 'answer a secret card' : `${command.type} a secret card`);
+    }
     switch (command.type) {
       case 'close': this.closeBy(command.id, 'you', command.reason ?? '', device); return;
       case 'reopen': this.reopenClosed(command.id, device); return;
@@ -367,7 +377,6 @@ export class NotifyQueue extends EventEmitter {
       case 'agent-rewrite': this.agentAct(command); return;
       default:
     }
-    if (teammate && entry.item.ui === 'secret') throw teammateSecretRefusal(teammate, 'answer a secret card');
     const needs = command.type === 'answer' ? 'waiting' : command.type === 'undo' ? 'sent' : 'queued';
     const state = entry.item.state;
     if ((needs === 'queued' && !this.queue.includes(command.id)) || (needs !== 'queued' && state !== needs)) {
@@ -499,7 +508,8 @@ export class NotifyQueue extends EventEmitter {
         this.closeOpen(entry, { by: 'pane', reason }, closedResult(`Closed: ${reason}.`));
         continue;
       }
-      if (item.staleSince === undefined && now - item.createdAt >= staleAfter && !item.summaryOf) {
+      // A reopened item counts from the person's Reopen, or it would go straight back to Stale (F-4).
+      if (item.staleSince === undefined && now - (item.reopened?.at ?? item.createdAt) >= staleAfter && !item.summaryOf) {
         item.staleSince = now;
         clearTimeout(entry.ringTimer);
         this.save(entry);
@@ -714,6 +724,10 @@ export class NotifyQueue extends EventEmitter {
     if (entry.item.rewrittenAs) {
       throw new PaneError('ERR_NOTIFY_REWRITTEN', `This question was rewritten as "${entry.item.rewrittenAs.title}", so reopening it would ask twice. Nothing was changed.`, 'Answer the rewrite, or close it.');
     }
+    // Asked from outside Pane: its call ended when the item closed, so an answer would reach no one (F-5).
+    if (entry.item.source.panelId === undefined) {
+      throw new PaneError('ERR_NOTIFY_ASKER_GONE', 'Nobody can take an answer to this question any more: it was asked from outside Pane, and that call ended when it closed. Nothing was changed.', 'Ask again from where it came from if it still matters.');
+    }
     const previous = entry.item.closed;
     entry.item.closed = undefined;
     const gone = this.env.askerGone?.(entry.item);
@@ -724,6 +738,7 @@ export class NotifyQueue extends EventEmitter {
     entry.item.state = 'waiting';
     entry.item.resolvedAt = undefined;
     entry.item.answeredOn = undefined;
+    entry.item.staleSince = undefined;
     entry.item.reopened = { by: 'you', at: Date.now(), closedBy: previous.by, closedReason: previous.reason };
     if (device) entry.item.reopened.device = device;
     entry.restored = true;
@@ -788,8 +803,10 @@ export class NotifyQueue extends EventEmitter {
         again = true;
         this.tabMessages = this.tabMessages.filter(other => other !== message);
         const entry = this.entries.get(message.itemId);
-        if (outcome === 'delivered' && message.answer && entry) {
-          entry.item.delivered = { via: 'tab', at: Date.now() };
+        if (message.answer && entry) {
+          // An answer that can never be typed says why, so the person or the orchestrator passes it on (F-3).
+          if (outcome === 'delivered') entry.item.delivered = { via: 'tab', at: Date.now() };
+          else entry.item.undelivered = { reason: outcome === 'gone' ? 'its tab closed' : "Pane can't see what runs in its tab", at: Date.now() };
           this.save(entry);
           this.changed();
         }
@@ -1095,8 +1112,9 @@ export class NotifyQueue extends EventEmitter {
     this.clearTransient();
   }
 
+  /** Whether the Answer-all round has anything to show: stale and quiet items never come up (F-6). */
   hasWaiting(): boolean {
-    return this.allQueued().length > 0;
+    return this.roundQueue().length > 0;
   }
 
   waitingItems(): NotifyItem[] {
@@ -1121,7 +1139,7 @@ export class NotifyQueue extends EventEmitter {
           }))),
         ]
         : local,
-      queue: this.allQueued(),
+      queue: this.roundQueue(),
       hidden: [...this.allHidden()],
       strip,
       stripSurface: this.stripSurface(strip),
@@ -1455,6 +1473,14 @@ export class NotifyQueue extends EventEmitter {
       if (pick === -1) return merged;
       merged.push(queues[pick][heads[pick]++]);
     }
+  }
+
+  /** What the round and the strip's "1 of N" walk: every machine's waiting items, less stale and quiet ones, as the counts are. */
+  private roundQueue(): string[] {
+    return this.allQueued().filter((id) => {
+      const item = this.find(id);
+      return item !== undefined && item.staleSince === undefined && !item.quiet;
+    });
   }
 
   private allHidden(): Set<string> {

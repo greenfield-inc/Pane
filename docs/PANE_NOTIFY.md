@@ -225,9 +225,15 @@ alert timers stay in memory beside the table.
 
 An item survives a restart, and an answer reaches its asker whether or not its
 call is still open: an open call returns it, and otherwise Pane types `answer:
-Q-n → <answer> (by you)` into the asking tab once, when an agent is in its
-foreground at its prompt. A shell, `ssh` or any other program there keeps the
-answer owed, and the card reads "not delivered to <tab> yet" until it goes. An
+Q-n → <answer> (by you)` into the asking tab once, when its agent is idle at
+its prompt and in the terminal's foreground process group. A wrapper and the
+agent it started share that group, so an agent-farm worker (`node
+telemetry.mjs` running `claude`) qualifies. A shell, a nested shell, `ssh` or a
+REPL there keeps the answer owed, and the card reads "not delivered to <tab>
+yet" until it goes. Where Pane can't see what runs in the tab (Windows, WSL and
+the PTY host), or the tab closed, the answer is never typed: the card reads
+"not delivered to <tab>: <why>", and `runpane inbox` lists it as `undelivered`
+so the orchestrator passes it on. An
 asker that posts the same question again from the same tab (same Q-n or title)
 joins the waiting card instead of adding one.
 

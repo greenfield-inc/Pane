@@ -2208,7 +2208,8 @@ describe('TerminalPanelManager wrapper launches', () => {
 });
 
 type DetectionAccess = AgentStatusAccess & {
-  getForegroundProcess(panelId: string): { name: string; isShell: boolean; isAgent: boolean } | undefined;
+  getForegroundProcess(panelId: string): { name: string; isShell: boolean } | undefined;
+  readForegroundAgent(panelId: string): Promise<boolean | undefined>;
 };
 
 describe('TerminalPanelManager wrapper agent detection', () => {
@@ -2327,7 +2328,7 @@ describe('TerminalPanelManager wrapper agent detection', () => {
     manager.pollAgentStatus();
 
     expect(terminal.agentType).toBeUndefined();
-    expect(manager.getForegroundProcess(terminal.panelId)).toEqual({ name: '-zsh', isShell: true, isAgent: false });
+    expect(manager.getForegroundProcess(terminal.panelId)).toEqual({ name: '-zsh', isShell: true });
     manager.destroyTerminal(terminal.panelId);
   });
 
@@ -2335,26 +2336,55 @@ describe('TerminalPanelManager wrapper agent detection', () => {
     wrapperPanel();
     const { manager, terminal } = attachWrapper('bash');
 
-    expect(manager.getForegroundProcess(terminal.panelId)).toEqual({ name: 'bash', isShell: false, isAgent: false });
+    expect(manager.getForegroundProcess(terminal.panelId)).toEqual({ name: 'bash', isShell: false });
     manager.destroyTerminal(terminal.panelId);
   });
 
-  it.skipIf(process.platform === 'win32')('names an agent in the foreground only from its executable or its versioned binary', () => {
-    wrapperPanel();
-    const { manager, terminal } = attachWrapper('codex');
-    expect(manager.getForegroundProcess(terminal.panelId)?.isAgent).toBe(true);
-
-    terminal.pty.process = '2.1.289';
-    expect(manager.getForegroundProcess(terminal.panelId)?.isAgent).toBe(false);
-    terminal.agentType = 'claude';
-    expect(manager.getForegroundProcess(terminal.panelId)?.isAgent).toBe(true);
-
-    // A program started in an agent's tab after it exited: a nested shell, ssh, a REPL.
-    for (const name of ['bash', 'ssh', 'python3']) {
-      terminal.pty.process = name;
-      expect(manager.getForegroundProcess(terminal.panelId)?.isAgent).toBe(false);
+  describe('readForegroundAgent', () => {
+    function withGroup(group: { pgid: number; members: string[] } | undefined, processName = 'node') {
+      wrapperPanel();
+      const manager = testAccess<DetectionAccess>(new TerminalPanelManager(undefined, undefined, undefined, undefined, async () => group));
+      const terminal = createTerminal({ screenEmulator: inProcessEmulatorHost().createEmulator(60, 10), shellProcessName: 'zsh' });
+      terminal.pty.process = processName;
+      terminal.pty.pid = 4242;
+      manager.terminals.set(terminal.panelId, terminal);
+      return { manager, terminal };
     }
-    manager.destroyTerminal(terminal.panelId);
+
+    it.skipIf(process.platform === 'win32')('finds the agent a wrapper started in the same foreground group', async () => {
+      // An agent-farm worker: `node telemetry.mjs` leads the group, `claude` is its child.
+      const { manager, terminal } = withGroup({ pgid: 8080, members: ['/opt/node/bin/node', '/Users/me/.local/bin/claude'] });
+      expect(await manager.readForegroundAgent(terminal.panelId)).toBe(true);
+      manager.destroyTerminal(terminal.panelId);
+    });
+
+    it.skipIf(process.platform === 'win32')('takes Claude\'s versioned binary only in a tab Pane identified as Claude', async () => {
+      const { manager, terminal } = withGroup({ pgid: 8080, members: ['2.1.319'] }, '2.1.319');
+      expect(await manager.readForegroundAgent(terminal.panelId)).toBe(false);
+      terminal.agentType = 'claude';
+      expect(await manager.readForegroundAgent(terminal.panelId)).toBe(true);
+      manager.destroyTerminal(terminal.panelId);
+    });
+
+    it.skipIf(process.platform === 'win32')('refuses a nested shell, ssh, a REPL, and Pane\'s own shell at its prompt', async () => {
+      for (const members of [['/bin/bash'], ['/usr/bin/ssh'], ['/opt/homebrew/bin/python3']]) {
+        const { manager, terminal } = withGroup({ pgid: 9090, members }, members[0]);
+        terminal.agentType = 'claude';
+        expect(await manager.readForegroundAgent(terminal.panelId)).toBe(false);
+        manager.destroyTerminal(terminal.panelId);
+      }
+      // The shell's own group (its pid): the agent exited; a frame it left proves nothing.
+      const { manager, terminal } = withGroup({ pgid: 4242, members: ['-zsh', '/Users/me/.local/bin/claude'] }, '-zsh');
+      expect(await manager.readForegroundAgent(terminal.panelId)).toBe(false);
+      manager.destroyTerminal(terminal.panelId);
+    });
+
+    it('cannot tell on a ptyHost terminal', async () => {
+      const { manager, terminal } = withGroup({ pgid: 8080, members: ['claude'] });
+      terminal.isPtyHost = true;
+      expect(await manager.readForegroundAgent(terminal.panelId)).toBeUndefined();
+      manager.destroyTerminal(terminal.panelId);
+    });
   });
 
   it('cannot name the foreground process of a ptyHost terminal', () => {

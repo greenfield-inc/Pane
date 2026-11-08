@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { NotifyCommand, NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
+import { showActionError } from './errorStore';
 
 /**
  * The renderer's copy of main's Notify queue. Main owns every decision (what the
@@ -37,9 +38,26 @@ export function subscribeNotify(): () => void {
   return unsubscribe;
 }
 
+/** The title a refused card command shows under; commands nobody waits on fail quietly. */
+function failedTitle(type: NotifyCommand['type']): string | undefined {
+  switch (type) {
+    case 'answer': return 'Your answer was not sent';
+    case 'override': return 'Your correction was not sent';
+    case 'close': return 'Could not close this approval';
+    case 'reopen': return 'Could not reopen this approval';
+    case 'undo': return 'Could not undo your answer';
+    default: return undefined;
+  }
+}
+
+/** Runs a card's command; a refusal (asker gone, machine offline, already answered) shows the person why. */
 export function runNotify(command: NotifyCommand): void {
   void window.electronAPI.notify.run(command)
-    .catch((error) => console.error(`Notify command ${command.type} failed:`, error));
+    .catch((error) => {
+      console.error(`Notify command ${command.type} failed:`, error);
+      const title = failedTitle(command.type);
+      if (title) showActionError(title, error);
+    });
 }
 
 export function notifyItem(snapshot: NotifySnapshot | null, id: string | null | undefined): NotifyItem | undefined {

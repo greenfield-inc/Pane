@@ -12,6 +12,7 @@ import { hasHeadlessDaemonLaunchArg } from '../utils/runtimeMode';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
+import { submitOnlyToAgent } from './runpane';
 import { NotifyService } from '../services/notify/notifyService';
 import { ClaudePromptBridge } from '../services/claudePrompts/claudePromptBridge';
 import { setClaudePromptBridge } from '../services/claudePrompts';
@@ -19,7 +20,7 @@ import type { MachineConnections } from '../services/machineConnections';
 import { LOCAL_MACHINE_ID, type MachineState } from '../../../shared/types/machineConnections';
 import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
-import { PaneError } from '../../../shared/paneError';
+import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
@@ -180,6 +181,7 @@ const notifyItemSchema = boundary.object({
   rewrittenFrom: boundary.optional(boundary.object({ id: boundary.string, title: boundary.string, qn: boundary.optional(boundary.string) })),
   rewrittenAs: boundary.optional(boundary.object({ id: boundary.string, title: boundary.string })),
   delivered: boundary.optional(boundary.object({ via: boundary.enumeration('call', 'tab'), at: boundary.number })),
+  undelivered: boundary.optional(boundary.object({ reason: boundary.string, at: boundary.number })),
   decision: boundary.optional(boundary.string),
   corrections: boundary.optional(boundary.array(boundary.object({ summary: boundary.string, by: actorSchema, at: boundary.number }))),
   reopened: boundary.optional(boundary.object({ by: actorSchema, device: boundary.optional(boundary.string), at: boundary.number, closedBy: actorSchema, closedReason: boundary.string })),
@@ -232,25 +234,12 @@ function idleSeconds(): number {
 }
 
 /**
- * Whether Pane may type an owed answer into a terminal tab: only at a live agent's prompt. Typed at
- * a shell, a nested shell, `ssh` or a REPL, `$(…)` in an answer would run (QA N1), so where the
- * foreground can be read it must be an agent. Where it can't, only the agent's composer on screen counts.
+ * Whether Pane may type an owed answer into a terminal tab: only at a live agent's prompt, with an
+ * agent in the terminal's foreground process group (D-5). Typed at a shell, a nested shell, `ssh`
+ * or a REPL, `$(…)` in an answer would run (QA N1).
  */
-export function tabTakesText(status: AgentState | undefined, foreground: { isAgent: boolean } | undefined, composerPresent: boolean | undefined): boolean {
-  if (status !== 'idle') return false;
-  return foreground ? foreground.isAgent : composerPresent === true;
-}
-
-const panelScreenComposerSchema = boundary.object({ composer: boundary.object({ isPresent: boundary.boolean }) });
-
-async function composerOnScreen(commandRegistry: Pick<PaneCommandRegistry, 'invoke'>, panelId: string): Promise<boolean> {
-  try {
-    const screen = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:screen', [{ panelId }]), panelScreenComposerSchema);
-    return screen?.composer.isPresent === true;
-  } catch (error) {
-    console.warn(`[Notify] Couldn't read tab ${panelId}'s screen; what it's owed waits:`, error);
-    return false;
-  }
+export function tabTakesText(status: AgentState | undefined, agentInForeground: boolean): boolean {
+  return status === 'idle' && agentInForeground;
 }
 
 /** Why an item's Pane or tab can no longer take an answer. Read from the database, which is whole from the first moment of a start. */
@@ -347,13 +336,14 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       if (panel.type === 'chat') {
         if (getChatTabManager().agentState(panelId) !== 'idle') return 'busy';
       } else {
-        const foreground = terminalPanelManager.getForegroundProcess(panelId);
-        // Where the foreground can't be read (Windows, WSL, the PTY host), only the agent's own composer on screen proves it's there.
-        const composer = foreground ? undefined : await composerOnScreen(commandRegistry, panelId);
-        if (!tabTakesText(terminalPanelManager.getAgentStatus(panelId), foreground, composer)) return 'busy';
+        const agentInForeground = await terminalPanelManager.readForegroundAgent(panelId);
+        // Where Pane can't see what runs in the tab (Windows, WSL, the PTY host), it never types (F-7).
+        if (agentInForeground === undefined) return 'unsupported';
+        if (!tabTakesText(terminalPanelManager.getAgentStatus(panelId), agentInForeground)) return 'busy';
       }
       try {
-        const result = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: text, expectReport: false }]), boundary.object({ ok: boundary.optional(boundary.boolean) }));
+        const submit = () => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: text, expectReport: false }]);
+        const result = decodeOptionalBoundary(await (panel.type === 'chat' ? submit() : submitOnlyToAgent(panelId, submit)), boundary.object({ ok: boundary.optional(boundary.boolean) }));
         return result?.ok === false ? 'busy' : 'delivered';
       } catch (error) {
         // Not started yet, say: the next time it's at its prompt, or the next sweep, tries again.
@@ -390,12 +380,23 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   commandRegistry.register('notify:remote-command', async (command: PaneCommandValue, sender: PaneCommandValue) => {
     // A Mac names itself "studio.local" on its event stream; cards call it "studio".
     const device = decodeBoundary(sender, remoteSenderSchema).device.replace(/\.(local|lan|home|internal)$/i, '');
-    await notify.runRemote(decodeBoundary(command, notifyRemoteCommandSchema) satisfies NotifyRemoteCommand, device, teammatePaneCaller());
+    const decoded: NotifyRemoteCommand = decodeBoundary(command, notifyRemoteCommandSchema);
+    // A forwarded rewrite takes the same checks here, on the machine that holds the item (F-8).
+    const rawQuestion = decodeBoundary(command, boundary.object({ question: boundary.optional(boundary.jsonObject) })).question;
+    const checked = decoded.type === 'agent-rewrite' && rawQuestion ? { ...decoded, question: parseRewriteQuestion(rawQuestion) } : decoded;
+    await notify.runRemote(checked, device, teammatePaneCaller());
     return null;
   });
 
   ipcMain.handle('notify:snapshot', () => notify.snapshot());
-  ipcMain.handle('notify:command', (_event, command: PaneCommandValue) => notify.run(decodeBoundary(command, notifyCommandSchema) satisfies NotifyCommand));
+  ipcMain.handle('notify:command', async (_event, command: PaneCommandValue) => {
+    try {
+      await notify.run(decodeBoundary(command, notifyCommandSchema) satisfies NotifyCommand);
+    } catch (error) {
+      // Electron passes only "PaneError: <message>" to the renderer: keep the next step in the text it shows.
+      throw error instanceof PaneError ? new Error(paneErrorText(error)) : error;
+    }
+  });
   ipcMain.on('notify:window-size', (event, size: PaneCommandValue) => notify.resizeWindow(event.sender, decodeBoundary(size, windowSizeSchema)));
   ipcMain.handle('notify:window-focus', (event) => notify.focusWindow(event.sender));
 

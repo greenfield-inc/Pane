@@ -3850,6 +3850,7 @@ const inboxAnswerSchema: BoundarySchema<InboxAnswer> = boundary.object({
   panelId: boundary.optional(boundary.string),
   answeredAt: boundary.string,
   delivered: boundary.optional(boundary.enumeration('call', 'tab')),
+  undelivered: boundary.optional(boundary.string),
   decision: boundary.optional(boundary.string),
 });
 const inboxListResultSchema: BoundarySchema<InboxListResult> = boundary.object({

@@ -284,6 +284,7 @@ describe('approvalRowLines', () => {
     const owed = item('a', 1, { source: { ...source, paneId: 'p', panelId: 'tab' }, state: 'answered', answerSummary: 'USD', answeredBy: { by: 'you' } });
     expect(approvalRowLines(owed).acted).toBe('→ USD · Answered by you · not delivered to workos-sso yet');
     expect(approvalRowLines({ ...owed, delivered: { via: 'tab', at: 2 } }).acted).toBe('→ USD · Answered by you');
+    expect(approvalRowLines({ ...owed, undelivered: { reason: 'its tab closed', at: 2 } }).acted).toBe('→ USD · Answered by you · not delivered to workos-sso: its tab closed');
   });
 
   it('reads Closed in place of Expired once closed, and Expired only when it just ended', () => {

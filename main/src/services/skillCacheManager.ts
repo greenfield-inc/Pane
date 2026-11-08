@@ -164,7 +164,9 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
 - Stay free to talk. When the person asks about an item, answer in this tab;
   the card keeps waiting.
 - A relayed answer goes straight to the worker's tab, so don't forward it;
-  record it with \`runpane inbox ack <item> --decision <D-n>\`. A tab can also
+  record it with \`runpane inbox ack <item> --decision <D-n>\`. When
+  \`runpane inbox\` lists the answer with \`undelivered\`, Pane can't type it
+  there: pass it on with \`runpane panels submit\`. A tab can also
   receive \`closed: Q-n (by you)\` or \`correction: Q-n → <answer> (by you)\`: that
   is the person's word.
 - Stop waiting on an item that is superseded or no longer needed: stop its

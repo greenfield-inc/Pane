@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, ShieldCheck, X } from 'lucide-react';
 import type { NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
-import { canClose, canOverride, canReopen, decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
+import { showActionError } from '../../stores/errorStore';
+import { canClose, canCopyAnswer, canOverride, canReopen, decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { cn } from '../../utils/cn';
 import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
@@ -991,6 +992,7 @@ function ExpiredCard({ item, form, narrow, onCommand, menuPlacement, machineMark
 function AnsweredCard(props: NotifyCardProps) {
   const { item, form, narrow, onCommand, menuPlacement, machineMark, related, className } = props;
   const [overriding, setOverriding] = useState(false);
+  const [copied, setCopied] = useState(false);
   if (overriding) {
     return (
       <QuestionCard
@@ -1021,9 +1023,17 @@ function AnsweredCard(props: NotifyCardProps) {
         </NoticePill>
       </div>
       {related}
-      {canOverride(item) && !item.unreachable && (
-        <div className="flex items-center justify-end px-3.5 pb-3 text-[12.5px] text-text-tertiary">
-          <FooterLink onClick={() => setOverriding(true)}>Override</FooterLink>
+      {((canOverride(item) && !item.unreachable) || canCopyAnswer(item)) && (
+        <div className="flex items-center justify-end gap-4 px-3.5 pb-3 text-[12.5px] text-text-tertiary">
+          {canCopyAnswer(item) && (
+            <FooterLink onClick={() => {
+              void navigator.clipboard.writeText(item.answerSummary ?? '').then(() => setCopied(true)).catch(cause => showActionError('Could not copy the answer', cause));
+            }}>
+              {/* One box for both labels, so Copied doesn't shift Override. */}
+              <span className="inline-block w-[5.5rem] text-right">{copied ? 'Copied' : 'Copy answer'}</span>
+            </FooterLink>
+          )}
+          {canOverride(item) && !item.unreachable && <FooterLink onClick={() => setOverriding(true)}>Override</FooterLink>}
         </div>
       )}
     </div>

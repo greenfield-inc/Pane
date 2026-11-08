@@ -128,7 +128,7 @@ import {
   resolveAgentTypeFromProcessName,
 } from './agents/agentIdentity';
 import { claudeFolderTrustKey, detectAgentComposer, detectAgentFromScreen } from './agents/agentScreenSignature';
-import { readForegroundExecutablePath, readForegroundProcessGroup } from '../utils/foregroundProcess';
+import { readForegroundExecutablePath, readForegroundGroupMembers, readForegroundProcessGroup, type ForegroundGroup } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import { assertDirectOpenCodeLaunchCommand, extractOpenCodeSessionId, resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
@@ -389,8 +389,6 @@ export interface TerminalForegroundProcess {
   name: string;
   /** The foreground is Pane's own interactive shell, not a program started from it. */
   isShell: boolean;
-  /** The foreground is an agent: its executable's name, or Claude's versioned binary in a tab Pane identified. */
-  isAgent: boolean;
 }
 /**
  * Whether a viewer's answer to a terminal query reached the PTY.
@@ -437,13 +435,15 @@ export class TerminalPanelManager extends EventEmitter {
 
   /**
    * Screen models parse PTY output on this host, off the main thread.
-   * `readForegroundExecutable` names the program behind a versioned process name.
+   * `readForegroundExecutable` names the program behind a versioned process name;
+   * `readForegroundMembers` lists the foreground process group.
    */
   constructor(
     private readonly emulatorHost: () => TerminalEmulatorHostConnection = sharedEmulatorThread,
     private readonly readForegroundExecutable: (shellPid: number) => Promise<string | undefined> = readForegroundExecutablePath,
     private readonly readForegroundGroup: (shellPid: number) => Promise<number | undefined> = readForegroundProcessGroup,
     private readonly projectEnv: Pick<ProjectEnvService, 'resolveForSession'> = new ProjectEnvService(databaseService),
+    private readonly readForegroundMembers: (shellPid: number) => Promise<ForegroundGroup | undefined> = readForegroundGroupMembers,
   ) {
     super();
     this.setMaxListeners(100);
@@ -2837,13 +2837,35 @@ export class TerminalPanelManager extends EventEmitter {
    * The program in the foreground of a panel's PTY. Undefined on Windows, WSL
    * and ptyHost terminals, where node-pty cannot name it.
    */
+  /**
+   * Whether an agent reads this tab's input now: a known agent (by executable, or Claude's versioned
+   * binary in a tab Pane identified) is in the terminal's foreground process group, and that group
+   * isn't Pane's own shell. A wrapper such as `node telemetry.mjs` shares a group with the agent it
+   * started; an interactive shell runs in a group of its own. Undefined where the foreground can't be
+   * read (Windows, WSL, the PTY host).
+   */
+  async readForegroundAgent(panelId: string): Promise<boolean | undefined> {
+    const terminal = this.terminals.get(panelId);
+    if (!terminal || terminal.destroying) return false;
+    if (!this.readForegroundProcessName(terminal)) return undefined;
+    let group: ForegroundGroup | undefined;
+    try {
+      group = await this.readForegroundMembers(terminal.pty.pid);
+    } catch (error) {
+      console.warn(`[TerminalPanelManager] Could not read the foreground process group for panel ${panelId}:`, error);
+      return false;
+    }
+    if (!group || group.pgid === terminal.pty.pid) return false;
+    return group.members.some(member => resolveAgentTypeFromExecutablePath(member) !== undefined
+      || (terminal.agentType !== undefined && isVersionedExecutableName(member)));
+  }
+
   getForegroundProcess(panelId: string): TerminalForegroundProcess | undefined {
     const terminal = this.terminals.get(panelId);
     if (!terminal || terminal.destroying) return undefined;
     const name = this.readForegroundProcessName(terminal);
     if (!name) return undefined;
-    const isAgent = resolveAgentTypeFromProcessName(name) !== undefined || (terminal.agentType !== undefined && isVersionedExecutableName(name));
-    return { name, isShell: this.isInteractiveShellProcess(terminal, name), isAgent };
+    return { name, isShell: this.isInteractiveShellProcess(terminal, name) };
   }
 
   /**

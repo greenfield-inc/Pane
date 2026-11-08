@@ -285,6 +285,8 @@ export interface NotifyItem extends NotifyQuestion {
   rewrittenAs?: { id: string; title: string };
   /** The answer reached the asker. */
   delivered?: NotifyDelivered;
+  /** The answer can never be typed into the asking tab: why, and since when. Its owner stops trying. */
+  undelivered?: { reason: string; at: number };
   /** The orchestrator recorded the answer as this D-n. */
   decision?: string;
   /** The person's Overrides, oldest first. */

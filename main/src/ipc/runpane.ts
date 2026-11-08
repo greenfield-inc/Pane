@@ -473,6 +473,7 @@ function inboxAnswer(item: NotifyItem): RunpaneInboxAnswer {
   if (item.source.panelId) answer.panelId = item.source.panelId;
   if (item.answeredBy?.because) answer.because = item.answeredBy.because;
   if (item.delivered) answer.delivered = item.delivered.via;
+  if (item.undelivered) answer.undelivered = item.undelivered.reason;
   if (item.decision) answer.decision = item.decision;
   return answer;
 }
@@ -482,6 +483,19 @@ const lockListRequestSchema = boundary.object({
 const loopRequestSchema = boundary.object({ loopId: boundary.nonEmptyString });
 const loopSetEnabledRequestSchema = boundary.object({ loopId: boundary.nonEmptyString, enabled: boundary.boolean });
 const loopPreviewRequestSchema = boundary.object({ cron: boundary.string });
+
+/** Panels where a submit in flight is an owed answer: it is written only while an agent, not Pane's shell, has the foreground. */
+const agentOnlySubmits = new Set<string>();
+
+/** Runs `submit` (a `runpane:panels:submit` to `panelId`) so it writes nothing once Pane's own shell has the foreground (F-7). */
+export async function submitOnlyToAgent<T>(panelId: string, submit: () => Promise<T>): Promise<T> {
+  agentOnlySubmits.add(panelId);
+  try {
+    return await submit();
+  } finally {
+    agentOnlySubmits.delete(panelId);
+  }
+}
 
 export function registerRunpaneHandlers(
   _ipcMain: IpcMain,
@@ -1647,7 +1661,14 @@ export function registerRunpaneHandlers(
     }));
   });
 
-  async function submitToPanel(normalized: RunpanePanelSubmitRequest, panel: ToolPanel, reserve: (screen: RunpanePanelScreenResult) => void, beforeDelivery: () => void): Promise<RunpanePanelSubmitResult> {
+  async function submitToPanel(normalized: RunpanePanelSubmitRequest, panel: ToolPanel, reserve: (screen: RunpanePanelScreenResult) => void, deliver: () => void): Promise<RunpanePanelSubmitResult> {
+    // An owed answer goes only to an agent: re-read the foreground right before each write, since the
+    // agent may have quit back to the shell since Notify checked (F-7).
+    const shellTookOver = () => agentOnlySubmits.has(panel.id) && terminalPanelManager.getForegroundProcess(panel.id)?.isShell === true;
+    const beforeDelivery = () => {
+      if (shellTookOver()) throw new PaneError('ERR_NOTIFY_TAB_NOT_AGENT', 'The agent in this tab exited before Pane typed the answer, so Pane typed nothing.', 'Pane keeps the answer owed and tries again when an agent is at its prompt.');
+      deliver();
+    };
     const blocked = (message: string): RunpanePanelSubmitResult => ({
       ok: false, panelId: panel.id, paneId: panel.sessionId, inputBytes: 0,
       enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
@@ -1734,6 +1755,7 @@ export function registerRunpaneHandlers(
     if (stagedInput.length > 0 && stagesComposer && (agentType === 'claude' || agentType === 'codex')) {
       // Claude takes a separately written Enter while it works (it queues
       // the message), so staging never waits for it to be idle.
+      if (shellTookOver()) return blocked('The agent in this tab exited before Pane typed the answer; no input was sent.');
       const staged = await stageComposerText(panel, agentType, stagedInput);
       const submission = await submitComposerForPanel(panel, normalized.interrupt ? 'enter' : 'auto', {
         cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,

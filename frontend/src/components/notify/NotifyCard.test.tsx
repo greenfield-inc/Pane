@@ -271,6 +271,16 @@ describe('receipts and actions on an inbox card', () => {
     expect(text(render({ ...answered, corrections: [{ summary: 'No', by: 'you', at: 1 }] }, { form: 'inbox', view: 'answered' }))).toContain('You corrected it: No');
   });
 
+  it("offers Copy answer while an answer hasn't reached its tab, and says why when it never will", () => {
+    const owed: NotifyItem = { ...worker, state: 'answered', answerSummary: 'eu-west', answeredBy: { by: 'you' } };
+    expect(text(render(owed, { form: 'inbox', view: 'answered' }))).toContain('Copy answer');
+    const closedTab = text(render({ ...owed, undelivered: { reason: 'its tab closed', at: 2 } }, { form: 'inbox', view: 'answered' }));
+    expect(closedTab).toContain('not delivered to');
+    expect(closedTab).toContain('its tab closed');
+    expect(closedTab).toContain('Copy answer');
+    expect(text(render({ ...owed, delivered: { via: 'tab', at: 2 } }, { form: 'inbox', view: 'answered' }))).not.toContain('Copy answer');
+  });
+
   it('shows why an item closed and a Reopen when it takes one', () => {
     const closed: NotifyItem = { ...worker, state: 'expired', closed: { by: 'autopilot', reason: 'Session archived', at: 1 } };
     const visible = text(render(closed, { form: 'inbox', view: 'expired' }));
