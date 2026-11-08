@@ -1360,7 +1360,7 @@ if (launchRemoteSetup) {
     await initializeServices();
     installMenu(configManager.getConfig());
     configManager.on('config-updated', () => installMenu(configManager.getConfig()));
-    if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
+    syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     void addRunpaneToUserPathBestEffort();
     if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') setTimeout(() => syncPaneMcpForApp({
       isPackaged: app.isPackaged,
@@ -1506,6 +1506,8 @@ if (launchRemoteSetup) {
 
 // Initialize worktree pool — cleanup orphans and seed reserves
   setTimeout(async () => {
+    // Reserves belong to the Pane that owns this data directory; a second one would delete them.
+    if (!paneDaemonHost?.duties.housekeeping) return;
     try {
       const projects = databaseService.getAllProjects();
       // Cleanup leftover reserves from previous runs — await before seeding new ones

@@ -418,3 +418,25 @@ async function probeUnixSocketPath(socketPath: string): Promise<'active' | 'stal
     });
   });
 }
+
+const DAEMON_PROBE_TIMEOUT_MS = 1_000;
+
+/**
+ * Whether another Pane already serves this data directory's daemon endpoint.
+ * Anything but a clear "nobody is there" (an unexpected error, no answer within
+ * a second) counts as yes, so callers skip destructive work when unsure.
+ */
+export async function isPaneDaemonListening(appDirectory: string): Promise<boolean> {
+  const endpointPath = getPaneDaemonEndpoint(appDirectory).path;
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<'active'>((resolve) => {
+    timer = setTimeout(() => resolve('active'), DAEMON_PROBE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([probeUnixSocketPath(endpointPath), timeout]) === 'active';
+  } catch {
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
+}

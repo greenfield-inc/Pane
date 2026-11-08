@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { PaneDaemonFrame } from '../../../shared/types/daemon';
 import { PaneCommandRegistry } from './commandRegistry';
 import { encodePaneDaemonFrame, PaneDaemonFrameDecoder } from './socketFraming';
-import { PaneDaemonServer } from './server';
+import { isPaneDaemonListening, PaneDaemonServer } from './server';
 import { PaneError } from '../../../shared/paneError';
 
 interface TestClient {
@@ -556,5 +556,20 @@ describe('PaneDaemonServer', () => {
     await expect(server.start()).resolves.toBeUndefined();
     expect(Buffer.byteLength(server.getEndpoint().path)).toBeLessThan(100);
     expect(fs.existsSync(server.getEndpoint().path)).toBe(true);
+  });
+});
+
+describe('isPaneDaemonListening', () => {
+  it('sees the Pane already serving a data directory, and no one on a fresh one', async () => {
+    const appDirectory = createTempAppDirectory();
+    await expect(isPaneDaemonListening(appDirectory)).resolves.toBe(false);
+
+    const server = new PaneDaemonServer(new PaneCommandRegistry(), appDirectory);
+    activeServers.push(server);
+    await server.start();
+    await expect(isPaneDaemonListening(appDirectory)).resolves.toBe(true);
+
+    await server.stop();
+    await expect(isPaneDaemonListening(appDirectory)).resolves.toBe(false);
   });
 });

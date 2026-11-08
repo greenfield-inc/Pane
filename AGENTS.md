@@ -31,7 +31,8 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
 ## Rules
 
 - Never point a dev build, test run or script at your real `~/.pane`: set
-  `PANE_DIR`. It does not isolate Electron's browser profile; see
+  `PANE_DIR`. Without one a dev build uses `~/.pane_dev`, which may hold old
+  data. `PANE_DIR` does not isolate Electron's browser profile; see
   [Running a dev build safely](CONTRIBUTING.md#running-a-dev-build-safely).
 - Never release, publish, deploy or migrate real data unless asked.
 - No explicit `any`; blocking lint is the floor, with no broad suppressions
