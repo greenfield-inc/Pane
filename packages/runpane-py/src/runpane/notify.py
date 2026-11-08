@@ -344,9 +344,10 @@ def describe_notify_result(result: Dict[str, Any]) -> str:
     if "waiting" in result:
         return f"Still waiting (id {result.get('id')}). {result.get('next')}"
     if "reply" in result:
-        picks = [pick for pick in result.get("picks") or [] if pick]
-        picked = f" (picked: {' · '.join(picks)})" if picks else ""
-        return f'Reply (id {result.get("id")}): "{result["reply"]}"{picked}. {result.get("next")}'
+        # Picks keep their question's place: one left unpicked reads "—".
+        picks = result.get("picks") or []
+        picked = f" (picked: {' · '.join(pick or '—' for pick in picks)})" if any(picks) else ""
+        return f'Reply {result.get("replyId")} on {result.get("id")}: "{result["reply"]}"{picked}. {result.get("next")}'
     if "took" in result:
         taken = "the answer" if result["took"] == "answer" else "a question"
         return f"Taken as {taken} (id {result.get('id')})." + (f" {result['next']}" if result.get("next") else "")

@@ -258,7 +258,7 @@ test('notify types its inputs, so a model passes choices as objects, and needs n
 
 test('notify takes a reply with took and update, and names the next step as the tool', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
-  const reply = { reply: 'Can it be undone?', picks: ['Yes'], id: 'n-1', next: 'Run `runpane notify --took n-1 answer` if this answers it, or `runpane notify --took n-1 question`.' };
+  const reply = { reply: 'Can it be undone?', picks: ['Yes'], id: 'n-1', replyId: 'r-1', next: 'Run `runpane notify --took n-1 answer` if this answers it, or `runpane notify --took n-1 question`.' };
   try {
     await withStubDaemon(paneDir, { 'runpane:notify': reply }, async (requests) => {
       await withMcpClient(async (client) => {

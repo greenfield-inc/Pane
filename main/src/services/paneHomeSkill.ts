@@ -336,8 +336,9 @@ options card: \`--questions '[{"title":"<question>","choices":[...]},...]'\`
 
 **When the person types a reply.** Picks alone come back as before: \`{answer}\`, or
 \`answer: Q-n → <answer> (by you)\` in your tab. Anything typed comes back as a
-reply: the open call's result \`{reply, picks?, id, next}\`, or this line in
-your tab:
+reply: the open call's result \`{reply, picks?, id, replyId, next}\` (pass its
+\`replyId\` to \`--took\` and \`--update\`: only your call was given it, so it works
+from outside a Pane tab too), or this line in your tab:
 \`reply: Q-n → "<their words>" (picked: <picks>) (by you)\` (\`(picked: …)\`
 only when they picked something; without a Q-n it names the title and ends
 \`[id <item id>]\`). A reply is an answer or a question about the approval,

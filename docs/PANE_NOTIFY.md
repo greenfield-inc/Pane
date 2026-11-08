@@ -290,8 +290,11 @@ returns `{answer}`, or Pane types `answer: Q-20 → Yes, turn it on · One train
 about the approval. Pane doesn't decide which; the agent that reads it does
 (D-245, D-258).
 
-**The lines.** The reader's open call returns `{reply, picks?, id, next}`;
-otherwise Pane types into its tab, once, by the same rule as an answer:
+**The lines.** The reader's open call returns `{reply, picks?, id, replyId,
+next}`. Only that call is given `replyId`, so passing it to `--took` and
+`--update` proves the caller is the reader, from a Pane tab or a terminal
+outside Pane alike (D-294). With no open call, Pane types into the reader's
+tab, once, by the same rule as an answer:
 
 ```text
 reply: Q-20 → "Turn it on only if it can be undone" (picked: Yes, turn it on · One train) (by you)

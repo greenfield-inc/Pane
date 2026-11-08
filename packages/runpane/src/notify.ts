@@ -81,7 +81,7 @@ type NotifyTookAs = 'answer' | 'question';
 export type NotifyResult =
   | { answer: string; note?: string; answers?: string[] }
   /** The person typed a reply: an answer or a question. Say which with `--took`. */
-  | { reply: string; picks?: string[]; id: string; next: string }
+  | { reply: string; picks?: string[]; id: string; replyId: string; next: string }
   | { took: NotifyTookAs; id: string; next?: string }
   | { approved: boolean; note?: string }
   | { delivered: 'screen' | 'inbox' }
@@ -129,7 +129,7 @@ export const notifyResultSchema: BoundarySchema<NotifyResult> = boundary.union(
   boundary.object({ waiting: boundary.literal(true), id: boundary.nonEmptyString, next: boundary.string }),
   boundary.object({ unavailable: boundary.string, next: boundary.string }),
   boundary.object({ took: boundary.enumeration('answer', 'question'), id: boundary.nonEmptyString, next: boundary.optional(boundary.string) }),
-  boundary.object({ reply: boundary.string, picks: boundary.optional(boundary.array(boundary.string)), id: boundary.nonEmptyString, next: boundary.string }),
+  boundary.object({ reply: boundary.string, picks: boundary.optional(boundary.array(boundary.string)), id: boundary.nonEmptyString, replyId: boundary.nonEmptyString, next: boundary.string }),
   boundary.object({ approved: boundary.boolean, note }),
   boundary.object({ answer: boundary.string, note, answers: boundary.optional(boundary.array(boundary.string)) }),
   boundary.object({ delivered: boundary.enumeration('screen', 'inbox') }),
@@ -394,9 +394,10 @@ export function describeNotifyResult(result: NotifyResult): string {
   const withNote = (text: string, noteText: string | undefined) => (noteText ? `${text}. Note: ${noteText}` : text);
   if ('waiting' in result) return `Still waiting (id ${result.id}). ${result.next}`;
   if ('reply' in result) {
-    const picks = result.picks?.filter(Boolean) ?? [];
-    const picked = picks.length > 0 ? ` (picked: ${picks.join(' · ')})` : '';
-    return `Reply (id ${result.id}): "${result.reply}"${picked}. ${result.next}`;
+    // Picks keep their question's place: one left unpicked reads "—".
+    const picks = result.picks ?? [];
+    const picked = picks.some(Boolean) ? ` (picked: ${picks.map(pick => pick || '—').join(' · ')})` : '';
+    return `Reply ${result.replyId} on ${result.id}: "${result.reply}"${picked}. ${result.next}`;
   }
   if ('took' in result) return `Taken as ${result.took === 'answer' ? 'the answer' : 'a question'} (id ${result.id}).${result.next ? ` ${result.next}` : ''}`;
   if ('unavailable' in result) return `Unavailable: ${result.unavailable} ${result.next}`;

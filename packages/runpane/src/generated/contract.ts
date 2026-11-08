@@ -15616,10 +15616,11 @@ export const RUNPANE_CONTRACT = {
         },
         {
           "type": "object",
-          "description": "The person typed a reply: it may answer the question or ask one. The approval keeps waiting; say which with `runpane notify --took <id> answer|question` (see next).",
+          "description": "The person typed a reply: it may answer the question or ask one. The approval keeps waiting; say which with `runpane notify --took <replyId> answer|question` (see next).",
           "required": [
             "reply",
             "id",
+            "replyId",
             "next"
           ],
           "properties": {
@@ -15638,6 +15639,11 @@ export const RUNPANE_CONTRACT = {
               "type": "string",
               "minLength": 1,
               "description": "The approval, for --took and --update."
+            },
+            "replyId": {
+              "type": "string",
+              "minLength": 1,
+              "description": "This reply. Pass it to --took and --update: only this call was given it, so it lets its agent continue, also from outside a Pane tab."
             },
             "next": {
               "type": "string"
@@ -22974,7 +22980,7 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "Write the card the way the pane MCP server's instructions say: in plain words, what the work is for, what just happened, and what you need.",
           "Results: options returns {answer: <chosen label>, note?}, with questions also answers (one label per question); approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
-          "A result of {reply, picks?, id, next} means the person typed a reply instead of only picking: it may answer the question or ask one. Read it, then call `runpane notify --took <id> answer` to record it as the answer, or `runpane notify --took <id> question` and find out, then `runpane notify --update <id> --asked \"<their question>\" --what-changed \"<one line per change>\"` with whatever changed, instead of asking again. With no open call the reply reaches your tab as a `reply:` line; `correction:` lines fix how it was taken. --took returns {took, id, next?}.",
+          "A result of {reply, picks?, id, replyId, next} means the person typed a reply instead of only picking: it may answer the question or ask one. Read it, then call `runpane notify --took <replyId> answer` to record it as the answer, or `runpane notify --took <replyId> question` and find out, then `runpane notify --update <replyId> --asked \"<their question>\" --what-changed \"<one line per change>\"` with whatever changed, instead of asking again. With no open call the reply reaches your tab as a `reply:` line; `correction:` lines fix how it was taken. --took returns {took, id, next?}. Use its replyId rather than the Q-n: only this call was given it, so it works from outside a Pane tab too.",
           "Only the reply's reader may run took and update: the asker, the orchestrator that relayed it, or Autopilot. Anyone else gets ERR_NOTIFY_NOT_READER.",
           "A result of {waiting: true, id} means the question is still on screen and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting. After 15 minutes on this loop Pane gives up and returns unavailable.",
           "A result of {unavailable, next} means nobody can answer through Pane right now (Pane is not running, Notify is off, or the wait ended): ask in the terminal instead. It is a result, not an error.",
@@ -23389,7 +23395,7 @@ export const RUNPANE_CONTRACT = {
         "Put related questions in one card.",
         "Send `info` rarely, only for what the person must know now.",
         "Write the card as its Summary: a title of about 80 characters; context saying why it matters; each choice saying what it does, with one recommended; links to every file, page or approval it mentions.",
-        "A `reply:` line (or a `{reply}` result) is the person's typed reply: an answer or a question. If it answers, run `runpane notify --took <id|Q-n> answer`. If it asks, run `--took <id|Q-n> question`, find out, then `runpane notify --update <id|Q-n> --asked \"<their question>\" --what-changed \"<one line per change>\"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` (a reworded choice adds `\"was\"`, its old label) instead of asking again. A `correction:` line fixes how it was taken.",
+        "A `reply:` line (or a `{reply, replyId}` result) is the person's typed reply: an answer or a question. If it answers, run `runpane notify --took <id|Q-n> answer`. If it asks, run `--took <id|Q-n> question`, find out, then `runpane notify --update <id|Q-n> --asked \"<their question>\" --what-changed \"<one line per change>\"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` (a reworded choice adds `\"was\"`, its old label) instead of asking again. A `correction:` line fixes how it was taken. From a `{reply, replyId}` result, pass its replyId to --took and --update.",
         "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`."
       ],
       "cardRule": "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",

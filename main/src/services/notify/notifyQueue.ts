@@ -772,7 +772,8 @@ export class NotifyQueue extends EventEmitter {
     const earlier = item.reply;
     // One reply at a time with its reader: --took names the approval, so it must mean the reply the reader has.
     if (earlier?.state === 'reading' && earlier.deliveredAt !== undefined) {
-      throw new PaneError('ERR_NOTIFY_REPLY_BEING_READ', `${earlier.reader?.name ?? 'Its reader'} is still reading your last reply, so this one wasn't sent. Your words are still in the box.`, 'Send it once the approval says how your last reply was taken, or pick an option to answer now.');
+      const reader = earlier.reader?.name ?? 'its reader';
+      throw new PaneError('ERR_NOTIFY_REPLY_BEING_READ', `${reader.charAt(0).toUpperCase()}${reader.slice(1)} is still reading your last reply, so this one wasn't sent. Your words are still in the box.`, 'Send it once the approval says how your last reply was taken, or pick an option to answer now.');
     }
     if (picks.some(Boolean)) this.checkPicks(item, picks, true);
     // A reply nobody has read yet is replaced, and its line, if still waiting for a busy tab, never goes.
@@ -835,7 +836,7 @@ export class NotifyQueue extends EventEmitter {
     if (!reader.panelId) {
       entry.replyTried?.add('call');
       item.reply.deliveredAt = Date.now();
-      const result: NotifyResult = { reply: reply.text, id: item.id, next: tookNext(item) };
+      const result: NotifyResult = { reply: reply.text, id: item.id, replyId: reply.id, next: tookNext(item, reply.id) };
       if (reply.picks?.length) Object.assign(result, { picks: reply.picks });
       if (entry.waiter) entry.waiter.resolve(result);
       else entry.pending = result;
@@ -1000,11 +1001,12 @@ export class NotifyQueue extends EventEmitter {
    */
   private forReader(caller: NotifyReaderCaller, ref: string, what: 'took' | 'update'): Entry {
     const wanted = ref.trim();
-    const candidates = [...this.entries.values()].filter(({ item }) => item.state === 'waiting' && (item.id === wanted || leadingQn(item.title) === wanted));
+    // A reply's id names its approval too: it is how a reader with no Pane tab continues (D-294).
+    const candidates = [...this.entries.values()].filter(({ item }) => item.state === 'waiting' && (item.id === wanted || item.reply?.id === wanted || leadingQn(item.title) === wanted));
     if (candidates.length === 0) {
       throw new PaneError('ERR_NOTIFY_GONE', `There's no waiting approval ${wanted} on ${this.machine()}: it was answered or closed. Nothing was changed.`, 'Check the id or Q-n in the reply: line, or read the answer you already have.');
     }
-    const mine = candidates.filter(entry => this.mayRead(entry, caller));
+    const mine = candidates.filter(entry => this.mayRead(entry, caller, wanted));
     if (mine.length === 0) {
       const reader = candidates[0].item.reply?.reader?.name ?? candidates[0].item.source.name;
       throw new PaneError('ERR_NOTIFY_NOT_READER', `Only the agent reading ${wanted}'s reply (${reader}) can run --${what} on it, and this tab isn't it. Nothing was changed.`, 'Leave it to its reader. To ask the person something else, call notify as usual.');
@@ -1012,11 +1014,14 @@ export class NotifyQueue extends EventEmitter {
     return mine.find(entry => entry.item.reply) ?? mine[0];
   }
 
-  private mayRead(entry: Entry, caller: NotifyReaderCaller): boolean {
+  private mayRead(entry: Entry, caller: NotifyReaderCaller, ref: string): boolean {
     const { item } = entry;
+    const reader = item.reply?.reader;
+    // The open call the reply went back to holds its id, and nobody else was given it: that call's
+    // agent continues with it, from a terminal outside Pane as from a tab (D-294).
+    if (reader && !reader.panelId && item.reply?.id === ref) return true;
     const panelId = caller.panelId;
     if (!panelId) return false;
-    const reader = item.reply?.reader;
     if (reader?.panelId) return reader.panelId === panelId || panelId === item.source.panelId;
     return panelId === item.source.panelId || panelId === item.relayedBy?.panelId || panelId === this.env.autopilotReader?.()?.panelId;
   }
@@ -2026,9 +2031,9 @@ function picksText(picks: readonly string[]): string {
   return picks.map(pick => pick || '—').join(' · ');
 }
 
-/** What a reader with an open call does with a reply. */
-function tookNext(item: NotifyItem): string {
-  return `The person replied. If it answers ${refOf(item)}, run \`runpane notify --took ${item.id} answer\`. If it asks about it, run \`runpane notify --took ${item.id} question\`, find out, then \`runpane notify --update ${item.id} --asked "<their question>" --what-changed "<one line per change>"\`.`;
+/** What a reader with an open call does with a reply: it names the reply's id, which only this call was given. */
+function tookNext(item: NotifyItem, replyId: string): string {
+  return `The person replied. If it answers ${refOf(item)}, run \`runpane notify --took ${replyId} answer\`. If it asks about it, run \`runpane notify --took ${replyId} question\`, find out, then \`runpane notify --update ${replyId} --asked "<their question>" --what-changed "<one line per change>"\`. Use this reply id, not the Q-n: it is what lets this call continue.`;
 }
 
 /** A reply is with its reader, or its reader took it as a question: the pager and strip move past it. */

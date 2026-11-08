@@ -1387,7 +1387,8 @@ default), a Session has one voice to the person: its orchestrator.
   workers and orchestrators treat those as the person's word.
 - **Typed replies.** Anything the person types on an approval arrives as
   `reply: Q-n → "<their words>" (picked: <picks>) (by you)` (or as the open
-  call's `{reply, picks?, id, next}` result). A worker's question's reply goes
+  call's `{reply, picks?, id, replyId, next}` result, whose `replyId` the
+  reader passes to `--took` and `--update`). A worker's question's reply goes
   to the worker's tab; when the worker can't read it, to the orchestrator that
   relayed it; else to Autopilot. The reader decides whether it answers or asks:
   `runpane notify --took <id|Q-n> answer`, or `--took <id|Q-n> question`, then

@@ -150,9 +150,11 @@ export type NotifyResult =
   | { answer: string; note?: string; answers?: string[] }
   /**
    * The person typed a reply: it may be an answer or a question about it. The call ends; run
-   * `runpane notify --took <id> answer|question` (see `next`), and the approval keeps waiting meanwhile.
+   * `runpane notify --took <replyId> answer|question` (see `next`), and the approval keeps waiting
+   * meanwhile. `replyId` is given only to this call, so it lets its agent continue with --took and
+   * --update even from outside a Pane tab (D-294).
    */
-  | { reply: string; picks?: string[]; id: string; next: string }
+  | { reply: string; picks?: string[]; id: string; replyId: string; next: string }
   /** --took: how the reply was recorded. */
   | { took: 'answer' | 'question'; id: string; next?: string }
   | { approved: boolean; note?: string }

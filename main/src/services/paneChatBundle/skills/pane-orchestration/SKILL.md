@@ -400,7 +400,8 @@ approval, a PR ready to merge, and a next step only they can take.
   over the answer and update your D-n.
 - **Read a typed reply as an answer or a question.** Picks alone come back as
   `answer:`. Anything typed comes back as a reply: your open call's result
-  `{reply, picks?, id, next}`, or in your tab
+  `{reply, picks?, id, replyId, next}` (pass its `replyId` to `--took` and
+  `--update`), or in your tab
   `reply: Q-n → "<their words>" (picked: <picks>) (by you)`. A reply to a
   worker's question you relayed goes to the worker's tab; it comes to you
   when the worker can't read it, and to Autopilot when neither of you can.

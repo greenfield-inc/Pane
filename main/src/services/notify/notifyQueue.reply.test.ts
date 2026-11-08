@@ -128,9 +128,29 @@ describe('NotifyQueue replies (the reply contract)', () => {
     queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Can it be undone?' } });
     const result: NotifyResult = await call;
     expect(result).toMatchObject({ reply: 'Can it be undone?', id: 'q20' });
-    expect('next' in result && result.next).toMatch(/--took q20 answer/);
+    expect('replyId' in result && result.replyId).toBe(item(queue, 'q20')?.reply?.id);
+    expect('next' in result && 'replyId' in result && result.next).toContain(`--took ${'replyId' in result ? result.replyId : ''} answer`);
     expect(typed).toEqual([]);
     expect(item(queue, 'q20')).toMatchObject({ state: 'waiting', reply: { state: 'reading', reader: { kind: 'asker' } } });
+  });
+
+  it('F-6 (D-294): a reader outside Pane continues with the reply id its call was given; nobody else can use the approval\'s id', async () => {
+    const outside: NotifySource = { name: 'release-scripts', agent: 'Claude', cwd: '/tmp/release' };
+    const queue = queueWith();
+    const call = queue.ask({ question: { ui: 'options', title: 'Q-50: Tag the release?', choices: [{ label: 'Tag it' }, { label: 'Wait' }] }, source: outside, id: 'q50' });
+    queue.run({ type: 'answer', id: 'q50', answer: { picks: [], text: 'What goes in it?' } });
+    const result = await call;
+    if (!('replyId' in result)) throw new Error(`expected a reply result, got ${JSON.stringify(result)}`);
+    expect(result.next).toContain(`--took ${result.replyId} question`);
+    // Not by the approval's id or Q-n alone: that names the approval, not the reader.
+    expect(() => queue.took({}, 'q50', 'question')).toThrow(/Only the agent reading/);
+    expect(() => queue.took({ panelId: 'some-tab' }, 'Q-50', 'question')).toThrow(/Only the agent reading/);
+    expect(queue.took({}, result.replyId, 'question')).toMatchObject({ took: 'question', id: 'q50' });
+    const updated = queue.update({}, result.replyId, { asked: 'What goes in it?', whatChanged: 'Listed the commits', context: 'Eight commits since 2.4.215.' });
+    expect(item(queue, 'q50')).toMatchObject({ version: 2, context: 'Eight commits since 2.4.215.' });
+    queue.run({ type: 'answer', id: 'q50', answer: { picks: ['Tag it'] } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect(updated).resolves.toEqual({ answer: 'Tag it' });
   });
 
   it('J7: --took question, then --update makes v2 with the question, what changed and v1 kept', async () => {

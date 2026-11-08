@@ -5927,8 +5927,11 @@ async function checkNotifyParity() {
     [{ status: 'declined' }, 'Declined'],
     [{ waiting: true, id: 'n-1', next: 'Call `runpane notify --resume n-1` now.' }, 'Still waiting (id n-1). Call `runpane notify --resume n-1` now.'],
     // A typed reply may be an answer or a question; the reader says which with --took.
-    [{ reply: 'Only if it can be undone', picks: ['Yes', 'One train'], id: 'n-1', next: 'Run `runpane notify --took n-1 answer` if this answers it.' },
-      'Reply (id n-1): "Only if it can be undone" (picked: Yes · One train). Run `runpane notify --took n-1 answer` if this answers it.'],
+    [{ reply: 'Only if it can be undone', picks: ['Yes', 'One train'], id: 'n-1', replyId: 'r-1', next: 'Run `runpane notify --took r-1 answer` if this answers it.' },
+      'Reply r-1 on n-1: "Only if it can be undone" (picked: Yes · One train). Run `runpane notify --took r-1 answer` if this answers it.'],
+    // A partial pick keeps its question's place (D-294 replies carry their own id).
+    [{ reply: 'Only the train', picks: ['', 'One train'], id: 'n-1', replyId: 'r-2', next: 'Run `runpane notify --took r-2 answer` if this answers it.' },
+      'Reply r-2 on n-1: "Only the train" (picked: — · One train). Run `runpane notify --took r-2 answer` if this answers it.'],
     [{ answer: 'Yes · One train', answers: ['Yes', 'One train'] }, 'Answer: Yes · One train'],
     [{ took: 'question', id: 'n-1' }, 'Taken as a question (id n-1).'],
   ];
@@ -6505,7 +6508,7 @@ print(json.dumps(errors))
     ['notifyRequest', { took: 'Q-20', tookAs: 'question', status: 'Checking', caller: {} }],
     ['notifyRequest', { update: 'Q-20', asked: 'Why?', whatChanged: 'Added a choice', choices: [{ label: 'Wait', was: 'Hold' }], caller: {} }],
     ['notifyResult', { took: 'answer', id: 'n-1', next: 'Done.' }],
-    ['notifyResult', { reply: 'Why?', id: 'n-1', next: 'Run --took.' }],
+    ['notifyResult', { reply: 'Why?', id: 'n-1', replyId: 'r-1', next: 'Run --took.' }],
     ['inboxListResult', { ok: true, session: { id: 's-1', name: 'Release' }, items: [], answers: [{ id: 'n-7', title: 'Q', answer: 'Yes', by: 'you', worker: 'W', answeredAt: 'now', delivered: 'tab', decision: 'D-1' }] }],
     ['autopilotWaitingResult', { ok: true, items: [{ ...waitingItem('n-1', { quiet: true, stale: true, connected: { kind: 'session', id: 's-1', name: 'Release', paneId: 'p-1' } }) }], offline: ['A'], cantSee: ['B'] }],
   ]) {
