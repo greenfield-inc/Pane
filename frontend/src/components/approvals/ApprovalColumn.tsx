@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, CircleAlert, FileText, GitPullRequest, Globe, Loader2, MessageSquare, Sparkles, X } from 'lucide-react';
 import type { NotifyItem, NotifyLink } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
@@ -41,6 +41,23 @@ export interface ApprovalColumnProps {
   items?: readonly NotifyItem[];
 }
 
+/** Below this width the header keeps the pager and ✕, and drops the group's name, the dots and the chip. */
+const NARROW_PX = 520;
+
+/** Whether the column is narrow, measured as it is, since it takes the width of what it covers. */
+function useNarrow(): [RefObject<HTMLDivElement | null>, boolean] {
+  const ref = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => setNarrow(entry.contentRect.width < NARROW_PX));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, narrow];
+}
+
 const TONE_TEXT = {
   muted: 'text-text-secondary',
   success: 'text-status-success-on-tint',
@@ -72,6 +89,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
     onSelect(pager[(index + direction + pager.length) % pager.length]);
   };
   usePagerKeys(step);
+  const [rootRef, narrow] = useNarrow();
 
   if (!item) {
     return (
@@ -83,8 +101,9 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary" data-testid="approval-column" data-item-id={item.id}>
+    <div ref={rootRef} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary" data-testid="approval-column" data-item-id={item.id} data-narrow={narrow || undefined}>
       <ColumnHeader
+        narrow={narrow}
         index={index}
         total={pager.length}
         groupLabel={groupLabel}
@@ -143,9 +162,9 @@ function Chip({ chip, testId }: { chip: NonNullable<CardChip>; testId?: string }
 
 export { Chip as ApprovalChip };
 
-function ColumnHeader({ index, total, groupLabel, closeLabel, onClose, onStep, dots, chip }: {
+function ColumnHeader({ index, total, groupLabel, closeLabel, onClose, onStep, dots, chip, narrow = false }: {
   index: number; total: number; groupLabel: string; closeLabel?: string; onClose?: () => void; onStep: (direction: 1 | -1) => void;
-  dots: ReturnType<typeof dotTone>[]; chip: CardChip;
+  dots: ReturnType<typeof dotTone>[]; chip: CardChip; narrow?: boolean;
 }) {
   const stepButton = 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border-secondary text-text-secondary hover:bg-surface-hover disabled:opacity-40';
   return (
@@ -153,8 +172,8 @@ function ColumnHeader({ index, total, groupLabel, closeLabel, onClose, onStep, d
       <button type="button" className={stepButton} aria-label="Previous approval" disabled={total < 2} onClick={() => onStep(-1)}><ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" /></button>
       <span className="shrink-0 font-semibold tabular-nums text-text-primary" data-testid="approval-pager">{total > 0 ? `${index + 1} of ${total}` : '0 of 0'}</span>
       <button type="button" className={stepButton} aria-label="Next approval" disabled={total < 2} onClick={() => onStep(1)}><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
-      <span className="min-w-0 truncate text-text-tertiary">{groupLabel}</span>
-      <span className="flex shrink-0 items-center gap-1" aria-hidden="true" data-testid="approval-dots">
+      {!narrow && <span className="min-w-0 truncate text-text-tertiary">{groupLabel}</span>}
+      <span className={cn('shrink-0 items-center gap-1', narrow ? 'hidden' : 'flex')} aria-hidden="true" data-testid="approval-dots">
         {dots.map((tone, at) => (
           // Fixed box: a dot swaps colour, never size.
           <span key={at} className="flex h-2 w-2 items-center justify-center" data-tone={tone}>
@@ -162,11 +181,13 @@ function ColumnHeader({ index, total, groupLabel, closeLabel, onClose, onStep, d
           </span>
         ))}
       </span>
-      {chip && chip.tone !== 'success' && <Chip chip={chip} />}
+      {/* Narrow, the Questions & answers tab says it's ready again; the header keeps to the pager and ✕. */}
+      {chip && chip.tone !== 'success' && !narrow && <Chip chip={chip} />}
       {onClose && closeLabel && (
-        <button type="button" onClick={onClose} className="ml-auto inline-flex min-w-0 shrink items-center gap-1.5 rounded px-1.5 py-1 text-text-secondary hover:bg-surface-hover hover:text-text-primary" data-testid="approval-column-close">
+        <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel}
+          className="ml-auto inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded px-1.5 py-1 text-text-secondary hover:bg-surface-hover hover:text-text-primary" data-testid="approval-column-close">
           <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="truncate">{closeLabel}</span>
+          {!narrow && <span className="max-w-[220px] truncate">{closeLabel}</span>}
         </button>
       )}
     </div>
@@ -186,7 +207,8 @@ function tabIcon(tab: CardTab) {
 
 function TabBar({ tabs, active, onPick }: { tabs: CardTab[]; active: string; onPick: (key: string) => void }) {
   return (
-    <div role="tablist" aria-label="Approval" className="scrollbar-thin flex h-10 shrink-0 items-stretch overflow-x-auto border-b border-border-primary" data-testid="approval-tabs">
+    // Tabs wrap onto a second row rather than scroll out of sight in a narrow column.
+    <div role="tablist" aria-label="Approval" className="flex min-h-10 shrink-0 flex-wrap items-stretch border-b border-border-primary" data-testid="approval-tabs">
       {tabs.map((tab) => {
         const Icon = tabIcon(tab);
         const selected = tab.key === active;
@@ -197,13 +219,13 @@ function TabBar({ tabs, active, onPick }: { tabs: CardTab[]; active: string; onP
             role="tab"
             aria-selected={selected}
             onClick={() => onPick(tab.key)}
-            className={cn('-mb-px inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3.5 text-[13px]', selected ? 'border-interactive font-semibold text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary')}
+            className={cn('-mb-px inline-flex h-10 min-w-0 items-center gap-1.5 border-b-2 px-3 text-[13px]', selected ? 'border-interactive font-semibold text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary')}
             data-testid="approval-tab"
           >
             {tab.kind === 'qa'
               ? <span className="flex h-2 w-2 items-center justify-center" aria-hidden="true"><span className="h-1.5 w-1.5 rounded-full bg-status-warning" /></span>
               : Icon && <Icon className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" />}
-            <span className="max-w-[200px] truncate">{tab.label}</span>
+            <span className="max-w-[180px] truncate">{tab.label}</span>
           </button>
         );
       })}
@@ -340,7 +362,7 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
               <button type="button" className="font-medium text-interactive hover:underline" onClick={() => runNotify({ type: 'undo', id: item.id })}>Undo</button>
             </div>
           )}
-          {waiting && !item.agentPrompt && (
+          {waiting && !item.agentPrompt && !item.optionsOnly && (
             <textarea
               value={text}
               onChange={(event) => setText(event.target.value)}
@@ -355,7 +377,7 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
           {waiting && !closing && (
             <div className="mt-2 flex items-center gap-3">
               <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary">
-                {item.agentPrompt ? 'A permission prompt takes one of its options.' : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
+                {item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.' : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
               </p>
               {!item.agentPrompt && (
                 <button type="button" onClick={() => setClosing(true)} className="shrink-0 text-[12.5px] text-text-tertiary hover:text-text-primary" data-testid="approval-close-item">Close…</button>

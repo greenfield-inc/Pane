@@ -571,10 +571,11 @@ export class NotifyQueue extends EventEmitter {
           this.deliverReply(entry, { kind: 'autopilot', panelId: autopilot.panelId, name: 'Autopilot' });
           dirty = true;
         }
-      } else if (reply?.state === 'reading' && reply.deliveredAt === undefined && !this.tabMessages.some(message => message.reply === reply.id)) {
-        // Nobody could read it earlier: try again now that a reader may be back.
+      } else if (reply && (reply.state === 'unread' || (reply.state === 'reading' && reply.deliveredAt === undefined)) && !this.tabMessages.some(message => message.reply === reply.id)) {
+        // Nobody could read it earlier: try every reader again, now that one may be back.
+        entry.replyTried = new Set();
         this.routeReply(entry);
-        dirty = true;
+        if (entry.item.reply?.state !== reply.state) dirty = true;
       }
       // A reopened item counts from the person's Reopen, or it would go straight back to Stale (F-4).
       if (item.staleSince === undefined && now - (item.reopened?.at ?? item.createdAt) >= staleAfter && !item.summaryOf) {
@@ -801,9 +802,9 @@ export class NotifyQueue extends EventEmitter {
     const { item } = entry;
     const openCall = (entry.waiter !== undefined || entry.resumeLoop) && !tried.has('call');
     // A worker's open call is its orchestrator's relay: the worker's own tab reads first.
-    if (openCall && item.originKind !== 'worker') return { kind: 'asker', name: item.source.name };
+    if (openCall && item.originKind !== 'worker') return { kind: 'asker', name: askerName(item) };
     const asker = item.source.panelId;
-    if (asker && !tried.has(asker) && !item.agentPrompt && this.env.typeIntoTab && !this.env.askerGone?.(item)) return { kind: 'asker', panelId: asker, name: item.source.name };
+    if (asker && !tried.has(asker) && !item.agentPrompt && this.env.typeIntoTab && !this.env.askerGone?.(item)) return { kind: 'asker', panelId: asker, name: askerName(item) };
     if (openCall && item.relayedBy) return { kind: 'orchestrator', name: item.relayedBy.name };
     return this.fallbackReader(item, tried);
   }
@@ -894,7 +895,8 @@ export class NotifyQueue extends EventEmitter {
     this.queue = this.queue.filter(other => other !== item.id);
     this.hidden.delete(item.id);
     clearEntryTimers(entry);
-    const result: NotifyResult = { answer: reply.picks?.length ? reply.picks.join(' · ') : reply.text, note: reply.text };
+    // The words are the answer, or a note on the picks: never both.
+    const result: NotifyResult = reply.picks?.length ? { answer: reply.picks.join(' · '), note: reply.text } : { answer: reply.text };
     if (entry.waiter) entry.waiter.resolve(result);
     if (reply.reader?.kind !== 'asker' && item.source.panelId && !this.env.askerGone?.(item)) this.enqueueTabMessage(item, answerLine(item), true);
     this.save(entry);
@@ -931,7 +933,7 @@ export class NotifyQueue extends EventEmitter {
     }
     if (update.links) item.links = update.links;
     item.version = (item.version ?? 1) + 1;
-    const by = item.reply?.reader?.name ?? item.source.name;
+    const by = item.reply?.reader?.name ?? askerName(item);
     item.revision = { asked: update.asked.trim(), whatChanged: update.whatChanged.split('\n').map(line => line.trim()).filter(Boolean), by, at: now };
     item.reply = undefined;
     item.readyAgain = now;
@@ -1614,6 +1616,9 @@ export class NotifyQueue extends EventEmitter {
     }
     if (entry.item.ui === 'secret') return this.answerSecret(entry, answer, device);
     const typed = 'picks' in answer ? answer.text?.trim() ?? '' : '';
+    if ('picks' in answer && typed && entry.item.optionsOnly) {
+      throw new Error('This question takes only one of its options: pick one, or answer in its chat.');
+    }
     if ('picks' in answer && typed && !entry.item.replyIsAnswer) {
       if (entry.item.agentPrompt) throw new Error('A permission prompt takes one of its options, not a typed reply.');
       this.replyTo(entry, typed, answer.picks, device);
@@ -1979,6 +1984,11 @@ function askerRef(item: NotifyItem): string {
 function answerLine(item: NotifyItem): string {
   const by = item.answeredBy?.by === 'autopilot' ? 'Autopilot' : item.answeredBy?.by === 'orchestrator' ? 'the orchestrator' : 'you';
   return `answer: ${askerRef(item)} → ${item.answerSummary ?? ''}${idTag(item)} (by ${by})`;
+}
+
+/** Who asked, as a person reads it: "the Doozy orchestrator", or the asking Pane's name. */
+function askerName(item: NotifyItem): string {
+  return item.source.session?.orchestrator ? `the ${item.source.session.name} orchestrator` : item.source.name;
 }
 
 /** Without a Q-n, a line names the item's id too, so its reader can pass it to --took and --update. */

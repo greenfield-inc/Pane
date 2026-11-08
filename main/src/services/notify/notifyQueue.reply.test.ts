@@ -150,7 +150,7 @@ describe('NotifyQueue replies (the reply contract)', () => {
       ],
     });
     const v2 = item(queue, 'q20');
-    expect(v2).toMatchObject({ state: 'waiting', version: 2, revision: { asked: 'Can the switch be turned off again if the test goes badly?', by: 'Session: Doozy' } });
+    expect(v2).toMatchObject({ state: 'waiting', version: 2, revision: { asked: 'Can the switch be turned off again if the test goes badly?', by: 'the Doozy orchestrator' } });
     expect(v2?.revision?.whatChanged).toHaveLength(3);
     expect(v2?.readyAgain).toBeDefined();
     expect(v2?.reply).toBeUndefined();
@@ -254,6 +254,19 @@ describe('NotifyQueue replies (the reply contract)', () => {
     expect(item(other, 'q20')?.state).toBe('sent');
   });
 
+  it('an unread reply goes to the first reader that comes back', async () => {
+    const queue = restoredQ20();
+    tabs.set('orch', 'gone');
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'why?' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(item(queue, 'q20')?.reply?.state).toBe('unread');
+    autopilot = { panelId: 'autopilot-chat' };
+    queue.sweep();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([['autopilot-chat', 'reply: Q-20 → "why?" (by you)']]);
+    expect(item(queue, 'q20')?.reply).toMatchObject({ state: 'reading', reader: { kind: 'autopilot' } });
+  });
+
   it('passes a reply its reader leaves unread for 10 minutes to Autopilot', async () => {
     const queue = restoredQ20();
     queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'why?' } });
@@ -295,6 +308,16 @@ describe('NotifyQueue replies (the reply contract)', () => {
     await vi.advanceTimersByTimeAsync(3_000);
     await expect(call).resolves.toEqual({ answer: 'Both, unit first' });
     expect(item(queue, 'chat:c1:q')).toMatchObject({ state: 'answered', reply: { state: 'sent', reader: { name: 'Claude' } } });
+  });
+
+  it('J12: a chat tab question that takes only its choices refuses typed text, and still takes a pick', async () => {
+    const queue = queueWith();
+    const call = queue.ask({ id: 'chat:c1:q', question: { ui: 'options', title: 'Which colour?', choices: [{ label: 'Red' }, { label: 'Blue' }], optionsOnly: true }, source: { ...orchestrator, panelId: 'c1' } });
+    expect(() => queue.run({ type: 'answer', id: 'chat:c1:q', answer: { picks: [], text: 'Teal' } })).toThrow(/only one of its options/);
+    expect(item(queue, 'chat:c1:q')).toMatchObject({ state: 'waiting' });
+    queue.run({ type: 'answer', id: 'chat:c1:q', answer: { picks: ['Blue'] } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect(call).resolves.toEqual({ answer: 'Blue' });
   });
 
   it('J21: versions, the reply state and how it was taken survive a restart', async () => {

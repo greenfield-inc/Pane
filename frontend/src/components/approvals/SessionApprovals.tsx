@@ -2,10 +2,9 @@ import { Inbox, MessageSquare } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
-import { selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { openOnMachine } from '../../utils/machineRowActions';
 import { ApprovalColumn } from './ApprovalColumn';
-import { firstToOpen, readyCount, sessionApprovals } from './approvalCard';
+import { firstToOpen, readyCount } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
 
 /**
@@ -32,13 +31,29 @@ export function SessionApprovalsButton({ sessionId }: { sessionId: string }) {
 }
 
 /**
- * A click on a Session row's count (J15): opens the Session's newest ready-again approval, or its
- * first waiting one, beside the Session the row's click opens.
+ * The count again, as a button in a Session row's hover slot, where the row's "…" would cover the
+ * plain count (J15): it opens the Session and its newest ready-again or first waiting approval.
  */
-export function openApprovalsFromCount(target: EventTarget, sessionId: string): void {
-  if (!(target instanceof Element) || target.closest('[data-opens-approvals]')?.getAttribute('data-opens-approvals') !== sessionId) return;
-  const first = firstToOpen(sessionApprovals(selectNotifyItems(useNotifyStore.getState()), sessionId));
-  if (first) openSessionApproval(sessionId, first.id);
+export function SessionApprovalsCountButton({ sessionId, onOpenSession }: { sessionId: string; onOpenSession: () => void }) {
+  const waiting = useSessionApprovals(sessionId);
+  if (waiting.length === 0) return null;
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        const first = firstToOpen(waiting);
+        if (first) openSessionApproval(sessionId, first.id);
+        onOpenSession();
+      }}
+      aria-label={`Open ${waiting.length} ${waiting.length === 1 ? 'approval' : 'approvals'}`}
+      title="Open its approvals"
+      className="mr-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-status-warning px-[5px] text-[11px] font-semibold tabular-nums text-text-on-status-warning hover:bg-status-warning-hover"
+      data-testid="session-approvals-count-button"
+    >
+      {waiting.length}
+    </button>
+  );
 }
 
 /** The approval column for one Session: its pager walks the Session's waiting approvals. */

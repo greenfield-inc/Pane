@@ -170,6 +170,7 @@ const notifyItemSchema = boundary.object({
   choices: boundary.optional(boundary.array(choiceSchema)),
   questions: boundary.optional(boundary.array(subQuestionSchema)),
   replyIsAnswer: boundary.optional(boundary.boolean),
+  optionsOnly: boundary.optional(boundary.boolean),
   detail: boundary.optional(boundary.string),
   detailLabel: boundary.optional(boundary.string),
   suggestions: boundary.optional(boundary.array(boundary.string)),
