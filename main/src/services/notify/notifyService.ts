@@ -238,6 +238,8 @@ export class NotifyService {
         connected: { kind: 'session', id: entry.sessionId, name: session?.name ?? 'Closed Session', paneId: session?.paneId ?? '' },
         // D-81: the worker's status file, which its report named, opens beside the card.
         links: entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : undefined,
+        // What the worker was doing, so the person can answer without opening its tab.
+        context: entry.report?.summary?.trim() || undefined,
       });
     }
   }

@@ -111,6 +111,8 @@ export interface WorkerQuestion {
   at: number;
   connected?: NotifyConnected;
   links?: NotifyQuestion['links'];
+  /** The worker's report summary: what it was doing when it asked. */
+  context?: string;
 }
 
 export interface NotifyQueueEnvironment {
@@ -419,6 +421,7 @@ export class NotifyQueue extends EventEmitter {
     // Past its grace already (brought in from before this start): it shows as ringing, without a chime for each.
     if (Date.now() - question.at < relayAfterMs()) item.quiet = true;
     if (question.links?.length) item.links = question.links;
+    if (question.context) item.context = question.context;
     item.connected = question.connected ?? connectedOf(item, this.machine());
     const entry: Entry = { item, resumeLoop: false };
     this.entries.set(item.id, entry);

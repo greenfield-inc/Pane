@@ -356,7 +356,7 @@ describe('Approvals items, through the registered handlers', () => {
   }
   const blocked = (at: number): RunpaneInboxItem => ({
     id: 'in-1', sessionId: 'session-1', kind: 'report', at: new Date(at).toISOString(), paneId: 'worker', paneName: 'api-fix', panelId: 'worker-panel',
-    report: { state: 'blocked', question: 'Use the invoice id or number in the PDF filename?', summaryPath: '/work/api-fix/status.json', reportedAt: new Date(at).toISOString() },
+    report: { state: 'blocked', question: 'Use the invoice id or number in the PDF filename?', summary: 'Invoice PDFs render; the filename is the last open choice.', summaryPath: '/work/api-fix/status.json', reportedAt: new Date(at).toISOString() },
   });
 
   it("files the orchestrator's question under its Session, and a standalone Pane's under none", async () => {
@@ -428,6 +428,8 @@ describe('Approvals items, through the registered handlers', () => {
       quiet: true,
       originKind: 'worker',
       title: 'Use the invoice id or number in the PDF filename?',
+      // What the worker was doing when it asked.
+      context: 'Invoice PDFs render; the filename is the last open choice.',
       source: { paneId: 'worker', panelId: 'worker-panel', name: 'api-fix', session: { id: launch.id, name: launch.name, paneId: launch.paneId } },
       connected: { kind: 'session', id: launch.id },
       // The worker's status file, which its report named, opens beside the card.
