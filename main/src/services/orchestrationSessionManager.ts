@@ -1183,6 +1183,9 @@ export class OrchestrationSessionManager extends EventEmitter {
       nextCustomState.hasClaudeSessionId = undefined;
       nextCustomState.wasInterrupted = undefined;
     }
+    if (current?.agentSessionId && current.agentSessionId !== nextCustomState.agentSessionId) {
+      console.log(`[OrchestrationSessionManager] Session ${record.id} panel ${panel.id}: saved conversation ${current.agentSessionId} ${nextCustomState.agentSessionId ? `replaced by ${nextCustomState.agentSessionId}` : 'cleared'} by the Session's launch (agent ${current.agentType ?? 'unknown'} -> ${desired.agentType}, resume ${current.customResume?.mode ?? 'none'} -> ${desired.customResume?.mode ?? 'none'}).`);
+    }
     const nextTitle = `${record.name} · ${RUNPANE_CONTRACT.agentTemplates[record.agent].title}`;
     const stateNeedsRefresh = JSON.stringify(current?.customResume) !== JSON.stringify(nextCustomState.customResume)
       || current?.initialCommand !== nextCustomState.initialCommand

@@ -1185,6 +1185,205 @@ async function checkReportDeliveryLine() {
   }
 }
 
+/** Runs the CLI with its stdin held open until `holdMs` passes, and times the run. */
+function runCliHoldingStdin(runtime, args, paneDir, extraEnv, holdMs) {
+  const command = runtime === 'npm' ? process.execPath : findPython();
+  const commandArgs = runtime === 'npm' ? [npmCli, ...args] : ['-m', 'runpane', ...args];
+  const env = { ...process.env, PANE_DIR: paneDir, PYTHONDONTWRITEBYTECODE: '1', PYTHONPATH: pythonSource, RUNPANE_TELEMETRY_DISABLED: '1', ...extraEnv };
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const child = childProcess.spawn(command, commandArgs, { cwd: rootDir, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const release = setTimeout(() => child.stdin.end(), holdMs);
+    const timer = setTimeout(() => { child.kill(); reject(new Error(`${runtime} ${args.join(' ')} did not exit. stdout=${stdout} stderr=${stderr}`)); }, holdMs + 20_000);
+    child.stdin.on('error', () => {});
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+    child.once('error', (error) => { clearTimeout(timer); clearTimeout(release); reject(error); });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      clearTimeout(release);
+      resolve({ code, stdout, stderr, elapsedMs: Date.now() - started });
+    });
+  });
+}
+
+async function checkPanelsConversation() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const localControl = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
+  const ajv = new Ajv({ allErrors: true });
+  ajv.addSchema({ jsonSchemas: contract.jsonSchemas }, 'contract');
+  const validResult = ajv.compile({ $ref: 'contract#/jsonSchemas/panelConversationResult' });
+  const validRequest = ajv.compile({ $ref: 'contract#/jsonSchemas/panelConversationRequest' });
+  const result = { ok: true, paneId: 'session-1', panelId: 'panel-1', conversationId: 'c0ffee00-1111-4222-8333-444455556666', source: 'resume', sure: true };
+  assert.ok(validResult(result), ajv.errorsText(validResult.errors));
+  assert.ok(validResult({ ...result, source: undefined, sure: false, generation: 7 }), ajv.errorsText(validResult.errors));
+  assert.ok(!validResult({ ...result, source: 'user' }), 'the result names only the hook sources');
+  assert.ok(!validResult({ ...result, sure: undefined }), 'the result says whether Pane is sure');
+  assert.ok(validRequest({ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'clear' }), ajv.errorsText(validRequest.errors));
+  assert.ok(!validRequest({ panelId: 'panel-1', conversationId: 'c', source: 'agent' }), 'the request names only the hook sources');
+
+  // Parsing: the shared --source takes the hook's sources here and keeps user|agent elsewhere.
+  const parsed = parseRunpaneArgs(['panels', 'conversation', '--conversation', result.conversationId, '--source', 'clear', '--panel', 'panel-1', '--json']);
+  assert.strictEqual(parsed.conversationId, result.conversationId);
+  assert.strictEqual(parsed.conversationSource, 'clear');
+  assert.strictEqual(parsed.source, undefined);
+  assert.strictEqual(parseRunpaneArgs(['panels', 'conversation', '--hook']).hook, true);
+  assert.strictEqual(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--agent', 'claude', '--source', 'agent', '--yes']).source, 'agent');
+  const parseErrors = [
+    [['panels', 'conversation'], /needs --conversation <id>, or --hook/],
+    [['panels', 'conversation', '--conversation', 'abc', '--source', 'user'], /--source must be one of: startup, resume, clear, compact/],
+    [['panels', 'conversation', '--conversation', 'has space'], /--conversation must be/],
+    [['panels', 'conversation', '--conversation', ''], /--conversation requires a value/],
+    [['panels', 'conversation', '--hook', '--conversation', 'abc'], /--hook reads the conversation from the hook's stdin/],
+    [['panels', 'conversation', '--hook', '--panel', 'panel-1'], /--hook reads the conversation from the hook's stdin/],
+    [['panels', 'submit', '--panel', 'p', '--text', 'x', '--hook', '--yes'], /--hook is only valid with runpane panels conversation/],
+    [['panels', 'submit', '--panel', 'p', '--text', 'x', '--conversation', 'abc', '--yes'], /--conversation is only valid with runpane panels conversation/],
+  ];
+  for (const [args, pattern] of parseErrors) {
+    assert.throws(() => parseRunpaneArgs(args), pattern, args.join(' '));
+  }
+  const pythonErrors = JSON.parse(runPythonSnippet(`
+import json
+import sys
+from runpane.cli import parse_args
+
+errors = []
+for args in json.loads(sys.stdin.read()):
+    try:
+        parse_args(args)
+        errors.append(None)
+    except Exception as error:
+        errors.append(str(error))
+print(json.dumps(errors))
+`, JSON.stringify(parseErrors.map(([args]) => args))));
+  parseErrors.forEach(([args, pattern], index) => {
+    assert.ok(pythonErrors[index] && pattern.test(pythonErrors[index]), `python ${args.join(' ')}: ${pythonErrors[index]}`);
+  });
+  const nodeError = (() => { try { parseRunpaneArgs(parseErrors[0][0]); } catch (error) { return error.message; } return null; })();
+  assert.strictEqual(pythonErrors[0], nodeError, 'both CLIs word the missing --conversation error the same');
+
+  // Identity: the same rule as runpane report.
+  const identity = async (args, env) => {
+    const originalInvoke = daemonClient.invokeDaemon;
+    const originalLog = console.log;
+    let request;
+    daemonClient.invokeDaemon = async (_channel, callArgs) => {
+      request = callArgs[0];
+      return result;
+    };
+    console.log = () => {};
+    try {
+      await localControl.runPanelsConversation(parseRunpaneArgs(['panels', 'conversation', '--conversation', 'abc', ...args]), env);
+    } finally {
+      daemonClient.invokeDaemon = originalInvoke;
+      console.log = originalLog;
+    }
+    return JSON.parse(JSON.stringify({ paneId: request.paneId, panelId: request.panelId }));
+  };
+  assert.deepStrictEqual(await identity([], { PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1' }), { paneId: 'session-1', panelId: 'panel-1' });
+  assert.deepStrictEqual(await identity(['--panel', 'panel-9'], { PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1' }), { panelId: 'panel-9' });
+  assert.deepStrictEqual(await identity(['--pane', 'session-2', '--panel', 'panel-9'], {}), { paneId: 'session-2', panelId: 'panel-9' });
+  await assert.rejects(identity([], {}), /cannot tell which panel/);
+  await assert.rejects(identity(['--pane', 'session-2'], { PANE_PANEL_ID: 'panel-1' }), /--pane also needs --panel/);
+  const pythonIdentity = JSON.parse(runPythonSnippet(`
+import json
+from runpane.cli import parse_args
+from runpane.local_control import resolve_conversation_identity
+
+def identity(args, env):
+    try:
+        return resolve_conversation_identity(parse_args(["panels", "conversation", "--conversation", "abc", *args]), env)
+    except Exception as error:
+        return {"error": str(error)}
+
+print(json.dumps([
+    identity([], {"PANE_SESSION_ID": "session-1", "PANE_PANEL_ID": "panel-1"}),
+    identity(["--panel", "panel-9"], {"PANE_SESSION_ID": "session-1", "PANE_PANEL_ID": "panel-1"}),
+    identity(["--pane", "session-2", "--panel", "panel-9"], {}),
+    identity([], {}),
+    identity(["--pane", "session-2"], {"PANE_PANEL_ID": "panel-1"}),
+]))
+`));
+  assert.deepStrictEqual(pythonIdentity.slice(0, 3), [
+    { paneId: 'session-1', panelId: 'panel-1' },
+    { panelId: 'panel-9' },
+    { paneId: 'session-2', panelId: 'panel-9' },
+  ]);
+  assert.match(pythonIdentity[3].error, /cannot tell which panel/);
+  assert.match(pythonIdentity[4].error, /--pane also needs --panel/);
+
+  const hookInput = (fields) => JSON.stringify({ hook_event_name: 'SessionStart', cwd: '/repo', transcript_path: '/t.jsonl', ...fields });
+  const paneEnv = { PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1' };
+  for (const runtime of ['npm', 'pip']) {
+    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-conversation-${runtime}-`));
+    try {
+      // Explicit report: the request, the human line, and --json.
+      let requests = [];
+      const answer = (response) => (frame) => { requests.push({ channel: frame.channel, request: frame.args[0] }); return response; };
+      let run = await withFakeDaemon(paneDir, answer({ result }),
+        () => runCliOnce(runtime, ['panels', 'conversation', '--conversation', result.conversationId, '--source', 'resume', '--pane', 'session-1', '--panel', 'panel-1'], paneDir));
+      assert.strictEqual(run.code, 0, `${runtime} explicit report exits 0. stderr=${run.stderr}`);
+      assert.strictEqual(lf(run.stdout), `Recorded conversation ${result.conversationId} for panel panel-1.\n`, `${runtime} human line`);
+      assert.deepStrictEqual(requests, [{ channel: 'runpane:panels:conversation', request: { panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'resume' } }]);
+      run = await withFakeDaemon(paneDir, answer({ result: { ...result, generation: 9 } }),
+        () => runCliOnce(runtime, ['panels', 'conversation', '--conversation', result.conversationId, '--json'], paneDir, 20_000, paneEnv));
+      assert.strictEqual(run.code, 0, `${runtime} --json exits 0. stderr=${run.stderr}`);
+      assert.deepStrictEqual(JSON.parse(run.stdout), { ...result, generation: 9 }, `${runtime} --json prints the daemon result`);
+      assert.deepStrictEqual(requests[1].request, { panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId });
+      run = await withFakeDaemon(paneDir, () => ({ error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'Unknown channel runpane:panels:conversation' } }),
+        () => runCliOnce(runtime, ['panels', 'conversation', '--conversation', 'abc', '--panel', 'panel-1'], paneDir));
+      assert.strictEqual(run.code, 1, `${runtime} explicit report fails loudly on an older daemon`);
+      assert.match(run.stderr, /Unknown channel/);
+
+      // --hook: silent and exit 0 whatever happens.
+      const hook = async (label, { env = paneEnv, input, respond = () => ({ result }), daemon = true }) => {
+        requests = [];
+        const call = () => runCliOnce(runtime, ['panels', 'conversation', '--hook'], paneDir, 20_000, env, input);
+        const hookRun = daemon ? await withFakeDaemon(paneDir, (frame) => { requests.push({ channel: frame.channel, request: frame.args[0] }); return respond(frame); }, call) : await call();
+        assert.strictEqual(hookRun.code, 0, `${runtime} --hook ${label} exits 0`);
+        assert.strictEqual(hookRun.stdout, '', `${runtime} --hook ${label} prints nothing on stdout`);
+        assert.strictEqual(hookRun.stderr, '', `${runtime} --hook ${label} prints nothing on stderr`);
+        return requests.map((item) => item.request);
+      };
+      assert.deepStrictEqual(await hook('reports', { input: hookInput({ session_id: result.conversationId, source: 'resume' }) }),
+        [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'resume' }]);
+      assert.deepStrictEqual(await hook('drops an unknown source', { env: { PANE_PANEL_ID: 'panel-1' }, input: hookInput({ session_id: 'abc', source: 'later' }) }),
+        [{ panelId: 'panel-1', conversationId: 'abc' }]);
+      assert.deepStrictEqual(await hook('outside Pane', { env: {}, input: hookInput({ session_id: 'abc', source: 'startup' }) }), []);
+      assert.deepStrictEqual(await hook('bad JSON', { input: '{not json' }), []);
+      assert.deepStrictEqual(await hook('no session_id', { input: hookInput({ source: 'startup' }) }), []);
+      assert.deepStrictEqual(await hook('a bad session_id', { input: hookInput({ session_id: 'a b\n' }) }), []);
+      assert.deepStrictEqual(await hook('another event', { input: hookInput({ hook_event_name: 'Stop', session_id: 'abc' }) }), []);
+      assert.deepStrictEqual(await hook('empty stdin', { input: '' }), []);
+      assert.deepStrictEqual(await hook('stdin over 64 KiB', { input: hookInput({ session_id: 'abc', padding: 'x'.repeat(70 * 1024) }) }), []);
+      assert.deepStrictEqual((await hook('an older daemon', {
+        input: hookInput({ session_id: 'abc' }),
+        respond: () => ({ error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'Unknown channel runpane:panels:conversation' } }),
+      })).length, 1);
+      assert.deepStrictEqual((await hook('a daemon that hangs up', { input: hookInput({ session_id: 'abc' }), respond: () => ({ destroy: true }) })).length, 1);
+      assert.deepStrictEqual((await hook('an unreadable result', { input: hookInput({ session_id: 'abc' }), respond: () => ({ result: { nope: true } }) })).length, 1);
+      await hook('Pane not running', { input: hookInput({ session_id: 'abc' }), daemon: false });
+      const extra = await runCliOnce(runtime, ['panels', 'conversation', '--hook', '--bogus'], paneDir, 20_000, paneEnv, hookInput({ session_id: 'abc' }));
+      assert.deepStrictEqual([extra.code, extra.stdout, extra.stderr], [0, '', ''], `${runtime} --hook with an unknown flag stays silent`);
+
+      // Bounded: stdin that never closes, and a daemon that never answers, both end well inside the hook's 5 s.
+      const held = await runCliHoldingStdin(runtime, ['panels', 'conversation', '--hook'], paneDir, paneEnv, 8_000);
+      assert.deepStrictEqual([held.code, held.stdout, held.stderr], [0, '', ''], `${runtime} --hook with open stdin stays silent`);
+      assert.ok(held.elapsedMs < 4_500, `${runtime} --hook stops reading stdin after 2 s (took ${held.elapsedMs} ms)`);
+      const started = Date.now();
+      const slow = await hook('a daemon that never answers', { input: hookInput({ session_id: 'abc' }), respond: () => ({ result, delayMs: 30_000 }) });
+      assert.strictEqual(slow.length, 1);
+      assert.ok(Date.now() - started < 4_800, `${runtime} --hook gives up on a slow daemon (took ${Date.now() - started} ms)`);
+    } finally {
+      fs.rmSync(paneDir, { recursive: true, force: true });
+    }
+  }
+}
+
 function spawnWatchCli(runtime, args, paneDir) {
   return runtime === 'npm'
     ? childProcess.spawnSync(process.execPath, [npmCli, ...args, '--pane-dir', paneDir], { encoding: 'utf8', timeout: 5000, env: { ...process.env, PANE_DIR: paneDir, RUNPANE_TELEMETRY_DISABLED: '1' } })
@@ -1208,7 +1407,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false, closed: false,
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
-  answerApprove: false, answerDeny: false,
+  answerApprove: false, answerDeny: false, hook: false,
 };
 
 function normalizeParsedArgs(value) {
@@ -6564,6 +6763,7 @@ async function runChecks() {
   await checkPanelsCloseParity();
   await checkArchiveClosedAndCallerPanel();
   await checkReportDeliveryLine();
+  await checkPanelsConversation();
   await checkNotifyParity();
   await checkAutopilotParity();
   await checkPaneCreateBlockedReadiness();

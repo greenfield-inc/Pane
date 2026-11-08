@@ -246,7 +246,8 @@ happened, why, what changed, and what to do next.
 - Main and daemon handlers throw `PaneError(code, message, next)` from
   `shared/paneError.ts`; `reasonOf(error)` quotes a cause inside a sentence.
   The daemon socket and HTTP API send `{ code, message, next }`. Electron IPC
-  keeps only text, so the renderer gets `<message> Next: <next>`.
+  keeps only text, so the renderer gets `Error [<code>]: <message> Next: <next>`;
+  `ipcErrorCode` reads the code back and `ipcErrorMessage` shows the rest.
 - The `runpane` CLI throws `RunpaneError` (`packages/runpane/src/errors.ts`)
   and prints every failure one way: the message and a `Next:` line on stderr,
   and with `--json` also `{ "ok": false, "error": { "code", "message", "next" } }`

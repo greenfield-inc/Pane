@@ -699,6 +699,32 @@
       "--json"
     ],
     [
+      "panels",
+      "conversation",
+      "--conversation",
+      "0b6c5f0e-8d1a-4f43-9a51-2f7d0c1e9b44",
+      "--source",
+      "resume",
+      "--panel",
+      "panel-1",
+      "--pane",
+      "session-1",
+      "--json"
+    ],
+    [
+      "panels",
+      "conversation",
+      "--conversation=abc",
+      "--source=compact",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "panels",
+      "conversation",
+      "--hook"
+    ],
+    [
       "panes",
       "create",
       "--repo",

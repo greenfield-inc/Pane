@@ -1,7 +1,7 @@
 import {
   client, methods, RequestError, type ClientConnection, type ContentBlock, type CreateElicitationRequest, type CreateElicitationResponse,
   type InitializeResponse, type LoadSessionRequest, type LoadSessionResponse, type NewSessionRequest, type NewSessionResponse,
-  type PromptResponse, type AnyMessage, type Stream, type RequestPermissionRequest, type SessionNotification, type RequestPermissionResponse, type SessionConfigOption, type SessionUpdate,
+  type PromptResponse, type AnyMessage, type Stream, type RequestPermissionRequest, type SessionInfo, type SessionNotification, type RequestPermissionResponse, type SessionConfigOption, type SessionUpdate,
 } from '@agentclientprotocol/sdk';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import type { ChatTabCommand, ChatTabContextUsage, ChatTabTask } from '../../../../shared/types/chatTab';
@@ -110,6 +110,21 @@ export class ChatTabRuntime {
   isAlive(): boolean { return this.process.running && !this.stopping; }
   supportsImages(): boolean { return this.initialization?.agentCapabilities?.promptCapabilities?.image === true; }
   canLoad(): boolean { return this.initialization?.agentCapabilities?.loadSession === true; }
+  canList(): boolean { return Boolean(this.initialization?.agentCapabilities?.sessionCapabilities?.list); }
+
+  /** The agent's saved conversations in `cwd` (ACP session/list), following its cursor; at most `limit`. */
+  async list(cwd: string, limit = 500): Promise<SessionInfo[]> {
+    if (!this.canList()) throw new PaneError('CHAT_LIST_UNSUPPORTED', 'This agent adapter cannot list saved conversations.', 'Update Pane, or keep working in this conversation.');
+    const sessions: SessionInfo[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 50 && sessions.length < limit; page++) {
+      const response = await this.bounded(this.agent().request(methods.agent.session.list, cursor ? { cwd, cursor } : { cwd })).catch(error => { throw chatFailure(error, { code: 'CHAT_LIST_FAILED', next: 'Try again, or keep working in this conversation.' }); });
+      sessions.push(...response.sessions);
+      cursor = response.nextCursor ?? undefined;
+      if (!cursor) break;
+    }
+    return sessions.slice(0, limit);
+  }
 
   async start(): Promise<InitializeResponse> {
     await this.process.started();

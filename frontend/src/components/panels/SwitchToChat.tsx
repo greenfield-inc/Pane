@@ -5,9 +5,10 @@ import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
 import { useHotkey } from '../../hooks/useHotkey';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useErrorStore } from '../../stores/errorStore';
-import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { Button } from '../ui/Button';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui/Modal';
+import { SwitchToChatBody } from './SwitchToChatDialog';
+import { switchFailure, type SwitchFailure } from './switchToChatCopy';
 
 /** Whether Switch to chat is offered for this tab: chat tabs are on and it is a terminal Claude or Codex tab. */
 function useCanSwitchToChat(panel: ToolPanel | undefined): boolean {
@@ -20,7 +21,7 @@ function useCanSwitchToChat(panel: ToolPanel | undefined): boolean {
  */
 export function SwitchToChatDialog({ panel, isOpen, onClose }: { panel: ToolPanel; isOpen: boolean; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SwitchFailure | null>(null);
   const close = () => { setError(null); onClose(); };
   const switchNow = async () => {
     setBusy(true);
@@ -31,7 +32,8 @@ export function SwitchToChatDialog({ panel, isOpen, onClose }: { panel: ToolPane
       // The chat tab may already be in front, and this dialog goes with the terminal's tab: say why both stay app-wide.
       if (result.terminalKept && result.reason) useErrorStore.getState().showError({ title: 'Both tabs stayed open', error: result.reason });
     } catch (failure) {
-      setError(ipcErrorMessage(failure, 'Could not switch to chat.'));
+      // After the stop, the code says whether the terminal is back on its conversation or stopped; Try again runs the switch again.
+      setError(switchFailure(failure));
     } finally {
       setBusy(false);
     }
@@ -40,11 +42,7 @@ export function SwitchToChatDialog({ panel, isOpen, onClose }: { panel: ToolPane
     <Modal isOpen={isOpen} onClose={() => { if (!busy) close(); }} ariaLabel="Switch to chat">
       <ModalHeader title="Switch to chat" />
       <ModalBody>
-        <p className="text-sm text-text-secondary">
-          Continue this conversation in a chat tab. Pane stops the terminal agent and reopens the same conversation in chat, with its history. If it can&apos;t, you&apos;ll see why, and the terminal comes back running the same conversation.
-        </p>
-        {busy && <p role="status" className="mt-3 text-sm text-text-tertiary">Switching…</p>}
-        {error && <p role="alert" className="mt-3 text-sm text-status-error">{error}</p>}
+        <SwitchToChatBody busy={busy} failure={error ?? undefined} />
       </ModalBody>
       <ModalFooter>
         <Button variant="secondary" disabled={busy} onClick={close}>{error ? 'Close' : 'Cancel'}</Button>

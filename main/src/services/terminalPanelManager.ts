@@ -14,7 +14,7 @@ import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestr
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
-import { ToolPanel, TerminalPanelState, pausedMarkOf, type TerminalPausedMark } from '../../../shared/types/panels';
+import { ToolPanel, TerminalPanelState, pausedMarkOf, type TerminalConversationReport, type TerminalPausedMark } from '../../../shared/types/panels';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
 import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
 import { panelManager } from './panelManager';
@@ -374,6 +374,8 @@ interface TerminalProcess {
   agentSessionScrapeBuffer: string;
   /** Agent Farm reported its ID for this launch; later ID lines are agent output. */
   reportedSessionIdLocked?: boolean;
+  /** This process's launch: new at every spawn and every launch in its shell. A conversation report counts only for it. */
+  launchId: string;
 }
 
 interface AgentProbe {
@@ -411,6 +413,8 @@ interface CliLaunchResolution {
 
 export class TerminalPanelManager extends EventEmitter {
   private terminals = new Map<string, TerminalProcess>();
+  /** Panels that had a process in this run; their next spawn is a relaunch. */
+  private readonly launchedPanels = new Set<string>();
   // Retiring a PTY is not proof its shell or agent exited. Keep their identities
   // (pid and start time) until the OS confirms exit; a pid alone may since
   // belong to an unrelated process.
@@ -986,6 +990,33 @@ export class TerminalPanelManager extends EventEmitter {
     return Object.entries(fields).filter(([, value]) => value !== undefined).map(([key, value]) => `${key}=${value}`).join(' ');
   }
 
+  /** The running launch of a terminal tab, if one is running; a conversation report counts only for it. */
+  currentLaunchId(panelId: string): string | undefined {
+    const terminal = this.terminals.get(panelId);
+    return terminal && !terminal.destroying ? terminal.launchId : undefined;
+  }
+
+  /**
+   * A SessionStart hook's report (`runpane panels conversation`, D-269): the tab's Claude is on
+   * conversation `id`. Saved as the tab's conversation, so a restart resumes it, and marked with the
+   * running launch, so Switch to chat is sure of it only while that launch runs. Returns whether it
+   * was recorded; a tab with no running process has no launch to report for.
+   */
+  async recordConversationReport(panelId: string, id: string, source: string | undefined): Promise<boolean> {
+    const terminal = this.terminals.get(panelId);
+    const panel = panelManager.getPanel(panelId);
+    if (!terminal || terminal.destroying || !panel) return false;
+    const customState = terminalCustomState(panel.state);
+    const previous = customState.agentSessionId;
+    const report: TerminalConversationReport = { id, launchId: terminal.launchId, reportedAt: new Date().toISOString() };
+    if (source) report.source = source;
+    terminal.capturedAgentSessionId = id;
+    panel.state.customState = { ...customState, agentSessionId: id, conversationReport: report };
+    await panelManager.updatePanel(panelId, { state: panel.state });
+    console.log(`[TerminalPanelManager] Panel ${panelId} reported conversation ${id} (${source ?? 'no source'})${previous && previous !== id ? `, replacing ${previous}` : ''}.`);
+    return true;
+  }
+
   /** The launch ID a wrapper such as Agent Farm printed as `PANE_AGENT_SESSION_ID=<id>`, if it did. */
   getLaunchSessionId(panelId: string): string | undefined {
     const terminal = this.terminals.get(panelId);
@@ -1136,6 +1167,8 @@ export class TerminalPanelManager extends EventEmitter {
     // the terminal; its reported ID belongs to the launch either way.
     const agentType = this.resolveTerminalAgentType(customState);
     if (!firstLineOnly && agentType !== terminal.agentType) return;
+    // The SessionStart hook knows better than a launch line or a scraped ID (D-269).
+    if (customState.conversationReport && customState.conversationReport.launchId === terminal.launchId) return;
     terminal.capturedAgentSessionId = agentSessionId;
     if (customState.agentSessionId === agentSessionId) return;
 
@@ -1652,10 +1685,12 @@ export class TerminalPanelManager extends EventEmitter {
     }
     const terminal = this.terminals.get(panelId);
     if (terminal) {
-      // A new launch in this shell reports its own ID.
+      // A new launch in this shell reports its own ID, and its own conversation.
       terminal.reportedSessionIdLocked = undefined;
       terminal.agentSessionScrapeBuffer = '';
+      terminal.launchId = randomUUID();
     }
+    console.log(`[TerminalPanelManager] Relaunching panel ${panelId} in its shell: ${launch.commandToRun}`);
     return launch;
   }
 
@@ -2030,12 +2065,16 @@ export class TerminalPanelManager extends EventEmitter {
       agentType: this.resolveTerminalAgentType(launchResolution?.customState ?? existingState),
       shellProcessName: normalizeProcessName(shellPath),
       agentSessionScrapeBuffer: '',
+      launchId: randomUUID(),
       heldInput: process.platform === 'win32' && !wslContext ? [] : undefined,
       claudeTrustFolder,
     };
 
     // Store in map (ptyHost path: pid is already populated on the shim).
     this.terminals.set(panel.id, terminalProcess);
+    // A tab restarted in place (a failed Switch to chat, Resume) redraws at once, behind its loading overlay.
+    if (this.launchedPanels.has(panel.id)) this.sendRendererEvent('terminal:relaunched', { sessionId: panel.sessionId, panelId: panel.id });
+    this.launchedPanels.add(panel.id);
     // A tab starting in a Pane that has paused tabs (a new tab, or one resumed) can end the Pane's paused state.
     if (panelManager.getPanelsForSession(panel.sessionId).some(other => pausedMarkOf(other))) {
       this.emit('pause-changed', { panelIds: [], paneIds: [panel.sessionId], paused: false });
