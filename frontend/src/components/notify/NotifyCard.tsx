@@ -432,7 +432,7 @@ function Chip({ keyLabel, label, detail, shaded, onClick, tall, inbox }: ChipPro
       <KeyCap className={tall ? 'mt-px' : undefined}>{keyLabel}</KeyCap>
       {tall ? (
         <span className="min-w-0">
-          <span className="block [overflow-wrap:anywhere]">{label}</span>
+          <span className="block break-words">{label}</span>
           {detail && <span className="block text-[12px] font-normal leading-snug text-text-tertiary">{detail}</span>}
         </span>
       ) : <span className="min-w-0 truncate">{label}</span>}
@@ -606,7 +606,7 @@ function QuestionCard({
   if (item.ui === 'options' && expanded) {
     body = (
       <>
-        <div className={cn('grid gap-x-3 gap-y-2.5 px-3.5 pb-4 pt-3', narrow ? 'grid-cols-2' : 'grid-cols-3')}>
+        <div className={cn('grid gap-x-3 gap-y-2.5 px-3.5 pb-4 pt-3', form === 'inbox' ? 'grid-cols-1' : narrow ? 'grid-cols-2' : 'grid-cols-3')}>
           {choices.map((choice, index) => (
             <Chip
               key={choice.label}
@@ -633,6 +633,9 @@ function QuestionCard({
   } else if (item.ui === 'options') {
     // An Override can't open the round (the item no longer waits), so every choice shows.
     const visible = onCancelOverride ? choices : choices.slice(0, COMPACT_CHOICE_LIMIT);
+    // On Approvals the card opens in place: the round holds only fresh waiting items, and choices' notes need room.
+    const opensInPlace = form === 'inbox';
+    const more = choices.length > visible.length ? 'More' : opensInPlace && choices.some((choice) => choice.detail) ? 'Details' : undefined;
     body = (
       <div className={cn('flex flex-wrap items-center gap-2', actionsClass)}>
         {visible.map((choice, index) => (
@@ -645,13 +648,13 @@ function QuestionCard({
             onClick={() => answerChoice(index)}
           />
         ))}
-        {choices.length > visible.length && (
+        {more && (
           <button
             type="button"
-            onClick={() => onCommand({ type: 'open-round', id: item.id })}
+            onClick={() => (opensInPlace ? showDetailsChange(true) : onCommand({ type: 'open-round', id: item.id }))}
             className="inline-flex h-[42px] items-center rounded-xl px-3.5 text-[15px] text-text-secondary hover:bg-surface-hover"
           >
-            More
+            {more}
           </button>
         )}
         {recommended >= 0 && form !== 'inbox' && (
@@ -780,6 +783,8 @@ function QuestionCard({
   // Snooze hides a card from the strip, so a card docked in its terminal has none.
   const snooze = form === 'docked' ? null : <SnoozeButton item={item} onCommand={onCommand} menuPlacement={menuPlacement} />;
   let footer: ReactNode = null;
+  // On Approvals an opened card keeps its one row of actions below (Send joins it there).
+  const sendInRow = form === 'inbox' && item.ui === 'options' && expanded;
   if (form !== 'inbox' && item.ui === 'options' && expanded) {
     footer = (
       <CardFooter
@@ -854,6 +859,7 @@ function QuestionCard({
         <ItemCloseForm item={item} onCommand={onCommand} onCancel={() => setClosing(false)} className="px-3.5 pb-3.5" />
       ) : (
         <div className="flex items-center gap-3 px-3.5 pb-3 text-[12.5px] text-text-tertiary">
+          {sendInRow && <FooterLink onClick={() => showDetailsChange(false)}>Hide details</FooterLink>}
           {item.snoozedUntil !== undefined && <span className="min-w-0 truncate">{snoozedLabel(item.snoozedUntil)}</span>}
           <div className="ml-auto flex shrink-0 items-center gap-3">
             {item.source.paneId && !item.elsewhere && (!item.source.autopilot || onOpenInPane) && (
@@ -867,6 +873,16 @@ function QuestionCard({
               </button>
             )}
             {snooze}
+            {sendInRow && (
+              <button
+                type="button"
+                disabled={selected < 0}
+                onClick={() => answerChoice(selected, note)}
+                className="h-[30px] rounded-[10px] bg-interactive px-3 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50"
+              >
+                Send
+              </button>
+            )}
           </div>
         </div>
       ))}
