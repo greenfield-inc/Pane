@@ -1,10 +1,10 @@
 import { createHash } from 'crypto';
 import path from 'path';
-import type { ContentBlock, McpServer, NewSessionRequest } from '@agentclientprotocol/sdk';
+import type { ContentBlock, McpServer, NewSessionRequest, SessionInfo } from '@agentclientprotocol/sdk';
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ToolPanel } from '../../../../shared/types/panels';
-import type { ChatPanelState, ChatTabEvent, ChatTabAnswer, ChatTabProblem, ChatTabQueuedPrompt, ChatTabSend, ChatTabStatus, ChatTabView } from '../../../../shared/types/chatTab';
+import type { ChatPanelState, ChatTabConversation, ChatTabSwitchBanner, ChatTabEvent, ChatTabAnswer, ChatTabProblem, ChatTabQueuedPrompt, ChatTabSend, ChatTabStatus, ChatTabView } from '../../../../shared/types/chatTab';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
@@ -50,6 +50,11 @@ export interface ChatTabManagerOptions {
   /** The tab was closed; nothing about it is published again (its Notify cards close). */
   onClosed?: (panelId: string) => void;
   windowMessages?: number;
+  /**
+   * Conversations open in Pane tabs on this machine other than `panelId` (and the terminal it replaced),
+   * by conversation ID. "Most recent" and the picker never open one of them (D-282).
+   */
+  openConversations?: (panelId: string) => Map<string, { panelId: string; title: string }>;
   /** How long closing, stopping or quitting waits for a tab's agent to end. Default 5 s. */
   stopTimeoutMs?: number;
 }
@@ -224,6 +229,49 @@ export class ChatTabManager {
     this.publish(panelId);
   }
 
+  /** The folder's past conversations for the picker, newest first, with this tab's and other tabs' marked. */
+  async conversations(panelId: string): Promise<ChatTabConversation[]> {
+    const state = this.required(panelId);
+    const runtime = this.liveRuntime(panelId);
+    const elsewhere = this.options.openConversations?.(panelId) ?? new Map();
+    return newestFirst(await runtime.list(state.cwd)).map(session => {
+      const entry: ChatTabConversation = { sessionId: session.sessionId };
+      if (session.title) entry.title = session.title;
+      if (session.updatedAt) entry.updatedAt = session.updatedAt;
+      if (session.sessionId === state.acpSessionId) entry.current = true;
+      else {
+        const open = elsewhere.get(session.sessionId);
+        if (open) entry.openIn = open;
+      }
+      return entry;
+    });
+  }
+
+  /**
+   * Reloads the tab on another conversation of its folder (/resume, "Pick another"). Refused while the
+   * agent works, and for a conversation another Pane tab has open: two processes never write one.
+   */
+  async resume(panelId: string, sessionId: string): Promise<void> {
+    const state = this.required(panelId);
+    const tab = this.tab(panelId);
+    if (state.turn || tab.delivering || tab.runtime?.isRunning() || tab.runtime?.isWorkingAlone()) {
+      throw new PaneError('CHAT_RESUME_BUSY', 'The agent is in the middle of a turn, so the conversation was not changed.', 'Wait for it to finish, or press Stop, then pick again.');
+    }
+    if (sessionId === state.acpSessionId) return;
+    const open = this.options.openConversations?.(panelId).get(sessionId);
+    if (open) throw new PaneError('CHAT_RESUME_OPEN_ELSEWHERE', `That conversation is open in tab "${open.title}", so it was not opened here.`, 'Switch to that tab, or close it first and pick again.');
+    console.log(`[ChatTabs] ${panelId} continues conversation ${sessionId}${state.acpSessionId ? ` instead of ${state.acpSessionId}` : ''}.`);
+    this.update(panelId, current => ({ ...current, acpSessionId: sessionId, open: undefined, banner: undefined, turn: undefined }));
+    await this.restart(panelId);
+  }
+
+  /** Closes the Switch to chat banner or note. */
+  dismissBanner(panelId: string): void {
+    if (!this.required(panelId).banner) return;
+    this.update(panelId, current => ({ ...current, banner: undefined }));
+    this.publish(panelId);
+  }
+
   /** `runpane report` from the tab's agent; kept in its state like a terminal agent tab's report. */
   setReport(panelId: string, report: NonNullable<ChatPanelState['agentReport']>): void {
     this.update(panelId, state => ({ ...state, agentReport: report }));
@@ -305,6 +353,11 @@ export class ChatTabManager {
     tab.runtime = runtime;
     try {
       await runtime.start();
+      if (this.required(panelId).open === 'most-recent' && !this.required(panelId).acpSessionId) {
+        const chosen = await this.mostRecent(panelId, runtime);
+        if (tab.run !== generation) return;
+        this.update(panelId, current => ({ ...current, open: undefined, acpSessionId: chosen.sessionId, banner: chosen.banner }));
+      }
       const state = this.required(panelId);
       const request: NewSessionRequest = { cwd: state.cwd, mcpServers: launch.mcpServers ?? [] };
       if (launch.meta) request._meta = launch.meta;
@@ -342,6 +395,23 @@ export class ChatTabManager {
       this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent));
       throw failure;
     }
+  }
+
+  /**
+   * Switch to chat when Pane wasn't sure of the terminal's conversation (D-282): the folder's newest
+   * conversation that no other Pane tab has open. None left, or no list, starts a new one, and says so.
+   */
+  private async mostRecent(panelId: string, runtime: ChatTabRuntime): Promise<{ sessionId?: string; banner: ChatTabSwitchBanner }> {
+    const elsewhere = this.options.openConversations?.(panelId) ?? new Map();
+    let sessions: SessionInfo[];
+    try { sessions = newestFirst(await runtime.list(this.required(panelId).cwd)); }
+    catch (error) {
+      console.warn(`[ChatTabs] ${panelId} could not list its folder's conversations, so it starts a new one: ${reasonOf(error)}`);
+      return { banner: { kind: 'list-failed', reason: reasonOf(error).replace(/\.$/, '') } };
+    }
+    const chosen = sessions.find(session => !elsewhere.has(session.sessionId));
+    console.log(`[ChatTabs] ${panelId} opens ${chosen ? `the folder's most recent conversation ${chosen.sessionId}` : 'a new conversation'}: ${sessions.length} listed, ${sessions.length - sessions.filter(session => !elsewhere.has(session.sessionId)).length} open in other tabs.`);
+    return chosen ? { sessionId: chosen.sessionId, banner: { kind: 'most-recent' } } : { banner: { kind: 'none' } };
   }
 
   private async applySettings(panelId: string, runtime: ChatTabRuntime): Promise<void> {
@@ -498,7 +568,7 @@ export class ChatTabManager {
       schema: 'requestedSchema' in question.request ? decodeBoundary(question.request.requestedSchema, boundary.json) : {},
       toolCallId: decodeOptionalBoundary(question.request, boundary.object({ toolCallId: boundary.optional(boundary.string) }))?.toolCallId,
     })) : [];
-    return {
+    const view: ChatTabView = {
       panelId, agent: state.agent, generation: tab.generation, status: this.status(state, tab), problem: state.problem, notice: tab.notice,
       canAttachImages: tab.runtime?.supportsImages() ?? false,
       controls: runtime?.controls() ?? [], commands: runtime?.commands() ?? [],
@@ -507,6 +577,8 @@ export class ChatTabManager {
       transcript: tab.transcript && limit > 0 && !tab.loading && !tab.starting ? tab.transcript.snapshot(limit) : undefined,
       messageCount: tab.transcript?.count() ?? 0,
     };
+    if (state.banner) view.banner = state.banner;
+    return view;
   }
 
   private status(state: ChatPanelState, tab: Tab): ChatTabStatus {
@@ -559,6 +631,14 @@ function toAgentState(view: ChatTabView): AgentState {
   if (view.status === 'blocked' || (view.status === 'stopped' && view.problem)) return 'blocked';
   if (view.status === 'working' || view.status === 'starting') return 'working';
   return view.status === 'idle' ? 'idle' : 'unknown';
+}
+
+/** Newest first by the agent's `updatedAt`, undated last; the agent's own order breaks ties. */
+function newestFirst(sessions: SessionInfo[]): SessionInfo[] {
+  const time = (session: SessionInfo) => { const at = session.updatedAt ? Date.parse(session.updatedAt) : Number.NaN; return Number.isNaN(at) ? -Infinity : at; };
+  return sessions.map((session, index) => ({ session, index, at: time(session) }))
+    .sort((a, b) => (a.at === b.at ? 0 : b.at > a.at ? 1 : -1) || a.index - b.index)
+    .map(entry => entry.session);
 }
 
 function safeName(panelId: string): string { return createHash('sha256').update(panelId).digest('hex').slice(0, 32); }

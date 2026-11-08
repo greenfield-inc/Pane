@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ToolPanel, TerminalPanelState } from '../../../../shared/types/panels';
-import type { ChatPanelState } from '../../../../shared/types/chatTab';
+import type { ChatPanelState, ChatTabSwitchBanner } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
-import { switchToChat, terminalConversation, terminalRestored, type SessionAdoption, type SwitchToChatPorts } from './switchToChat';
+import { switchToChat, terminalConversation, terminalRestored, type SessionAdoption, type SwitchToChatPorts, type TerminalConversation } from './switchToChat';
 import { withSessionFolderAccess } from '../agents/sessionFolderAccess';
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 
@@ -15,8 +15,10 @@ interface World {
   loadable: Set<string>;
   startError?: PaneError;
   enabled: boolean;
-  /** Why the conversation is not known, when it is not. */
-  noConversation?: string;
+  /** What Pane knows about the terminal's conversation. */
+  conversation: TerminalConversation;
+  /** The banner the started chat ends up with (the manager resolves "most recent" at start). */
+  startedBanner?: ChatTabSwitchBanner;
   /** The Session's saved launch for this tab, when it is a Session orchestrator. */
   sessionCommand?: string;
   /** The Session that owns the terminal, by its agent tab ID. */
@@ -32,7 +34,7 @@ function terminal(state: Partial<TerminalPanelState>, extra: Partial<ToolPanel> 
 }
 
 function world(panel: ToolPanel, overrides: Partial<World> = {}) {
-  const w: World = { panels: new Map([[panel.id, panel]]), log: [], chats: new Map(), busy: false, loadable: new Set(['conv-1']), enabled: true, ...overrides };
+  const w: World = { panels: new Map([[panel.id, panel]]), log: [], chats: new Map(), busy: false, loadable: new Set(['conv-1']), enabled: true, conversation: { sure: true, id: 'conv-1', messages: true }, ...overrides };
   let next = 0;
   const ports: SwitchToChatPorts = {
     chatTabsEnabled: () => w.enabled,
@@ -40,7 +42,7 @@ function world(panel: ToolPanel, overrides: Partial<World> = {}) {
     paneDirectory: () => '/work/pane-1',
     terminal: {
       busy: async () => w.busy,
-      conversationId: async () => w.noConversation ? { problem: w.noConversation } : { id: 'conv-1' },
+      conversation: async () => w.conversation,
       stop: async id => { w.log.push(`stop ${id}`); },
       restart: async id => {
         if (w.restartFails) throw new Error('shell is gone');
@@ -56,15 +58,17 @@ function world(panel: ToolPanel, overrides: Partial<World> = {}) {
         expect(replaces.id).toBe(panel.id);
         const id = `chat-${++next}`;
         w.chats.set(id, state);
-        w.log.push(`create ${id} load ${state.acpSessionId}`);
+        w.log.push(`create ${id} ${state.open ? `open ${state.open}` : state.acpSessionId ? `load ${state.acpSessionId}` : 'new'}`);
         return id;
       },
       start: async id => {
         if (w.startError) throw w.startError;
         const state = w.chats.get(id)!;
-        if (!w.loadable.has(state.acpSessionId ?? '')) throw new PaneError('CHAT_START_FAILED', 'Resource not found', 'Press Restart.');
+        if (state.acpSessionId && !w.loadable.has(state.acpSessionId)) throw new PaneError('CHAT_START_FAILED', 'Resource not found', 'Press Restart.');
+        if (w.startedBanner) w.chats.set(id, { ...state, banner: w.startedBanner });
         w.log.push(`started ${id}`);
       },
+      banner: id => w.chats.get(id)?.banner,
       close: async id => { w.log.push(`close ${id}`); w.chats.delete(id); },
       activate: async id => { w.log.push(`activate ${id}`); },
     },
@@ -83,7 +87,7 @@ function world(panel: ToolPanel, overrides: Partial<World> = {}) {
 describe('Switch to chat', () => {
   it('reopens the conversation in a chat tab with the same launch, then closes the terminal', async () => {
     const { world: w, ports } = world(terminal({ launchCommand: 'agent-farm run greenfield/orchestrator --arg docs=grain', orchestrationSessionId: 'session-1', sessionFolder: '/sessions/one' }));
-    await expect(switchToChat('term', ports)).resolves.toEqual({ panelId: 'chat-1', terminalKept: false });
+    await expect(switchToChat('term', ports)).resolves.toEqual({ panelId: 'chat-1', terminalKept: false, outcome: 'known' });
     expect(w.log).toEqual(['stop term', 'create chat-1 load conv-1', 'started chat-1', 'adopt term -> chat-1', 'activate chat-1', 'close term']);
     expect(w.chats.get('chat-1')).toMatchObject({
       agent: 'claude', acpSessionId: 'conv-1', cwd: '/work/pane-1',
@@ -91,6 +95,49 @@ describe('Switch to chat', () => {
       orchestrationSessionId: 'session-1', sessionFolder: '/sessions/one',
     });
     expect(w.chats.get('chat-1')?.initialInput).toBeUndefined();
+    expect(w.chats.get('chat-1')?.banner).toBeUndefined();
+    expect(w.chats.get('chat-1')?.notice).toBeUndefined();
+  });
+
+  it('starts a new conversation with the "no messages yet" note when the known conversation has none, never loading or restarting it (J3)', async () => {
+    const { world: w, ports } = world(terminal({}), { conversation: { sure: true, id: 'conv-empty', messages: false } });
+    await expect(switchToChat('term', ports)).resolves.toMatchObject({ terminalKept: false, outcome: 'new' });
+    expect(w.log).toEqual(['stop term', 'create chat-1 new', 'started chat-1', 'adopt term -> chat-1', 'activate chat-1', 'close term']);
+    expect(w.chats.get('chat-1')).toMatchObject({ banner: { kind: 'known-empty' } });
+    expect(w.chats.get('chat-1')?.acpSessionId).toBeUndefined();
+  });
+
+  it('opens the folder\'s most recent conversation when Pane is not sure, and reports it (J4)', async () => {
+    const { world: w, ports } = world(terminal({}), { conversation: { sure: false, why: 'no report' }, startedBanner: { kind: 'most-recent' } });
+    await expect(switchToChat('term', ports)).resolves.toMatchObject({ terminalKept: false, outcome: 'most-recent' });
+    expect(w.log.slice(0, 3)).toEqual(['stop term', 'create chat-1 open most-recent', 'started chat-1']);
+    expect(w.chats.get('chat-1')?.acpSessionId).toBeUndefined();
+  });
+
+  it('reports a new conversation when nothing in the folder could be opened (J5)', async () => {
+    const { ports } = world(terminal({}), { conversation: { sure: false, why: 'no report' }, startedBanner: { kind: 'none' } });
+    await expect(switchToChat('term', ports)).resolves.toMatchObject({ outcome: 'new' });
+  });
+
+  it('leaves the terminal stopped when Pane was not sure and the chat fails, and says so (J8)', async () => {
+    const { world: w, ports } = world(terminal({}), { conversation: { sure: false, why: 'no report' }, startError: new PaneError('CHAT_START_FAILED', 'The chat agent didn\'t start within 60 seconds.', 'Press Restart.') });
+    const failure = await switchToChat('term', ports).catch(error => error);
+    expect(failure).toMatchObject({ code: 'CHAT_SWITCH_NOT_STARTED' });
+    expect(failure.message).toBe('The chat agent didn\'t start within 60 seconds. The terminal is stopped, because Pane wasn\'t sure which conversation to restart it on. Your conversations are saved.');
+    expect(w.log).toEqual(['stop term', 'create chat-1 open most-recent', 'close chat-1']);
+    expect(w.log).not.toContain('restart term');
+  });
+
+  it('never restarts a terminal on a known conversation with no messages when the chat fails (bug case A)', async () => {
+    const { world: w, ports } = world(terminal({}), { conversation: { sure: true, id: 'conv-empty', messages: false }, startError: new PaneError('CHAT_START_FAILED', 'Adapter exited', 'Press Restart.') });
+    await expect(switchToChat('term', ports)).rejects.toMatchObject({ code: 'CHAT_SWITCH_NOT_STARTED', message: expect.stringContaining('no messages yet') });
+    expect(w.log).not.toContain('restart term');
+  });
+
+  it('decides what it is sure of before the stop, and sends the terminal nothing when it changes nothing (J10)', async () => {
+    const { world: w, ports } = world(terminal({}), { busy: true, conversation: { sure: false, why: 'no report' } });
+    await expect(switchToChat('term', ports)).rejects.toMatchObject({ code: 'CHAT_SWITCH_BUSY' });
+    expect(w.log).toEqual([]);
   });
 
   it('fails cleanly when the conversation does not reopen: the actual reason, no chat tab, the terminal running again', async () => {
@@ -98,28 +145,17 @@ describe('Switch to chat', () => {
     const failure = await switchToChat('term', ports).catch(error => error);
     expect(failure).toBeInstanceOf(PaneError);
     expect(failure.code).toBe('CHAT_SWITCH_FAILED');
-    expect(failure.message).toContain('ACP adapter not found');
-    expect(failure.message).toContain('running the same conversation again');
-    expect(failure.next).toBe('Check the profile name.');
+    expect(failure.message).toBe('Agent Farm could not prepare greenfield/orchestrator: ACP adapter not found. The terminal is back on the same conversation (conv-1), with its history.');
+    expect(failure.message).not.toMatch(/starting a new one|running the same conversation again/);
+    expect(failure.next).toMatch(/Try again/);
     expect(w.log).toEqual(['stop term', 'create chat-1 load conv-1', 'close chat-1', 'restart term']);
     expect(w.chats.size).toBe(0);
     expect(w.panels.has('term')).toBe(true);
   });
 
-  it('does not pass on a next step about the chat tab it removed', async () => {
-    const { ports } = world(terminal({}), { loadable: new Set() });
-    await expect(switchToChat('term', ports)).rejects.toMatchObject({ code: 'CHAT_SWITCH_FAILED', next: 'Keep working in the terminal.' });
-  });
-
   it('says so when the terminal does not come back either', async () => {
     const { ports } = world(terminal({}), { loadable: new Set(), restartFails: true });
-    await expect(switchToChat('term', ports)).rejects.toMatchObject({ code: 'CHAT_SWITCH_FAILED', message: expect.stringContaining('did not start again (shell is gone)') });
-  });
-
-  it('touches nothing when it cannot tell which conversation the terminal is running', async () => {
-    const { world: w, ports } = world(terminal({ agentType: 'codex' }), { noConversation: 'Codex has saved no conversation for this terminal yet' });
-    await expect(switchToChat('term', ports)).rejects.toMatchObject({ code: 'CHAT_SWITCH_NO_CONVERSATION', message: expect.stringContaining('no conversation') });
-    expect(w.log).toEqual([]);
+    await expect(switchToChat('term', ports)).rejects.toMatchObject({ code: 'CHAT_SWITCH_FAILED', message: expect.stringMatching(/did not start again \(shell is gone\), so it is stopped\. Its conversation \(conv-1\) is saved\./) });
   });
 
   it('asks the person to wait or stop a mid-turn agent, and touches nothing', async () => {
@@ -210,14 +246,24 @@ describe('whether the terminal came back after a failed switch', () => {
   });
 });
 
-describe('which conversation a terminal is running (review F-9)', () => {
-  it('is the ID Pane started or resumed it with, or the one its launch reported', () => {
-    expect(terminalConversation({ agentType: 'claude', agentSessionId: 'conv-a' }, 'reported')).toEqual({ id: 'conv-a' });
-    expect(terminalConversation({ agentType: 'claude' }, 'agent-farm-id')).toEqual({ id: 'agent-farm-id' });
+describe('which conversation Pane is sure a terminal is on (D-269)', () => {
+  const report = { id: 'conv-a', source: 'clear', launchId: 'launch-2', reportedAt: '2026-11-08T00:00:00Z' };
+  const found = () => 'found' as const;
+
+  it('is sure only of a report from the launch running now', () => {
+    expect(terminalConversation({ agentType: 'claude', conversationReport: report }, 'launch-2', found)).toEqual({ sure: true, id: 'conv-a', messages: true });
+    expect(terminalConversation({ agentType: 'claude', conversationReport: report }, 'launch-3', found)).toMatchObject({ sure: false, why: expect.stringContaining('earlier launch') });
+    expect(terminalConversation({ agentType: 'claude', conversationReport: report }, undefined, found)).toMatchObject({ sure: false });
+    expect(terminalConversation({ agentType: 'claude' }, 'launch-2', found)).toMatchObject({ sure: false });
   });
 
-  it('is never guessed for a Codex terminal that has reported none, even when another conversation is active in its folder', () => {
-    expect(terminalConversation({ agentType: 'codex' }, undefined)).toEqual({ problem: expect.stringContaining('Codex reports its conversation ID only when it exits') });
-    expect(terminalConversation({ agentType: 'claude' }, undefined)).toEqual({ problem: 'this terminal has no saved conversation ID' });
+  it('is never sure of a Codex terminal, even with a report', () => {
+    expect(terminalConversation({ agentType: 'codex', conversationReport: report }, 'launch-2', found)).toMatchObject({ sure: false });
+  });
+
+  it('knows a conversation with no transcript has no messages, and is not sure when two transcripts share its ID', () => {
+    expect(terminalConversation({ agentType: 'claude', conversationReport: report }, 'launch-2', () => 'missing')).toEqual({ sure: true, id: 'conv-a', messages: false });
+    expect(terminalConversation({ agentType: 'claude', conversationReport: report }, 'launch-2', () => 'unknown')).toEqual({ sure: true, id: 'conv-a', messages: true });
+    expect(terminalConversation({ agentType: 'claude', conversationReport: report }, 'launch-2', () => 'ambiguous')).toMatchObject({ sure: false, why: expect.stringContaining('two transcripts') });
   });
 });
