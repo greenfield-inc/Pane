@@ -476,6 +476,26 @@ describe('chat tab manager', () => {
     expect(() => manager.editQueued('p1', 'op-2', 'late')).toThrow(expect.objectContaining({ code: 'CHAT_NOT_QUEUED' }));
   });
 
+  it('editQueued keeps the original message when the queue state cannot be saved (review F-1)', async () => {
+    const store = new CeilingStore();
+    const { manager, directory } = harness(store);
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'permission' });
+    await expect.poll(() => manager.view('p1').permissions.length).toBe(1);
+    // Long enough to be stored as a body file, as a real queued message with images or a long text is.
+    const original = `Run only the unit tests ${'.'.repeat(600)}`;
+    manager.send('p1', { operationId: 'op-2', text: original });
+    store.refuseQueue = true;
+    expect(() => manager.editQueued('p1', 'op-2', 'Run the integration suite too')).toThrow(expect.objectContaining({ code: 'CHAT_STATE_NOT_SAVED' }));
+    store.refuseQueue = false;
+    expect(manager.view('p1').queue.map(item => item.text.slice(0, 23))).toEqual(['Run only the unit tests']);
+    const [permission] = manager.view('p1').permissions;
+    manager.answerPermission('p1', permission.id, 'allow');
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state).toBe('completed');
+    expect(userTexts(manager.view('p1')).at(-1)).toBe(original);
+  });
+
   it('editQueued refuses to empty a text-only message', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));

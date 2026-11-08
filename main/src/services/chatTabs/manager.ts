@@ -218,7 +218,18 @@ export class ChatTabManager {
     catch (error) { throw new PaneError('CHAT_PROMPT_NOT_SAVED', `The edited message could not be saved on this machine (${reasonOf(error)}). The queued message was not changed.`, 'Check free disk space, then edit it again.'); }
     const replacement: ChatTabQueuedPrompt = { operationId, text: text.slice(0, QUEUE_PREVIEW), queuedAt: item.queuedAt, stored: true };
     if (edited.images?.length) replacement.imageCount = edited.images.length;
-    this.update(panelId, current => ({ ...current, queue: current.queue?.map(entry => entry.operationId === operationId ? replacement : entry) }));
+    try {
+      this.update(panelId, current => ({ ...current, queue: current.queue?.map(entry => entry.operationId === operationId ? replacement : entry) }));
+    } catch (error) {
+      // The queue still shows the old text, so the delivered body must stay the old one too (review F-1).
+      try {
+        if (item.stored) this.bodies.write(panelId, operationId, body);
+        else this.bodies.remove(panelId, operationId);
+      } catch (restore) {
+        throw new PaneError('CHAT_QUEUED_EDIT_UNCERTAIN', `The edit could not be saved, and the original text could not be put back (${reasonOf(restore)}), so this queued message may send the edited text.`, 'Remove it from the queue and send it again.');
+      }
+      throw error;
+    }
     this.publish(panelId);
   }
 
