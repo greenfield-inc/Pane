@@ -385,7 +385,7 @@ describe('toggleMaximizedTile', () => {
 
   it('survives a save and load, and an older layout simply lacks it', () => {
     const maximized = toggleMaximizedTile(two(), 't1');
-    expect(decodeSessionWorkspaceLayout(JSON.parse(JSON.stringify(maximized)))?.maximizedTileId).toBe('t1');
+    expect(decodeSessionWorkspaceLayout(structuredClone(maximized))?.maximizedTileId).toBe('t1');
     expect(decodeSessionWorkspaceLayout({ ...maximized, maximizedTileId: 'gone' })?.maximizedTileId).toBeUndefined();
     expect(decodeSessionWorkspaceLayout(two())?.maximizedTileId).toBeUndefined();
   });

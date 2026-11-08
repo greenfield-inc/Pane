@@ -67,8 +67,8 @@ function atPath(root: Element, path: readonly number[]): HTMLElement | null {
 
 function scrollers(root: Element): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>('*')).filter(element =>
-    element.scrollHeight > element.clientHeight + 1 || element.scrollWidth > element.clientWidth + 1
-  ).filter(element => element.scrollTop > 0 || element.scrollLeft > 0);
+    (element.scrollTop > 0 || element.scrollLeft > 0)
+    && (element.scrollHeight > element.clientHeight + 1 || element.scrollWidth > element.clientWidth + 1));
 }
 
 function focusKindOf(element: Element | null): ReturnPlace['focusKind'] {
