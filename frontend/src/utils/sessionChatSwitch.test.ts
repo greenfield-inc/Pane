@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionChatSwitchOutcome } from '../../../shared/types/chatTab';
-import { summarizeSessionSwitch } from './sessionChatSwitch';
+import { byResult, summarizeSessionSwitch } from './sessionChatSwitch';
 
 let next = 0;
 function item(result: SessionChatSwitchOutcome['result'], kind?: 'busy' | 'plain-codex' | 'other'): SessionChatSwitchOutcome {
@@ -15,5 +15,13 @@ describe('the summary after switching a Session to chat', () => {
     expect(summarizeSessionSwitch([item('switched'), item('skipped', 'busy'), item('skipped', 'busy'), item('skipped', 'plain-codex'), item('failed', 'other')]))
       .toBe('1 switched, 3 skipped: busy, plain Codex, 1 failed');
     expect(summarizeSessionSwitch([item('failed', 'other')])).toBe('0 switched, 1 failed');
+  });
+});
+
+describe('sorting the outcomes for the result view', () => {
+  it('groups each tab under what happened to it, keeping Session order', () => {
+    const outcomes = [item('skipped', 'busy'), item('switched'), item('failed', 'other'), item('switched')].map((outcome, index) => ({ ...outcome, panelId: `p-${index}` }));
+    const groups = byResult(outcomes);
+    expect([groups.switched, groups.failed, groups.skipped].map(list => list.map(outcome => outcome.panelId))).toEqual([['p-1', 'p-3'], ['p-2'], ['p-0']]);
   });
 });

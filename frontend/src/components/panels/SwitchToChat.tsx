@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { ToolPanel, TerminalPanelState } from '../../../../shared/types/panels';
+import type { ToolPanel } from '../../../../shared/types/panels';
+import { isAgentTerminal } from '../../utils/agentTerminal';
 import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
 import { useHotkey } from '../../hooks/useHotkey';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -7,13 +8,6 @@ import { useErrorStore } from '../../stores/errorStore';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { Button } from '../ui/Button';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui/Modal';
-
-/** Whether a tab is a terminal running Claude or Codex, the agents a chat tab can run. */
-export function isAgentTerminal(panel: ToolPanel | undefined): panel is ToolPanel {
-  // SAFETY: terminal panels persist TerminalPanelState as their custom state.
-  const agent = panel?.type === 'terminal' ? (panel.state.customState as TerminalPanelState | undefined)?.agentType : undefined;
-  return agent === 'claude' || agent === 'codex';
-}
 
 /** Whether Switch to chat is offered for this tab: chat tabs are on and it is a terminal Claude or Codex tab. */
 function useCanSwitchToChat(panel: ToolPanel | undefined): boolean {

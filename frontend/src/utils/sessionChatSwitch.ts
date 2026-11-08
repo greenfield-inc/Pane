@@ -53,15 +53,23 @@ export function switchable(items: readonly SessionChatSwitchItem[]): SessionChat
   return items.filter(item => !item.skip);
 }
 
+export interface OutcomesByResult { switched: SessionChatSwitchOutcome[]; failed: SessionChatSwitchOutcome[]; skipped: SessionChatSwitchOutcome[] }
+
+/** The outcomes sorted by what happened to each tab, in one pass and in Session order. */
+export function byResult(items: readonly SessionChatSwitchOutcome[]): OutcomesByResult {
+  const groups: OutcomesByResult = { switched: [], failed: [], skipped: [] };
+  for (const item of items) groups[item.result].push(item);
+  return groups;
+}
+
 /** "4 switched, 1 skipped: busy": each skip kind once, in the order it first appears. */
 export function summarizeSessionSwitch(items: readonly SessionChatSwitchOutcome[]): string {
-  const skipped = items.filter(item => item.result === 'skipped');
-  const failed = items.filter(item => item.result === 'failed').length;
-  const parts = [`${items.filter(item => item.result === 'switched').length} switched`];
+  const { switched, failed, skipped } = byResult(items);
+  const parts = [`${switched.length} switched`];
   if (skipped.length) {
     const kinds = [...new Set(skipped.map(item => skipLabel(item.skip?.kind ?? 'other')))];
     parts.push(`${skipped.length} skipped: ${kinds.join(', ')}`);
   }
-  if (failed) parts.push(`${failed} failed`);
+  if (failed.length) parts.push(`${failed.length} failed`);
   return parts.join(', ');
 }

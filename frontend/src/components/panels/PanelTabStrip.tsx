@@ -23,7 +23,8 @@ import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
 import { getPanelIcon } from './panelIcon';
 import { editorPanelState, pinEditorPanel } from '../../services/openFileInEditor';
 import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
-import { isAgentTerminal, SwitchToChatDialog } from './SwitchToChat';
+import { SwitchToChatDialog } from './SwitchToChat';
+import { isAgentTerminal } from '../../utils/agentTerminal';
 
 // ---------------------------------------------------------------------------
 // Types

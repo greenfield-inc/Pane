@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { SessionChatSwitchItem, SessionChatSwitchPreview, SessionChatSwitchResult } from '../../../shared/types/chatTab';
 import { isChatTabsEnabled, useConfigStore } from '../stores/configStore';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
-import { previewSessionChatSwitch, runSessionChatSwitch, skipLabel, summarizeSessionSwitch, switchable, type SessionSwitchWhere } from '../utils/sessionChatSwitch';
+import { byResult, previewSessionChatSwitch, runSessionChatSwitch, skipLabel, summarizeSessionSwitch, switchable, type SessionSwitchWhere } from '../utils/sessionChatSwitch';
 import { Button } from './ui/Button';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 
@@ -28,6 +28,8 @@ export function useSessionSwitchPreview(where: SessionSwitchWhere, sessionId: st
   }, [chatTabsHere, machineId, sessionId]);
   return preview;
 }
+
+const tabs = (count: number) => `${count} tab${count === 1 ? '' : 's'}`;
 
 function TabRow({ item, detail }: { item: SessionChatSwitchItem; detail?: string }) {
   return (
@@ -76,21 +78,21 @@ export function SessionSwitchToChatDialog({ where, sessionName, preview, onClose
     }
   };
 
-  const tabs = (count: number) => `${count} tab${count === 1 ? '' : 's'}`;
+  const done = result && byResult(result.items);
   return (
     <Modal isOpen onClose={() => { if (!busy) onClose(); }} ariaLabel="Switch Session to chat">
       <ModalHeader title={result ? 'Switched to chat' : `Switch ${sessionName} to chat`} />
       <ModalBody>
-        {result ? (<>
+        {result && done ? (<>
           <p role="status" className="text-sm font-medium text-text-primary" data-testid="session-switch-summary">{summarizeSessionSwitch(result.items)}</p>
-          {result.items.some(item => item.result === 'switched') && (
-            <Section title="Switched">{result.items.filter(item => item.result === 'switched').map(item => <TabRow key={item.panelId} item={item} detail={item.note} />)}</Section>
+          {done.switched.length > 0 && (
+            <Section title="Switched">{done.switched.map(item => <TabRow key={item.panelId} item={item} detail={item.note} />)}</Section>
           )}
-          {result.items.some(item => item.result === 'failed') && (
-            <Section title="Failed, terminal kept">{result.items.filter(item => item.result === 'failed').map(item => <TabRow key={item.panelId} item={item} detail={item.skip?.reason} />)}</Section>
+          {done.failed.length > 0 && (
+            <Section title="Failed, terminal kept">{done.failed.map(item => <TabRow key={item.panelId} item={item} detail={item.skip?.reason} />)}</Section>
           )}
-          {result.items.some(item => item.result === 'skipped') && (
-            <Section title="Skipped">{result.items.filter(item => item.result === 'skipped').map(item => <TabRow key={item.panelId} item={item} detail={item.skip && `${skipLabel(item.skip.kind)}: ${item.skip.reason}`} />)}</Section>
+          {done.skipped.length > 0 && (
+            <Section title="Skipped">{done.skipped.map(item => <TabRow key={item.panelId} item={item} detail={item.skip && `${skipLabel(item.skip.kind)}: ${item.skip.reason}`} />)}</Section>
           )}
         </>) : (<>
           <p className="text-sm text-text-secondary">
