@@ -32,10 +32,20 @@ orchestrator in a terminal. Open chat tabs keep working.
 
 ## Switching a terminal tab to chat
 
-**Switch to chat** (the speech-bubble button beside a terminal Claude or Codex
-tab's actions, the same button in a Session's toolbar, or the command palette)
-reopens the same conversation in a chat tab, or fails cleanly (D-129, D-184). It
-shows only with chat tabs on, and it never sends anything to your agent.
+**Switch to chat** (right-click a terminal Claude or Codex tab, or the command
+palette) reopens the same conversation in a chat tab, or fails cleanly (D-129,
+D-184, D-229). It shows only with chat tabs on, and it never sends anything to
+your agent.
+
+Right-click a Session in the sidebar (or on All machines, where it runs on the
+Session's own machine) and choose **Switch to chat…** to switch every terminal
+agent tab in it: the orchestrator and the agent tabs in its Panes. A dialog
+first lists the tabs that will switch and the ones it will skip, with why (busy
+mid-turn, plain Codex with no conversation ID yet, not an agent, a launch chat
+can't run). Pane then switches them one at a time the same way as one tab, so a
+tab that fails gets its terminal back and the others carry on, and the dialog
+ends with a summary such as "4 switched, 1 skipped: busy". The item is left out
+when nothing in the Session can switch.
 
 Nothing is touched when:
 

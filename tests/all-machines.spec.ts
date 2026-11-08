@@ -308,6 +308,52 @@ test('row actions run on the row\'s own machine without switching', async ({ pag
   await expect(page.getByRole('button', { name: 'Showing all machines. Switch machine' })).toBeVisible();
 });
 
+for (const scheme of ['light', 'dark'] as const) {
+  test(`Switch to chat on a Session runs on its own machine, after showing what it will skip (${scheme})`, async ({ page }, testInfo) => {
+    const tab = (panelId: string, paneName: string, title: string) => ({ panelId, paneName, title });
+    const busy = { kind: 'busy', reason: 'Claude is in the middle of a turn. Nothing was switched.' };
+    const plain = { kind: 'plain-codex', reason: 'Pane could not tell which conversation this terminal is running: Codex reports its conversation ID only when it exits. Nothing was switched.' };
+    const shell = { kind: 'not-agent', reason: 'Only a terminal tab running Claude or Codex can switch to chat. Nothing was switched.' };
+    const items = [
+      tab('s1-c', 'Session', 'Claude'), tab('p-1', 'terraform-upgrade', 'Claude'), tab('p-2', 'terraform-upgrade', 'Review'),
+      tab('p-3', 'terraform-upgrade', 'Codex'), { ...tab('p-4', 'terraform-upgrade', 'QA'), skip: busy },
+      { ...tab('p-5', 'terraform-upgrade', 'Codex 2'), skip: plain }, { ...tab('p-6', 'terraform-upgrade', 'Terminal'), skip: shell },
+    ];
+    await openAllMachines(page, scheme, { extra: { machineRunAnswers: { build: {
+      'preview-switch-to-chat': { sessionId: 's1', items },
+      'switch-to-chat': { sessionId: 's1', items: items.map(item => ({ ...item, result: item.skip ? 'skipped' : 'switched' })) },
+    } } } });
+
+    await sessionRows(page).filter({ hasText: 'Backup rotation' }).click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Switch to chat…' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`all-machines-session-menu-${scheme}.png`) });
+    await page.getByRole('menuitem', { name: 'Switch to chat…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Switch Session to chat' });
+    await expect(dialog).toContainText('Will switch (4)');
+    await expect(dialog).toContainText('Will skip (3)');
+    await expect(dialog).toContainText('plain Codex: ');
+    await page.screenshot({ path: testInfo.outputPath(`all-machines-session-switch-confirm-${scheme}.png`) });
+    await dialog.getByRole('button', { name: 'Switch 4 tabs' }).click();
+
+    await expect(dialog.getByTestId('session-switch-summary')).toHaveText('4 switched, 3 skipped: busy, plain Codex, not an agent');
+    await page.screenshot({ path: testInfo.outputPath(`all-machines-session-switch-summary-${scheme}.png`) });
+    expect(await (await mock(page)).evaluate(api => api.getMachineRuns())).toEqual([
+      { machineId: 'build', command: { type: 'preview-switch-to-chat', sessionId: 's1' } },
+      { machineId: 'build', command: { type: 'switch-to-chat', sessionId: 's1', panelIds: ['s1-c', 'p-1', 'p-2', 'p-3'] } },
+    ]);
+  });
+}
+
+test('a Session with nothing that can switch has no Switch to chat in its menu', async ({ page }) => {
+  await openAllMachines(page, 'light', { extra: { machineRunAnswers: { build: {
+    'preview-switch-to-chat': { sessionId: 's1', items: [{ panelId: 'p-6', paneName: 'terraform-upgrade', title: 'Terminal', skip: { kind: 'not-agent', reason: 'Not an agent.' } }] },
+  } } } });
+  await sessionRows(page).filter({ hasText: 'Backup rotation' }).click({ button: 'right' });
+  await expect.poll(async () => (await mock(page)).evaluate(api => api.getMachineRuns().length)).toBe(1);
+  await expect(page.getByRole('menuitem', { name: 'Rename Session…' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Switch to chat…' })).toHaveCount(0);
+});
+
 test('allowing a permission from the row menu shows what the agent will run on that machine first', async ({ page }, testInfo) => {
   await openAllMachines(page);
   const request = { id: 'req-1', sessionId: 'a1', toolName: 'Bash', input: { command: 'rm -rf /srv/releases' }, timestamp: 1 };

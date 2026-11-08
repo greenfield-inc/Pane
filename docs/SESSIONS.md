@@ -28,7 +28,8 @@ conversation, run in WSL, use a truly custom resume command or a wrapper launch,
 and Cursor Sessions, keep their terminal, and the Session's overview says why. A
 Session keeps the kind of tab it started with.
 A Claude or Codex Session already running in a terminal can move to chat with
-**Switch to chat** in its toolbar (see
+**Switch to chat…** in the Session's right-click menu, which switches every
+terminal agent tab in it (see
 [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).
 
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle

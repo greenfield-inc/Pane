@@ -20,7 +20,7 @@ import { visibleAgentPresets } from '../../utils/agentPresets';
 import { PanelTabStrip } from './PanelTabStrip';
 import { getPanelIcon } from './panelIcon';
 import { PromoteChatButton } from './PromoteChatButton';
-import { SwitchToChatButton } from './SwitchToChatButton';
+import { SwitchToChatPaletteEntry } from './SwitchToChat';
 import { CustomCommandForm } from './CustomCommandForm';
 import { AgentFarmProfileDialog } from '../chatTab/AgentFarmProfileDialog';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
@@ -423,7 +423,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   const rightActions = (
         <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
-          {activePanel && <SwitchToChatButton key={`switch-${activePanel.id}`} panel={activePanel} palette="pane" />}
+          {activePanel && <SwitchToChatPaletteEntry key={`switch-${activePanel.id}`} panel={activePanel} view="pane" />}
           {activePanel && <PromoteChatButton key={activePanel.id} panel={activePanel} paneName={session?.name} />}
           {/* Run Dev Server button */}
           {session && (
