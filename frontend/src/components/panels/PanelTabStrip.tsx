@@ -404,7 +404,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                       : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-8"),
                   ),
               isActive
-                ? (dimActive ? "text-text-secondary" : "text-text-primary")
+                ? (dimActive ? "text-text-tertiary" : "text-text-primary")
                 : isDisabled
                   ? "text-text-muted opacity-50"
                   : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover",
