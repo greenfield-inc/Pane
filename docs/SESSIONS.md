@@ -19,8 +19,8 @@ With [chat tabs](CHAT_TABS.md) on (Settings → Advanced → Chat tabs), a new C
 or Codex Session runs its orchestrator in a chat tab instead of a terminal, from
 the plain agent or the Session's `agent-farm run <profile>` launch, and sends its
 opening prompt once. Like every chat, finished turns fold to one row. A worker
-Pane shows up as one line with **Open** only when it finished, reported or is
-asking the person in the latest turn; the sidebar lists the rest. Workers the orchestrator
+Pane shows up as one line with **Open** while it is asking the person, and when
+it finished, failed or reported during the latest turn; the sidebar lists the rest. Workers the orchestrator
 starts stay terminal tabs. Agent Farm's standard resume template
 (`{command} --resume {sessionId}`, which the dialog saves) doesn't stop a chat,
 since a chat reopens through ACP. Sessions that resume or promote a terminal

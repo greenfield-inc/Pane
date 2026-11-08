@@ -18727,7 +18727,7 @@ export const RUNPANE_CONTRACT = {
       "panes pause": {
         "name": "panes pause",
         "summary": "Pause a Pane: stop every terminal tab and keep their conversations until the Pane is resumed.",
-        "details": "Pauses every terminal tab of a Pane, run scripts included, until `panes resume` resumes it. A Pane reads as paused (`panes list` `paused`) while all of its terminal tabs are. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
+        "details": "Pauses every terminal tab of a Pane, run scripts included, until `panes resume` resumes it. A chat tab can't pause yet, so its agent keeps running and the result counts it in `chatTabsNotPaused`. A Pane reads as paused (`panes list` `paused`) while all of its terminal tabs are. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -19389,7 +19389,7 @@ export const RUNPANE_CONTRACT = {
       "panels pause": {
         "name": "panels pause",
         "summary": "Pause a terminal tab: stop its process and keep its agent's conversation until it is resumed.",
-        "details": "Pauses one terminal tab until `panels resume --panel <panel-id>`, or its Pane or Session, resumes it. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
+        "details": "Pauses one terminal tab until `panels resume --panel <panel-id>`, or its Pane or Session, resumes it. A chat tab can't pause yet: pausing one fails with `ERR_RUNPANE_CHAT_NOT_PAUSABLE` and changes nothing. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
