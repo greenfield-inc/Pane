@@ -45,6 +45,8 @@ import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
 import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { KeySequenceHint } from './components/KeySequenceHint';
+import { KeymapNotice } from './components/KeymapNotice';
 import { RestartToUpdateToast } from './components/RestartToUpdateToast';
 import { useRestartToUpdateStore, useRestartToUpdateSync } from './stores/restartToUpdateStore';
 import { createVisibilityAwareInterval } from './utils/performanceUtils';
@@ -1037,6 +1039,8 @@ function App() {
         <FeedbackDialog isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
         <LoopDrawer />
         <RestartToUpdateToast />
+        <KeySequenceHint />
+        <KeymapNotice onOpenKeyboardShortcuts={() => openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' })} />
         <UpdateDialog
           isOpen={isUpdateDialogOpen}
           onClose={() => setIsUpdateDialogOpen(false)}
@@ -1082,10 +1086,15 @@ function App() {
           isOpen={showAddProjectDialog}
           onClose={() => setShowAddProjectDialog(false)}
         />
-        <Help isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+        <Help
+          isOpen={isHelpOpen}
+          onClose={() => setIsHelpOpen(false)}
+          onOpenKeyboardShortcuts={() => { setIsHelpOpen(false); openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' }); }}
+        />
         <Help
           isOpen={isKeyboardShortcutsOpen}
           onClose={() => setIsKeyboardShortcutsOpen(false)}
+          onOpenKeyboardShortcuts={() => { setIsKeyboardShortcutsOpen(false); openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' }); }}
           shortcutsOnly
         />
         <DocsDialog isOpen={isDocsOpen} onClose={() => setIsDocsOpen(false)} />
