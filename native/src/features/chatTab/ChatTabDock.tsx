@@ -75,7 +75,7 @@ export function QuestionCard({ question, disabled, onAnswer }: { question: ChatT
             else { const list = Array.isArray(current) ? current : []; set(field.key, chosen ? list.filter(entry => entry !== choice.value) : [...list, choice.value]); }
           }} />;
         })}</View>
-        : <TextInput testID={`chat-field-${field.key}`} accessibilityLabel={field.title} placeholder="Your own answer (optional)" placeholderTextColor={theme.chat.mutedForeground} editable={!disabled}
+        : <TextInput testID={`chat-field-${field.key}`} accessibilityLabel={field.title} placeholder={field.required ? 'Your answer' : 'Your own answer (optional)'} placeholderTextColor={theme.chat.mutedForeground} editable={!disabled}
           value={typeof values[field.key] === 'string' ? String(values[field.key]) : ''} onChangeText={text => set(field.key, text)} style={[styles.input, { color: theme.chat.foreground, borderColor: theme.chat.border }]} />}
     </View>)}
     <View style={styles.row}>

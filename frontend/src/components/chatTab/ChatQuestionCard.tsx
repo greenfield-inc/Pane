@@ -50,7 +50,7 @@ function Field({ field, value, disabled, onChange }: { field: QuestionField; val
   }
   return <label className="chat-question-field">{label}
     <input type={field.kind === 'number' ? 'number' : 'text'} className="chat-question-input" disabled={disabled} value={value === undefined || value === null ? '' : String(value)}
-      placeholder={field.kind === 'text' ? 'Your own answer (optional)' : undefined}
+      placeholder={field.kind === 'text' ? (field.required ? 'Your answer' : 'Your own answer (optional)') : undefined}
       onChange={event => {
         const raw = event.target.value;
         // An empty or partial number is left as text, never stored as 0 or NaN.
