@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, CornerDownLeft, X } from 'lucide-react';
-import type { NotifyCommand, NotifyItem, NotifySnapshot } from '../../../../shared/types/notify';
+import type { NotifyAnswer, NotifyCommand, NotifyItem, NotifySnapshot } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
-import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
+import { askedBy, cardAnswer, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
 import { ShortcutCap, UnreachableNotice } from './NotifyCard';
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
@@ -117,19 +117,19 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
       setText('');
       return;
     }
+    // Anything typed is a reply its asker reads (P1); a pick alone is the answer.
+    const sendAnswer = (answer: NotifyAnswer | null) => { if (answer) onCommand({ type: 'answer', id: item.id, answer }); };
     if (ask) {
-      const answer = (index >= 0 ? rows[index]?.label : text)?.trim();
-      if (answer) onCommand({ type: 'answer', id: item.id, answer: { text: answer } });
+      sendAnswer(cardAnswer(item, null, (index >= 0 ? rows[index]?.label : text) ?? ''));
       return;
     }
     if (index < 0) return;
     if (approval) {
-      const approved = index === 0;
-      onCommand({ type: 'answer', id: item.id, answer: trimmedNote ? { approved, note: trimmedNote } : { approved } });
+      sendAnswer(cardAnswer(item, { approved: index === 0 }, trimmedNote));
       return;
     }
     const label = rows[index]?.label;
-    if (label) onCommand({ type: 'answer', id: item.id, answer: trimmedNote ? { choice: label, note: trimmedNote } : { choice: label } });
+    if (label) sendAnswer(cardAnswer(item, { choice: label }, trimmedNote));
   };
 
   // Read the latest state from the key handler without re-binding it each render.

@@ -22,9 +22,10 @@ import { AWAY_BLOCK, controlLine, ITEMS_BLOCK, LOG_BLOCK, queuedControlLabel } f
 
 const ChatTabPanel = lazy(() => import('../chatTab/ChatTabPanel'));
 
-/** ← → step the stack, unless the person is typing or a page has focus. */
-function useStackKeys() {
+/** ← → step the stack, unless the person is typing or a page has focus, or an approval covers it (F-9). */
+function useStackKeys(covered: boolean) {
   useEffect(() => {
+    if (covered) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -35,7 +36,7 @@ function useStackKeys() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [covered]);
 }
 
 /** Running on <Session> / Paused, and every Session with its count (D-59). */
@@ -256,7 +257,8 @@ export function AutopilotView() {
   const pending = useAutopilotStore((state) => state.pending);
   const machine = useActiveMachineStore((state) => state.machine);
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
-  useStackKeys();
+  const approvalOpen = useApprovalColumnStore((state) => state.open.autopilot !== undefined);
+  useStackKeys(approvalOpen);
   // Opening Autopilot, or coming back to Pane on it, is how the person returns while Sentinel stays on (J29).
   useEffect(() => {
     markAutopilotOpened();

@@ -454,9 +454,11 @@ export function SessionWorkspacePanels({
   const right = rightSplit(layout);
   // Decided when it opens: over the split there was, or in a split of its own that ✕ collapses.
   const [approvalMode, setApprovalMode] = useState<'over' | 'split' | null>(null);
+  // Only once this visit's saved layout has loaded: opened from the sidebar count, the approval can
+  // arrive before the Session's split does, and deciding then would open a third column (F-8).
   useLayoutEffect(() => {
-    setApprovalMode(mode => (!approvalOpen ? null : mode ?? (right ? 'over' : 'split')));
-  }, [approvalOpen, right]);
+    setApprovalMode(mode => (!approvalOpen ? null : !loaded ? mode : mode ?? (right ? 'over' : 'split')));
+  }, [approvalOpen, right, loaded]);
   // The person closed the split under it: the column keeps its own.
   const placement = approvalMode === 'over' && !right ? 'split' : approvalMode;
   const [overlay, setOverlay] = useState<Overlay | null>(null);

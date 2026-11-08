@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { NotifyCard, type NotifyCardProps } from './NotifyCard';
-import { acceleratorFromKeys, askedBy, machineLabel, originOf, shortcutLabel, withMachineLabels } from './notifyFormat';
+import { acceleratorFromKeys, askedBy, cardAnswer, machineLabel, originOf, shortcutLabel, withMachineLabels } from './notifyFormat';
 
 const base: Omit<NotifyItem, 'ui' | 'title'> = {
   id: 'q1',
@@ -289,5 +289,15 @@ describe('receipts and actions on an inbox card', () => {
     expect(visible).not.toContain('stopped waiting');
     expect(text(render({ ...closed, closed: { by: 'pane', reason: 'Session archived', at: 1 } }, { form: 'inbox', view: 'expired' }))).not.toContain('Reopen');
     expect(text(render({ ...worker, state: 'expired' }, { form: 'inbox', view: 'expired' }))).toContain('Claude stopped waiting');
+  });
+
+  it('F-5: a floating card sends anything typed as a reply, a pick alone as the answer, and keeps a prompt\'s note a note', () => {
+    const options: NotifyItem = { ...base, ui: 'options', title: 'Ship?', choices: [{ label: 'Yes' }, { label: 'No' }] };
+    expect(cardAnswer(options, { choice: 'Yes' }, '')).toEqual({ choice: 'Yes' });
+    expect(cardAnswer(options, { choice: 'Yes' }, 'Can this be undone?')).toEqual({ picks: ['Yes'], text: 'Can this be undone?' });
+    expect(cardAnswer({ ...base, ui: 'ask', title: 'Which?' }, null, ' main ')).toEqual({ picks: [], text: 'main' });
+    expect(cardAnswer({ ...base, ui: 'approve', title: 'Apply?' }, { approved: false }, 'Not on Friday')).toEqual({ picks: ['Deny'], text: 'Not on Friday' });
+    expect(cardAnswer({ ...options, agentPrompt: { yes: 'Yes', no: 'No' } }, { choice: 'No' }, 'too broad')).toEqual({ choice: 'No', note: 'too broad' });
+    expect(cardAnswer({ ...options, optionsOnly: true }, null, 'Teal')).toBeNull();
   });
 });
