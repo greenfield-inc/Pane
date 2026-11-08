@@ -72,7 +72,7 @@ function StartCard({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending
     return (
       <div className="flex shrink-0 items-center gap-2.5 border-b border-border-primary bg-autopilot-subtle px-4 py-2 text-[13px]" data-testid="autopilot-start" role="status">
         <Navigation className="h-4 w-4 shrink-0 text-autopilot" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-text-primary">{blocked ?? 'Autopilot is stopped. Start picks the walk up where it was.'}</span>
+        <span className="min-w-0 flex-1 leading-snug text-text-primary">{blocked ?? 'Autopilot is stopped. Start picks the walk up where it was.'}</span>
         <button type="button" disabled={pending || !!blocked} onClick={() => void runAutopilot('start')} data-testid="autopilot-start-button"
           className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg bg-interactive px-3 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50">
           <Play className="h-3.5 w-3.5" aria-hidden="true" /> Start
