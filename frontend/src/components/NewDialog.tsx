@@ -28,6 +28,7 @@ import {
 } from '../utils/newOnMachine';
 import { cn } from '../utils/cn';
 import { openPaneTarget } from './terminal/openPaneLink';
+import { rememberOnMachine } from '../utils/machineRowActions';
 import { OrchestrationSessionForm } from './CreateOrchestrationSessionDialog';
 import { CreatePaneForm } from './CreateSessionDialog';
 import { MachineMark } from './machines/MachineMark';
@@ -87,9 +88,16 @@ async function openAfterSwitch(machineName: string, select: (() => Promise<Machi
   }
 }
 
+/**
+ * Opens the new Session once the switch has landed. The switch restores the Session
+ * New left in the machine's memory, so it is normally open already; selecting it
+ * then would reach a machine that is still restoring and be refused.
+ */
 async function openSession(sessionId: string): Promise<void> {
-  await useOrchestrationSessionStore.getState().select({ sessionId });
-  await useSessionStore.getState().setActiveSession(null);
+  if (useOrchestrationSessionStore.getState().selectedSessionId !== sessionId) {
+    await useOrchestrationSessionStore.getState().select({ sessionId });
+  }
+  if (useSessionStore.getState().activeSessionId !== null) await useSessionStore.getState().setActiveSession(null);
   useNavigationStore.getState().navigateToPaneChat();
 }
 
@@ -230,6 +238,8 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
             const name = requestedName || nextOrchestrationSessionName(await readSessionNames(machine));
             const sessionId = await createSessionOn(machine, { ...input, name, nameFromFirstMessage: !requestedName });
             rememberNewMachine(machine.id);
+            // Without the memory the switch still works; openSession then selects it after the restore.
+            await rememberOnMachine(machine.id, { kind: 'session', id: sessionId, name }).catch(() => undefined);
             onClose();
             void openAfterSwitch(machine.name, switchTo.current, () => openSession(sessionId));
             return;

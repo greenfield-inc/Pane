@@ -109,6 +109,39 @@ describe('Session selection per desktop', () => {
     await store.getState().load();
     store.getState().preferSelection('b');
     expect(store.getState().selectedSessionId).toBe('b');
+    expect(store.getState().selectionRevision).toBe(1);
+  });
+
+  // The Session workspace lets its stored layout's focus win only while the
+  // revision is zero, so the remembered Session must count (D-241).
+  it('counts landing on the remembered Session after a host switch as this desktop’s selection', async () => {
+    const store = await setup();
+    store.getState().invalidateHost();
+    store.getState().preferSelection('b');
+    expect(store.getState().selectionRevision).toBe(0);
+    list.mockResolvedValue(reply('a'));
+    await store.getState().refresh({ adoptServerSelection: true });
+    expect(store.getState()).toMatchObject({ selectedSessionId: 'b', selectionRevision: 1 });
+  });
+
+  it('does not count the host’s last-used Session as this desktop’s selection', async () => {
+    const store = await setup();
+    store.getState().invalidateHost();
+    list.mockResolvedValue(reply('a'));
+    await store.getState().refresh({ adoptServerSelection: true });
+    expect(store.getState()).toMatchObject({ selectedSessionId: 'a', selectionRevision: 0 });
+    await store.getState().refresh({ adoptServerSelection: true });
+    expect(store.getState().selectionRevision).toBe(0);
+  });
+
+  it('counts the remembered Session on first load, but only once', async () => {
+    list.mockResolvedValue(reply('a'));
+    const store = await freshStore();
+    store.getState().preferSelection('b');
+    await store.getState().load();
+    expect(store.getState()).toMatchObject({ selectedSessionId: 'b', selectionRevision: 1 });
+    await store.getState().refresh({ adoptServerSelection: true });
+    expect(store.getState().selectionRevision).toBe(1);
   });
 });
 
