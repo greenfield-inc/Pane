@@ -150,7 +150,8 @@ function focusInside(container: HTMLElement): boolean {
     const target = Array.from(scope.querySelectorAll<HTMLElement>(selector)).find(isShown);
     if (target) {
       target.focus({ preventScroll: true });
-      if (document.activeElement === target || target.tagName === 'WEBVIEW') return true;
+      // A focused <webview> is the document's active element too.
+      if (document.activeElement === target) return true;
     }
   }
   if (!container.hasAttribute('tabindex')) container.setAttribute('tabindex', '-1');
