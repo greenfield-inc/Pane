@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
 import type { AgentChatConfigOption } from '../../shared/types/agentChat';
-import type { ChatTabClient, ChatTabSend, ChatTabView } from '../../shared/types/chatTab';
+import type { ChatTabClient, ChatTabConversation, ChatTabSend, ChatTabSwitchBanner, ChatTabView } from '../../shared/types/chatTab';
 import '../../frontend/src/index.css';
 
 // A chat tab's composer in a column of a chosen width (?width=360), with Claude's settings.
@@ -35,6 +35,23 @@ const view: ChatTabView = {
     { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Nothing is waiting on you right now.' }] },
   ] },
 };
+// ?banner=most-recent|none|known-empty|list-failed: what Switch to chat did (D-282); ✕ closes it.
+const bannerParam = params.get('banner');
+const banner: ChatTabSwitchBanner | undefined = bannerParam === 'most-recent' || bannerParam === 'none' || bannerParam === 'known-empty' ? { kind: bannerParam }
+  : bannerParam === 'list-failed' ? { kind: 'list-failed', reason: 'Codex is signed out' } : undefined;
+if (banner) view.banner = banner;
+// The folder's conversations for the picker (/resume, Pick another); ?conversations=none lists none, ?busy=1 refuses a pick mid-turn.
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+const conversations: ChatTabConversation[] = params.get('conversations') === 'none' ? [] : [
+  { sessionId: 'c-1', title: 'Orchestrate Pane UI/UX improvements', updatedAt: minutesAgo(2), current: true },
+  { sessionId: 'c-2', title: 'Plan the approvals inbox', updatedAt: minutesAgo(60 * 24 + 30) },
+  { sessionId: 'c-3', title: 'Session orchestrator', updatedAt: minutesAgo(60 * 24 * 5) },
+  { sessionId: 'c-4', title: 'Review PR #1274', updatedAt: minutesAgo(12), openIn: { panelId: 'p-review', title: 'Review' } },
+];
+declare global { interface Window { qaResumed: string[]; qaDismissed: number } }
+window.qaResumed = [];
+window.qaDismissed = 0;
+const stateListeners = new Set<(next: ChatTabView) => void>();
 // ?files=1 copies dropped files "to the host" (D-139); what was copied and sent is kept for the test.
 declare global { interface Window { qaCopied: string[]; qaSent: ChatTabSend[]; qaReleaseCopies?: () => void } }
 window.qaCopied = [];
@@ -51,7 +68,15 @@ const saveFile = params.has('files') ? async ({ name }: { name: string; dataUrl:
 const client: ChatTabClient = {
   get: async () => structuredClone(view), history: async () => [], send: async (_panel, request) => { window.qaSent.push(request); return { operationId: request.operationId, state: 'accepted' }; }, receipt: async () => undefined,
   unqueue: async () => {}, cancel: async () => {}, permission: async () => {}, answer: async () => {}, restart: async () => {}, signIn: async () => ({ panelId: 'composer' }),
-  configure: async () => {}, onEvent: () => () => {}, onState: () => () => {},
+  configure: async () => {}, onEvent: () => () => {}, onState: callback => { stateListeners.add(callback); return () => stateListeners.delete(callback); },
+  conversations: async () => structuredClone(conversations),
+  resume: async (_panel, sessionId) => {
+    if (params.has('busy')) throw new Error("Error invoking remote method 'daemon:invoke': Error [CHAT_RESUME_BUSY]: Claude is in the middle of a turn, so the chat stayed on this conversation. Next: Stop the turn or wait for it to finish, then pick again.");
+    window.qaResumed.push(sessionId);
+    delete view.banner;
+    stateListeners.forEach(listener => listener(structuredClone(view)));
+  },
+  dismissBanner: async () => { window.qaDismissed++; delete view.banner; stateListeners.forEach(listener => listener(structuredClone(view))); },
 };
 const width = Number(params.get('width') ?? 360);
 createRoot(document.getElementById('root')!).render(
