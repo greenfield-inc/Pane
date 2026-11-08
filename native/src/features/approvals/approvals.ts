@@ -1,6 +1,6 @@
 import { decisionLine, receiptLine } from '@shared/approvalReceipts';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
-import type { NotifyItem, NotifyRemoteOpenLink, NotifySharedState } from '@shared/types/notify';
+import type { NotifyItem, NotifyLink, NotifyRemoteOpenLink, NotifySharedState } from '@shared/types/notify';
 
 import { NOTIFY_KIND_LABEL } from '@/features/notify/notifyQuestions';
 
@@ -297,6 +297,24 @@ export async function openApprovalLink(
   const after = await opener.readPanels().catch(() => undefined);
   const added = after?.find(id => !before.includes(id));
   return added ? { kind: 'opened', panelId: added } : { kind: 'opened' };
+}
+
+/**
+ * Where a `{ label, approval }` link opens on the approval screen: the item it names (by id) and
+ * the list that holds it, so Next and "1 of N" step through that list. Null when none of
+ * Approvals' lists holds it (a Q-n, which only the computer resolves, or an item past a day).
+ */
+export function approvalLinkTarget(state: NotifySharedState | undefined, ref: string, now: number): { id: string; list: ApprovalList } | null {
+  const lists: ApprovalList[] = ['waiting', 'stale', 'answered'];
+  const list = lists.find(candidate => approvalListOrder(state, candidate, now, 'recent').includes(ref));
+  return list ? { id: ref, list } : null;
+}
+
+/** A related link's chip icon: a page, another approval, or a file. */
+export function linkIcon(link: NotifyLink) {
+  if ('url' in link) return { ios: 'globe', android: 'language' } as const;
+  if ('approval' in link) return { ios: 'checkmark.circle', android: 'check_circle' } as const;
+  return { ios: 'doc.text', android: 'description' } as const;
 }
 
 /** An older machine's mirror of a worker's question: it takes no answer here. */

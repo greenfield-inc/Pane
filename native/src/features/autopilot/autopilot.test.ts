@@ -102,6 +102,8 @@ describe('the approval full screen', () => {
     const docs = relatedDocs(item({ links: [
       { label: 'cover-sheet.html', path: '/repo/tmp/plan/cover-sheet.html' },
       { label: 'Test build', url: 'http://localhost:5173/' },
+      // Another approval isn't a document, so it isn't listed.
+      { label: 'Q-19', approval: 'Q-19' },
     ] }), entry('e1', 'q14', { tabs: [
       { kind: 'item', label: 'Question', notifyId: 'q14' },
       { kind: 'file', label: 'cover-sheet.html', path: '/repo/tmp/plan/cover-sheet.html' },

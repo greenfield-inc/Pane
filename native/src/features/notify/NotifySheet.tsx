@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { originLine } from '@shared/approvalReceipts';
-import type { NotifyAnswer, NotifyItem } from '@shared/types/notify';
+import type { NotifyAnswer, NotifyChoice, NotifyItem, NotifyRemoteCommand } from '@shared/types/notify';
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
@@ -14,7 +14,7 @@ import { monoFontFamily, useTheme } from '@/theme';
 import { Icon, Text, TextField } from '@/ui';
 
 import { useMachineNotifyCommand, useMachineNotifyShared, useNotifyCommand, useNotifyShared } from './hooks';
-import { type AnsweredHere, NOTIFY_KIND_LABEL, notifySheetState } from './notifyQuestions';
+import { type AnsweredHere, isReply, NOTIFY_KIND_LABEL, notifySheetState, optionsAnswer, replyStatus, revisionNote, type ReplyTone } from './notifyQuestions';
 
 /**
  * One Notify question, drawn like the desktop card (frontend/src/components/notify/NotifyCard.tsx) in the app's sheet chrome.
@@ -28,8 +28,9 @@ export function NotifySheet({ notifyId, host }: { notifyId: string; host?: strin
   const shared = other ? remote : live;
   // Set when the host accepts this phone's answer, so the sheet reads "Sent to" before the snapshot catches up.
   const [answeredHere, setAnsweredHere] = useState<AnsweredHere | null>(null);
-  const onAccepted = (sent: { type: string }) => {
-    if (sent.type !== 'answer' || !shared.data) return;
+  const onAccepted = (sent: NotifyRemoteCommand) => {
+    // A reply isn't held for Undo: the snapshot shows it being read.
+    if (sent.type !== 'answer' || isReply(sent.answer) || !shared.data) return;
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setAnsweredHere({ epoch: shared.data.epoch, revision: shared.data.revision });
   };
@@ -87,7 +88,7 @@ function QuestionSheet({ item, machine, answer, busy, error, onClose }: {
   onClose: () => void;
 }) {
   return (
-    <QuestionForm item={item} answer={answer} busy={busy}>
+    <QuestionForm key={questionFormKey(item)} item={item} answer={answer} busy={busy}>
       {({ fields, actions }) => (
         <DialogSheet
           testID="notify-sheet"
@@ -102,6 +103,8 @@ function QuestionSheet({ item, machine, answer, busy, error, onClose }: {
             <Text variant="footnote" tone="muted" numberOfLines={1}>{originLine(item, machine)}</Text>
             <Text testID="notify-title" variant="headline" selectable>{item.title}</Text>
             {item.context ? <Text variant="subhead" tone="secondary" selectable>{item.context}</Text> : null}
+            <RevisionLines item={item} />
+            <ReplyStatusLines item={item} />
             {fields}
             {error ? <Notice testID="notify-error" danger message={error} /> : null}
           </DialogSection>
@@ -136,7 +139,17 @@ export function QuestionForm({ item, answer, busy, children }: {
   const [note, setNote] = useState('');
   const [text, setText] = useState('');
   const [showDetail, setShowDetail] = useState(false);
+  // Several questions: one pick each, sent together with Send.
+  const [picks, setPicks] = useState<string[]>([]);
   const trimmedNote = note.trim();
+  // A permission prompt stays options only: its note rides on the choice, never as a reply.
+  const replies = item.ui === 'options' && !item.agentPrompt;
+  const choose = (label: string) => {
+    if (!replies) return answer(withNote({ choice: label }));
+    const value = optionsAnswer(item, [label], note);
+    if (value) answer(value);
+  };
+  const several = replies ? optionsAnswer(item, picks, note) : null;
   const withNote = <T extends object>(value: T) => (trimmedNote ? { ...value, note: trimmedNote } : value);
   const block = { borderRadius: theme.radius.lg, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised };
 
@@ -152,32 +165,42 @@ export function QuestionForm({ item, answer, busy, children }: {
       // Sent as typed, then dropped from this sheet's state.
       { testID: 'notify-save-secret', variant: 'primary', title: 'Save securely', loading: busy, disabled: !text, onPress: () => { answer({ text }); setText(''); } },
     ];
+  } else if (replies && (item.questions || trimmedNote)) {
+    // Typed text with no pick goes as a reply; several questions send their picks together.
+    const reply = item.questions ? several : optionsAnswer(item, [], note);
+    actions = [{ testID: 'notify-send-reply', variant: 'primary', title: `Send to ${item.source.agent}`, loading: busy, disabled: busy || !reply, onPress: () => { if (reply) answer(reply); } }];
   } else if (item.ui === 'ask') {
-    actions = [{ testID: 'notify-send', variant: 'primary', title: `Send to ${item.source.agent}`, loading: busy, disabled: !text.trim(), onPress: () => answer({ text: text.trim() }) }];
+    // A typed answer is a reply its asker reads as an answer or a question (J19).
+    actions = [{ testID: 'notify-send', variant: 'primary', title: `Send to ${item.source.agent}`, loading: busy, disabled: !text.trim(), onPress: () => answer({ picks: [], text: text.trim() }) }];
   }
 
   const fields = (
     <>
-      {item.ui === 'options' ? (
+      {item.ui === 'options' && item.questions ? (
+        item.questions.map((question, questionIndex) => (
+          <View key={`${questionIndex}:${question.title}`} testID={`notify-question-${questionIndex}`} style={styles.choices}>
+            <Text variant="footnote" tone="muted">{`Question ${questionIndex + 1} of ${item.questions?.length ?? 0}`}</Text>
+            <Text variant="callout" style={styles.bold} selectable>{question.title}</Text>
+            {question.choices.map((choice, index) => (
+              <ChoiceRow
+                key={choice.label}
+                testID={`notify-choice-${questionIndex}-${index}`}
+                choice={choice}
+                selected={picks[questionIndex] === choice.label}
+                disabled={busy}
+                onPress={() => setPicks(current => {
+                  const next = [...current];
+                  next[questionIndex] = current[questionIndex] === choice.label ? '' : choice.label;
+                  return next;
+                })}
+              />
+            ))}
+          </View>
+        ))
+      ) : item.ui === 'options' ? (
         <View style={styles.choices}>
           {(item.choices ?? []).map((choice, index) => (
-            <Pressable
-              key={choice.label}
-              testID={`notify-choice-${index}`}
-              accessibilityRole="button"
-              accessibilityLabel={choice.recommended ? `${choice.label}, recommended` : choice.label}
-              disabled={busy}
-              onPress={() => answer(withNote({ choice: choice.label }))}
-              style={({ pressed }) => [styles.choice, block, {
-                backgroundColor: pressed ? theme.colors.surfacePressed : choice.recommended ? theme.colors.selected : theme.colors.surfaceRaised,
-              }]}
-            >
-              <View style={styles.fill}>
-                <Text variant="callout" style={choice.recommended ? styles.bold : undefined}>{choice.label}</Text>
-                {choice.detail ? <Text variant="footnote" tone="muted">{choice.detail}</Text> : null}
-              </View>
-              {choice.recommended ? <Text variant="caption" tone="muted">Recommended</Text> : null}
-            </Pressable>
+            <ChoiceRow key={choice.label} testID={`notify-choice-${index}`} choice={choice} disabled={busy} onPress={() => choose(choice.label)} />
           ))}
         </View>
       ) : null}
@@ -248,7 +271,7 @@ export function QuestionForm({ item, answer, busy, children }: {
       ) : item.ui === 'info' ? null : (
         <TextField
           testID="notify-note"
-          placeholder={item.ui === 'approve' ? `Reason or note for ${item.source.agent} (optional)` : `Add a note for ${item.source.agent} (optional)`}
+          placeholder={item.ui === 'approve' ? `Reason or note for ${item.source.agent} (optional)` : replies ? `Reply or ask ${item.source.agent} (optional)` : `Add a note for ${item.source.agent} (optional)`}
           value={note}
           onChangeText={setNote}
           editable={!busy}
@@ -257,6 +280,80 @@ export function QuestionForm({ item, answer, busy, children }: {
     </>
   );
   return children({ fields, actions });
+}
+
+/** One choice: tapped to answer (one question) or to pick (several). A reworded one says what it was. */
+function ChoiceRow({ choice, testID, selected, disabled, onPress }: { choice: NotifyChoice; testID: string; selected?: boolean; disabled: boolean; onPress: () => void }) {
+  const theme = useTheme();
+  const highlighted = selected || choice.recommended;
+  return (
+    <Pressable
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={choice.recommended ? `${choice.label}, recommended` : choice.label}
+      accessibilityState={selected === undefined ? undefined : { selected }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [styles.choice, {
+        borderRadius: theme.radius.lg,
+        borderColor: selected ? theme.colors.accent : theme.colors.border,
+        backgroundColor: pressed ? theme.colors.surfacePressed : highlighted ? theme.colors.selected : theme.colors.surfaceRaised,
+      }]}
+    >
+      <View style={styles.fill}>
+        <Text variant="callout" style={choice.recommended || selected ? styles.bold : undefined}>{choice.label}</Text>
+        {choice.detail ? <Text variant="footnote" tone="muted">{choice.detail}</Text> : null}
+        {choice.was !== undefined ? <Text variant="footnote" tone="muted">{choice.was === choice.label ? 'Reworded' : `Reworded, was “${choice.was}”`}</Text> : null}
+      </View>
+      {selected ? <Icon ios="checkmark" android="check" size={14} color={theme.colors.accentText} /> : choice.recommended ? <Text variant="caption" tone="muted">Recommended</Text> : null}
+    </Pressable>
+  );
+}
+
+/**
+ * A fresh form for each reply and version: a reply the host has taken clears the field, and a
+ * new version's choices start unpicked. A failed send keeps what was typed.
+ */
+export function questionFormKey(item: NotifyItem): string {
+  return `${item.version ?? 1}:${item.reply?.id ?? ''}`;
+}
+
+/**
+ * How the person's reply was taken, or that the approval came back updated, as text (the phone
+ * keeps its own screen). `onFix` sends the one-tap correction; without it none is offered.
+ */
+export function ReplyStatusLines({ item, onFix, fixing }: { item: NotifyItem; onFix?: (as: 'answer' | 'question') => void; fixing?: boolean }) {
+  const theme = useTheme();
+  const status = replyStatus(item);
+  if (!status) return null;
+  const color: Record<ReplyTone, string> = { success: theme.colors.success, warning: theme.colors.warning, accent: theme.colors.accentText, muted: theme.colors.textSecondary };
+  return (
+    <View testID="notify-reply-status" style={styles.replyStatus} accessibilityLiveRegion="polite">
+      <Text testID="notify-reply-state" variant="subhead" style={[styles.bold, { color: color[status.tone] }]}>{status.text}</Text>
+      {status.detail ? <Text testID="notify-reply-detail" variant="footnote" tone="secondary" selectable numberOfLines={3}>{status.detail}</Text> : null}
+      {status.fix && onFix ? (
+        <Pressable testID="notify-reply-fix" accessibilityRole="button" hitSlop={8} disabled={fixing} onPress={() => { if (status.fix) onFix(status.fix.as); }}>
+          <Text variant="footnote" tone="accent">{status.fix.label}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** A revised approval's What changed: the person's question and the asker's lines, as text. */
+export function RevisionLines({ item }: { item: NotifyItem }) {
+  const theme = useTheme();
+  const note = revisionNote(item);
+  if (!note) return null;
+  return (
+    <View testID="notify-revision" style={[styles.block, styles.revision, { borderRadius: theme.radius.lg, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
+      <Text variant="caption" tone="muted">{`v${note.version} · What changed · ${note.by}`}</Text>
+      <Text testID="notify-revision-asked" variant="footnote" tone="secondary" selectable>{`You asked: “${note.asked}”`}</Text>
+      {note.whatChanged.map((line, index) => (
+        <Text key={`${index}:${line}`} testID="notify-revision-line" variant="footnote" selectable>{`• ${line}`}</Text>
+      ))}
+    </View>
+  );
 }
 
 /** The desktop's held line: a check and what was sent. */
@@ -284,5 +381,7 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 12, borderWidth: 1 },
   sent: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  replyStatus: { gap: 2 },
+  revision: { gap: 4 },
   check: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
 });
