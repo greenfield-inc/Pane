@@ -81,7 +81,7 @@ export function SessionSwitchToChatDialog({ where, sessionName, preview, onClose
   const done = result && byResult(result.items);
   return (
     <Modal isOpen onClose={() => { if (!busy) onClose(); }} ariaLabel="Switch Session to chat">
-      <ModalHeader title={result ? 'Switched to chat' : `Switch ${sessionName} to chat`} />
+      <ModalHeader title={done ? (done.switched.length > 0 ? 'Switched to chat' : 'Nothing switched to chat') : `Switch ${sessionName} to chat`} />
       <ModalBody>
         {result && done ? (<>
           <p role="status" className="text-sm font-medium text-text-primary" data-testid="session-switch-summary">{summarizeSessionSwitch(result.items)}</p>

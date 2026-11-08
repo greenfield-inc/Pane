@@ -16,7 +16,9 @@ import { chatTabEnv } from '../services/chatTabs/launch';
 import { adapterEntry, adapterFileForPlainNode, installAdapter } from '../services/agentChat/adapterSetup';
 import { findExecutableInPath } from '../utils/shellPath';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import { switchToChat, terminalConversation, terminalRestored, type SwitchToChatPorts } from '../services/chatTabs/switchToChat';
+import { savedConversation, switchToChat, terminalConversation, terminalRestored, type SwitchToChatPorts } from '../services/chatTabs/switchToChat';
+import { claudeTranscriptFiles } from '../services/agentTranscript/claude';
+import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
 import { previewSessionSwitch, switchSessionToChat, type SessionSwitchPorts } from '../services/chatTabs/switchSession';
 import { getAppDirectory } from '../utils/appDirectory';
 import type { TerminalPanelState } from '../../../shared/types/panels';
@@ -165,7 +167,10 @@ function sessionSwitchPorts(services: AppServices, registry: PaneCommandRegistry
       const [own] = paneIds;
       return paneIds.flatMap(paneId => {
         const paneName = paneId === own ? 'Session' : services.sessionManager.getSession(paneId)?.name ?? paneId;
-        return panelManager.getPanelsBySessionAndType(paneId, 'terminal')
+        const terminals = panelManager.getPanelsBySessionAndType(paneId, 'terminal');
+        // The Pane's terminal dock is a plain shell below the tabs, not a tab: leave it out.
+        const dock = getDockTerminalPanel(terminals);
+        return terminals.filter(panel => panel !== dock)
           .sort((a, b) => (a.metadata.position ?? 0) - (b.metadata.position ?? 0))
           .map(panel => ({ panel, paneName }));
       });
@@ -187,9 +192,12 @@ function switchPorts(services: AppServices, registry: PaneCommandRegistry): Swit
     terminal: {
       busy: id => terminalPanelManager.isAgentMidTurn(id),
       conversationId: async id => {
+        const panel = panelManager.getPanel(id);
         // SAFETY: Switch to chat only asks this of terminal panels, which persist TerminalPanelState.
-        const state = (panelManager.getPanel(id)?.state.customState ?? {}) as TerminalPanelState;
-        return terminalConversation(state, terminalPanelManager.getLaunchSessionId(id));
+        const state = (panel?.state.customState ?? {}) as TerminalPanelState;
+        const cwd = state.resumeDirectory ?? (panel && services.sessionManager.getSession(panel.sessionId)?.worktreePath);
+        return savedConversation(terminalConversation(state, terminalPanelManager.getLaunchSessionId(id)), state.agentType,
+          async conversationId => !cwd || (await claudeTranscriptFiles(cwd, conversationId, 0)).length > 0);
       },
       stop: id => terminalPanelManager.stopForPromotion(id),
       restart: async id => {

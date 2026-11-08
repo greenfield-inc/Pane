@@ -34,7 +34,9 @@ async function check(panel: ToolPanel, paneName: string, ports: SessionSwitchPor
   try {
     return { item, prepared: await prepareSwitch(panel.id, ports) };
   } catch (error) {
-    return { item: { ...item, skip: { kind: skipKind(error instanceof PaneError ? error.code : undefined, panel), reason: reasonOf(error) } } };
+    // The preview and the summary already say the tab is skipped.
+    const reason = reasonOf(error).replace(/\s*Nothing was switched\.?$/, '');
+    return { item: { ...item, skip: { kind: skipKind(error instanceof PaneError ? error.code : undefined, panel), reason } } };
   }
 }
 
@@ -61,7 +63,7 @@ export async function switchSessionToChat(sessionId: string, panelIds: readonly 
     const { item, prepared } = await check(panel, paneName, ports);
     if (!prepared) { items.push({ ...item, result: 'skipped' }); continue; }
     if (panelIds && !panelIds.includes(item.panelId)) {
-      items.push({ ...item, result: 'skipped', skip: { kind: 'other', reason: 'It was not in the list you confirmed, so it was left as it is.' } });
+      items.push({ ...item, result: 'skipped', skip: { kind: 'unconfirmed', reason: 'It was not on the list when you confirmed (it was busy then, or opened later), so it was left as it is. Switch it from its tab\'s menu.' } });
       continue;
     }
     try {

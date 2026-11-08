@@ -71,7 +71,7 @@ export interface ChatTabSwitchResult { panelId: string; terminalKept: boolean; r
  * not reported its conversation, a launch chat cannot run, not a Claude or Codex agent, or another
  * refusal that `reason` spells out.
  */
-export type SessionChatSwitchSkip = 'busy' | 'plain-codex' | 'no-conversation' | 'launch' | 'not-agent' | 'other';
+export type SessionChatSwitchSkip = 'busy' | 'plain-codex' | 'no-conversation' | 'launch' | 'not-agent' | 'unconfirmed' | 'other';
 
 /** One terminal tab of a Session, and whether Switch to chat will move it. */
 export interface SessionChatSwitchItem {

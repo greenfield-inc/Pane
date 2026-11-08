@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { IpcMain } from 'electron';
@@ -28,7 +28,9 @@ function partial<Contract>(value: Partial<Contract>): Contract {
 // so its chat starts without the owner's key or secret project variables.
 describe.skipIf(process.platform === 'win32')('switching a teammate\'s terminal to chat', () => {
   const originalPath = process.env.PATH;
+  const originalClaudeConfig = process.env.CLAUDE_CONFIG_DIR;
   let bin: string;
+  let claudeConfig: string;
 
   beforeEach(() => {
     // A stand-in claude on PATH, so the launch gets as far as choosing the key.
@@ -37,12 +39,20 @@ describe.skipIf(process.platform === 'win32')('switching a teammate\'s terminal 
     chmodSync(path.join(bin, 'claude'), 0o755);
     process.env.PATH = `${bin}${path.delimiter}${originalPath}`;
     clearShellPathCache();
+    // Claude has saved the conversation, so the switch tries to reopen it.
+    claudeConfig = mkdtempSync(path.join(os.tmpdir(), 'pane-switch-claude-'));
+    mkdirSync(path.join(claudeConfig, 'projects', '-tmp-pane-switch'), { recursive: true });
+    writeFileSync(path.join(claudeConfig, 'projects', '-tmp-pane-switch', 'conv-1.jsonl'), '');
+    process.env.CLAUDE_CONFIG_DIR = claudeConfig;
   });
 
   afterEach(() => {
     process.env.PATH = originalPath;
     clearShellPathCache();
     rmSync(bin, { recursive: true, force: true });
+    rmSync(claudeConfig, { recursive: true, force: true });
+    if (originalClaudeConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = originalClaudeConfig;
     resetPaneRuntimeForTests();
   });
 

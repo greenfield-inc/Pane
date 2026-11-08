@@ -11,13 +11,14 @@ const SKIP_LABELS = {
   'no-conversation': 'no saved conversation',
   launch: 'launch chat can\'t run',
   'not-agent': 'not an agent',
+  unconfirmed: 'not confirmed',
   other: 'can\'t switch',
 } satisfies Record<SessionChatSwitchSkip, string>;
 
 export function skipLabel(kind: SessionChatSwitchSkip): string { return SKIP_LABELS[kind]; }
 
 const skipSchema = boundary.object({
-  kind: boundary.enumeration('busy', 'plain-codex', 'no-conversation', 'launch', 'not-agent', 'other'),
+  kind: boundary.enumeration('busy', 'plain-codex', 'no-conversation', 'launch', 'not-agent', 'unconfirmed', 'other'),
   reason: boundary.string,
 });
 const itemFields = { panelId: boundary.nonEmptyString, title: boundary.string, paneName: boundary.string, skip: boundary.optional(skipSchema) };

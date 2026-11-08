@@ -38,6 +38,15 @@ export function terminalConversation(state: Pick<TerminalPanelState, 'agentType'
   return { problem: state.agentType === 'codex' ? 'Codex reports its conversation ID only when it exits, and this terminal has not reported one yet' : 'this terminal has no saved conversation ID' };
 }
 
+/**
+ * A Claude conversation can be reopened only once Claude has saved it, which it does after the
+ * first message: before that, reopening it fails and so does resuming it in the terminal.
+ */
+export async function savedConversation(found: { id: string } | { problem: string }, agent: TerminalPanelState['agentType'], isSaved: (id: string) => Promise<boolean>): Promise<{ id: string } | { problem: string }> {
+  if ('problem' in found || agent !== 'claude' || await isSaved(found.id)) return found;
+  return { problem: 'Claude has not saved this conversation yet. It saves it after the first message' };
+}
+
 /** What a switch needs from the rest of Pane; ipc/chatTabs.ts wires the real ones. */
 export interface SwitchToChatPorts {
   chatTabsEnabled(): boolean;

@@ -68,7 +68,9 @@ describe('switching a whole Session to chat', () => {
       ['shell', 'docs', 'not-agent'],
       ['codex', 'docs', 'switch'],
     ]);
-    expect(preview.items.find(item => item.panelId === 'busy')?.skip?.reason).toMatch(/middle of a turn/);
+    expect(preview.items.find(item => item.panelId === 'busy')?.skip?.reason).toBe('Claude is in the middle of a turn.');
+    // Nothing has run yet, so no reason says "Nothing was switched".
+    expect(preview.items.filter(item => item.skip?.reason.includes('Nothing was switched'))).toEqual([]);
     // A preview never touches an agent.
     expect(log).toEqual([]);
   });
@@ -103,9 +105,9 @@ describe('switching a whole Session to chat', () => {
     const { ports, log } = session(tabs);
     const result = await switchSessionToChat('s-1', ['auth', 'busy', 'elsewhere'], ports);
     expect(result.items.map(item => [item.panelId, item.result, item.skip?.kind])).toEqual([
-      ['orchestrator', 'skipped', 'other'], ['auth', 'switched', undefined], ['busy', 'skipped', 'busy'], ['plain', 'skipped', 'plain-codex'], ['shell', 'skipped', 'not-agent'], ['codex', 'skipped', 'other'],
+      ['orchestrator', 'skipped', 'unconfirmed'], ['auth', 'switched', undefined], ['busy', 'skipped', 'busy'], ['plain', 'skipped', 'plain-codex'], ['shell', 'skipped', 'not-agent'], ['codex', 'skipped', 'unconfirmed'],
     ]);
-    expect(result.items[0].skip?.reason).toMatch(/not in the list you confirmed/);
+    expect(result.items[0].skip?.reason).toMatch(/not on the list when you confirmed/);
     expect(log).toEqual(['stop auth', 'started auth', 'close auth']);
   });
 
