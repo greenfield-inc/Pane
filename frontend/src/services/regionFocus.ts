@@ -228,6 +228,19 @@ function focusMainArea(): void {
   if (target) focusStop(target);
 }
 
+/**
+ * After a tab key (⌘⇧[ ⌘⇧] ⌘⇧1-9) shows another tab, keyboard focus follows
+ * into it, unless focus is somewhere else on purpose (the sidebar, a dialog).
+ */
+export function focusActiveTabSoon(): void {
+  const from = document.activeElement;
+  if (from && from !== document.body && regionOf(from) !== 'main') return;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const group = queryShown('[data-focus-region="main"] [data-panel-group-id][data-group-focused="true"]')[0];
+    if (group) focusInside(group);
+  }));
+}
+
 // --- Maximize and minimize (P4) ---
 
 export interface RegionActions {

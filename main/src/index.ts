@@ -622,6 +622,12 @@ async function createWindow() {
     // dialog webview and every other key stay with the page.
     // A page keeps the first step of a two-step key (⌘K is many sites' search);
     // this remembers it so ⌘K ⌘M still reaches Pane (D-250).
+    // Clicks inside a page never reach Pane's DOM, so the split it sits in
+    // learns it is the active one from here (P3: keys act on the split you are in).
+    wvContents.on('focus', () => {
+      const context = webviewContextMap.get(wvContents.id);
+      if (context) mainWindow?.webContents.send('browser-panel:page-focused', { panelId: context.panelId });
+    });
     const keySequence = createWebviewSequenceState();
     wvContents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;

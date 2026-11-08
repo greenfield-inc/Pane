@@ -21,6 +21,7 @@ import { cycleIndex } from '../utils/arrayUtils';
 import { RestoreRegionButton } from './RestoreRegionButton';
 import { useRegionActions } from '../hooks/useRegionNavigation';
 import { useProjectViewActionsStore, type ProjectViewActions } from '../stores/projectViewActionsStore';
+import { announceTerminalReflow } from '../utils/terminalReflow';
 import {
   activatePanelInLayout,
   addPanelToGroup,
@@ -400,6 +401,7 @@ export function SessionWorkspacePanels({
   const toggleMaximize = useCallback((groupId?: string) => {
     const current = usePanelStore.getState().layouts[sessionId];
     if (!current) return;
+    announceTerminalReflow();
     if (current.zoomedGroupId || tileMaximized) {
       if (current.zoomedGroupId) applyLayout({ ...current, zoomedGroupId: null });
       if (tileMaximized) onToggleTileMaximize?.();

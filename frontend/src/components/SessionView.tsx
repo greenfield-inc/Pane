@@ -81,6 +81,8 @@ import { ApprovalsView } from './approvals/ApprovalsView';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
 import { CUSTOM_COMMAND_KEYS, type CustomCommandId } from '../../../shared/constants/keyboardShortcuts';
 import { useRegionActions } from '../hooks/useRegionNavigation';
+import { announceTerminalReflow } from '../utils/terminalReflow';
+import { focusActiveTabSoon } from '../services/regionFocus';
 import { useLoopsStore } from '../stores/loopsStore';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
@@ -819,6 +821,7 @@ export const SessionView = memo(() => {
 
   const cycleTab = useCallback((direction: 'next' | 'prev') => {
     const bridged = projectActions();
+    focusActiveTabSoon();
     if (bridged) { bridged.cycleTab(direction); return; }
     if (!activeSession || focusedGroupPanels.length < 2) return;
 
@@ -858,15 +861,15 @@ export const SessionView = memo(() => {
     const name = p.type === 'diff' ? 'Review' : p.title;
     return `Switch to ${name}`;
   };
-  useHotkey({ id: 'panel-tab-1', label: panelLabel(0), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 0 || !!focusedGroupPanels[0], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(0); return; } const p = focusedGroupPanels[0]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-2', label: panelLabel(1), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 1 || !!focusedGroupPanels[1], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(1); return; } const p = focusedGroupPanels[1]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-3', label: panelLabel(2), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 2 || !!focusedGroupPanels[2], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(2); return; } const p = focusedGroupPanels[2]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-4', label: panelLabel(3), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 3 || !!focusedGroupPanels[3], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(3); return; } const p = focusedGroupPanels[3]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-5', label: panelLabel(4), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 4 || !!focusedGroupPanels[4], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(4); return; } const p = focusedGroupPanels[4]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-6', label: panelLabel(5), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 5 || !!focusedGroupPanels[5], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(5); return; } const p = focusedGroupPanels[5]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-7', label: panelLabel(6), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 6 || !!focusedGroupPanels[6], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(6); return; } const p = focusedGroupPanels[6]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-8', label: panelLabel(7), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 7 || !!focusedGroupPanels[7], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(7); return; } const p = focusedGroupPanels[7]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-9', label: panelLabel(8), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 8 || !!focusedGroupPanels[8], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(8); return; } const p = focusedGroupPanels[8]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-1', label: panelLabel(0), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 0 || !!focusedGroupPanels[0], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(0); return; } const p = focusedGroupPanels[0]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-2', label: panelLabel(1), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 1 || !!focusedGroupPanels[1], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(1); return; } const p = focusedGroupPanels[1]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-3', label: panelLabel(2), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 2 || !!focusedGroupPanels[2], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(2); return; } const p = focusedGroupPanels[2]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-4', label: panelLabel(3), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 3 || !!focusedGroupPanels[3], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(3); return; } const p = focusedGroupPanels[3]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-5', label: panelLabel(4), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 4 || !!focusedGroupPanels[4], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(4); return; } const p = focusedGroupPanels[4]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-6', label: panelLabel(5), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 5 || !!focusedGroupPanels[5], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(5); return; } const p = focusedGroupPanels[5]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-7', label: panelLabel(6), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 6 || !!focusedGroupPanels[6], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(6); return; } const p = focusedGroupPanels[6]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-8', label: panelLabel(7), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 7 || !!focusedGroupPanels[7], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(7); return; } const p = focusedGroupPanels[7]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-9', label: panelLabel(8), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 8 || !!focusedGroupPanels[8], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(8); return; } const p = focusedGroupPanels[8]; if (p) handlePanelSelect(p); } });
 
   // --- Add Tool commands (palette-only, no keybindings) ---
   // Only enabled in session view (not project view) to prevent hidden panel mutations
@@ -1001,6 +1004,7 @@ export const SessionView = memo(() => {
     const currentLayout = usePanelStore.getState().layouts[sid];
     if (!currentLayout || allGroups(currentLayout.root).length < 2) return;
     const isZoomed = currentLayout.zoomedGroupId === groupId;
+    announceTerminalReflow();
     applyLayout(sid, { ...currentLayout, focusedGroupId: groupId, zoomedGroupId: isZoomed ? null : groupId });
   }, [activeSession, applyLayout]);
 

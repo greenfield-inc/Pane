@@ -12,7 +12,7 @@
  * - A drag shield to intercept mouse events from webviews/xterm during drags.
  */
 
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Plus } from 'lucide-react';
 import { PanelTabStrip } from './PanelTabStrip';
 import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
@@ -22,6 +22,8 @@ import { subsetInsertIndex, type DropZone } from '../../utils/panelLayout';
 import { DropOverlay } from './DropOverlay';
 import { RestoreRegionButton } from '../RestoreRegionButton';
 import { useRegionActions } from '../../hooks/useRegionNavigation';
+import { noteFocusIn } from '../../services/regionFocus';
+import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 
 // ---------------------------------------------------------------------------
@@ -105,6 +107,20 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   onToggleMaximize,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
+  // A click inside a browser page reaches main, not this DOM: main says which
+  // tab's page took focus, and its split becomes the active one.
+  const panelIdsKey = group.panelIds.join('|');
+  useEffect(() => {
+    const handler = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const panelId = decodeOptionalBoundary(event.detail, boundary.object({ panelId: boundary.string }))?.panelId;
+      if (!panelId || !panelIdsKey.split('|').includes(panelId)) return;
+      if (!isFocusedGroup) onFocusGroup(group.id);
+      noteFocusIn(rootRef.current);
+    };
+    window.addEventListener('browser-panel:page-focused', handler);
+    return () => window.removeEventListener('browser-panel:page-focused', handler);
+  }, [panelIdsKey, isFocusedGroup, onFocusGroup, group.id]);
   useRegionActions(rootRef, {
     toggleMaximize: onToggleMaximize ? () => onToggleMaximize(group.id) : undefined,
   });
