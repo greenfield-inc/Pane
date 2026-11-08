@@ -2,6 +2,7 @@ import type { PaneSecretMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
+import type { MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { WorkspaceAccessConfig } from '../../../shared/types/workspaceAccess';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
@@ -212,6 +213,8 @@ export interface AppConfig {
   terminalPowerMode?: TerminalPowerMode;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
+  /** Machine marks chosen on this computer only (D-252), keyed by `machineMarkKey`. Absent: automatic. */
+  machineMarks?: MachineMarkOverrides;
   // Codeless remote access over Tailscale (runpane workspace and desktop remote mode)
   workspaces?: WorkspaceAccessConfig;
   terminalFontFamily?: string;
@@ -316,6 +319,8 @@ export interface UpdateConfigRequest {
   terminalPowerMode?: TerminalPowerMode;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
+  /** Machine marks chosen on this computer only (D-252), keyed by `machineMarkKey`. Absent: automatic. */
+  machineMarks?: MachineMarkOverrides;
   terminalFontFamily?: string;
   terminalFontSize?: number;
 }

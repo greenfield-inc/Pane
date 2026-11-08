@@ -1,5 +1,6 @@
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
+import type { MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
@@ -201,6 +202,8 @@ export interface AppConfig {
   terminalPowerMode?: TerminalPowerMode;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
+  /** Machine marks chosen on this computer only (D-252), keyed by `machineMarkKey`. Absent: automatic. */
+  machineMarks?: MachineMarkOverrides;
   terminalFontFamily?: string;
   terminalFontSize?: number;
 }
@@ -278,4 +281,5 @@ export interface UpdateConfigRequest {
   terminalFontSize?: number;
   // How many entries each Session keeps before the oldest are dropped
   retention?: Partial<SessionRetention>;
+  machineMarks?: MachineMarkOverrides;
 }
