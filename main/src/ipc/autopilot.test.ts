@@ -29,7 +29,7 @@ beforeEach(() => {
       exists: () => false, create: async () => undefined, ensure: async () => undefined,
       isRunning: () => false, send: () => undefined, stop: async () => undefined,
     },
-    notify: { items: () => [], subscribe: () => () => undefined },
+    notify: { items: () => [], notReadYet: () => false, subscribe: () => () => undefined },
     sessions: { list: () => [], subscribe: () => () => undefined },
     launch: () => ({ kind: 'agent' }),
     skillPath: '/pane/skills/pane-autopilot/SKILL.md',

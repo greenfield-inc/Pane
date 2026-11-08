@@ -293,7 +293,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
         await send();
       }
     },
-    refreshMachine: (machineId) => void saved?.read(machineId),
+    refreshMachine: (machineId) => saved?.read(machineId) ?? Promise.resolve(),
     // Every question buzzes each phone with Needs Input on (D-7), on a desktop or a headless host.
     onQuestion: (event) => {
       // Optional delivery: a failed send or config write must never take the host down.

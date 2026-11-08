@@ -211,6 +211,8 @@ describe('terminal panel persistence', () => {
   });
 
   afterEach(async () => {
+    // A test that timed out never reached its own finally: don't leave its fake clock to the next test.
+    vi.useRealTimers();
     for (const manager of managers) {
       for (const panelId of manager.getActiveTerminals()) await manager.destroyTerminal(panelId);
     }
@@ -514,7 +516,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     const { manager, handle } = await startTerminal(panel);
     handle.written.length = 0;
     panelManagerMock.getPanel.mockReturnValue(panel);
-    vi.spyOn(databaseService, 'updatePanel').mockReturnValue(false);
+    const refuse = vi.spyOn(databaseService, 'updatePanel').mockReturnValue(false);
 
     try {
       await expect(manager.stageInitialCommand(panel.id, 'opencode --auto')).rejects.toThrow(
@@ -522,7 +524,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       );
       expect(handle.written).toEqual([]);
     } finally {
-      vi.restoreAllMocks();
+      refuse.mockRestore();
     }
   });
 
@@ -1108,7 +1110,6 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     } finally {
       if (previous === undefined) delete process.env.PANE_SESSION_DIR;
       else process.env.PANE_SESSION_DIR = previous;
-      vi.restoreAllMocks();
     }
   });
 
@@ -1136,7 +1137,6 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       expect(spawn.mock.calls.map(([opts]) => opts.env.PANE_PANEL_KIND)).toEqual(['agent', 'dock', 'shell']);
     } finally {
       panelManagerMock.getPanelsForSession.mockReturnValue([]);
-      vi.restoreAllMocks();
     }
   });
 
@@ -1165,7 +1165,6 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       expect(spawn).toHaveBeenCalledTimes(2);
       expect(spawn.mock.calls[1][0].args).toEqual(first.args);
     } finally {
-      vi.restoreAllMocks();
       store.write({ version: 1, sessions: [] });
     }
   });
@@ -1334,6 +1333,14 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
 
     const mark = { at: '2026-11-04T12:00:00.000Z', by: 'manual' as const };
 
+    /** Pause awaits emulator replies (real macrotasks) before it arms its timers, so keep advancing until it settles. */
+    async function settleWithFakeTimers<T>(promise: Promise<T>): Promise<T> {
+      let settled = false;
+      void promise.then(() => { settled = true; }, () => { settled = true; });
+      while (!settled) await vi.advanceTimersByTimeAsync(100);
+      return promise;
+    }
+
     function pausedPanel(id: string): ToolPanel {
       const panel = makePanel(id);
       panel.state.customState = { agentType: 'claude', agentSessionId: 'conversation-1', hasClaudeSessionId: true, initialCommand: 'claude', paused: mark };
@@ -1373,18 +1380,14 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
         const changes: unknown[] = [];
         manager.on('pause-changed', change => changes.push(change));
 
-        const pausing = manager.pausePanels([first.id, second.id], mark);
-        await vi.advanceTimersByTimeAsync(5000);
-        expect(await pausing).toEqual({ paused: [first.id], failed: [{ panelId: second.id, error: 'state write refused' }] });
+        expect(await settleWithFakeTimers(manager.pausePanels([first.id, second.id], mark))).toEqual({ paused: [first.id], failed: [{ panelId: second.id, error: 'state write refused' }] });
         expect(manager.isTerminalInitialized(first.id)).toBe(false);
         expect(manager.isTerminalInitialized(second.id)).toBe(true);
         expect(changes).toHaveLength(1);
 
         // The second tab now carries a mark but still runs: the next pause stops it.
         second.state.customState = { ...second.state.customState, paused: mark };
-        const again = manager.pausePanels([second.id], mark);
-        await vi.advanceTimersByTimeAsync(5000);
-        expect(await again).toEqual({ paused: [second.id], failed: [] });
+        expect(await settleWithFakeTimers(manager.pausePanels([second.id], mark))).toEqual({ paused: [second.id], failed: [] });
         expect(manager.isTerminalInitialized(second.id)).toBe(false);
       } finally {
         vi.clearAllTimers();
@@ -1422,9 +1425,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
         // Ctrl+C ends the agent, and its shell prints over the screen before the terminal stops.
         const write = handle.write.bind(handle);
         handle.write = async (data: string) => { await write(data); if (data === '\x03') handle.emit('\x1b[2J\x1b[Hshell after exit $ '); };
-        const pausing = manager.pausePanels([panel.id], mark);
-        await vi.advanceTimersByTimeAsync(5000);
-        expect((await pausing)?.paused).toEqual([panel.id]);
+        expect((await settleWithFakeTimers(manager.pausePanels([panel.id], mark))).paused).toEqual([panel.id]);
         expect(databaseService.getPanel(panel.id)?.state.customState?.screenText).toContain('the plan is ready');
         expect(databaseService.getPanel(panel.id)?.state.customState?.screenText).not.toContain('shell after exit');
 

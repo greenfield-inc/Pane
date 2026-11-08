@@ -150,6 +150,9 @@ export interface ChatTabPanelProps {
   dock?: ReactNode;
 }
 
+/** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
+const PASTE_LIMIT = 1024 * 1024;
+
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
 const NO_ACTIONS: ChatTurnActions = {};
 const NO_RENDERING: ChatRendering = {};
@@ -390,7 +393,13 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             addAttachmentOnPaste={false}
             onPaste={event => {
               const files = [...event.clipboardData.files];
-              if (!files.length) return;
+              if (!files.length) {
+                // The composer lays out its whole text on every render: megabytes of it stall the window (D-7).
+                if (event.clipboardData.getData('text/plain').length <= PASTE_LIMIT) return;
+                event.preventDefault();
+                setAttachProblems([`Nothing was pasted: the text is larger than 1 MiB, too large to paste into a message. Save it as a file, then attach the file or ask ${agentName} to read it.`]);
+                return;
+              }
               event.preventDefault();
               attachFiles(files);
             }}
