@@ -187,7 +187,7 @@ function RunMenu({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: 
             </button>
           ) : (
             <div className="rounded-lg bg-autopilot-subtle px-2.5 py-2 text-[12.5px] text-text-secondary">
-              <p>A new Autopilot Session gets a new folder and an empty stack. This one&rsquo;s documents stay in its folder.</p>
+              <p>A new Autopilot Session gets a new folder and an empty stack. This one&rsquo;s documents stay in its folder.{snapshot.state !== 'stopped' ? ` Autopilot stops${snapshot.sentinel ? ' and Sentinel turns off' : ''}; press Start to begin the new one.` : ''}</p>
               <div className="mt-2 flex gap-1.5">
                 <button type="button" disabled={pending} onClick={() => { setOpen(false); void runAutopilot('newRun'); }} data-testid="autopilot-new-run-confirm"
                   className="inline-flex h-7 items-center rounded-lg bg-interactive px-2.5 font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50">Start a new one</button>
