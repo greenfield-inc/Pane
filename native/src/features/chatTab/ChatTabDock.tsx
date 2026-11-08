@@ -79,7 +79,7 @@ export function QuestionCard({ question, disabled, onAnswer }: { question: ChatT
         : <TextInput testID={`chat-field-${field.key}`} accessibilityLabel={field.title} placeholder={field.required ? 'Your answer' : 'Your own answer (optional)'} placeholderTextColor={theme.chat.mutedForeground} editable={!disabled}
           value={typeof values[field.key] === 'string' ? String(values[field.key]) : ''} onChangeText={text => set(field.key, text)} style={[styles.input, { color: theme.chat.foreground, borderColor: theme.chat.border }]} />}
     </View>)}
-    {unshown.length > 0 && <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Pane can't show {unshown.join(', ')}, so this question can only be skipped here.</Text>}
+    {unshown.length > 0 && <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Pane can't show {unshown.join(', ')}, so you can only skip this question.</Text>}
     <View style={styles.row}>
       <DockButton testID="chat-question-answer" title="Answer" primary disabled={disabled || !content} onPress={() => { if (content) onAnswer({ action: 'accept', content }); }} />
       <DockButton testID="chat-question-skip" title="Skip" disabled={disabled} onPress={() => onAnswer({ action: 'decline' })} />

@@ -19,7 +19,7 @@ export function ChatQuestionCard({ question, disabled, onAnswer }: { question: C
   }}>
     <p className="chat-question-message">{question.message}</p>
     {fields.map(field => <Field key={field.key} field={field.title === question.message ? { ...field, title: '' } : field} value={values[field.key]} disabled={disabled} onChange={value => set(field.key, value)} />)}
-    {unshown.length > 0 && <p className="text-[13px] text-text-tertiary">Pane can't show {unshown.join(', ')}, so this question can only be skipped here.</p>}
+    {unshown.length > 0 && <p className="chat-question-hint">Pane can't show {unshown.join(', ')}, so you can only skip this question.</p>}
     <div className="chat-question-actions">
       <button type="button" className="chat-button chat-button-primary" disabled={disabled || !content} onClick={submit}>Answer</button>
       <button type="button" className="chat-button chat-button-outline" disabled={disabled} onClick={() => onAnswer({ action: 'decline' })}>Skip</button>

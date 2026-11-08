@@ -47,6 +47,8 @@ export function ApprovalActions({ item, style }: { item: NotifyItem; style?: Sty
   const command = useNotifyCommand(sent => {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     if (sent.type === 'override') setOverriding(false);
+    // Cleared once the close went through; a failed close keeps the reason to try again.
+    if (sent.type === 'close') { setClosing(false); setReason(''); }
   });
   const closable = canClose(item);
   const overridable = canOverride(item);
@@ -59,8 +61,6 @@ export function ApprovalActions({ item, style }: { item: NotifyItem; style?: Sty
   const close = () => {
     const trimmed = reason.trim();
     command.mutate([trimmed ? { type: 'close', id: item.id, reason: trimmed } : { type: 'close', id: item.id }]);
-    setClosing(false);
-    setReason('');
   };
 
   return (
@@ -81,7 +81,7 @@ export function ApprovalActions({ item, style }: { item: NotifyItem; style?: Sty
           <Text variant="footnote" tone="secondary">{closeNote}</Text>
           <View style={styles.actions}>
             <View style={styles.action}><Button testID="approval-close-cancel" title="Cancel" variant="secondary" onPress={() => { setClosing(false); setReason(''); }} /></View>
-            <View style={styles.action}><Button testID="approval-close-confirm" title="Close it" variant="destructive" onPress={close} /></View>
+            <View style={styles.action}><Button testID="approval-close-confirm" title="Close it" variant="destructive" loading={pending === 'close'} disabled={command.isPending} onPress={close} /></View>
           </View>
         </View>
       ) : null}
