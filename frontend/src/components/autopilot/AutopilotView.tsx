@@ -145,7 +145,7 @@ function SentinelToggle({ snapshot, pending }: { snapshot: AutopilotSnapshot; pe
       <span className="hidden min-[1440px]:inline">Sentinel</span>
       {/* Fixed-size track: the knob moves, nothing around it does. */}
       <span className={cn('relative h-4 w-7 shrink-0 rounded-full transition-colors', snapshot.sentinel ? 'bg-autopilot' : 'bg-surface-tertiary')} aria-hidden="true">
-        <span className={cn('absolute top-0.5 h-3 w-3 rounded-full bg-surface-primary shadow transition-transform', snapshot.sentinel ? 'translate-x-3.5' : 'translate-x-0.5')} />
+        <span className={cn('absolute left-0 top-0.5 h-3 w-3 rounded-full bg-surface-primary shadow transition-transform', snapshot.sentinel ? 'translate-x-3.5' : 'translate-x-0.5')} />
       </span>
     </button>
   );
