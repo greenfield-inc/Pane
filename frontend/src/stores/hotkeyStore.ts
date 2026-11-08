@@ -80,7 +80,7 @@ interface HotkeyStore {
 }
 
 /** The first step of a two-step key that is waiting for its second. */
-export interface PendingKeySequence {
+interface PendingKeySequence {
   first: string;
   startedAt: number;
 }
@@ -127,10 +127,12 @@ function registeredBinding(keys: string | undefined): string | null {
   return parsed.ok ? chordForPlatform(parsed.chord, rendererKeyPlatform()) : null;
 }
 
-function rebuildIndex(hotkeys: Map<string, EffectiveHotkeyDefinition>): {
+interface RebuiltHotkeyIndex {
   next: Map<string, EffectiveHotkeyDefinition>;
   index: Map<string, HotkeyId[]>;
-} {
+}
+
+function rebuildIndex(hotkeys: Map<string, EffectiveHotkeyDefinition>): RebuiltHotkeyIndex {
   const overrides = currentOverrides();
   const platform = rendererKeyPlatform();
   const next = new Map<string, EffectiveHotkeyDefinition>();
@@ -273,11 +275,9 @@ export function cancelKeySequence(): void {
 }
 
 function targetOf(event: KeyboardEvent): HTMLElement | null {
-  const target = event.target;
-  if (!target || typeof target !== 'object' || !('closest' in target)) return null;
-  // SAFETY: these listeners are installed only for DOM keyboard events on window,
-  // and the closest() check above rules out window and document targets.
-  return target as HTMLElement;
+  // SAFETY: these listeners are installed only for DOM keyboard events on
+  // window, whose targets are elements (or null for synthetic test events).
+  return event.target as HTMLElement | null;
 }
 
 function isXtermHelperTarget(target: HTMLElement): boolean {
@@ -383,7 +383,7 @@ function handleKeyUp(event: KeyboardEvent): void {
 }
 
 function attachListener(): void {
-  if (listenerAttached || typeof window === 'undefined') return;
+  if (listenerAttached) return;
   window.addEventListener('keydown', handleKeyDown);
   window.addEventListener('keydown', handleSequenceKeyDown, true);
   window.addEventListener('keyup', handleKeyUp, true);

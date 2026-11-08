@@ -302,7 +302,6 @@ function SessionWorkspace() {
   useHotkey({
     id: 'focus-session-tile-left',
     label: 'Focus Session Left',
-    keys: '',
     category: 'view',
     enabled: () => isTiled,
     action: () => focusDirection('left'),
@@ -311,7 +310,6 @@ function SessionWorkspace() {
   useHotkey({
     id: 'focus-session-tile-right',
     label: 'Focus Session Right',
-    keys: '',
     category: 'view',
     enabled: () => isTiled,
     action: () => focusDirection('right'),
@@ -320,7 +318,6 @@ function SessionWorkspace() {
   useHotkey({
     id: 'focus-session-tile-up',
     label: 'Focus Session Up',
-    keys: '',
     category: 'view',
     enabled: () => isTiled,
     action: () => focusDirection('up'),
@@ -329,7 +326,6 @@ function SessionWorkspace() {
   useHotkey({
     id: 'focus-session-tile-down',
     label: 'Focus Session Down',
-    keys: '',
     category: 'view',
     enabled: () => isTiled,
     action: () => focusDirection('down'),
@@ -338,7 +334,6 @@ function SessionWorkspace() {
   useHotkey({
     id: 'close-session-tile',
     label: 'Stop tiling this Session',
-    keys: '',
     category: 'view',
     enabled: () => isTiled,
     action: () => {

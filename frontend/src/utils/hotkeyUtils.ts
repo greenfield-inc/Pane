@@ -33,25 +33,25 @@ export const CATEGORY_LABELS = {
   debug: 'Debug',
 } satisfies Record<ShortcutCategory, string>;
 
-const MAC_SYMBOLS: Record<string, string> = {
-  mod: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧',
-  enter: '↩', backspace: '⌫', delete: '⌦',
-};
-const OTHER_NAMES: Record<string, string> = {
-  mod: 'Ctrl', ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift',
-  enter: 'Enter', backspace: 'Backspace', delete: 'Del',
-};
-const SHARED_NAMES: Record<string, string> = {
-  arrowleft: '←', arrowright: '→', arrowup: '↑', arrowdown: '↓',
-  tab: 'Tab', escape: 'Esc', space: 'Space', pageup: 'PgUp', pagedown: 'PgDn',
-  home: 'Home', end: 'End',
-};
+const MAC_SYMBOLS = new Map([
+  ['mod', '⌘'], ['ctrl', '⌃'], ['alt', '⌥'], ['shift', '⇧'],
+  ['enter', '↩'], ['backspace', '⌫'], ['delete', '⌦'],
+]);
+const OTHER_NAMES = new Map([
+  ['mod', 'Ctrl'], ['ctrl', 'Ctrl'], ['alt', 'Alt'], ['shift', 'Shift'],
+  ['enter', 'Enter'], ['backspace', 'Backspace'], ['delete', 'Del'],
+]);
+const SHARED_NAMES = new Map([
+  ['arrowleft', '←'], ['arrowright', '→'], ['arrowup', '↑'], ['arrowdown', '↓'],
+  ['tab', 'Tab'], ['escape', 'Esc'], ['space', 'Space'], ['pageup', 'PgUp'], ['pagedown', 'PgDn'],
+  ['home', 'Home'], ['end', 'End'],
+]);
 
 function formatPart(part: string, mac: boolean): string {
   const lower = part.toLowerCase();
-  const platformName = (mac ? MAC_SYMBOLS : OTHER_NAMES)[lower];
+  const platformName = (mac ? MAC_SYMBOLS : OTHER_NAMES).get(lower);
   if (platformName) return platformName;
-  const shared = SHARED_NAMES[lower];
+  const shared = SHARED_NAMES.get(lower);
   if (shared) return shared;
   return part.length === 1 ? part.toUpperCase() : part;
 }

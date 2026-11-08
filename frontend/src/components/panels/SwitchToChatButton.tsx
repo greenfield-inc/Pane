@@ -26,7 +26,6 @@ function SwitchToChatCommand({ view, onOpen }: { view: 'pane' | 'session'; onOpe
   useHotkey({
     id: `switch-to-chat-${view}`,
     label: 'Switch to chat',
-    keys: '',
     category: 'tabs',
     enabled: () => showing,
     action: onOpen,

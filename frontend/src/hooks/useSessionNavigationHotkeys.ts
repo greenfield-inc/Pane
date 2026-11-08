@@ -125,7 +125,6 @@ export function useSessionNavigationHotkeys({
   useHotkey({
     id: 'cycle-session-next-0',
     label: 'Next Pane',
-    keys: 'mod+Tab',
     category: 'session',
     enabled: () => allActiveSessionsRef.current.length > 1,
     action: () => cycleSession('next'),
@@ -134,7 +133,6 @@ export function useSessionNavigationHotkeys({
   useHotkey({
     id: 'cycle-session-prev-0',
     label: 'Previous Pane',
-    keys: 'mod+shift+Tab',
     category: 'session',
     enabled: () => allActiveSessionsRef.current.length > 1,
     action: () => cycleSession('prev'),
@@ -143,7 +141,6 @@ export function useSessionNavigationHotkeys({
   useHotkey({
     id: 'cycle-sidebar-session-next',
     label: 'Next Pane in Sidebar',
-    keys: 'mod+ArrowDown',
     category: 'session',
     enabled: () => {
       const sessions = chooseSidebarCycleSessions(
@@ -161,7 +158,6 @@ export function useSessionNavigationHotkeys({
   useHotkey({
     id: 'cycle-sidebar-session-prev',
     label: 'Previous Pane in Sidebar',
-    keys: 'mod+ArrowUp',
     category: 'session',
     enabled: () => {
       const sessions = chooseSidebarCycleSessions(
