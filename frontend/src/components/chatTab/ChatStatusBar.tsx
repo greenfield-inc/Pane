@@ -21,8 +21,9 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 function setStatusItems(items: readonly StatusItem[]) {
-  writeStatusItems(browserStorage(), items);
-  current = readStatusItems(browserStorage());
+  // The choice applies at once; saving it is best effort, so blocked or full storage keeps it until reload (review F-5).
+  current = STATUS_ITEMS.filter(item => items.includes(item));
+  writeStatusItems(browserStorage(), current);
   listeners.forEach(listener => listener());
 }
 /** The status items this device shows. */

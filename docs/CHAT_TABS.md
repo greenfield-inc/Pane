@@ -151,6 +151,7 @@ says, and after running the chat tab suites against it.
     a meter and **Clear conversation**; it is absent when the adapter reports no
     usage;
   - **Pull request** ("#1272 · Open", the chat's Pane's PR) opens it on GitHub;
+    the PWA reads it from the host's git status;
   - **Background tasks** ("2 tasks") lists them, with Stop where the adapter
     allows it;
   - **Queued messages** ("2 queued") moves focus to the queue.
@@ -229,11 +230,14 @@ wrote.
 Approvals and questions are also asked in Pane's Approvals and on the phone (see
 [PANE_NOTIFY.md](PANE_NOTIFY.md)), a question form one field at a time. The
 first answer wins everywhere. In the chat, a form that asks several questions
-(Claude's AskUserQuestion with more than one) takes them one at a time (D-230):
-"1 of 2", each question with its options and its Other box, Next and Back, and
-on the last one a review of the picks beside **Answer**. Number keys pick an
-option and Enter goes on; **Skip** passes over one question, and skipping every
-one declines the form. A form with one question has no steps.
+(Claude's AskUserQuestion with more than one, or any form with several fields)
+takes them one at a time (D-230): "1 of 2", each question with its options and
+its Other box, Next and Back, and on the last one a review of the picks beside
+**Answer**. Every field is a question of its own, except a choice's optional
+Other box (keyed after the choice, such as `question_0_custom`, or titled
+"Other"), which stays with it. Number keys pick an option and Enter goes on,
+with focus moving to each new question; **Skip** passes over one question, and
+skipping every one declines the form. A form with one question has no steps.
 
 ## Restart and resume
 
