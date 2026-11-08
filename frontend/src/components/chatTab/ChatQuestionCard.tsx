@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ChatTabAnswer, ChatTabQuestion } from '../../../../shared/types/chatTab';
-import { questionFields, type QuestionField } from '../../../../shared/chatTabQuestions';
+import { questionAnswer, questionFields, type QuestionField } from '../../../../shared/chatTabQuestions';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 /**
@@ -11,22 +11,15 @@ export function ChatQuestionCard({ question, disabled, onAnswer }: { question: C
   const fields = questionFields(question.schema);
   const [values, setValues] = useState<Record<string, JsonValue>>({});
   const set = (key: string, value: JsonValue) => setValues(current => ({ ...current, [key]: value }));
-  const submit = () => {
-    const content: Record<string, JsonValue> = {};
-    for (const field of fields) {
-      const value = values[field.key];
-      if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) continue;
-      content[field.key] = value;
-    }
-    onAnswer({ action: 'accept', content });
-  };
+  const content = questionAnswer(fields, values);
+  const submit = () => { if (content) onAnswer({ action: 'accept', content }); };
   return <section aria-label="Agent question" className="chat-question" onKeyDown={event => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); submit(); }
   }}>
     <p className="chat-question-message">{question.message}</p>
     {fields.map(field => <Field key={field.key} field={field.title === question.message ? { ...field, title: '' } : field} value={values[field.key]} disabled={disabled} onChange={value => set(field.key, value)} />)}
     <div className="chat-question-actions">
-      <button type="button" className="chat-button chat-button-primary" disabled={disabled} onClick={submit}>Answer</button>
+      <button type="button" className="chat-button chat-button-primary" disabled={disabled || !content} onClick={submit}>Answer</button>
       <button type="button" className="chat-button chat-button-outline" disabled={disabled} onClick={() => onAnswer({ action: 'decline' })}>Skip</button>
     </div>
   </section>;

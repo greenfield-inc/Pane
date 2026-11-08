@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { questionFields } from '../../../../shared/chatTabQuestions';
+import { questionAnswer, questionFields } from '../../../../shared/chatTabQuestions';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 describe('question form fields', () => {
@@ -31,5 +31,14 @@ describe('question form fields', () => {
       { key: 'count', kind: 'number', title: 'count' },
     ]);
     expect(questionFields('nonsense')).toEqual([]);
+  });
+
+  it('has no answer until the person chooses or types something', () => {
+    const fields = questionFields({ type: 'object', properties: { color: { type: 'string', oneOf: [{ const: 'Red' }, { const: 'Blue' }] }, note: { type: 'string' } } });
+    expect(questionAnswer(fields, {})).toBeUndefined();
+    expect(questionAnswer(fields, { note: '' })).toBeUndefined();
+    expect(questionAnswer(fields, { color: 'Blue', note: '' })).toEqual({ color: 'Blue' });
+    // An unticked checkbox is an answer of its own.
+    expect(questionAnswer(questionFields({ type: 'object', properties: { ok: { type: 'boolean' } } }), {})).toEqual({});
   });
 });

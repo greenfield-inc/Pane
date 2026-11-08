@@ -50,3 +50,18 @@ export function questionFields(schema: JsonValue): QuestionField[] {
     return [];
   });
 }
+
+/**
+ * The form's answer: the fields the person filled in, or undefined while nothing is
+ * chosen or typed (an empty Answer would tell the agent nothing; Skip declines).
+ * A checkbox counts as answered, since leaving it unticked is an answer.
+ */
+export function questionAnswer(fields: readonly QuestionField[], values: Readonly<Record<string, JsonValue>>): Record<string, JsonValue> | undefined {
+  const content: Record<string, JsonValue> = {};
+  for (const field of fields) {
+    const value = values[field.key];
+    if (value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) continue;
+    content[field.key] = value;
+  }
+  return Object.keys(content).length || fields.some(field => field.kind === 'boolean') ? content : undefined;
+}
