@@ -89,6 +89,17 @@ describe('Pane home skill', () => {
     expect(skill).toContain('Any other agent** calls `notify` as above.');
   });
 
+  it('tells an agent to read a typed reply as an answer or a question, and update instead of re-asking', () => {
+    const skill = buildPaneHomeSkill().replace(/\s+/g, ' ');
+    expect(skill).toContain('`reply: Q-n → "<their words>" (picked: <picks>) (by you)`');
+    expect(skill).toContain('run `runpane notify --took <id|Q-n> answer --json`, then act on it.');
+    expect(skill).toContain('`runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>" --json`');
+    expect(skill).toContain('never post a second approval for it.');
+    expect(skill).toContain('`correction: Q-n → that was your answer: "…" (by you)` means it is recorded as the answer: act on it.');
+    expect(skill).toContain('a title of about 80 characters');
+    expect(skill).toContain('{"label":"Q-12","approval":"<id|Q-n>"}');
+  });
+
   it('upgrades a copy an older Pane marked and leaves a newer one alone', async () => {
     await installPaneHomeSkill(dirs);
     const v1 = `---\nname: pane\n---\n<!-- pane-managed-skill v1 -->\nold text\n`;

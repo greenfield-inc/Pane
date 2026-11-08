@@ -1383,6 +1383,20 @@ default), a Session has one voice to the person: its orchestrator.
   orchestrator passes it on unless its tab closed. The tab can
   also receive `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)`;
   workers and orchestrators treat those as the person's word.
+- **Typed replies.** Anything the person types on an approval arrives as
+  `reply: Q-n → "<their words>" (picked: <picks>) (by you)` (or as the open
+  call's `{reply, picks?, id, next}` result). A worker's question's reply goes
+  to the worker's tab; when the worker can't read it, to the orchestrator that
+  relayed it; else to Autopilot. The reader decides whether it answers or asks:
+  `runpane notify --took <id|Q-n> answer`, or `--took <id|Q-n> question`, then
+  `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed
+  "<one line per change>"` with any changed fields. That saves a new version of
+  the same approval ("Updated · ready again", at most 10 kept) and waits for the
+  answer; nobody posts a second approval for it. `correction: Q-n → that was a
+  question: "…"` and `correction: Q-n → that was your answer: "…"` are the
+  person's fix of how it was taken. A worker may run `--took` and `--update`:
+  they aren't new asks. [docs/PANE_NOTIFY.md](PANE_NOTIFY.md#replies-and-new-versions)
+  has the lines, the reader order and what the approval shows.
 - **Orchestrator mode.** The generated orchestrator skill, the Session's
   `AGENTS.md` and the orchestrator guide
   (`paneChatBundle/skills/pane-orchestration/SKILL.md`, "What waits on the
@@ -1390,9 +1404,11 @@ default), a Session has one voice to the person: its orchestrator.
   running list and keep the work moving; when the person asks about one
   thing while other work is open, to remind them and offer the next step; at
   the end of a turn, to have an approval waiting or be done; and to ask
-  through Approvals with context (why, the options with the recommended one
-  first, related files and links). These are instructions; Pane doesn't
-  check turns.
+  through Approvals with context, in the Summary's format (D-225): a title of
+  about 80 characters, why it matters, each option with what it does and the
+  recommended one first, and links to every reference, other approvals
+  included (`{label, approval}`); and to read a typed reply as an answer or a
+  question. These are instructions; Pane doesn't check turns.
 - **The orchestrator relays and posts.** The same three carry the posting rule: keep every item that waits on the person (a
   worker's needs_you or blocked question, a plan or design approval, a PR
   ready to merge, a next step only they can take) posted to Approvals exactly

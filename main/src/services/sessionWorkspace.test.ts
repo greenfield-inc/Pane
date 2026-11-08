@@ -205,6 +205,11 @@ describe('Session workspace instructions', () => {
     expect(agents).toContain('The answer goes straight to the worker\'s tab');
     expect(agents).toContain('runpane inbox ack <item> --decision <D-n>');
     expect(agents).toContain('correction: Q-n → <answer> (by you)');
+    expect(agents).toContain('reply: Q-n → "<their words>" (picked: <picks>) (by you)');
+    expect(agents).toContain('run runpane notify --took <id|Q-n> answer and act on it');
+    expect(agents).toContain('runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"');
+    expect(agents).toContain('never post a second approval for it');
+    expect(agents).toContain('a title of about 80 characters');
     expect(agents).toContain('Stop the background call of an item that went stale.');
     expect(agents).toContain('Approvals survive a restart');
     expect(agents).not.toContain('Pane keeps no approvals');
