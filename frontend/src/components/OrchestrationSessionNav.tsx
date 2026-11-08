@@ -455,7 +455,7 @@ export function OrchestrationSessionNav({
           <>
             <SessionActivityDot session={session} paneIds={visiblePaneIds} />
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
-            <SessionApprovalsCount sessionId={session.id} otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
+            <SessionApprovalsCount sessionId={session.id} opensApprovals otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
           </>
         )}
       </button>

@@ -1,8 +1,8 @@
 import { createPortal } from 'react-dom';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, PanelRight, Terminal } from 'lucide-react';
-import type { SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import type { PanelLayoutNode, SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useConfigStore } from '../stores/configStore';
@@ -48,6 +48,29 @@ function launchesCommand(panel: ToolPanel): boolean {
   return !!state?.initialCommand?.trim() || !!state?.isCliPanel || !!state?.agentType;
 }
 
+/** Every group in a layout subtree, in order. */
+function groupsIn(node: PanelLayoutNode): Array<Extract<PanelLayoutNode, { type: 'group' }>> {
+  return node.type === 'group' ? [node] : node.children.flatMap(groupsIn);
+}
+
+/** The Session's right split view: the last child of a side-by-side root, if there is one (D-261). */
+function rightSplit(layout: SessionPanelLayout | null | undefined): PanelLayoutNode | undefined {
+  return layout?.root.type === 'split' && layout.root.direction === 'row' ? layout.root.children.at(-1) : undefined;
+}
+
+/** Where the approval column sits (P4): over the right split, measured so nothing under it resizes. */
+interface Overlay { left: number; top: number; width: number; height: number }
+
+/**
+ * The approval column for a Session's stage (D-261): it lays over the right split view, or opens
+ * a split of its own when there is none. ✕ shows the split again, or collapses the one it opened.
+ */
+export interface StageApproval {
+  open: boolean;
+  render: (closeLabel: string, onClose: () => void) => ReactNode;
+  onClose: () => void;
+}
+
 function layoutPanelIds(layout: SessionPanelLayout | null | undefined): Set<string> {
   const ids = new Set<string>();
   const walk = (node: SessionPanelLayout['root']) => {
@@ -81,6 +104,7 @@ export function SessionWorkspacePanels({
   stageNotice,
   chromeInline = false,
   focusWithin = true,
+  approval,
 }: {
   agentPanel: ToolPanel; agentPanelIds: string[];
   overviewContent: ReactNode; changesContent: ReactNode; toolbarActions?: ReactNode;
@@ -97,6 +121,8 @@ export function SessionWorkspacePanels({
    * autofocus its panels, or the last tile to mount would steal the caret.
    */
   focusWithin?: boolean;
+  /** An approval open on this Session (P4). */
+  approval?: StageApproval;
 }) {
   const titleBarSlot = useTitleBarSlotStore(state => state.trailingSlot);
   const trailingSlot = chromeInline ? null : titleBarSlot;
@@ -423,6 +449,50 @@ export function SessionWorkspacePanels({
     </>
   );
 
+  const stageRef = useRef<HTMLDivElement>(null);
+  const approvalOpen = approval?.open ?? false;
+  const right = rightSplit(layout);
+  // Decided when it opens: over the split there was, or in a split of its own that ✕ collapses.
+  const [approvalMode, setApprovalMode] = useState<'over' | 'split' | null>(null);
+  useLayoutEffect(() => {
+    setApprovalMode(mode => (!approvalOpen ? null : mode ?? (right ? 'over' : 'split')));
+  }, [approvalOpen, right]);
+  // The person closed the split under it: the column keeps its own.
+  const placement = approvalMode === 'over' && !right ? 'split' : approvalMode;
+  const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const rightGroupIds = useMemo(() => (right ? groupsIn(right).map(group => group.id) : []), [right]);
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (placement !== 'over' || !stage || rightGroupIds.length === 0) { setOverlay(null); return; }
+    const elements = () => rightGroupIds.flatMap(id => {
+      const element = stage.querySelector(`[data-panel-group-id="${CSS.escape(id)}"]`);
+      return element ? [element] : [];
+    });
+    const measure = () => {
+      const found = elements();
+      if (found.length === 0) { setOverlay(null); return; }
+      const base = stage.getBoundingClientRect();
+      const rects = found.map(element => element.getBoundingClientRect());
+      const left = Math.min(...rects.map(rect => rect.left)) - base.left;
+      const top = Math.min(...rects.map(rect => rect.top)) - base.top;
+      const next = { left, top, width: Math.max(...rects.map(rect => rect.right)) - base.left - left, height: Math.max(...rects.map(rect => rect.bottom)) - base.top - top };
+      setOverlay(previous => (previous && previous.left === next.left && previous.top === next.top && previous.width === next.width && previous.height === next.height ? previous : next));
+    };
+    measure();
+    // It follows the split as it is dragged or the window resizes; it never resizes the split itself.
+    const observer = new ResizeObserver(measure);
+    observer.observe(stage);
+    for (const element of elements()) observer.observe(element);
+    return () => observer.disconnect();
+  }, [placement, rightGroupIds]);
+  // ✕ names what the split shows underneath.
+  const underneath = useMemo(() => {
+    if (!right) return undefined;
+    const groups = groupsIn(right);
+    const group = groups.find(candidate => candidate.id === layout?.focusedGroupId) ?? groups[0];
+    return tabs.find(panel => panel.id === group?.activePanelId)?.title;
+  }, [right, layout?.focusedGroupId, tabs]);
+
   if (!loaded) {
     return <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
       {!error ? <SelectionLoading name="Session tools" /> : <div className="p-6 text-text-secondary"><p role="alert">{error}</p>
@@ -444,8 +514,13 @@ export function SessionWorkspacePanels({
       {error && <p role="alert" className="px-3 py-1 text-xs text-status-error">{error}</p>}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="relative min-h-0 flex-1">
+          <div ref={stageRef} className="relative min-h-0 flex-1">
             {stageNotice}
+            {approval && placement === 'over' && overlay && (
+              <div className="absolute z-30 flex min-h-0 min-w-0 border-l border-border-primary bg-bg-primary" style={overlay} data-testid="session-approval-overlay">
+                {approval.render(underneath ? `Back to ${underneath}` : 'Back', approval.onClose)}
+              </div>
+            )}
             {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
               isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
               onFocusGroup={focusGroup} alwaysShowClose keepPermanentTabsInGroups
@@ -467,6 +542,11 @@ export function SessionWorkspacePanels({
             </div>}
           </div>
         </div>
+        {approval && placement === 'split' && (
+          <div className="flex min-h-0 w-1/2 min-w-[360px] flex-shrink-0 flex-col border-l border-border-primary" data-testid="session-approval-split">
+            {approval.render('Close split', approval.onClose)}
+          </div>
+        )}
         {showSidebar && <aside aria-label={sidebarTab === 'overview' ? 'Session overview' : sidebarTab === 'files' ? 'Session files' : 'Session changes'}
           className="relative flex min-w-0 flex-shrink-0 flex-col border-l border-border-primary" style={{ width: filesResize.renderedPx }}>
           <OuterResizeSeparator label="Resize Session sidebar" orientation="vertical" value={filesResize.effectivePx}
