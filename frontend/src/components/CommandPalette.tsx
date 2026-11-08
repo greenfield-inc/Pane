@@ -24,7 +24,7 @@ import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { formatTimeAgo } from '../utils/timestampUtils';
 import { API } from '../utils/api';
 import { cn } from '../utils/cn';
-import { MachineBadge } from './machines/MachineBadge';
+import { MachineRowMark, machineMarkTitle } from './machines/MachineMark';
 import { useAllMachinesTree } from '../hooks/useAllMachinesTree';
 import { isAllMachinesOn, useAllMachinesStore } from '../stores/allMachinesStore';
 import { openOnMachine, runOnMachine } from '../utils/machineRowActions';
@@ -645,7 +645,11 @@ function ResultRow({ item, query, selected, attention }: { item: SearchItem; que
         {pinned && <Pin className="h-3 w-3 flex-shrink-0 self-center rotate-45 text-text-tertiary" aria-label="Pinned" />}
         {detail && <span className="min-w-0 truncate text-[13px] text-text-tertiary">{detail}</span>}
       </span>
-      {item.machine && <MachineBadge machine={item.machine} />}
+      {item.machine && (
+        <Tooltip content={machineMarkTitle(item.machine)} side="left">
+          <MachineRowMark machine={item.machine} />
+        </Tooltip>
+      )}
       {/* One fixed-height slot, so the hints and the metadata swap without moving the row. */}
       <span className="flex h-5 flex-shrink-0 items-center gap-3 text-[13px] text-text-tertiary">
         {selected ? (

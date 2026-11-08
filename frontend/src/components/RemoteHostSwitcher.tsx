@@ -55,7 +55,7 @@ export function RemoteHostSwitcher({
     label: <span className="font-medium">{machine.name}</span>,
     description: machine.subtitle,
     // A disabled row is dimmed as a whole, so its mark stays solid inside it.
-    leading: <MachineMark os={machine.os} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
+    leading: <MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
     disabled: switching || unpickable(machine),
     onClick: () => void pick(machine),
   }));

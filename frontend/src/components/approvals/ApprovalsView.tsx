@@ -41,7 +41,7 @@ function useMachineMark() {
   const machines = useAllMachinesStore((state) => state.entries);
   return (machineId: string | undefined, dimmed = false) => {
     const machine = machineId ? machines.find((entry) => entry.id === machineId) : undefined;
-    return machine ? <MachineMark os={machine.os} slot={machine.slot} presence={dimmed ? 'dimmed' : 'solid'} size="logo" /> : null;
+    return machine ? <MachineMark letters={machine.letters} slot={machine.slot} presence={dimmed ? 'dimmed' : 'solid'} size="logo" /> : null;
   };
 }
 
