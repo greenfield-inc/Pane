@@ -39,7 +39,9 @@ your agent.
 
 Right-click a Session in the sidebar (or on All machines, where it runs on the
 Session's own machine) and choose **Switch to chat…** to switch every terminal
-agent tab in it: the orchestrator and the agent tabs in its Panes. A dialog
+agent tab in it: the orchestrator, and the agent tabs of each Pane in it (all of
+a Pane's tabs when the whole Pane is in the Session, otherwise only the tabs
+added to it). A dialog
 first lists the tabs that will switch and the ones it will skip, with why (busy
 mid-turn, plain Codex with no conversation ID yet, a Claude tab with no saved
 conversation, not an agent, a launch chat can't run). A Pane's terminal dock is

@@ -157,20 +157,24 @@ const REOPEN_LIMIT_MS = 3 * 60_000;
 const resumeResultSchema = boundary.object({ readiness: boundary.optional(boundary.object({ ok: boundary.boolean, blocked: boundary.optional(boundary.object({ message: boundary.string })), reason: boundary.optional(boundary.object({ code: boundary.string, message: boundary.string })), state: boundary.optional(boundary.object({ running: boundary.boolean })) })) });
 const deleteResultSchema = boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) });
 
-/** A Session's terminal tabs: its own Pane's, then those of each Pane in it that is not archived. */
+/**
+ * A Session's terminal tabs, as its membership has them: every tab of its own Pane, then for each
+ * Pane in it that is not archived, every tab when the whole Pane is linked, or only its linked tabs.
+ */
 function sessionSwitchPorts(services: AppServices, registry: PaneCommandRegistry): SessionSwitchPorts {
   return {
     ...switchPorts(services, registry),
     sessionTerminals: sessionId => {
-      const paneIds = services.orchestrationSessionManager?.pausablePaneIds(sessionId) ?? [];
-      if (paneIds.length === 0) return undefined;
-      const [own] = paneIds;
-      return paneIds.flatMap(paneId => {
-        const paneName = paneId === own ? 'Session' : services.sessionManager.getSession(paneId)?.name ?? paneId;
+      const membership = services.orchestrationSessionManager?.workspaceMembership(sessionId);
+      if (!membership) return undefined;
+      const panes: Array<[string, readonly string[]]> = [...membership.ownPaneIds].map(paneId => [paneId, []]);
+      for (const [paneId, panelIds] of membership.panes) if (!membership.ownPaneIds.has(paneId)) panes.push([paneId, panelIds]);
+      return panes.flatMap(([paneId, linked]) => {
+        const paneName = membership.ownPaneIds.has(paneId) ? 'Session' : services.sessionManager.getSession(paneId)?.name ?? paneId;
         const terminals = panelManager.getPanelsBySessionAndType(paneId, 'terminal');
         // The Pane's terminal dock is a plain shell below the tabs, not a tab: leave it out.
         const dock = getDockTerminalPanel(terminals);
-        return terminals.filter(panel => panel !== dock)
+        return terminals.filter(panel => panel !== dock && (linked.length === 0 || linked.includes(panel.id)))
           .sort((a, b) => (a.metadata.position ?? 0) - (b.metadata.position ?? 0))
           .map(panel => ({ panel, paneName }));
       });
