@@ -320,6 +320,53 @@ describe('NotifyQueue replies (the reply contract)', () => {
     await expect(call).resolves.toEqual({ answer: 'Blue' });
   });
 
+  it('F-2: a second reply waits until the reader has said how it took the first, so --took always means the reply it has', async () => {
+    const queue = restoredQ20();
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Do not proceed' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(() => queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Wait, what will be deleted?' } })).toThrow(/still reading your last reply/);
+    expect(item(queue, 'q20')?.reply?.text).toBe('Do not proceed');
+    queue.took({ panelId: 'orch' }, 'Q-20', 'answer');
+    expect(item(queue, 'q20')).toMatchObject({ state: 'answered', answerSummary: 'Do not proceed' });
+  });
+
+  it('F-2: a reply still waiting for a busy tab is replaced, and only the newer line is ever typed', async () => {
+    const queue = restoredQ20();
+    tabs.set('orch', 'busy');
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'A' } });
+    await vi.advanceTimersByTimeAsync(1);
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'B' } });
+    await vi.advanceTimersByTimeAsync(1);
+    tabs.set('orch', 'delivered');
+    queue.flushTabMessages();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([['orch', 'reply: Q-20 → "B" (by you)']]);
+  });
+
+  it('F-3: partial picks keep their positions, in the line, the record and an open call\'s result', async () => {
+    const queue = queueWith();
+    const call = queue.ask({ question: q20, source: orchestrator, id: 'q20' });
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: ['', 'One train'], text: 'Only the train for now' } });
+    await expect(call).resolves.toMatchObject({ reply: 'Only the train for now', picks: ['', 'One train'] });
+    expect(item(queue, 'q20')?.reply?.picks).toEqual(['', 'One train']);
+    const restored = restoredQ20();
+    restored.run({ type: 'answer', id: 'q20', answer: { picks: ['', 'One train'], text: 'Only the train' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed.at(-1)).toEqual(['orch', 'reply: Q-20 → "Only the train" (picked: — · One train) (by you)']);
+  });
+
+  it('F-7: an updated version gets its own 15 minutes to wait, counted from the update', async () => {
+    const queue = restoredQ20();
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'why?' } });
+    await vi.advanceTimersByTimeAsync(1);
+    queue.took({ panelId: 'orch' }, 'Q-20', 'question');
+    await vi.advanceTimersByTimeAsync(16 * 60_000);
+    const updated = queue.update({ panelId: 'orch' }, 'Q-20', { asked: 'why?', whatChanged: 'Explained', context: 'Because.' }, 50_000);
+    await vi.advanceTimersByTimeAsync(50_000);
+    await expect(updated).resolves.toMatchObject({ waiting: true, id: 'q20' });
+    expect(item(queue, 'q20')?.state).toBe('waiting');
+  });
+
   it('J21: versions, the reply state and how it was taken survive a restart', async () => {
     const queue = restoredQ20();
     queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'why?' } });
