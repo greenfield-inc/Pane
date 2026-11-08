@@ -20,8 +20,8 @@ interface ApprovalColumnState {
   /** The last approval the person replied to: a quiet line on whichever approval opens next says how it was taken. */
   lastReplied: string | null;
   openApproval(surface: ApprovalSurface, itemId: string, tab?: string): void;
-  setTab(surface: ApprovalSurface, tab: string): void;
-  openNested(surface: ApprovalSurface, itemId: string | undefined): void;
+  setTab(surface: ApprovalSurface, itemId: string, tab: string): void;
+  openNested(surface: ApprovalSurface, itemId: string, nested: string | undefined): void;
   close(surface: ApprovalSurface): void;
   noteReplied(itemId: string | null): void;
 }
@@ -30,15 +30,11 @@ export const useApprovalColumnStore = create<ApprovalColumnState>((set) => ({
   open: {},
   lastReplied: null,
   openApproval: (surface, itemId, tab = 'qa') => set((state) => ({ open: { ...state.open, [surface]: { itemId, tab } } })),
-  setTab: (surface, tab) => set((state) => {
-    const current = state.open[surface];
-    return current ? { open: { ...state.open, [surface]: { ...current, tab } } } : state;
-  }),
-  openNested: (surface, itemId) => set((state) => {
-    const current = state.open[surface];
-    if (!current) return state;
-    const next: OpenApproval = { itemId: current.itemId, tab: 'qa' };
-    if (itemId) next.nested = itemId;
+  // Approvals opens its column from the list's selection, so a tab can be the first thing set.
+  setTab: (surface, itemId, tab) => set((state) => ({ open: { ...state.open, [surface]: { itemId, tab } } })),
+  openNested: (surface, itemId, nested) => set((state) => {
+    const next: OpenApproval = { itemId, tab: 'qa' };
+    if (nested) next.nested = nested;
     return { open: { ...state.open, [surface]: next } };
   }),
   close: (surface) => set((state) => {

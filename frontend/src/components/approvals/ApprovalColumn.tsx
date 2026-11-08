@@ -62,7 +62,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
   const setTab = useApprovalColumnStore((state) => state.setTab);
   const openNested = useApprovalColumnStore((state) => state.openNested);
   const item = byId.get(itemId);
-  const nested = open?.nested ? byId.get(open.nested) : undefined;
+  const nested = open?.itemId === itemId && open.nested ? byId.get(open.nested) : undefined;
   const tabs = useMemo(() => (item ? cardTabs(item, inChat) : []), [item, inChat]);
   const tab = tabs.find((candidate) => candidate.key === (open?.itemId === itemId ? open.tab : 'qa')) ?? tabs[0];
   const pager = order.includes(itemId) ? order : [...order, itemId];
@@ -94,15 +94,15 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
         dots={pager.map((id) => dotTone(byId.get(id), id === itemId))}
         chip={cardChip(item)}
       />
-      <TabBar tabs={tabs} active={tab?.key ?? 'qa'} onPick={(key) => setTab(surface, key)} />
+      <TabBar tabs={tabs} active={tab?.key ?? 'qa'} onPick={(key) => setTab(surface, itemId, key)} />
       <div className="relative min-h-0 flex-1">
         {(tab?.kind ?? 'qa') === 'qa' && (
           nested
-            ? <NestedApproval item={nested} onBack={() => openNested(surface, undefined)} />
+            ? <NestedApproval item={nested} onBack={() => openNested(surface, itemId, undefined)} />
             : <QuestionsTab key={item.id} item={item} order={pager} byId={byId} onSelect={onSelect} />
         )}
-        {tab?.kind === 'summary' && <SummaryTab item={item} onOpenTab={(key) => setTab(surface, key)} tabs={tabs} />}
-        {tab?.kind === 'link' && <LinkTab item={item} link={tab.link} onOpenApproval={(id) => openNested(surface, resolveApproval(items ?? [], id))} />}
+        {tab?.kind === 'summary' && <SummaryTab item={item} onOpenTab={(key) => setTab(surface, itemId, key)} tabs={tabs} />}
+        {tab?.kind === 'link' && <LinkTab item={item} link={tab.link} onOpenApproval={(id) => openNested(surface, itemId, resolveApproval(items ?? [], id))} />}
         {tab?.kind === 'origin' && (renderOrigin?.(item) ?? <p className="p-6 text-[13px] text-text-tertiary">Asked in {item.source.name}.</p>)}
       </div>
     </div>

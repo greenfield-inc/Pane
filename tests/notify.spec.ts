@@ -88,7 +88,7 @@ test.describe('Approvals in the main window', () => {
     await expect(row('sms-retry')).not.toContainText('Waiting');
   });
 
-  test('Approvals lists newest first, sorts by Session, opens the selected item in place, and answers it', async ({ page }) => {
+  test('Approvals lists newest first, groups by Session, opens the selected item in the column beside the list, and answers it', async ({ page }) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();
     const queue = page.getByTestId('approvals-queue');
@@ -99,19 +99,23 @@ test.describe('Approvals in the main window', () => {
     await page.getByRole('menuitemradio', { name: 'By Session' }).click();
     await expect(queue.getByTestId('approvals-group')).toHaveText([/Launch\s*1/, /Not in a Session\s*2/]);
 
-    // The newest waiting item is selected first; others are rows.
-    const selected = queue.getByTestId('approvals-selected');
-    await expect(selected).toContainText('Which session store should the refactor use?');
-    await expect(selected.getByTestId('approvals-related').getByRole('button')).toHaveText(['plan.html', 'PR #812']);
-    await selected.getByTestId('approvals-related').getByRole('button', { name: 'PR #812' }).click();
-    await selected.getByRole('button', { name: /Keep Redis/ }).click();
+    // The first waiting item opens in the column beside the list (P4); the list stays compact rows.
+    await expect(queue.getByTestId('approvals-selected')).toHaveCount(0);
+    const column = page.getByTestId('approval-column');
+    await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
+    await expect(column.getByTestId('approval-pager')).toHaveText('1 of 3');
+    // Questions & answers first, then Summary, each reference, and the chat where it was asked (D-224).
+    await expect(column.getByTestId('approval-tab')).toHaveText(['Questions & answers', 'Summary', 'plan.html', 'PR #812', "auth-refactor's tab"]);
+    await column.getByRole('radio', { name: /Keep Redis/ }).click();
+    await column.getByTestId('approval-send').click();
 
     await queue.getByTestId('approvals-row').filter({ hasText: 'Apply migration 0042' }).click();
-    await queue.getByTestId('approvals-selected').getByRole('button', { name: /Approve/ }).click();
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    await column.getByRole('radio', { name: /Approve/ }).click();
+    await column.getByTestId('approval-send').click();
     await expect.poll(() => commands(page)).toEqual([
-      { type: 'open-link', id: 'q-options', index: 1, paneId: 'pane-auth' },
-      { type: 'answer', id: 'q-options', answer: { choice: 'Keep Redis' } },
-      { type: 'answer', id: 'q-approve', answer: { approved: true } },
+      { type: 'answer', id: 'q-options', answer: { picks: ['Keep Redis'] } },
+      { type: 'answer', id: 'q-approve', answer: { picks: ['Approve'] } },
     ]);
 
     await queue.getByRole('tab', { name: /Answered/ }).click();
@@ -132,7 +136,7 @@ test.describe('Approvals in the main window', () => {
     const queue = page.getByTestId('approvals-queue');
     await queue.getByRole('tab', { name: /Answered/ }).click();
     await queue.getByTestId('approvals-row').filter({ hasText: 'Which cache should staging use?' }).click();
-    const selected = queue.getByTestId('approvals-selected');
+    const selected = page.getByTestId('approval-column');
     await selected.getByRole('button', { name: 'Override' }).click();
     await expect(selected.getByRole('button', { name: 'Details' })).toHaveCount(0);
     await expect(selected.getByRole('button', { name: 'Cancel' })).toBeVisible();
@@ -140,10 +144,11 @@ test.describe('Approvals in the main window', () => {
     await expect.poll(() => commands(page)).toContainEqual({ type: 'override', id: 'q-overridable', answer: { choice: 'Keep Redis' } });
   });
 
-  test('a worker item shows its Pane beside it', async ({ page }) => {
+  test('a worker item shows its Pane in the column\'s origin tab', async ({ page }) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();
-    const beside = page.getByTestId('approvals-beside');
+    await page.getByTestId('approval-tab').filter({ hasText: "auth-refactor's tab" }).click();
+    const beside = page.getByTestId('approvals-origin');
     await expect(beside).toContainText('Pane');
     await expect(beside).toContainText('auth-refactor');
   });
@@ -164,25 +169,25 @@ test.describe('Approvals in the main window', () => {
     await page.getByRole('button', { name: 'Home' }).first().click();
 
     await page.getByTestId('approvals-nav').click();
-    const beside = page.getByTestId('approvals-beside');
+    await page.getByTestId('approval-tab').filter({ hasText: "auth-refactor's tab" }).click();
+    const beside = page.getByTestId('approvals-origin');
     await expect(beside.getByRole('tab', { name: /Asking tab/ })).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('a suggestion fills the answer field and waits for Enter', async ({ page }) => {
+  test('a suggestion fills the one reply box and waits for Send; typed text goes as a reply', async ({ page }) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();
     await page.getByTestId('approvals-row').filter({ hasText: 'release headline' }).click();
-    const card = page.getByTestId('approvals-selected');
-    await card.getByRole('button', { name: /Notify is here/ }).click();
-    const field = card.getByPlaceholder('Type your answer');
+    const column = page.getByTestId('approval-column');
+    await column.getByRole('button', { name: /Notify is here/ }).click();
+    const field = column.getByTestId('approval-reply-box');
     await expect(field).toHaveValue('Notify is here');
-    await expect(field).toBeFocused();
     expect(await commands(page)).toEqual([]);
 
     await field.press('End');
     await field.pressSequentially(' in 2.5');
-    await field.press('Enter');
-    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-ask', answer: { text: 'Notify is here in 2.5' } }]);
+    await column.getByTestId('approval-send').click();
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-ask', answer: { picks: [], text: 'Notify is here in 2.5' } }]);
   });
 
   test('says nothing waits in one line, and main can open it', async ({ page }) => {
