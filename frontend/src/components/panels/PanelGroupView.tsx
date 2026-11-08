@@ -14,6 +14,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Plus } from 'lucide-react';
+import { cn } from '../../utils/cn';
 import { PanelTabStrip } from './PanelTabStrip';
 import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
 import { PanelContainer } from './PanelContainer';

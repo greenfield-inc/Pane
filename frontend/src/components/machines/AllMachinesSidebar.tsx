@@ -8,7 +8,6 @@ import { RenameDialog } from '../CompactSessionMenu';
 import { PermissionDialog } from '../PermissionDialog';
 import { SessionSwitchToChatDialog, useSessionSwitchPreview } from '../SessionSwitchToChat';
 import type { SessionChatSwitchPreview } from '../../../../shared/types/chatTab';
-import { MachineBadge } from './MachineBadge';
 import { MachineMark, MachineRowMark, machineMarkTitle } from './MachineMark';
 import { Tooltip } from '../ui/Tooltip';
 import { machineLetter } from '../../../../shared/utils/machineMarks';

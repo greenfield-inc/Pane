@@ -569,7 +569,6 @@ export function SessionWorkspacePanels({
     </>
   );
 
-  const stageRef = useRef<HTMLDivElement>(null);
   const approvalOpen = approval?.open ?? false;
   const right = rightSplit(layout);
   // Decided when it opens: over the split there was, or in a split of its own that ✕ collapses.
