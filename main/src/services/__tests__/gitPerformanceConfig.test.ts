@@ -88,6 +88,15 @@ describe('removePaneFsmonitorConfig', () => {
     expect(readFileSync(globalConfig, 'utf8')).toBe('[core]\n\tfsmonitor = true\n');
   });
 
+  it('cleans up after an upgrade from a canary build that wrote it', async () => {
+    const cwd = repository();
+    git(cwd, 'config', '--local', 'core.fsmonitor', 'true');
+
+    await removePaneFsmonitorConfig('2.4.210-canary.202610310113.d8d9742.32.1', [{ path: cwd, commandRunner: new CommandRunner({ path: cwd }) }]);
+
+    expect(localConfig(cwd, 'core.fsmonitor')).toBeUndefined();
+  });
+
   it('keeps a local core.fsmonitor value Pane did not write', async () => {
     const cwd = repository();
     git(cwd, 'config', '--local', 'core.fsmonitor', '/usr/local/bin/watchman-hook');
@@ -97,7 +106,7 @@ describe('removePaneFsmonitorConfig', () => {
     expect(localConfig(cwd, 'core.fsmonitor')).toBe('/usr/local/bin/watchman-hook');
   });
 
-  it.each([['2.4.216'], ['2.5.0'], [null]])('does nothing when the last recorded version is %s', async lastVersion => {
+  it.each([['2.4.216'], ['2.4.216-canary.202611090101.abc1234.40.1'], ['2.5.0'], [null]])('does nothing when the last recorded version is %s', async lastVersion => {
     const cwd = repository();
     git(cwd, 'config', '--local', 'core.fsmonitor', 'true');
 

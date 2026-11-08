@@ -64,7 +64,8 @@ export async function removePaneFsmonitorConfig(
   lastVersion: string | null,
   repositories: Array<{ path: string; commandRunner: CommandRunner }>,
 ): Promise<void> {
-  if (!lastVersion || compareVersions(lastVersion, FIRST_VERSION_WITHOUT_FSMONITOR) >= 0) return;
+  // A canary records `2.4.216-canary.<date>.<sha>…`; compare its release part.
+  if (!lastVersion || compareVersions(lastVersion.split('-')[0], FIRST_VERSION_WITHOUT_FSMONITOR) >= 0) return;
   console.log(`[GitPerformanceConfig] Removing core.fsmonitor that Pane ${lastVersion} wrote, in ${repositories.length} repositories`);
   let removed = 0;
   for (const { path, commandRunner } of repositories) {
