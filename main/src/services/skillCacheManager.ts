@@ -166,7 +166,8 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
 - A relayed answer goes straight to the worker's tab, so don't forward it;
   record it with \`runpane inbox ack <item> --decision <D-n>\`. When
   \`runpane inbox\` lists the answer with \`undelivered\`, Pane can't type it
-  there: pass it on with \`runpane panels submit\`. A tab can also
+  there: pass it on with \`runpane panels submit\`, unless the reason is that
+  its tab closed (no worker is left to tell). A tab can also
   receive \`closed: Q-n (by you)\` or \`correction: Q-n → <answer> (by you)\`: that
   is the person's word.
 - Stop waiting on an item that is superseded or no longer needed: stop its

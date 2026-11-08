@@ -232,8 +232,9 @@ telemetry.mjs` running `claude`) qualifies. A shell, a nested shell, `ssh` or a
 REPL there keeps the answer owed, and the card reads "not delivered to <tab>
 yet" until it goes. Where Pane can't see what runs in the tab (Windows, WSL and
 the PTY host), or the tab closed, the answer is never typed: the card reads
-"not delivered to <tab>: <why>", and `runpane inbox` lists it as `undelivered`
-so the orchestrator passes it on. An
+"not delivered to <tab>: <why>" with Copy answer, and `runpane inbox` lists it
+as `undelivered`. The orchestrator passes on one Pane couldn't see to type; one
+whose tab closed has no one left to tell. An
 asker that posts the same question again from the same tab (same Q-n or title)
 joins the waiting card instead of adding one.
 

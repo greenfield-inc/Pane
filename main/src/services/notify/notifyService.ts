@@ -354,7 +354,11 @@ export class NotifyService {
     // A phone on Autopilot's machine answers an item another machine holds (D-165): this machine passes it on.
     const target = this.queue.remoteTarget(command.id);
     if (target) {
-      // The other machine sees this one as the sender, so a teammate's answer to a secret card stops here.
+      // The other machine sees this one as the sender, so a teammate's answer to a secret card stops here,
+      // and so does a teammate acting as Autopilot, which it would record as Autopilot's (F-8).
+      if (teammate && command.type.startsWith('agent-')) {
+        throw new PaneError('ERR_NOTIFY_NOT_AUTOPILOT', `${teammate} can't act as Autopilot on ${target.machine}. Nothing was sent.`, 'Answer or close it as yourself instead.');
+      }
       if (teammate && target.ui === 'secret') throw teammateSecretRefusal(teammate, 'answer a secret card');
       if (!target.online) throw new PaneError('ERR_APPROVALS_MACHINE_OFFLINE', `${target.machine} is offline, so this item can't change. Nothing was sent.`, `Try again when ${target.machine} is back.`);
       await this.deps.sendToMachine(target.machineId, { ...command, id: target.id });

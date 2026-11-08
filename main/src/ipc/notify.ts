@@ -336,10 +336,13 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       if (panel.type === 'chat') {
         if (getChatTabManager().agentState(panelId) !== 'idle') return 'busy';
       } else {
+        // The status is free to read; the process group costs a `ps`, so only an idle tab pays for it.
+        const status = terminalPanelManager.getAgentStatus(panelId);
+        if (status !== 'idle') return 'busy';
         const agentInForeground = await terminalPanelManager.readForegroundAgent(panelId);
         // Where Pane can't see what runs in the tab (Windows, WSL, the PTY host), it never types (F-7).
         if (agentInForeground === undefined) return 'unsupported';
-        if (!tabTakesText(terminalPanelManager.getAgentStatus(panelId), agentInForeground)) return 'busy';
+        if (!tabTakesText(status, agentInForeground)) return 'busy';
       }
       try {
         const submit = () => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: text, expectReport: false }]);

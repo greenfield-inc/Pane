@@ -1371,8 +1371,8 @@ default), a Session has one voice to the person: its orchestrator.
   already answers (D-79). The answer goes straight to the asking tab, whether or
   not the orchestrator is running: `answer: Q-n → <answer> (by you)`, once its
   agent is at its prompt ([docs/PANE_NOTIFY.md](PANE_NOTIFY.md) has the rule).
-  An answer Pane can't type shows in `runpane inbox` as `undelivered`, and the
-  orchestrator passes it on. The tab can
+  An answer Pane can't type shows in `runpane inbox` as `undelivered`; the
+  orchestrator passes it on unless its tab closed. The tab can
   also receive `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)`;
   workers and orchestrators treat those as the person's word.
 - **Orchestrator mode.** The generated orchestrator skill, the Session's
@@ -1397,7 +1397,9 @@ default), a Session has one voice to the person: its orchestrator.
   inbox`, gives that card its choices, context and links and rings it, and the
   call waits on it as on any notify. The answer goes straight to the worker's
   tab, so the orchestrator doesn't forward it, except an answer `runpane inbox`
-  lists as `undelivered`, which it passes on with `runpane panels submit`. It
+  lists as `undelivered` because Pane can't see what runs in the tab, which it
+  passes on with `runpane panels submit` (one whose tab closed has no one left
+  to tell). It
   records the decision with
   `runpane inbox ack <item> --decision <D-n>`, and the card reads "Recorded as
   D-n". The older way (post a second card, ack, forward the answer) keeps working

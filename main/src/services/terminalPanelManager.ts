@@ -2834,10 +2834,6 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   /**
-   * The program in the foreground of a panel's PTY. Undefined on Windows, WSL
-   * and ptyHost terminals, where node-pty cannot name it.
-   */
-  /**
    * Whether an agent reads this tab's input now: a known agent (by executable, or Claude's versioned
    * binary in a tab Pane identified) is in the terminal's foreground process group, and that group
    * isn't Pane's own shell. A wrapper such as `node telemetry.mjs` shares a group with the agent it
@@ -2860,6 +2856,10 @@ export class TerminalPanelManager extends EventEmitter {
       || (terminal.agentType !== undefined && isVersionedExecutableName(member)));
   }
 
+  /**
+   * The program in the foreground of a panel's PTY. Undefined on Windows, WSL
+   * and ptyHost terminals, where node-pty cannot name it.
+   */
   getForegroundProcess(panelId: string): TerminalForegroundProcess | undefined {
     const terminal = this.terminals.get(panelId);
     if (!terminal || terminal.destroying) return undefined;

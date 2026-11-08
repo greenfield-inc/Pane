@@ -181,6 +181,18 @@ describe('Notify across machines, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it("refuses a teammate acting as Autopilot on another machine's item before passing it on", async () => {
+    const pane = await startPane();
+    const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)) });
+    followSavedMachines(saved.machines);
+    await flush();
+
+    await expect(pane.notify.runRemote({ type: 'agent-answer', id: 'studio:q-1', answer: { approved: true }, because: 'trust me' }, 'build-mac', 'teammate@example.com'))
+      .rejects.toMatchObject({ code: 'ERR_NOTIFY_NOT_AUTOPILOT' });
+    expect(saved.sent).toEqual([]);
+    pane.notify.dispose();
+  });
+
   it("keeps an offline machine's question, dimmed and unanswerable, until it answers again", async () => {
     const pane = await startPane();
     const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)) });
