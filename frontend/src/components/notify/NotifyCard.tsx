@@ -302,7 +302,8 @@ function CardHeader({ item, form, queue, onCommand, menuPlacement, machineMark }
             · {machineMark}<span className="truncate">{item.machine}</span>
           </span>
         )}
-        <span className="ml-auto shrink-0">{relativeAge(item.createdAt, now)}</span>
+        {/* The same time as the item's row in the list: when it ended, else when it was asked. */}
+        <span className="ml-auto shrink-0">{relativeAge(item.resolvedAt ?? item.createdAt, now)}</span>
       </div>
     );
   }
