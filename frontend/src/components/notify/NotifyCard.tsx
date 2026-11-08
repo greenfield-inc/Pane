@@ -421,8 +421,9 @@ function Chip({ keyLabel, label, detail, shaded, onClick, tall, inbox }: ChipPro
       type="button"
       onClick={onClick}
       aria-pressed={tall ? shaded : undefined}
+      title={tall ? undefined : label}
       className={cn(
-        'inline-flex rounded-xl text-left text-text-secondary hover:bg-surface-hover',
+        'inline-flex min-w-0 max-w-full rounded-xl text-left text-text-secondary hover:bg-surface-hover',
         tall ? 'items-start gap-2.5 px-3.5 py-3' : 'h-[42px] items-center gap-2.5 whitespace-nowrap pl-3 pr-4',
         inbox ? 'text-[14.5px]' : 'text-[15px]',
         shaded && 'bg-surface-tertiary font-medium text-text-primary hover:bg-surface-tertiary',
@@ -431,10 +432,10 @@ function Chip({ keyLabel, label, detail, shaded, onClick, tall, inbox }: ChipPro
       <KeyCap className={tall ? 'mt-px' : undefined}>{keyLabel}</KeyCap>
       {tall ? (
         <span className="min-w-0">
-          <span className="block">{label}</span>
+          <span className="block [overflow-wrap:anywhere]">{label}</span>
           {detail && <span className="block text-[12px] font-normal leading-snug text-text-tertiary">{detail}</span>}
         </span>
-      ) : label}
+      ) : <span className="min-w-0 truncate">{label}</span>}
     </button>
   );
 }
