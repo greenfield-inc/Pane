@@ -55,7 +55,6 @@ import {
   primaryGroup,
   allGroups,
   allPanelIds,
-  findGroupInDirection,
   updateSizes,
   findGroupContainingPanel,
   activatePanelInLayout,
@@ -806,10 +805,13 @@ export const SessionView = memo(() => {
   // Main-repo panes render ProjectView, which owns its own tabs and inspector;
   // the hotkeys below act on it through this bridge instead of this view's state.
   const isMainRepoPane = !!activeSession?.isMainRepo;
-  const projectActions = useCallback(
-    () => (isMainRepoPane ? useProjectViewActionsStore.getState().actions : null),
-    [isMainRepoPane],
-  );
+  // A Session's focused tile answers the same keys (P3).
+  const isSessionsView = activeView === 'pane-chat';
+  const projectActions = useCallback(() => {
+    const bridge = useProjectViewActionsStore.getState();
+    if (isSessionsView) return bridge.sessionActions;
+    return isMainRepoPane ? bridge.actions : null;
+  }, [isMainRepoPane, isSessionsView]);
 
   const cycleTab = useCallback((direction: 'next' | 'prev') => {
     const bridged = projectActions();
@@ -920,10 +922,14 @@ export const SessionView = memo(() => {
     label: 'Split Right',
     category: 'tabs',
     enabled: () => {
+      const bridged = projectActions();
+      if (bridged) return bridged.canSplit?.() ?? false;
       if (!activeSession || !focusedGroup) return false;
       return focusedGroup.panelIds.length >= 2 && !!focusedGroup.activePanelId;
     },
     action: () => {
+      const bridged = projectActions();
+      if (bridged) { bridged.split?.('row'); return; }
       if (!activeSession || !focusedGroup || !focusedGroup.activePanelId) return;
       const sid = activeSession.id;
       const currentLayout = usePanelStore.getState().layouts[sid];
@@ -953,10 +959,14 @@ export const SessionView = memo(() => {
     label: 'Split Down',
     category: 'tabs',
     enabled: () => {
+      const bridged = projectActions();
+      if (bridged) return bridged.canSplit?.() ?? false;
       if (!activeSession || !focusedGroup) return false;
       return focusedGroup.panelIds.length >= 2 && !!focusedGroup.activePanelId;
     },
     action: () => {
+      const bridged = projectActions();
+      if (bridged) { bridged.split?.('column'); return; }
       if (!activeSession || !focusedGroup || !focusedGroup.activePanelId) return;
       const sid = activeSession.id;
       const currentLayout = usePanelStore.getState().layouts[sid];
@@ -975,56 +985,6 @@ export const SessionView = memo(() => {
       if (newGroup) {
         setFocusedGroupInStore(sid, newGroup.id);
       }
-    },
-    showInPalette: true,
-  });
-
-  // Mod+Alt+Arrows: directional group focus
-  useHotkey({
-    id: 'focus-group-left',
-    label: 'Focus Group Left',
-    category: 'tabs',
-    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
-    action: () => {
-      if (!activeSession || !sessionLayout) return;
-      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'left');
-      if (target) handleFocusGroup(target);
-    },
-    showInPalette: true,
-  });
-  useHotkey({
-    id: 'focus-group-right',
-    label: 'Focus Group Right',
-    category: 'tabs',
-    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
-    action: () => {
-      if (!activeSession || !sessionLayout) return;
-      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'right');
-      if (target) handleFocusGroup(target);
-    },
-    showInPalette: true,
-  });
-  useHotkey({
-    id: 'focus-group-up',
-    label: 'Focus Group Up',
-    category: 'tabs',
-    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
-    action: () => {
-      if (!activeSession || !sessionLayout) return;
-      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'up');
-      if (target) handleFocusGroup(target);
-    },
-    showInPalette: true,
-  });
-  useHotkey({
-    id: 'focus-group-down',
-    label: 'Focus Group Down',
-    category: 'tabs',
-    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
-    action: () => {
-      if (!activeSession || !sessionLayout) return;
-      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'down');
-      if (target) handleFocusGroup(target);
     },
     showInPalette: true,
   });
@@ -1752,16 +1712,16 @@ export const SessionView = memo(() => {
     id: 'toggle-terminal',
     label: 'Toggle Terminal',
     category: 'view',
-    enabled: () => isInSessionView,
-    action: toggleTerminalCollapse,
+    enabled: () => isInSessionView || Boolean(projectActions()?.toggleTerminal),
+    action: () => { const bridged = projectActions(); if (bridged?.toggleTerminal) bridged.toggleTerminal(); else toggleTerminalCollapse(); },
   });
 
   // Ctrl+Shift+B: toggle detail panel (right sidebar)
   useHotkey({
     id: 'toggle-detail-panel',
-    label: 'Toggle Detail Panel',
+    label: 'Toggle Right Panel',
     category: 'view',
-    enabled: () => isInSessionView && !immersiveMode,
+    enabled: () => (isInSessionView && !immersiveMode) || (isSessionsView && Boolean(projectActions())),
     action: () => { const bridged = projectActions(); if (bridged) bridged.toggleDetail(); else handleToggleDetailPanel(); },
   });
 
@@ -2087,6 +2047,8 @@ export const SessionView = memo(() => {
                 )}
                 <div className="pane-terminal-rail-clip h-full overflow-hidden">
                   <div
+                    data-focus-region="terminal"
+                    data-region-open={rightTerminalResize.bodyActive}
                     className="pane-terminal-rail-shell bg-surface-primary flex flex-col h-full relative overflow-hidden"
                     style={{ width: `${rightTerminalResize.effectivePx}px` }}
                     aria-hidden={!rightTerminalResize.bodyActive}
@@ -2124,6 +2086,8 @@ export const SessionView = memo(() => {
                 {/* Bottom: persistent terminal (collapsible) */}
                 {defaultTerminalPanel && (
                   <div
+                    data-focus-region="terminal"
+                    data-region-open={!isTerminalCollapsed && terminalResize.bodyActive}
                     className={`pane-terminal-dock flex-shrink-0 flex flex-col relative overflow-visible ${
                       !immersiveMode && (isTerminalCollapsed || terminalResize.renderedPx > 0)
                         ? 'border-t border-border-primary'

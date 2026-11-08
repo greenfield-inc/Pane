@@ -45,6 +45,7 @@ import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
 import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { useRegionNavigation } from './hooks/useRegionNavigation';
 import { KeySequenceHint } from './components/KeySequenceHint';
 import { KeymapNotice } from './components/KeymapNotice';
 import { RestartToUpdateToast } from './components/RestartToUpdateToast';
@@ -281,21 +282,8 @@ function App() {
     action: () => openSettings(),
   });
 
-  useHotkey({
-    id: 'focus-sidebar',
-    label: 'Focus Sidebar',
-    category: 'navigation',
-    action: () => {
-      if (sidebarCollapsed) handleToggleSidebar();
-      // Land on the selected pane (or the first row) so arrow keys work from here.
-      requestAnimationFrame(() => {
-        const shell = document.querySelector<HTMLElement>('.pane-sidebar-shell');
-        const target = shell?.querySelector<HTMLElement>('[aria-current="page"]')
-          ?? shell?.querySelector<HTMLElement>('button, [tabindex="0"]');
-        target?.focus();
-      });
-    },
-  });
+  // ⌘0, ⌘⌥+arrows, F6 and the sidebar's arrow keys (P3).
+  useRegionNavigation();
 
   useHotkey({
     id: 'open-shortcut-settings',

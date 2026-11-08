@@ -96,6 +96,8 @@ export function HorizontalDetailPanel({
   return (
     <div
       ref={detailPanelRef}
+      data-focus-region="right-panel"
+      data-region-open={contentActive && !isCollapsed}
       className={`pane-detail-panel pane-detail-panel-horizontal flex-shrink-0 bg-surface-primary flex flex-col overflow-visible relative ${immersiveMode ? '' : 'border-t border-border-primary'}`}
       style={immersiveMode
         ? { height: '0px' }

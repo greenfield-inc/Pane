@@ -237,6 +237,12 @@ body.understory {
     inset 0 calc(-1 * var(--tab-indicator-height, 4px)) 0 0 var(--tab-indicator-color, #3574F0);
 }
 
+/* Quiet focus (D-237): only the focused group's active tab keeps the accent
+   while keyboard focus is in the main area; other groups' active tabs dim. */
+.panel-tab-strip-dimmed [aria-selected="true"] {
+  --tab-indicator-color: transparent;
+}
+
 /* Theme-aware structural shells.
    Folio, Newsprint and Walnut are intentionally absent from the shell selector
    lists below — the print themes use the flat base layout with rule-line
@@ -360,6 +366,26 @@ body.understory {
 .pane-sidebar-shell :is(button, a, [role="button"]):focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: -2px;
+}
+
+/* The sidebar as a keyboard list (D-234, the VS Code way): the cursor row
+   gets the focus tint and a 1px ring, and the selected row is stronger while
+   the list has focus and grey (its usual shade) once focus leaves. */
+[data-sidebar-item]:focus-visible {
+  box-shadow: none;
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+  background-color: color-mix(in srgb, var(--color-focus-ring) 12%, transparent);
+}
+
+.pane-sidebar-shell :is(button, a, [role="button"])[data-sidebar-item]:focus-visible {
+  box-shadow: none;
+  outline-width: 1px;
+  outline-offset: -1px;
+}
+
+.pane-sidebar-shell:focus-within [data-sidebar-selected] {
+  background-color: color-mix(in srgb, var(--color-focus-ring) 22%, var(--color-surface-selected));
 }
 
 .panel-tab-bar {

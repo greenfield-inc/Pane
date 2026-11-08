@@ -451,7 +451,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const enabled = snapshot?.settings.enabled ?? true;
   const importError = snapshot?.importError;
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary min-[1100px]:flex-row" data-testid="notify-inbox">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary min-[1100px]:flex-row" data-testid="notify-inbox" data-focus-region="approvals">
       <section
         aria-label="Approvals"
         // Stacked (a narrow window), the list takes the height when nothing shows beside it.

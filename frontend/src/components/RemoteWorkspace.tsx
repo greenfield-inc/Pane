@@ -31,6 +31,7 @@ export function RemoteWorkspace({ dimmed, children }: { dimmed: boolean; childre
   return (
     <div
       ref={ref}
+      data-focus-region="main"
       inert={dimmed}
       aria-busy={dimmed || undefined}
       className={cn('relative flex min-h-0 min-w-0 flex-1 transition-opacity duration-normal', dimmed && 'opacity-50')}

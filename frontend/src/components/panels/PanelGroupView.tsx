@@ -20,7 +20,6 @@ import { PanelContainer } from './PanelContainer';
 import type { ToolPanel, PanelGroupNode } from '../../../../shared/types/panels';
 import { subsetInsertIndex, type DropZone } from '../../utils/panelLayout';
 import { DropOverlay } from './DropOverlay';
-import { cn } from '../../utils/cn';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 
 // ---------------------------------------------------------------------------
@@ -144,11 +143,12 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
 
   return (
     <div
-      className={cn(
-        "h-full flex flex-col",
-        multiGroup && isFocusedGroup && "ring-1 ring-inset ring-[color-mix(in_srgb,var(--color-interactive-primary)_30%,transparent)]",
-      )}
+      className="h-full flex flex-col"
+      data-panel-group-id={group.id}
+      data-group-focused={isFocusedGroup}
       onMouseDownCapture={handleMouseDownCapture}
+      // Keyboard focus arriving in a group (⌘⌥+arrows, F6, Tab) makes it the active split.
+      onFocusCapture={isFocusedGroup ? undefined : handleMouseDownCapture}
     >
       {/* Once the pane is split each group owns a full tab strip — its working
           tabs plus a "+" that opens the add-tool menu for this group. The row
@@ -164,6 +164,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             onPanelClose={onPanelClose}
             isPrimary={isPrimary}
             isFocused={isFocusedGroup}
+            quietFocus
             showShortcutHints={false}
             onDragStart={onDragStart}
             onDragEnd={onDragEnd}

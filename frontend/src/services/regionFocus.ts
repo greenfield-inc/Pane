@@ -1,0 +1,382 @@
+/**
+ * Keyboard focus across the window's regions (D-234, D-237): which region has
+ * focus, moving to the stop in a direction (⌘⌥+arrows), cycling regions (F6),
+ * and focusing the sidebar (⌘0).
+ *
+ * Regions mark themselves with `data-focus-region` (sidebar, main,
+ * right-panel, terminal, approvals); split groups with `data-panel-group-id`.
+ * A region that can be shown collapsed says so with `data-region-open`.
+ * The page is the source of truth: stops are read from what is on screen, so
+ * worktree Panes, Session tiles, the main-repo Pane and the other views all
+ * work the same way.
+ */
+import { create } from 'zustand';
+import { useNavigationStore } from '../stores/navigationStore';
+import {
+  stepStop,
+  stopInDirection,
+  type FocusDirection,
+  type FocusStop,
+  type FocusStopKind,
+} from '../utils/focusStops';
+
+type FocusRegion = 'sidebar' | 'main' | 'right-panel' | 'terminal' | 'approvals';
+
+const REGIONS: ReadonlySet<string> = new Set(['sidebar', 'main', 'right-panel', 'terminal', 'approvals']);
+
+interface FocusRegionState {
+  /** The region holding keyboard focus, or the one that last did. */
+  region: FocusRegion | null;
+}
+
+export const useFocusRegionStore = create<FocusRegionState>(() => ({ region: null }));
+
+/** Where focus was before it entered the sidebar, for Esc (D-234). */
+let returnTarget: HTMLElement | null = null;
+/** The last stop that held focus, when focus has since left the page (a webview, a dialog). */
+let lastStopElement: HTMLElement | null = null;
+
+function regionOf(element: Element | null): FocusRegion | null {
+  const value = element?.closest('[data-focus-region]')?.getAttribute('data-focus-region');
+  // SAFETY: REGIONS holds exactly the FocusRegion values, checked just before.
+  return value && REGIONS.has(value) ? (value as FocusRegion) : null;
+}
+
+/** Follows focus as it moves (by mouse, Tab, or these keys). */
+export function noteFocusIn(target: Element | null): void {
+  const region = regionOf(target);
+  if (!region) return;
+  if (useFocusRegionStore.getState().region !== region) useFocusRegionStore.setState({ region });
+  // SAFETY: focusin targets on the window are elements.
+  const element = target as HTMLElement;
+  if (region !== 'sidebar') returnTarget = element;
+  const stop = stopElementFor(element);
+  if (stop) lastStopElement = stop;
+}
+
+function isShown(element: Element): boolean {
+  if (element.closest('[inert], [aria-hidden="true"]')) return false;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 8 && rect.height > 8;
+}
+
+function rectOf(element: Element) {
+  const rect = element.getBoundingClientRect();
+  return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+}
+
+const stopIds = new WeakMap<Element, string>();
+let nextStopId = 0;
+function idFor(element: Element): string {
+  let id = stopIds.get(element);
+  if (!id) {
+    id = `stop-${nextStopId += 1}`;
+    stopIds.set(element, id);
+  }
+  return id;
+}
+
+function asStop(element: HTMLElement, kind: FocusStopKind, preferred = false): FocusStop<HTMLElement> {
+  return { id: idFor(element), kind, rect: rectOf(element), preferred, ref: element };
+}
+
+function queryShown(selector: string): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(isShown);
+}
+
+/** Every place focus can stop right now, read from the page. */
+function collectFocusStops(): FocusStop<HTMLElement>[] {
+  const stops: FocusStop<HTMLElement>[] = [];
+  const sidebar = queryShown('[data-focus-region="sidebar"].pane-sidebar-shell')[0];
+  if (sidebar) stops.push(asStop(sidebar, 'sidebar'));
+
+  const mains = queryShown('[data-focus-region="main"]');
+  const groups = mains.flatMap(main => Array.from(main.querySelectorAll<HTMLElement>('[data-panel-group-id]')))
+    .filter(isShown)
+    .filter(group => regionOf(group) === 'main');
+  for (const group of new Set(groups)) {
+    stops.push(asStop(group, 'group', group.getAttribute('data-group-focused') === 'true'));
+  }
+  if (groups.length === 0) {
+    // A view without splits (Home, the main-repo Pane, Loops) is one stop.
+    const outermost = mains.find(main => !mains.some(other => other !== main && other.contains(main)));
+    if (outermost) stops.push(asStop(outermost, 'main'));
+  }
+  for (const panel of queryShown('[data-focus-region="right-panel"]:not([data-region-open="false"])')) {
+    stops.push(asStop(panel, 'right-panel'));
+  }
+  for (const terminal of queryShown('[data-focus-region="terminal"][data-region-open="true"]')) {
+    stops.push(asStop(terminal, 'terminal'));
+  }
+  for (const approvals of queryShown('[data-focus-region="approvals"]')) {
+    stops.push(asStop(approvals, 'approvals'));
+  }
+  return stops;
+}
+
+function stopElementFor(element: Element): HTMLElement | null {
+  return element.closest<HTMLElement>('[data-panel-group-id]')
+    ?? element.closest<HTMLElement>('[data-focus-region="right-panel"], [data-focus-region="terminal"], [data-focus-region="approvals"]')
+    ?? element.closest<HTMLElement>('[data-focus-region="sidebar"]')
+    ?? element.closest<HTMLElement>('[data-focus-region="main"]');
+}
+
+function currentStop(stops: readonly FocusStop<HTMLElement>[]): FocusStop<HTMLElement> | null {
+  const active = document.activeElement;
+  const fromActive = active && active !== document.body ? stopElementFor(active) : null;
+  // The machine switcher sits in the title bar but belongs to the sidebar.
+  const sidebarItem = active?.closest('[data-sidebar-item]') ? stops.find(stop => stop.kind === 'sidebar') : undefined;
+  if (sidebarItem) return sidebarItem;
+  const element = fromActive ?? lastStopElement;
+  if (!element) return null;
+  return stops.find(stop => stop.ref === element)
+    ?? stops.find(stop => stop.ref.contains(element))
+    ?? null;
+}
+
+const FOCUS_TARGETS = [
+  '.xterm-helper-textarea',
+  'textarea:not([disabled])',
+  '[contenteditable="true"]',
+  'webview',
+  'input:not([type="hidden"]):not([disabled])',
+  'button:not([disabled]), [href], select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+];
+
+/** Moves DOM focus into a region: its terminal, its composer or field, its page, or its first control. */
+function focusInside(container: HTMLElement): boolean {
+  const scope = container.querySelector<HTMLElement>('[role="tabpanel"]:not([aria-hidden="true"])') ?? container;
+  for (const selector of FOCUS_TARGETS) {
+    const target = Array.from(scope.querySelectorAll<HTMLElement>(selector)).find(isShown);
+    if (target) {
+      target.focus({ preventScroll: true });
+      if (document.activeElement === target || target.tagName === 'WEBVIEW') return true;
+    }
+  }
+  if (!container.hasAttribute('tabindex')) container.setAttribute('tabindex', '-1');
+  container.focus({ preventScroll: true });
+  return document.activeElement === container;
+}
+
+function sidebarItems(): HTMLElement[] {
+  return sortedByDocument(queryShown('[data-sidebar-item]'));
+}
+
+function sortedByDocument(elements: HTMLElement[]): HTMLElement[] {
+  return elements.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+}
+
+let sidebarCursor: HTMLElement | null = null;
+
+/** Focus Sidebar (⌘0): expands a collapsed sidebar and puts the cursor on the open Pane's row. */
+export function focusSidebar(): void {
+  const navigation = useNavigationStore.getState();
+  const place = () => {
+    const items = sidebarItems();
+    const target = items.find(item => item.getAttribute('aria-current') === 'page')
+      ?? (sidebarCursor && items.includes(sidebarCursor) ? sidebarCursor : null)
+      ?? items.find(item => item.hasAttribute('data-row-open'))
+      ?? items[0];
+    target?.focus({ preventScroll: false });
+  };
+  if (navigation.sidebarCollapsed) {
+    navigation.setSidebarCollapsed(false);
+    requestAnimationFrame(() => requestAnimationFrame(place));
+    return;
+  }
+  place();
+}
+
+function focusStop(stop: FocusStop<HTMLElement>): void {
+  releaseCursorHold?.();
+  if (stop.kind === 'sidebar') {
+    focusSidebar();
+    return;
+  }
+  focusInside(stop.ref);
+  lastStopElement = stop.ref;
+}
+
+/** ⌘⌥+arrows: the stop in that direction, across region edges. */
+export function moveFocus(dir: FocusDirection): boolean {
+  const stops = collectFocusStops();
+  const from = currentStop(stops);
+  if (!from) {
+    const first = stops.find(stop => stop.kind === 'group' || stop.kind === 'main');
+    if (first) focusStop(first);
+    return Boolean(first);
+  }
+  const target = stopInDirection(stops, from, dir);
+  if (!target) return false;
+  focusStop(target);
+  return true;
+}
+
+/** F6 / ⇧F6: the next or previous region (VS Code's focusNextPart). */
+export function stepFocus(delta: 1 | -1): void {
+  const stops = collectFocusStops();
+  const target = stepStop(stops, currentStop(stops)?.id ?? null, delta);
+  if (target) focusStop(target);
+}
+
+/** Into the main area from the sidebar (Enter on a row): its focused group. */
+function focusMainArea(): void {
+  const stops = collectFocusStops();
+  const target = stops.find(stop => stop.kind === 'group' && stop.preferred)
+    ?? stops.find(stop => stop.kind === 'group' || stop.kind === 'main' || stop.kind === 'approvals');
+  if (target) focusStop(target);
+}
+
+// --- The sidebar as a keyboard list ---
+
+function expandableFor(item: HTMLElement): HTMLElement | null {
+  if (item.hasAttribute('aria-expanded')) return item;
+  // A Session row opens with one button and expands with another beside it.
+  return item.closest('[data-sidebar-row]')?.querySelector<HTMLElement>('[aria-expanded]') ?? null;
+}
+
+/** The project or Session row a Pane row sits under, from its `aria-controls` list. */
+function parentItem(item: HTMLElement): HTMLElement | null {
+  let container = item.parentElement;
+  while (container) {
+    if (container.id) {
+      const control = document.querySelector<HTMLElement>(`[aria-controls="${CSS.escape(container.id)}"]`);
+      const owner = control?.hasAttribute('data-sidebar-item')
+        ? control
+        : control?.closest('[data-sidebar-row]')?.querySelector<HTMLElement>('[data-sidebar-item]');
+      if (owner && owner !== item) return owner;
+    }
+    container = container.parentElement;
+  }
+  return null;
+}
+
+/** How long "open and stay" (Space) keeps the cursor while the opened Pane mounts. */
+const HOLD_CURSOR_MS = 3000;
+let releaseCursorHold: (() => void) | null = null;
+
+/**
+ * Space opens a Pane but keeps the cursor in the list (D-234). The opened
+ * Pane's terminal or composer focuses itself as it mounts; for a moment
+ * after Space, that focus goes back to the cursor row. A click anywhere ends
+ * the hold at once.
+ */
+function holdSidebarCursor(): void {
+  releaseCursorHold?.();
+  const until = Date.now() + HOLD_CURSOR_MS;
+  const onFocusIn = (event: FocusEvent) => {
+    if (Date.now() > until) { release(); return; }
+    // SAFETY: focusin targets on the window are elements.
+    if (regionOf(event.target as Element | null) === 'sidebar') return;
+    const cursor = sidebarCursor;
+    if (cursor?.isConnected) requestAnimationFrame(() => cursor.focus({ preventScroll: true }));
+  };
+  const release = () => {
+    window.removeEventListener('focusin', onFocusIn, true);
+    window.removeEventListener('mousedown', release, true);
+    clearTimeout(timer);
+    if (releaseCursorHold === release) releaseCursorHold = null;
+  };
+  const timer = setTimeout(release, HOLD_CURSOR_MS);
+  window.addEventListener('focusin', onFocusIn, true);
+  window.addEventListener('mousedown', release, true);
+  releaseCursorHold = release;
+}
+
+function refocus(item: HTMLElement): void {
+  // A click may re-render the row; find the same item again by its key.
+  const key = item.getAttribute('data-sidebar-key');
+  requestAnimationFrame(() => {
+    if (item.isConnected) { item.focus({ preventScroll: true }); return; }
+    const again = key ? document.querySelector<HTMLElement>(`[data-sidebar-key="${CSS.escape(key)}"]`) : null;
+    again?.focus({ preventScroll: true });
+  });
+}
+
+/**
+ * Arrow keys walk the sidebar's rows, top buttons included (D-239): ↑ ↓ move,
+ * Home End jump, ← → collapse or expand (or step to the parent row), Enter
+ * opens and moves focus into the work, Space opens and keeps the cursor, Esc
+ * goes back to where focus was. Alt+↑/↓ stays row reordering.
+ */
+export function handleSidebarListKey(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+  // SAFETY: keydown targets on the window are elements.
+  const target = event.target as HTMLElement | null;
+  const item = target?.closest<HTMLElement>('[data-sidebar-item]');
+  if (!item || target !== item) return;
+  const items = sidebarItems();
+  const index = items.indexOf(item);
+  if (index === -1) return;
+  sidebarCursor = item;
+
+  const moveTo = (next: HTMLElement | undefined) => {
+    event.preventDefault();
+    if (!next) return;
+    sidebarCursor = next;
+    next.focus({ preventScroll: false });
+    next.scrollIntoView({ block: 'nearest' });
+  };
+
+  switch (event.key) {
+    case 'ArrowDown':
+      if (!event.shiftKey) moveTo(items[index + 1]);
+      return;
+    case 'ArrowUp':
+      if (!event.shiftKey) moveTo(items[index - 1]);
+      return;
+    case 'Home':
+      moveTo(items[0]);
+      return;
+    case 'End':
+      moveTo(items[items.length - 1]);
+      return;
+    case 'ArrowRight': {
+      const expandable = expandableFor(item);
+      if (!expandable) return;
+      event.preventDefault();
+      if (expandable.getAttribute('aria-expanded') === 'false') {
+        expandable.click();
+        refocus(item);
+      } else if (expandable === item) {
+        moveTo(items[index + 1]);
+      }
+      return;
+    }
+    case 'ArrowLeft': {
+      const expandable = expandableFor(item);
+      if (expandable?.getAttribute('aria-expanded') === 'true') {
+        event.preventDefault();
+        expandable.click();
+        refocus(item);
+        return;
+      }
+      const parent = parentItem(item);
+      if (parent) moveTo(parent);
+      return;
+    }
+    case 'Enter':
+      event.preventDefault();
+      releaseCursorHold?.();
+      item.click();
+      // A toggle (a project or section) stays in the list; a row opens its work.
+      if (item.hasAttribute('aria-expanded')) refocus(item);
+      else requestAnimationFrame(() => requestAnimationFrame(focusMainArea));
+      return;
+    case ' ':
+      event.preventDefault();
+      holdSidebarCursor();
+      item.click();
+      refocus(item);
+      return;
+    case 'Escape': {
+      event.preventDefault();
+      releaseCursorHold?.();
+      const back = returnTarget;
+      if (back?.isConnected && regionOf(back) !== 'sidebar') back.focus({ preventScroll: true });
+      else focusMainArea();
+      return;
+    }
+    default:
+  }
+}
