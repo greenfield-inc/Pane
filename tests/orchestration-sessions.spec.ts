@@ -76,6 +76,8 @@ type SessionFixtureOptions = {
   rememberPaneLayouts?: boolean;
   tailnetMachines?: TailnetMachineList;
   notifySnapshot?: NotifySnapshot;
+  initialPanels?: JsonObject[];
+  initialLayout?: JsonObject;
 };
 
 function sessionFixture(
@@ -167,6 +169,8 @@ async function installSessionsFixture(
     rememberPaneLayouts: fixtureOptions.rememberPaneLayouts,
     tailnetMachines: fixtureOptions.tailnetMachines,
     notifySnapshot: fixtureOptions.notifySnapshot,
+    initialPanels: fixtureOptions.initialPanels,
+    initialLayout: fixtureOptions.initialLayout,
   });
   await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[] }) => {
     type SessionRecord = UiSessionFixture;
@@ -3663,4 +3667,31 @@ test('an approval covers the Session\'s right split exactly, and ✕ shows it ag
   await expect(overlay).toHaveCount(0);
   await expect(stage.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
   expect(await layoutBox(right)).toEqual(rightBefore);
+});
+
+test('F-8: opened cold from the sidebar count, the approval waits for the saved split and lays over it', async ({ page }) => {
+  const sessionId = '__orchestration_session_plansterminal__';
+  const now = new Date(0).toISOString();
+  // A saved layout from before the restart: the conversation, and plan.html split to its right.
+  const planPage = { id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+    { type: 'group', id: 'g1', panelIds: ['__orchestration_panel_plans_claude'], activePanelId: '__orchestration_panel_plans_claude' },
+    { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
+  ] }, focusedGroupId: 'g1' };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now)], [], { notifySnapshot: sessionApprovalsSnapshot(), rememberPaneLayouts: true, initialPanels: [planPage], initialLayout: savedLayout });
+  // The Session's tools load slowly, as on a cold start, so the approval is open before its layout is.
+  await page.addInitScript(() => {
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = async (channel, ...args) => {
+      if (channel === 'panels:checkInitialized' || channel === 'panels:get-layout') await new Promise(resolve => setTimeout(resolve, 400));
+      return invoke(channel, ...args);
+    };
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').hover();
+  await page.getByTestId('session-approvals-count-button').click();
+  await expect(page.locator('.panel-group-tab-bar')).toHaveCount(2);
+  await expect(page.getByTestId('session-approval-overlay')).toBeVisible();
+  await expect(page.getByTestId('session-approval-split')).toHaveCount(0);
 });

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { ArrowLeft, BookOpen, Check, ChevronLeft, ChevronRight, CircleAlert, FileText, GitPullRequest, Globe, Loader2, MessageSquare, Sparkles, X } from 'lucide-react';
-import type { NotifyItem, NotifyLink } from '../../../../shared/types/notify';
+import type { NotifyAnswer, NotifyItem, NotifyLink } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
-import { runNotify, useNotifyStore } from '../../stores/notifyStore';
+import { runNotify, sendNotify, useNotifyStore } from '../../stores/notifyStore';
+import { leadingQn } from '../../../../shared/autopilotDecision';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
 import { useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
 import { AutopilotDocument, AutopilotWebPage } from '../autopilot/AutopilotDocument';
@@ -12,7 +13,7 @@ import { relayReadOnlyLine } from './approvalGroups';
 import { relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import {
-  askedBy, canSend, cardChip, cardSummary, cardTabs, dotTone, markedQuestions, nextAfterSend, previousVersion, questionsOf, replyLine,
+  askedBy, canSend, cardChip, replyBeingRead, cardSummary, cardTabs, dotTone, markedQuestions, nextAfterSend, previousVersion, questionsOf, replyLine,
   type CardChip, type CardQuestion, type CardTab, type ReplyLine,
 } from './approvalCard';
 
@@ -40,6 +41,8 @@ export interface ApprovalColumnProps {
   /** The items to read instead of the Notify store's (tests). */
   items?: readonly NotifyItem[];
 }
+
+const NO_PICKS: string[] = [];
 
 /** Below this width the header keeps the pager and ✕, and drops the group's name, the dots and the chip. */
 const NARROW_PX = 520;
@@ -88,7 +91,6 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
     if (pager.length < 2) return;
     onSelect(pager[(index + direction + pager.length) % pager.length]);
   };
-  usePagerKeys(step);
   const [rootRef, narrow] = useNarrow();
 
   if (!item) {
@@ -101,7 +103,8 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
   }
 
   return (
-    <div ref={rootRef} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary" data-testid="approval-column" data-item-id={item.id} data-narrow={narrow || undefined}>
+    // Focusable, so its ← → keys belong to it alone; clicking anywhere in it gives it focus.
+    <div ref={rootRef} tabIndex={-1} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid="approval-column" data-item-id={item.id} data-narrow={narrow || undefined}>
       <ColumnHeader
         narrow={narrow}
         index={index}
@@ -129,25 +132,24 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
   );
 }
 
-/** An approval link names an id or a Q-n. */
+/** An approval link names an id, or a Q-n read as every other Q-n is (`leadingQn`). */
 function resolveApproval(items: readonly NotifyItem[], ref: string): string | undefined {
-  return items.find((candidate) => candidate.id === ref)?.id ?? items.find((candidate) => candidate.title.startsWith(`${ref}:`) || candidate.title.startsWith(`${ref} `))?.id;
+  const wanted = ref.trim();
+  return items.find((candidate) => candidate.id === wanted)?.id ?? items.find((candidate) => leadingQn(candidate.title) === wanted)?.id;
 }
 
-/** ← → step the pager, unless the person is typing or a page has focus (Autopilot's keys). */
-function usePagerKeys(step: (direction: 1 | -1) => void) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName) || target.closest('[role="menu"], .xterm'))) return;
-      event.preventDefault();
-      step(event.key === 'ArrowLeft' ? -1 : 1);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
+/**
+ * ← → step the pager of the column that has focus, unless the person is typing or a page has it
+ * (F-9): a covered Stack or another tiled Session's column never moves.
+ */
+function pagerKey(event: React.KeyboardEvent, step: (direction: 1 | -1) => void): void {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName) || target.closest('[role="menu"], [role="tablist"], .xterm'))) return;
+  event.preventDefault();
+  event.stopPropagation();
+  step(event.key === 'ArrowLeft' ? -1 : 1);
 }
 
 function Chip({ chip, testId }: { chip: NonNullable<CardChip>; testId?: string }) {
@@ -238,8 +240,15 @@ function TabBar({ tabs, active, onPick }: { tabs: CardTab[]; active: string; onP
 function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order: readonly string[]; byId: ReadonlyMap<string, NotifyItem>; onSelect: (id: string) => void }) {
   const now = useNow();
   const questions = useMemo(() => markedQuestions(item), [item]);
-  const [picks, setPicks] = useState<string[]>([]);
-  const [text, setText] = useState('');
+  // The draft lives in the store, so it survives paging away and a refused Send (F-4).
+  const draftKey = `${item.id}:${item.version ?? 1}`;
+  const draft = useApprovalColumnStore((state) => state.drafts[draftKey]);
+  const setDraft = useApprovalColumnStore((state) => state.setDraft);
+  const picks = draft?.picks ?? NO_PICKS;
+  const text = draft?.text ?? '';
+  const setPicks = (update: (current: string[]) => string[]) => setDraft(draftKey, { picks: update(picks), text });
+  const setText = (value: string) => setDraft(draftKey, { picks, text: value });
+  const [sending, setSending] = useState(false);
   const lastReplied = useApprovalColumnStore((state) => state.lastReplied);
   const noteReplied = useApprovalColumnStore((state) => state.noteReplied);
   const waiting = item.state === 'waiting';
@@ -249,17 +258,18 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
   const ended = item.state === 'answered' || item.state === 'expired';
   const [closing, setClosing] = useState(false);
   const line = replyLine(item);
-  const send = () => {
+  const send = async () => {
     const typed = text.trim();
-    if (!canSend(item, picks, typed)) return;
-    if (item.agentPrompt && picks[0]) runNotify({ type: 'answer', id: item.id, answer: { choice: picks[0] } });
-    else if (typed) {
-      const padded = questionsOf(item).map((_, at) => picks[at] ?? '');
-      runNotify({ type: 'answer', id: item.id, answer: { picks: padded, text: typed } });
-      noteReplied(item.id);
-    } else runNotify({ type: 'answer', id: item.id, answer: { picks } });
-    setText('');
-    setPicks([]);
+    if (sending || !canSend(item, picks, typed)) return;
+    const padded = questionsOf(item).map((_, at) => picks[at] ?? '');
+    const answer: NotifyAnswer = item.agentPrompt && picks[0] ? { choice: picks[0] } : typed ? { picks: padded, text: typed } : { picks };
+    setSending(true);
+    const accepted = await sendNotify({ type: 'answer', id: item.id, answer });
+    setSending(false);
+    // Refused (machine offline, already answered, still reading): the words and picks stay.
+    if (!accepted) return;
+    if (typed && !item.agentPrompt) noteReplied(item.id);
+    setDraft(draftKey, null);
     const next = nextAfterSend(order, item.id, byId);
     if (next) onSelect(next);
   };
@@ -365,7 +375,7 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
             <textarea
               value={text}
               onChange={(event) => setText(event.target.value)}
-              onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); send(); } }}
+              onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send(); } }}
               rows={2}
               aria-label="Reply"
               placeholder="Reply: add a note, answer in your own words, or ask about it…"
@@ -377,12 +387,13 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
           {waiting && !closing && (
             <div className="mt-2 flex items-center gap-3">
               <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary">
-                {item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.' : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
+                {item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
+                  : replyBeingRead(item) ? `${item.reply?.reader?.name ?? 'Its reader'} is reading your last reply. You can send another once it says how it took it, or pick an option now.` : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
               </p>
               {!item.agentPrompt && (
                 <button type="button" onClick={() => setClosing(true)} className="shrink-0 text-[12.5px] text-text-tertiary hover:text-text-primary" data-testid="approval-close-item">Close…</button>
               )}
-              <button type="button" disabled={!canSend(item, picks, text) || item.unreachable} onClick={send}
+              <button type="button" disabled={sending || !canSend(item, picks, text) || item.unreachable} onClick={() => void send()}
                 className="inline-flex h-8 shrink-0 items-center rounded-lg bg-interactive px-4 text-[13.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50" data-testid="approval-send">
                 Send
               </button>

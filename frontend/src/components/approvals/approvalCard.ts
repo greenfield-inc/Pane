@@ -79,7 +79,7 @@ export function replyLine(item: NotifyItem): ReplyLine | null {
     case 'reading':
       return { tone: 'muted', text: reply.reader?.kind === 'autopilot' ? 'Autopilot is reading your reply…' : 'Reading your reply…' };
     case 'answer': {
-      const line: ReplyLine = { tone: 'success', text: `Taken as your answer${reply.picks?.length ? `: ${reply.picks.join(' · ')}, with your note “${reply.text}”` : `: “${reply.text}”`}` };
+      const line: ReplyLine = { tone: 'success', text: `Taken as your answer${reply.picks?.length ? `: ${reply.picks.map(pick => pick || '—').join(' · ')}, with your note “${reply.text}”` : `: “${reply.text}”`}` };
       // A fix is one click, once.
       if (!reply.fixed) line.fix = { as: 'question', label: 'It was a question' };
       return line;
@@ -106,6 +106,11 @@ export function cardChip(item: NotifyItem): CardChip {
   if (item.reply?.state === 'question') return { tone: 'warning', text: item.reply.status ?? 'Getting more context…' };
   if (item.reply?.state === 'reading') return { tone: 'muted', text: 'Reading your reply…' };
   return null;
+}
+
+/** The last reply reached its reader, which hasn't said how it took it yet. */
+export function replyBeingRead(item: NotifyItem): boolean {
+  return item.reply?.state === 'reading' && item.reply.deliveredAt !== undefined;
 }
 
 /** Being read or asked about: Send moves past it (J14). */
@@ -139,7 +144,8 @@ export function nextAfterSend(order: readonly string[], sentId: string, items: R
  */
 export function canSend(item: NotifyItem, picks: readonly string[], text: string): boolean {
   if (item.state !== 'waiting') return false;
-  if (text.trim() && !item.agentPrompt && !item.optionsOnly) return true;
+  // One reply at a time with its reader (F-2): while it reads the last one, only picks can go.
+  if (text.trim() && !item.agentPrompt && !item.optionsOnly) return !replyBeingRead(item);
   const questions = questionsOf(item);
   return questions.length > 0 && picks.length >= questions.length && questions.every((_, index) => Boolean(picks[index]));
 }

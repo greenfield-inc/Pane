@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, ShieldCheck, X } from 'lucide-react';
-import type { NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
+import type { NotifyAnswer, NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
 import { showActionError } from '../../stores/errorStore';
 import { canClose, canCopyAnswer, canOverride, canReopen, decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { cn } from '../../utils/cn';
-import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
+import { askedBy, cardAnswer, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
 import { ClampedText } from './ClampedText';
@@ -540,20 +540,14 @@ function QuestionCard({
   const actionsClass = form === 'inbox' ? 'px-2 pb-3 pt-2.5' : 'px-3.5 py-3';
   const fieldPad = form === 'inbox' ? 'px-3.5 pb-3.5 pt-3' : 'px-[22px] pb-[18px] pt-3';
 
+  // Anything typed is a reply its asker reads (P1); a pick alone is the answer.
+  const sendAnswer = (answer: NotifyAnswer | null) => { if (answer) onCommand({ type: 'answer', id: item.id, answer }); };
   const answerChoice = (index: number, withNote?: string) => {
     const choice = choices[index];
-    if (!choice) return;
-    const trimmed = withNote?.trim();
-    onCommand({ type: 'answer', id: item.id, answer: trimmed ? { choice: choice.label, note: trimmed } : { choice: choice.label } });
+    if (choice) sendAnswer(cardAnswer(item, { choice: choice.label }, withNote ?? ''));
   };
-  const answerApproval = (approved: boolean, reason?: string) => {
-    const trimmed = reason?.trim();
-    onCommand({ type: 'answer', id: item.id, answer: trimmed ? { approved, note: trimmed } : { approved } });
-  };
-  const answerText = (value: string) => {
-    const trimmed = value.trim();
-    if (trimmed) onCommand({ type: 'answer', id: item.id, answer: { text: trimmed } });
-  };
+  const answerApproval = (approved: boolean, reason?: string) => sendAnswer(cardAnswer(item, { approved }, reason ?? ''));
+  const answerText = (value: string) => sendAnswer(cardAnswer(item, null, value));
   // A secret is sent as typed, and leaves this card's state at once.
   const saveSecret = () => {
     if (!text) return;
