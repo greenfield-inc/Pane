@@ -3669,6 +3669,23 @@ test('an approval covers the Session\'s right split exactly, and ✕ shows it ag
   expect(await layoutBox(right)).toEqual(rightBefore);
 });
 
+test('D-289: a worker\'s approval shows its asking tab live in the Session column\'s origin tab', async ({ page }) => {
+  const now = new Date(0).toISOString();
+  const workerTab = { id: 'panel-worker', sessionId: 'pane-worker', type: 'logs', title: 'doozy-overhaul logs', state: { isActive: true, hasBeenViewed: true }, metadata: { createdAt: now, lastActiveAt: now, position: 0 } };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now)], [paneFixture('pane-worker', 'doozy-overhaul')], { notifySnapshot: sessionApprovalsSnapshot(), initialPanels: [workerTab] });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').click();
+  await page.getByTestId('session-approvals-button').click();
+  const column = page.getByTestId('approval-column');
+  await column.getByRole('button', { name: 'Next approval' }).click();
+  await expect(column.getByTestId('approval-title')).toContainText('Q-20');
+  await column.getByTestId('approval-tab').filter({ hasText: "doozy-overhaul's tab" }).click();
+  const origin = column.getByTestId('approval-origin');
+  await expect(origin).toContainText('doozy-overhaul');
+  await expect(origin.getByTestId('approval-origin-tab')).toBeVisible();
+});
+
 test('F-8: opened cold from the sidebar count, the approval waits for the saved split and lays over it', async ({ page }) => {
   const sessionId = '__orchestration_session_plansterminal__';
   const now = new Date(0).toISOString();
