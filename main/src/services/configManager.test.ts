@@ -173,6 +173,31 @@ describe('ConfigManager appearance persistence', () => {
     expect(await fs.readFile(configPath, 'utf8')).toBe(before);
     rename.mockRestore();
   });
+
+  it('saves machine marks across reload, keeping only known parts and dropping empty ones', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    // SAFETY: the casts stand in for a renderer that sends fields the config does not know.
+    await manager.updateConfig({
+      machineMarks: {
+        local: { letters: 'SM', color: 'Lime' },
+        'travel-laptop': { color: 'Violet', extra: true } as never,
+        'build-box': {},
+      },
+    });
+    await manager.reloadFromDisk();
+    const expected = { local: { letters: 'SM', color: 'Lime' }, 'travel-laptop': { color: 'Violet' } };
+    expect(manager.getConfig().machineMarks).toEqual(expected);
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).machineMarks).toEqual(expected);
+  });
+
+  it('rejects a machine mark colour outside the palette without saving it', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    // SAFETY: the cast stands in for a renderer that sends a colour outside the palette.
+    await expect(manager.updateConfig({ machineMarks: { local: { color: 'Plaid' as never } } })).rejects.toThrow(/Violet/);
+    expect(manager.getConfig().machineMarks).toBeUndefined();
+  });
 });
 
 

@@ -27,6 +27,8 @@ import {
   normalizeKeyboardShortcutOverrides,
 } from '../../../shared/utils/keyboardBindings';
 import { keyPlatformFor } from '../../../shared/utils/keyboardChords';
+import { MACHINE_COLOR_NAMES } from '../../../shared/utils/machineColor';
+import type { MachineMarkOverride, MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import {
   AppearanceValidationError,
   DEFAULT_APPEARANCE,
@@ -46,6 +48,23 @@ function defaultAnalyticsConfig(): NonNullable<AppConfig['analytics']> {
     posthogApiKey: DEFAULT_POSTHOG_API_KEY,
     posthogHost: DEFAULT_POSTHOG_HOST
   };
+}
+
+const machineMarksSchema = boundary.record(boundary.object({
+  letters: boundary.optional(boundary.string),
+  color: boundary.optional(boundary.enumeration(...MACHINE_COLOR_NAMES)),
+}));
+
+/** Machine marks as saved: only the known parts, and no entry left with nothing in it. */
+function decodeMachineMarks(update: MachineMarkOverrides): MachineMarkOverrides {
+  const marks: MachineMarkOverrides = {};
+  for (const [key, { letters, color }] of Object.entries(decodeBoundary(update, machineMarksSchema))) {
+    const mark: MachineMarkOverride = {};
+    if (letters) mark.letters = letters;
+    if (color) mark.color = color;
+    if (mark.letters || mark.color) marks[key] = mark;
+  }
+  return marks;
 }
 
 export class ConfigManager extends EventEmitter {
@@ -441,6 +460,7 @@ export class ConfigManager extends EventEmitter {
           : this.config.remoteDaemon,
       };
 
+      if (updates.machineMarks !== undefined) next.machineMarks = decodeMachineMarks(updates.machineMarks);
       if (updates.agentContext !== undefined) {
         decodeBoundary(updates.agentContext, boundary.object({
           managedAgentsMd: boundary.optional(boundary.boolean),
