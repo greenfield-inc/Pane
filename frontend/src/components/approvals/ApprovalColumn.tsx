@@ -118,7 +118,8 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
         {(tab?.kind ?? 'qa') === 'qa' && (
           nested
             ? <NestedApproval item={nested} onBack={() => openNested(surface, itemId, undefined)} />
-            : <QuestionsTab key={item.id} item={item} order={pager} byId={byId} onSelect={onSelect} />
+            // A new version starts afresh: its options may have changed under the picks.
+            : <QuestionsTab key={`${item.id}:${item.version ?? 1}`} item={item} order={pager} byId={byId} onSelect={onSelect} />
         )}
         {tab?.kind === 'summary' && <SummaryTab item={item} onOpenTab={(key) => setTab(surface, itemId, key)} tabs={tabs} />}
         {tab?.kind === 'link' && <LinkTab item={item} link={tab.link} onOpenApproval={(id) => openNested(surface, itemId, resolveApproval(items ?? [], id))} />}
@@ -237,10 +238,8 @@ function TabBar({ tabs, active, onPick }: { tabs: CardTab[]; active: string; onP
 function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order: readonly string[]; byId: ReadonlyMap<string, NotifyItem>; onSelect: (id: string) => void }) {
   const now = useNow();
   const questions = useMemo(() => markedQuestions(item), [item]);
-  // A new version starts with nothing picked: the options may have changed under the picks.
   const [picks, setPicks] = useState<string[]>([]);
   const [text, setText] = useState('');
-  useEffect(() => { setPicks([]); }, [item.version]);
   const lastReplied = useApprovalColumnStore((state) => state.lastReplied);
   const noteReplied = useApprovalColumnStore((state) => state.noteReplied);
   const waiting = item.state === 'waiting';
@@ -368,6 +367,7 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
               onChange={(event) => setText(event.target.value)}
               onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); send(); } }}
               rows={2}
+              aria-label="Reply"
               placeholder="Reply: add a note, answer in your own words, or ask about it…"
               className="w-full resize-none rounded-lg border border-border-primary bg-surface-primary px-3 py-2 text-[14px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none"
               data-testid="approval-reply-box"

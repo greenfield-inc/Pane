@@ -57,7 +57,9 @@ export function markedQuestions(item: NotifyItem): CardQuestion[] {
       }
       return { ...choice };
     });
-    return { title: question.title, choices, removed: old.filter(choice => !used.has(choice.label)).map(choice => choice.label) };
+    const removed: string[] = [];
+    for (const choice of old) if (!used.has(choice.label)) removed.push(choice.label);
+    return { title: question.title, choices, removed };
   });
 }
 
@@ -139,7 +141,7 @@ export function canSend(item: NotifyItem, picks: readonly string[], text: string
   if (item.state !== 'waiting') return false;
   if (text.trim() && !item.agentPrompt && !item.optionsOnly) return true;
   const questions = questionsOf(item);
-  return questions.length > 0 && questions.every((_, index) => Boolean(picks[index]));
+  return questions.length > 0 && picks.length >= questions.length && questions.every((_, index) => Boolean(picks[index]));
 }
 
 /** The column's tabs, in order (D-224): Questions & answers, Summary, each reference, the chat where it was asked. */
@@ -188,12 +190,16 @@ export interface CardSummary {
 
 export function cardSummary(item: NotifyItem): CardSummary {
   const questions = questionsOf(item);
-  const recommendation = questions.flatMap(question => question.choices.filter(choice => choice.recommended).map(choice => {
-    const recommended: CardSummary['recommendation'][number] = { label: choice.label };
-    if (questions.length > 1) recommended.question = question.title;
-    if (choice.detail) recommended.detail = choice.detail;
-    return recommended;
-  }));
+  const recommendation: CardSummary['recommendation'] = [];
+  for (const question of questions) {
+    for (const choice of question.choices) {
+      if (!choice.recommended) continue;
+      const recommended: CardSummary['recommendation'][number] = { label: choice.label };
+      if (questions.length > 1) recommended.question = question.title;
+      if (choice.detail) recommended.detail = choice.detail;
+      recommendation.push(recommended);
+    }
+  }
   const references: CardSummary['references'] = (item.links ?? []).map(link => (
     'path' in link ? { label: link.label, kind: 'file' as const, detail: link.path }
       : 'url' in link ? { label: link.label, kind: 'url' as const, detail: link.url }
