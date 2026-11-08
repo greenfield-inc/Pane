@@ -113,6 +113,9 @@ export interface ChatTabView {
   messageCount: number;
 }
 
+/** The most a chat message can carry, text and images together (UTF-16 units and base64 characters). */
+export const CHAT_PROMPT_LIMIT = 8 * 1024 * 1024;
+
 export interface ChatTabSend {
   operationId: string;
   text: string;

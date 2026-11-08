@@ -5,7 +5,7 @@ import {
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
-import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
+import { CHAT_PROMPT_LIMIT, type ChatTabClient, type ChatTabCommand, type ChatTabSend } from '../../../../shared/types/chatTab';
 import { chatTurns, waitingToolIds, workerNotes, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
@@ -390,7 +390,14 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             addAttachmentOnPaste={false}
             onPaste={event => {
               const files = [...event.clipboardData.files];
-              if (!files.length) return;
+              if (!files.length) {
+                // Text past the send limit could never be sent, and laying out megabytes stalls the window.
+                const { selectionStart, selectionEnd } = event.currentTarget;
+                if (snapshot.draft.length - (selectionEnd - selectionStart) + event.clipboardData.getData('text/plain').length <= CHAT_PROMPT_LIMIT) return;
+                event.preventDefault();
+                setAttachProblems([`Nothing was pasted: the message would be larger than 8 MiB, the most one message can carry. Save the text to a file in this worktree and ask ${agentName} to read it.`]);
+                return;
+              }
               event.preventDefault();
               attachFiles(files);
             }}
