@@ -13,7 +13,9 @@ on:
     branches: [ main ]
     paths: [ 'native/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml' ]
   pull_request:
-    paths: [ 'native/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml', 'scripts/ci-native-fingerprint.sh' ]
+    # shared/ is not a fingerprint input, but the native app imports it, so a
+    # shared/ change runs the cheap fingerprint job, which says why it skips.
+    paths: [ 'native/**', 'shared/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml', 'scripts/ci-native-fingerprint.sh' ]
   workflow_dispatch:
 
 concurrency:
