@@ -179,8 +179,8 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
         <SettingRow
           settingId="autopilot"
           label="Autopilot"
-          description={autopilotDescription(isChatTabsEnabled(config), autopilot?.entitlement)}
-          disabled={!isChatTabsEnabled(config) || autopilot?.entitlement.entitled === false}
+          description={autopilotDescription(isChatTabsEnabled(config), autopilot?.entitlement, autopilot?.enabled === true)}
+          disabled={!autopilot?.enabled && (!isChatTabsEnabled(config) || autopilot?.entitlement.entitled === false)}
         >
           <ImmediateToggle
             label="Autopilot"
@@ -221,8 +221,9 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
 }
 
 /** What the switch does, or why it can't be turned on (chat tabs off, or not entitled: D-65). */
-function autopilotDescription(chatTabs: boolean, entitlement: { entitled: boolean; reason?: string; next?: string } | undefined): string {
+function autopilotDescription(chatTabs: boolean, entitlement: { entitled: boolean; reason?: string; next?: string } | undefined, on: boolean): string {
   if (entitlement && !entitlement.entitled) return `${entitlement.reason ?? 'Autopilot is not available.'} ${entitlement.next ?? ''}`.trim();
+  if (!chatTabs && on) return 'Chat tabs are off, and Autopilot runs as one: it keeps running, but once it stops it can\'t start again until Chat tabs are back on. Turning it off stops it and keeps its Autopilot Session.';
   if (!chatTabs) return 'Autopilot runs as a chat tab: turn on Chat tabs above first.';
   return 'Add Autopilot above Sessions: one agent, on your own installed claude, that walks your Sessions from the top and puts what waits on you in front of you with its documents. It can answer and close approvals when the way is clear or you tell it to, with a receipt you can override; permission prompts stay yours. Turning it off stops it and keeps its Autopilot Session.';
 }
