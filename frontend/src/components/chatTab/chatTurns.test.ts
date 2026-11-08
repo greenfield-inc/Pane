@@ -127,9 +127,9 @@ describe('what a turn shows by default (D-192)', () => {
       say('a2', 'Done.'), end('t', 27),
     ], { running: false });
     const display = turnDisplay(turn);
-    expect(display.shown.map(item => item.type === 'text' && item.text)).toEqual(['Looking.', 'Done.']);
+    expect(display.before.map(item => item.type === 'text' && item.text)).toEqual(['Looking.']);
+    expect(display.after.map(item => item.type === 'text' && item.text)).toEqual(['Done.']);
     expect(display.activity.map(item => item.type)).toEqual(['thought', 'steps', 'plan', 'content']);
-    expect(display.foldAt).toBe(1);
     expect(turnSummary(turn)).toBe('Worked for 27s');
   });
 
@@ -142,7 +142,7 @@ describe('what a turn shows by default (D-192)', () => {
     expect(currentActivity(working(tool('e', 'edit', { status: 'in_progress', locations: [{ path: '/repo/a.ts' }] })), new Set(['e']))).toBe('Waiting for you · Editing a.ts');
     expect(currentActivity(working(tool('x', 'execute', { status: 'in_progress', input: { command: 'pnpm test\n--all' } })))).toBe('Running pnpm test');
     const turn = working(tool('r', 'read'), say('a', 'Hi'));
-    expect(turnDisplay(turn).foldAt).toBe(1);
+    expect(turnDisplay(turn).before.map(item => item.type === 'text' && item.text)).toEqual(['Hi']);
   });
 });
 
@@ -167,6 +167,22 @@ describe('when a message was written (D-202)', () => {
     expect(turnFooter(turn({ running: true, endedAt: undefined }), true, now, 'en-US')).toBe('Working');
     // A reopened turn has no time.
     expect(turnFooter(turn({ startedAt: undefined, endedAt: undefined }), false, now)).toBeUndefined();
+  });
+});
+
+describe('streaming', () => {
+  it('hands back the same turn object for every turn the new event left alone', () => {
+    const earlier = [user('u1', 'one'), say('a1', 'First.'), end('t1', 5), user('u2', 'two')];
+    const before = chatTurns([...earlier, say('a2', 'Sec')], { running: true });
+    const second = say('a2', 'Second.');
+    const after = chatTurns([...earlier, second], { running: true });
+    expect(after[0]).toBe(before[0]);
+    expect(after[1]).not.toBe(before[1]);
+    expect(after[1].items).toEqual([{ type: 'text', id: 'a2:0', text: 'Second.' }]);
+    // A turn that stops running is a new object over the same messages, so its row redraws.
+    const stopped = chatTurns([...earlier, second], { running: false });
+    expect(stopped[1]).not.toBe(after[1]);
+    expect(stopped[1].running).toBe(false);
   });
 });
 

@@ -16,7 +16,7 @@ const messages: AgentChatMessage[] = [
 describe('phone chat rows', () => {
   it('folds a finished turn to one row and opens it on request (D-192)', () => {
     const turns = chatTurns(messages, { running: false });
-    const folded = chatRows(turns, { open: new Set(), now: new Date(2026, 10, 5) });
+    const folded = chatRows(turns, { open: new Set(), now: new Date(2026, 10, 5), locale: 'en-US' });
     expect(folded.map(row => row.kind)).toEqual(['user', 'fold', 'text', 'copy']);
     // D-202: the latest turn says when it finished.
     const folded1 = folded[1];
@@ -34,6 +34,12 @@ describe('phone chat rows', () => {
     const rows = chatRows(running, { open: new Set() });
     expect(rows.map(row => row.kind)).toEqual(['user', 'fold']);
     expect(rows[1]).toMatchObject({ summary: 'Running git fetch', running: true, expandable: true });
+  });
+
+  it('says a running turn waits for the person while its step has an approval pending', () => {
+    const running = chatTurns([...messages.slice(0, 2), { id: 'tool:x', role: 'assistant', parts: [{ type: 'tool', id: 'x', title: 'Run', status: 'pending', kind: 'execute', input: { command: 'echo hi' } }] }], { running: true });
+    const rows = chatRows(running, { open: new Set(), waiting: new Set(['x']) });
+    expect(rows[1]).toMatchObject({ kind: 'fold', summary: 'Waiting for you · Running echo hi', waiting: true });
   });
 
   it('mentions only a worker the latest turn has news of (D-201)', () => {

@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import { describeChatContent, permissionToolId } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import { imageOf, messageTime, planEntryKeys, stoppedText, turnDisplay, turnFooter, turnSummary, type WorkerNote, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
+import { imageOf, messageTime, planEntryKeys, stoppedText, turnDisplay, type WorkerNote, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 import { responseText, userMarkdown } from '../../../../shared/chatTabMarkdown';
 import { ChatCopyButton } from './ChatCopyButton';
 
@@ -164,24 +164,22 @@ export function WorkerNoteLine({ note, onOpen }: { note: WorkerNote; onOpen?: (p
 export const ChatTurnView = memo(function ChatTurnView({ turn, permissions, actions, latest = false }: { turn: ChatTurn; permissions: AgentChatPermission[]; actions: ChatTurnActions; latest?: boolean }) {
   const [open, setOpen] = useState(false);
   const waiting = new Set(permissions.flatMap(permission => { const id = permissionToolId(permission); return id ? [id] : []; }));
-  const { shown, activity, foldAt } = turnDisplay(turn);
-  const showFold = turn.running || activity.length > 0;
   // D-202: the latest turn says when it finished; every message shows its time on hover.
-  const ended = messageTime(turn.endedAt);
-  const label = latest && !turn.running ? turnFooter(turn, activity.length > 0) ?? turnSummary(turn) : turnSummary(turn, waiting);
-  const liveIcon = <span className="chat-step-icon" data-state={turn.current && waiting.has(turn.current.id) ? 'waiting' : 'running'}>{turn.current && waiting.has(turn.current.id) ? <AlertCircle aria-hidden="true" /> : <LoaderCircle aria-hidden="true" />}</span>;
-  const fold = showFold && <div key="fold" className="chat-fold-row" data-running={turn.running}>
+  const { before, after, activity, fold: row, ended } = turnDisplay(turn, { latest, waiting });
+  // The icon box stays after the turn ends, so the label never shifts.
+  const icon = <span className="chat-step-icon" data-state={row?.waiting ? 'waiting' : turn.running ? 'running' : 'done'}>
+    {row?.waiting ? <AlertCircle aria-hidden="true" /> : turn.running ? <LoaderCircle aria-hidden="true" /> : null}
+  </span>;
+  const fold = row && <div key="fold" className="chat-fold-row" data-running={turn.running}>
     {activity.length > 0
       ? <button type="button" className="chat-fold" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {turn.running && liveIcon}
-        <span className="chat-fold-label" title={ended?.full ?? label}>{label}</span>
+        {icon}
+        <span className="chat-fold-label" title={ended?.full ?? row.label}>{row.label}</span>
         {open ? <ChevronDown className="chat-fold-chevron" /> : <ChevronRight className="chat-fold-chevron" />}
       </button>
-      : <p className="chat-fold">{liveIcon}<span className="chat-fold-label">{turnSummary(turn, waiting)}</span></p>}
+      : <p className="chat-fold">{icon}<span className="chat-fold-label">{row.label}</span></p>}
     {open && <div className="chat-fold-body">{activity.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>}
   </div>;
-  const before = shown.slice(0, foldAt < 0 ? shown.length : Math.min(foldAt, shown.length));
-  const after = shown.slice(before.length);
   return <div className="chat-turn" data-anchor-id={turn.id} data-running={turn.running}>
     <UserMessage turn={turn} />
     <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>

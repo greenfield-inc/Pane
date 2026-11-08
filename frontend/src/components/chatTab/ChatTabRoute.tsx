@@ -9,6 +9,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionWorkers, type SessionWorkerSource } from './sessionWorkers';
 import { savedFilePath } from './chatAttachments';
+import type { ChatTurnActions } from './ChatTurns';
 import { onSessionOverviewChange } from '../../utils/sessionOverviewEvents';
 
 /** The desktop reads the Session overview over IPC and hears its updates as window events. */
@@ -37,6 +38,13 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   // Dropped and pasted files land in the Pane's folder on its machine, local or remote, as the terminal's do.
   const saveFile = useMemo(() => async (file: { name: string; dataUrl: string }) =>
     savedFilePath(await window.electronAPI.invoke('terminal:paste-file', panel.sessionId, file.dataUrl, file.name, { keepName: true })), [panel.sessionId]);
+  // Stable, so a re-render here does not re-render every turn of the chat.
+  const cwd = state?.cwd;
+  const actions = useMemo<ChatTurnActions>(() => ({
+    onOpenWorker: paneId => { setActiveSession(paneId); navigateToSessions(); },
+    onViewDiff: file => void openFileInEditor({ sessionId: panel.sessionId, filePath: worktreeRelative(file, cwd), pin: true, diff: { kind: 'scope', scope: { kind: 'session' } } })
+      .catch(error => showActionError('Could not open the diff', error)),
+  }), [cwd, navigateToSessions, panel.sessionId, setActiveSession]);
   return <ChatTabPanel
     saveFile={saveFile}
     workers={workers}
@@ -44,10 +52,6 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     client={window.electronAPI.chatTab}
     machine={machine}
     placeholder={state?.orchestrationSessionId ? 'Ask the Session anything' : undefined}
-    actions={{
-      onOpenWorker: paneId => { setActiveSession(paneId); navigateToSessions(); },
-      onViewDiff: file => void openFileInEditor({ sessionId: panel.sessionId, filePath: worktreeRelative(file, state?.cwd), pin: true, diff: { kind: 'scope', scope: { kind: 'session' } } })
-        .catch(error => showActionError('Could not open the diff', error)),
-    }}
+    actions={actions}
   />;
 }

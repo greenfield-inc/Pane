@@ -159,7 +159,10 @@ export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowAc
     case 'image': return <Image accessibilityLabel="Image from the agent" source={{ uri: `data:${row.mimeType};base64,${row.data}` }} style={styles.image} />;
     case 'steps': return <StepLine group={row.group} actions={actions} />;
     case 'fold': return <Pressable testID="chat-fold" accessibilityRole="button" accessibilityState={{ expanded: row.open }} disabled={!row.expandable} onPress={() => actions.onToggleTurn(row.turnId)} style={styles.stepLine}>
-      {row.running && <View style={styles.stepIcon}><ActivityIndicator size="small" color={theme.chat.mutedForeground} /></View>}
+      {/* The icon box stays after the turn ends, so the summary never shifts. */}
+      <View style={styles.stepIcon}>{row.waiting
+        ? <Icon ios="exclamationmark.shield" android="shield" size={15} color={theme.colors.warning} />
+        : row.running ? <ActivityIndicator size="small" color={theme.chat.mutedForeground} /> : null}</View>
       <Text variant="subhead" numberOfLines={1} style={{ color: theme.chat.mutedForeground, flexShrink: 1 }}>{row.summary}</Text>
       {row.expandable && <Icon ios={row.open ? 'chevron.down' : 'chevron.right'} android={row.open ? 'expand_more' : 'chevron_right'} size={13} color={theme.chat.mutedForeground} />}
     </Pressable>;
