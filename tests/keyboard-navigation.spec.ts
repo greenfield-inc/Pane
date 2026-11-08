@@ -314,7 +314,8 @@ test('Esc leaves Approvals for where you were, but not while an answer is being 
   await page.keyboard.type('Postgres');
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('approvals-queue')).toBeVisible();
-  await page.getByTestId('approvals-queue').getByRole('heading', { name: 'Approvals' }).click();
+  // Esc with the cursor still on the sidebar's Approvals row leaves Approvals too.
+  await page.getByTestId('approvals-nav').focus();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('approvals-queue')).toHaveCount(0);
   await expect.poll(() => focusPlace(page)).toMatchObject({ group: 'g-left' });
