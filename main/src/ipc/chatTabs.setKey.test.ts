@@ -34,3 +34,12 @@ describe('saving a chat tab key', () => {
     await expect(registry.invokeRemote('chat-tab:set-key', ['claude', null])).resolves.toEqual({ claude: false, codex: false });
   });
 });
+
+describe('signing a chat tab in', () => {
+  afterEach(() => resetPaneRuntimeForTests());
+
+  it('refuses a teammate, since sign-in sets the owner\'s agent account', async () => {
+    const registry = host(true);
+    await expect(registry.invokeRemote('chat-tab:sign-in', ['chat-1'], { teammate: 'bob@example.com' })).rejects.toMatchObject({ code: 'SECRET_OWNER_REQUIRED' });
+  });
+});

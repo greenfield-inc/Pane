@@ -93,6 +93,9 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   });
   registry.register('chat-tab:restart', async (id: string) => { await manager.restart(panelId(id)); });
   registry.register('chat-tab:sign-in', async (id: string) => {
+    // Sign-in sets the owner's own agent account on this machine.
+    const teammate = teammatePaneCaller();
+    if (teammate) throw teammateSecretRefusal(teammate, 'sign a chat tab in');
     const panel = panelManager.getPanel(panelId(id));
     const state = manager.view(panelId(id), 0, false);
     if (!panel) throw new PaneError('CHAT_PANEL_MISSING', 'This chat tab no longer exists.', 'Open another chat tab.');
@@ -174,7 +177,7 @@ function switchPorts(services: AppServices, registry: PaneCommandRegistry): Swit
       },
     },
     chat: {
-      create: async (replaces, state) => (await panelManager.createPanel({ sessionId: replaces.sessionId, type: 'chat', title: replaces.title, initialState: { customState: state }, metadata: { position: replaces.metadata.position, replacesPanelId: replaces.id }, activate: false, announceActivation: false })).id,
+      create: async (replaces, state) => (await panelManager.createPanel({ sessionId: replaces.sessionId, type: 'chat', title: replaces.title, initialState: { customState: state }, metadata: { position: replaces.metadata.position, replacesPanelId: replaces.id, teammate: replaces.metadata.teammate }, activate: false, announceActivation: false })).id,
       start: id => {
         let timer: ReturnType<typeof setTimeout> | undefined;
         const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PaneError('CHAT_SWITCH_TIMEOUT', 'The agent did not reopen the conversation within 3 minutes.', 'Keep working in the terminal, then try again.')), REOPEN_LIMIT_MS); });

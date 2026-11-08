@@ -1124,7 +1124,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   private terminalReason(record: OrchestrationSessionRecord): string | undefined {
     const result = this.chatLaunch(record);
     if (!result || panelManager.getPanel(record.panelIds[record.agent])?.type !== 'terminal') return undefined;
-    return 'terminalReason' in result ? result.terminalReason : 'It started in a terminal, and a Session keeps the kind of tab it started with. A new Session opens as a chat.';
+    return 'terminalReason' in result ? result.terminalReason : 'It started in a terminal, because Chat tabs were off then or a Pane app that cannot show chat tabs created it, and a Session keeps the kind of tab it started with.';
   }
 
   private chatTabPort?: SessionChatTabs;
