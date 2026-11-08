@@ -35,6 +35,7 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 .chat-question-head .chat-question-message { flex:1; min-width:0; }
 .chat-question-count { flex-shrink:0; font-size:12px; font-variant-numeric:tabular-nums; color:var(--chat-muted-foreground); }
 .chat-question-step { display:flex; flex-direction:column; gap:12px; }
+.chat-question-step:focus { outline:none; }
 .chat-question-heading { font-weight:600; }
 .chat-question-review { display:flex; flex-direction:column; gap:2px; margin:0; padding:8px 0 0; list-style:none; border-top:1px solid var(--chat-border); }
 .chat-question-review-row { display:flex; width:100%; gap:12px; padding:4px 6px; border-radius:6px; text-align:left; font-size:13px; }

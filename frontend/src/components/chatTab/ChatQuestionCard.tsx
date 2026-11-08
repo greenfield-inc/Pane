@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ChatTabAnswer, ChatTabQuestion } from '../../../../shared/types/chatTab';
 import { questionAnswer, questionFields, questionSteps, steppedAnswer, stepSummary, unshownRequiredFields, type QuestionField } from '../../../../shared/chatTabQuestions';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
@@ -26,7 +26,20 @@ export function ChatQuestionCard({ question, disabled, onAnswer }: { question: C
   const step = steps[index] ?? [];
   const last = index === steps.length - 1;
   const answered = !!stepSummary(step, values);
-  const go = (next: number) => setIndex(Math.max(0, Math.min(steps.length - 1, next)));
+  const stepRef = useRef<HTMLDivElement>(null);
+  /** Set when the person moves between questions, so the new one takes focus (and the card keeps its keys). */
+  const moved = useRef(false);
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    const box = stepRef.current;
+    const target = box?.querySelector<HTMLElement>('input:checked:not(:disabled)') ?? box?.querySelector<HTMLElement>('input:not(:disabled), textarea:not(:disabled)');
+    (target ?? box)?.focus();
+  }, [index]);
+  const go = (next: number) => {
+    moved.current = true;
+    setIndex(Math.max(0, Math.min(steps.length - 1, next)));
+  };
   const next = () => {
     if (last) { submit(); return; }
     if (answered) go(index + 1);
@@ -77,7 +90,7 @@ export function ChatQuestionCard({ question, disabled, onAnswer }: { question: C
       <p className="chat-question-message">{question.message}</p>
       <span className="chat-question-count" aria-live="polite">{index + 1} of {steps.length}</span>
     </div>
-    <div className="chat-question-step" key={index}>
+    <div className="chat-question-step" key={index} ref={stepRef} tabIndex={-1}>
       {lead && <Field field={lead} heading value={values[lead.key]} disabled={disabled} onChange={value => set(lead.key, value)} />}
       {rest.map(field => <Field key={field.key} field={field} value={values[field.key]} disabled={disabled} onChange={value => set(field.key, value)} />)}
     </div>
@@ -95,7 +108,7 @@ export function ChatQuestionCard({ question, disabled, onAnswer }: { question: C
         : <button type="button" className="chat-button chat-button-primary" disabled={disabled || !answered} onClick={next}>Next</button>}
       <button type="button" className="chat-button chat-button-outline" disabled={disabled} onClick={skip} title="Skip this question">Skip</button>
       {index > 0 && <button type="button" className="chat-button chat-button-outline chat-question-back" disabled={disabled} onClick={() => go(index - 1)}>Back</button>}
-      <span className="chat-question-keys" aria-hidden>1–9 picks · Enter {last ? 'answers' : 'next'}</span>
+      <span className="chat-question-keys" aria-hidden>{lead && (lead.kind === 'single' || lead.kind === 'multiple') ? '1–9 picks · ' : ''}Enter {last ? 'answers' : 'next'}</span>
     </div>
   </section>;
 }

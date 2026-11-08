@@ -37,6 +37,33 @@ test('two questions are asked one at a time, with a review before Answer', async
   await expect.poll(() => answers(page)).toEqual([{ action: 'accept', content: { question_0: 'Ready', question_1: 'Some', question_1_custom: 'Keep the old metric name' } }]);
 });
 
+test('the keyboard alone answers both questions: number, Enter, number, Enter (review F-2)', async ({ page }) => {
+  await open(page, `questions=2&width=${width()}`);
+  const card = page.getByRole('region', { name: 'Agent question' });
+  await card.getByRole('radio', { name: /Wait for plan v9/ }).focus();
+  await page.keyboard.press('1');
+  await page.keyboard.press('Enter');
+  await expect(card).toContainText('2 of 2');
+  // Focus moved into the new question, so its keys still reach the card.
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[aria-label="Agent question"]'))).toBe(true);
+  await page.keyboard.press('2');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => answers(page)).toEqual([{ action: 'accept', content: { question_0: 'Ready', question_1: 'Some' } }]);
+});
+
+test('a form with no choices is still one question at a time, and Skip skips one (review F-4)', async ({ page }) => {
+  await open(page, `questions=text&width=${width()}`);
+  const card = page.getByRole('region', { name: 'Agent question' });
+  await expect(card).toContainText('1 of 2');
+  await expect(card.getByRole('spinbutton')).toHaveCount(0);
+  await card.getByRole('textbox', { name: /Project name/ }).fill('atlas');
+  await page.keyboard.press('Enter');
+  await expect(card).toContainText('2 of 2');
+  await expect(card.getByRole('spinbutton', { name: /Keep logs for/ })).toBeFocused();
+  await card.getByRole('button', { name: 'Skip', exact: true }).click();
+  await expect.poll(() => answers(page)).toEqual([{ action: 'accept', content: { name: 'atlas' } }]);
+});
+
 test('Skip passes over one question, not the whole card', async ({ page }) => {
   await open(page, `questions=2&width=${width()}`);
   const card = page.getByRole('region', { name: 'Agent question' });

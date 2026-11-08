@@ -77,11 +77,17 @@ describe('one question at a time (D-230)', () => {
     expect(questionSteps(fields).map(step => step.map(field => field.key))).toEqual([['question_0', 'question_0_custom'], ['question_1', 'question_1_custom']]);
   });
 
-  it('keeps a form with no choices as one step, and leading text fields as a step of their own', () => {
-    const plain = questionFields({ properties: { name: { type: 'string' }, age: { type: 'integer' } } });
-    expect(questionSteps(plain).map(step => step.map(field => field.key))).toEqual([['name', 'age']]);
-    const leading = questionFields({ properties: { why: { type: 'string' }, pick: { type: 'string', enum: ['a'] } } });
-    expect(questionSteps(leading).map(step => step.map(field => field.key))).toEqual([['why'], ['pick']]);
+  it('asks independent questions one at a time, choice or not (review F-4)', () => {
+    const keys = (schema: JsonValue) => questionSteps(questionFields(schema)).map(step => step.map(field => field.key));
+    // A form with no choices: a project name, then a retention period.
+    expect(keys({ required: ['name', 'days'], properties: { name: { type: 'string', title: 'Project name' }, days: { type: 'integer', title: 'Keep logs for (days)' } } })).toEqual([['name'], ['days']]);
+    expect(keys({ properties: { why: { type: 'string' }, pick: { type: 'string', enum: ['a'] } } })).toEqual([['why'], ['pick']]);
+    // A required text question after a choice is its own question, not the choice's Other box.
+    expect(keys({ required: ['pick', 'reason'], properties: { pick: { type: 'string', enum: ['a', 'b'] }, reason: { type: 'string', title: 'Why?' } } })).toEqual([['pick'], ['reason']]);
+    // An optional box titled Other right after a choice stays with it, whatever its key.
+    expect(keys({ properties: { pick: { type: 'string', enum: ['a'] }, note: { type: 'string', title: 'Other' }, flag: { type: 'boolean', title: 'Notify me' } } })).toEqual([['pick', 'note'], ['flag']]);
+    // A companion keyed after its choice stays with it, wherever its title says.
+    expect(keys({ properties: { colour: { type: 'string', enum: ['red'] }, colour_other: { type: 'string', title: 'Something else' } } })).toEqual([['colour', 'colour_other']]);
   });
 
   it('sums a step up for the review: the pick, the note, or skipped', () => {

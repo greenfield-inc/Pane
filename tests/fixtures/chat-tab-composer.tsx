@@ -40,6 +40,11 @@ const queued = Number(params.get('queue') ?? 0);
 view.queue = Array.from({ length: queued }, (_, index) => ({ operationId: `q${index + 1}`, text: ['Also run the linter before you push', 'Then open a draft PR'][index] ?? `Queued ${index + 1}`, queuedAt: '2026-11-08T10:00:00.000Z', stored: true }));
 // ?questions=2: Claude's AskUserQuestion with two questions, taken one at a time (D-230); ?questions=1 asks one.
 const asked = Number(params.get('questions') ?? 0);
+// ?questions=text: a form with no choices, a project name then a retention period (review F-4).
+if (params.get('questions') === 'text') {
+  view.questions = [{ id: 'q', generation: 1, message: 'Set up the project', schema: { type: 'object', required: ['name', 'days'], properties: { name: { type: 'string', title: 'Project name' }, days: { type: 'integer', title: 'Keep logs for (days)' } } } }];
+  view.status = 'blocked';
+}
 if (asked) {
   const first = {
     question_0: { type: 'string', title: '#1491 P1', description: 'Workspaces P1 is validated. Start the agent review? (Nothing merges.)', oneOf: [{ const: 'Ready', title: 'Ready: start agent review (Recommended)', description: 'A reviewer posts findings on #1491.' }, { const: 'Wait', title: 'Wait for plan v9' }, { const: 'Changes', title: 'I have changes first' }] },

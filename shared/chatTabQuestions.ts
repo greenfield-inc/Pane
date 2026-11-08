@@ -93,18 +93,27 @@ export function questionAnswer(fields: readonly QuestionField[], values: Readonl
 }
 
 /**
- * The form as questions asked one at a time (D-230): each choice starts a question, and the
- * fields after it (Claude's "Other" box) belong to it. Fields before the first choice are a
- * question of their own; a form with no choices is a single question.
+ * The form as questions asked one at a time (D-230): every field is a question of its own,
+ * except a choice's companion box (Claude's optional "Other"), which stays with its choice.
+ * A companion is keyed after the choice (`question_0_custom`, `pick_other`), or is an optional
+ * text field titled "Other" right after it (review F-4).
  */
 export function questionSteps(fields: readonly QuestionField[]): QuestionField[][] {
   const steps: QuestionField[][] = [];
   for (const field of fields) {
     const current = steps.at(-1);
-    if (!current || field.kind === 'single' || field.kind === 'multiple') steps.push([field]);
-    else current.push(field);
+    const choice = current?.[0];
+    if (current && choice && isCompanion(field, choice)) current.push(field);
+    else steps.push([field]);
   }
   return steps;
+}
+
+function isCompanion(field: QuestionField, choice: QuestionField): boolean {
+  if (choice.kind !== 'single' && choice.kind !== 'multiple') return false;
+  if (field.kind !== 'text') return false;
+  if (field.key === `${choice.key}_custom` || field.key === `${choice.key}_other`) return true;
+  return !field.required && /^other\b/i.test(field.title.trim());
 }
 
 /** What was given for one question, for the review before Answer: "Ready · after lunch", or undefined when nothing was. */
