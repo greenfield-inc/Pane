@@ -1154,13 +1154,18 @@ export class NotifyQueue extends EventEmitter {
       items: remotes.length > 0
         ? [
           ...local.map(item => ({ ...withDeviceLabels(item, device => this.deviceLabel(device)), machine: this.machine(), machineId: LOCAL_MACHINE })),
-          ...remotes.flatMap(remote => [...remote.items.values()].map(item => ({
-            ...withDeviceLabels(item, device => this.deviceLabel(device)),
+          ...remotes.flatMap(remote => [...remote.items.values()].map(item => {
+            const sentHere = this.answeredHere.has(item.id);
+            const shown: NotifyItem = {
+              ...withDeviceLabels(item, device => this.deviceLabel(device)),
+              answeredOn: sentHere ? undefined : this.deviceLabel(item.answeredOn),
+              unreachable: remote.online ? undefined : true,
+              elsewhere: remote.machineId === this.activeMachineId ? undefined : true,
+            };
             // Sent from here, before the machine says so: the card reads "Sent to" and can't be answered twice.
-            ...(this.answeredHere.has(item.id) ? { answeredOn: undefined, ...(item.state === 'waiting' ? { state: 'sent' as const } : {}) } : { answeredOn: this.deviceLabel(item.answeredOn) }),
-            unreachable: remote.online ? undefined : true,
-            elsewhere: remote.machineId === this.activeMachineId ? undefined : true,
-          }))),
+            if (sentHere && item.state === 'waiting') shown.state = 'sent';
+            return shown;
+          })),
         ]
         : local,
       queue: this.roundQueue(),

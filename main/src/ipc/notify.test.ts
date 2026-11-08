@@ -146,7 +146,7 @@ describe('Notify across machines, through the registered handlers', () => {
   it("sends one answer when another machine's card is answered twice before that machine replies", async () => {
     const pane = await startPane();
     const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)) });
-    let reply = () => undefined as void;
+    let reply: () => void = () => undefined;
     const run = saved.machines.run;
     saved.machines.run = (machineId, command) => new Promise(resolve => { reply = () => resolve(run(machineId, command)); });
     followSavedMachines(saved.machines);
