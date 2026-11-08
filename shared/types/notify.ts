@@ -27,7 +27,21 @@ export interface NotifyChoice {
   label: string;
   detail?: string;
   recommended?: boolean;
+  /**
+   * `--update` only: the label this choice had in the version before, when it was reworded. A
+   * choice whose label is unchanged but whose detail changed is reworded too; Pane marks both.
+   */
+  was?: string;
 }
+
+/** One question of an options approval that asks several at once (Q-20's "Question 1 of 2"). */
+export interface NotifySubQuestion {
+  title: string;
+  choices: NotifyChoice[];
+}
+
+/** An options approval asks 2 to this many questions at once; each takes one pick. */
+export const NOTIFY_QUESTIONS_MAX = 4;
 
 export interface NotifyAction {
   label: string;
@@ -38,7 +52,7 @@ export interface NotifyAction {
  * A related link on a card (Approvals): a file on the asking machine, or an http(s) URL. A file
  * opens as a tab of the item's Pane; a URL opens as a browser tab there. Older agents send none.
  */
-export type NotifyLink = { label: string; path: string } | { label: string; url: string };
+export type NotifyLink = { label: string; path: string } | { label: string; url: string } | { label: string; approval: string };
 
 /** Up to this many links per card; a label takes up to NOTIFY_LINK_LABEL_MAX characters. */
 export const NOTIFY_LINKS_MAX = 6;
@@ -49,8 +63,10 @@ export interface NotifyQuestion {
   ui: NotifyUi;
   title: string;
   context?: string;
-  /** options only: 1 to 9. */
+  /** options only: 1 to 9. Absent when `questions` asks several. */
   choices?: NotifyChoice[];
+  /** options only, instead of `choices`: 2 to NOTIFY_QUESTIONS_MAX questions, each picked once. */
+  questions?: NotifySubQuestion[];
   /** approve only: preformatted block behind a "Show the …" disclosure. */
   detail?: string;
   /** approve only, with detail: the disclosure's label, such as "Show the SQL". Default "Show details". */
@@ -67,6 +83,11 @@ export interface NotifyQuestion {
   secretError?: string;
   /** Set when the question mirrors a prompt in an agent's terminal (Claude's permission and plan prompts). */
   agentPrompt?: NotifyAgentPrompt;
+  /**
+   * Set by the chat tab bridge for a built-in question (AskUserQuestion): a typed reply is the
+   * answer itself, since the paused turn resumes with it. It reads "Sent to <agent>", with no fix.
+   */
+  replyIsAnswer?: boolean;
 }
 
 /** A prompt an agent shows in its terminal, asked here too; the first answer from either place wins. */
@@ -82,6 +103,23 @@ export interface NotifyAgentPrompt {
 export interface NotifyRequest extends Partial<NotifyQuestion> {
   /** Keep waiting on a question an earlier call returned `waiting` for. */
   resume?: string;
+  /**
+   * `runpane notify --took <id|Q-n> answer|question`: the reader of the person's reply says how it
+   * took it. `answer` records the reply as the answer; `question` shows "Getting more context…".
+   */
+  took?: string;
+  tookAs?: 'answer' | 'question';
+  /** --took question: what the reader is doing, shown on the approval. Default "Getting more context…". */
+  status?: string;
+  /**
+   * `runpane notify --update <id|Q-n> --asked … --what-changed …`: saves a new version of the
+   * approval (any question field it passes replaces that field), then waits on it like a notify call.
+   */
+  update?: string;
+  /** --update: the person's question the new version answers, as they asked it. */
+  asked?: string;
+  /** --update: what changed, one line per change. */
+  whatChanged?: string;
   /** A Session orchestrator improves this waiting item (a worker's question) instead of posting a second card. */
   relays?: string;
   /** Autopilot's own item: the Session it is about (an id or name). Absent: it links to Autopilot's chat. */
@@ -103,7 +141,15 @@ export interface NotifyCaller {
 }
 
 export type NotifyResult =
-  | { answer: string; note?: string }
+  /** `answers`: one pick per question, when the approval asks several (`answer` joins them with " · "). */
+  | { answer: string; note?: string; answers?: string[] }
+  /**
+   * The person typed a reply: it may be an answer or a question about it. The call ends; run
+   * `runpane notify --took <id> answer|question` (see `next`), and the approval keeps waiting meanwhile.
+   */
+  | { reply: string; picks?: string[]; id: string; next: string }
+  /** --took: how the reply was recorded. */
+  | { took: 'answer' | 'question'; id: string; next?: string }
   | { approved: boolean; note?: string }
   | { delivered: 'screen' | 'inbox' }
   /** secret: the value was saved as `project/name`; it is never returned. */
@@ -297,11 +343,91 @@ export interface NotifyItem extends NotifyQuestion {
   pushed?: boolean;
   /** The one-time summary card after an upgrade: the items it offers to close, oldest first. */
   summaryOf?: string[];
+  /** The person's latest typed reply and how it was taken. */
+  reply?: NotifyReply;
+  /** The current version: 1 (or absent) until the asker updates it. */
+  version?: number;
+  /** How the current version came to be (v2 and later). */
+  revision?: NotifyRevision;
+  /** Earlier versions, oldest first. */
+  versions?: NotifyVersion[];
+  /** Epoch ms when it came back updated after the person's question: "Updated · ready again" until answered or replied to. */
+  readyAgain?: number;
+  /** The orchestrator tab that relayed this worker's question: it reads a reply when the worker can't. */
+  relayedBy?: { panelId: string; name: string };
 }
+
+/**
+ * The person's typed reply on an approval (P1 of the approval card): the asker's agent (or the
+ * next reader) reads it and says whether it was an answer or a question with `--took`.
+ */
+export interface NotifyReply {
+  /** Each reply is delivered once, by id. */
+  id: string;
+  text: string;
+  /** What was picked with it, one label per question, in order. */
+  picks?: string[];
+  /** Epoch ms. */
+  at: number;
+  /**
+   * reading: delivered (or waiting for a busy reader) until it runs --took. answer / question:
+   * how it was taken. unread: no agent can read replies right now. sent: a built-in question's
+   * answer, typed into the chat tab's paused turn.
+   */
+  state: 'reading' | 'answer' | 'question' | 'unread' | 'sent';
+  /** Who reads it: the asker, the orchestrator that relayed it, or Autopilot. */
+  reader?: NotifyReplyReader;
+  /** Epoch ms when its line was typed into the reader's tab or returned to its call. */
+  deliveredAt?: number;
+  /** --took question: what the reader is doing ("Getting more context…"). */
+  status?: string;
+  /** The person's fix of how it was taken, if they made one. */
+  fixed?: 'answer' | 'question';
+}
+
+export interface NotifyReplyReader {
+  kind: 'asker' | 'orchestrator' | 'autopilot';
+  /** The tab that reads it; absent when it went back to the asker's open call. */
+  panelId?: string;
+  /** Who, as the approval names it: "doozy-overhaul", "the Doozy orchestrator", "Autopilot". */
+  name: string;
+}
+
+/** An earlier version of an approval, kept on it (at most NOTIFY_VERSIONS_MAX in all, current included). */
+export interface NotifyVersion {
+  /** 1 for the first version. */
+  version: number;
+  title: string;
+  context?: string;
+  choices?: NotifyChoice[];
+  questions?: NotifySubQuestion[];
+  links?: NotifyLink[];
+  /** Epoch ms when this version was asked. */
+  at: number;
+  /** How this version came to be, for v2 and later. */
+  revision?: NotifyRevision;
+}
+
+/** Why a version exists: the person's question, and what the asker changed for it. */
+export interface NotifyRevision {
+  /** The person's question, as they typed it. */
+  asked: string;
+  /** The asker's own lines, one per change. */
+  whatChanged: string[];
+  /** Who changed it: the reader's name. */
+  by: string;
+  /** Epoch ms. */
+  at: number;
+}
+
+/** An approval keeps at most this many versions, the current one included; older ones fold into the oldest. */
+export const NOTIFY_VERSIONS_MAX = 10;
 
 /** What the strip shows. Main decides; every surface renders the same thing. */
 export type NotifyStripView =
   | { kind: 'question'; itemId: string }
+  /** A quiet notice: an approval came back after the person's question (no chime). */
+  | { kind: 'updated'; itemId: string; hideAt: number | null }
   | { kind: 'sent'; itemId: string }
   | { kind: 'expired'; itemId: string }
   | { kind: 'info'; itemId: string; hideAt: number | null };
@@ -361,6 +487,8 @@ export type NotifyRemoteCommand =
   | { type: 'reopen'; id: string }
   /** The person corrects an answer already sent. */
   | { type: 'override'; id: string; answer: NotifyAnswer }
+  /** The person fixes how a reply was taken. A machine too old for it refuses it. */
+  | NotifyFixCommand
   /** Autopilot on any machine acts on this machine's item, recorded as "by Autopilot" here. */
   | NotifyAgentAction;
 
@@ -398,6 +526,11 @@ export type NotifyRemindAfter = '3m' | '5m' | '15m' | '10m' | '1h' | 'pane';
  * or declined with `{ approved: false }`.
  */
 export type NotifyAnswer =
+  /**
+   * The approval column's one reply box: one pick per question (an empty string for none) and
+   * anything typed. Picks alone are an answer; typed text is a reply its reader takes either way.
+   */
+  | { picks: string[]; text?: string }
   | { choice: string; note?: string }
   | { approved: boolean; note?: string }
   | { text: string };
@@ -426,7 +559,16 @@ export type NotifyCommand =
   /** Reopen a closed item: it waits again. */
   | { type: 'reopen'; id: string }
   /** Override: the person's answer goes to the asker as a correction. */
-  | { type: 'override'; id: string; answer: NotifyAnswer };
+  | { type: 'override'; id: string; answer: NotifyAnswer }
+  /** The one-click fix of how a reply was taken: it was a question, or it was the answer. */
+  | NotifyFixCommand;
+
+/** "It was a question" on a reply taken as the answer, or "It was my answer" on one taken as a question. */
+export interface NotifyFixCommand {
+  type: 'fix-reply';
+  id: string;
+  as: 'answer' | 'question';
+}
 
 /** Where main sends the main window: Approvals (optionally on one item) or its settings. */
 export type NotifyNavigateTarget = 'inbox' | 'settings' | { approval: string };

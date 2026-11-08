@@ -14,6 +14,7 @@ import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { submitOnlyToAgent } from './runpane';
 import { NotifyService } from '../services/notify/notifyService';
+import { ASKING_TAB_CLOSED } from '../services/notify/notifyQueue';
 import { ClaudePromptBridge } from '../services/claudePrompts/claudePromptBridge';
 import { setClaudePromptBridge } from '../services/claudePrompts';
 import type { MachineConnections } from '../services/machineConnections';
@@ -22,7 +23,7 @@ import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
-import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
@@ -41,11 +42,20 @@ const linkInputSchema = boundary.object({
   label: boundary.string,
   path: boundary.optional(boundary.string),
   url: boundary.optional(boundary.string),
+  approval: boundary.optional(boundary.string),
 });
 const linkSchema = boundary.union(
   boundary.object({ label: boundary.nonEmptyString, path: boundary.nonEmptyString }),
   boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString }),
+  boundary.object({ label: boundary.nonEmptyString, approval: boundary.nonEmptyString }),
 );
+const choiceSchema = boundary.object({
+  label: boundary.nonEmptyString,
+  detail: boundary.optional(boundary.string),
+  recommended: boundary.optional(boundary.boolean),
+  was: boundary.optional(boundary.string),
+});
+const subQuestionSchema = boundary.object({ title: boundary.string, choices: boundary.array(choiceSchema) });
 const sessionSchema = boundary.object({
   id: boundary.nonEmptyString,
   name: boundary.string,
@@ -57,11 +67,8 @@ const notifyRequestSchema = boundary.object({
   ui: boundary.optional(boundary.enumeration('options', 'approve', 'ask', 'secret', 'info')),
   title: boundary.optional(boundary.string),
   context: boundary.optional(boundary.string),
-  choices: boundary.optional(boundary.array(boundary.object({
-    label: boundary.nonEmptyString,
-    detail: boundary.optional(boundary.string),
-    recommended: boundary.optional(boundary.boolean),
-  }))),
+  choices: boundary.optional(boundary.array(choiceSchema)),
+  questions: boundary.optional(boundary.array(subQuestionSchema)),
   detail: boundary.optional(boundary.string),
   detailLabel: boundary.optional(boundary.string),
   suggestions: boundary.optional(boundary.array(boundary.string)),
@@ -69,6 +76,12 @@ const notifyRequestSchema = boundary.object({
   secret: boundary.optional(boundary.object({ project: boundary.string, name: boundary.string })),
   links: boundary.optional(boundary.array(linkInputSchema)),
   resume: boundary.optional(boundary.nonEmptyString),
+  took: boundary.optional(boundary.string),
+  tookAs: boundary.optional(boundary.enumeration('answer', 'question')),
+  status: boundary.optional(boundary.string),
+  update: boundary.optional(boundary.string),
+  asked: boundary.optional(boundary.string),
+  whatChanged: boundary.optional(boundary.string),
   relays: boundary.optional(boundary.nonEmptyString),
   aboutSession: boundary.optional(boundary.nonEmptyString),
   returnAfterMs: boundary.optional(boundary.number),
@@ -81,6 +94,7 @@ const notifyRequestSchema = boundary.object({
 });
 
 const answerSchema = boundary.union(
+  boundary.object({ picks: boundary.array(boundary.string), text: boundary.optional(boundary.string) }),
   boundary.object({ choice: boundary.nonEmptyString, note: boundary.optional(boundary.string) }),
   boundary.object({ approved: boundary.boolean, note: boundary.optional(boundary.string) }),
   boundary.object({ text: boundary.string }),
@@ -104,13 +118,15 @@ const notifyCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('close'), id: boundary.nonEmptyString, reason: boundary.optional(boundary.string) }),
   idCommand('reopen'),
   boundary.object({ type: boundary.literal('override'), id: boundary.nonEmptyString, answer: answerSchema }),
+  boundary.object({ type: boundary.literal('fix-reply'), id: boundary.nonEmptyString, as: boundary.enumeration('answer', 'question') }),
 );
 /** The question of Autopilot's rewrite: checked further in parseNotifyRequest. */
 const rewriteQuestionSchema = boundary.object({
   ui: boundary.enumeration('options', 'approve', 'ask', 'info'),
   title: boundary.string,
   context: boundary.optional(boundary.string),
-  choices: boundary.optional(boundary.array(boundary.object({ label: boundary.nonEmptyString, detail: boundary.optional(boundary.string), recommended: boundary.optional(boundary.boolean) }))),
+  choices: boundary.optional(boundary.array(choiceSchema)),
+  questions: boundary.optional(boundary.array(subQuestionSchema)),
   detail: boundary.optional(boundary.string),
   detailLabel: boundary.optional(boundary.string),
   suggestions: boundary.optional(boundary.array(boundary.string)),
@@ -126,6 +142,7 @@ const notifyRemoteCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('close'), id: boundary.nonEmptyString, reason: boundary.optional(boundary.string) }),
   idCommand('reopen'),
   boundary.object({ type: boundary.literal('override'), id: boundary.nonEmptyString, answer: answerSchema }),
+  boundary.object({ type: boundary.literal('fix-reply'), id: boundary.nonEmptyString, as: boundary.enumeration('answer', 'question') }),
   boundary.object({ type: boundary.literal('agent-answer'), id: boundary.nonEmptyString, answer: answerSchema, because: boundary.nonEmptyString, machine: boundary.optional(boundary.string) }),
   boundary.object({ type: boundary.literal('agent-close'), id: boundary.nonEmptyString, reason: boundary.nonEmptyString, machine: boundary.optional(boundary.string) }),
   boundary.object({ type: boundary.literal('agent-rewrite'), id: boundary.nonEmptyString, question: rewriteQuestionSchema, reason: boundary.optional(boundary.string), machine: boundary.optional(boundary.string), newId: boundary.optional(boundary.nonEmptyString) }),
@@ -133,16 +150,26 @@ const notifyRemoteCommandSchema = boundary.union(
 /** The server's name for the sender (httpApiServer fills it in), never the caller's own claim. */
 const remoteSenderSchema = boundary.object({ device: boundary.nonEmptyString });
 const actorSchema = boundary.enumeration('you', 'autopilot', 'orchestrator', 'pane');
+const replySchema = boundary.object({
+  id: boundary.nonEmptyString,
+  text: boundary.string,
+  picks: boundary.optional(boundary.array(boundary.string)),
+  at: boundary.number,
+  state: boundary.enumeration('reading', 'answer', 'question', 'unread', 'sent'),
+  reader: boundary.optional(boundary.object({ kind: boundary.enumeration('asker', 'orchestrator', 'autopilot'), panelId: boundary.optional(boundary.string), name: boundary.string })),
+  deliveredAt: boundary.optional(boundary.number),
+  status: boundary.optional(boundary.string),
+  fixed: boundary.optional(boundary.enumeration('answer', 'question')),
+});
+const revisionSchema = boundary.object({ asked: boundary.string, whatChanged: boundary.array(boundary.string), by: boundary.string, at: boundary.number });
 const notifyItemSchema = boundary.object({
   id: boundary.nonEmptyString,
   ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
   title: boundary.string,
   context: boundary.optional(boundary.string),
-  choices: boundary.optional(boundary.array(boundary.object({
-    label: boundary.nonEmptyString,
-    detail: boundary.optional(boundary.string),
-    recommended: boundary.optional(boundary.boolean),
-  }))),
+  choices: boundary.optional(boundary.array(choiceSchema)),
+  questions: boundary.optional(boundary.array(subQuestionSchema)),
+  replyIsAnswer: boundary.optional(boundary.boolean),
   detail: boundary.optional(boundary.string),
   detailLabel: boundary.optional(boundary.string),
   suggestions: boundary.optional(boundary.array(boundary.string)),
@@ -187,6 +214,21 @@ const notifyItemSchema = boundary.object({
   reopened: boundary.optional(boundary.object({ by: actorSchema, device: boundary.optional(boundary.string), at: boundary.number, closedBy: actorSchema, closedReason: boundary.string })),
   pushed: boundary.optional(boundary.boolean),
   summaryOf: boundary.optional(boundary.array(boundary.string)),
+  reply: boundary.optional(replySchema),
+  version: boundary.optional(boundary.number),
+  revision: boundary.optional(revisionSchema),
+  versions: boundary.optional(boundary.array(boundary.object({
+    version: boundary.number,
+    title: boundary.string,
+    context: boundary.optional(boundary.string),
+    choices: boundary.optional(boundary.array(choiceSchema)),
+    questions: boundary.optional(boundary.array(subQuestionSchema)),
+    links: boundary.optional(boundary.array(linkSchema)),
+    at: boundary.number,
+    revision: boundary.optional(revisionSchema),
+  }))),
+  readyAgain: boundary.optional(boundary.number),
+  relayedBy: boundary.optional(boundary.object({ panelId: boundary.string, name: boundary.string })),
 });
 const notifySharedStateSchema = boundary.object({
   machine: boundary.string,
@@ -250,7 +292,7 @@ function askerPaneGone(database: NotifyServices['databaseService'], item: Notify
     if (!pane) return 'Pane deleted';
     if (pane.archived) return 'Pane archived';
   }
-  if (panelId && database?.getPanel && !database.getPanel(panelId)) return 'the asking tab was closed';
+  if (panelId && database?.getPanel && !database.getPanel(panelId)) return ASKING_TAB_CLOSED;
   return undefined;
 }
 
@@ -268,6 +310,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       return { paneId: pane.id, panelId: panel?.id, name: pane.name, agentType };
     },
     openLink: async (paneId, link) => {
+      // Another approval opens in place on the card, never as a tab.
+      if ('approval' in link) throw new PaneError('ERR_APPROVALS_LINK_OPEN', `${link.label} is another approval, which opens on the card itself. Nothing was opened.`, 'Open it from its tab on the approval.');
       // A file page is titled by its label, as the card shows it.
       const target = 'path' in link ? { filePath: link.path } : link.url.startsWith('file:') ? { url: link.url, title: link.label } : { url: link.url };
       await commandRegistry.invoke('runpane:panels:open', [{ paneId, ...target, placement: 'tab', source: 'user' }]);
@@ -355,6 +399,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       }
     },
     idleSeconds: () => (hasHeadlessDaemonLaunchArg() ? Infinity : idleSeconds()),
+    tabAlive: (panelId) => panelManager.getPanel(panelId) !== undefined,
   });
 
   notifyBeforeQuit = () => notify.queue.prepareForQuit();
@@ -610,6 +655,26 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   const { links, ...rest } = decoded;
   const request: NotifyRequest = rest;
   if (request.resume) return request;
+  if (request.took !== undefined) {
+    if (!request.took.trim()) throw invalid('took needs the approval\'s id or Q-n.');
+    if (!request.tookAs) throw invalid('took needs answer or question: --took <id|Q-n> answer.');
+    if (request.ui !== undefined || request.update !== undefined) throw invalid('took goes on its own, without ui or update.');
+    return request;
+  }
+  if (request.tookAs !== undefined || request.status !== undefined) throw invalid('answer, question and status only go with took.');
+  if (request.update !== undefined) {
+    if (!request.update.trim()) throw invalid('update needs the approval\'s id or Q-n.');
+    if (request.ui !== undefined) throw invalid('update keeps the approval\'s ui; leave ui out.');
+    if (!request.asked?.trim()) throw invalid('update needs asked: the person\'s question, as they asked it.');
+    if (!request.whatChanged?.trim()) throw invalid('update needs whatChanged: one line per change.');
+    if ((request.title?.length ?? 0) > MAX_TEXT || (request.context?.length ?? 0) > MAX_TEXT || request.asked.length > MAX_TEXT || request.whatChanged.length > MAX_TEXT) throw invalid(`title, context, asked and whatChanged take up to ${MAX_TEXT} characters.`);
+    if (request.choices && request.questions) throw invalid('pass choices or questions, not both.');
+    if (request.choices) checkChoices(request.choices, 'choices');
+    if (request.questions) checkQuestions(request.questions);
+    if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
+    return request;
+  }
+  if (request.asked !== undefined || request.whatChanged !== undefined) throw invalid('asked and whatChanged only go with update.');
   const { ui } = request;
   if (!ui) throw invalid('ui is required: options, approve, ask or info.');
   if (ui === 'secret') {
@@ -623,14 +688,15 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (!request.title?.trim()) throw invalid('title is required.');
   if (request.title.length > MAX_TEXT || (request.context?.length ?? 0) > MAX_TEXT) throw invalid(`title and context take up to ${MAX_TEXT} characters.`);
   if ((request.detail?.length ?? 0) > MAX_DETAIL) throw invalid(`detail takes up to ${MAX_DETAIL} characters.`);
-  if (ui === 'options') {
-    const count = request.choices?.length ?? 0;
-    if (count < 1 || count > MAX_CHOICES) throw invalid(`choices needs 1 to ${MAX_CHOICES} entries for an options question; it has ${count}.`);
-    const labels = new Set(request.choices?.map(choice => choice.label.trim()));
-    if (labels.size !== count) throw invalid('choices need different labels.');
-  } else if (request.choices) {
-    throw invalid(`choices only goes with ui: options, not ${ui}.`);
+  if (ui === 'options' && request.questions) {
+    if (request.choices) throw invalid('pass choices or questions, not both.');
+    checkQuestions(request.questions);
+  } else if (ui === 'options') {
+    checkChoices(request.choices ?? [], 'choices');
+  } else if (request.choices || request.questions) {
+    throw invalid(`${request.choices ? 'choices' : 'questions'} only goes with ui: options, not ${ui}.`);
   }
+  if (request.choices?.some(choice => choice.was !== undefined)) throw invalid('was only goes with update: it names a reworded choice\'s old label.');
   if (request.detail !== undefined && ui !== 'approve') throw invalid(`detail only goes with ui: approve, not ${ui}.`);
   if (request.detailLabel !== undefined && request.detail === undefined) throw invalid('detailLabel needs detail: it labels the button that shows it.');
   // Code points, as the CLIs count them.
@@ -642,9 +708,26 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   return request;
 }
 
+/** 1 to 9 choices with different labels. */
+function checkChoices(choices: NonNullable<NotifyRequest['choices']>, where: string): void {
+  const count = choices.length;
+  if (count < 1 || count > MAX_CHOICES) throw invalid(`${where} needs 1 to ${MAX_CHOICES} entries for an options question; it has ${count}.`);
+  if (new Set(choices.map(choice => choice.label.trim())).size !== count) throw invalid(`${where} need different labels.`);
+}
+
+/** 2 to 4 questions, each with a title and its own choices. */
+function checkQuestions(questions: NonNullable<NotifyRequest['questions']>): void {
+  if (questions.length < 2 || questions.length > NOTIFY_QUESTIONS_MAX) throw invalid(`questions takes 2 to ${NOTIFY_QUESTIONS_MAX} questions; it has ${questions.length}. For one, use choices.`);
+  questions.forEach((question, index) => {
+    if (!question.title.trim()) throw invalid(`questions[${index}].title is required.`);
+    if (question.title.length > MAX_TEXT) throw invalid(`questions[${index}].title takes up to ${MAX_TEXT} characters.`);
+    checkChoices(question.choices, `questions[${index}].choices`);
+  });
+}
+
 /** Autopilot's rewrite takes the same checks as any notify call. */
 export function parseRewriteQuestion(value: PaneCommandValue, cwd?: string): NotifyQuestion {
-  const { caller: _caller, resume: _resume, relays: _relays, aboutSession: _about, returnAfterMs: _after, ...question } = parseNotifyRequest({ ...decodeBoundary(value, boundary.jsonObject), caller: { cwd } });
+  const { caller: _caller, resume: _resume, relays: _relays, aboutSession: _about, returnAfterMs: _after, took: _took, tookAs: _tookAs, status: _status, update: _update, asked: _asked, whatChanged: _changed, ...question } = parseNotifyRequest({ ...decodeBoundary(value, boundary.jsonObject), caller: { cwd } });
   if (!question.ui || !question.title) throw invalid('ui and title are required.');
   return { ...question, ui: question.ui, title: question.title };
 }
@@ -653,7 +736,7 @@ export function parseRewriteQuestion(value: PaneCommandValue, cwd?: string): Not
  * Related links: up to 6, each a label and exactly one of a file path (relative to the asking
  * folder) or an http(s) URL.
  */
-function parseLinks(links: Array<{ label: string; path?: string; url?: string }>, cwd: string | undefined): NotifyLink[] {
+function parseLinks(links: Array<{ label: string; path?: string; url?: string; approval?: string }>, cwd: string | undefined): NotifyLink[] {
   if (links.length > NOTIFY_LINKS_MAX) throw invalid(`links takes up to ${NOTIFY_LINKS_MAX} entries; it has ${links.length}.`);
   return links.map((link, index): NotifyLink => {
     const label = link.label.trim();
@@ -662,7 +745,9 @@ function parseLinks(links: Array<{ label: string; path?: string; url?: string }>
     if ([...label].length > NOTIFY_LINK_LABEL_MAX) throw invalid(`${where}.label takes up to ${NOTIFY_LINK_LABEL_MAX} characters.`);
     const filePath = link.path?.trim();
     const url = link.url?.trim();
-    if (Boolean(filePath) === Boolean(url)) throw invalid(`${where} needs exactly one of path or url.`);
+    const approval = link.approval?.trim();
+    if ([filePath, url, approval].filter(Boolean).length !== 1) throw invalid(`${where} needs exactly one of path, url or approval.`);
+    if (approval) return { label, approval };
     if (url) {
       if (!/^https?:\/\/\S+$/i.test(url)) throw invalid(`${where}.url must be an http(s) URL.`);
       return { label, url };

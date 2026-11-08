@@ -90,6 +90,8 @@ export interface NotifyServiceDependencies {
   typeIntoTab?: NotifyQueueEnvironment['typeIntoTab'];
   /** Seconds since the person last used this computer; Infinity while its screen is locked. Absent: in use. */
   idleSeconds?: () => number;
+  /** Whether a tab still exists. */
+  tabAlive?: (panelId: string) => boolean;
 }
 
 /** A computer rings only if used in the last 2 minutes (D-144). */
@@ -131,6 +133,10 @@ export class NotifyService {
   private readonly stoppers: Array<() => void> = [];
   private readonly timers: Array<ReturnType<typeof setInterval>> = [];
   private sweepTimer?: ReturnType<typeof setTimeout>;
+  /** Autopilot's chat tab while it's on (set once Autopilot starts): it reads replies no one else can. */
+  private autopilotReader?: () => { panelId: string } | undefined;
+  /** When each item last came back ready again, as the phone was last told. */
+  private readyAgainSeen = new Map<string, number>();
 
   constructor(private readonly deps: NotifyServiceDependencies) {
     this.lastSettings = this.settings();
@@ -150,6 +156,8 @@ export class NotifyService {
       askerGone: (item) => this.askerGone(item),
       inUse: deps.idleSeconds ? () => (deps.idleSeconds?.() ?? 0) < IN_USE_SECONDS : undefined,
       typeIntoTab: deps.typeIntoTab,
+      tabAlive: deps.tabAlive,
+      autopilotReader: () => this.autopilotReader?.(),
       workerQuestionGone: (inboxId) => {
         try {
           deps.inbox?.ack?.([inboxId]);
@@ -275,10 +283,24 @@ export class NotifyService {
     return notifySettings(this.deps.configManager.getConfig());
   }
 
+  /** Autopilot tells Notify where it reads replies, once it's set up. */
+  setAutopilotReader(reader: () => { panelId: string } | undefined): void {
+    this.autopilotReader = reader;
+  }
+
   /** The `runpane:notify` daemon command. */
   ask(request: NotifyRequest, signal?: AbortSignal): Promise<NotifyResult> {
-    const { resume, relays, aboutSession, returnAfterMs, caller, ...question } = request;
+    const { resume, relays, aboutSession, returnAfterMs, caller, took, tookAs, status, update, asked, whatChanged, ...question } = request;
     const source = this.describeSource(caller);
+    // A reader saying how it took a reply, or updating the approval: not a new ask, so a worker may too.
+    const reader = { paneId: source.paneId, panelId: source.panelId };
+    if (took !== undefined) return Promise.resolve(this.queue.took(reader, took, tookAs ?? 'answer', status));
+    if (update !== undefined) {
+      return this.queue.update(reader, update, {
+        asked: asked ?? '', whatChanged: whatChanged ?? '',
+        title: question.title, context: question.context, choices: question.choices, questions: question.questions, links: question.links,
+      }, returnAfterMs, signal);
+    }
     // D-79: in a Pane Session only the orchestrator asks the person; a worker asks its orchestrator.
     // Claude's and chat tabs' own prompts (the tool asking) don't come through here, so they still reach you.
     const session = !resume && source.paneId ? this.deps.sessionOf?.(source.paneId, source.panelId) : undefined;
@@ -668,6 +690,12 @@ export class NotifyService {
     const onQuestion = this.deps.onQuestion;
     for (const item of state.items) {
       if (item.state === 'info') continue;
+      // Ready again is a follow-up the person started: the phone hears only when no computer is in use (D-244).
+      if (item.readyAgain !== undefined && item.state === 'waiting' && this.readyAgainSeen.get(item.id) !== item.readyAgain) {
+        this.readyAgainSeen.set(item.id, item.readyAgain);
+        // An item first seen on this start was already told about before it.
+        if (previous.has(item.id) && !this.inUse()) onQuestion({ item, open: true });
+      }
       const open = ringing(item);
       if (open === previous.get(item.id)) continue;
       if (open) {
@@ -697,6 +725,11 @@ export class NotifyService {
       clearTimeout(timer);
       this.pushTimers.delete(id);
     }
+  }
+
+  private inUse(): boolean {
+    const idle = this.deps.idleSeconds?.();
+    return idle === undefined || idle < IN_USE_SECONDS;
   }
 
   private sendToMainWindow(channel: string, ...args: unknown[]): void {
