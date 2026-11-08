@@ -769,10 +769,17 @@ export class NotifyQueue extends EventEmitter {
    */
   private replyTo(entry: Entry, text: string, picks: string[], device?: string): void {
     const { item } = entry;
-    const picked = picks.filter(Boolean);
-    if (picked.length) this.checkPicks(item, picks, true);
+    const earlier = item.reply;
+    // One reply at a time with its reader: --took names the approval, so it must mean the reply the reader has.
+    if (earlier?.state === 'reading' && earlier.deliveredAt !== undefined) {
+      throw new PaneError('ERR_NOTIFY_REPLY_BEING_READ', `${earlier.reader?.name ?? 'Its reader'} is still reading your last reply, so this one wasn't sent. Your words are still in the box.`, 'Send it once the approval says how your last reply was taken, or pick an option to answer now.');
+    }
+    if (picks.some(Boolean)) this.checkPicks(item, picks, true);
+    // A reply nobody has read yet is replaced, and its line, if still waiting for a busy tab, never goes.
+    if (earlier) this.tabMessages = this.tabMessages.filter(message => message.reply !== earlier.id);
     item.reply = { id: randomUUID(), text, at: Date.now(), state: 'reading' };
-    if (picked.length) item.reply.picks = picked;
+    // Positional: one entry per question, '' for one left unpicked, so a pick never moves to another question.
+    if (picks.some(Boolean)) item.reply.picks = [...picks];
     item.readyAgain = undefined;
     item.answeredOn = device;
     item.quiet = undefined;
@@ -896,7 +903,7 @@ export class NotifyQueue extends EventEmitter {
     this.hidden.delete(item.id);
     clearEntryTimers(entry);
     // The words are the answer, or a note on the picks: never both.
-    const result: NotifyResult = reply.picks?.length ? { answer: reply.picks.join(' · '), note: reply.text } : { answer: reply.text };
+    const result: NotifyResult = reply.picks?.length ? { answer: picksText(reply.picks), answers: reply.picks, note: reply.text } : { answer: reply.text };
     if (entry.waiter) entry.waiter.resolve(result);
     if (reply.reader?.kind !== 'asker' && item.source.panelId && !this.env.askerGone?.(item)) this.enqueueTabMessage(item, answerLine(item), true);
     this.save(entry);
@@ -935,8 +942,10 @@ export class NotifyQueue extends EventEmitter {
     item.version = (item.version ?? 1) + 1;
     const by = item.reply?.reader?.name ?? askerName(item);
     item.revision = { asked: update.asked.trim(), whatChanged: update.whatChanged.split('\n').map(line => line.trim()).filter(Boolean), by, at: now };
-    item.reply = undefined;
+    // A newer reply still on its way to the reader stays; the one this version answers is done.
+    if (item.reply?.state !== 'reading') item.reply = undefined;
     item.readyAgain = now;
+    clearTimeout(entry.graceTimer);
     item.staleSince = undefined;
     this.hidden.delete(item.id);
     this.save(entry);
@@ -1588,7 +1597,8 @@ export class NotifyQueue extends EventEmitter {
       }
       signal?.addEventListener('abort', onAbort, { once: true });
       if (returnAfterMs !== undefined && returnAfterMs > 0) {
-        const remaining = entry.item.createdAt + NOTIFY_RESUME_CAP_MS - Date.now();
+        // Each round has its own 15 minutes: an updated version counts from when it was posted.
+        const remaining = (entry.item.revision?.at ?? entry.item.createdAt) + NOTIFY_RESUME_CAP_MS - Date.now();
         returnTimer = setTimeout(() => {
           if (remaining <= returnAfterMs) {
             // An answer in its Undo hold reaches this call when the hold ends.
@@ -1629,8 +1639,7 @@ export class NotifyQueue extends EventEmitter {
     // A built-in question in a chat tab: the paused turn resumes with the person's words (J12).
     if ('picks' in answer && typed && entry.item.replyIsAnswer) {
       entry.item.reply = { id: randomUUID(), text: typed, at: Date.now(), state: 'sent', reader: { kind: 'asker', name: entry.item.source.agent }, deliveredAt: Date.now() };
-      const picks = answer.picks.filter(Boolean);
-      if (picks.length) entry.item.reply.picks = picks;
+      if (answer.picks.some(Boolean)) entry.item.reply.picks = [...answer.picks];
     }
     entry.item.readyAgain = undefined;
     entry.item.state = 'sent';
@@ -2003,13 +2012,18 @@ function refOf(item: NotifyItem): string {
 
 /** The line a reader receives: `reply: Q-20 → "…" (picked: Yes · One train) (by you)`. */
 function replyLine(item: NotifyItem, reply: NotifyReply): string {
-  const picked = reply.picks?.length ? ` (picked: ${reply.picks.join(' · ')})` : '';
+  const picked = reply.picks?.length ? ` (picked: ${picksText(reply.picks)})` : '';
   return `reply: ${askerRef(item)} → "${reply.text}"${picked}${idTag(item)} (by you)`;
 }
 
 /** What a reply recorded as the answer reads as: its picks, then the person's words. */
 function replySummary(reply: NotifyReply): string {
-  return reply.picks?.length ? `${reply.picks.join(' · ')} — "${reply.text}"` : reply.text;
+  return reply.picks?.length ? `${picksText(reply.picks)} — "${reply.text}"` : reply.text;
+}
+
+/** Picks in question order; one left unpicked reads "—", so each pick stays beside its own question. */
+function picksText(picks: readonly string[]): string {
+  return picks.map(pick => pick || '—').join(' · ');
 }
 
 /** What a reader with an open call does with a reply. */
