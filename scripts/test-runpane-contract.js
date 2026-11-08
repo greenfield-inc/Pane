@@ -459,6 +459,8 @@ function runCliOnce(runtime, args, paneDir, timeoutMs = 20_000, extraEnv = {}, i
     PANE_DIR: paneDir,
     PYTHONDONTWRITEBYTECODE: '1',
     PYTHONPATH: pythonSource,
+    // The suite reads output as UTF-8; a Windows runner's console code page would turn ` · ` into `�`.
+    PYTHONIOENCODING: 'utf-8',
     RUNPANE_TELEMETRY_DISABLED: '1',
   };
   delete env.PANE_PANEL_ID;
