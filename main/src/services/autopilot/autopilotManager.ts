@@ -274,16 +274,14 @@ export class AutopilotManager extends EventEmitter {
         context,
         choices: [{ label: question.on, recommended: true }, { label: question.off }],
       });
-      if ('answer' in result && result.answer === question.on) await this.setSentinel(true).catch(error => this.tellCouldNotStart(error));
+      if ('answer' in result && result.answer === question.on) await this.setSentinel(true).catch((error: Error) => this.tellCouldNotStart(error.message, error instanceof PaneError ? error.next : undefined));
     } catch (error) {
       this.log(`could not ask about Sentinel (${question.title}): ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   /** The person said yes from their phone, and Start failed: they hear why, where they answered. */
-  private async tellCouldNotStart(error: unknown): Promise<void> {
-    const message = error instanceof Error ? error.message : String(error);
-    const next = error instanceof PaneError ? error.next : undefined;
+  private async tellCouldNotStart(message: string, next: string | undefined): Promise<void> {
     this.log(`could not turn Sentinel back on: ${message}`);
     await this.ports.notify.ask({ ui: 'info', title: 'Sentinel did not start', context: [message, next].filter(Boolean).join(' ') })
       .catch(() => { /* Logged above; Autopilot's view shows Start. */ });
