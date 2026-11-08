@@ -933,12 +933,6 @@ export class NotifyQueue extends EventEmitter {
     this.changed();
   }
 
-  /**
-   * One saved machine's shared state (null: no longer saved, so its cards go). `online: false`
-   * keeps its questions showing but unanswerable. Each change plays out here as it does for this
-   * machine's own questions: a chime, an update on the strip, a "Sent to" or "Answered on" hold,
-   * an expiry.
-   */
   /** A saved machine this screen will read; until it does, its cards count as not read yet. */
   expectRemote(machineId: string): void {
     if (!this.remotes.has(machineId)) this.unreadMachines.add(machineId);
@@ -950,6 +944,12 @@ export class NotifyQueue extends EventEmitter {
     return false;
   }
 
+  /**
+   * One saved machine's shared state (null: no longer saved, so its cards go). `online: false`
+   * keeps its questions showing but unanswerable. Each change plays out here as it does for this
+   * machine's own questions: a chime, an update on the strip, a "Sent to" or "Answered on" hold,
+   * an expiry.
+   */
   setRemote(machineId: string, next: NotifyRemoteUpdate | null): void {
     const previous = this.remotes.get(machineId) ?? null;
     // A saved machine that is this computer (the same running Pane): its cards already show once.
