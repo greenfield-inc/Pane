@@ -3,6 +3,9 @@ import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions, type 
 export const APP_MENU_ACTION_CHANNEL = 'app:menu-action';
 export type AppMenuAction = 'open-about' | 'open-settings';
 
+/** View › Actual Size. Kept off every default in the shortcut catalog (keyboardShortcutCatalog.test.ts). */
+export const RESET_ZOOM_ACCELERATOR = 'CmdOrCtrl+Shift+0';
+
 const DOCS_URL = 'https://runpane.com/docs';
 const ISSUES_URL = 'https://github.com/dcouple/Pane/issues';
 
@@ -45,7 +48,8 @@ export function installApplicationMenu(options: {
       label: 'View',
       submenu: [
         ...developerItems,
-        { role: 'resetZoom' },
+        // ⌘0 is Focus Sidebar in Pane's VS Code keymap (D-236), so Actual Size moves to ⌘⇧0.
+        { role: 'resetZoom', accelerator: RESET_ZOOM_ACCELERATOR },
         { role: 'zoomIn' },
         { role: 'zoomOut' },
         { type: 'separator' },

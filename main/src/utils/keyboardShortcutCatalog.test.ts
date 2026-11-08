@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AGENT_LAUNCH_PRESETS } from '../../../shared/constants/agentLaunchPresets';
 import {
+  defaultChordFor,
   getCatalogEntry,
   KEYBOARD_SHORTCUT_CATALOG,
   scopesOverlap,
@@ -36,6 +37,16 @@ describe('keyboard shortcut catalog', () => {
           expect(scopesOverlap(a.scope, b.scope), `${a.id}/${b.id}`).toBe(false);
         }
       }
+    }
+  });
+
+  it('keeps the menu\'s Actual Size key off every default, and ⌘0 for Focus Sidebar', async () => {
+    const { RESET_ZOOM_ACCELERATOR } = await import('../services/nativeMenus');
+    expect(RESET_ZOOM_ACCELERATOR).toBe('CmdOrCtrl+Shift+0');
+    for (const platform of ['mac', 'other'] as const) {
+      const defaults = KEYBOARD_SHORTCUT_CATALOG.map(entry => defaultChordFor(entry, platform));
+      expect(defaults).not.toContain('mod+shift+0');
+      expect(defaults).toContain('mod+0');
     }
   });
 
