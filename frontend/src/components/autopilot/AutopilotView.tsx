@@ -6,6 +6,7 @@ import { markAutopilotOpened, moveAutopilotStack, runAutopilot, shownStackEntry,
 import { countsAsWaiting, useNotifyStore } from '../../stores/notifyStore';
 import { useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { ApprovalColumn } from '../approvals/ApprovalColumn';
+import { ApprovalOrigin } from '../approvals/ApprovalOrigin';
 import { useActiveMachineStore } from '../../stores/activeMachineStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import type { ChatRendering } from '../chatTab/chatRendering';
@@ -322,6 +323,7 @@ function StackWithApproval() {
             groupLabel="Waiting on you"
             closeLabel="Back to the Stack"
             onClose={() => useApprovalColumnStore.getState().close('autopilot')}
+            renderOrigin={(item) => <ApprovalOrigin item={item} />}
           />
         </div>
       )}

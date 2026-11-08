@@ -1,9 +1,7 @@
-import { Inbox, MessageSquare } from 'lucide-react';
-import type { NotifyItem } from '../../../../shared/types/notify';
-import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
+import { Inbox } from 'lucide-react';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
-import { openOnMachine } from '../../utils/machineRowActions';
 import { ApprovalColumn } from './ApprovalColumn';
+import { ApprovalOrigin } from './ApprovalOrigin';
 import { firstToOpen, readyCount } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
 
@@ -74,23 +72,7 @@ export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLab
       closeLabel={closeLabel}
       onClose={onClose}
       inChat={inChat}
-      renderOrigin={(item) => <AskedIn item={item} />}
+      renderOrigin={(item) => <ApprovalOrigin item={item} />}
     />
-  );
-}
-
-/** The tab where it was asked, when that isn't the chat you're in: one click away. */
-function AskedIn({ item }: { item: NotifyItem }) {
-  const paneId = item.source.paneId;
-  return (
-    <div className="flex flex-col items-start gap-2 p-6 text-[13.5px] text-text-secondary" data-testid="approval-origin">
-      <p>{item.source.name} asked this in its own tab.</p>
-      {paneId && (
-        <button type="button" onClick={() => void openOnMachine(item.machineId ?? LOCAL_MACHINE_ID, { kind: 'pane', id: paneId, name: item.source.name })}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-surface-tertiary px-3 font-medium text-text-primary hover:bg-surface-hover">
-          <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" /> Open {item.source.name}
-        </button>
-      )}
-    </div>
   );
 }

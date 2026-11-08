@@ -216,7 +216,9 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   Session's orchestrator chat docks light cards above its composer: title,
   one line, a one-question approval's options as buttons, and **Open on the
   right**. In **Autopilot**, the column covers the Stack (✕ "Back to the
-  Stack"), and Autopilot's decision cards gain **Open**.
+  Stack"), and Autopilot's decision cards gain **Open**. In a Session and in
+  Autopilot, the chat tab is live too: an orchestrator's item shows its
+  Session, and a worker's or a Pane's item shows the tab that asked.
 - **The strip**: while Pane isn't in front, a borderless card at the bottom
   center of the screen with the pointer. It never takes keyboard focus when it
   appears; click a choice to answer, or click its text field to type. After
