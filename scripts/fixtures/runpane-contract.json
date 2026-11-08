@@ -1474,6 +1474,40 @@
       "--choices=[{\"label\":\"A\"}]",
       "--links=[{\"label\":\"Notes\",\"url\":\"https://example.com\"}]",
       "--json"
+    ],
+    [
+      "notify",
+      "--took",
+      "Q-20",
+      "answer",
+      "--json"
+    ],
+    [
+      "notify",
+      "--took=n-1",
+      "question",
+      "--status",
+      "Checking the logs",
+      "--json"
+    ],
+    [
+      "notify",
+      "--took",
+      "Q-20",
+      "--took-as",
+      "answer"
+    ],
+    [
+      "notify",
+      "--update",
+      "Q-20",
+      "--asked",
+      "Can it be undone?",
+      "--what-changed",
+      "- Added: it can be undone",
+      "--questions",
+      "[{\"title\":\"A\",\"choices\":[{\"label\":\"x\"}]},{\"title\":\"B\",\"choices\":[{\"label\":\"y\"}]}]",
+      "--json"
     ]
   ],
   "help": {

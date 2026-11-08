@@ -4,6 +4,7 @@ import { installElectronApiMock } from './electronApiMock';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import type { PanelActivationRequest, PanelLayoutNode, SessionPanelLayout, ToolPanel } from '../shared/types/panels';
 import type { TailnetMachine, TailnetMachineList } from '../shared/types/workspaceAccess';
+import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 
 type UiAssociationFixture = {
   paneId: string;
@@ -74,6 +75,9 @@ type SessionFixtureOptions = {
   initialConfig?: JsonObject;
   rememberPaneLayouts?: boolean;
   tailnetMachines?: TailnetMachineList;
+  notifySnapshot?: NotifySnapshot;
+  initialPanels?: JsonObject[];
+  initialLayout?: JsonObject;
 };
 
 function sessionFixture(
@@ -164,6 +168,9 @@ async function installSessionsFixture(
     initialSessions: paneSessions,
     rememberPaneLayouts: fixtureOptions.rememberPaneLayouts,
     tailnetMachines: fixtureOptions.tailnetMachines,
+    notifySnapshot: fixtureOptions.notifySnapshot,
+    initialPanels: fixtureOptions.initialPanels,
+    initialLayout: fixtureOptions.initialLayout,
   });
   await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[] }) => {
     type SessionRecord = UiSessionFixture;
@@ -3623,3 +3630,129 @@ for (const scheme of ['light', 'dark'] as const) {
       .toEqual([{ sessionId: 'alpha', panelIds: ['orch', 'a', 'b', 'c'] }]);
   });
 }
+
+/** Q-20 and one more, waiting from the Plan demo Session (the approval card, P4). */
+function sessionApprovalsSnapshot(): NotifySnapshot {
+  const now = Date.now();
+  const session = { id: 'plans', name: 'Plan demo', paneId: '__orchestration_session_plansterminal__' };
+  const q20: NotifyItem = {
+    id: 'q20', ui: 'options', title: 'Q-20: Turn on the new-agent switch for dev QA, and merge as one train?',
+    context: 'One UPDATE in my status file keeps the person\'s test on the new agent.',
+    questions: [
+      { title: 'May I turn the new-agent switch on for the dev QA workspace?', choices: [{ label: 'Yes, turn it on', detail: 'One UPDATE on dev QA only.' }, { label: 'Not yet' }] },
+      { title: 'Merge #2470–#2480 as one train, or gate each lower PR too?', choices: [{ label: 'One train', recommended: true }, { label: 'Gate each lower PR' }] },
+    ],
+    source: { paneId: 'pane-worker', panelId: 'panel-worker', name: 'doozy-overhaul', agent: 'Claude', session },
+    state: 'waiting', createdAt: now - 4 * 60_000, originKind: 'worker',
+  };
+  const realUse: NotifyItem = {
+    id: 'real-use', ui: 'options', title: 'Real use: how do you want to use the new build before everyone switches?',
+    choices: [{ label: 'Switch for my workspace', recommended: true }, { label: 'Copy to dev' }],
+    source: { paneId: session.paneId, panelId: '__orchestration_panel_plans_claude', name: 'Plan demo', agent: 'Claude', session: { ...session, orchestrator: true } },
+    state: 'waiting', createdAt: now - 17 * 60_000, originKind: 'orchestrator',
+  };
+  return {
+    settings: { ...DEFAULT_NOTIFY_SETTINGS }, items: [realUse, q20], queue: ['real-use', 'q20'], hidden: [], strip: null, stripSurface: null,
+    pausedUntil: null, shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [],
+  };
+}
+
+test('an approval covers the Session\'s right split exactly, and ✕ shows it again unchanged; with no split it opens one and ✕ collapses it', async ({ page }, testInfo) => {
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: sessionApprovalsSnapshot() });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').click();
+  await expect(page.getByTestId('session-workspace-tabs').getByRole('tab').first()).toBeVisible();
+
+  // J3: no split open. The approval opens a split of its own, and ✕ collapses it.
+  const stage = page.locator('.panel-group-tab-bar');
+  await page.getByTestId('session-approvals-button').click();
+  const split = page.getByTestId('session-approval-split');
+  await expect(split).toBeVisible();
+  await expect(split.getByTestId('approval-pager')).toHaveText('1 of 2');
+  await expect(split.getByTestId('approval-column-close')).toHaveText('Close split');
+  const created = testInfo.outputPath('session-approval-created-split.png');
+  await page.screenshot({ path: created });
+  await testInfo.attach('session-approval-created-split.png', { path: created, contentType: 'image/png' });
+  // Paging keeps the same split.
+  await split.getByRole('button', { name: 'Next approval' }).click();
+  await expect(split.getByTestId('approval-title')).toContainText('Q-20');
+  await expect(split.getByTestId('approval-question')).toHaveCount(2);
+  await split.getByTestId('approval-column-close').click();
+  await expect(split).toHaveCount(0);
+  await expect(stage).toHaveCount(0);
+
+  // J1: a right split is open. The approval lays over it exactly; nothing under it moves.
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock adds these controls before the app loads.
+    const mock = (window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void; emitPanelActivation: (request: PanelActivationRequest) => void } }).__paneTestElectronMock;
+    const now = new Date(0).toISOString();
+    const sessionId = '__orchestration_session_plansterminal__';
+    mock.emitPanelCreated({ id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' } });
+    mock.emitPanelActivation({ sessionId, panelId: 'plan-page', placement: 'split' });
+  });
+  await expect(stage).toHaveCount(2);
+  const right = page.locator('[data-panel-group-id]').nth(1);
+  const left = page.locator('[data-panel-group-id]').nth(0);
+  const [rightBefore, leftBefore] = [await layoutBox(right), await layoutBox(left)];
+  await page.getByTestId('session-approvals-button').click();
+  const overlay = page.getByTestId('session-approval-overlay');
+  await expect(overlay).toBeVisible();
+  await expect(overlay.getByTestId('approval-column-close')).toHaveText('Back to plan.html');
+  const covered = await layoutBox(overlay);
+  expect(covered).toEqual(rightBefore);
+  // The split underneath stays mounted at its size, and the chat beside it doesn't move.
+  expect(await layoutBox(right)).toEqual(rightBefore);
+  expect(await layoutBox(left)).toEqual(leftBefore);
+  const over = testInfo.outputPath('session-approval-over-split.png');
+  await page.screenshot({ path: over });
+  await testInfo.attach('session-approval-over-split.png', { path: over, contentType: 'image/png' });
+  await overlay.getByTestId('approval-column-close').click();
+  await expect(overlay).toHaveCount(0);
+  await expect(stage.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
+  expect(await layoutBox(right)).toEqual(rightBefore);
+});
+
+test('D-289: a worker\'s approval shows its asking tab live in the Session column\'s origin tab', async ({ page }) => {
+  const now = new Date(0).toISOString();
+  const workerTab = { id: 'panel-worker', sessionId: 'pane-worker', type: 'logs', title: 'doozy-overhaul logs', state: { isActive: true, hasBeenViewed: true }, metadata: { createdAt: now, lastActiveAt: now, position: 0 } };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now)], [paneFixture('pane-worker', 'doozy-overhaul')], { notifySnapshot: sessionApprovalsSnapshot(), initialPanels: [workerTab] });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').click();
+  await page.getByTestId('session-approvals-button').click();
+  const column = page.getByTestId('approval-column');
+  await column.getByRole('button', { name: 'Next approval' }).click();
+  await expect(column.getByTestId('approval-title')).toContainText('Q-20');
+  await column.getByTestId('approval-tab').filter({ hasText: "doozy-overhaul's tab" }).click();
+  const origin = column.getByTestId('approval-origin');
+  await expect(origin).toContainText('doozy-overhaul');
+  await expect(origin.getByTestId('approval-origin-tab')).toBeVisible();
+});
+
+test('F-8: opened cold from the sidebar count, the approval waits for the saved split and lays over it', async ({ page }) => {
+  const sessionId = '__orchestration_session_plansterminal__';
+  const now = new Date(0).toISOString();
+  // A saved layout from before the restart: the conversation, and plan.html split to its right.
+  const planPage = { id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+    { type: 'group', id: 'g1', panelIds: ['__orchestration_panel_plans_claude'], activePanelId: '__orchestration_panel_plans_claude' },
+    { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
+  ] }, focusedGroupId: 'g1' };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now)], [], { notifySnapshot: sessionApprovalsSnapshot(), rememberPaneLayouts: true, initialPanels: [planPage], initialLayout: savedLayout });
+  // The Session's tools load slowly, as on a cold start, so the approval is open before its layout is.
+  await page.addInitScript(() => {
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = async (channel, ...args) => {
+      if (channel === 'panels:checkInitialized' || channel === 'panels:get-layout') await new Promise(resolve => setTimeout(resolve, 400));
+      return invoke(channel, ...args);
+    };
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').hover();
+  await page.getByTestId('session-approvals-count-button').click();
+  await expect(page.locator('.panel-group-tab-bar')).toHaveCount(2);
+  await expect(page.getByTestId('session-approval-overlay')).toBeVisible();
+  await expect(page.getByTestId('session-approval-split')).toHaveCount(0);
+});

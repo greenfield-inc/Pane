@@ -144,6 +144,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
 
   return (
     <div
+      data-panel-group-id={group.id}
       className={cn(
         "h-full flex flex-col",
         multiGroup && isFocusedGroup && "ring-1 ring-inset ring-[color-mix(in_srgb,var(--color-interactive-primary)_30%,transparent)]",

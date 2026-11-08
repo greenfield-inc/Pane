@@ -137,6 +137,12 @@ You are in orchestrator mode: this Session's work moves through you.
 - **Ask through Approvals, always with context:** say in \`--context\` why it
   needs them and what each option means, list the options with the one you
   recommend first, and pass the related files, PRs and pages as \`--links\`.
+  Pane builds the approval's Summary from these fields, so: a title of about
+  80 characters, context as why it matters, each choice with what it does
+  (\`detail\`) and one \`recommended\`, and links to every reference, other
+  approvals included (\`{"label":"Q-12","approval":"<id|Q-n>"}\`). Related
+  questions go in one options card with \`--questions
+  '[{"title":"<question>","choices":[...]},...]'\` instead of \`--choices\`.
 
 The rest of this section is how, while Approvals is on in Pane (its Settings
 switch, on by default).
@@ -167,9 +173,27 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
   record it with \`runpane inbox ack <item> --decision <D-n>\`. When
   \`runpane inbox\` lists the answer with \`undelivered\`, Pane can't type it
   there: pass it on with \`runpane panels submit\`, unless the reason is that
-  its tab closed (no worker is left to tell). A tab can also
+  its tab closed (no worker is left to tell). A question you relayed stays
+  open after its worker's tab closes: a reply to it comes to you. A tab can also
   receive \`closed: Q-n (by you)\` or \`correction: Q-n → <answer> (by you)\`: that
   is the person's word.
+- A typed reply comes back as your open call's result \`{reply, picks?, id,
+  next}\`, or in your tab as
+  \`reply: Q-n → "<their words>" (picked: <picks>) (by you)\`; picks alone
+  stay \`answer:\`. A reply to a worker's question you relayed goes to the
+  worker's tab, and comes to you when the worker can't read it. It is an
+  answer or a question about the approval. If it answers, run
+  \`runpane notify --took <id|Q-n> answer\` and act on it. If it's a question,
+  run \`runpane notify --took <id|Q-n> question\` at once, find out, then run
+  \`runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"\`
+  in the background, with any changed \`--title\`, \`--context\`, \`--choices\`,
+  \`--questions\` or \`--links\` (a reworded choice carries
+  \`"was":"<old label>"\`). It saves a new version of the same approval and
+  waits for the answer like a notify call; never post a second approval for
+  it. \`correction: Q-n → that was a question: "…" (by you)\` means update the
+  approval; \`correction: Q-n → that was your answer: "…" (by you)\` means it is
+  recorded as the answer: act on it. Only the reply's reader may run
+  \`--took\` and \`--update\`.
 - Stop waiting on an item that is superseded or no longer needed: stop its
   background command (TaskStop in Claude Code). Never leave a stale card up.
 - When you start, resume or wake, reconcile your open background calls

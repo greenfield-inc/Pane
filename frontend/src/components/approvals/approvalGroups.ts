@@ -1,16 +1,21 @@
 import type { NotifyConnected, NotifyItem, NotifySession } from '../../../../shared/types/notify';
+import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
 import { decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { countsAsWaiting } from '../../stores/notifyStore';
 
 export type ApprovalsTab = 'waiting' | 'answered';
 
-/** How the queue column lists a tab: flat with the newest on top, or in groups. */
-export type ApprovalsSort = 'recent' | 'session' | 'project';
+/**
+ * How the queue column lists a tab: flat with the newest on top, or in groups. `sidebar` groups by
+ * Session in the order the left sidebar shows them.
+ */
+export type ApprovalsSort = 'recent' | 'session' | 'project' | 'sidebar';
 
 export const APPROVALS_SORTS: ReadonlyArray<{ id: ApprovalsSort; label: string }> = [
   { id: 'recent', label: 'Most recent' },
   { id: 'session', label: 'By Session' },
   { id: 'project', label: 'By project' },
+  { id: 'sidebar', label: 'Sidebar order' },
 ];
 
 const SORT_KEY = 'pane-approvals-sort';
@@ -151,17 +156,42 @@ function intoGroups(list: readonly NotifyItem[], groupOf: (item: NotifyItem) => 
 }
 
 /**
+ * The one-machine sidebar's Sessions as Sidebar order keys, top first: Pinned in their saved order,
+ * then the rest in theirs (`sessions` is the host's saved order). Archived Sessions aren't shown.
+ */
+export function sidebarSessionKeys(sessions: ReadonlyArray<Pick<OrchestrationSessionRecord, 'id' | 'archived' | 'isPinned'>>, machineId: string): string[] {
+  const shown = sessions.filter((session) => session.archived !== true);
+  return [...shown.filter((session) => session.isPinned === true), ...shown.filter((session) => session.isPinned !== true)].map((session) => `${machineId}:${session.id}`);
+}
+
+/**
+ * Puts Session groups in the sidebar's order (`sidebarOrder`: `<machine id>:<Session id>` keys, top
+ * first). Groups the sidebar doesn't show (another machine's Session, an archived one, Autopilot,
+ * items in no Session) follow, in the newest-first order they came in.
+ */
+function inSidebarOrder(groups: ApprovalGroup[], sidebarOrder: readonly string[]): ApprovalGroup[] {
+  const place = new Map(sidebarOrder.map((key, index) => [key, index]));
+  const shown = groups.filter((group) => place.has(group.key)).sort((a, b) => (place.get(a.key) ?? 0) - (place.get(b.key) ?? 0));
+  return [...shown, ...groups.filter((group) => !place.has(group.key))];
+}
+
+/**
  * The Approvals queue for one tab: newest first, by when it was asked on Waiting and when it was
  * answered on Answered. Most recent lists them flat; By Session and By project group them, with each
- * group placed by its newest item. Stale and offline machines stay apart from the sort.
+ * group placed by its newest item; Sidebar order groups by Session in `sidebarOrder` (the keys of
+ * the Sessions the sidebar shows, top first; see `inSidebarOrder`). Stale and offline machines stay
+ * apart from the sort.
  */
-export function groupApprovals(items: NotifyItem[], tab: ApprovalsTab, sort: ApprovalsSort): ApprovalQueue {
+export function groupApprovals(items: NotifyItem[], tab: ApprovalsTab, sort: ApprovalsSort, sidebarOrder: readonly string[] = []): ApprovalQueue {
   const answeredItems = items.filter(isAnswered);
   const { live, stale, offline } = splitWaiting(items);
   const listedAt = tab === 'waiting' ? (item: NotifyItem) => item.createdAt : resolved;
   // By id on a tie, so items of the same millisecond don't swap as snapshots arrive.
   const newestFirst = [...(tab === 'waiting' ? live : answeredItems)].sort((a, b) => listedAt(b) - listedAt(a) || a.id.localeCompare(b.id));
-  const groups = sort === 'recent' ? [] : intoGroups(newestFirst, sort === 'session' ? sessionGroup : projectGroup);
+  const groups = sort === 'recent' ? []
+    : sort === 'project' ? intoGroups(newestFirst, projectGroup)
+      : sort === 'sidebar' ? inSidebarOrder(intoGroups(newestFirst, sessionGroup), sidebarOrder)
+        : intoGroups(newestFirst, sessionGroup);
   return {
     // An answer in its Undo hold still shows, but no longer waits on you.
     waiting: items.filter(countsAsWaiting).length,
@@ -171,6 +201,21 @@ export function groupApprovals(items: NotifyItem[], tab: ApprovalsTab, sort: App
     stale: tab === 'waiting' ? stale : [],
     offline: tab === 'waiting' ? offline : [],
   };
+}
+
+/**
+ * The ids of the items a queue lists, top to bottom: the order the pager steps through, grouped as
+ * the list shows them under every sort. `withStale` adds the Stale group's items after them, in
+ * their own oldest-first order, for a pager that also steps into it.
+ */
+export function approvalIdsInListOrder(queue: Pick<ApprovalQueue, 'list' | 'stale'>, { withStale = false }: { withStale?: boolean } = {}): string[] {
+  const ids = queue.list.map((item) => item.id);
+  return withStale ? [...ids, ...queue.stale.map((item) => item.id)] : ids;
+}
+
+/** A group header's count: how many of its items still wait on you, or on Answered how many it lists. */
+export function groupCountText(group: ApprovalGroup, tab: ApprovalsTab): string {
+  return tab === 'waiting' ? `${group.items.filter(countsAsWaiting).length} waiting` : `${group.items.length} answered`;
 }
 
 /** What an item is connected to: its Session, else its Pane, Autopilot, or (no link at all) a name. */

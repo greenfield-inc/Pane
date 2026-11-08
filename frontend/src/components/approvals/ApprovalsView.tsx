@@ -1,10 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLink, FileText, Folder, GitBranch, Globe, Inbox, Laptop, MessageSquare, MessagesSquare, Navigation, ShieldAlert, WifiOff } from 'lucide-react';
+import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLink, Folder, GitBranch, Inbox, MessageSquare, MessagesSquare, Navigation, ShieldAlert, WifiOff } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
-import { receiptLine } from '../../../../shared/approvalReceipts';
 import { cn } from '../../utils/cn';
-import { runNotify, useNotifyStore } from '../../stores/notifyStore';
+import { useNotifyStore } from '../../stores/notifyStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
@@ -14,19 +13,15 @@ import { showActionError } from '../../stores/errorStore';
 import { openOnMachine } from '../../utils/machineRowActions';
 import { MachineMark } from '../machines/MachineMark';
 import { Dropdown } from '../ui/Dropdown';
-import { NotifyCard } from '../notify/NotifyCard';
 import { relativeAge, withMachineLabels } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import { SessionBeside } from '../PaneChatView';
-import { APPROVALS_SORTS, approvalRowLines, besideOf, connectedOf, groupApprovals, offlineRowText, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
+import { ApprovalColumn, ApprovalChip } from './ApprovalColumn';
+import { cardChip } from './approvalCard';
+import { APPROVALS_SORTS, approvalIdsInListOrder, approvalRowLines, besideOf, connectedOf, groupApprovals, groupCountText, offlineRowText, readApprovalsSort, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
 import { MachineContext } from './MachineContext';
 import { toggleApprovals } from './approvalsNavigation';
-
-/**
- * Links open as tabs through this computer's Pane, so only for this computer's items while the
- * app is on this computer; another machine's file lives there.
- */
-const linksOpenHere = (item: NotifyItem, activeMachineId: string) => (item.machineId ?? LOCAL_MACHINE_ID) === LOCAL_MACHINE_ID && activeMachineId === LOCAL_MACHINE_ID;
+import { useSidebarSessionOrder } from './useSidebarSessionOrder';
 
 function ItemIcon({ item }: { item: NotifyItem }) {
   const className = 'mt-0.5 h-4 w-4 shrink-0';
@@ -45,10 +40,10 @@ function useMachineMark() {
   };
 }
 
-function GroupHeader({ group, mark }: { group: ApprovalGroup; mark: ReactNode }) {
+function GroupHeader({ group, mark, count }: { group: ApprovalGroup; mark: ReactNode; count: string }) {
   const Icon = group.autopilot ? Navigation : group.project ? Folder : group.session ? MessageSquare : GitBranch;
   return (
-    <div className={cn('flex items-center gap-2 px-4 pb-1.5 pt-4 text-[12.5px] font-medium', group.autopilot ? 'text-autopilot-on-tint' : 'text-text-secondary')} data-testid="approvals-group">
+    <div className={cn('flex items-center gap-2 border-b border-border-secondary bg-surface-secondary px-3 py-2 text-[12.5px] font-semibold', group.autopilot ? 'text-autopilot-on-tint' : 'text-text-primary')} data-testid="approvals-group">
       <Icon className={cn('h-3.5 w-3.5 shrink-0', group.autopilot ? 'text-autopilot' : 'text-text-tertiary')} aria-hidden="true" />
       <span className="min-w-0 truncate">{group.label}</span>
       {group.machine && (
@@ -56,7 +51,7 @@ function GroupHeader({ group, mark }: { group: ApprovalGroup; mark: ReactNode })
           {mark}{group.machine}
         </span>
       )}
-      <span className="ml-auto shrink-0 tabular-nums text-text-tertiary">{group.items.length}</span>
+      <span className="ml-auto shrink-0 rounded-full bg-surface-tertiary px-2 py-px text-[11.5px] font-medium tabular-nums text-text-secondary" data-testid="approvals-group-count">{count}</span>
     </div>
   );
 }
@@ -64,6 +59,7 @@ function GroupHeader({ group, mark }: { group: ApprovalGroup; mark: ReactNode })
 function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; now: number; selected?: boolean; onSelect: (fromKeyboard: boolean) => void }) {
   const done = item.state === 'answered' || item.state === 'expired' || item.state === 'info';
   const { acted, origin } = approvalRowLines(item);
+  const chip = cardChip(item);
   return (
     <button
       type="button"
@@ -87,106 +83,11 @@ function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; 
           {item.unreachable ? ` · ${item.machine ?? 'its machine'} can't be reached` : ''}
         </span>
       </span>
-      <span className="shrink-0 text-[12px] tabular-nums text-text-tertiary">{relativeAge(item.resolvedAt ?? item.createdAt, now)}</span>
+      <span className="flex shrink-0 flex-col items-end gap-1">
+        <span className="text-[12px] tabular-nums text-text-tertiary">{relativeAge(item.resolvedAt ?? item.createdAt, now)}</span>
+        {chip && chip.tone !== 'success' && <ApprovalChip chip={chip} testId="approvals-row-chip" />}
+      </span>
     </button>
-  );
-}
-
-function RelatedLinks({ item, paneId }: { item: NotifyItem; paneId?: string }) {
-  const activeMachineId = useAllMachinesStore((state) => state.entries.find((entry) => entry.active)?.id ?? LOCAL_MACHINE_ID);
-  const links = item.links ?? [];
-  if (links.length === 0) return null;
-  const here = linksOpenHere(item, activeMachineId);
-  return (
-    <div className="px-3.5 pb-3" data-testid="approvals-related">
-      <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Related</div>
-      <div className="flex flex-wrap gap-1.5">
-        {links.map((link, index) => {
-          const isUrl = 'url' in link;
-          const Icon = isUrl ? Globe : FileText;
-          const disabled = !here && !isUrl;
-          return (
-            <button
-              key={`${link.label}-${index}`}
-              type="button"
-              disabled={disabled}
-              title={disabled ? `On ${item.machine ?? 'the other machine'}` : isUrl ? link.url : link.path}
-              onClick={() => {
-                if (here) {
-                  window.electronAPI.notify.run({ type: 'open-link', id: item.id, index, paneId })
-                    .catch((error) => showActionError(`Could not open ${link.label}`, error));
-                }
-                else if (isUrl) void window.electronAPI.openExternal(link.url);
-              }}
-              className="inline-flex max-w-full items-center gap-1.5 rounded-lg bg-surface-tertiary px-2 py-1 text-[12.5px] text-text-primary hover:bg-surface-hover disabled:opacity-50"
-            >
-              <Icon className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
-              <span className="truncate">{link.label}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/** The Session (or Pane, or Autopilot) the item belongs to: its name and machine, opening it on click. A bare name takes no action. */
-function ConnectedRow({ item, onOpen }: { item: NotifyItem; onOpen: () => void }) {
-  const connected = connectedOf(item);
-  const Icon = connected.kind === 'session' ? MessageSquare : connected.kind === 'pane' ? GitBranch : connected.kind === 'autopilot' ? Navigation : Laptop;
-  const chip = 'inline-flex max-w-full items-center gap-1.5 rounded-lg bg-surface-tertiary px-2 py-1 text-[12.5px] text-text-primary';
-  const label = (
-    <>
-      <Icon className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
-      {/* Asked outside Pane: the header already names the asker, so the chip names its machine, as the picker does. */}
-      <span className="truncate">{connected.kind === 'machine' ? item.machine ?? 'This computer' : `${connected.name}${item.machine ? ` · ${item.machine}` : ''}`}</span>
-    </>
-  );
-  return (
-    <div className="px-3.5 pb-2 pt-2" data-testid="approvals-connected" data-connected={connected.kind}>
-      {connected.kind === 'machine'
-        ? <span className={chip}>{label}</span>
-        : <button type="button" onClick={onOpen} title={`Open ${connected.name}`} className={cn(chip, 'hover:bg-surface-hover')}>{label}</button>}
-    </div>
-  );
-}
-
-function SelectedItem({ item, beside, mark, onOpenInPane, onOpenConnected }: { item: NotifyItem; beside: Beside; mark: ReactNode; onOpenInPane: () => void; onOpenConnected: () => void }) {
-  const linkPane = beside.kind === 'session' || beside.kind === 'pane' ? beside.paneId : undefined;
-  const related = (
-    <>
-      <ConnectedRow item={item} onOpen={onOpenConnected} />
-      <RelatedLinks item={item} paneId={linkPane} />
-    </>
-  );
-  if (item.relay) {
-    // A mirror from an older machine: it shows, but takes no answer here.
-    return (
-      <div className="rounded-[18px] bg-surface-primary shadow-card ring-1 ring-border-secondary" data-testid="approvals-read-only">
-        <div className="px-3.5 pt-3 text-[12px] font-medium text-text-secondary">{item.relay.worker}{item.machine ? ` · ${item.machine}` : ''}</div>
-        <div className="px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-primary">{item.relay.question}</div>
-        <div className="px-3.5 pt-0.5 text-[13px] text-text-tertiary">{relayReadOnlyLine(item)}</div>
-        {related}
-      </div>
-    );
-  }
-  const view = item.state === 'waiting' ? 'question' : item.state === 'sent' ? 'sent' : item.state === 'expired' ? 'expired' : item.state === 'answered' ? 'answered' : null;
-  if (!view) return null;
-  return (
-    <div className="[&_[data-notify-view=sent]]:w-full [&_[data-notify-view=sent]]:min-w-0">
-      <NotifyCard
-        item={item}
-        view={view}
-        form="inbox"
-        menuPlacement="below"
-        onCommand={runNotify}
-        machineMark={mark}
-        related={related}
-        onOpenInPane={onOpenInPane}
-      />
-      {/* The Undo line has no room for it, and the item is still connected to its Session. */}
-      {view === 'sent' && related}
-    </div>
   );
 }
 
@@ -283,7 +184,8 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const machines = useAllMachinesStore((state) => state.entries);
   const items = useMemo(() => withMachineLabels(snapshot?.items ?? [], machines), [snapshot, machines]);
   const [sort, setSort] = useState<ApprovalsSort>(() => readApprovalsSort());
-  const { waiting, answered, list, groups, stale, offline } = useMemo(() => groupApprovals(items, tab, sort), [items, tab, sort]);
+  const sidebarOrder = useSidebarSessionOrder(sort === 'sidebar');
+  const { waiting, answered, list, groups, stale, offline } = useMemo(() => groupApprovals(items, tab, sort, sidebarOrder), [items, tab, sort, sidebarOrder]);
   const [staleExpanded, setStaleExpanded] = useState(false);
   // An item opened from elsewhere (a link, the strip) shows even when its group is collapsed.
   const staleOpen = staleExpanded || stale.some((item) => item.id === selectedId);
@@ -423,20 +325,23 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
     </button>
   );
 
+  // The list stays compact rows; the selected approval opens in the column beside it (P4).
   const renderItem = (item: NotifyItem) => (
-    item.id === selected?.id && item.state !== 'info'
-      ? (
-        <div key={item.id} tabIndex={-1} className="rounded-[20px] px-1 pb-2 outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle" data-approval-selected data-testid="approvals-selected">
-          <SelectedItem
-            item={item}
-            beside={beside}
-            mark={machineMark(item.machineId, item.unreachable)}
-            onOpenInPane={() => openInPane(item, beside)}
-            onOpenConnected={() => openConnected(item)}
-          />
-        </div>
-      )
-      : <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} onSelect={(fromKeyboard) => { focusCard.current = fromKeyboard; selectApproval(item.id); }} />
+    <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} onSelect={(fromKeyboard) => { focusCard.current = fromKeyboard; selectApproval(item.id); }} />
+  );
+  // The pager follows the list as grouped (J14).
+  const order = approvalIdsInListOrder({ list, stale: staleOpen ? stale : [] });
+  const origin = (
+    <div className="absolute inset-0 flex flex-col" data-testid="approvals-origin">
+      <BesideHeader
+        beside={beside}
+        mark={selected ? machineMark(selected.machineId) : null}
+        onOpen={selected ? () => openInPane(selected, beside) : undefined}
+      />
+      {beside.kind === 'session' && <SessionBeside key={beside.sessionId} sessionId={beside.sessionId} />}
+      {beside.kind === 'pane' && (activePaneId === beside.paneId ? paneView : null)}
+      {beside.kind === 'machine' && selected && <MachineContext key={selected.id} item={selected} machine={beside.machine} connectedName={beside.connected.name} />}
+    </div>
   );
   const chooseSort = (next: ApprovalsSort) => {
     setSort(next);
@@ -455,7 +360,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
       <section
         aria-label="Approvals"
         // Stacked (a narrow window), the list takes the height when nothing shows beside it.
-        className={cn('flex min-h-0 flex-col border-b border-border-primary bg-bg-secondary min-[1100px]:max-h-none min-[1100px]:w-[400px] min-[1100px]:flex-none min-[1100px]:shrink-0 min-[1100px]:border-b-0 min-[1100px]:border-r', beside.kind === 'none' ? 'flex-1' : 'max-h-[45%] shrink-0')}
+        className={cn('flex min-h-0 flex-col border-b border-border-primary bg-bg-secondary min-[1100px]:max-h-none min-[1100px]:w-[400px] min-[1100px]:flex-none min-[1100px]:shrink-0 min-[1100px]:border-b-0 min-[1100px]:border-r', !selected ? 'flex-1' : 'max-h-[45%] shrink-0')}
         data-testid="approvals-queue"
       >
         <header className="flex h-[50px] shrink-0 items-center gap-2.5 px-4">
@@ -470,14 +375,15 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             {importError.message} {importError.next}
           </p>
         )}
-        <div className="shrink-0 px-4 pb-1">
+        <div className="flex shrink-0 items-center gap-2 px-4 pb-1">
+          <span className="text-[12.5px] text-text-tertiary" aria-hidden="true">Group by</span>
           <Dropdown
             className="inline-block"
             trigger={
               <button
                 type="button"
-                aria-label={`Sort approvals: ${APPROVALS_SORTS.find((option) => option.id === sort)?.label}`}
-                className="inline-flex items-center gap-1 rounded text-[12.5px] text-text-tertiary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+                aria-label={`Group by: ${APPROVALS_SORTS.find((option) => option.id === sort)?.label}`}
+                className="inline-flex items-center gap-1 rounded text-[12.5px] font-medium text-text-secondary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
                 data-testid="approvals-sort"
               >
                 {APPROVALS_SORTS.find((option) => option.id === sort)?.label}
@@ -487,7 +393,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             items={APPROVALS_SORTS.map((option) => ({ id: option.id, label: option.label, onClick: () => chooseSort(option.id) }))}
             selectedId={sort}
             selectedMark="check"
-            menuLabel="Sort approvals"
+            menuLabel="Group by"
             position="bottom-left"
             width="sm"
           />
@@ -502,12 +408,16 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             </p>
           )}
           {groups.length > 0
-            ? groups.map((group) => (
-              <div key={group.key}>
-                <GroupHeader group={group} mark={machineMark(group.machineId)} />
-                {group.items.map(renderItem)}
+            ? (
+              <div className="flex flex-col gap-3 pt-1">
+                {groups.map((group) => (
+                  <div key={group.key} className="overflow-hidden rounded-xl border border-border-secondary bg-surface-primary" data-testid="approvals-group-box">
+                    <GroupHeader group={group} mark={machineMark(group.machineId)} count={groupCountText(group, tab)} />
+                    <div className="p-1">{group.items.map(renderItem)}</div>
+                  </div>
+                ))}
               </div>
-            ))
+            )
             : list.map(renderItem)}
           {offline.map((row) => <OfflineMachineRow key={row.machineId} row={row} />)}
           {stale.length > 0 && (
@@ -532,30 +442,22 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         </div>
       </section>
 
-      <section aria-label="Beside the approval" className={cn('min-h-0 min-w-0 flex-1 flex-col', beside.kind === 'none' ? 'hidden min-[1100px]:flex' : 'flex')} data-testid="approvals-beside">
-        <BesideHeader
-          beside={beside}
-          mark={selected ? machineMark(selected.machineId) : null}
-          onOpen={selected ? () => openInPane(selected, beside) : undefined}
-        />
-        {beside.kind === 'session' && <SessionBeside key={beside.sessionId} sessionId={beside.sessionId} />}
-        {beside.kind === 'pane' && (activePaneId === beside.paneId ? paneView : null)}
-        {beside.kind === 'machine' && selected && <MachineContext key={selected.id} item={selected} machine={beside.machine} connectedName={beside.connected.name} />}
-        {beside.kind === 'autopilot' && (
-          <div className="m-auto max-w-sm text-center text-[13px] text-text-secondary" data-testid="approvals-autopilot">
-            <p>Autopilot asks you this. Open Autopilot to see it in its chat, with any documents it wrote for it.</p>
-            <button type="button" onClick={navigateToAutopilot}
-              className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-interactive px-3 font-medium text-text-on-interactive hover:bg-interactive-hover">
-              <Navigation className="h-3.5 w-3.5" aria-hidden="true" /> Open Autopilot
-            </button>
-          </div>
+      <section aria-label="Beside the approval" className={cn('min-h-0 min-w-0 flex-1 flex-col', !selected ? 'hidden min-[1100px]:flex' : 'flex')} data-testid="approvals-beside">
+        {selected && (
+          <ApprovalColumn
+            surface="approvals"
+            itemId={selected.id}
+            order={order}
+            onSelect={selectApproval}
+            groupLabel={tab === 'waiting' ? 'Approvals' : 'Answered'}
+            inChat={undefined}
+            renderOrigin={() => origin}
+          />
         )}
-        {beside.kind === 'none' && (
+        {!selected && (
           <div className="m-auto flex flex-col items-center gap-2 text-[13px] text-text-tertiary">
             <Inbox className="h-5 w-5" aria-hidden="true" />
-            {!selected ? (shown.length === 0 ? 'When an agent asks you something, its Session shows here.' : 'Select an approval to see its Session here.')
-              : selected.closed ? receiptLine(selected)
-                : `Asked from ${beside.kind === 'none' && beside.name ? beside.name : selected.source.name}, outside Pane.`}
+            {shown.length === 0 ? 'When an agent asks you something, it opens here.' : 'Select an approval to open it here.'}
           </div>
         )}
       </section>

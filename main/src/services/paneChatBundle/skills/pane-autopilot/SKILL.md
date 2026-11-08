@@ -194,9 +194,34 @@ you). By default:
   secret, into its masked field. A `kind` of `approval` or `question` is yours
   to work this way, whichever machine it is on.
 
-Say what you did in your chat, in one line, each time. Only these three commands
-record you as Autopilot: never answer through anything else, and never put words
-in the person's mouth.
+- **Read replies their asker can't.** When the person types a reply on an
+  approval and neither its asker nor the orchestrator that relayed it can read
+  it (or neither ran `--took` within 10 minutes), Pane types it into your chat:
+  `reply: Q-n → "<their words>" (picked: <picks>) (by you)`. Without a Q-n it
+  names the title and ends `[id <item id>]`. You are its reader now, so you
+  decide whether it answers or asks:
+  - If it answers, run `runpane notify --took <id|Q-n> answer --json`. Pane
+    records the reply as the answer and sends it to the asker.
+  - If it's a question, run `runpane notify --took <id|Q-n> question --json`
+    at once (the approval reads "Getting more context…"). Find out from its
+    links, its Session and its orchestrator, or answer from what you know,
+    then run `runpane notify --update <id|Q-n> --asked "<their question>"
+    --what-changed "<one line per change>" --json` with any changed `--title`,
+    `--context`, `--choices`, `--questions` or `--links` (a reworded choice
+    carries `"was":"<old label>"`). That saves a new version of the same
+    approval, "Updated · ready again", and waits like a notify call: run it in
+    the background and put the id on the stack. Never post a second approval
+    for it.
+  - `correction: Q-n → that was a question: "…" (by you)` means update the
+    approval; `correction: Q-n → that was your answer: "…" (by you)` means it
+    is recorded as the answer.
+
+  Your own approvals' replies reach you the same way, as their asker.
+
+Say what you did in your chat, in one line, each time. Only these three
+commands, and `--took` and `--update` on a reply you read, record you as
+Autopilot: never answer through anything else, and never put words in the
+person's mouth.
 
 ## Your queue (D-168)
 
@@ -327,12 +352,17 @@ up and ask:
    --choices '[{"label":"..."},{"label":"..."}]' --links '[{"label":"<file>","path":"<absolute path>"}]' --about-session "<Session>" --json`.
    `--about-session` names the Session it is about, when it is about one. It
    lives on this machine. Pane files it under "Autopilot" in Approvals and shows
-   it violet, "written by Autopilot".
+   it violet, "written by Autopilot". Pane builds its Summary from the
+   fields: a title of about 80 characters, context as why it matters, each
+   choice with what it does (`detail`) and one `recommended`, and links to
+   every reference, other approvals included
+   (`{"label":"Q-12","approval":"<id|Q-n>"}`).
 3. Put it on the stack: `runpane autopilot stack push --item <its id> --json`
    (the id is in the notify call's output; `runpane autopilot waiting --json`
    lists it too).
 4. When the background call returns the person's answer, do what it said and
-   only that, then say what you did in one line.
+   only that, then say what you did in one line. When it returns a `reply`,
+   read it as in [Approvals](#approvals-d-149-to-d-152).
 
 ## From a brain-dump to Sessions (D-92)
 

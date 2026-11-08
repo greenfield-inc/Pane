@@ -113,6 +113,7 @@ default, Autopilot:
 | closes the ones that don't matter or that it judges stale; you can reopen them | "Closed by Autopilot: <reason>" |
 | may close an unclear one and re-ask it rewritten; the answer goes to the original asker | "Closed by Autopilot: rewritten as …" on the old one, "Rewritten by Autopilot from Q-n" on the new one |
 | answers only when the way forward is clear and the item relates to what it's working on with you, or when you tell it to handle approvals | "Answered by Autopilot · because <D-n, document or your words>", with **Override** |
+| reads a typed reply its asker can't (D-258): takes it as an answer with `runpane notify --took`, or as a question, then finds out and sends a new version with `runpane notify --update` ([Replies](PANE_NOTIFY.md#replies-and-new-versions)) | "Autopilot is reading your reply…", then "Taken as your answer" or "Updated · ready again" |
 | never answers a permission prompt, or types raw keys into another tab | refused in code ([The guard](#the-guard-d-149)) |
 
 An answer is delivered at once, with no hold. Override sends your answer to the
@@ -293,7 +294,8 @@ on; `--json` gives only the state).
 runpane sends the caller's Pane and tab (`PANE_SESSION_ID`, `PANE_PANEL_ID`)
 on every daemon request (`caller` on the request frame; older builds leave it
 out). Autopilot acts on approvals only through `runpane autopilot answer`,
-`close` and `rewrite`, which record it; the machine that holds the item refuses
+`close` and `rewrite`, which record it, and `runpane notify --took` and
+`--update` on a reply it reads; the machine that holds the item refuses
 them for a permission prompt (`AUTOPILOT_CANNOT_ANSWER`), Claude tool permissions
 and Bypass changes included. A guard on the command registry refuses every other
 answer route when the caller is Autopilot's tab or owner Pane, since those
