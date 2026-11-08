@@ -41,18 +41,18 @@ export interface ApprovalColumnProps {
   items?: readonly NotifyItem[];
 }
 
-const TONE_TEXT: Record<ReplyLine['tone'], string> = {
+const TONE_TEXT = {
   muted: 'text-text-secondary',
   success: 'text-status-success-on-tint',
   warning: 'text-status-warning-on-tint',
   info: 'text-status-info-on-tint',
-};
-const TONE_BOX: Record<ReplyLine['tone'], string> = {
+} satisfies Record<ReplyLine['tone'], string>;
+const TONE_BOX = {
   muted: 'bg-surface-tertiary',
   success: 'bg-status-success/10',
   warning: 'bg-status-warning/10',
   info: 'bg-status-info/10',
-};
+} satisfies Record<ReplyLine['tone'], string>;
 
 export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, closeLabel, onClose, inChat, renderOrigin, items: given }: ApprovalColumnProps) {
   const stored = useNotifyStore((state) => state.snapshot?.items);

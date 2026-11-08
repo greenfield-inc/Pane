@@ -7,7 +7,7 @@ import { create } from 'zustand';
  */
 export type ApprovalSurface = `session:${string}` | 'autopilot' | 'approvals';
 
-export interface OpenApproval {
+interface OpenApproval {
   itemId: string;
   /** The column's tab: `qa`, `summary`, `origin` or a link's key. */
   tab: string;

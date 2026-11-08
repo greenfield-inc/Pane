@@ -880,7 +880,8 @@ export class NotifyQueue extends EventEmitter {
     if (!reply) return;
     const summary = replySummary(reply);
     const before = { ...item };
-    item.reply = { ...reply, state: 'answer', ...(as === 'fix' ? { fixed: 'answer' as const } : {}) };
+    item.reply = { ...reply, state: 'answer' };
+    if (as === 'fix') item.reply.fixed = 'answer';
     item.state = 'answered';
     item.resolvedAt = Date.now();
     item.answerSummary = summary;

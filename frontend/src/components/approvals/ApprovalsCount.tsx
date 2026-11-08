@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { sessionWaitingCount, useNotifyStore } from '../../stores/notifyStore';
-import { openSessionApproval } from '../../stores/approvalColumnStore';
-import { firstToOpen, readyCount } from './approvalCard';
+import { readyCount } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
 
 /**
@@ -15,10 +14,6 @@ export function SessionApprovalsCount({ sessionId, machineId, otherwise, opensAp
   const count = useNotifyStore((state) => sessionWaitingCount(state.snapshot, sessionId, machineId));
   const waiting = useSessionApprovals(sessionId);
   const ready = readyCount(waiting);
-  const open = () => {
-    const first = firstToOpen(waiting);
-    if (first) openSessionApproval(sessionId, first.id);
-  };
   return (
     <span className="pointer-events-none ml-auto inline-flex h-[18px] shrink-0 items-center justify-end gap-1.5">
       {count > 0 && ready > 0 && (
@@ -32,7 +27,8 @@ export function SessionApprovalsCount({ sessionId, machineId, otherwise, opensAp
             className={`${opensApprovals ? 'pointer-events-auto cursor-pointer' : ''} inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-status-warning px-[5px] text-[11px] font-semibold tabular-nums text-text-on-status-warning`}
             aria-label={`${count} ${count === 1 ? 'approval' : 'approvals'} waiting`}
             data-testid="session-approvals-count"
-            onClick={opensApprovals ? open : undefined}
+            // Inside the row's button: the row's click opens the Session, and on the count, its approvals too.
+            data-opens-approvals={opensApprovals ? sessionId : undefined}
           >
             {count}
           </span>

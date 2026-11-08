@@ -2,9 +2,10 @@ import { Inbox, MessageSquare } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
+import { selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { openOnMachine } from '../../utils/machineRowActions';
 import { ApprovalColumn } from './ApprovalColumn';
-import { firstToOpen, readyCount } from './approvalCard';
+import { firstToOpen, readyCount, sessionApprovals } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
 
 /**
@@ -28,6 +29,16 @@ export function SessionApprovalsButton({ sessionId }: { sessionId: string }) {
       {ready > 0 && <span className="rounded-full bg-status-info/15 px-2 py-px text-[11.5px] font-medium text-status-info-on-tint" data-testid="session-approvals-ready">{ready} ready</span>}
     </button>
   );
+}
+
+/**
+ * A click on a Session row's count (J15): opens the Session's newest ready-again approval, or its
+ * first waiting one, beside the Session the row's click opens.
+ */
+export function openApprovalsFromCount(target: EventTarget, sessionId: string): void {
+  if (!(target instanceof Element) || target.closest('[data-opens-approvals]')?.getAttribute('data-opens-approvals') !== sessionId) return;
+  const first = firstToOpen(sessionApprovals(selectNotifyItems(useNotifyStore.getState()), sessionId));
+  if (first) openSessionApproval(sessionId, first.id);
 }
 
 /** The approval column for one Session: its pager walks the Session's waiting approvals. */

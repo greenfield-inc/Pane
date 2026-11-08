@@ -14,7 +14,7 @@ export interface CardQuestion {
   removed: string[];
 }
 
-export interface CardChoice extends NotifyChoice {
+interface CardChoice extends NotifyChoice {
   /** NEW: added in this version. REWORDED: its label or detail changed (the old one struck through). */
   mark?: 'new' | 'reworded';
   /** What it said before, for a reworded choice. */
@@ -51,7 +51,9 @@ export function markedQuestions(item: NotifyItem): CardQuestion[] {
       if (!match) return { ...choice, mark: 'new' };
       used.add(match.label);
       if (match.label !== choice.label || (match.detail ?? '') !== (choice.detail ?? '')) {
-        return { ...choice, mark: 'reworded', before: { label: match.label, ...(match.detail ? { detail: match.detail } : {}) } };
+        const before: NonNullable<CardChoice['before']> = { label: match.label };
+        if (match.detail) before.detail = match.detail;
+        return { ...choice, mark: 'reworded', before };
       }
       return { ...choice };
     });
@@ -74,10 +76,17 @@ export function replyLine(item: NotifyItem): ReplyLine | null {
   switch (reply.state) {
     case 'reading':
       return { tone: 'muted', text: reply.reader?.kind === 'autopilot' ? 'Autopilot is reading your reply…' : 'Reading your reply…' };
-    case 'answer':
-      return { tone: 'success', text: `Taken as your answer${reply.picks?.length ? `: ${reply.picks.join(' · ')}, with your note “${reply.text}”` : `: “${reply.text}”`}`, ...(reply.fixed ? {} : { fix: { as: 'question' as const, label: 'It was a question' } }) };
-    case 'question':
-      return { tone: 'warning', text: `Taken as a question: asking ${reader}. ${reply.status ?? 'Getting more context…'}`, ...(reply.fixed ? {} : { fix: { as: 'answer' as const, label: 'It was my answer' } }) };
+    case 'answer': {
+      const line: ReplyLine = { tone: 'success', text: `Taken as your answer${reply.picks?.length ? `: ${reply.picks.join(' · ')}, with your note “${reply.text}”` : `: “${reply.text}”`}` };
+      // A fix is one click, once.
+      if (!reply.fixed) line.fix = { as: 'question', label: 'It was a question' };
+      return line;
+    }
+    case 'question': {
+      const line: ReplyLine = { tone: 'warning', text: `Taken as a question: asking ${reader}. ${reply.status ?? 'Getting more context…'}` };
+      if (!reply.fixed) line.fix = { as: 'answer', label: 'It was my answer' };
+      return line;
+    }
     case 'sent':
       return { tone: 'success', text: `Sent to ${reply.reader?.name ?? item.source.agent}` };
     case 'unread':
@@ -153,7 +162,7 @@ export function cardTabs(item: NotifyItem, inChat?: string): CardTab[] {
 }
 
 /** The tab where it was asked, when it was asked from one. */
-export function originPanel(item: NotifyItem): string | undefined {
+function originPanel(item: NotifyItem): string | undefined {
   if (item.source.autopilot || item.summaryOf) return undefined;
   return item.source.panelId;
 }
@@ -179,22 +188,28 @@ export interface CardSummary {
 
 export function cardSummary(item: NotifyItem): CardSummary {
   const questions = questionsOf(item);
-  const recommendation = questions.flatMap(question => question.choices.filter(choice => choice.recommended).map(choice => ({
-    ...(questions.length > 1 ? { question: question.title } : {}),
-    label: choice.label,
-    ...(choice.detail ? { detail: choice.detail } : {}),
-  })));
+  const recommendation = questions.flatMap(question => question.choices.filter(choice => choice.recommended).map(choice => {
+    const recommended: CardSummary['recommendation'][number] = { label: choice.label };
+    if (questions.length > 1) recommended.question = question.title;
+    if (choice.detail) recommended.detail = choice.detail;
+    return recommended;
+  }));
   const references: CardSummary['references'] = (item.links ?? []).map(link => (
     'path' in link ? { label: link.label, kind: 'file' as const, detail: link.path }
       : 'url' in link ? { label: link.label, kind: 'url' as const, detail: link.url }
         : { label: link.label, kind: 'approval' as const, detail: 'another approval' }
   ));
   if (originPanel(item)) references.push({ label: `${item.source.name}'s tab`, kind: 'origin', detail: 'where it was asked' });
-  const history: CardSummary['history'] = [
-    ...(item.versions ?? []).map(version => ({ version: version.version, at: version.at, ...(version.revision ? { asked: version.revision.asked, whatChanged: version.revision.whatChanged, by: version.revision.by } : { whatChanged: [] }) })),
-    { version: item.version ?? 1, at: item.revision?.at ?? item.createdAt, ...(item.revision ? { asked: item.revision.asked, whatChanged: item.revision.whatChanged, by: item.revision.by } : { whatChanged: [] }) },
+  const round = (version: number, at: number, revision: NotifyItem['revision']): CardSummary['history'][number] => (
+    revision ? { version, at, asked: revision.asked, whatChanged: revision.whatChanged, by: revision.by } : { version, at, whatChanged: [] }
+  );
+  const history = [
+    ...(item.versions ?? []).map(version => round(version.version, version.at, version.revision)),
+    round(item.version ?? 1, item.revision?.at ?? item.createdAt, item.revision),
   ];
-  return { ...(item.context ? { why: item.context } : {}), recommendation, questions, references, history };
+  const summary: CardSummary = { recommendation, questions, references, history };
+  if (item.context) summary.why = item.context;
+  return summary;
 }
 
 /** Waiting items connected to a Session (its own, its workers', Autopilot's about it), oldest first. */

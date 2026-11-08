@@ -82,7 +82,7 @@ export interface ReplyStatus {
 }
 
 /** The default status while a reader asks about a reply (`--took question` with no `--status`). */
-export const GETTING_MORE_CONTEXT = 'Getting more context…';
+const GETTING_MORE_CONTEXT = 'Getting more context…';
 
 export function replyStatus(item: NotifyItem): ReplyStatus | null {
   const reply = item.reply;
