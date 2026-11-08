@@ -97,7 +97,7 @@ test('Autopilot: switch, Start, the walk on the stack, answers by you, never by 
     for (const name of ['AGENTS.md', 'docs', 'stack.json', 'state.json', 'log']) expect(existsSync(path.join(run.folder, name))).toBe(true);
     expect(readFileSync(path.join(paneDir, 'autopilot', 'current'), 'utf8').trim()).toBe(run.id);
     await expect(page.getByTestId('autopilot-nav')).toBeVisible();
-    await expect(page.getByTestId('autopilot-nav-state')).toHaveText('start');
+    await expect(page.getByTestId('autopilot-nav-state')).toHaveText('Start');
     // The top list reads New, Pane Chat, Loops, Autopilot, then Approvals right under Autopilot (D-117).
     await expect(page.locator('[data-testid="loops-nav"] + [data-testid="autopilot-nav"] + [data-testid="approvals-nav"]')).toHaveCount(1);
     // One height and no gaps between them, so the list reads evenly.
@@ -221,7 +221,7 @@ test('Autopilot: switch, Start, the walk on the stack, answers by you, never by 
     // Pause and Go on.
     await page.getByTestId('autopilot-pause').click();
     await expect(page.getByTestId('autopilot-walk-status')).toHaveText('Paused');
-    await expect(page.getByTestId('autopilot-nav-state')).toHaveText('paused');
+    await expect(page.getByTestId('autopilot-nav-state')).toHaveText('Paused');
     await page.getByTestId('autopilot-go-on').click();
     await expect(page.getByTestId('autopilot-walk-status')).not.toHaveText('Paused');
 

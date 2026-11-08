@@ -135,7 +135,7 @@ function SentinelToggle({ snapshot, pending }: { snapshot: AutopilotSnapshot; pe
       .finally(() => setBusy(false));
   };
   return (
-    <button type="button" role="switch" aria-checked={snapshot.sentinel} disabled={pending || busy || (blocked && !snapshot.sentinel)} onClick={toggle} data-testid="autopilot-sentinel"
+    <button type="button" role="switch" aria-checked={snapshot.sentinel} aria-label="Sentinel" disabled={pending || busy || (blocked && !snapshot.sentinel)} onClick={toggle} data-testid="autopilot-sentinel"
       title={snapshot.sentinel ? 'Sentinel keeps your Sessions moving while you are away. Turn it off when you are back.' : 'Keep Sessions moving while you are away: answers only what a plan or decision settles, nudges stalls, pushes the rest to your phone.'}
       className={cn('inline-flex h-8 shrink-0 items-center gap-2 rounded-full border px-2.5 text-[12.5px] font-medium disabled:opacity-50',
         snapshot.sentinel ? 'border-autopilot-border bg-autopilot-subtle text-autopilot-on-tint' : 'border-border-secondary text-text-secondary hover:bg-surface-hover')}>

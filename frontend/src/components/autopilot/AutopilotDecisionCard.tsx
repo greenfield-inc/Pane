@@ -6,6 +6,7 @@ import { decisionModel, type DecisionModel } from '../../../../shared/autopilotD
 import { cn } from '../../utils/cn';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
 import { runNotify } from '../../stores/notifyStore';
+import { shownStackEntry, useAutopilotStore } from '../../stores/autopilotStore';
 import { relayReadOnlyLine } from '../approvals/approvalGroups';
 import { ItemCloseForm } from '../notify/NotifyCard';
 import { machineLabel, originOf, relativeAge } from '../notify/notifyFormat';
@@ -87,6 +88,8 @@ export function AutopilotDecisionCard({ item, current, onMakeCurrent }: { item: 
   const [closing, setClosing] = useState(false);
   const model = decisionModel(item);
   const origin = originOf(item, machines);
+  // The right side holds the shown entry's documents; with none, the card doesn't point there.
+  const contextShown = useAutopilotStore((state) => !!shownStackEntry(state.snapshot)?.tabs.some((tab) => tab.kind !== 'item'));
 
   if (model.state === 'answered' || model.state === 'expired' || model.state === 'info') {
     const receipt = receiptLine(item);
@@ -164,10 +167,10 @@ export function AutopilotDecisionCard({ item, current, onMakeCurrent }: { item: 
       {closing ? (
         <ItemCloseForm item={item} onCommand={runNotify} onCancel={() => setClosing(false)} className="border-t border-border-primary px-3.5 py-2.5" />
       ) : (
-        <div className="flex items-center gap-1.5 border-t border-border-primary px-3.5 py-2 text-[12.5px] text-text-tertiary">
-          <PanelRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          {current ? <span className="min-w-0 truncate">{model.contextLabel} and related docs are on the right</span>
-            : <button type="button" onClick={onMakeCurrent} className="min-w-0 truncate hover:text-text-primary">{model.contextLabel} and related docs ›</button>}
+        (!current || contextShown || (canClose(item) && !item.unreachable)) && <div className="flex items-center gap-1.5 border-t border-border-primary px-3.5 py-2 text-[12.5px] text-text-tertiary">
+          {(!current || contextShown) && <PanelRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+          {!current ? <button type="button" onClick={onMakeCurrent} className="min-w-0 truncate hover:text-text-primary">{model.contextLabel} and related docs ›</button>
+            : contextShown && <span className="min-w-0 truncate">{model.contextLabel} and related docs are on the right</span>}
           {canClose(item) && !item.unreachable && (
             <button type="button" onClick={() => setClosing(true)} data-testid="autopilot-decision-close" className="ml-auto shrink-0 hover:text-text-primary">Close</button>
           )}

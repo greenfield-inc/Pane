@@ -400,7 +400,7 @@ for (const scheme of ['light', 'dark'] as const) test(`All machines shows the Au
   await openAllMachines(page, scheme, { extra: { autopilotSnapshot, notifySnapshot: notifyFixture() } });
   const sidebar = page.getByTestId('all-machines-sidebar');
   await expect(sidebar.locator('[data-testid="loops-nav"] + [data-testid="autopilot-nav"] + [data-testid="approvals-nav"]')).toHaveCount(1);
-  await expect(sidebar.getByTestId('autopilot-nav-state')).toHaveText('start');
+  await expect(sidebar.getByTestId('autopilot-nav-state')).toHaveText('Start');
   await page.screenshot({ path: testInfo.outputPath(`all-machines-autopilot-row-${scheme}.png`) });
   await sidebar.getByTestId('autopilot-nav').click();
   await expect(sidebar.getByTestId('autopilot-nav')).toHaveAttribute('aria-current', 'page');
