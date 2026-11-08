@@ -83,6 +83,21 @@ describe('runpane on a chat tab', () => {
       .resolves.toMatchObject({ ok: false, matched: false, timedOut: true });
   });
 
+  it('does not match a queued prompt, and matches the reply that follows it', async () => {
+    const { manager, panel } = setup();
+    await manager.ensure(panel.id);
+    await submitChatTab(manager, panel, 'slow', { interrupt: false });
+    await expect.poll(() => manager.view(panel.id, 0).status).toBe('working');
+    // "steps" replies "Done.", so only the queued prompt contains QUEUED-ONLY.
+    expect((await submitChatTab(manager, panel, 'steps 2 QUEUED-ONLY', { interrupt: false })).delivery.state).toBe('queued');
+    const prompt = waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'QUEUED-ONLY', timeoutMs: 3_000 });
+    const reply = waitForChatTab(manager, panel, { panelId: panel.id, condition: 'text', contains: 'Done.', timeoutMs: 10_000 });
+    await manager.cancel(panel.id);
+    await expect(reply).resolves.toMatchObject({ ok: true, matched: true });
+    await expect(prompt).resolves.toMatchObject({ matched: false, timedOut: true });
+    expect(chatTabScreen(manager, panel, 80).text).toContain('user: steps 2 QUEUED-ONLY');
+  });
+
   it('refuses raw terminal input with a clear next step', () => {
     const { panel } = setup();
     const error = chatTabNoTerminal(panel, 'input');

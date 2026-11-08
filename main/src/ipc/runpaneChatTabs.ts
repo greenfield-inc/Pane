@@ -49,12 +49,12 @@ function transcriptTail(manager: ChatTabManager, panelId: string, chars: number)
   return { text: text.slice(-chars), hasMore: length > chars || before > 0 };
 }
 
-/** Whether a message from index `since` up to `count` contains `text`, read a page at a time. */
+/** Whether something the agent wrote from index `since` up to `count` contains `text`, read a page at a time. */
 function textSince(manager: ChatTabManager, panelId: string, since: number, count: number, text: string): boolean {
   for (let before = count; before > since;) {
     const page = manager.history(panelId, before, before - since);
     if (!page.length) return false;
-    if (page.some(message => messageText(message).includes(text))) return true;
+    if (page.some(message => message.role !== 'user' && messageText(message).includes(text))) return true;
     before -= page.length;
   }
   return false;
@@ -128,10 +128,11 @@ export async function waitForChatTab(manager: ChatTabManager, panel: ToolPanel, 
   const timeout = request.timeoutMs ?? 30_000;
   const interval = Math.max(25, request.intervalMs ?? 250);
   const condition = request.condition ?? 'idle';
-  // Text waits search only what arrives after the wait starts, plus a reply still streaming then,
-  // so the prompt that asked for the text never matches and no poll rereads the whole transcript.
-  const count = manager.view(panel.id, 0, false).messageCount;
-  const since = count > 0 && manager.history(panel.id, count, 1)[0]?.role === 'assistant' ? count - 1 : count;
+  // Text waits search only what the agent writes after the wait starts, plus a reply still streaming
+  // then, so no prompt (sent or queued) and no finished reply matches, and no poll rereads the transcript.
+  const start = manager.view(panel.id, 0, false);
+  const streaming = start.status === 'working' || start.status === 'blocked';
+  const since = streaming && start.messageCount > 0 ? start.messageCount - 1 : start.messageCount;
   while (true) {
     const view = manager.view(panel.id, 0);
     const state = chatTabState(view);
