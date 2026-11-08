@@ -23,7 +23,7 @@
 /* Turns and steps (round 2 · Option 1; quiet turns per round 3 · A). */
 .chat-turn { display:flex; flex-direction:column; gap:10px; }
 .chat-turn+.chat-turn { margin-top:14px; }
-.chat-user { align-self:flex-end; max-width:min(85%, 40rem); padding:8px 16px; border-radius:var(--composer-radius); background:var(--chat-muted); overflow-wrap:anywhere; }
+.chat-user { align-self:flex-end; max-width:min(85%, 40rem); max-height:24rem; overflow-y:auto; padding:8px 16px; border-radius:var(--composer-radius); background:var(--chat-muted); overflow-wrap:anywhere; }
 .chat-image { max-width:min(100%, 24rem); border-radius:8px; border:1px solid var(--chat-border); }
 .chat-steps { display:flex; flex-direction:column; gap:2px; }
 .chat-step-line { display:flex; align-items:center; gap:8px; min-height:28px; font-size:14px; color:var(--chat-foreground); min-width:0; }
