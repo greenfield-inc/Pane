@@ -122,7 +122,7 @@ says, and after running the chat tab suites against it.
 - To-do lists from the agent's plan updates.
 - **Approvals** dock above the composer with exactly the choices the adapter
   sent; keys 1 to 9 answer while the composer is empty. Typing a message
-  instead declines the request and sends the message. ExitPlanMode shows the
+  instead sends it and, once Pane has it, declines the request. ExitPlanMode shows the
   plan itself.
 - **Questions** (ACP form elicitation, such as Claude's AskUserQuestion) dock
   as a form. Pane declares `elicitation.form`; without it Claude turns
@@ -143,7 +143,7 @@ says, and after running the chat tab suites against it.
   **Permissions**, below Model, Effort and the other settings; each choice shows
   a check and On/Off settings are switches. A mode that never asks (Bypass)
   leaves a small shield on the row. The `/` menu lists
-  the agent's own commands and skills; **Stop** cancels the turn. A message sent
+  the agent's own commands and skills; **Stop** (or Esc in the composer) cancels the turn. A message sent
   while the agent works is queued and sent next; **Remove** takes it out of the
   queue.
 - **Copying**: message text can be selected and copied like any page. Each

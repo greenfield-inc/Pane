@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLink, FileText, Folder, GitBranch, Globe, Inbox, Laptop, MessageSquare, MessagesSquare, Navigation, ShieldAlert, WifiOff } from 'lucide-react';
+import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLink, FileText, Folder, GitBranch, Globe, Inbox, Laptop, MessageSquare, MessagesSquare, Navigation, ShieldAlert, WifiOff } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { receiptLine } from '../../../../shared/approvalReceipts';
@@ -20,6 +20,7 @@ import { useNow } from '../notify/useNow';
 import { SessionBeside } from '../PaneChatView';
 import { APPROVALS_SORTS, approvalRowLines, besideOf, connectedOf, groupApprovals, offlineRowText, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
 import { MachineContext } from './MachineContext';
+import { toggleApprovals } from './approvalsNavigation';
 
 /**
  * Links open as tabs through this computer's Pane, so only for this computer's items while the
@@ -60,13 +61,14 @@ function GroupHeader({ group, mark }: { group: ApprovalGroup; mark: ReactNode })
   );
 }
 
-function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; now: number; selected?: boolean; onSelect: () => void }) {
+function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; now: number; selected?: boolean; onSelect: (fromKeyboard: boolean) => void }) {
   const done = item.state === 'answered' || item.state === 'expired' || item.state === 'info';
   const { acted, origin } = approvalRowLines(item);
   return (
     <button
       type="button"
-      onClick={onSelect}
+      // Enter or Space reports no clicks (detail 0): the card that replaces this row takes the focus.
+      onClick={(event) => onSelect(event.detail === 0)}
       aria-current={selected || undefined}
       data-approval-selected={selected || undefined}
       data-testid="approvals-row"
@@ -188,6 +190,21 @@ function SelectedItem({ item, beside, mark, onOpenInPane, onOpenConnected }: { i
   );
 }
 
+/** Newer rows held out of view above the selected card, one click from the top. */
+function RowsAbove({ count, onTop }: { count: number; onTop: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onTop}
+      className="absolute left-1/2 top-1 z-10 inline-flex h-6 -translate-x-1/2 items-center gap-1 rounded-full bg-surface-primary px-2.5 text-[12px] font-medium text-text-secondary shadow-card ring-1 ring-border-secondary hover:text-text-primary"
+      data-testid="approvals-rows-above"
+    >
+      <ArrowUp className="h-3 w-3" aria-hidden="true" />
+      {count} more above
+    </button>
+  );
+}
+
 function OfflineMachineRow({ row }: { row: OfflineRow }) {
   return (
     <div className="flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-text-tertiary" data-testid="approvals-offline-row">
@@ -251,6 +268,11 @@ async function switchToMachine(machineId: string, name: string): Promise<boolean
  */
 export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const snapshot = useNotifyStore((state) => state.snapshot);
+  // Approvals turned off (here, or saved off and restored on launch): back to the view you left, as the row would.
+  const turnedOff = snapshot?.settings.enabled === false;
+  useEffect(() => {
+    if (turnedOff) toggleApprovals();
+  }, [turnedOff]);
   const [tab, setTab] = useState<ApprovalsTab>('waiting');
   const selectedId = useNavigationStore((state) => state.selectedApprovalId);
   const selectApproval = useNavigationStore((state) => state.selectApproval);
@@ -278,13 +300,23 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   // person is reading it. Changing the tab, the sort or the selection moves it on purpose.
   const listRef = useRef<HTMLDivElement>(null);
   const listSpacerRef = useRef<HTMLDivElement>(null);
+  // A row picked with the keyboard: its card takes the focus once it renders.
+  const focusCard = useRef(false);
   const lastSelected = useRef<{ id: string; tab: ApprovalsTab; sort: ApprovalsSort; offset: number; rounding: number } | null>(null);
   const selectedRowId = selected?.id;
+  // Each tab is its own list: it opens at its top, not at the other tab's scroll position.
+  useLayoutEffect(() => {
+    if (listSpacerRef.current) listSpacerRef.current.style.height = '0px';
+    listRef.current?.scrollTo({ top: 0 });
+  }, [tab]);
   useLayoutEffect(() => {
     const listElement = listRef.current;
     const row = listElement?.querySelector('[data-approval-selected]');
     if (!listElement || !row || !selectedRowId) {
       lastSelected.current = null;
+      // No card to focus or hold still (another tab, the item left): the count follows this list, and a pending focus lapses.
+      focusCard.current = false;
+      countAbove();
       return;
     }
     // From the top of the content, so the person's own scrolling doesn't count as a move.
@@ -310,7 +342,22 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
       }
     }
     lastSelected.current = { id: selectedRowId, tab, sort, offset, rounding };
+    countAbove();
+    if (focusCard.current) {
+      focusCard.current = false;
+      // The card itself, not its first choice: Enter again (or a held Enter) must not answer.
+      if (row instanceof HTMLElement) row.focus();
+    }
   });
+
+  // Holding the selected card still can carry newer rows out of view above it: say so, one click from the top.
+  const [rowsAbove, setRowsAbove] = useState(0);
+  const countAbove = () => {
+    const listElement = listRef.current;
+    if (!listElement) return;
+    const top = listElement.getBoundingClientRect().top;
+    setRowsAbove([...listElement.querySelectorAll('[data-testid="approvals-row"]')].filter((row) => row.getBoundingClientRect().bottom <= top + 1).length);
+  };
 
   const beside: Beside = selected ? besideOf(selected, activeMachineId) : { kind: 'none' };
   const besidePaneId = beside.kind === 'pane' ? beside.paneId : undefined;
@@ -379,7 +426,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const renderItem = (item: NotifyItem) => (
     item.id === selected?.id && item.state !== 'info'
       ? (
-        <div key={item.id} className="px-1 pb-2" data-approval-selected data-testid="approvals-selected">
+        <div key={item.id} tabIndex={-1} className="rounded-[20px] px-1 pb-2 outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle" data-approval-selected data-testid="approvals-selected">
           <SelectedItem
             item={item}
             beside={beside}
@@ -389,7 +436,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
           />
         </div>
       )
-      : <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} onSelect={() => selectApproval(item.id)} />
+      : <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} onSelect={(fromKeyboard) => { focusCard.current = fromKeyboard; selectApproval(item.id); }} />
   );
   const chooseSort = (next: ApprovalsSort) => {
     setSort(next);
@@ -407,7 +454,8 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary min-[1100px]:flex-row" data-testid="notify-inbox">
       <section
         aria-label="Approvals"
-        className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-b border-border-primary bg-bg-secondary min-[1100px]:max-h-none min-[1100px]:w-[400px] min-[1100px]:border-b-0 min-[1100px]:border-r"
+        // Stacked (a narrow window), the list takes the height when nothing shows beside it.
+        className={cn('flex min-h-0 flex-col border-b border-border-primary bg-bg-secondary min-[1100px]:max-h-none min-[1100px]:w-[400px] min-[1100px]:flex-none min-[1100px]:shrink-0 min-[1100px]:border-b-0 min-[1100px]:border-r', beside.kind === 'none' ? 'flex-1' : 'max-h-[45%] shrink-0')}
         data-testid="approvals-queue"
       >
         <header className="flex h-[50px] shrink-0 items-center gap-2.5 px-4">
@@ -445,7 +493,9 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
           />
         </div>
         {/* The browser's own scroll anchoring would add to the compensation above. */}
-        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 [overflow-anchor:none]">
+        <div className="relative flex min-h-0 flex-1 flex-col">
+        {rowsAbove > 0 && <RowsAbove count={rowsAbove} onTop={() => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />}
+        <div ref={listRef} onScroll={countAbove} className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 [overflow-anchor:none]">
           {shown.length === 0 && stale.length === 0 && offline.length === 0 && (
             <p className="px-3 pt-6 text-[13px] text-text-tertiary" data-testid="notify-empty">
               {!enabled ? 'Approvals are off. Turn them on in Settings → Approvals.' : tab === 'waiting' ? 'Nothing is waiting on you.' : 'Nothing answered yet today.'}
@@ -479,9 +529,10 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
           )}
           <div ref={listSpacerRef} aria-hidden="true" />
         </div>
+        </div>
       </section>
 
-      <section aria-label="Beside the approval" className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="approvals-beside">
+      <section aria-label="Beside the approval" className={cn('min-h-0 min-w-0 flex-1 flex-col', beside.kind === 'none' ? 'hidden min-[1100px]:flex' : 'flex')} data-testid="approvals-beside">
         <BesideHeader
           beside={beside}
           mark={selected ? machineMark(selected.machineId) : null}
@@ -502,7 +553,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         {beside.kind === 'none' && (
           <div className="m-auto flex flex-col items-center gap-2 text-[13px] text-text-tertiary">
             <Inbox className="h-5 w-5" aria-hidden="true" />
-            {!selected ? 'Select an approval to see its Session here.'
+            {!selected ? (shown.length === 0 ? 'When an agent asks you something, its Session shows here.' : 'Select an approval to see its Session here.')
               : selected.closed ? receiptLine(selected)
                 : `Asked from ${beside.kind === 'none' && beside.name ? beside.name : selected.source.name}, outside Pane.`}
           </div>

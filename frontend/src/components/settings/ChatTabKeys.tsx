@@ -14,24 +14,27 @@ const AGENTS: Array<{ id: ChatAgent; label: string; env: string }> = [
  * sign-in (D-14). An API key is optional, stays in this machine's secure store,
  * and is never shown again once saved.
  */
-export function ChatTabKeys() {
+/** `removeOnly` (Chat tabs off): saved keys can be removed, and nothing new saved. */
+export function ChatTabKeys({ removeOnly = false, onRemovedAll }: { removeOnly?: boolean; onRemovedAll?: () => void }) {
   const [status, setStatus] = useState<ChatTabKeyStatus | undefined>();
   const [drafts, setDrafts] = useState<Record<ChatAgent, string>>({ claude: '', codex: '' });
   const [error, setError] = useState<string>();
   useEffect(() => { void window.electronAPI.chatTab.keys().then(setStatus, cause => setError(ipcErrorMessage(cause, 'Pane could not read the key status.'))); }, []);
   const save = async (agent: ChatAgent, key: string | null) => {
     try {
-      setStatus(await window.electronAPI.chatTab.setKey(agent, key));
+      const next = await window.electronAPI.chatTab.setKey(agent, key);
+      setStatus(next);
+      if (!next.claude && !next.codex) onRemovedAll?.();
       setDrafts(current => ({ ...current, [agent]: '' }));
       setError(undefined);
     } catch (cause) { setError(ipcErrorMessage(cause, 'The key was not saved.')); }
   };
   return <div className="flex w-full flex-col gap-3">
-    {AGENTS.map(agent => <div key={agent.id} className="flex flex-col gap-1">
+    {AGENTS.filter(agent => !removeOnly || status?.[agent.id]).map(agent => <div key={agent.id} className="flex flex-col gap-1">
       <span className="text-xs font-medium text-text-secondary">{agent.label}{status?.[agent.id] ? ' · set on this machine' : ''}</span>
       <div className="flex gap-2">
-        <Input type="password" autoComplete="off" aria-label={agent.label} title={`Passed to the agent as ${agent.env}`} placeholder={status?.[agent.id] ? 'Saved; type to replace' : 'Optional'} value={drafts[agent.id]} onChange={event => setDrafts(current => ({ ...current, [agent.id]: event.target.value }))} />
-        <Button variant="secondary" size="sm" disabled={!drafts[agent.id].trim()} onClick={() => void save(agent.id, drafts[agent.id])}>Save</Button>
+        {!removeOnly && <Input type="password" autoComplete="off" aria-label={agent.label} title={`Passed to the agent as ${agent.env}`} placeholder={status?.[agent.id] ? 'Saved; type to replace' : 'Optional'} value={drafts[agent.id]} onChange={event => setDrafts(current => ({ ...current, [agent.id]: event.target.value }))} />}
+        {!removeOnly && <Button variant="secondary" size="sm" disabled={!drafts[agent.id].trim()} onClick={() => void save(agent.id, drafts[agent.id])}>Save</Button>}
         {status?.[agent.id] && <Button variant="ghost" size="sm" onClick={() => void save(agent.id, null)}>Remove</Button>}
       </div>
     </div>)}

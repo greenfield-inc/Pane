@@ -82,8 +82,8 @@ export interface AutopilotPorts {
     /** Every item the Approvals snapshot holds (this machine's and saved machines'). */
     items(): NotifyItem[];
     subscribe(listener: () => void): () => void;
-    /** Asks the person through Notify (so it reaches their phone as a push); resolves with their answer. */
-    ask(question: NotifyQuestion): Promise<NotifyResult>;
+    /** Asks the person through Notify (so it reaches their phone as a push); resolves with their answer. Aborting withdraws the card. */
+    ask(question: NotifyQuestion, signal?: AbortSignal): Promise<NotifyResult>;
   };
   /** Runs `run` every `ms` until the returned stop is called (tests pass their own clock). */
   every?: (ms: number, run: () => void) => () => void;
@@ -158,6 +158,10 @@ export class AutopilotManager extends EventEmitter {
   private stopWatchingInstructions: (() => void) | undefined;
   /** Pane is stopping the agent itself (off, a new run): the tab stopping then is expected. */
   private stoppingAgent = false;
+  /** A Start in flight: a second press (the Sentinel switch, the phone) joins it instead of sending Start twice. */
+  private starting: Promise<AutopilotSnapshot> | undefined;
+  /** The open "start again?" card: withdrawn once the person starts Autopilot themselves. */
+  private startAgainCard: AbortController | undefined;
   private readonly unsubscribe: Array<() => void> = [];
   private readonly now: () => number;
   private emitScheduled = false;
@@ -265,17 +269,28 @@ export class AutopilotManager extends EventEmitter {
 
   /** Asks the person (it reaches their phone) whether to turn Sentinel back on; yes also starts Autopilot. */
   private async askToStartAgain(question: { title: string; on: string; off: string }, context: string): Promise<void> {
+    this.startAgainCard?.abort();
+    const card = new AbortController();
+    this.startAgainCard = card;
     try {
       const result = await this.ports.notify.ask({
         ui: 'options',
         title: question.title,
         context,
         choices: [{ label: question.on, recommended: true }, { label: question.off }],
-      });
-      if ('answer' in result && result.answer === question.on) await this.setSentinel(true);
+      }, card.signal);
+      if (this.startAgainCard === card) this.startAgainCard = undefined;
+      if ('answer' in result && result.answer === question.on) await this.setSentinel(true).catch((error: Error) => this.tellCouldNotStart(error.message, error instanceof PaneError ? error.next : undefined));
     } catch (error) {
       this.log(`could not ask about Sentinel (${question.title}): ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /** The person said yes from their phone, and Start failed: they hear why, where they answered. */
+  private async tellCouldNotStart(message: string, next: string | undefined): Promise<void> {
+    this.log(`could not turn Sentinel back on: ${message}`);
+    await this.ports.notify.ask({ ui: 'info', title: 'Sentinel did not start', context: [message, next].filter(Boolean).join(' ') })
+      .catch(() => { /* Logged above; Autopilot's view shows Start. */ });
   }
 
   snapshot(): AutopilotSnapshot {
@@ -327,6 +342,14 @@ export class AutopilotManager extends EventEmitter {
     this.requireOn('Start');
     assertAutopilotEntitled('Start');
     this.requireChatTabs('Start');
+    if (this.state !== 'stopped') return this.snapshot();
+    this.startAgainCard?.abort();
+    this.startAgainCard = undefined;
+    this.starting ??= this.startAgent().finally(() => { this.starting = undefined; });
+    return this.starting;
+  }
+
+  private async startAgent(): Promise<AutopilotSnapshot> {
     const run = this.run ?? this.createRun();
     await this.ensureAgentTab(run);
     const panelId = panelIdOf(run.id);
@@ -436,6 +459,8 @@ export class AutopilotManager extends EventEmitter {
     if (on === this.sentinel) return this.snapshot();
     if (on) {
       if (this.state === 'stopped') await this.start();
+      // Another press turned it on while Start ran.
+      if (this.sentinel) return this.snapshot();
       // From Pause, the Sentinel line itself says to carry on; a Go on line too would queue a second turn.
       else if (this.state === 'paused') this.setState('running');
       const run = this.requireRun();

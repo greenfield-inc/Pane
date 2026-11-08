@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { MessageSquare } from 'lucide-react';
 import type { ToolPanel, TerminalPanelState } from '../../../../shared/types/panels';
-import type { ChatTabSwitchResult } from '../../../../shared/types/chatTab';
 import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
 import { useHotkey } from '../../hooks/useHotkey';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { useErrorStore } from '../../stores/errorStore';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { Button } from '../ui/Button';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui/Modal';
@@ -45,18 +45,18 @@ export function SwitchToChatButton({ panel, className, palette }: { panel: ToolP
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [kept, setKept] = useState<ChatTabSwitchResult | null>(null);
 
   if (!enabled) return null;
 
-  const close = () => { setOpen(false); setError(null); setKept(null); };
+  const close = () => { setOpen(false); setError(null); };
   const switchNow = async () => {
     setBusy(true);
     setError(null);
     try {
       const result = await window.electronAPI.chatTab.switch(panel.id);
-      if (result.terminalKept) setKept(result);
-      else close();
+      close();
+      // The chat tab may already be in front, and this button goes with the terminal's tab: say why both stay app-wide.
+      if (result.terminalKept && result.reason) useErrorStore.getState().showError({ title: 'Both tabs stayed open', error: result.reason });
     } catch (failure) {
       setError(ipcErrorMessage(failure, 'Could not switch to chat.'));
     } finally {
@@ -71,17 +71,15 @@ export function SwitchToChatButton({ panel, className, palette }: { panel: ToolP
     <Modal isOpen={open} onClose={() => { if (!busy) close(); }} ariaLabel="Switch to chat">
       <ModalHeader title="Switch to chat" />
       <ModalBody>
-        {kept ? <p className="text-sm text-text-secondary">{kept.reason}</p> : <p className="text-sm text-text-secondary">
+        <p className="text-sm text-text-secondary">
           Continue this conversation in a chat tab. Pane stops the terminal agent and reopens the same conversation in chat, with its history. If it can&apos;t, you&apos;ll see why, and the terminal comes back running the same conversation.
-        </p>}
+        </p>
         {busy && <p role="status" className="mt-3 text-sm text-text-tertiary">Switching…</p>}
         {error && <p role="alert" className="mt-3 text-sm text-status-error">{error}</p>}
       </ModalBody>
       <ModalFooter>
-        {kept ? <Button onClick={close}>OK</Button> : <>
-          <Button variant="secondary" disabled={busy} onClick={close}>{error ? 'Close' : 'Cancel'}</Button>
-          <Button disabled={busy} onClick={() => void switchNow()}>{busy ? 'Switching…' : error ? 'Try again' : 'Switch to chat'}</Button>
-        </>}
+        <Button variant="secondary" disabled={busy} onClick={close}>{error ? 'Close' : 'Cancel'}</Button>
+        <Button disabled={busy} onClick={() => void switchNow()}>{busy ? 'Switching…' : error ? 'Try again' : 'Switch to chat'}</Button>
       </ModalFooter>
     </Modal>
   </>;

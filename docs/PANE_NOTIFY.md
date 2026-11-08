@@ -202,9 +202,12 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
 
 **Keys on a card.** With the pointer over a card in Approvals, its keys work:
 a choice's number answers it, Y approves, N starts a denial, and typing starts
-an ask's answer. The floating strip over another app takes keys once you click
-it, so typing in that app never answers by accident. Keys work whatever Pane's
-keyboard-shortcuts setting says.
+an ask's answer. Keys typed into a field (a terminal, a chat composer, a search
+box) stay there, even with the pointer over a card. The floating strip over
+another app takes keys once you click it, so typing in that app never answers
+by accident. Keys work whatever Pane's keyboard-shortcuts setting says. On
+Approvals, **More** (or **Details**, when choices have notes) opens the card in
+place with every choice, its note and **Send**.
 
 ✕ hides a question from the strip; it keeps waiting in Approvals.
 Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next

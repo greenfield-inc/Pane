@@ -40,7 +40,9 @@ function useStackKeys() {
 function WalkBar({ snapshot }: { snapshot: AutopilotSnapshot }) {
   const current = snapshot.walk.sessions.find((session) => session.id === snapshot.walk.sessionId);
   const moving = snapshot.walk.sessions.length;
-  const status = snapshot.sentinel
+  // Paused holds Sentinel's checks too, so Paused wins.
+  const sentinelOn = snapshot.sentinel && snapshot.state === 'running';
+  const status = sentinelOn
     ? `Sentinel on · keeping ${moving} ${moving === 1 ? 'Session' : 'Sessions'} moving · checks every 5 min`
     : snapshot.state === 'paused' ? 'Paused' : snapshot.state === 'stopped' ? 'Not started' : current ? `Running on ${current.name}` : 'Running';
   const sessions = snapshot.walk.sessions.filter((session) => session.waiting > 0 || session.id === snapshot.walk.sessionId);
@@ -48,9 +50,9 @@ function WalkBar({ snapshot }: { snapshot: AutopilotSnapshot }) {
     <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border-primary px-4 text-[12.5px]" data-testid="autopilot-walk">
       {/* Fixed box: the dot swaps colour, never size. */}
       <span className="flex h-3 w-3 shrink-0 items-center justify-center" aria-hidden="true">
-        <span className={cn('h-2 w-2 rounded-full', snapshot.sentinel ? 'bg-autopilot' : snapshot.state === 'running' ? 'bg-status-success' : snapshot.state === 'paused' ? 'bg-status-warning' : 'bg-status-neutral')} />
+        <span className={cn('h-2 w-2 rounded-full', sentinelOn ? 'bg-autopilot' : snapshot.state === 'running' ? 'bg-status-success' : snapshot.state === 'paused' ? 'bg-status-warning' : 'bg-status-neutral')} />
       </span>
-      <span className={cn('min-w-0 truncate font-medium', snapshot.sentinel ? 'text-autopilot-on-tint' : 'text-text-primary')} data-testid="autopilot-walk-status">{status}</span>
+      <span className={cn('min-w-0 truncate font-medium', sentinelOn ? 'text-autopilot-on-tint' : 'text-text-primary')} data-testid="autopilot-walk-status">{status}</span>
       <div className="scrollbar-thin flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
         {sessions.map((session) => (
           <span key={session.id} data-testid="autopilot-walk-session"
@@ -143,7 +145,7 @@ function SentinelToggle({ snapshot, pending }: { snapshot: AutopilotSnapshot; pe
       <span className="hidden min-[1440px]:inline">Sentinel</span>
       {/* Fixed-size track: the knob moves, nothing around it does. */}
       <span className={cn('relative h-4 w-7 shrink-0 rounded-full transition-colors', snapshot.sentinel ? 'bg-autopilot' : 'bg-surface-tertiary')} aria-hidden="true">
-        <span className={cn('absolute top-0.5 h-3 w-3 rounded-full bg-surface-primary shadow transition-transform', snapshot.sentinel ? 'translate-x-3.5' : 'translate-x-0.5')} />
+        <span className={cn('absolute left-0 top-0.5 h-3 w-3 rounded-full bg-surface-primary shadow transition-transform', snapshot.sentinel ? 'translate-x-3.5' : 'translate-x-0.5')} />
       </span>
     </button>
   );
@@ -185,7 +187,7 @@ function RunMenu({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: 
             </button>
           ) : (
             <div className="rounded-lg bg-autopilot-subtle px-2.5 py-2 text-[12.5px] text-text-secondary">
-              <p>A new Autopilot Session gets a new folder and an empty stack. This one&rsquo;s documents stay in its folder.</p>
+              <p>A new Autopilot Session gets a new folder and an empty stack. This one&rsquo;s documents stay in its folder.{snapshot.state !== 'stopped' ? ` Autopilot stops${snapshot.sentinel ? ' and Sentinel turns off' : ''}; press Start to begin the new one.` : ''}</p>
               <div className="mt-2 flex gap-1.5">
                 <button type="button" disabled={pending} onClick={() => { setOpen(false); void runAutopilot('newRun'); }} data-testid="autopilot-new-run-confirm"
                   className="inline-flex h-7 items-center rounded-lg bg-interactive px-2.5 font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50">Start a new one</button>

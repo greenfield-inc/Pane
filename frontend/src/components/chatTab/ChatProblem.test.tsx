@@ -15,5 +15,7 @@ describe('ChatProblem', () => {
     expect(html).toContain('The agent exited (code 1).');
     expect(html).not.toContain('>Restart<');
     expect(html).not.toContain('>Retry<');
+    expect(html).not.toContain('Press Restart.');
+    expect(html).toContain('Press Start above to start it again.');
   });
 });
