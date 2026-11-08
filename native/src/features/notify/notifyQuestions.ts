@@ -129,7 +129,8 @@ export function revisionNote(item: NotifyItem): RevisionNote | null {
 export function optionsAnswer(item: NotifyItem, picks: readonly (string | undefined)[], typed: string): NotifyAnswer | null {
   const count = item.questions?.length ?? 1;
   const all = Array.from({ length: count }, (_, index) => picks[index] ?? '');
-  const text = typed.trim();
+  // A choice-only question ignores typed words: the host would refuse them (F-10).
+  const text = item.optionsOnly ? '' : typed.trim();
   if (text) return { picks: all, text };
   if (!all.every(Boolean)) return null;
   return item.questions ? { picks: all } : { choice: all[0] };
