@@ -284,7 +284,10 @@ happened, why, what changed, and what to do next.
    you ran, and screenshots for UI changes.
 
 CI runs typecheck, lint, a markdown link check, unit tests on Linux, macOS and
-Windows, and the Playwright smoke suite. React Doctor also comments on new React
+Windows, and the Playwright smoke suite. CI retries a failed unit test once
+(`--retry=1`; local runs never retry) and lists every retried test in the job
+summary, with a warning on each test that passed only on its retry: that test
+is flaky, so fix it. Playwright journeys are not retried. React Doctor also comments on new React
 findings in `frontend/`; it is advisory. To see its findings before you push:
 
 ```bash
