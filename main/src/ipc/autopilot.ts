@@ -128,7 +128,7 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
       items: () => notify.queue.snapshot().items,
       subscribe: (listener) => { notify.queue.on('change', listener); return () => notify.queue.off('change', listener); },
       // Pane's own question to the person (Sentinel stopped on a restart): filed under Autopilot, pushed like any other.
-      ask: (question) => notify.queue.ask({ question, source: { name: 'Autopilot', agent: 'Pane', autopilot: true } }),
+      ask: (question, signal) => notify.queue.ask({ question, source: { name: 'Autopilot', agent: 'Pane', autopilot: true } }, signal),
     },
     sessions: {
       list: () => sessionsList,

@@ -21,7 +21,7 @@ interface Fake {
   busy: Set<string>;
   queued: string[];
   resumed: string[];
-  asks: Array<{ title: string; choices: string[]; resolve: (result: NotifyResult) => void }>;
+  asks: Array<{ title: string; choices: string[]; resolve: (result: NotifyResult) => void; signal?: AbortSignal }>;
   ticks: Array<{ ms: number; run: () => void }>;
   chatListeners: Array<(panelId: string) => void>;
   timers: Array<{ ms: number; run: () => void }>;
@@ -62,7 +62,7 @@ function fake(): Fake {
     notify: {
       items: () => f.items,
       subscribe: (listener) => { f.notifyListeners.push(listener); return () => undefined; },
-      ask: (question) => new Promise<NotifyResult>(resolve => { f.asks.push({ title: question.title, choices: (question.choices ?? []).map(choice => choice.label), resolve }); }),
+      ask: (question, signal) => new Promise<NotifyResult>(resolve => { f.asks.push({ title: question.title, choices: (question.choices ?? []).map(choice => choice.label), resolve, signal }); }),
     },
     every: (ms, run) => { const tick = { ms, run }; f.ticks.push(tick); return () => { f.ticks.splice(f.ticks.indexOf(tick), 1); }; },
     after: (ms, run) => { const timer = { ms, run }; f.timers.push(timer); return () => { const at = f.timers.indexOf(timer); if (at >= 0) f.timers.splice(at, 1); }; },
@@ -547,6 +547,19 @@ describe('AutopilotManager: Sentinel (package 7)', () => {
     await settle(); await settle();
     expect(again.snapshot()).toMatchObject({ sentinel: false, state: 'stopped' });
     expect(f.asks[1]?.title).toBe('Sentinel did not start');
+  });
+
+  it('pressing Start in the app withdraws the open "Sentinel stopped" card', async () => {
+    const f = fake();
+    const manager = new AutopilotManager(f.ports);
+    await manager.setEnabled(true);
+    await manager.setSentinel(true);
+    manager.dispose();
+    const again = new AutopilotManager(f.ports);
+    await again.initialize();
+    expect(f.asks[0].signal?.aborted).toBe(false);
+    await again.start();
+    expect(f.asks[0].signal?.aborted).toBe(true);
   });
 
   it('Start pressed twice at once (the Sentinel switch, the phone) sends Start once', async () => {
