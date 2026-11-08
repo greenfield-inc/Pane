@@ -220,6 +220,20 @@ describe('demo host', () => {
     client.disconnect();
   }, 10_000);
 
+  it('reads a typed reply, then takes it as the answer, and takes the person’s fix', async () => {
+    const { client } = connectDemo();
+    await connected(client);
+    const read = async () => (await invokeChannel<NotifySharedState>(client, 'notify:remote-snapshot')).items.find(item => item.id === 'demo-q-colors');
+    await invokeChannel(client, 'notify:remote-command', [{ type: 'answer', id: 'demo-q-colors', answer: { picks: ['Design-system tokens'], text: 'Keep the brand red' } }]);
+    expect(await read()).toMatchObject({ state: 'waiting', reply: { state: 'reading', text: 'Keep the brand red', picks: ['Design-system tokens'] } });
+    await vi.waitFor(async () => {
+      expect(await read()).toMatchObject({ state: 'answered', answerSummary: '“Keep the brand red” (picked: Design-system tokens)', reply: { state: 'answer' } });
+    }, { timeout: 5_000 });
+    await invokeChannel(client, 'notify:remote-command', [{ type: 'fix-reply', id: 'demo-q-colors', as: 'question' }]);
+    expect(await read()).toMatchObject({ state: 'waiting', reply: { state: 'question', fixed: 'question' } });
+    client.disconnect();
+  }, 10_000);
+
   it('walks Autopilot: Start names the first item, answering it brings the next', async () => {
     const { client, events } = connectDemo();
     await connected(client);
