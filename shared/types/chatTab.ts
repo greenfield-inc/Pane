@@ -67,6 +67,35 @@ export interface ChatPanelState {
 export interface ChatTabSwitchResult { panelId: string; terminalKept: boolean; reason?: string }
 
 /**
+ * Why a Session's terminal tab will not switch to chat: mid-turn, a plain Codex terminal that has
+ * not reported its conversation, a launch chat cannot run, not a Claude or Codex agent, or another
+ * refusal that `reason` spells out.
+ */
+export type SessionChatSwitchSkip = 'busy' | 'plain-codex' | 'no-conversation' | 'launch' | 'not-agent' | 'other';
+
+/** One terminal tab of a Session, and whether Switch to chat will move it. */
+export interface SessionChatSwitchItem {
+  panelId: string;
+  title: string;
+  /** The Pane it is in; the Session's own tab says `Session`. */
+  paneName: string;
+  /** Present when it will not switch. */
+  skip?: { kind: SessionChatSwitchSkip; reason: string };
+}
+
+/** What switching a whole Session to chat will do, in the order it does it. */
+export interface SessionChatSwitchPreview { sessionId: string; items: SessionChatSwitchItem[] }
+
+/** What happened to one tab: `failed` passed the preview but the switch itself refused or fell back. */
+export interface SessionChatSwitchOutcome extends SessionChatSwitchItem {
+  result: 'switched' | 'skipped' | 'failed';
+  /** A switched tab whose terminal stayed open says why (ChatTabSwitchResult.reason). */
+  note?: string;
+}
+
+export interface SessionChatSwitchResult { sessionId: string; items: SessionChatSwitchOutcome[] }
+
+/**
  * A prompt waiting for the agent. With `stored`, `text` is a preview and the full
  * text and images are kept on the host beside the tab's state.
  */
