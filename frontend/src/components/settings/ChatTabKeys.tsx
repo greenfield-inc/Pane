@@ -27,7 +27,6 @@ export function ChatTabKeys() {
     } catch (cause) { setError(ipcErrorMessage(cause, 'The key was not saved.')); }
   };
   return <div className="flex w-full flex-col gap-3">
-    <p className="text-sm text-text-secondary">Claude chat uses your own Claude Code sign-in on each machine, and Codex chat your own Codex sign-in. Pane never sees or copies a login. To sign in, run <code>claude auth login</code> or <code>codex login</code> in a terminal tab on that machine.</p>
     {AGENTS.map(agent => <div key={agent.id} className="flex flex-col gap-1">
       <span className="text-xs font-medium text-text-secondary">{agent.label}{status?.[agent.id] ? ' · set on this machine' : ''}</span>
       <div className="flex gap-2">
