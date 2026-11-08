@@ -289,11 +289,19 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const focusCard = useRef(false);
   const lastSelected = useRef<{ id: string; tab: ApprovalsTab; sort: ApprovalsSort; offset: number; rounding: number } | null>(null);
   const selectedRowId = selected?.id;
+  // Each tab is its own list: it opens at its top, not at the other tab's scroll position.
+  useLayoutEffect(() => {
+    if (listSpacerRef.current) listSpacerRef.current.style.height = '0px';
+    listRef.current?.scrollTo({ top: 0 });
+  }, [tab]);
   useLayoutEffect(() => {
     const listElement = listRef.current;
     const row = listElement?.querySelector('[data-approval-selected]');
     if (!listElement || !row || !selectedRowId) {
       lastSelected.current = null;
+      // No card to focus or hold still (another tab, the item left): the count follows this list, and a pending focus lapses.
+      focusCard.current = false;
+      countAbove();
       return;
     }
     // From the top of the content, so the person's own scrolling doesn't count as a move.
@@ -322,7 +330,8 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
     countAbove();
     if (focusCard.current) {
       focusCard.current = false;
-      row.querySelector<HTMLElement>('button, input, textarea')?.focus();
+      // The card itself, not its first choice: Enter again (or a held Enter) must not answer.
+      if (row instanceof HTMLElement) row.focus();
     }
   });
 
@@ -402,7 +411,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const renderItem = (item: NotifyItem) => (
     item.id === selected?.id && item.state !== 'info'
       ? (
-        <div key={item.id} className="px-1 pb-2" data-approval-selected data-testid="approvals-selected">
+        <div key={item.id} tabIndex={-1} className="rounded-[20px] px-1 pb-2 outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle" data-approval-selected data-testid="approvals-selected">
           <SelectedItem
             item={item}
             beside={beside}
