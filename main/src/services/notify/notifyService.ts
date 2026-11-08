@@ -61,7 +61,7 @@ export interface NotifyServiceDependencies {
   /** Sends a command for a saved machine's question to that machine, under the id it knows the question by. */
   sendToMachine: (machineId: string, command: NotifyRemoteCommand) => Promise<void>;
   /** Reads a saved machine's state again, after it refused or missed a command. */
-  refreshMachine: (machineId: string) => void;
+  refreshMachine: (machineId: string) => Promise<void>;
   /** The phone alert: sent about 90 s after a question starts ringing if it's still waiting, cleared when it stops (D-144). */
   onQuestion?: (event: { item: NotifyItem; open: boolean }) => void;
   /** WSL distros Pane runs agents in (its WSL projects'), whose homes get the instructions too. */
@@ -326,7 +326,7 @@ export class NotifyService {
     try {
       await this.deps.sendToMachine(target.machineId, { ...sent, id: target.id, machine: this.deps.machine });
     } catch (error) {
-      this.deps.refreshMachine(target.machineId);
+      void this.deps.refreshMachine(target.machineId);
       const code = error instanceof Error && 'code' in error ? String(error.code) : '';
       if (code.startsWith('ERR_NOTIFY') || code.startsWith('AUTOPILOT') || UNREACHABLE_CODES.has(code)) throw error;
       // A machine too old for these commands refuses them when it decodes them.
@@ -389,7 +389,7 @@ export class NotifyService {
       try {
         await this.deps.sendToMachine(target.machineId, { ...command, id: target.id });
       } finally {
-        this.deps.refreshMachine(target.machineId);
+        void this.deps.refreshMachine(target.machineId);
       }
       return;
     }
@@ -427,7 +427,11 @@ export class NotifyService {
     }
     try {
       await this.deps.sendToMachine(target.machineId, machineCommand);
-      if (command.type === 'answer') this.queue.endSendingHere(command.id, true);
+      if (command.type === 'answer') {
+        this.queue.endSendingHere(command.id, true);
+        // Its reply can land before its new state, which may never come if the stream dropped: read it.
+        void this.deps.refreshMachine(target.machineId);
+      }
     } catch (error) {
       if (command.type === 'answer') this.queue.endSendingHere(command.id, false);
       const code = error instanceof Error && 'code' in error ? String(error.code) : '';
@@ -435,7 +439,7 @@ export class NotifyService {
       // The cards say so until a read of the machine succeeds: now, if the link is back, or on reconnect.
       if (UNREACHABLE_CODES.has(code)) this.queue.setRemote(target.machineId, { machine: target.machine, online: false });
       // Refused (another screen got there first, or the hold ended): the machine's state says how.
-      this.deps.refreshMachine(target.machineId);
+      void this.deps.refreshMachine(target.machineId);
       if (command.type === 'answer') {
         throw UNREACHABLE_CODES.has(code)
           ? new PaneError('ERR_APPROVALS_MACHINE_OFFLINE', `Not sent: ${target.machine} went offline, so your answer didn't reach it.`, `Answer again when ${target.machine} is back.`)

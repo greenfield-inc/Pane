@@ -204,8 +204,11 @@ export class NotifyQueue extends EventEmitter {
   private readonly answeredHere = new Set<string>();
   /** Other machines' questions reminded "when I switch to Pane", by key: hidden on this screen only. */
   private readonly remindedHere = new Set<string>();
-  /** Other machines' questions this screen is answering right now, by key: "Sent to" until the machine replies. */
-  private readonly sendingHere = new Set<string>();
+  /**
+   * Other machines' questions answered from here that the machine hasn't shown as answered yet, by key:
+   * the card reads "Sent to" meanwhile. `epoch` and `revision` are the machine's state when the answer left.
+   */
+  private readonly sendingHere = new Map<string, { epoch: string; revision: number; delivered: boolean }>();
   private importError: { code: string; message: string; next: string } | undefined;
   private quitting = false;
   private tabMessages: TabMessage[] = [];
@@ -911,17 +914,26 @@ export class NotifyQueue extends EventEmitter {
 
   /** This screen is sending (or failed to send) an answer for another machine's question; its card reads "Sent to". */
   startSendingHere(key: string): void {
-    this.sendingHere.add(key);
+    const machineId = this.remoteTarget(key)?.machineId;
+    const remote = machineId ? this.remotes.get(machineId) : undefined;
+    this.sendingHere.set(key, { epoch: remote?.epoch ?? '', revision: remote?.revision ?? 0, delivered: false });
     this.answeredHere.add(key);
     // As a local answer does: the strip says "Sent" now, not when the machine's next state arrives.
     this.setTransient({ kind: 'sent', itemId: key }, NOTIFY_UNDO_MS);
     this.changed();
   }
 
-  /** The machine replied: from here on its own state drives the card. A refused or lost send leaves the card waiting. */
+  /**
+   * The machine replied. Delivered, the card keeps reading "Sent to" until the machine's state says
+   * so (its reply can land before its new state); refused or lost, the card is waiting again.
+   */
   endSendingHere(key: string, delivered: boolean): void {
-    this.sendingHere.delete(key);
-    if (!delivered) {
+    const hold = this.sendingHere.get(key);
+    if (delivered) {
+      if (hold) hold.delivered = true;
+      if (this.find(key)?.state !== 'waiting') this.sendingHere.delete(key);
+    } else {
+      this.sendingHere.delete(key);
       this.answeredHere.delete(key);
       if (this.transient?.view.itemId === key) this.clearTransient();
     }
@@ -1029,6 +1041,11 @@ export class NotifyQueue extends EventEmitter {
     }
     const ours = (id: string) => id.startsWith(`${machineId}:`);
     for (const id of [...this.answeredHere]) if (ours(id) && (!items.has(id) || !isOpen(items.get(id)!))) this.answeredHere.delete(id);
+    // The machine's state speaks for the card once it has moved it on (held, answered, gone), or shows
+    // it waiting at a newer revision after taking the answer (undone there, or the machine restarted).
+    for (const [id, hold] of [...this.sendingHere]) {
+      if (ours(id) && (items.get(id)?.state !== 'waiting' || (hold.delivered && (state.epoch !== hold.epoch || state.revision > hold.revision)))) this.sendingHere.delete(id);
+    }
     for (const id of [...this.remindedHere]) if (ours(id) && !queue.includes(id)) this.remindedHere.delete(id);
     if (this.transient && previous?.items.has(this.transient.view.itemId) && !items.has(this.transient.view.itemId)) this.clearTransient();
     this.changed();

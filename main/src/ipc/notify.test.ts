@@ -235,6 +235,21 @@ describe('Notify across machines, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it("keeps another machine's card on Sent to when the machine replies before it publishes its new state", async () => {
+    const pane = await startPane();
+    const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000), question('q-2', 'And this?', 2_000)) });
+    followSavedMachines(saved.machines);
+    await flush();
+    // The reply is in; the machine's new state hasn't arrived (it publishes a moment later, or the stream dropped).
+    await pane.notify.run({ type: 'answer', id: 'studio:q-1', answer: { approved: true } });
+    await flush();
+    expect(pane.notify.snapshot().items.find(item => item.id === 'studio:q-1')?.state).toBe('sent');
+    expect(pane.notify.snapshot().queue).toEqual(['studio:q-2']);
+    await pane.notify.run({ type: 'answer', id: 'studio:q-1', answer: { approved: false } });
+    expect(saved.sent).toHaveLength(1);
+    pane.notify.dispose();
+  });
+
   it('takes a second answer once the machine has the card waiting again, even when this screen missed its Sent state', async () => {
     const pane = await startPane();
     const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)) });
