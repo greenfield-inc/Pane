@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { chmodSync, mkdtempSync, rmSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +7,8 @@ import type { ToolPanel } from '../../../../shared/types/panels';
 import { applyChatTabEvent, type ChatPanelState, type ChatTabEvent, type ChatTabView } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
 import type { PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
-import { ChatTabManager, type ChatTabLauncher, type ChatTabStore } from './manager';
+import { ChatTabManager, type ChatTabLauncher, type ChatTabManagerOptions, type ChatTabStore } from './manager';
+import { ChatTabNotifyBridge } from './notifyBridge';
 
 const AGENT = path.join(__dirname, 'testing', 'scriptedAgent.mjs');
 const cleanup: Array<() => Promise<void> | void> = [];
@@ -35,13 +36,13 @@ class CeilingStore extends MemoryStore {
   }
 }
 
-function harness(store = new MemoryStore(), env: NodeJS.ProcessEnv = {}, directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-manager-'))) {
+function harness(store = new MemoryStore(), env: NodeJS.ProcessEnv = {}, directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-manager-')), options: Partial<ChatTabManagerOptions> = {}) {
   cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
   const sent: Array<{ channel: string; payload: ChatTabEvent | ChatTabView | PanelAgentStatusEvent }> = [];
   const launcher: ChatTabLauncher = {
     resolve: async () => ({ command: { executable: process.execPath, args: [AGENT], cwd: directory, env: { ...process.env, SCRIPTED_AGENT_STORE: path.join(directory, 'agent'), PANE_TEST_TOKEN: 'secret-token-value', ...env } } }),
   };
-  const manager = new ChatTabManager({ store, launcher, send: (channel, payload) => sent.push({ channel, payload }), spoolDirectory: path.join(directory, 'spool') });
+  const manager = new ChatTabManager({ store, launcher, send: (channel, payload) => sent.push({ channel, payload }), spoolDirectory: path.join(directory, 'spool'), ...options });
   cleanup.push(() => manager.stopAll());
   // SAFETY: the manager sends a ChatTabView on chat-tab:state and a ChatTabEvent on chat-tab:event.
   const states = () => sent.filter(entry => entry.channel === 'chat-tab:state').map(entry => entry.payload as ChatTabView);
@@ -126,6 +127,8 @@ describe('chat tab manager', () => {
     await manager.cancel('p1');
     await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 5000 }).toBe('completed');
     expect(replyText(manager.view('p1'))).toContain('You said: second');
+    const turnEnds = manager.view('p1').transcript!.messages.flatMap(message => message.parts.flatMap(part => part.type === 'content' && JSON.stringify(part.content).includes('pane_turn') ? [JSON.parse(JSON.stringify(part.content)).stopReason] : []));
+    expect(turnEnds).toEqual(['end_turn', 'cancelled', 'end_turn']);
   });
 
   it('comes back after Pane quits with its history, marks the interrupted turn and continues the same conversation', async () => {
@@ -328,6 +331,70 @@ describe('chat tab manager', () => {
     expect(manager.isRunning('p1')).toBe(false);
     await expect.poll(() => { try { process.kill(pid, 0); return true; } catch { return false; } }).toBe(false);
     await starting;
+    expect(manager.isRunning('p1')).toBe(false);
+  });
+
+  it('quits without waiting for a tab whose agent never answers the load (review F-28)', async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_HANG_LOAD: '1' });
+    store.add('p1', { ...newTab(directory), acpSessionId: 'never-answers' });
+    const starting = manager.ensure('p1').catch(error => error);
+    await expect.poll(() => manager.processId('p1')).toBeTruthy();
+    const pid = manager.processId('p1')!;
+    const started = Date.now();
+    await manager.stopAll();
+    expect(Date.now() - started).toBeLessThan(5000);
+    await expect.poll(() => { try { process.kill(pid, 0); return true; } catch { return false; } }).toBe(false);
+    await starting;
+    expect(manager.isRunning('p1')).toBe(false);
+  });
+
+  it('closes a tab whose launch never resolves, after a capped wait', async () => {
+    const store = new MemoryStore();
+    const directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-manager-'));
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
+    const manager = new ChatTabManager({ store, send: () => undefined, spoolDirectory: directory, stopTimeoutMs: 100, launcher: { resolve: () => new Promise(() => undefined) } });
+    store.add('p1', newTab(directory));
+    void manager.ensure('p1');
+    const started = Date.now();
+    await manager.close('p1');
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('closes the tab\'s approval in Notify when the tab is closed (review F-29)', async () => {
+    const settled: Array<[string, string]> = [];
+    const bridge = new ChatTabNotifyBridge({
+      queue: { ask: () => new Promise(() => undefined), settle: (id, summary) => settled.push([id, summary]) },
+      enabled: () => true, source: () => ({ name: 'pane', agent: 'Claude' }), answerPermission: () => undefined, answerQuestion: () => undefined,
+    });
+    const { manager, store, directory } = harness(new MemoryStore(), {}, undefined, { onView: view => bridge.observe(view), onClosed: panelId => bridge.forget(panelId) });
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'permission' });
+    await expect.poll(() => manager.view('p1').permissions.length).toBe(1);
+    const [permission] = manager.view('p1').permissions;
+    await manager.close('p1');
+    expect(settled).toEqual([[`chat:p1:${permission.id}`, 'The chat tab closed']]);
+  });
+
+  it('stops with Restart when its chat-tabs folder cannot be created (review F-33)', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-manager-'));
+    // A file where the folder should be: creating anything under it fails.
+    writeFileSync(path.join(directory, 'spool'), '');
+    const { manager, store } = harness(new MemoryStore(), {}, directory);
+    store.add('p1', newTab(directory));
+    await expect(manager.ensure('p1')).rejects.toBeDefined();
+    expect(manager.view('p1')).toMatchObject({ status: 'stopped', problem: { action: 'restart' } });
+  });
+
+  it('closes a tab whose transcript spool cannot be deleted (review F-33)', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    // A folder in the spool file's place cannot be removed as a file, as a file another process holds open on Windows cannot.
+    mkdirSync(path.join(directory, 'spool', createHash('sha256').update('p1').digest('hex').slice(0, 32), 'transcript.jsonl'), { recursive: true });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await expect(manager.close('p1')).resolves.toBeUndefined();
+    warn.mockRestore();
     expect(manager.isRunning('p1')).toBe(false);
   });
 

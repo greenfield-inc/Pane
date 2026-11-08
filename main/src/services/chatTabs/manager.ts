@@ -47,7 +47,11 @@ export interface ChatTabManagerOptions {
   onStatus?: (event: PanelAgentStatusEvent) => void;
   /** Every view the host publishes (approvals and questions for Notify). */
   onView?: (view: ChatTabView) => void;
+  /** The tab was closed; nothing about it is published again (its Notify cards close). */
+  onClosed?: (panelId: string) => void;
   windowMessages?: number;
+  /** How long closing, stopping or quitting waits for a tab's agent to end. Default 5 s. */
+  stopTimeoutMs?: number;
 }
 
 interface Tab {
@@ -130,7 +134,13 @@ export class ChatTabManager {
     const tab = this.tab(panelId);
     if (tab.runtime?.isAlive()) return Promise.resolve();
     // Publish after the start settles: while it runs, every view says `starting`.
-    tab.starting ??= this.start(panelId, tab).finally(() => { tab.starting = undefined; this.publish(panelId); this.drain(panelId); });
+    tab.starting ??= this.start(panelId, tab).finally(() => {
+      tab.starting = undefined;
+      // A tab closed while it started is gone; nothing is published for it.
+      if (this.tabs.get(panelId) !== tab) return;
+      this.publish(panelId);
+      this.drain(panelId);
+    });
     return tab.starting;
   }
 
@@ -223,15 +233,11 @@ export class ChatTabManager {
   async close(panelId: string): Promise<void> {
     const tab = this.tabs.get(panelId);
     if (!tab) return;
-    // Stop the agent first: a start waiting on an agent that never answers settles once it is gone.
-    const starting = tab.starting;
-    await this.release(tab);
-    await starting?.catch(() => undefined);
-    // A start that was still resolving its launch may have started a runtime after the release.
-    await this.release(tab);
+    await this.end(tab);
     tab.transcript?.dispose();
     this.bodies.clear(panelId);
     this.tabs.delete(panelId);
+    this.options.onClosed?.(panelId);
   }
 
   /**
@@ -241,16 +247,13 @@ export class ChatTabManager {
   async stop(panelId: string, reason: { message: string; next: string }): Promise<void> {
     this.required(panelId);
     const tab = this.tabs.get(panelId);
-    if (tab) {
-      await tab.starting?.catch(() => undefined);
-      await this.release(tab);
-    }
+    if (tab) await this.end(tab);
     this.stopWith(panelId, { code: 'exited', message: reason.message, next: reason.next });
   }
 
   /** Pane is quitting: end every agent. Saved state is left as it was, so each tab comes back on the next launch. */
   async stopAll(): Promise<void> {
-    await Promise.allSettled([...this.tabs.values()].map(async tab => { await tab.starting?.catch(() => undefined); await this.release(tab); }));
+    await Promise.allSettled([...this.tabs.values()].map(tab => this.end(tab)));
   }
 
   async stopSession(sessionId: string): Promise<void> {
@@ -262,13 +265,16 @@ export class ChatTabManager {
     if (!panel) throw new PaneError('CHAT_PANEL_MISSING', 'This chat tab no longer exists.', 'Open another chat tab.');
     tab.generation = tab.run = this.lastGeneration = Math.max(Date.now(), this.lastGeneration + 1);
     tab.transcript?.dispose();
-    tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages });
+    tab.transcript = undefined;
     tab.notice = undefined;
     const generation = tab.generation;
     this.update(panelId, state => ({ ...state, status: 'starting', problem: undefined }));
     this.publish(panelId);
     let launch: ResolvedLaunch;
+    let transcript: ChatTranscript;
     try {
+      // Inside the try: a chat-tabs folder that cannot be written leaves the tab stopped with Restart, not starting.
+      transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages });
       launch = await this.options.launcher.resolve(panel, this.required(panelId));
     } catch (error) {
       const failure = chatFailure(error, { code: 'CHAT_LAUNCH_FAILED', next: 'Press Restart.' });
@@ -278,7 +284,6 @@ export class ChatTabManager {
     // Closed or restarted while the launch resolved: start nothing.
     if (tab.run !== generation) return;
     tab.launch = launch;
-    const transcript = tab.transcript;
     const runtime = new ChatTabRuntime({
       command: launch.command,
       generation,
@@ -321,6 +326,8 @@ export class ChatTabManager {
           receipts: current.receipts?.map(receipt => receipt.operationId === interrupted.operationId && receipt.state === 'accepted' ? { ...receipt, state: 'failed', error: 'Pane closed before the turn finished.' } : receipt),
         }));
       }
+      // Closed or stopped while starting: the tab stays as that left it.
+      if (tab.run !== generation) return;
       const { notice } = this.required(panelId);
       if (notice) tab.notice = notice;
       this.update(panelId, current => ({ ...current, status: 'idle', notice: undefined }));
@@ -441,6 +448,23 @@ export class ChatTabManager {
     if (!this.options.store.state(panelId)) return;
     this.update(panelId, state => ({ ...state, status: 'stopped', problem, turn: undefined }));
     this.publish(panelId);
+  }
+
+  /**
+   * Ends the tab's agent without waiting for a start to finish: the release makes the
+   * start give up, and the wait for it and the agent is capped so a hung adapter cannot hold up a quit.
+   */
+  private async end(tab: Tab): Promise<void> {
+    const starting = tab.starting;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ending = (async () => {
+      await this.release(tab);
+      await starting?.catch(() => undefined);
+      // A restart racing this may have started another runtime meanwhile.
+      await this.release(tab);
+    })();
+    await Promise.race([ending, new Promise<void>(resolve => { timer = setTimeout(resolve, this.options.stopTimeoutMs ?? 5000); })]);
+    clearTimeout(timer);
   }
 
   private async release(tab: Tab): Promise<void> {
