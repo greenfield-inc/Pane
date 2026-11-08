@@ -67,7 +67,8 @@ describe.skipIf(process.platform === 'win32')('switching a teammate\'s terminal 
     const opened = await registry.invokeRemote('panels:create', [{ sessionId, type: 'terminal', title: 'Claude', activate: false, initialState: { customState: { agentType: 'claude', agentSessionId: 'conv-1', launchCommand: 'claude' } } }], { teammate: 'bob' });
     // SAFETY: panels:create answers { success, data: ToolPanel }.
     const terminalId = (opened as { data: ToolPanel }).data.id;
-    await expect(registry.invoke('chat-tab:switch', [terminalId])).rejects.toMatchObject({ code: 'CHAT_SWITCH_FAILED' });
+    // The terminal never ran, so Pane is not sure of its conversation: the chat fails and the terminal stays stopped.
+    await expect(registry.invoke('chat-tab:switch', [terminalId])).rejects.toMatchObject({ code: 'CHAT_SWITCH_NOT_STARTED' });
 
     const chat = created.find(panel => panel.type === 'chat');
     expect(chat?.metadata.teammate).toBe('bob');

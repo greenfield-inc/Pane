@@ -9,6 +9,8 @@ import { ChatTabManager, type ChatTabLauncher, type ChatTabStore } from './manag
 import { AgentChatLauncher, chatTabEnv, type ChatLaunchContext, type ChatProfileResolver } from './launch';
 import { chatTabSecrets } from './secrets';
 import { decodeChatPanelState } from './state';
+import { databaseService } from '../database';
+import type { TerminalPanelState, ToolPanel } from '../../../../shared/types/panels';
 import type { ChatTabNotifyBridge } from './notifyBridge';
 
 /** Chat tab state lives in the panel's custom state; only the host writes it. */
@@ -20,6 +22,31 @@ const store: ChatTabStore = {
   },
   commit: (panelId, state) => panelManager.commitChatTab(panelId, state),
 };
+
+/**
+ * Conversations open in Pane tabs on this machine other than `panelId` and the terminal it replaced
+ * (D-282): every chat tab's saved conversation, and every Claude or Codex terminal tab's, running or
+ * not, since a terminal resumes its conversation when it starts again.
+ */
+function openConversations(panelId: string): Map<string, { panelId: string; title: string }> {
+  const replaced = panelManager.getPanel(panelId)?.metadata.replacesPanelId;
+  const open = new Map<string, { panelId: string; title: string }>();
+  for (const row of databaseService.getActivePanels()) {
+    if (row.id === panelId || row.id === replaced) continue;
+    const panel = panelManager.getPanel(row.id) ?? row;
+    const id = conversationOf(panel);
+    if (id && !open.has(id)) open.set(id, { panelId: panel.id, title: panel.title });
+  }
+  return open;
+}
+
+function conversationOf(panel: ToolPanel): string | undefined {
+  if (panel.type === 'chat') return decodeChatPanelState(panel.state.customState)?.acpSessionId;
+  if (panel.type !== 'terminal') return undefined;
+  // SAFETY: terminal panels persist TerminalPanelState as their custom state.
+  const state = (panel.state.customState ?? {}) as TerminalPanelState;
+  return state.agentType === 'claude' || state.agentType === 'codex' ? state.agentSessionId : undefined;
+}
 
 let manager: ChatTabManager | undefined;
 let context: ChatLaunchContext = { unsupportedHost: () => undefined, projectEnv: async () => ({ env: {}, warnings: [] }) };
@@ -70,6 +97,7 @@ export function getChatTabManager(): ChatTabManager {
     onStatus: event => terminalPanelManager.emit('agent-status', event),
     onView: view => notifyBridge?.observe(view),
     onClosed: panelId => notifyBridge?.forget(panelId),
+    openConversations,
   });
   return manager;
 }

@@ -36,6 +36,12 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
   sessionFolder: boundary.optional(boundary.string),
   autopilotRunId: boundary.optional(boundary.string),
   agentReport: boundary.optional(report),
+  notice: boundary.optional(boundary.string),
+  open: boundary.optional(boundary.literal('most-recent')),
+  banner: boundary.optional(boundary.union(
+    boundary.object({ kind: boundary.enumeration('most-recent', 'none', 'known-empty') }),
+    boundary.object({ kind: boundary.literal('list-failed'), reason: boundary.string }),
+  )),
 });
 
 /** A chat panel's saved state, or undefined when the row does not hold one. */
