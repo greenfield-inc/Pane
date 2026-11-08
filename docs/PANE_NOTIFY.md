@@ -333,6 +333,7 @@ so older items simply have none.
 | Updated | "Updated · ready again": your question quoted ("You asked"), What changed and by whom, choices marked NEW, REWORDED (the old label struck) or REMOVED, and a collapsed **Earlier version** |
 | No reader | "No agent can read replies right now. You can still pick an option." |
 | A chat tab's built-in question | "Sent to <agent>": the typed reply is its answer, so there is no fix |
+| A chat tab's built-in question that takes only its choices | No reply box: pick one of its options |
 | Answered | Answered |
 
 The fix is one click. **It was a question** sends the reader `correction: Q-n →
