@@ -215,6 +215,21 @@ describe('Notify across machines, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it("counts a saved machine's questions as not read yet while it has been offline since launch", async () => {
+    const pane = await startPane();
+    const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)) }, 'offline');
+    followSavedMachines(saved.machines);
+    await flush();
+    expect(pane.notify.queue.notReadYet('studio:q-1')).toBe(true);
+    expect(pane.notify.queue.notReadYet('q-1')).toBe(false);
+
+    saved.setStatus('studio', 'online');
+    await flush();
+    expect(pane.notify.snapshot().items.map(item => item.id)).toEqual(['studio:q-1']);
+    expect(pane.notify.queue.notReadYet('studio:q-2')).toBe(false);
+    pane.notify.dispose();
+  });
+
   it("keeps an offline machine's question, dimmed and unanswerable, until it answers again", async () => {
     const pane = await startPane();
     const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)) });

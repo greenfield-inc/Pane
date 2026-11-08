@@ -202,6 +202,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly answeredHere = new Set<string>();
   /** Other machines' questions reminded "when I switch to Pane", by key: hidden on this screen only. */
   private readonly remindedHere = new Set<string>();
+  /** Saved machines whose questions this screen hasn't read since launch: their cards aren't gone, just not here yet. */
+  private readonly unreadMachines = new Set<string>();
   private importError: { code: string; message: string; next: string } | undefined;
   private quitting = false;
   private tabMessages: TabMessage[] = [];
@@ -937,10 +939,22 @@ export class NotifyQueue extends EventEmitter {
    * machine's own questions: a chime, an update on the strip, a "Sent to" or "Answered on" hold,
    * an expiry.
    */
+  /** A saved machine this screen will read; until it does, its cards count as not read yet. */
+  expectRemote(machineId: string): void {
+    if (!this.remotes.has(machineId)) this.unreadMachines.add(machineId);
+  }
+
+  /** Another machine's card this screen can't see yet: that machine is saved, but its questions haven't been read since launch. */
+  notReadYet(key: string): boolean {
+    for (const machineId of this.unreadMachines) if (key.startsWith(`${machineId}:`)) return true;
+    return false;
+  }
+
   setRemote(machineId: string, next: NotifyRemoteUpdate | null): void {
     const previous = this.remotes.get(machineId) ?? null;
     // A saved machine that is this computer (the same running Pane): its cards already show once.
     if (next?.state?.epoch === this.epoch) next = null;
+    if (!next || next.state) this.unreadMachines.delete(machineId);
     if (!next) {
       if (!previous) return;
       if (this.transient && previous.items.has(this.transient.view.itemId)) this.clearTransient();

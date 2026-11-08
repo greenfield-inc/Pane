@@ -81,6 +81,8 @@ export interface AutopilotPorts {
   notify: {
     /** Every item the Approvals snapshot holds (this machine's and saved machines'). */
     items(): NotifyItem[];
+    /** An item of a saved machine whose questions haven't been read since launch (offline, say): missing, not gone. */
+    notReadYet(id: string): boolean;
     subscribe(listener: () => void): () => void;
     /** Asks the person through Notify (so it reaches their phone as a push); resolves with their answer. Aborting withdraws the card. */
     ask(question: NotifyQuestion, signal?: AbortSignal): Promise<NotifyResult>;
@@ -605,7 +607,8 @@ export class AutopilotManager extends EventEmitter {
       if (entry.doneAt !== undefined || entry.ref.kind !== 'item') return [];
       const item = open.get(entry.ref.notifyId);
       // Gone from the snapshot, answered, or expired: the person is done with it. A held answer (`sent`) stays until Undo passes.
-      return !item || item.state === 'answered' || item.state === 'expired' ? [entry.id] : [];
+      if (!item) return this.ports.notify.notReadYet(entry.ref.notifyId) ? [] : [entry.id];
+      return item.state === 'answered' || item.state === 'expired' ? [entry.id] : [];
     }));
     if (resolved.size > 0) {
       this.stack = resolveEntries(this.stack, resolved, this.now());

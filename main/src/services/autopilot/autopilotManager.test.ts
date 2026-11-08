@@ -16,6 +16,8 @@ interface Fake {
   running: Set<string>;
   sent: Array<{ panelId: string; text: string }>;
   items: NotifyItem[];
+  /** Item ids whose machine hasn't been read since launch. */
+  notReadYet: Set<string>;
   sessions: AutopilotSessionInfo[];
   notifyListeners: Array<() => void>;
   busy: Set<string>;
@@ -32,7 +34,7 @@ let root: string;
 
 function fake(): Fake {
   const f: Fake = {
-    enabled: false, chatTabs: true, owners: new Map(), tabs: new Map(), running: new Set(), sent: [], items: [], sessions: [], notifyListeners: [], busy: new Set(), queued: [], resumed: [], asks: [], ticks: [], chatListeners: [], timers: [], watchers: new Map(),
+    enabled: false, chatTabs: true, owners: new Map(), tabs: new Map(), running: new Set(), sent: [], items: [], notReadYet: new Set(), sessions: [], notifyListeners: [], busy: new Set(), queued: [], resumed: [], asks: [], ticks: [], chatListeners: [], timers: [], watchers: new Map(),
     // SAFETY: the ports close over `f` and are assigned on the next statement, before any use.
     ports: undefined as never,
   };
@@ -61,6 +63,7 @@ function fake(): Fake {
     },
     notify: {
       items: () => f.items,
+      notReadYet: (id) => f.notReadYet.has(id),
       subscribe: (listener) => { f.notifyListeners.push(listener); return () => undefined; },
       ask: (question, signal) => new Promise<NotifyResult>(resolve => { f.asks.push({ title: question.title, choices: (question.choices ?? []).map(choice => choice.label), resolve, signal }); }),
     },
@@ -264,6 +267,28 @@ describe('AutopilotManager: stack and waiting', () => {
     f.notifyListeners.forEach(listener => listener());
     expect(manager.snapshot().stack.shownId).not.toBe(first);
     expect(manager.snapshot().stack.entries.find(entry => entry.id === first)?.doneAt).toBe(1_000_000);
+  });
+
+  it("keeps an offline machine's item on the stack after a restart, and closes it once that machine's list has it gone", async () => {
+    const f = fake();
+    f.items = [item('studio:q1', { machineId: 'studio' })];
+    const manager = new AutopilotManager(f.ports);
+    await manager.setEnabled(true);
+    await manager.start();
+    manager.pushToStack({ item: 'studio:q1' });
+    manager.dispose();
+    // Restarted while the studio is still offline: its questions aren't here yet.
+    f.items = [];
+    f.notReadYet.add('studio:q1');
+    f.notifyListeners.length = 0;
+    const again = new AutopilotManager(f.ports);
+    await again.initialize();
+    f.notifyListeners.forEach(listener => listener());
+    expect(again.snapshot().stack.entries.map(entry => entry.doneAt)).toEqual([undefined]);
+    // The studio is back and no longer lists the question: it was answered there.
+    f.notReadYet.clear();
+    f.notifyListeners.forEach(listener => listener());
+    expect(again.snapshot().stack.entries.map(entry => entry.doneAt)).toEqual([1_000_000]);
   });
 
   it('says which entry each push made or refreshed, even with another Session or a same-named file on the stack (F-1)', async () => {
