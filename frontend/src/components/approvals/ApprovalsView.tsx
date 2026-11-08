@@ -61,13 +61,14 @@ function GroupHeader({ group, mark }: { group: ApprovalGroup; mark: ReactNode })
   );
 }
 
-function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; now: number; selected?: boolean; onSelect: () => void }) {
+function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; now: number; selected?: boolean; onSelect: (fromKeyboard: boolean) => void }) {
   const done = item.state === 'answered' || item.state === 'expired' || item.state === 'info';
   const { acted, origin } = approvalRowLines(item);
   return (
     <button
       type="button"
-      onClick={onSelect}
+      // Enter or Space reports no clicks (detail 0): the card that replaces this row takes the focus.
+      onClick={(event) => onSelect(event.detail === 0)}
       aria-current={selected || undefined}
       data-approval-selected={selected || undefined}
       data-testid="approvals-row"
@@ -284,6 +285,8 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   // person is reading it. Changing the tab, the sort or the selection moves it on purpose.
   const listRef = useRef<HTMLDivElement>(null);
   const listSpacerRef = useRef<HTMLDivElement>(null);
+  // A row picked with the keyboard: its card takes the focus once it renders.
+  const focusCard = useRef(false);
   const lastSelected = useRef<{ id: string; tab: ApprovalsTab; sort: ApprovalsSort; offset: number; rounding: number } | null>(null);
   const selectedRowId = selected?.id;
   useLayoutEffect(() => {
@@ -317,6 +320,10 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
     }
     lastSelected.current = { id: selectedRowId, tab, sort, offset, rounding };
     countAbove();
+    if (focusCard.current) {
+      focusCard.current = false;
+      row.querySelector<HTMLElement>('button, input, textarea')?.focus();
+    }
   });
 
   // Holding the selected card still can carry newer rows out of view above it: say so, one click from the top.
@@ -405,7 +412,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
           />
         </div>
       )
-      : <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} onSelect={() => selectApproval(item.id)} />
+      : <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} onSelect={(fromKeyboard) => { focusCard.current = fromKeyboard; selectApproval(item.id); }} />
   );
   const chooseSort = (next: ApprovalsSort) => {
     setSort(next);
