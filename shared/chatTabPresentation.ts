@@ -125,7 +125,18 @@ function outputText(output: JsonValue | undefined, content: JsonValue[] | undefi
   return parts.length ? parts.join('\n') : undefined;
 }
 
-export function toStep(part: Extract<AgentChatPart, { type: 'tool' }>): ChatStep {
+type ToolPart = Extract<AgentChatPart, { type: 'tool' }>;
+
+/** Steps by the part they came from: a part that kept its identity is not parsed again (its diff line counts are the costly part). */
+const builtSteps = new WeakMap<ToolPart, ChatStep>();
+
+function cachedStep(part: ToolPart): ChatStep {
+  let step = builtSteps.get(part);
+  if (!step) { step = toStep(part); builtSteps.set(part, step); }
+  return step;
+}
+
+function toStep(part: ToolPart): ChatStep {
   const kind = stepKind(part.kind);
   const step: ChatStep = { id: part.id, kind, title: part.title, status: part.status };
   const input = decodeOptionalBoundary(part.input, commandInput);
@@ -217,7 +228,7 @@ export function chatTurns(messages: readonly AgentChatMessage[], options: { runn
       const current: ChatTurn = turn && !turn.endedAt ? turn : open(`turn:start:${message.id}`, message, index);
       const used = sources.at(-1)!.messages;
       if (used.at(-1) !== message) used.push(message);
-      if (part.type === 'tool') { pending.push(toStep(part)); continue; }
+      if (part.type === 'tool') { pending.push(cachedStep(part)); continue; }
       if (end) { flush(); current.startedAt = end.startedAt; current.endedAt = end.endedAt; current.stopReason = end.stopReason; continue; }
       flush();
       if (part.type === 'text' || part.type === 'thought') {
@@ -327,7 +338,7 @@ export function currentActivity(turn: ChatTurn, waiting: ReadonlySet<string> = n
 }
 
 /** The fold row's words: "Worked for 27s", or what the turn is doing while it runs. */
-export function turnSummary(turn: ChatTurn, waiting?: ReadonlySet<string>): string {
+function turnSummary(turn: ChatTurn, waiting?: ReadonlySet<string>): string {
   if (turn.running) return currentActivity(turn, waiting);
   const duration = turn.startedAt && turn.endedAt ? formatDuration(Date.parse(turn.endedAt) - Date.parse(turn.startedAt)) : undefined;
   if (duration) return `Worked for ${duration}`;
@@ -422,7 +433,7 @@ export function messageTime(iso: string | undefined, now = new Date(), locale?: 
 }
 
 /** The footer of the latest finished turn: "Worked for 27s · 2:04 PM", or the time alone with no activity. */
-export function turnFooter(turn: ChatTurn, hasActivity: boolean, now?: Date, locale?: string): string | undefined {
+function turnFooter(turn: ChatTurn, hasActivity: boolean, now?: Date, locale?: string): string | undefined {
   const time = messageTime(turn.endedAt, now, locale);
   if (turn.running || !time) return hasActivity ? turnSummary(turn) : undefined;
   return hasActivity ? `${turnSummary(turn)} · ${time.short}` : time.short;

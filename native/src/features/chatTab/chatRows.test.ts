@@ -80,6 +80,22 @@ describe('phone chat rows', () => {
   });
 });
 
+describe('streaming', () => {
+  it('keeps a finished turn\'s row objects while the latest turn streams, and rebuilds them when it opens', () => {
+    const next: AgentChatMessage[] = [...messages, { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'Push them' }] }];
+    const open = new Set<string>();
+    const before = chatRows(chatTurns([...next, { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'Push' }] }], { running: true }), { open });
+    const turns = chatTurns([...next, { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'Pushing.' }] }], { running: true });
+    const after = chatRows(turns, { open });
+    // The finished turn's rows: its message, fold, reply and copy row.
+    expect(after.slice(0, 4).map(row => row.kind)).toEqual(['user', 'fold', 'text', 'copy']);
+    after.slice(0, 4).forEach((row, index) => expect(row).toBe(before[index]));
+    expect(after.find(row => row.key === 'a2:0')).toMatchObject({ kind: 'text', text: 'Pushing.' });
+    const opened = chatRows(turns, { open: new Set([turns[0].id]) });
+    expect(opened[1]).toMatchObject({ kind: 'fold', open: true });
+  });
+});
+
 describe('hidden lines', () => {
   it('drops a person\'s line whose notice is empty (Pane\'s own wake-ups)', () => {
     const messages: AgentChatMessage[] = [

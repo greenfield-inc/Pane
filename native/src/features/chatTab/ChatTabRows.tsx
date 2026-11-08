@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
 import { useMarkdown } from 'react-native-marked';
@@ -138,7 +138,8 @@ function WorkerNoteRow({ note, onOpen }: { note: WorkerNote; onOpen?: (paneId: s
   </View>;
 }
 
-export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowActions }) {
+/** Memoized: an unchanged row object (chatRows keeps them per turn) skips rendering. */
+export const ChatRowView = memo(function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowActions }) {
   const theme = useTheme();
   switch (row.kind) {
     case 'user': {
@@ -173,7 +174,7 @@ export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowAc
     case 'notice': return <Text testID="chat-notice" variant="footnote" style={[styles.notice, { color: theme.chat.mutedForeground }]}>{row.text}</Text>;
     case 'content': return <Text variant="footnote" numberOfLines={2} style={{ color: theme.chat.mutedForeground }}>{describeChatContent(row.content).label}</Text>;
   }
-}
+});
 
 const styles = StyleSheet.create({
   userRow: { alignSelf: 'flex-end', alignItems: 'flex-end', maxWidth: '88%', gap: 2 },

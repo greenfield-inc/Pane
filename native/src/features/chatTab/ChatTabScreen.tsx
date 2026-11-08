@@ -1,6 +1,6 @@
 import { AssistantRuntimeProvider, ThreadPrimitive, useExternalStoreRuntime, type AppendMessage } from '@assistant-ui/react-native';
 import { LegendList } from '@legendapp/list/react-native';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Keyboard, StyleSheet, View } from 'react-native';
 
 import { arrangeComposerControls, choiceName, isRiskyMode, triggerLabels } from '@shared/chatComposerControls';
@@ -18,7 +18,7 @@ import { ChatTabComposer } from './ChatTabComposer';
 import { ChatTabSettings } from './ChatTabSettings';
 import { matchingCommands } from './chatComposer';
 import { ApprovalCard, DockButton, ProblemBanner, QuestionCard, QueueList } from './ChatTabDock';
-import { ChatRowView } from './ChatTabRows';
+import { ChatRowView, type ChatRowActions } from './ChatTabRows';
 import { chatRows } from './chatRows';
 import { chatImageAdapter, chatImageAttachment, chatSendFromComposer, chatThreadMessage, composedText, restorableAttachments } from './chatThread';
 import { pickChatImages } from './pickChatImages';
@@ -68,6 +68,12 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
   const messages = snapshot.transcript?.messages ?? [];
   const waiting = waitingToolIds(view?.permissions, view?.questions);
   const rows = chatRows(chatTurns(messages, { running: working }), { open, workers, waiting, blocks: new Set(Object.keys(blocks ?? {})), notice: userNotice });
+  // Stable across streamed events, so rows that kept their identity skip rendering.
+  const rowActions = useMemo<ChatRowActions>(() => ({
+    onToggleTurn: turnId => setOpen(current => { const next = new Set(current); if (next.has(turnId)) next.delete(turnId); else next.add(turnId); return next; }),
+    onViewDiff, onOpenWorker,
+    renderBlock: (language, content) => blocks?.[language]?.(content),
+  }), [onViewDiff, onOpenWorker, blocks]);
   const agent = view ? AGENT_NAMES[view.agent] : 'the agent';
   const disabled = !connected || !view || view.status === 'stopped';
   const commands = matchingCommands(snapshot.draft, view?.commands ?? []);
@@ -168,11 +174,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
             maintainScrollAtEnd={snapshot.hasNewer ? false : { animated: false }} maintainScrollAtEndThreshold={0.05}
             ListHeaderComponent={(snapshot.transcript?.start ?? 0) > 0 ? <DockButton testID="chat-earlier" title={snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`} disabled={snapshot.loadingEarlier} onPress={() => void viewer.loadEarlier()} style={styles.earlier} /> : null}
             ListFooterComponent={footer}
-            renderItem={({ item }) => <View style={styles.row}><ChatRowView row={item} actions={{
-              onToggleTurn: turnId => setOpen(current => { const next = new Set(current); if (next.has(turnId)) next.delete(turnId); else next.add(turnId); return next; }),
-              onViewDiff, onOpenWorker,
-              renderBlock: (language, content) => blocks?.[language]?.(content),
-            }} /></View>} />}
+            renderItem={({ item }) => <View style={styles.row}><ChatRowView row={item} actions={rowActions} /></View>} />}
       </Dimmed>
       <View style={styles.dock}>
         {snapshot.pendingDelivery && <View style={styles.inline}>
