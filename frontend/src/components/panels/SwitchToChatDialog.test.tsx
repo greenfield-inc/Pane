@@ -14,9 +14,10 @@ describe('Switch to chat dialog (D-282)', () => {
   });
 
   it('titles a failure after the stop by its code, with the host\'s message as the body', () => {
-    expect(switchFailure(wrapped('CHAT_SWITCH_FAILED', 'The chat agent didn\'t start within 60 seconds. The terminal is back on the same conversation (0a432b9d), with its history.')))
+    // The host joins its next step after "Next:"; the approved copy shows the message alone (QA F2).
+    expect(switchFailure(wrapped('CHAT_SWITCH_FAILED', 'The chat agent didn\'t start within 60 seconds. The terminal is back on the same conversation (0a432b9d), with its history. Next: Press Try again, or close this and keep working in the terminal.')))
       .toEqual({ title: 'The chat couldn\'t open it', message: 'The chat agent didn\'t start within 60 seconds. The terminal is back on the same conversation (0a432b9d), with its history.' });
-    expect(switchFailure(wrapped('CHAT_SWITCH_NOT_STARTED', 'The chat agent didn\'t start within 60 seconds. The terminal is stopped, because Pane wasn\'t sure which conversation to restart it on. Your conversations are saved.')))
+    expect(switchFailure(wrapped('CHAT_SWITCH_NOT_STARTED', 'The chat agent didn\'t start within 60 seconds. The terminal is stopped, because Pane wasn\'t sure which conversation to restart it on. Your conversations are saved. Next: Press Try again.')))
       .toEqual({ title: 'The chat couldn\'t start', message: 'The chat agent didn\'t start within 60 seconds. The terminal is stopped, because Pane wasn\'t sure which conversation to restart it on. Your conversations are saved.' });
   });
 

@@ -61,6 +61,12 @@ describe('the conversation picker (D-277, D-282)', () => {
     expect(text(view({ rows: undefined }))).toContain('Loading conversations…');
   });
 
+  it('shows only the reason when the list could not be read, not an empty folder too (QA F3)', () => {
+    const html = text(view({ rows: [], error: 'The agent is not signed in on this machine.' }));
+    expect(html).toContain('The agent is not signed in on this machine.');
+    expect(html).not.toContain('No past conversations');
+  });
+
   it('can\'t Open while the selection is a row open elsewhere', () => {
     expect(view({ selected: 1 })).toMatch(/<button[^>]*disabled=""[^>]*>Open</);
   });

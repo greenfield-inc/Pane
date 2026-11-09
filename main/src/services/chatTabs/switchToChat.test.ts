@@ -26,7 +26,7 @@ interface World {
   adoption?: SessionAdoption;
   adoptThrows?: boolean;
   closeFails?: boolean;
-  restartFails?: boolean;
+  restartFails?: boolean | string;
 }
 
 function terminal(state: Partial<TerminalPanelState>, extra: Partial<ToolPanel> = {}): ToolPanel {
@@ -45,7 +45,7 @@ function world(panel: ToolPanel, overrides: Partial<World> = {}) {
       conversation: async () => w.conversation,
       stop: async id => { w.log.push(`stop ${id}`); },
       restart: async id => {
-        if (w.restartFails) throw new Error('shell is gone');
+        if (w.restartFails) throw new Error(w.restartFails === true ? 'shell is gone' : w.restartFails);
         w.log.push(`restart ${id}`);
       },
       close: async id => {
@@ -147,10 +147,19 @@ describe('Switch to chat', () => {
     expect(failure.code).toBe('CHAT_SWITCH_FAILED');
     expect(failure.message).toBe('Agent Farm could not prepare greenfield/orchestrator: ACP adapter not found. The terminal is back on the same conversation (conv-1), with its history.');
     expect(failure.message).not.toMatch(/starting a new one|running the same conversation again/);
-    expect(failure.next).toMatch(/Try again/);
+    expect(failure.next).toBe('Press Try again, or keep working in the terminal.');
     expect(w.log).toEqual(['stop term', 'create chat-1 load conv-1', 'close chat-1', 'restart term']);
     expect(w.chats.size).toBe(0);
     expect(w.panels.has('term')).toBe(true);
+  });
+
+  it('quotes only the first sentence of a long restart refusal (QA F4)', async () => {
+    const refusal = 'Session 0a43 was launched as bigbrain/orchestrator on claude; resume it with that profile and variant. Run: runpane panels resume --panel term --wait-ready --json for details.';
+    const failure = await switchToChat('term', world(terminal({}), { loadable: new Set(), restartFails: refusal }).ports).catch(error => error);
+    expect(failure.message).toContain('(Session 0a43 was launched as bigbrain/orchestrator on claude; resume it with that profile and variant)');
+    expect(failure.message).not.toContain('runpane panels resume');
+    expect(failure.next).toMatch(/Try again/);
+    expect(failure.next).not.toMatch(/keep working in the terminal/);
   });
 
   it('says so when the terminal does not come back either', async () => {

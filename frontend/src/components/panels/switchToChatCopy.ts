@@ -23,5 +23,6 @@ export interface SwitchFailure { title?: string; message: string }
 export function switchFailure(cause: unknown): SwitchFailure {
   const message = ipcErrorMessage(cause, 'Could not switch to chat.');
   const title = failureTitle(ipcErrorCode(cause));
-  return title ? { title, message } : { message };
+  // The approved copy is the host's message alone: Close and Try again are the next step.
+  return title ? { title, message: message.replace(/\s+Next: [\s\S]*$/, '') } : { message };
 }

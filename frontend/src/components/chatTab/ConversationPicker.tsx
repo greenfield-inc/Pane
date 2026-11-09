@@ -35,7 +35,8 @@ export function ConversationPickerView({ rows, filter, selected, busy, error, no
     {!rows
       ? <p role="status" className="chat-picker-empty">Loading conversations…</p>
       : !shown.length
-        ? <p className="chat-picker-empty">{filter.trim() ? `No conversation matches “${filter.trim()}”.` : 'No past conversations in this folder yet.'}</p>
+        // A list that failed says why above; an empty state under it would contradict it (QA F3).
+        ? error ? null : <p className="chat-picker-empty">{filter.trim() ? `No conversation matches “${filter.trim()}”.` : 'No past conversations in this folder yet.'}</p>
         : <ul role="listbox" aria-label="Past conversations" className="chat-picker-list">
           {shown.map((row, index) => {
             const time = conversationTime(row.updatedAt, now);

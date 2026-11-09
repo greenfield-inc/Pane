@@ -84,9 +84,17 @@ export interface SwitchToChatPorts {
   sessionLaunchCommand(panelId: string): string | undefined;
 }
 
-const TRY_AGAIN = 'Press Try again, or close this and keep working in the terminal.';
+/** Next steps after a failure past the stop: with the terminal back, and with it stopped. */
+const TRY_AGAIN_OR_TERMINAL = 'Press Try again, or keep working in the terminal.';
+const TRY_AGAIN = 'Press Try again, or open a chat tab from the + menu and type /resume to pick the conversation.';
 
 function shortId(id: string): string { return id.slice(0, 8); }
+
+/** A nested error's first sentence, for quoting in a dialog; the log keeps all of it. */
+function firstSentence(reason: string): string {
+  const sentence = reason.split(/(?<=[.!?])\s/)[0].replace(/[.!?]$/, '');
+  return sentence.length > 160 ? `${sentence.slice(0, 157)}...` : sentence;
+}
 
 /**
  * Switch to chat (D-129, D-184, D-282): opens a terminal Claude or Codex tab's conversation in a chat
@@ -161,10 +169,10 @@ export async function switchToChat(panelId: string, ports: SwitchToChatPorts): P
       await ports.terminal.restart(panelId);
     } catch (error) {
       console.warn(`[ChatTabs] Could not restart ${panelId} on ${conversation.id}: ${reasonOf(error)}`);
-      throw new PaneError('CHAT_SWITCH_FAILED', `${cause}. The terminal did not start again (${reasonOf(error)}), so it is stopped. Its conversation (${shortId(conversation.id)}) is saved.${leftover.join('')}`, TRY_AGAIN);
+      throw new PaneError('CHAT_SWITCH_FAILED', `${cause}. The terminal did not start again (${firstSentence(reasonOf(error))}), so it is stopped. Its conversation (${shortId(conversation.id)}) is saved.${leftover.join('')}`, TRY_AGAIN);
     }
     console.log(`[ChatTabs] Restarted ${panelId} on its conversation ${conversation.id} after the failed switch.`);
-    throw new PaneError('CHAT_SWITCH_FAILED', `${cause}. The terminal is back on the same conversation (${shortId(conversation.id)}), with its history.${leftover.join('')}`, TRY_AGAIN);
+    throw new PaneError('CHAT_SWITCH_FAILED', `${cause}. The terminal is back on the same conversation (${shortId(conversation.id)}), with its history.${leftover.join('')}`, TRY_AGAIN_OR_TERMINAL);
   };
 
   let chatId: string;
