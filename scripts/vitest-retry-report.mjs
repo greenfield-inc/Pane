@@ -20,6 +20,8 @@ function legacyFullName(task) {
   return names.join(' > ');
 }
 
+const posix = (file) => file.replaceAll('\\', '/');
+
 // Annotations need repo-relative paths; the summary reads better from the package.
 function repoPath(file) {
   return process.env.GITHUB_WORKSPACE ? relative(process.env.GITHUB_WORKSPACE, resolve(process.cwd(), file)).replaceAll('\\', '/') : file;
@@ -46,7 +48,7 @@ export default class RetryReport {
         const retries = testCase.diagnostic()?.retryCount ?? 0;
         if (retries > 0) {
           this.retried.push({
-            file: relative(process.cwd(), testModule.moduleId),
+            file: posix(relative(process.cwd(), testModule.moduleId)),
             name: testCase.fullName,
             retries,
             passed: testCase.result().state === 'passed',
@@ -69,7 +71,7 @@ export default class RetryReport {
       }
       for (const child of task.tasks ?? []) visit(child, file);
     };
-    for (const file of files) visit(file, relative(process.cwd(), file.filepath));
+    for (const file of files) visit(file, posix(relative(process.cwd(), file.filepath)));
     this.report();
   }
 
