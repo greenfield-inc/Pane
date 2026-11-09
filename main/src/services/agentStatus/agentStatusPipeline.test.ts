@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TerminalStateEmulator } from '../terminalStateEmulator';
 import { AgentStatusMonitor } from './agentStatusMonitor';
 import { detectAgentState } from './manifestEngine';
-import { CLAUDE_MANIFEST, CURSOR_MANIFEST, OPENCODE_MANIFEST } from './manifests';
+import { CLAUDE_MANIFEST, CURSOR_MANIFEST, OPENCODE_MANIFEST, PI_MANIFEST } from './manifests';
 import type { AgentManifest } from './manifestEngine';
 
 /**
@@ -114,6 +114,32 @@ describe('agent status pipeline (emulator -> detect -> monitor)', () => {
     emulator.write('  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\r\n');
     emulator.write('  [project]         shift+tab agents  ctrl+p commands\r\n');
     expect(await classify(emulator, monitor, 15_010, OPENCODE_MANIFEST)).toBe('idle');
+  });
+
+  it('classifies distilled pi 1.5.0 bytes: trust prompt -> idle composer -> working -> idle', async () => {
+    const emulator = new TerminalStateEmulator(80, 20);
+    const monitor = new AgentStatusMonitor({ idleSettleMs: 10_000, startupGraceMs: 3000 });
+    monitor.register('p', 0);
+    const rule = '─'.repeat(80);
+    // Pi's own frame wrapping: synchronized output, home, clear to end, then the rows.
+    const frame = (rows: string[]) => `\x1b[?2026h\x1b[H\x1b[J${rows.join('\r\n')}\x1b[?2026l`;
+    const footer = ['/home/dev/repo (main)', '0.0%/128k (auto)                                                      mock-model'];
+
+    // The trust prompt comes before the TUI takes the alternate screen.
+    emulator.write("Warning: No project session found with id 'abc'; creating a new session with that id.\r\n");
+    emulator.write(frame([rule, '', ' Trust project folder?', ' /home/dev/repo', '', ' → Trust', '   Do not trust', '', ' ↑↓ navigate  enter select  escape/ctrl+c cancel', '', rule]));
+    expect(await classify(emulator, monitor, 1000, PI_MANIFEST)).toBe('blocked');
+
+    emulator.write('\x1b[?1049h\x1b[?2004h\x1b[>7u\x1b]0;π - repo\x07');
+    emulator.write(frame([' ▀▀█  v1.5.0', '', '', rule, '', rule, ...footer]));
+    expect(await classify(emulator, monitor, 4000, PI_MANIFEST)).toBe('idle');
+
+    emulator.write(frame([' ▀▀█  v1.5.0', '', ' please go slow', '', ' working slowly', `── \x1b[38;5;75m⠦\x1b[39m \x1b[2mWorking\x1b[22m ${'─'.repeat(67)}`, '', rule, ...footer]));
+    monitor.noteActivity('p', 5000);
+    expect(await classify(emulator, monitor, 5010, PI_MANIFEST)).toBe('working');
+
+    emulator.write(frame([' ▀▀█  v1.5.0', '', ' please go slow', '', ' pong: please go slow', rule, '', rule, ...footer]));
+    expect(await classify(emulator, monitor, 16_000, PI_MANIFEST)).toBe('idle');
   });
 
   it('stays working across 5.03s high-effort redraw gaps', async () => {

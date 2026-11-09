@@ -396,6 +396,7 @@ The shell installers and the other one-shot commands are at the top of this READ
   - [Codex](https://github.com/openai/codex) — `curl -fsSL https://chatgpt.com/codex/install.sh | sh` (on Windows, `npm install -g @openai/codex`), then `codex login`
   - [Cursor Agent](https://cursor.com/docs/cli/installation) — `curl https://cursor.com/install -fsS | bash` (macOS/Linux, or inside WSL on Windows), then `cursor-agent login`
   - [OpenCode](https://opencode.ai/docs) — `curl -fsSL https://opencode.ai/install | bash` (on Windows, `npm install -g opencode-ai`), then `opencode auth login`
+  - [Pi](https://pi.dev) — `npm install -g @earendil-works/pi-coding-agent` (0.76.0 or newer), then `/login` inside `pi`
   - [Aider](https://aider.chat/) — `pip install aider-chat`
   - [Goose](https://github.com/block/goose) — or any other CLI agent
 
@@ -405,14 +406,16 @@ The shell installers and the other one-shot commands are at the top of this READ
 
 1. **Open Pane** and create or select a project (any git repository)
 2. **Create a pane** — enter a prompt and pick your agent
-3. **Add tabs** — launch a Claude, Codex, Cursor, or OpenCode terminal, diff viewer, file explorer, or any CLI tool
+3. **Add tabs** — launch a Claude, Codex, Cursor, OpenCode, or Pi terminal, diff viewer, file explorer, or any CLI tool
 4. **Work in parallel** — create multiple panes for different approaches
 5. **Review diffs** — see what changed with the built-in diff viewer
 6. **Ship** — commit, rebase, and merge from keyboard shortcuts
 
 OpenCode's native terminal integration starts a new conversation bare, saves the ID OpenCode prints when it exits (`opencode -s <id>`), and resumes that exact ID in project tabs, Pane Chat, and named Sessions. A conversation still running when Pane quits has no saved ID yet, so it starts fresh next time. OpenCode Sessions require supported direct commands, not wrappers or custom-resume templates.
 
-The default `opencode --auto` auto-approves non-denied operations; it is not a sandbox. Closing, archiving, and switching retain existing lifecycle behavior, and PTY exit does not prove that agent work was cancelled.
+The default `opencode --auto` auto-approves non-denied operations; it is not a sandbox.
+
+Pi tabs open with a Pane-chosen `pi --session-id <id>`, so a restarted or reopened tab continues the same conversation. Pi runs tools without asking; in a folder with `.pi` settings or project skills it first asks whether to trust the folder, which Pane shows as blocked and never answers. Pi is not yet offered for Pane Chat, named Sessions or Loops. Closing, archiving, and switching retain existing lifecycle behavior, and PTY exit does not prove that agent work was cancelled.
 
 Moving to a new computer? **Settings → Import & Export** saves your commands, run scripts, agent defaults, shortcuts, skill and MCP choices and look to a file, and imports it after showing what would change. Keys and tokens stay behind. See [Export and import your Pane setup](docs/SETUP_EXPORT_IMPORT.md).
 

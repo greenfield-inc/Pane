@@ -12,6 +12,7 @@ export const DEFAULT_WORKTREE_FILE_SYNC_ENTRIES: WorktreeFileSyncEntry[] = [
   { id: 'claude', path: '.claude', enabled: true, recursive: false },
   { id: 'codex', path: '.codex', enabled: true, recursive: false },
   { id: 'cursor', path: '.cursor', enabled: true, recursive: false },
+  { id: 'pi', path: '.pi', enabled: true, recursive: false },
   { id: 'continue', path: '.continue', enabled: true, recursive: false },
   { id: 'windsurf', path: '.windsurf', enabled: true, recursive: false },
   { id: 'amazonq', path: '.amazonq', enabled: true, recursive: false },

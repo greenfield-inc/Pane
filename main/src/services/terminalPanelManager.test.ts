@@ -1173,6 +1173,64 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
   });
 
+  it('opens a fresh Pi tab on a Pane-chosen --session-id and records it', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'pi', { agentType: 'pi' });
+
+    const sessionId = result.customState.agentSessionId;
+    expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+    expect(result.commandToRun).toBe(`pi --session-id ${sessionId}`);
+    expect(result.isCliCommand).toBe(true);
+    expect(result.customState).toMatchObject({ agentType: 'pi', agentDetection: 'command', isCliPanel: true, isCliReady: false, launchCommand: 'pi' });
+  });
+
+  it('reopens the same Pi session on every relaunch, interrupted or not', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const sessionId = '6f1d2c3a-1111-4222-8333-444455556666';
+
+    for (const wasInterrupted of [undefined, true]) {
+      const result = manager.resolveCliLaunchCommand('panel-1', 'pi', { agentType: 'pi', agentSessionId: sessionId, wasInterrupted });
+      expect(result.commandToRun).toBe(`pi --session-id ${sessionId}`);
+      expect(result.customState.agentSessionId).toBe(sessionId);
+      expect(result.customState.wasInterrupted).toBeUndefined();
+    }
+  });
+
+  it('types a Pi starting message instead of passing it as an argument', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'pi', {
+      agentType: 'pi', initialInput: '@src/app.ts explain this', initialInputMode: 'argument',
+    });
+
+    expect(result.commandToRun).toMatch(/^pi --session-id [0-9a-f-]{36}$/u);
+    expect(result.customState).toMatchObject({ initialInput: '@src/app.ts explain this', initialInputMode: 'stdin' });
+    expect(result.customState.initialInputSentAt).toBeUndefined();
+  });
+
+  it('runs a Pi command that picks its own session unchanged', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    expect(manager.resolveCliLaunchCommand('panel-1', 'pi --continue', { agentType: 'pi' }).commandToRun).toBe('pi --continue');
+    const chosen = manager.resolveCliLaunchCommand('panel-1', 'pi --session-id mine-1', { agentType: 'pi' });
+    expect(chosen.commandToRun).toBe('pi --session-id mine-1');
+    expect(chosen.customState.agentSessionId).toBe('mine-1');
+  });
+
+  it('resumes the exact recorded Pi update conversation without replaying input', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const sessionId = '6f1d2c3a-1111-4222-8333-444455556666';
+
+    const result = manager.resolveCliLaunchCommand('panel', 'pi', {
+      agentType: 'pi', agentSessionId: sessionId, updateResumeId: sessionId, wasInterrupted: true,
+      initialInput: 'Do not replay this prompt', initialInputMode: 'stdin',
+    });
+
+    expect(result.commandToRun).toBe(`pi --session-id ${sessionId}`);
+    expect(result.customState).toMatchObject({ agentSessionId: sessionId, initialInput: undefined, updateResumeId: undefined });
+  });
+
   it('starts a fresh native OpenCode launch without a session selector', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
 

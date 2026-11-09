@@ -1,4 +1,4 @@
-export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor' | 'opencode';
+export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi';
 
 export interface AgentLaunchPreset {
   id: AgentLaunchPresetId;
@@ -48,6 +48,14 @@ export const AGENT_LAUNCH_PRESETS: readonly AgentLaunchPreset[] = [
     iconKey: 'opencode',
     hotkeyId: 'add-tool-terminal-opencode',
     hotkey: 'mod+alt+6',
+  },
+  {
+    id: 'pi',
+    title: 'Pi',
+    command: 'pi',
+    iconKey: 'pi',
+    hotkeyId: 'add-tool-terminal-pi',
+    hotkey: 'mod+alt+7',
   },
 ];
 

@@ -506,6 +506,57 @@ export const OPENCODE_MANIFEST: AgentManifest = {
   ],
 };
 
+/*
+ * Distilled from real pi 1.5.0 (@earendil-works/pi-coding-agent) screens. Pi
+ * runs full-screen with its composer boxed between two rules and a footer of
+ * the working folder and a stats row (`↑30 ↓15 0.0%/128k (auto)  model`).
+ * While a turn runs, a braille spinner and its message (`Working`, `Retrying
+ * (1/3) in 2s...`, `Auto-compacting...`) sit in the composer's top rule, or on
+ * a row of their own with `tuiMode: regular` or an extension editor. Pi never
+ * asks before a tool call; its one startup prompt is project trust, shown for
+ * a folder with `.pi` settings or project skills it has no saved decision for.
+ * The OSC title (`π - <folder>`) carries no status and is unused.
+ */
+const PI_SPINNER = '[\\u2800-\\u28FF]';
+const PI_STATUS_MESSAGE = '(?:Working|Retrying|Compacting|Auto-compacting|Context overflow|Summarizing)';
+
+export const PI_MANIFEST: AgentManifest = {
+  id: 'pi',
+  rules: [
+    {
+      id: 'project_trust_prompt',
+      state: 'blocked',
+      priority: 1000,
+      region: 'bottom_non_empty_lines(20)',
+      visibleBlocker: true,
+      // Live only while its key hint ends the screen, above at most its closing rule.
+      regex: [/(?:^|\n)\s*Trust project folder\?\s*\n[\s\S]*\n\s*↑↓ navigate\s+enter select\s+escape\/ctrl\+c cancel\s*(?:\n\s*─{3,}\s*)?$/u],
+    },
+    {
+      id: 'status_in_composer',
+      state: 'working',
+      priority: 700,
+      region: 'bottom_non_empty_lines(20)',
+      visibleWorking: true,
+      any: [
+        // `── ⠦ Working ────`; a narrow composer keeps only the spinner.
+        { lineRegex: [new RegExp(`^\\s*─{1,3}\\s*${PI_SPINNER}(?:\\s+\\S[^\\n]*?)?\\s*─{2,}`, 'u')] },
+        { lineRegex: [new RegExp(`^\\s*${PI_SPINNER}\\s+${PI_STATUS_MESSAGE}\\b`, 'u')] },
+      ],
+    },
+    {
+      id: 'idle_composer',
+      state: 'idle',
+      priority: 500,
+      region: 'bottom_non_empty_lines(5)',
+      visibleIdle: true,
+      // The composer's closing rule, then the footer ending in its stats row.
+      regex: [/(?:^|\n)\s*─{3,}\s*\n(?:[^\n]*\n){1,3}[^\n]*(?:\d+(?:\.\d+)?%|\?)\/\d+(?:\.\d+)?[kMB]?\b/u],
+      not: [{ contains: ['trust project folder?'] }],
+    },
+  ],
+};
+
 interface AgentManifestLookup {
   [agent: string]: AgentManifest;
 }
@@ -515,6 +566,7 @@ const MANIFESTS_BY_AGENT: AgentManifestLookup = {
   codex: CODEX_MANIFEST,
   cursor: CURSOR_MANIFEST,
   opencode: OPENCODE_MANIFEST,
+  pi: PI_MANIFEST,
 };
 
 /**

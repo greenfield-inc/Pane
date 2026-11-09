@@ -78,6 +78,17 @@ export function assessComposerEvidence(args: {
     return before === after ? 'staged' : 'unknown';
   }
 
+  if (args.agentType === 'pi') {
+    const before = piComposer(args.beforeText);
+    const after = piComposer(args.afterText);
+    if (before === undefined || after === undefined) return 'unknown';
+    // A paste over 10 lines or 1000 characters shows as `[paste #1 +12 lines]`.
+    const content = (PI_PASTE_MARKER.exec(before)?.[0] ?? marker).replace(/\s/gu, '');
+    if (!before.replace(/\s/gu, '').includes(content)) return 'unknown';
+    if (!after.replace(/\s/gu, '').includes(content)) return 'cleared';
+    return before === after ? 'staged' : 'unknown';
+  }
+
   if (!args.afterText.includes(marker)) {
     return 'cleared';
   }
@@ -110,6 +121,26 @@ function openCodeComposer(text: string): string | undefined {
   const metadataGap = rows.lastIndexOf('');
   if (rows[0] !== '' || metadataGap < 1 || metadataGap === rows.length - 1) return undefined;
   return rows.slice(1, metadataGap).join('\n');
+}
+
+const PI_PASTE_MARKER = /\[paste #\d+(?: \+\d+ lines| \d+ chars)?\]/u;
+const PI_FOOTER_STATS = /(?:\d+(?:\.\d+)?%|\?)\/\d+(?:\.\d+)?[kMB]?\b/u;
+
+/**
+ * Pi's composer: the rows between its last two rules, when a footer of at most
+ * three rows ending in pi's stats row (`0.0%/128k`) follows the closing rule.
+ * The opening rule may carry the working spinner (`── ⠋ Working ───`).
+ */
+function piComposer(text: string): string | undefined {
+  const lines = text.split(/\r?\n/u);
+  const bottom = lines.map(line => /^\s*─{3,}\s*$/u.test(line)).lastIndexOf(true);
+  if (bottom < 1) return undefined;
+  const footer = lines.slice(bottom + 1).filter(line => line.trim());
+  if (footer.length === 0 || footer.length > 3 || !PI_FOOTER_STATS.test(footer[footer.length - 1])) return undefined;
+  let top = bottom - 1;
+  while (top >= 0 && !/^\s*─[^\n]*─{2,}\s*$/u.test(lines[top])) top -= 1;
+  if (top < 0) return undefined;
+  return lines.slice(top + 1, bottom).map(line => line.trim()).filter(Boolean).join('\n');
 }
 
 function firstNonEmptyLine(text: string): string | undefined {

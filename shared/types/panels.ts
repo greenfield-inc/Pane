@@ -137,7 +137,7 @@ export interface TerminalPanelState {
   updateResumeHold?: string;         // Update operation that stopped the panel; released by explicit resume, or when the panel starts after that update ended.
   updateResumeId?: string;           // Exact identity required by automatic update restoration.
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
-  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode'; // CLI agent type for panel-local resume behavior
+  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi'; // CLI agent type for panel-local resume behavior
   /** How Pane learned `agentType`: declared with the launch, from the launch command, the foreground process, or the screen. */
   agentDetection?: TerminalAgentDetection;
   /** The command the panel was launched (or staged) with, as the user gave it. */

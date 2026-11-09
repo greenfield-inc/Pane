@@ -30,6 +30,12 @@ describe('resolveResumeId', () => {
     expect(resolveResumeId('opencode', PANEL_ID, { agentSessionId: PANEL_ID })).toBeUndefined();
   });
 
+  it('resumes Pi only with the session id Pane gave it', () => {
+    expect(resolveResumeId('pi', PANEL_ID, { agentSessionId: CAPTURED_ID })).toBe(CAPTURED_ID);
+    expect(resolveResumeId('pi', PANEL_ID, {})).toBeUndefined();
+    expect(resolveResumeId('pi', PANEL_ID, { agentSessionId: '-not-a-pi-id' })).toBeUndefined();
+  });
+
   it('resumes custom CLIs only with a recorded ID', () => {
     const customResume = { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' } as const;
     expect(resolveResumeId(undefined, PANEL_ID, { customResume, agentSessionId: CAPTURED_ID })).toBe(CAPTURED_ID);

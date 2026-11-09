@@ -46,7 +46,7 @@ import { ApprovalStore, thisMachineName } from '../services/approvals/approvalSt
 import { importJsonStoreOnce } from '../database/jsonStoreImport';
 import { ExpectedReportTracker, MAX_MISSING_REPORT_OUTPUT_LENGTH, type PanelLastOutput } from '../services/expectedReports';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
-import { getManifestForAgent, CURSOR_MANIFEST } from '../services/agentStatus/manifests';
+import { getManifestForAgent, CURSOR_MANIFEST, PI_MANIFEST } from '../services/agentStatus/manifests';
 import { detectAgentBackgroundWork, detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
 import { agentTranscripts, type TranscriptLocator } from '../services/agentTranscript';
 import {
@@ -57,6 +57,7 @@ import {
 } from '../services/agentReport';
 import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand, isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
+import { isValidPiSessionId } from '../services/agents/piLaunch';
 import {
   bracketedPaste,
   claudePromptWarnings,
@@ -2754,7 +2755,7 @@ async function createTerminalPanelForSession(
   }
   if (useArgumentDelivery) {
     initialState.initialInputMode = 'argument';
-  } else if (tool.agent === 'opencode' && tool.initialInput) {
+  } else if ((tool.agent === 'opencode' || tool.agent === 'pi') && tool.initialInput) {
     initialState.initialInputMode = 'stdin';
   }
   if (initialInputFile) {
@@ -2937,7 +2938,7 @@ async function submitCreateInitialInput(
   const detection = tool.agent ? 'declared' : panelAgentDetection(panel) ?? 'detected';
 
   if (agent !== 'claude' && agent !== 'codex') {
-    const paste = agent === 'opencode' && isLongPrompt(text)
+    const paste = (agent === 'opencode' || agent === 'pi') && isLongPrompt(text)
       && terminalPanelManager.isBracketedPasteEnabled(panel.id);
     logStartingMessage(panel.id, 'writing', { agent, detection, bytes: Buffer.byteLength(text, 'utf8'), submit: 'enter' });
     terminalPanelManager.writeToTerminal(panel.id, paste ? bracketedPaste(text) : text);
@@ -3911,6 +3912,8 @@ function isWaitConditionMatched(
       if (!screen.state.isCliPanel && !launched) return true;
       if (!screen.state.agentType) return false;
       if (screen.state.agentType === 'codex' && !hasConfiguredCodexScreen(screen.text)) return false;
+      // Pi draws its trust prompt and startup frames before its composer.
+      if (screen.state.agentType === 'pi' && detectAgentState(PI_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleIdle !== true) return false;
       // A composer alone is enough for Claude; Codex also has a provisional one.
       return screen.state.isCliReady === true
         && (screen.composer.isPresent || (screen.state.agentType !== 'claude' && screen.state.agentType !== 'codex'));
@@ -4592,6 +4595,25 @@ async function runAgentDoctor(
         ok: false,
         message: 'Upgrade OpenCode to v2.0.19 or newer; Pane could not verify the required --session flag.',
       });
+    }
+  }
+
+  if (agent === 'pi' && executablePath) {
+    // Pane opens each pi tab's session with --session-id, which pi added in 0.76.0.
+    const upgrade = 'Upgrade pi to 0.76.0 or newer (npm install -g @earendil-works/pi-coding-agent); Pane opens each tab\'s session with --session-id.';
+    try {
+      const helpCommand = `${quoteAgentDoctorExecutable(executablePath, environment)} --help`;
+      const result = await context.commandRunner.execAsync(helpCommand, repo.path, { timeout: 5_000, silent: true });
+      sessionCapabilityOk = `${result.stdout}\n${result.stderr}`.split(/\r?\n/u).some(line => /^\s*--session-id\s/u.test(line));
+      checks.push({
+        name: 'session-capability',
+        ok: sessionCapabilityOk,
+        message: sessionCapabilityOk ? 'Pi supports explicit sessions with --session-id.' : `${upgrade} This pi's --help does not list it.`,
+      });
+    } catch (error) {
+      sessionCapabilityOk = false;
+      warnings.push(commandErrorMessage(error, `${executable} --help failed.`));
+      checks.push({ name: 'session-capability', ok: false, message: `${upgrade} Pane could not run pi --help to check.` });
     }
   }
 
@@ -6561,6 +6583,9 @@ function assertResumableTool(tool: RunpaneResolvedTool, resume: string | undefin
   }
   if (tool.agent === 'opencode' && !isValidOpenCodeSessionId(resume)) {
     throw new Error('OpenCode --resume must match the required ses_* format (^ses_[A-Za-z0-9]+$).');
+  }
+  if (tool.agent === 'pi' && !isValidPiSessionId(resume)) {
+    throw new Error('Pi --resume must be a pi session id: letters, digits, ".", "_" and "-", starting and ending with a letter or digit.');
   }
 }
 

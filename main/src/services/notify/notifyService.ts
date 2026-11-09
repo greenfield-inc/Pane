@@ -38,7 +38,7 @@ import type { JsonStoreImportOutcome } from '../../database/jsonStoreImport';
 import type { SessionInboxEnded } from '../sessionInbox';
 import { workerReportContext } from './workerContext';
 
-const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
+const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode'], ['pi', 'Pi']]);
 const agentName = (agentType: string | undefined): string => (agentType ? AGENT_NAMES.get(agentType) : undefined) ?? 'Agent';
 
 export interface NotifyServiceDependencies {

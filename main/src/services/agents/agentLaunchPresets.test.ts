@@ -24,15 +24,19 @@ describe('AGENT_LAUNCH_PRESETS', () => {
       hotkeyId: 'add-tool-terminal-opencode',
       hotkey: 'mod+alt+6',
     });
+    expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'pi')).toMatchObject({
+      hotkeyId: 'add-tool-terminal-pi',
+      hotkey: 'mod+alt+7',
+    });
   });
 
   it('supports cursor on POSIX hosts and WSL repos, but not native Windows', () => {
-    expect(agentPresetsForPlatform('win32').map(p => p.id)).toEqual(['claude', 'codex', 'opencode']);
-    expect(agentPresetsForPlatform('darwin').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
-    expect(agentPresetsForPlatform('linux').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
-    expect(agentPresetsForPlatform('windows').map(p => p.id)).toEqual(['claude', 'codex', 'opencode']);
-    expect(agentPresetsForPlatform('macos').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
-    expect(agentPresetsForPlatform('wsl').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
+    expect(agentPresetsForPlatform('win32').map(p => p.id)).toEqual(['claude', 'codex', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('darwin').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('linux').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('windows').map(p => p.id)).toEqual(['claude', 'codex', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('macos').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('wsl').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
     expect(isAgentSupportedOnPlatform('cursor', 'windows')).toBe(false);
     expect(isAgentSupportedOnPlatform('cursor', 'wsl')).toBe(true);
     expect(isAgentSupportedOnPlatform('opencode', 'darwin')).toBe(true);
@@ -40,5 +44,7 @@ describe('AGENT_LAUNCH_PRESETS', () => {
     expect(isAgentSupportedOnPlatform('opencode', 'wsl')).toBe(true);
     expect(isAgentSupportedOnPlatform('opencode', 'windows')).toBe(true);
     expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'opencode')?.platforms).toBeUndefined();
+    expect(isAgentSupportedOnPlatform('pi', 'windows')).toBe(true);
+    expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'pi')?.platforms).toBeUndefined();
   });
 });

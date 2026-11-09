@@ -131,6 +131,7 @@ import { claudeFolderTrustKey, detectAgentComposer, detectAgentFromScreen } from
 import { readForegroundExecutablePath, readForegroundGroupMembers, readForegroundProcessGroup, type ForegroundGroup } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import { assertDirectOpenCodeLaunchCommand, extractOpenCodeSessionId, resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
+import { resolvePiLaunchCommand } from './agents/piLaunch';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import { forgetClaudePrompts, withClaudePromptHooks } from './claudePrompts';
 import {
@@ -513,7 +514,7 @@ export class TerminalPanelManager extends EventEmitter {
       const expectedCustom = custom?.config.resumeTemplate.replace(/\{command\}|\{sessionId\}/g, token => token === '{command}' ? initialCommand : this.quoteCommandArgument(id));
       const exact = expectedCustom
         ? resolution.commandToRun === expectedCustom
-        : resolution.commandToRun.includes(id) && /(?:--resume(?:=|\s)|\bresume\s|--session(?:=|\s))/.test(resolution.commandToRun);
+        : resolution.commandToRun.includes(id) && /(?:--resume(?:=|\s)|\bresume\s|--session(?:-id)?(?:=|\s))/.test(resolution.commandToRun);
       if (!exact || resolution.customState.agentSessionId !== id) {
         throw new PaneError('ERR_UPDATE_CONVERSATION', `Panel ${panelId} could not reopen its exact recorded conversation. No command or input was sent.`, 'Review the saved panel and resume the intended conversation manually.');
       }
@@ -619,6 +620,8 @@ export class TerminalPanelManager extends EventEmitter {
           ? this.resolveCursorLaunch(panelId, initialCommand, customState, nextState, shellType)
           : agentType === 'opencode'
             ? this.resolveOpenCodeLaunch(initialCommand, customState, nextState, isWSL ? 'bash' : shellType)
+          : agentType === 'pi'
+            ? this.resolvePiLaunch(initialCommand, customState, nextState, isWSL)
           : undefined;
 
     return resolution ?? { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
@@ -653,6 +656,31 @@ export class TerminalPanelManager extends EventEmitter {
       if (customState.orchestrationSessionId) throw openCodeSessionLaunchError(cause);
       throw cause;
     }
+  }
+
+  /**
+   * Pi opens a Pane-chosen session with `--session-id`, which also creates it,
+   * so the first launch and every restart run the same command. Its starting
+   * message is always typed into its composer once it is idle: pi reads an
+   * argument starting with `@` as a file to attach and sends a slash command
+   * argument to the model as text instead of running it.
+   */
+  private resolvePiLaunch(
+    initialCommand: string,
+    customState: TerminalPanelState,
+    nextState: TerminalPanelState,
+    isWSL: boolean,
+  ): CliLaunchResolution {
+    const launch = resolvePiLaunchCommand({
+      baseCommand: initialCommand,
+      persistedSessionId: customState.agentSessionId,
+      allocate: randomUUID,
+      platform: isWSL ? 'linux' : process.platform,
+    });
+    nextState.wasInterrupted = undefined;
+    if (launch.sessionId) nextState.agentSessionId = launch.sessionId;
+    if (nextState.initialInputMode === 'argument') nextState.initialInputMode = 'stdin';
+    return { commandToRun: launch.commandToRun, customState: nextState, isCliCommand: true };
   }
 
   private resolveClaudeLaunch(

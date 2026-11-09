@@ -30,7 +30,7 @@ Before writing code, verify against the real binary (see the Cursor example):
 
 - Add the id to `enums.agents`.
 - Add `agentTemplates.<id> = { title, command, description }`.
-- Update `<codex|claude|cursor>` usage strings.
+- Update the `<codex|claude|cursor|opencode|pi>` usage strings.
 - Run `pnpm run generate-runpane-contract` and commit all regenerated artifacts.
 - `scripts/test-runpane-contract.js` (`checkAgentTemplateParity`) loops over the agent
   enum, so the new agent is exercised automatically.
@@ -65,6 +65,21 @@ persists it before the next spawn and resumes it with `--session`. Ids from Pane
 earlier allocator (`ses_` + 32 lowercase hex) are dropped. Its idle composer gates readiness and
 once-only stdin prompt delivery; wrapped commands remain opaque. RunPane doctor
 checks the installed executable's session capability before reporting support.
+
+Pi takes a caller-chosen id: `pi --session-id <id>` opens the working folder's
+session with that id and creates it when there is none. Pane allocates a UUID
+for a direct `pi` launch, saves it as the panel's `agentSessionId` and runs the
+same command on every relaunch (`agents/piLaunch.ts`). A command that picks its
+own session (`--session`, `-c`, `-r`, `--fork`, `--no-session`, its own
+`--session-id`), has a `--` or runs pi through a wrapper or shell syntax runs
+unchanged. Pi's starting message is always typed into its composer once the
+status manifest shows it idle: as an argument, pi reads a leading `@` as a file
+to attach (and exits when it is missing) and sends a slash command to the model
+as text. `--wait-ready` also waits for that composer, so pi's project-trust
+prompt, which comes first, is reported blocked and never typed into. The
+loading overlay still lifts on pi's first output, so that prompt can be answered.
+Pi 0.76.0 added `--session-id`; `runpane agents doctor --agent pi` checks `pi --help`
+for it. Pane Chat, Sessions, Loops and handoff session carrying do not offer pi yet.
 
 ## 4. Status manifest
 
@@ -155,7 +170,8 @@ Pane decides a terminal panel's agent in this order, and records the source in
 2. **`command`**: the launch command's executable word, through
    `resolveAgentTypeFromCommand` in `main/src/services/agents/agentIdentity.ts`.
 3. **`process`**: the PTY's foreground process name, which node-pty reports as
-   `pty.process`. The names `claude`, `codex`, `cursor-agent` and `opencode` map to agents.
+   `pty.process`. The names `claude`, `codex`, `cursor-agent`, `opencode` and `pi` map to agents.
+   Pi sets its process title to `pi`, so an npm-installed pi is found here too.
    Claude Code's native installer runs `~/.local/share/claude/versions/<version>`,
    so it reports a bare version such as `2.1.283`. Pane resolves that name to an
    executable path with `ps` (or `/proc/<pid>/exe` on Linux) before trusting it.
