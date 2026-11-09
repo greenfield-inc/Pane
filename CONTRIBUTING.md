@@ -309,10 +309,12 @@ Releases, CI and deploys are covered in [RUNBOOK.md](RUNBOOK.md).
 ### Merging
 
 A pull request is ready to merge when `CI result` is green and its review is
-done. Watch only the required check (`gh pr checks <number> --required`). The
-other checks (Native Android Build, Native OTA Updates, Native Runtime, React
-Doctor, Notes Native QA, the package builds) are advisory: look at them when
-they fail, but they never hold a merge.
+done. Watch only the required check (`gh pr checks <number> --required`; a PR
+based on another branch has no required checks, so watch its `CI result`
+check by name until it targets `main`). The other checks (Native Android
+Build, Native OTA Updates, Native Runtime, React Doctor, Notes Native QA, the
+package builds) are advisory: look at them when they fail, but they never hold
+a merge.
 
 A single pull request is squash-merged.
 

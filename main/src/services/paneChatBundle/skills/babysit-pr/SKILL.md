@@ -13,7 +13,7 @@ Run it once the PR is open, when the person says "ready", or when your own instr
 
 Match the effort to the change: a docs-only or few-line PR skips the watching below and the green-checks condition under Stop, and reports as soon as it's open.
 
-Watch the PR instead of checking once. In Claude Code, run `gh pr checks <pr> --required --watch` in the background or use a monitor, so you respond when checks or comments arrive. In Codex, or wherever nothing can wake you, poll `gh pr checks <pr> --required` and the review threads every few minutes. Only required checks hold a merge; look at an advisory check only when it fails.
+Watch the PR instead of checking once. In Claude Code, run `gh pr checks <pr> --required --watch` in the background or use a monitor, so you respond when checks or comments arrive. In Codex, or wherever nothing can wake you, poll `gh pr checks <pr> --required` and the review threads every few minutes. Only required checks hold a merge; look at an advisory check only when it fails. A PR based on another branch (a stacked PR) has no required checks until it targets the default branch, so `--required` lists nothing: watch the check the default branch requires by name (`CI result` in Pane's own repository) instead.
 
 Only act on checks and comments newer than the latest push. Compare their timestamps with the head commit:
 
