@@ -36,6 +36,7 @@
         "playwright*.ts"
       ],
       "ignoreUnresolved": ["/usr/bin/time"],
+      "ignoreBinaries": ["lychee"],
       "ignoreDependencies": [
         "original-fs",
         "@agentclientprotocol/claude-agent-acp",
