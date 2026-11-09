@@ -2,7 +2,7 @@ import type { CommandRunner } from '../utils/commandRunner';
 import { compareVersions } from './agentChat/adapterSetup';
 
 /** The last Pane release that wrote `core.fsmonitor=true`. */
-const LAST_VERSION_WITH_FSMONITOR = '2.4.215';
+const LAST_VERSION_WITH_FSMONITOR = '2.4.216';
 
 const configuredRepositories = new Map<string, Promise<void>>();
 const fsmonitorSupport = new Map<string, Promise<boolean>>();
@@ -78,14 +78,12 @@ export async function removePaneFsmonitorConfig(
 }
 
 /**
- * A canary carries the release it follows (`2.4.215-canary.<date>.<sha>…` is
- * built after 2.4.215), so a prerelease of the last writing release already
- * has this change.
+ * A canary carries the release it follows (`2.4.216-canary.<date>.<sha>…` is
+ * built after 2.4.216), and canaries of the last writing release were built
+ * both with and without this change, so all of them count.
  */
 function wroteFsmonitor(version: string): boolean {
-  const [release, prerelease] = version.split('-');
-  const order = compareVersions(release, LAST_VERSION_WITH_FSMONITOR);
-  return order < 0 || (order === 0 && prerelease === undefined);
+  return compareVersions(version.split('-')[0], LAST_VERSION_WITH_FSMONITOR) <= 0;
 }
 
 async function removeLocalFsmonitor(repoPath: string, commandRunner: CommandRunner): Promise<boolean> {

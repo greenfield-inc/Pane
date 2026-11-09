@@ -82,17 +82,17 @@ describe('removePaneFsmonitorConfig', () => {
     const cwd = repository();
     git(cwd, 'config', '--local', 'core.fsmonitor', 'true');
 
-    await removePaneFsmonitorConfig('2.4.215', [{ path: cwd, commandRunner: new CommandRunner({ path: cwd }) }]);
+    await removePaneFsmonitorConfig('2.4.216', [{ path: cwd, commandRunner: new CommandRunner({ path: cwd }) }]);
 
     expect(localConfig(cwd, 'core.fsmonitor')).toBeUndefined();
     expect(readFileSync(globalConfig, 'utf8')).toBe('[core]\n\tfsmonitor = true\n');
   });
 
-  it('cleans up after an upgrade from a canary build that wrote it', async () => {
+  it.each([['2.4.215'], ['2.4.210-canary.202610310113.d8d9742.32.1'], ['2.4.216-canary.202611090101.abc1234.40.1']])('cleans up after an upgrade from %s, which may have written it', async lastVersion => {
     const cwd = repository();
     git(cwd, 'config', '--local', 'core.fsmonitor', 'true');
 
-    await removePaneFsmonitorConfig('2.4.210-canary.202610310113.d8d9742.32.1', [{ path: cwd, commandRunner: new CommandRunner({ path: cwd }) }]);
+    await removePaneFsmonitorConfig(lastVersion, [{ path: cwd, commandRunner: new CommandRunner({ path: cwd }) }]);
 
     expect(localConfig(cwd, 'core.fsmonitor')).toBeUndefined();
   });
@@ -101,12 +101,12 @@ describe('removePaneFsmonitorConfig', () => {
     const cwd = repository();
     git(cwd, 'config', '--local', 'core.fsmonitor', '/usr/local/bin/watchman-hook');
 
-    await removePaneFsmonitorConfig('2.4.215', [{ path: cwd, commandRunner: new CommandRunner({ path: cwd }) }]);
+    await removePaneFsmonitorConfig('2.4.216', [{ path: cwd, commandRunner: new CommandRunner({ path: cwd }) }]);
 
     expect(localConfig(cwd, 'core.fsmonitor')).toBe('/usr/local/bin/watchman-hook');
   });
 
-  it.each([['2.4.216'], ['2.4.215-canary.202611090101.abc1234.40.1'], ['2.5.0'], [null]])('does nothing when the last recorded version is %s', async lastVersion => {
+  it.each([['2.4.217'], ['2.4.217-canary.202611200101.abc1234.41.1'], ['2.5.0'], [null]])('does nothing when the last recorded version is %s', async lastVersion => {
     const cwd = repository();
     git(cwd, 'config', '--local', 'core.fsmonitor', 'true');
 
@@ -120,7 +120,7 @@ describe('removePaneFsmonitorConfig', () => {
     const cwd = repository();
     git(cwd, 'config', '--local', 'core.fsmonitor', 'true');
 
-    await removePaneFsmonitorConfig('2.4.215', [
+    await removePaneFsmonitorConfig('2.4.216', [
       { path: missing, commandRunner: new CommandRunner({ path: missing }) },
       { path: cwd, commandRunner: new CommandRunner({ path: cwd }) },
     ]);
@@ -138,7 +138,7 @@ describe('removePaneFsmonitorConfig', () => {
     for (const checkout of [cwd, ...worktrees]) git(checkout, 'status', '--porcelain');
     for (const checkout of [cwd, ...worktrees]) expect(daemonStatus(checkout)).toContain('is watching');
 
-    await removePaneFsmonitorConfig('2.4.215', [{ path: cwd, commandRunner: new CommandRunner({ path: cwd }) }]);
+    await removePaneFsmonitorConfig('2.4.216', [{ path: cwd, commandRunner: new CommandRunner({ path: cwd }) }]);
 
     for (const checkout of [cwd, ...worktrees]) expect(daemonStatus(checkout)).toContain('not watching');
   });
