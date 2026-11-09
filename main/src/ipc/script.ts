@@ -7,6 +7,7 @@ import { logsManager } from '../services/panels/logPanel/logsManager';
 import { panelManager } from '../services/panelManager';
 import { exec, type ExecException } from 'child_process';
 import { scriptExecutionTracker } from '../services/scriptExecutionTracker';
+import { resolveIdeCommand } from '../../../shared/utils/ideCommands';
 
 const DAEMON_SCRIPT_CHANNELS = [
   'sessions:has-run-script',
@@ -23,7 +24,7 @@ const DAEMON_SCRIPT_CHANNELS = [
 
 export function registerScriptHandlers(
   ipcMain: IpcMain,
-  { sessionManager }: AppServices,
+  { configManager, sessionManager }: AppServices,
   commandRegistry: PaneCommandRegistry,
 ): void {
   // Script execution handlers
@@ -206,16 +207,6 @@ export function registerScriptHandlers(
     }
   });
 
-  // Allowlist of known IDE commands keyed by identifier
-  interface IdeCommandLookup {
-    [ide: string]: string;
-  }
-
-  const IDE_COMMANDS: IdeCommandLookup = {
-    vscode: 'code .',
-    cursor: 'cursor .',
-  };
-
   // Opening a local IDE is a client-local adapter action, not daemon-owned runtime behavior.
   ipcMain.handle('sessions:open-ide', async (_event, sessionId: string, ideKey?: PaneCommandValue) => {
     try {
@@ -225,16 +216,20 @@ export function registerScriptHandlers(
       }
 
       const project = sessionManager.getProjectForSession(sessionId);
-      // Resolve command: use allowlisted key, fall back to project config
+      // Resolve command: a built-in IDE key, else the project's command, else the app-wide default
       let safeKey: string | undefined;
       try {
         safeKey = decodeBoundary(ideKey, boundary.optional(boundary.string));
       } catch {
         safeKey = undefined;
       }
-      const ideCommand = (safeKey && IDE_COMMANDS[safeKey]) || project?.open_ide_command;
+      const ideCommand = resolveIdeCommand(safeKey, project?.open_ide_command, configManager.getConfig().defaultIdeCommand);
       if (!ideCommand) {
-        return { success: false, error: 'No IDE command configured for this project' };
+        return {
+          success: false,
+          error: 'No IDE command is set for this project, and there is no default for all projects. '
+            + 'Nothing was opened. Set one under Open IDE Command in Project Settings.',
+        };
       }
 
       // Execute the IDE command in the worktree directory

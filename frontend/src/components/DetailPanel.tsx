@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
-import { AlertTriangle, ArrowLeftRight, Code2, GitBranch, Link, Settings, TerminalSquare } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Code2, GitBranch, Link, Settings } from 'lucide-react';
 import { useSession } from '../contexts/SessionContext';
+import { ideMenuItems } from '../utils/ideMenuItems';
 import { useNavigationStore } from '../stores/navigationStore';
 import { DetailPanelGitActions } from './DetailPanelGitActions';
 import { GitHistoryGraph } from './GitHistoryGraph';
@@ -87,17 +88,8 @@ export function DetailPanel({
   });
   const ideItems = useMemo(() => {
     if (!sessionContext?.onOpenIDEWithCommand) return [];
-    const handler = sessionContext.onOpenIDEWithCommand;
-    const configured = sessionContext.configuredIDECommand?.trim();
-    const isCustom = configured && !['code .', 'cursor .'].includes(configured);
-    return [
-      ...(isCustom
-        ? [{ id: 'configured', label: configured, description: 'Project default', icon: TerminalSquare, onClick: () => handler() }]
-        : []),
-      { id: 'vscode', label: 'VS Code', description: 'code .', icon: Code2, onClick: () => handler('vscode') },
-      { id: 'cursor', label: 'Cursor', description: 'cursor .', icon: Code2, onClick: () => handler('cursor') },
-    ];
-  }, [sessionContext?.configuredIDECommand, sessionContext?.onOpenIDEWithCommand]);
+    return ideMenuItems(sessionContext.configuredIDE, sessionContext.onOpenIDEWithCommand);
+  }, [sessionContext?.configuredIDE, sessionContext?.onOpenIDEWithCommand]);
 
   if (!sessionContext) return null;
   if (orientation === 'horizontal') {

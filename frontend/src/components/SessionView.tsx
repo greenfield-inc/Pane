@@ -70,6 +70,7 @@ import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
 import { isChatTabsEnabled, isMissionControlEnabled, useConfigStore } from '../stores/configStore';
+import { configuredIde } from '../../../shared/utils/ideCommands';
 import { cycleIndex } from '../utils/arrayUtils';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { Kbd } from './ui/Kbd';
@@ -191,7 +192,7 @@ export const SessionView = memo(() => {
     setLayout: state.setLayout,
     setFocusedGroup: state.setFocusedGroup,
   })));
-  
+
   // History store for navigation
   const { addToHistory } = useSessionHistoryStore();
 
@@ -411,7 +412,7 @@ export const SessionView = memo(() => {
       flushLayoutPersist();
     };
   }, [activeSession?.id, projectViewShown, selectionRevision, hostId, panelRetry, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
-  
+
   // Listen for panel updates from the backend
   useEffect(() => {
     if (!activeSession?.id) return;
@@ -1788,7 +1789,7 @@ export const SessionView = memo(() => {
       : activeSession.status === 'running' || activeSession.status === 'initializing'
         ? 'Session is currently running'
         : undefined;
-    
+
     return activeSession.isMainRepo ? [
       {
         id: 'pull',
@@ -1802,7 +1803,7 @@ export const SessionView = memo(() => {
       },
       {
         id: 'push',
-        label: 'Push to Remote', 
+        label: 'Push to Remote',
         icon: Upload,
         onClick: hook.handleGitPush,
         disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing',
@@ -1927,7 +1928,7 @@ export const SessionView = memo(() => {
       }
     ];
   })();
-  
+
   // Removed unused variables - now handled by panels
 
   // Live grid of every agent pane — spans all projects.
@@ -1956,7 +1957,7 @@ export const SessionView = memo(() => {
           projectId={activeProjectId}
           projectName={projectData.name || 'Project'}
           projectEnvironment={projectData.environment}
-          configuredIDECommand={projectData.open_ide_command}
+          configuredIDE={configuredIde(projectData.open_ide_command, config?.defaultIdeCommand)}
           onConfigureIDE={() => setShowProjectSettings(true)}
         />
         <ProjectSettings
@@ -2015,7 +2016,7 @@ export const SessionView = memo(() => {
       <div className="flex min-h-0 min-w-0 flex-1 flex-row">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* SINGLE SessionProvider wraps everything */}
-      <SessionProvider session={activeSession} gitBranchActions={branchActions} isMerging={hook.isMerging} gitCommands={hook.gitCommands} onOpenIDEWithCommand={handleOpenIDEWithCommand} onOpenUrlInBrowser={handleOpenUrlInBrowser} onConfigureIDE={() => setShowProjectSettings(true)} onSetTracking={handleOpenSetTracking} trackingBranch={currentUpstream} configuredIDECommand={sessionProject?.open_ide_command} isRemoteMode={isRemoteMode}>
+      <SessionProvider session={activeSession} gitBranchActions={branchActions} isMerging={hook.isMerging} gitCommands={hook.gitCommands} onOpenIDEWithCommand={handleOpenIDEWithCommand} onOpenUrlInBrowser={handleOpenUrlInBrowser} onConfigureIDE={() => setShowProjectSettings(true)} onSetTracking={handleOpenSetTracking} trackingBranch={currentUpstream} configuredIDE={configuredIde(sessionProject?.open_ide_command, config?.defaultIdeCommand)} isRemoteMode={isRemoteMode}>
 
         {/* Tab bar at top */}
         <PanelTabBar

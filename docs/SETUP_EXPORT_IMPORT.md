@@ -28,9 +28,9 @@ is never written. That includes every API key and token Pane stores (Anthropic,
 OpenAI, fal, OpenRouter, Deepgram, APNs), shared credentials, Remote Pane and
 Workspaces settings, analytics settings and identity, leaderboard, the Claude
 executable path, extra PATH entries, the preferred shell, start on login,
-Publish Pane instructions to AGENTS.md, developer and verbose modes, and each
-repository's path, worktree folder, Open IDE Command and Project System
-Prompt. Notes, Loops and Sessions are not part of the setup.
+Publish Pane instructions to AGENTS.md, developer and verbose modes, the Open
+IDE Command used for all projects, and each repository's path, worktree folder,
+Open IDE Command and Project System Prompt. Notes, Loops and Sessions are not part of the setup.
 
 Free text can still hold a secret someone typed into it. As a second check,
 Pane leaves out any command, resume template, script, Session profile or

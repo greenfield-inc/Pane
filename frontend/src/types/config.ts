@@ -175,6 +175,8 @@ export interface AppConfig {
   analytics?: AnalyticsConfig;
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
+  // Open IDE command for every project without its own, e.g. `idea .`
+  defaultIdeCommand?: string;
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
@@ -252,6 +254,7 @@ export interface UpdateConfigRequest {
   htmlFileOpenMode?: HtmlFileOpenMode;
   analytics?: AnalyticsConfig;
   customCommands?: CustomCommand[];
+  defaultIdeCommand?: string;
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
