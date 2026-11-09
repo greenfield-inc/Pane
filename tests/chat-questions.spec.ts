@@ -47,6 +47,8 @@ test('the keyboard alone answers both questions: number, Enter, number, Enter (r
   // Focus moved into the new question, so its keys still reach the card.
   await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[aria-label="Agent question"]'))).toBe(true);
   await page.keyboard.press('2');
+  // The focus ring moves to the option the number picked.
+  await expect(card.getByRole('radio', { name: /Change some/ })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect.poll(() => answers(page)).toEqual([{ action: 'accept', content: { question_0: 'Ready', question_1: 'Some' } }]);
 });

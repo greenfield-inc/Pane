@@ -1,4 +1,4 @@
-import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { ChatTabClient, ChatTabCreate } from '../../../../shared/types/chatTab';
 import { decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
 import type {
@@ -94,6 +94,17 @@ export class RemoteRuntimeAdapter {
 
   onStatus(listener: RemoteRuntimeStatusListener): () => void {
     return this.client.onStatus(listener);
+  }
+
+  /**
+   * A Pane's git status, as the host's `sessions:get-git-status` returns it (non-blocking: the
+   * cached status now, with a refresh that arrives as `git-status-updated`). Its reply carries
+   * `gitStatus` beside `success`, not under `data`, so it is read here rather than through invoke.
+   */
+  async gitStatus(paneId: string): Promise<JsonValue | undefined> {
+    const response = await this.client.invoke<{ success?: boolean; error?: string; gitStatus?: JsonValue }>('sessions:get-git-status', [paneId, true]);
+    if (response.success === false) throw new Error(response.error ?? 'sessions:get-git-status failed');
+    return response.gitStatus ?? undefined;
   }
 
   onEvent(listener: RemoteRuntimeEventListener): () => void {

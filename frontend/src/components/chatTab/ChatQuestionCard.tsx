@@ -62,6 +62,8 @@ export function ChatQuestionCard({ question, disabled, onAnswer }: { question: C
       const picked = choice.choices[Number(event.key) - 1];
       if (!picked) return;
       event.preventDefault();
+      // The focus ring follows the pick, so the next keys start from it.
+      stepRef.current?.querySelector('fieldset')?.querySelectorAll<HTMLInputElement>('input')[Number(event.key) - 1]?.focus();
       if (choice.kind === 'single') set(choice.key, picked.value);
       else {
         const current = values[choice.key];
