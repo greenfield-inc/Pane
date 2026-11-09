@@ -2073,7 +2073,8 @@ export class TerminalPanelManager extends EventEmitter {
     // Store in map (ptyHost path: pid is already populated on the shim).
     this.terminals.set(panel.id, terminalProcess);
     // A tab restarted in place (a failed Switch to chat, Resume) redraws at once, behind its loading overlay.
-    if (this.launchedPanels.has(panel.id)) this.sendRendererEvent('terminal:relaunched', { sessionId: panel.sessionId, panelId: panel.id });
+    const relaunch = this.launchedPanels.has(panel.id);
+    if (relaunch) this.sendRendererEvent('terminal:relaunched', { sessionId: panel.sessionId, panelId: panel.id });
     this.launchedPanels.add(panel.id);
     // A tab starting in a Pane that has paused tabs (a new tab, or one resumed) can end the Pane's paused state.
     if (panelManager.getPanelsForSession(panel.sessionId).some(other => pausedMarkOf(other))) {
@@ -2122,6 +2123,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (initialCommand && launchResolution) {
       commandToRun = launchResolution.commandToRun;
       const isCliCommand = launchResolution.isCliCommand;
+      if (relaunch) console.log(`[TerminalPanelManager] Relaunching panel ${panel.id} in a new shell: ${commandToRun}`);
 
       if (isCliCommand && !launchStatePersistedBeforeSpawn) {
         panel.state.customState = launchResolution.customState;

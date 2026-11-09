@@ -843,13 +843,18 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     }
   }, [handleRefreshTerminal]);
 
-  // Main restarted this tab's process in place: rebuild from the new launch behind the loading overlay,
-  // now when it is showing, otherwise at its next activation.
+  // Main restarted this tab's process in place (a failed Switch to chat, Resume). The old process took
+  // this viewer's registration with it, so main holds the new launch's output as hidden until the tab
+  // registers again. Register first, then rebuild from main's snapshot behind the loading overlay: now
+  // when it is showing, otherwise at its next activation.
   useEffect(() => window.electronAPI.events.onTerminalRelaunched(data => {
     if (data.panelId !== panel.id) return;
     needsFullActivationRefreshRef.current = true;
-    if (activationVisible) void handleManualRefresh();
-  }), [panel.id, activationVisible, handleManualRefresh]);
+    if (!effectiveVisible) return;
+    void window.electronAPI.invoke('terminal:setVisibility', panel.id, true, TERMINAL_VISIBILITY_VIEWER_ID)
+      .then(() => { if (activationVisible) return handleManualRefresh(); })
+      .catch(error => console.warn('[TerminalPanel] Could not redraw the relaunched terminal:', error));
+  }), [panel.id, effectiveVisible, activationVisible, handleManualRefresh]);
 
   useEffect(() => registerRemoteTerminalRestore(panel.id, async () => {
     if (!isRemoteMode) return;
