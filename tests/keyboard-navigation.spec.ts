@@ -501,6 +501,56 @@ test('a failed refit still lifts the terminal\'s overlay (F-1)', async ({ page }
   await expect(page.locator('[data-panel-group-id="g-left"]').getByRole('status', { name: 'Loading terminal' })).toHaveCount(0, { timeout: 5000 });
 });
 
+test('an older refit never lifts the mask a newer refresh still holds (F-1)', async ({ page }) => {
+  await openFixture(page);
+  // Holds terminal:resize calls, and terminal:getState once asked, until the test lets them go.
+  await page.evaluate(() => {
+    const resizes: Array<() => void> = [];
+    const snapshots: Array<() => void> = [];
+    const held = { resizes, snapshots, holdSnapshots: false };
+    Object.assign(window, { __held: held });
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = (channel: string, ...args: unknown[]) => {
+      if (channel === 'terminal:resize') {
+        return new Promise(resolve => held.resizes.push(() => resolve(invoke(channel, ...args))));
+      }
+      if (channel === 'terminal:getState' && held.holdSnapshots) {
+        return new Promise(resolve => held.snapshots.push(() => resolve(invoke(channel, ...args))));
+      }
+      return invoke(channel, ...args);
+    };
+  });
+  const control = (action: 'hold-snapshots' | 'release-resizes' | 'release-all' | 'resizes' | 'snapshots') => page.evaluate((what) => {
+    // SAFETY: the evaluate above installed window.__held with exactly this shape.
+    const held = (window as typeof window & { __held: { resizes: Array<() => void>; snapshots: Array<() => void>; holdSnapshots: boolean } }).__held;
+    if (what === 'hold-snapshots') held.holdSnapshots = true;
+    if (what === 'release-resizes' || what === 'release-all') held.resizes.splice(0).forEach(release => release());
+    if (what === 'release-all') {
+      held.holdSnapshots = false;
+      held.snapshots.splice(0).forEach(release => release());
+    }
+    return what === 'snapshots' ? held.snapshots.length : held.resizes.length;
+  }, action);
+
+  const left = page.locator('[data-panel-group-id="g-left"]');
+  const mask = left.getByRole('status', { name: 'Loading terminal' });
+  await left.locator('.xterm-helper-textarea').focus();
+  await maximizeKey(page);
+  await expect(mask).toHaveCount(1);
+  // A manual refresh starts while the maximize refit still waits on its resize.
+  await control('hold-snapshots');
+  await left.getByTitle('Refresh terminal').dispatchEvent('click');
+  await expect.poll(() => control('resizes')).toBeGreaterThan(1);
+  // The refit finishes; the refresh still waits for its snapshot, so the mask stays.
+  await control('release-resizes');
+  await expect.poll(() => control('snapshots')).toBe(1);
+  await control('release-resizes');
+  await page.waitForTimeout(1500);
+  await expect(mask).toHaveCount(1);
+  await control('release-all');
+  await expect(mask).toHaveCount(0, { timeout: 5000 });
+});
+
 test('in the swapped layout, the bottom inspector maximizes, restores and minimizes (F-4)', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('pane-layout-swapped', 'true'));
   await openFixture(page);

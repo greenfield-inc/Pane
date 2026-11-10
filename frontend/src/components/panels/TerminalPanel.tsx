@@ -60,6 +60,7 @@ import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import { onTerminalReflow } from '../../utils/terminalReflow';
+import { createMaskOwnership } from '../../utils/maskOwnership';
 import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';
 
@@ -275,6 +276,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const scrollLineRemainderRef = useRef(0);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Every task that covers the terminal holds its own claim on the mask; the
+  // mask lifts when the last one lets go, so a late task never uncovers a newer one.
+  const [refreshMask] = useState(() => createMaskOwnership(setIsRefreshing));
   const [initError, setInitError] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [initAttempt, setInitAttempt] = useState(0);
@@ -843,15 +847,15 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   }, [panel.id, resizePtyToFit, isRemoteMode]);
 
   const handleManualRefresh = useCallback(async () => {
-    setIsRefreshing(true);
+    const releaseMask = refreshMask.acquire();
     try {
       await handleRefreshTerminal();
       await waitForNextPaint();
       await new Promise(resolve => setTimeout(resolve, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS));
     } finally {
-      setIsRefreshing(false);
+      releaseMask();
     }
-  }, [handleRefreshTerminal]);
+  }, [handleRefreshTerminal, refreshMask]);
 
   useEffect(() => registerRemoteTerminalRestore(panel.id, async () => {
     if (!isRemoteMode) return;
@@ -895,18 +899,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
   // Maximize and restore resize this terminal in one step: refit behind the
   // loading overlay instead of the debounced, unmasked resize (P4).
-  const reflowGenerationRef = useRef(0);
   useEffect(() => onTerminalReflow(() => {
     if (!isActiveRef.current || !xtermRef.current) return;
     // The layout change that follows comes from a store and renders at once,
-    // so the overlay must be on screen first, not a frame later.
+    // so the overlay must be on screen first, not a frame later. This refit
+    // lets go of only its own claim, and a failed refit still lets go.
+    let releaseMask = () => {};
     flushSync(() => {
-      setIsRefreshing(true);
+      releaseMask = refreshMask.acquire();
       setOverlayVisible(true);
     });
-    // Only the latest reflow lifts the mask, so an older one can never
-    // uncover a newer refresh; a failed refit still lifts it.
-    const generation = ++reflowGenerationRef.current;
     void (async () => {
       try {
         // Let the new layout (Allotment shows or hides panes) settle first.
@@ -918,10 +920,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       } catch (error) {
         console.warn('[TerminalPanel] Refit after maximize or restore failed:', error);
       } finally {
-        if (reflowGenerationRef.current === generation) setIsRefreshing(false);
+        releaseMask();
       }
     })();
-  }), [resizePtyToFit, repaintTerminal]);
+  }), [resizePtyToFit, repaintTerminal, refreshMask]);
 
   const getDropdownPosition = useCallback((): DropdownPosition => {
     const container = terminalRef.current;
@@ -1963,7 +1965,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     const fullRefresh = !hotActivation && (useBatterySaverTerminalVisibility || needsFullActivationRefreshRef.current);
 
     // Both full and hot panel activations stay behind the existing opaque mask.
-    if (fullRefresh || hotActivation) setIsRefreshing(true);
+    const releaseMask = fullRefresh || hotActivation ? refreshMask.acquire() : () => {};
 
     let lastWidth = 0;
     let retries = 0;
@@ -1990,7 +1992,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       // once layout settles. Leave the ref armed so the next activation retries full.
       if (containerWidth < MIN_VIABLE_RECT_PX) {
         forwardToMainLog('warn', `[TerminalPanel] Activation refresh bailed for panel ${panel.id}: container ${containerWidth}px`);
-        setIsRefreshing(false);
+        releaseMask();
         if (autoFocus && fullRefresh && !findBarHasFocus(panel.id)) xtermRef.current?.focus();
         return;
       }
@@ -2035,7 +2037,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             // The live buffer has now completed both reconciles and the delayed
             // paint. The overlay's own linger still shields presentation; adding
             // the full-replay settle timer here only delays an already hot view.
-            setIsRefreshing(false);
+            releaseMask();
           })();
         }, REFOCUS_DELAYED_REFRESH_MS);
 
@@ -2043,7 +2045,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // Full refresh keeps the historical mask timing. Hot activation keeps
           // the mask through its delayed fit/reconcile/refresh backstop above.
           hideOverlayTimer = setTimeout(() => {
-            if (!cancelled) setIsRefreshing(false);
+            if (!cancelled) releaseMask();
           }, TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS);
         }
       });
@@ -2057,9 +2059,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       if (retryTimer) clearTimeout(retryTimer);
       if (delayedRefreshTimer) clearTimeout(delayedRefreshTimer);
       if (hideOverlayTimer) clearTimeout(hideOverlayTimer);
-      setIsRefreshing(false);
+      releaseMask();
     };
-  }, [activationVisible, panelVisible, useBatterySaverTerminalVisibility, panel.id, panel.sessionId, isInitialized, autoFocus, handleRefreshTerminal, reconcileMountedTerminal, repaintTerminal, forwardToMainLog]);
+  }, [activationVisible, panelVisible, useBatterySaverTerminalVisibility, panel.id, panel.sessionId, isInitialized, autoFocus, handleRefreshTerminal, reconcileMountedTerminal, repaintTerminal, forwardToMainLog, refreshMask]);
 
   useEffect(() => {
     const terminal = xtermRef.current;
