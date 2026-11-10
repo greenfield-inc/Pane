@@ -198,6 +198,16 @@ publishes this contract for Pane: when `PANE_PANEL_ID` is set it prints
 first ID line of each launch and ignores later ones, which can only be agent
 output. Every other wrapper still needs an explicit config.
 
+The launch ID is only where the conversation started: `/clear` and `/resume`
+move Claude to another one. Agent Farm's compiled Claude plugin therefore also
+carries a `SessionStart` hook that runs `runpane panels conversation --hook` on
+start, `/resume`, `/clear` and compact (D-269). Pane saves the reported
+conversation on the tab, ahead of the launch ID, so a restart resumes the
+conversation the tab was last on and Switch to chat opens it. The hook does
+nothing outside Pane and prints nothing. With an older Agent Farm there is no
+report, and Switch to chat opens the folder's most recent conversation instead
+(see [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).
+
 A command counts when it is a single `agent-farm run <profile>` or
 `agent-farm agent <profile>`, optionally preceded by `VAR=value` assignments,
 with no shell operators, no `--`, and no `--resume` of its own. `npx`, `pnpm dlx`

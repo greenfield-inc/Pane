@@ -7,6 +7,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   'chat-tab:history',
   'chat-tab:receipt',
   'chat-tab:keys',
+  // Lists the folder's past conversations for the picker; nothing on the host changes.
+  'chat-tab:conversations',
   // Autopilot's state and its documents; nothing on the host changes.
   'autopilot:snapshot',
   'autopilot:read-doc',

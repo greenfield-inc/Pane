@@ -499,6 +499,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     permission: (panelId: string, requestId: string, optionId: string) => invokeIpc('chat-tab:permission', panelId, requestId, optionId),
     answer: (panelId: string, questionId: string, response: ChatTabAnswer) => invokeIpc('chat-tab:answer', panelId, questionId, response),
     restart: (panelId: string) => invokeIpc('chat-tab:restart', panelId),
+    conversations: (panelId: string) => invokeIpc('chat-tab:conversations', panelId),
+    resume: (panelId: string, sessionId: string) => invokeIpc('chat-tab:resume', panelId, sessionId),
+    dismissBanner: (panelId: string) => invokeIpc('chat-tab:dismiss-banner', panelId),
     signIn: (panelId: string) => invokeIpc('chat-tab:sign-in', panelId),
     keys: () => invokeIpc('chat-tab:keys'),
     setKey: (agent: 'claude' | 'codex', key: string | null) => invokeIpc('chat-tab:set-key', agent, key),
@@ -1117,6 +1120,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, output: TerminalOutputEvent) => callback(output);
       ipcRenderer.on('terminal:output', wrappedCallback);
       return () => ipcRenderer.removeListener('terminal:output', wrappedCallback);
+    },
+
+    onTerminalRelaunched: (callback: (data: { sessionId: string; panelId: string }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, data: { sessionId: string; panelId: string }) => callback(data);
+      ipcRenderer.on('terminal:relaunched', wrappedCallback);
+      return () => ipcRenderer.removeListener('terminal:relaunched', wrappedCallback);
     },
 
     onTerminalCliReady: (callback: (data: { panelId: string }) => void) => {

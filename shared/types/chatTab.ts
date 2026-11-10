@@ -57,16 +57,60 @@ export interface ChatPanelState {
   /** Set on Autopilot's own chat tab (its run id): the control plane refuses its answers (D-66). */
   autopilotRunId?: string;
   agentReport?: TerminalAgentReport;
+  /**
+   * Switch to chat when Pane was not sure of the terminal's conversation (D-282): the next start opens the
+   * folder's most recent conversation that no other Pane tab has open, instead of `acpSessionId`.
+   */
+  open?: 'most-recent';
+  /** What Switch to chat did, shown on the chat until it is closed or another conversation is picked. */
+  banner?: ChatTabSwitchBanner;
   /** When /clear last started a fresh conversation in this tab; shown as a divider at its start. */
   clearedAt?: string;
 }
 
 /**
- * Switch to chat reopened the conversation in chat tab `panelId`; any failure to do so is an error,
- * with the terminal running again. `terminalKept`: the chat has the conversation, but the
+ * The one-shot message a chat opened by Switch to chat carries (D-282, D-278 style 3).
+ * `most-recent`: Pane was not sure, and opened the folder's newest conversation.
+ * `none`: Pane was not sure, and the folder had none to open. `known-empty`: the terminal's
+ * conversation had no messages yet. `list-failed`: Pane was not sure and could not list the folder's conversations.
+ */
+export type ChatTabSwitchBanner =
+  | { kind: 'most-recent' }
+  | { kind: 'none' }
+  | { kind: 'known-empty' }
+  | { kind: 'list-failed'; reason: string };
+
+/**
+ * The most conversations Pane lists for one folder (picker and Switch to chat). A picker showing
+ * this many may have older ones left out, and says so.
+ */
+export const CHAT_CONVERSATION_LIMIT = 2000;
+
+/** One past conversation in a chat tab's folder, for the picker (/resume, "Pick another"). */
+export interface ChatTabConversation {
+  sessionId: string;
+  title?: string;
+  /** ISO time of the last change, when the agent reports it. */
+  updatedAt?: string;
+  /** This tab's own conversation ("open here"). */
+  current?: true;
+  /** Open in another Pane tab on this machine: it cannot be picked. */
+  openIn?: { panelId: string; title: string };
+}
+
+/**
+ * Switch to chat reopened the conversation in chat tab `panelId`. A failure is an error: before the
+ * terminal stopped, nothing changed; after, `CHAT_SWITCH_FAILED` (Pane was sure of a conversation with
+ * messages) restarts the terminal on it, and `CHAT_SWITCH_NOT_STARTED` leaves it stopped. `terminalKept`: the chat has the conversation, but the
  * terminal tab could not be closed or the Session could not be moved; `reason` says what to do.
  */
-export interface ChatTabSwitchResult { panelId: string; terminalKept: boolean; reason?: string }
+export interface ChatTabSwitchResult {
+  panelId: string;
+  terminalKept: boolean;
+  reason?: string;
+  /** Which conversation the chat opened: the one Pane knew, the folder's most recent one, or a new one. */
+  outcome?: 'known' | 'most-recent' | 'new';
+}
 
 /**
  * Why a Session's terminal tab will not switch to chat: mid-turn, a plain Codex terminal that has
@@ -142,6 +186,8 @@ export interface ChatTabView {
   transcript?: ChatTabTranscript;
   /** Total messages in this generation, including those before the window. */
   messageCount: number;
+  /** What Switch to chat did (D-282), until closed or another conversation is picked. */
+  banner?: ChatTabSwitchBanner;
   /**
    * How full the conversation's context window is, as the adapter last reported it (ACP `usage_update`).
    * Absent until the adapter reports usage; viewers then show nothing rather than a guess.
@@ -233,6 +279,12 @@ export interface ChatTabClient {
   permission(panelId: string, requestId: string, optionId: string): Promise<void>;
   answer(panelId: string, questionId: string, response: ChatTabAnswer): Promise<void>;
   restart(panelId: string): Promise<void>;
+  /** The folder's past conversations, newest first, with this tab's and other tabs' marked. */
+  conversations(panelId: string): Promise<ChatTabConversation[]>;
+  /** Reloads the tab on another conversation of its folder; refused mid-turn or when it is open in another tab. */
+  resume(panelId: string, sessionId: string): Promise<void>;
+  /** Closes the Switch to chat banner or note. */
+  dismissBanner(panelId: string): Promise<void>;
   signIn(panelId: string): Promise<{ panelId: string }>;
   onEvent(callback: (event: ChatTabEvent) => void): () => void;
   onState(callback: (view: ChatTabView) => void): () => void;

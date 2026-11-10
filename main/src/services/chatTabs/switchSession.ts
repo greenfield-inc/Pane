@@ -10,15 +10,10 @@ export interface SessionSwitchPorts extends SwitchToChatPorts {
 }
 
 /** The short kind of each refusal `prepareSwitch` can make before it touches the agent. */
-function skipKind(code: string | undefined, panel: ToolPanel): SessionChatSwitchSkip {
+function skipKind(code: string | undefined): SessionChatSwitchSkip {
   if (code === 'CHAT_SWITCH_BUSY') return 'busy';
   if (code === 'CHAT_SWITCH_UNSUPPORTED') return 'not-agent';
   if (code === 'CHAT_SWITCH_LAUNCH_UNSUPPORTED') return 'launch';
-  if (code === 'CHAT_SWITCH_NO_CONVERSATION') {
-    // SAFETY: only terminal panels reach this refusal, and they persist TerminalPanelState.
-    const agent = (panel.state.customState as { agentType?: string } | undefined)?.agentType;
-    return agent === 'codex' ? 'plain-codex' : 'no-conversation';
-  }
   return 'other';
 }
 
@@ -32,11 +27,18 @@ function terminalsOf(sessionId: string, ports: SessionSwitchPorts): Array<{ pane
 async function check(panel: ToolPanel, paneName: string, ports: SessionSwitchPorts): Promise<{ item: SessionChatSwitchItem; prepared?: PreparedSwitch }> {
   const item: SessionChatSwitchItem = { panelId: panel.id, title: panel.title, paneName };
   try {
-    return { item, prepared: await prepareSwitch(panel.id, ports) };
+    const prepared = await prepareSwitch(panel.id, ports);
+    // A Session switch opens only conversations Pane is sure of: the folder's most recent one is a
+    // guess for one tab at a time, with its banner and Pick another, and two tabs in one folder could swap.
+    if (!prepared.conversation.sure) {
+      const kind: SessionChatSwitchSkip = prepared.chatState.agent === 'codex' ? 'plain-codex' : 'no-conversation';
+      return { item: { ...item, skip: { kind, reason: `Pane isn't sure which conversation this tab is on (${prepared.conversation.why}). Switch it from its tab's menu to pick one` } } };
+    }
+    return { item, prepared };
   } catch (error) {
     // The preview and the summary already say the tab is skipped.
     const reason = reasonOf(error).replace(/\s*Nothing was switched\.?$/, '');
-    return { item: { ...item, skip: { kind: skipKind(error instanceof PaneError ? error.code : undefined, panel), reason } } };
+    return { item: { ...item, skip: { kind: skipKind(error instanceof PaneError ? error.code : undefined), reason } } };
   }
 }
 
@@ -71,7 +73,7 @@ export async function switchSessionToChat(sessionId: string, panelIds: readonly 
       items.push(switched.reason ? { ...item, result: 'switched', note: switched.reason } : { ...item, result: 'switched' });
     } catch (error) {
       console.warn(`[ChatTabs] Session ${sessionId}: ${item.panelId} did not switch to chat: ${reasonOf(error)}`);
-      items.push({ ...item, result: 'failed', skip: { kind: skipKind(error instanceof PaneError ? error.code : undefined, prepared.panel), reason: reasonOf(error) } });
+      items.push({ ...item, result: 'failed', skip: { kind: skipKind(error instanceof PaneError ? error.code : undefined), reason: reasonOf(error) } });
     }
   }
   return { sessionId, items };

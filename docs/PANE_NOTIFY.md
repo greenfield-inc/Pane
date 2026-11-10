@@ -109,7 +109,9 @@ at a loopback endpoint on the machine running it, with a token for that tab.
 Claude reads only the last `--settings` flag, so Pane writes one settings file
 per tab (owner-only, in `claude-prompts` under Pane's data folder) that merges
 its hooks with any `--settings` the command already passes, and launches with
-that file instead. A command whose `--settings` Pane can't read, or a tab
+that file instead. The file is written with this setting off too, for the
+`SessionStart` hook that tells Pane which conversation the tab is on
+([CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)). A command whose `--settings` Pane can't read, or a tab
 whose settings file Pane can't write, launches unchanged. Wrapped launches, commands that don't start with `claude`, SSH tabs
 and WSL tabs keep their command, and their prompts stay in the terminal.
 

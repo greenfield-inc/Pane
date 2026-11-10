@@ -87,7 +87,8 @@ export interface McpTool {
 
 // --json is always passed; --follow streams forever, and --until-event prints event lines rather
 // than one result and can wait without limit, which a single tool call cannot return.
-const OMITTED_FLAGS = new Set(['--json', '--follow', '--until-event', '--help']);
+// --hook reads a SessionStart hook's stdin, which an MCP call has none of.
+const OMITTED_FLAGS = new Set(['--json', '--follow', '--until-event', '--help', '--hook']);
 const FLAG_PATTERN = /--[a-z][a-z0-9-]*/g;
 const POSITIONAL_PATTERN = /^<([a-z][a-z0-9-]*)>$/;
 const REPEATED_POSITIONAL_PATTERN = /^<([a-z][a-z0-9-]*)>\.\.\.$/;

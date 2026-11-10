@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
-import { PaneCommandRegistry, isRemotePaneCommand, type PaneCommandValue } from './commandRegistry';
+import { PaneCommandRegistry, isRemotePaneCommand, rejectWithPaneErrorText, type PaneCommandValue } from './commandRegistry';
+import { PaneError } from '../../../shared/paneError';
 
 describe('PaneCommandRegistry', () => {
+  it('keeps a PaneError\'s code in the text Electron IPC sends, as Node does for coded errors', async () => {
+    const rejected = await rejectWithPaneErrorText(Promise.reject(new PaneError('CHAT_SWITCH_FAILED', 'The chat did not open.', 'Try again.'))).then(() => new Error('resolved'), (error: Error) => error);
+    // Electron replies with error.toString(); the renderer reads the code back from it.
+    expect(String(rejected)).toBe('Error [CHAT_SWITCH_FAILED]: The chat did not open. Next: Try again.');
+    expect(rejected.message).toBe('The chat did not open. Next: Try again.');
+  });
   it('keeps remote provenance through async handlers without affecting concurrent local calls', async () => {
     const registry = new PaneCommandRegistry();
     registry.register('panels:origin', async () => {
