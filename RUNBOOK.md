@@ -79,13 +79,15 @@ outside SQLite's runtime-dispatched AEGIS cipher code, since those crash older
 CPUs with SIGILL. It also fails if objdump prints no instructions for a module.
 
 ```
-build (macOS + Linux) ─┐
-                       ├─ publish-windows ─ publish-release ─ checksums ─┬─ notify-website
-build-windows (x64,  ──┘                                                ├─ publish-npm   ┐
-  arm64)                                   validate-runpane-packages ───┴─ publish-pypi  ┘
+build (macOS + Linux) ─┐                        ┌─ notify-website
+                       ├─ publish ──────────────┼─ homebrew (after packaging)
+build-windows (x64,  ──┘                        ├─ publish-npm   ┐
+  arm64)                validate-runpane-packages ┴─ publish-pypi  ┘
 ```
 
-`publish-npm` and `publish-pypi` each need both `checksums` and
+`publish` merges the Windows updater files, computes `SHA256SUMS.txt` and
+`continuity.json`, uploads them with the Windows installers, and publishes the
+draft release. `publish-npm` and `publish-pypi` each need both `publish` and
 `validate-runpane-packages`.
 
 ### Verify
@@ -118,8 +120,15 @@ for example with `wingetcreate submit <folder>`.
 `scripts/render-packaging.sh` fills the templates in `packaging/` with the
 version and installer checksums. A manual `Build & Release` run with `publish`
 unchecked builds, renders and audits the cask, uploads the packaging artifact,
-and publishes nothing. `HOMEBREW_TAP_TOKEN` permits the cask push; without it,
-the Homebrew job logs a notice and skips. npm publishes with `--provenance`.
+runs `publish`'s merge and checksum steps into a `release-metadata-vX.Y.Z`
+artifact, and publishes nothing. Its artifacts are kept for one day. Uncheck
+`sign` too for a dry run that neither signs nor notarizes:
+`gh workflow run build.yml --ref <branch> -f publish=false -f sign=false -f release_tag=v0.0.0-bench`.
+A run with `publish` checked always signs, and stops at once if `sign` is
+unchecked. Manual runs are named after their choices, for example
+`Build & Release v0.0.0-bench (publish=false, sign=false)`.
+`HOMEBREW_TAP_TOKEN` permits the cask push; without it, the Homebrew job logs
+a notice and skips. npm publishes with `--provenance`.
 
 `CI result` is the check branch protection requires. It fails if another
 `Code Quality` job fails or is cancelled, except Markdown Links, which it does
@@ -175,7 +184,7 @@ Names only; values live in the GitHub repository settings.
 | --- | --- | --- |
 | `GITHUB_TOKEN` | all | Provided by Actions |
 | `NPM_TOKEN`, `PYPI_API_TOKEN` | `build.yml` | Fallback only. npm and PyPI publish through trusted publishing (repository `greenfield-inc/Pane`, workflow `build.yml`, PyPI environment `pypi`). Use a token only for manual recovery, never commit `.npmrc` or `.pypirc`, and revoke the token afterwards |
-| `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | `build.yml` | macOS signing. It turns on only when all five are set; otherwise builds are unsigned |
+| `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | `build.yml` | macOS signing. It turns on only when all five are set and the `sign` input is not unchecked; otherwise builds are unsigned |
 | `SITE_REPO_DISPATCH_TOKEN` | `build.yml`, `notify-website.yml` | Sends the `pane-release` event to the website repo |
 | `TRAFFIC_TOKEN` | `traffic-snapshot.yml` | Reads repository traffic |
 | `GCP_*`, `CLOUD_RUN_*` variables | `deploy-remote-pwa-preview.yml`, `native-updates.yml` (all but `CLOUD_RUN_SERVICE`) | See [Remote PWA preview](#remote-pwa-preview) |

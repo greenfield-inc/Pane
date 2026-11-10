@@ -1,4 +1,7 @@
 name: Build & Release
+# Manual runs name their publish and sign choices, so a dry run's history
+# (and scripts/ci-timings.mjs) shows whether it signed.
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Build & Release {0} (publish={1}, sign={2})', inputs.release_tag, inputs.publish, inputs.sign) || format('Build & Release {0}', github.ref_name) }}
 
 on:
   push:
@@ -14,9 +17,19 @@ on:
         description: 'Existing vX.Y.Z tag to recover (required when publishing manually)'
         type: string
         required: true
+      sign:
+        description: 'Sign and notarize the macOS app (turn off for a dry run)'
+        type: boolean
+        default: true
 
 env:
   RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+  PUBLISH: ${{ github.ref_type == 'tag' || inputs.publish == true }}
+  # Tag and branch pushes always sign; only a manual dry run can turn it off.
+  # A publishing run always signs (its build jobs refuse sign=false).
+  SIGN: ${{ github.event_name != 'workflow_dispatch' || inputs.sign == true || inputs.publish == true }}
+  # Manual dry runs keep their artifacts for a day, long enough to check them.
+  ARTIFACT_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.publish != true && 1 || 30 }}
 
 jobs:
   build:
@@ -52,17 +65,26 @@ jobs:
       contents: write
 
     steps:
+    - name: Refuse to publish an unsigned release
+      if: inputs.publish == true && inputs.sign == false
+      run: |
+        echo "::error::publish=true needs sign=true: a published macOS release must be signed and notarized. Run again with sign checked, or with publish unchecked for a dry run."
+        exit 1
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
         python-version: '3.11'
     - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+    # macOS skips both caches: no workflow on main saves a macOS pnpm store or
+    # Electron cache, so a tag run never restores one, and saving the store
+    # cost 63-85 s per release. Electron's macOS cache is not ~/.cache anyway.
     - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
       with:
         node-version: '22.23.4'
-        cache: 'pnpm'
+        cache: ${{ runner.os != 'macOS' && 'pnpm' || '' }}
 
     - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+      if: runner.os != 'macOS'
       with:
         path: |
           ~/.cache/electron
@@ -78,7 +100,10 @@ jobs:
         echo 'CFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
         echo 'CXXFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
 
-    - run: pnpm install
+    # On macOS, electron-builder rebuilds the native modules for each target
+    # arch while packaging (npmRebuild), so the install-time rebuild for the
+    # host arch is skipped there.
+    - run: pnpm install ${{ runner.os == 'macOS' && '--ignore-scripts' || '' }}
 
     - name: Patch electron-builder temporary keychain password handling
       if: runner.os == 'macOS'
@@ -93,7 +118,12 @@ jobs:
 
     - name: Build and optionally publish
       run: |
-        if [[ "${{ github.ref_type }}" == "tag" ]] || [[ "${{ inputs.publish }}" == "true" ]]; then
+        # electron-builder signs whenever CSC_LINK is set, even to an empty
+        # string, so a dry run without signing removes the variables.
+        if [[ "$SIGN" != "true" ]]; then
+          unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD
+        fi
+        if [[ "$PUBLISH" == "true" ]]; then
           echo "Release build — publishing to GitHub Releases"
           pnpm run ${{ matrix.release_cmd }}
         else
@@ -107,8 +137,8 @@ jobs:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-        CSC_IDENTITY_AUTO_DISCOVERY: ${{ runner.os == 'macOS' && secrets.CSC_LINK != '' && secrets.CSC_KEY_PASSWORD != '' && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' }}
-        CSC_DISABLE: ${{ runner.os != 'macOS' || secrets.CSC_LINK == '' || secrets.CSC_KEY_PASSWORD == '' || secrets.APPLE_ID == '' || secrets.APPLE_TEAM_ID == '' || secrets.APPLE_APP_SPECIFIC_PASSWORD == '' }}
+        CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.SIGN == 'true' && runner.os == 'macOS' && secrets.CSC_LINK != '' && secrets.CSC_KEY_PASSWORD != '' && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' }}
+        CSC_DISABLE: ${{ env.SIGN != 'true' || runner.os != 'macOS' || secrets.CSC_LINK == '' || secrets.CSC_KEY_PASSWORD == '' || secrets.APPLE_ID == '' || secrets.APPLE_TEAM_ID == '' || secrets.APPLE_APP_SPECIFIC_PASSWORD == '' }}
 
     - run: ls -la dist-electron/
 
@@ -129,60 +159,103 @@ jobs:
         name: pane-${{ matrix.os }}-${{ env.RELEASE_TAG }}
         path: ${{ matrix.artifact_path }}
         if-no-files-found: error
-        retention-days: 30
+        retention-days: ${{ env.ARTIFACT_DAYS }}
 
-  publish-release:
-    if: github.ref_type == 'tag' || inputs.publish == true
-    needs: [publish-windows]
+  # One job after every build: merges the updater files, computes the
+  # checksums, then uploads and publishes. Dry runs stop after the merge and
+  # checksums and keep them as an artifact to check.
+  publish:
+    needs: [build, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    - name: Publish GitHub Release
-      run: bash scripts/publish-github-release.sh "${{ github.repository }}" "$RELEASE_TAG"
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+    - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      with:
+        node-version: '22.23.4'
+    # The merge scripts need js-yaml. Installing only the root package from the
+    # lockfile, without install scripts, keeps every version pinned and runs
+    # no package code in a job that can write the release.
+    - name: Install the root package for the merge scripts
+      run: pnpm install --frozen-lockfile --ignore-scripts --filter .
 
-  checksums:
-    if: github.ref_type == 'tag' || inputs.publish == true
-    needs: [publish-release, publish-windows]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-    - name: Download release assets
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        name: pane-windows-x64-${{ env.RELEASE_TAG }}
+        path: windows-artifacts/x64
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        name: pane-windows-arm64-${{ env.RELEASE_TAG }}
+        path: windows-artifacts/arm64
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: pane-macos-*-${{ env.RELEASE_TAG }}
+        path: release-files
+        merge-multiple: true
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: pane-ubuntu-*-${{ env.RELEASE_TAG }}
+        path: release-files
+        merge-multiple: true
+
+    - name: Merge Windows updater metadata
       run: |
-        VERSION="${RELEASE_TAG#v}"
-        mkdir -p assets && cd assets
-        gh release download "v${VERSION}" --repo "${{ github.repository }}" \
-          --pattern '*.exe' --pattern '*.dmg' --pattern '*.zip' \
-          --pattern '*.deb' --pattern '*.AppImage'
+        mkdir -p windows-release
+        cp windows-artifacts/x64/*-Windows-x64.exe windows-release/
+        cp windows-artifacts/x64/*-Windows-x64.exe.blockmap windows-release/
+        cp windows-artifacts/arm64/*-Windows-arm64.exe windows-release/
+        cp windows-artifacts/arm64/*-Windows-arm64.exe.blockmap windows-release/
+        node scripts/merge-windows-latest.js \
+          windows-artifacts/x64/latest.yml \
+          windows-artifacts/arm64/latest.yml \
+          windows-release/latest.yml
+        cp windows-release/* release-files/
+        ls -la release-files
 
+    # The same installers the release carries, so the sums match its assets.
     - name: Compute SHA256
       run: |
-        cd assets
-        sha256sum * > ../SHA256SUMS.txt
-        cat ../SHA256SUMS.txt
+        mkdir -p checksums
+        cd release-files
+        mapfile -t installers < <(printf '%s\n' *.exe *.dmg *.zip *.deb *.AppImage | sort)
+        sha256sum "${installers[@]}" > ../checksums/SHA256SUMS.txt
+        cat ../checksums/SHA256SUMS.txt
         python3 - <<'PY'
         import hashlib, json, os, pathlib
-        artifacts = [{"name": p.name, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
-                     for p in sorted(pathlib.Path('.').iterdir()) if p.is_file()]
-        pathlib.Path('../continuity.json').write_text(json.dumps({
+        names = sorted(p.name for p in pathlib.Path('.').iterdir()
+                       if p.is_file() and p.suffix in {'.exe', '.dmg', '.zip', '.deb', '.AppImage'})
+        artifacts = [{"name": n, "sha256": hashlib.sha256(pathlib.Path(n).read_bytes()).hexdigest()}
+                     for n in names]
+        pathlib.Path('../checksums/continuity.json').write_text(json.dumps({
             "protocol": 1, "version": os.environ['RELEASE_TAG'].removeprefix('v'),
             "artifacts": artifacts,
         }, indent=2) + '\n')
         PY
 
-    - name: Upload SHA256SUMS.txt to release
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: release-metadata-${{ env.RELEASE_TAG }}
+        path: |
+          checksums/*
+          release-files/*.yml
+        if-no-files-found: error
+        retention-days: ${{ env.ARTIFACT_DAYS }}
+
+    - name: Upload Windows assets and checksums
+      if: env.PUBLISH == 'true'
+      run: |
+        gh release upload "$RELEASE_TAG" windows-release/* checksums/SHA256SUMS.txt checksums/continuity.json \
+          --repo "${{ github.repository }}" --clobber
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        VERSION="${RELEASE_TAG#v}"
-        gh release upload "v${VERSION}" SHA256SUMS.txt continuity.json \
-          --repo "${{ github.repository }}" --clobber
+
+    - name: Publish GitHub Release
+      if: env.PUBLISH == 'true'
+      run: bash scripts/publish-github-release.sh "${{ github.repository }}" "$RELEASE_TAG"
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   validate-runpane-packages:
     if: github.ref_type == 'tag' || inputs.publish == true
@@ -210,7 +283,7 @@ jobs:
 
   publish-npm:
     if: github.ref_type == 'tag' || inputs.publish == true
-    needs: [checksums, validate-runpane-packages]
+    needs: [publish, validate-runpane-packages]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -241,7 +314,7 @@ jobs:
 
   publish-pypi:
     if: github.ref_type == 'tag' || inputs.publish == true
-    needs: [checksums, validate-runpane-packages]
+    needs: [publish, validate-runpane-packages]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -311,54 +384,7 @@ jobs:
           dist-electron/*-Windows-${{ matrix.arch }}.exe.blockmap
           dist-electron/latest.yml
         if-no-files-found: error
-        retention-days: 30
-
-  publish-windows:
-    if: github.ref_type == 'tag' || inputs.publish == true
-    needs: [build, build-windows]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-    - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
-      with:
-        node-version: '22.23.4'
-        cache: 'pnpm'
-    - run: pnpm install --ignore-scripts
-
-    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-      with:
-        name: pane-windows-x64-${{ env.RELEASE_TAG }}
-        path: windows-artifacts/x64
-
-    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
-      with:
-        name: pane-windows-arm64-${{ env.RELEASE_TAG }}
-        path: windows-artifacts/arm64
-
-    - name: Merge Windows updater metadata
-      run: |
-        mkdir -p windows-release
-        cp windows-artifacts/x64/*-Windows-x64.exe windows-release/
-        cp windows-artifacts/x64/*-Windows-x64.exe.blockmap windows-release/
-        cp windows-artifacts/arm64/*-Windows-arm64.exe windows-release/
-        cp windows-artifacts/arm64/*-Windows-arm64.exe.blockmap windows-release/
-        node scripts/merge-windows-latest.js \
-          windows-artifacts/x64/latest.yml \
-          windows-artifacts/arm64/latest.yml \
-          windows-release/latest.yml
-        ls -la windows-release
-
-    - name: Upload Windows release assets
-      run: |
-        VERSION="$(node -p "require('./package.json').version")"
-        TAG="$RELEASE_TAG"
-        gh release upload "${TAG}" windows-release/* \
-          --repo "${{ github.repository }}" --clobber
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        retention-days: ${{ env.ARTIFACT_DAYS }}
 
   # Renders the Homebrew cask and winget manifests from this run's macOS and
   # Windows artifacts. Runs on dry runs too, so the rendered files can be
@@ -403,7 +429,7 @@ jobs:
 
   homebrew:
     if: github.ref_type == 'tag' || inputs.publish == true
-    needs: [packaging, checksums]
+    needs: [packaging, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -435,7 +461,7 @@ jobs:
 
   notify-website:
     if: github.ref_type == 'tag' || inputs.publish == true
-    needs: [checksums]
+    needs: [publish]
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch to runpane-website
