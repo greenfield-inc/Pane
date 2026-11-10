@@ -28,6 +28,11 @@ export interface DropdownItem {
   separatorBefore?: boolean;
   /** Overrides the menu's `closeOnSelect` for this item. */
   closeOnSelect?: boolean;
+  /**
+   * A control beside the item, such as an edit button, shown while the item is hovered or
+   * focused. It sits left of the selection mark and is reached by the arrow keys after its item.
+   */
+  trailing?: ReactNode;
 }
 
 export interface DropdownProps {
@@ -442,7 +447,8 @@ export function Dropdown({
                         item.disabled && 'opacity-50 cursor-not-allowed',
                         !item.disabled && !isSelected && variantStyles[variant],
                         isSelected && selectedVariantStyles[variant],
-                        itemClassName
+                        itemClassName,
+                        item.trailing !== undefined && 'pr-14',
                       )}
                     >
                       {item.leading ?? (Icon && (
@@ -477,7 +483,14 @@ export function Dropdown({
                       <div className="h-2" />
                     )}
 
-                    {item.description && item.descriptionInTooltip
+                    {item.trailing !== undefined ? (
+                      <div className="group/item relative">
+                        {menuButton}
+                        <div className="absolute inset-y-0 right-8 flex items-center opacity-0 focus-within:opacity-100 group-hover/item:opacity-100 group-has-[[data-dropdown-item-index]:focus]/item:opacity-100">
+                          {item.trailing}
+                        </div>
+                      </div>
+                    ) : item.description && item.descriptionInTooltip
                       ? <Tooltip content={item.description} side="right" delay={250}>{menuButton}</Tooltip>
                       : menuButton}
                   </React.Fragment>

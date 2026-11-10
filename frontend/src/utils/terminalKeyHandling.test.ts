@@ -1,13 +1,30 @@
 import { describe, expect, it } from 'vitest';
+import { buildInterceptionSets } from '../../../shared/utils/keyboardBindings';
+import { chordFromKeyboardEvent } from '../../../shared/utils/keyboardChords';
 import {
   isFineSurfaceScrollKey,
   isPageSurfaceScrollKey,
-  resolveTerminalKeyHandling,
+  isTerminalClearKey,
+  resolveTerminalKeyHandling as resolveWithState,
   terminalClaimsFineSurfaceScroll,
   TERMINAL_MULTILINE_NEWLINE_SEQUENCE,
   type TerminalKeyHandlingState,
   type TerminalKeyLike,
 } from './terminalKeyHandling';
+
+const defaultSets = {
+  mac: buildInterceptionSets({ keyPlatform: 'mac' }),
+  other: buildInterceptionSets({ keyPlatform: 'other' }),
+};
+
+/** Resolves with `releasableFromTui` filled from the default catalog, as TerminalPanel does. */
+function resolveTerminalKeyHandling(event: TerminalKeyLike, state: TerminalKeyHandlingState) {
+  const keyPlatform = state.isMac ? 'mac' : 'other';
+  return resolveWithState(event, {
+    releasableFromTui: defaultSets[keyPlatform].tuiReleasable.has(chordFromKeyboardEvent(event, keyPlatform)),
+    ...state,
+  });
+}
 
 const key = (overrides: Partial<TerminalKeyLike>): TerminalKeyLike => ({
   key: 'a',
@@ -119,10 +136,40 @@ describe('resolveTerminalKeyHandling', () => {
     ['switch sessions', key({ key: 'Tab', code: 'Tab', ctrlKey: true })],
     ['switch group tabs', key({ key: '!', code: 'Digit1', ctrlKey: true, shiftKey: true })],
     ['add tools', key({ key: '1', code: 'Digit1', ctrlKey: true, altKey: true })],
-    ['zoom groups', key({ key: 'Z', code: 'KeyZ', ctrlKey: true, shiftKey: true })],
     ['split groups', key({ key: '\\', code: 'Backslash', ctrlKey: true })],
+    ['focus the sidebar', key({ key: '0', code: 'Digit0', ctrlKey: true })],
+    ['cycle regions', key({ key: 'F6', code: 'F6' })],
+    ['minimize', key({ key: 'M', code: 'KeyM', ctrlKey: true, shiftKey: true })],
+    ['switch machines', key({ key: 'o', code: 'KeyO', ctrlKey: true, altKey: true })],
+    ['cycle tabs', key({ key: 'PageDown', code: 'PageDown', ctrlKey: true })],
+    ['toggle the right panel', key({ key: 'b', code: 'KeyB', ctrlKey: true, altKey: true })],
   ])('releases Pane %s shortcuts while a TUI is active', (_label, event) => {
     expect(resolveTerminalKeyHandling(event, tui())).toEqual({ action: 'release-to-app' });
+  });
+
+  it('releases the second step of a two-step key', () => {
+    expect(resolveTerminalKeyHandling(
+      key({ key: 'm', code: 'KeyM', metaKey: true }),
+      tui({ isMac: true, keySequencePending: true }),
+    )).toEqual({ action: 'release-to-app' });
+    expect(resolveTerminalKeyHandling(
+      key({ key: 'm', code: 'KeyM', metaKey: true }),
+      tui({ isMac: true }),
+    )).toEqual({ action: 'pass-through' });
+  });
+
+  it.each(['a', 'b', 'd', 'e', 'k', 'w', 'q'])('keeps Ctrl+%s with a full-screen program on macOS', (letter) => {
+    expect(resolveTerminalKeyHandling(
+      key({ key: letter, code: `Key${letter.toUpperCase()}`, ctrlKey: true }),
+      tui({ isMac: true }),
+    )).toEqual({ action: 'pass-through' });
+  });
+
+  it('clears with Cmd+K on macOS and Ctrl+K elsewhere, never macOS Ctrl+K', () => {
+    expect(isTerminalClearKey(key({ key: 'k', code: 'KeyK', metaKey: true }), true)).toBe(true);
+    expect(isTerminalClearKey(key({ key: 'k', code: 'KeyK', ctrlKey: true }), true)).toBe(false);
+    expect(isTerminalClearKey(key({ key: 'k', code: 'KeyK', ctrlKey: true }), false)).toBe(true);
+    expect(isTerminalClearKey(key({ key: 'K', code: 'KeyK', metaKey: true, shiftKey: true }), true)).toBe(false);
   });
 
   it('releases Cmd+Backslash but preserves Ctrl+Backslash on macOS', () => {

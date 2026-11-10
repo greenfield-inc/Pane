@@ -14,6 +14,13 @@ export interface TerminalKeyHandlingState {
   keyboardShortcutsEnabled: boolean;
   /** This terminal's Pane find bar is open. */
   findOpen?: boolean;
+  /**
+   * The key is a Pane key that leaves a full-screen program (the catalog's
+   * `releaseInTui` flag, from `isTuiReleasableChordForEvent`).
+   */
+  releasableFromTui?: boolean;
+  /** A two-step key is waiting for its second step, which belongs to Pane. */
+  keySequencePending?: boolean;
 }
 
 export interface TerminalKeyLike {
@@ -91,39 +98,24 @@ function resolveTerminalFindKey(
   return { action: 'pass-through' };
 }
 
-function isPaneNavigationShortcut(
-  event: TerminalKeyLike,
-  state: TerminalKeyHandlingState,
-): boolean {
-  const primaryModifier = state.isMac ? event.metaKey : event.ctrlKey;
-  if (!primaryModifier) return false;
+/**
+ * Windows and Linux report AltGr as Ctrl+Alt. When the layout's AltGr+digit
+ * prints a character, `key` is that character rather than the digit, and the
+ * press is typing, not a Pane key.
+ */
+function isUnreportedAltGrDigit(event: TerminalKeyLike, isMac: boolean): boolean {
+  const digitMatch = event.code.match(/^Digit([0-9])$/);
+  return !isMac && event.ctrlKey && event.altKey && Boolean(digitMatch) && event.key !== digitMatch?.[1];
+}
 
-  const isAltGr = event.getModifierState('AltGraph');
-  const digitMatch = event.code.match(/^Digit([1-9])$/);
-  const isUnreportedAltGrDigit = !state.isMac
-    && event.ctrlKey
-    && event.altKey
-    && digitMatch
-    && event.key !== digitMatch[1];
-  if (
-    event.altKey
-    && !isAltGr
-    && !isUnreportedAltGrDigit
-    && !event.shiftKey
-    && (
-      ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)
-      || digitMatch
-    )
-  ) {
-    return true;
-  }
-
-  if (!event.altKey && event.key === 'Tab') return true;
-  if (!event.altKey && event.shiftKey && /^Digit[1-9]$/.test(event.code)) return true;
-  if (!event.altKey && event.shiftKey && event.key.toLowerCase() === 'z') return true;
-
-  const isBackslash = event.code === 'Backslash' || event.code === 'IntlBackslash';
-  return !event.altKey && isBackslash;
+/**
+ * The terminal's clear key: ⌘K on macOS (Ctrl+K stays readline's kill-line),
+ * Ctrl+K elsewhere. With a two-step key bound from it (⌘K ⌘M), the clear
+ * waits until the key is released without a second step (D-250).
+ */
+export function isTerminalClearKey(event: TerminalKeyLike, isMac: boolean): boolean {
+  if (event.altKey || event.shiftKey || event.key.toLowerCase() !== 'k') return false;
+  return isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 }
 
 export function resolveTerminalKeyHandling(
@@ -142,7 +134,11 @@ export function resolveTerminalKeyHandling(
     return { action: 'send-input', input: TERMINAL_MULTILINE_NEWLINE_SEQUENCE };
   }
 
-  if (state.isTuiActive && isPaneNavigationShortcut(event, state)) {
+  if (state.keySequencePending && !isUnreportedAltGrDigit(event, state.isMac)) {
+    return { action: 'release-to-app' };
+  }
+
+  if (state.isTuiActive && state.releasableFromTui && !isUnreportedAltGrDigit(event, state.isMac)) {
     return { action: 'release-to-app' };
   }
 

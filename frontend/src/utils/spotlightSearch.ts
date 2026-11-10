@@ -5,7 +5,7 @@
  */
 import { matchSorterWithRankInfo, rankings, type KeyOption, type RankedItem } from 'match-sorter';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import type { HotkeyDefinition } from '../stores/hotkeyStore';
+import type { EffectiveHotkeyDefinition } from '../stores/hotkeyStore';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import type { MachineRef, MachineView } from './allMachinesTree';
@@ -36,14 +36,14 @@ export type SearchItem =
   | SearchItemBase & { kind: 'pane'; pane: Session; current: boolean; viewedAt: number; prUrl?: string }
   | SearchItemBase & { kind: 'session'; session: OrchestrationSessionRecord }
   | SearchItemBase & { kind: 'project'; project: Project }
-  | SearchItemBase & { kind: 'command'; command: HotkeyDefinition; disabledReason: string | null };
+  | SearchItemBase & { kind: 'command'; command: EffectiveHotkeyDefinition; disabledReason: string | null };
 
 export interface SearchSources {
   panes: Session[];
   sessions: OrchestrationSessionRecord[];
   projects: Project[];
   /** Commands that show in the palette (`getAll({ paletteOnly: true })`). */
-  commands: HotkeyDefinition[];
+  commands: EffectiveHotkeyDefinition[];
   activePaneId: string | null;
   selectedSessionId?: string;
 }

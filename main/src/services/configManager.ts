@@ -15,7 +15,20 @@ import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
 import { restampNotifySwitch, restampSharedCredentials } from './sharedCredentials';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import {
+  boundary,
+  decodeBoundary,
+  decodeOptionalBoundary,
+  type JsonValue,
+} from '../../../shared/validation/boundaryDecoder';
+import {
+  collectActiveBindings,
+  findChordConflicts,
+  normalizeKeyboardShortcutOverrides,
+} from '../../../shared/utils/keyboardBindings';
+import { keyPlatformFor } from '../../../shared/utils/keyboardChords';
+import { MACHINE_COLOR_NAMES } from '../../../shared/utils/machineColor';
+import type { MachineMarkOverride, MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import {
   AppearanceValidationError,
   DEFAULT_APPEARANCE,
@@ -37,7 +50,25 @@ function defaultAnalyticsConfig(): NonNullable<AppConfig['analytics']> {
   };
 }
 
+const machineMarksSchema = boundary.record(boundary.object({
+  letters: boundary.optional(boundary.string),
+  color: boundary.optional(boundary.enumeration(...MACHINE_COLOR_NAMES)),
+}));
+
+/** Machine marks as saved: only the known parts, and no entry left with nothing in it. */
+function decodeMachineMarks(update: MachineMarkOverrides): MachineMarkOverrides {
+  const marks: MachineMarkOverrides = {};
+  for (const [key, { letters, color }] of Object.entries(decodeBoundary(update, machineMarksSchema))) {
+    const mark: MachineMarkOverride = {};
+    if (letters) mark.letters = letters;
+    if (color) mark.color = color;
+    if (mark.letters || mark.color) marks[key] = mark;
+  }
+  return marks;
+}
+
 export class ConfigManager extends EventEmitter {
+  private lastLoggedShortcutDiagnostics = '';
   private config: AppConfig;
   private configPath: string;
   private configDir: string;
@@ -107,6 +138,8 @@ export class ConfigManager extends EventEmitter {
       remoteDaemon: createDefaultRemoteDaemonConfig(),
       keyboardShortcutsEnabled: true,
       commandPaletteShortcutEnabled: true,
+      // A fresh install starts on the VS Code keymap, so it has nothing to be told.
+      keymapNotice: 'seen',
       terminalShortcuts: [
         {
           id: 'default-root-cause',
@@ -211,6 +244,8 @@ export class ConfigManager extends EventEmitter {
         defaultOrchestratorAgent: normalizePaneChatAgent(
           loadedConfig.defaultOrchestratorAgent ?? this.config.defaultOrchestratorAgent,
         ),
+        // Configs saved before the VS Code keymap (D-236) get a one-time notice of the moved keys.
+        keymapNotice: loadedConfig.keymapNotice ?? 'pending',
         // Configs saved before this setting existed kept the machine awake while plugged in.
         keepAwakeWhilePluggedIn: loadedConfig.keepAwakeWhilePluggedIn ?? true,
         remoteDaemon: normalizeRemoteDaemonConfig(loadedConfig.remoteDaemon),
@@ -254,6 +289,9 @@ export class ConfigManager extends EventEmitter {
       if (switchRestamped !== null) {
         this.config.notifyEnabledChangedAt = switchRestamped;
         shouldPersistMigration = true;
+      }
+      if (!this.applyKeyboardShortcutOverrides(loadedConfig.keyboardShortcutOverrides)) {
+        delete this.config.keyboardShortcutOverrides;
       }
       if (shouldPersistMigration) {
         await this.writeConfigToDisk(this.config);
@@ -422,6 +460,7 @@ export class ConfigManager extends EventEmitter {
           : this.config.remoteDaemon,
       };
 
+      if (updates.machineMarks !== undefined) next.machineMarks = decodeMachineMarks(updates.machineMarks);
       if (updates.agentContext !== undefined) {
         decodeBoundary(updates.agentContext, boundary.object({
           managedAgentsMd: boundary.optional(boundary.boolean),
@@ -435,6 +474,9 @@ export class ConfigManager extends EventEmitter {
         next.notifyEnabledChangedAt = restampNotifySwitch(this.config, next) ?? next.notifyEnabledChangedAt;
       }
       this.validateAppearanceUpdate(updates);
+      if (!this.applyKeyboardShortcutOverrides(next.keyboardShortcutOverrides, next)) {
+        delete next.keyboardShortcutOverrides;
+      }
       await this.writeConfigToDisk(next);
       this.config = next;
 
@@ -445,6 +487,40 @@ export class ConfigManager extends EventEmitter {
       this.emit('config-updated', this.config);
       return this.getConfig();
     });
+  }
+
+  /**
+   * Logs anything malformed or conflicting in the override map (once per
+   * distinct message set) and says whether the map stays in config: any
+   * non-empty object is kept verbatim, so unknown ids and malformed values from
+   * hand edits or newer versions survive a downgrade and are only ignored at
+   * runtime; `{}` and non-objects are dropped.
+   */
+  private applyKeyboardShortcutOverrides(rawOverrides: JsonValue | undefined, config: AppConfig = this.config): boolean {
+    const normalized = normalizeKeyboardShortcutOverrides(rawOverrides);
+    const messages = normalized.diagnostics.map(message =>
+      `[ConfigManager] keyboardShortcutOverrides: ${message}`
+    );
+    const conflicts = findChordConflicts(collectActiveBindings({
+      overrides: rawOverrides,
+      terminalShortcuts: config.terminalShortcuts,
+      customCommands: config.customCommands,
+      keyPlatform: keyPlatformFor(process.platform),
+      // No platform gate: a Windows host can open a WSL project where
+      // platform-limited commands (Cursor) are active.
+    }));
+    for (const conflict of conflicts) {
+      messages.push(
+        `[ConfigManager] keyboardShortcutOverrides conflict: ${conflict.chord} is bound to ${conflict.ids.join(' and ')}`
+      );
+    }
+    const diagnosticKey = messages.join('\n');
+    if (diagnosticKey !== this.lastLoggedShortcutDiagnostics) {
+      this.lastLoggedShortcutDiagnostics = diagnosticKey;
+      for (const message of messages) console.warn(message);
+    }
+    const parsed = decodeOptionalBoundary(rawOverrides, boundary.jsonObject);
+    return parsed !== undefined && Object.keys(parsed).length > 0;
   }
 
   private validateAppearanceUpdate(updates: Partial<AppConfig>): void {
