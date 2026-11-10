@@ -28,7 +28,8 @@ conversation, run in WSL, use a truly custom resume command or a wrapper launch,
 and Cursor Sessions, keep their terminal, and the Session's overview says why. A
 Session keeps the kind of tab it started with.
 A Claude or Codex Session already running in a terminal can move to chat with
-**Switch to chat** in its toolbar (see
+**Switch to chat…** in the Session's right-click menu, which switches every
+terminal agent tab in it (see
 [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).
 
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
@@ -196,6 +197,16 @@ publishes this contract for Pane: when `PANE_PANEL_ID` is set it prints
 `{command} --resume <id>` as the way to reopen that conversation. Pane keeps the
 first ID line of each launch and ignores later ones, which can only be agent
 output. Every other wrapper still needs an explicit config.
+
+The launch ID is only where the conversation started: `/clear` and `/resume`
+move Claude to another one. Agent Farm's compiled Claude plugin therefore also
+carries a `SessionStart` hook that runs `runpane panels conversation --hook` on
+start, `/resume`, `/clear` and compact (D-269). Pane saves the reported
+conversation on the tab, ahead of the launch ID, so a restart resumes the
+conversation the tab was last on and Switch to chat opens it. The hook does
+nothing outside Pane and prints nothing. With an older Agent Farm there is no
+report, and Switch to chat opens the folder's most recent conversation instead
+(see [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).
 
 A command counts when it is a single `agent-farm run <profile>` or
 `agent-farm agent <profile>`, optionally preceded by `VAR=value` assignments,
@@ -1036,7 +1047,11 @@ The watch also reports when the ground under the PR moves. `pr.base_changed`
 GitHub after a stack parent merges and its branch is deleted; `base.from` and
 `base.to` name the old and new base. `pr.base_deleted` (`BASE DELETED`) fires
 when the base branch no longer exists; GitHub may close the PR right after.
-Both arrive at once under `--follow`. Rebase onto the new base and recheck CI.
+Both arrive at once under `--follow`. When the PR below this one in a stack
+merged with a merge commit and this PR now targets the branch it merged into,
+the retarget is done: confirm the diff shows only this PR's commits and recheck
+required checks (`gh pr checks <number> --required`); do not rebase or push.
+After any other base change, rebase onto the new base and recheck CI.
 
 The daemon batches up to 25 fingerprints per host every two minutes (plus up
 to ten seconds of jitter), reads details on changes and at a 30-minute

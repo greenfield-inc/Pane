@@ -28,6 +28,13 @@ interface NavigationState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebarCollapsed: () => void;
 
+  /**
+   * A side region spread across the main area (P4, VS Code's maximized
+   * panel). The main area keeps its size underneath, so nothing in it refits.
+   */
+  maximizedRegion: 'sidebar' | 'right-panel' | null;
+  setMaximizedRegion: (region: 'sidebar' | 'right-panel' | null) => void;
+
   // Immersive mode — all sidebars hide in sync
   immersiveMode: boolean;
   setImmersiveMode: (immersive: boolean) => void;
@@ -96,13 +103,19 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   sidebarCollapsed: localStorage.getItem('pane-sidebar-collapsed') === 'true',
   setSidebarCollapsed: (collapsed) => {
     localStorage.setItem('pane-sidebar-collapsed', String(collapsed));
-    set({ sidebarCollapsed: collapsed });
+    set((state) => ({
+      sidebarCollapsed: collapsed,
+      maximizedRegion: collapsed && state.maximizedRegion === 'sidebar' ? null : state.maximizedRegion,
+    }));
   },
   toggleSidebarCollapsed: () => set((state) => {
     const next = !state.sidebarCollapsed;
     localStorage.setItem('pane-sidebar-collapsed', String(next));
-    return { sidebarCollapsed: next };
+    return { sidebarCollapsed: next, maximizedRegion: next && state.maximizedRegion === 'sidebar' ? null : state.maximizedRegion };
   }),
+
+  maximizedRegion: null,
+  setMaximizedRegion: (region) => set({ maximizedRegion: region }),
 
   immersiveMode: false,
   setImmersiveMode: (immersive) => set({ immersiveMode: immersive }),

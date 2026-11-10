@@ -49,7 +49,7 @@ Runs automatically when a new worktree/session is created. Use for dependency in
 
 #### `scripts.run`
 
-Runs when you click the **Play** button in the panel tab bar (or press `Ctrl+Shift+D`). Use for starting dev servers, test watchers, or any long-running process.
+Runs when you click the **Play** button in the panel tab bar (or press Run Dev Server's key: `Cmd+Shift+D` on macOS, `Ctrl+Shift+D` on Windows and Linux). Use for starting dev servers, test watchers, or any long-running process.
 
 Pane sets `PANE_PORT` to the first of a block of 10 ports picked from the pane's id (range 3000–8999), so dev servers in parallel panes rarely collide.
 

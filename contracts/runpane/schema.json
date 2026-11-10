@@ -540,6 +540,7 @@
         "panels resume",
         "panels pause",
         "panels last-message",
+        "panels conversation",
         "panels close",
         "agent-context",
         "mcp",
@@ -768,6 +769,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panels last-message": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels conversation": {
           "$ref": "#/$defs/helpLines"
         },
         "panels close": {

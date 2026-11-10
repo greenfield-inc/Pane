@@ -29,7 +29,7 @@ async function registerHost(existingConfig?: Partial<AppConfig>) {
   const configManager = new ConfigManager();
   await configManager.initialize();
   // SAFETY: These handlers read only configManager from the services bag.
-  const services = { configManager } as AppServices;
+  const services = { configManager, getMainWindow: () => null } as AppServices;
   const registry = new PaneCommandRegistry();
   const ipcMainStub: Pick<IpcMain, 'handle'> = { handle: () => undefined };
   // SAFETY: The config handlers use only ipcMain.handle, which the stub implements.

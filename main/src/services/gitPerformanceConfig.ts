@@ -1,4 +1,8 @@
 import type { CommandRunner } from '../utils/commandRunner';
+import { compareVersions } from './agentChat/adapterSetup';
+
+/** The last Pane release that wrote `core.fsmonitor=true`. */
+const LAST_VERSION_WITH_FSMONITOR = '2.4.216';
 
 const configuredRepositories = new Map<string, Promise<void>>();
 const fsmonitorSupport = new Map<string, Promise<boolean>>();
@@ -25,9 +29,9 @@ async function hasFsmonitorDaemon(commandRunner: CommandRunner, cwd: string): Pr
 /**
  * Speeds up the `git status`, diff and untracked-file scans Pane runs for
  * every worktree. `feature.manyFiles` turns on the untracked cache and index
- * v4; `core.fsmonitor` uses Git's built-in file watcher daemon. The keys go in
- * the repository's local config, which all of its worktrees share, and only
- * when no config scope sets them already, so explicit user config always wins.
+ * v4. It goes in the repository's local config, which all of its worktrees
+ * share, and only when no config scope sets it already, so explicit user
+ * config always wins.
  */
 export function ensureFastGitConfig(repoPath: string, commandRunner: CommandRunner): Promise<void> {
   let pending = configuredRepositories.get(repoPath);
@@ -43,15 +47,54 @@ export function ensureFastGitConfig(repoPath: string, commandRunner: CommandRunn
 }
 
 async function applyFastGitConfig(repoPath: string, commandRunner: CommandRunner): Promise<void> {
-  const keys = ['feature.manyFiles'];
-  if (await hasFsmonitorDaemon(commandRunner, repoPath)) keys.push('core.fsmonitor');
-  const existing = await Promise.all(keys.map(key =>
-    commandRunner.execFile('git', ['config', '--get', key], repoPath, { silent: true, okExitCodes: [1] })));
-  for (const [index, key] of keys.entries()) {
-    if (existing[index].exitCode === 1) {
-      await commandRunner.execFile('git', ['config', '--local', key, 'true'], repoPath, { silent: true });
+  const { exitCode } = await commandRunner.execFile('git', ['config', '--get', 'feature.manyFiles'], repoPath, { silent: true, okExitCodes: [1] });
+  if (exitCode === 1) {
+    await commandRunner.execFile('git', ['config', '--local', 'feature.manyFiles', 'true'], repoPath, { silent: true });
+  }
+}
+
+/**
+ * Pane releases up to LAST_VERSION_WITH_FSMONITOR wrote
+ * `core.fsmonitor=true` into each project's local config, and Git then keeps a
+ * daemon running in every worktree. On the first launch after upgrading from
+ * one of them, remove that exact value and stop the daemons in the repository's
+ * worktrees. Other values and other config scopes stay as they are.
+ */
+export async function removePaneFsmonitorConfig(
+  lastVersion: string | null,
+  repositories: Array<{ path: string; commandRunner: CommandRunner }>,
+): Promise<void> {
+  if (!lastVersion || !wroteFsmonitor(lastVersion)) return;
+  console.log(`[GitPerformanceConfig] Removing core.fsmonitor that Pane ${lastVersion} wrote, in ${repositories.length} repositories`);
+  let removed = 0;
+  for (const { path, commandRunner } of repositories) {
+    try {
+      if (await removeLocalFsmonitor(path, commandRunner)) removed++;
+    } catch (error) {
+      console.warn(`[GitPerformanceConfig] Skipped ${path}:`, error);
     }
   }
+  console.log(`[GitPerformanceConfig] Removed core.fsmonitor from ${removed} of ${repositories.length} repositories`);
+}
+
+/**
+ * A canary carries the release it follows (`2.4.216-canary.<date>.<sha>…` is
+ * built after 2.4.216), and canaries of the last writing release were built
+ * both with and without this change, so all of them count.
+ */
+function wroteFsmonitor(version: string): boolean {
+  return compareVersions(version.split('-')[0], LAST_VERSION_WITH_FSMONITOR) <= 0;
+}
+
+async function removeLocalFsmonitor(repoPath: string, commandRunner: CommandRunner): Promise<boolean> {
+  const { stdout, exitCode } = await commandRunner.execFile(
+    'git', ['config', '--local', '--get-all', 'core.fsmonitor'], repoPath, { silent: true, okExitCodes: [1] });
+  if (exitCode === 1 || stdout.trim() !== 'true') return false;
+  await commandRunner.execFile('git', ['config', '--local', '--unset', 'core.fsmonitor'], repoPath, { silent: true });
+  const { stdout: list } = await commandRunner.execFile('git', ['worktree', 'list', '--porcelain', '-z'], repoPath, { silent: true });
+  const worktrees = list.split('\0').filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
+  for (const worktree of worktrees) await stopFsmonitorDaemon(worktree, commandRunner);
+  return true;
 }
 
 /**

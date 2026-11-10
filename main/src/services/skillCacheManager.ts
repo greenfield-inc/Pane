@@ -710,6 +710,11 @@ what to put in delegated prompts.
   (for this Session, the bundle root above), opens it, and reports the path,
   so the work still shows.
 - Merges need the user's explicit authorization for that exact merge.
+  Merge the way the repository's own docs (AGENTS.md, CONTRIBUTING.md) say.
+  When a stack merges bottom-up with merge commits, after each merge
+  retarget the next PR to the default branch, confirm its diff shows only
+  its own commits and its required checks are still green, and do not
+  rebase or push it.
 
 ## Other orchestration capabilities
 

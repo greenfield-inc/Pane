@@ -51,7 +51,7 @@ describe('Autopilot and offline machines', () => {
     expect(offlineItemRows(['here', 'a', 'b', 'done'], items)).toEqual([{ machineId: 'mini', machine: 'Mac mini', count: 2 }]);
   });
 
-  const machine = (extra: Partial<MachineEntry>): MachineEntry => ({ id: 'x', name: 'x', os: 'macOS', kind: 'tailnet', slot: 0, active: false, presence: 'solid', stateText: '', subtitle: '', action: 'connect', ...extra });
+  const machine = (extra: Partial<MachineEntry>): MachineEntry => ({ id: 'x', name: 'x', os: 'macOS', kind: 'tailnet', slot: 0, letters: 'X', markKey: 'x', customMark: false, active: false, presence: 'solid', stateText: '', subtitle: '', action: 'connect', ...extra });
   const listed = (name: string, extra: Partial<NonNullable<MachineEntry['tailnet']>> = {}) => ({ name, dnsName: `${name}.ts.net`, url: '', os: 'macOS' as const, ownerLogin: 'me', mine: true, state: 'available' as const, ...extra });
 
   it('lists the person\'s Tailscale machines that aren\'t saved here', () => {

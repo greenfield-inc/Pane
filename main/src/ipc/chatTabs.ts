@@ -16,8 +16,11 @@ import { chatTabEnv } from '../services/chatTabs/launch';
 import { adapterEntry, adapterFileForPlainNode, installAdapter } from '../services/agentChat/adapterSetup';
 import { findExecutableInPath } from '../utils/shellPath';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import { switchToChat, terminalConversation, terminalRestored, type SwitchToChatPorts } from '../services/chatTabs/switchToChat';
+import { switchToChat, terminalConversation, terminalRestored, type SwitchToChatPorts, type TranscriptLookup } from '../services/chatTabs/switchToChat';
+import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
+import { previewSessionSwitch, switchSessionToChat, type SessionSwitchPorts } from '../services/chatTabs/switchSession';
 import { getAppDirectory } from '../utils/appDirectory';
+import { canReadClaudeTranscripts, findClaudeSessionTranscript } from '../services/claudeSessionTranscript';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 
 const agentSchema = boundary.enumeration('claude', 'codex');
@@ -52,7 +55,7 @@ const agentFarmProfiles = new AgentFarmProfiles({
   checkCli: (agent, context) => installAdapter(agent, printedCli(agent, context.env, findExecutableInPath), context),
 });
 
-const CHAT_TAB_CHANNELS = ['create', 'switch', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'sign-in', 'keys', 'set-key'] as const;
+const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key'] as const;
 
 function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
 
@@ -78,6 +81,13 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     return createChatTab(services, request);
   });
   registry.register('chat-tab:switch', (id: string) => switchToChat(panelId(id), switchPorts(services, registry)));
+  // A whole Session, from its right-click menu, here or from All machines (machines:run).
+  registry.register('chat-tab:preview-session-switch', (id: string) => previewSessionSwitch(decodeBoundary(id, boundary.nonEmptyString), sessionSwitchPorts(services, registry)));
+  registry.register('chat-tab:switch-session', (id: string, panelIds?: PaneCommandValue) => switchSessionToChat(
+    decodeBoundary(id, boundary.nonEmptyString),
+    panelIds === undefined || panelIds === null ? undefined : decodeBoundary(panelIds, boundary.array(boundary.nonEmptyString)),
+    sessionSwitchPorts(services, registry),
+  ));
   registry.register('chat-tab:get', (id: string, limit?: number) => manager.view(panelId(id), limit === undefined ? undefined : decodeBoundary(limit, boundary.number)));
   registry.register('chat-tab:history', (id: string, before: number, limit: number) => manager.history(panelId(id), decodeBoundary(before, boundary.number), decodeBoundary(limit, boundary.number)));
   registry.register('chat-tab:send', (id: string, request: PaneCommandValue) => manager.send(panelId(id), decodeBoundary(request, sendSchema)));
@@ -96,6 +106,9 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     return undefined;
   });
   registry.register('chat-tab:restart', async (id: string) => { await manager.restart(panelId(id)); });
+  registry.register('chat-tab:conversations', (id: string) => manager.conversations(panelId(id)));
+  registry.register('chat-tab:resume', async (id: string, sessionId: string) => { await manager.resume(panelId(id), decodeBoundary(sessionId, boundary.nonEmptyString)); });
+  registry.register('chat-tab:dismiss-banner', (id: string) => { manager.dismissBanner(panelId(id)); return undefined; });
   registry.register('chat-tab:sign-in', async (id: string) => {
     // Sign-in sets the owner's own agent account on this machine.
     const teammate = teammatePaneCaller();
@@ -151,6 +164,41 @@ const REOPEN_LIMIT_MS = 3 * 60_000;
 const resumeResultSchema = boundary.object({ readiness: boundary.optional(boundary.object({ ok: boundary.boolean, blocked: boundary.optional(boundary.object({ message: boundary.string })), reason: boundary.optional(boundary.object({ code: boundary.string, message: boundary.string })), state: boundary.optional(boundary.object({ running: boundary.boolean })) })) });
 const deleteResultSchema = boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) });
 
+/**
+ * A Session's terminal tabs, as its membership has them: every tab of its own Pane, then for each
+ * Pane in it that is not archived, every tab when the whole Pane is linked, or only its linked tabs.
+ */
+function sessionSwitchPorts(services: AppServices, registry: PaneCommandRegistry): SessionSwitchPorts {
+  return {
+    ...switchPorts(services, registry),
+    sessionTerminals: sessionId => {
+      const membership = services.orchestrationSessionManager?.workspaceMembership(sessionId);
+      if (!membership) return undefined;
+      const panes: Array<[string, readonly string[]]> = [...membership.ownPaneIds].map(paneId => [paneId, []]);
+      for (const [paneId, panelIds] of membership.panes) if (!membership.ownPaneIds.has(paneId)) panes.push([paneId, panelIds]);
+      return panes.flatMap(([paneId, linked]) => {
+        const paneName = membership.ownPaneIds.has(paneId) ? 'Session' : services.sessionManager.getSession(paneId)?.name ?? paneId;
+        const terminals = panelManager.getPanelsBySessionAndType(paneId, 'terminal');
+        // The Pane's terminal dock is a plain shell below the tabs, not a tab: leave it out.
+        const dock = getDockTerminalPanel(terminals);
+        return terminals.filter(panel => panel !== dock && (linked.length === 0 || linked.includes(panel.id)))
+          .sort((a, b) => (a.metadata.position ?? 0) - (b.metadata.position ?? 0))
+          .map(panel => ({ panel, paneName }));
+      });
+    },
+  };
+}
+
+/** Whether a Claude conversation has a transcript Pane can see; two sharing an ID is not a conversation Pane can be sure of. */
+const transcriptLookup: TranscriptLookup = id => {
+  if (!canReadClaudeTranscripts()) return 'unknown';
+  try { return findClaudeSessionTranscript(id) ? 'found' : 'missing'; }
+  catch (error) {
+    console.warn(`[ChatTabs] Could not tell whether conversation ${id} has messages: ${error instanceof Error ? error.message : String(error)}`);
+    return 'ambiguous';
+  }
+};
+
 /** Switch to chat over the real terminal, chat tab and Session owners. */
 function switchPorts(services: AppServices, registry: PaneCommandRegistry): SwitchToChatPorts {
   const manager = getChatTabManager();
@@ -164,10 +212,10 @@ function switchPorts(services: AppServices, registry: PaneCommandRegistry): Swit
     paneDirectory: paneId => services.sessionManager.getSession(paneId)?.worktreePath,
     terminal: {
       busy: id => terminalPanelManager.isAgentMidTurn(id),
-      conversationId: async id => {
+      conversation: async id => {
         // SAFETY: Switch to chat only asks this of terminal panels, which persist TerminalPanelState.
         const state = (panelManager.getPanel(id)?.state.customState ?? {}) as TerminalPanelState;
-        return terminalConversation(state, terminalPanelManager.getLaunchSessionId(id));
+        return terminalConversation(state, terminalPanelManager.currentLaunchId(id), transcriptLookup);
       },
       stop: id => terminalPanelManager.stopForPromotion(id),
       restart: async id => {
@@ -187,6 +235,7 @@ function switchPorts(services: AppServices, registry: PaneCommandRegistry): Swit
         const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PaneError('CHAT_SWITCH_TIMEOUT', 'The agent did not reopen the conversation within 3 minutes.', 'Keep working in the terminal, then try again.')), REOPEN_LIMIT_MS); });
         return Promise.race([manager.ensure(id), limit]).finally(() => clearTimeout(timer));
       },
+      banner: id => manager.view(id, 0, false).banner,
       close: async id => { await manager.close(id); await panelManager.deletePanel(id); },
       activate: async id => {
         const panel = panelManager.getPanel(id);

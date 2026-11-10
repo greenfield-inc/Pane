@@ -76,6 +76,7 @@ function createServicesStub(projects: Project[]): AppServices {
     },
     gitStatusManager: {},
     configManager: {
+      on: vi.fn(),
       getConfig: () => config,
       reloadFromDisk: async () => config,
       updateConfig: async (updates: UpdateConfigRequest) => {

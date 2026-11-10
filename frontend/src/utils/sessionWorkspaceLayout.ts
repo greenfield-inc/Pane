@@ -100,8 +100,10 @@ function withLayout(
   focusedTileId: string,
 ): SessionWorkspaceLayout {
   const focused = findSessionTile(root, focusedTileId);
+  // Any change to the tiles restores a maximized tile, as a split does in a Pane.
+  const { maximizedTileId: _restored, ...rest } = layout;
   return {
-    ...layout,
+    ...rest,
     root,
     focusedTileId: (focused ?? firstLeaf<SessionTileNode>(root)).id,
   };
@@ -111,7 +113,22 @@ function withLayout(
 export function focusSessionTile(layout: SessionWorkspaceLayout, tileId: string): SessionWorkspaceLayout {
   if (layout.focusedTileId === tileId) return layout;
   if (!findSessionTile(layout.root, tileId)) return layout;
-  return { ...layout, focusedTileId: tileId };
+  // Maximize follows focus: focusing a hidden tile restores the others.
+  const { maximizedTileId: _restored, ...rest } = layout;
+  return { ...rest, focusedTileId: tileId };
+}
+
+/**
+ * Maximize a tile over the others, or restore (P4). The other tiles stay
+ * mounted and live, only hidden. A single tile has nothing to maximize over.
+ */
+export function toggleMaximizedTile(layout: SessionWorkspaceLayout, tileId: string): SessionWorkspaceLayout {
+  if (layout.maximizedTileId === tileId) {
+    const { maximizedTileId: _restored, ...rest } = layout;
+    return rest;
+  }
+  if (layout.root.type !== 'split' || !findSessionTile(layout.root, tileId)) return layout;
+  return { ...layout, focusedTileId: tileId, maximizedTileId: tileId };
 }
 
 /**

@@ -126,7 +126,7 @@ Each of these is a small thing. Together they compound fast.
 | **Pane on Even G2 glasses** | See every Notify card from all your computers on Even Realities G2 glasses, answer with the R1 ring or your voice, and open any Pane's live terminal to read it and dictate into it. Pair once from the Pane phone app. | [Even G2 glasses](docs/EVEN_G2_GLASSES.md) |
 | **Loops** | Run an agent or command on a cron schedule, such as a nightly bug sweep. Each run is a new Pane in a fresh worktree, ready to review. Loops are for large recurring jobs and run at most once an hour. | [Loops](docs/LOOPS.md) |
 | **@mention Terminals** | Type `@` in any terminal to pull the last 500 lines from another pane's terminal directly into your context, no copy-paste required. | <img src="images/qol-at-mention.png" alt="Cross-terminal @mention picker" width="420"> |
-| **Clipboard Shortcuts** | `Ctrl+Alt+[key]` pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
+| **Clipboard Shortcuts** | `Cmd+Option+[key]` on macOS (`Ctrl+Alt+[key]` on Windows and Linux) pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
 | **Terminal Popover** | Highlight any text in a terminal and an intelligent popover offers the right action: copy, open in browser, or show in explorer. | <img src="images/qol-terminal-popover.png" alt="Terminal text selection popover" width="420"> |
 | **Built-in Browser** | Preview any URL in a tab next to your terminals so every pane can see its own running dev server without alt-tabbing. When a Pane's terminal or agent starts a web server, Pane offers to open a live preview of it beside the agent; the preview is that Pane's tab, so it follows the Pane. A new tab, or the address bar's Ports button, lists every port listening on the machine, grouped by the Pane that started it. On your phone, the Remote Pane app opens the same ports and HTML pages over Tailscale ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)), and its Explorer tab browses, edits and previews the worktree's files ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#files-on-the-phone)). | <img src="images/qol-browser.png" alt="Built-in browser tab previewing a local dev server" width="420"> |
 | **Resource Manager** | Built-in CPU and memory monitor broken down per pane and per process, so you can catch a runaway agent before it eats your laptop. | <img src="images/qol-resource-manager.png" alt="Built-in resource manager" width="420"> |
@@ -328,10 +328,26 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 
 ## Keyboard Shortcuts
 
+Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ctrl+K Ctrl+S`) for **Keyboard Shortcuts**, or pick **Change key…** in a command's Actions (`⌘K`) in Search. Two-step keys such as `⌘K ⌘S` are pressed one after the other; a small hint waits for the second key.
+
 | Shortcut | Action |
 |----------|--------|
-| `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command |
-| `⌘K` / `Ctrl+K` | Clear terminal scrollback |
+| `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command, and see or change its key |
+| `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Keyboard Shortcuts |
+| `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
+| `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel or sidebar in that direction |
+| `F6` / `⇧F6` | Next / previous region (sidebar, splits, right panel, terminal) |
+| `⌘K ⌘M` / `Ctrl+K Ctrl+M` | Maximize the focused split, Session tile, sidebar or right panel; again to restore |
+| `⌘⇧M` / `Ctrl+Shift+M` | Minimize the focused sidebar, right panel or terminal |
+| `⌘B` / `Ctrl+B` | Toggle sidebar |
+| `⌘⌥B` / `Ctrl+Alt+B` | Toggle right panel |
+| `` ⌃` `` / `` Ctrl+` `` | Toggle terminal |
+| `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab |
+| `⌃⇧Space` | Approvals, and back to exactly where you were (also `Esc`); change it in Settings → Notify |
+| `⌘⌥O` / `Ctrl+Alt+O` | Machine switcher (then `0` for All machines, `1-9` for a machine) |
+| `⌃⌘]` `⌃⌘[` / `Ctrl+Alt+Shift+]` `[` | Next / previous machine |
+| `⌃⌘0` / `Ctrl+Alt+Shift+0` | All machines ⇄ the last machine |
+| `⌘K` / `Ctrl+K` | Clear the focused terminal |
 | `⌘F` / `Ctrl+F` | Find in the focused tab (terminal, browser, file preview, Logs) |
 | `⌘G` / `Ctrl+G` | Find next |
 | `⌘⇧G` / `Ctrl+Shift+G` | Find previous |
@@ -340,9 +356,9 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 | `⌘1-9` / `Ctrl+1-9` | Switch pane |
 | `⌘,` / `Ctrl+,` | Open settings |
 | `⌘⌥<key>` / `Ctrl+Alt+<key>` | Paste a clipboard shortcut into the active terminal |
-| `⌘⌥/` / `Ctrl+Alt+/` | Open Settings → Shortcuts |
 | `⌘⌥` (hold) / `Ctrl+Alt` (hold) | Show all configured shortcuts as an overlay |
-| `⌘B` / `Ctrl+B` | Toggle sidebar |
+
+On macOS, Control+letter keys (`⌃A`, `⌃E`, `⌃K`, `⌃W`…) always reach the terminal. View → Actual Size is `⌘⇧0`, since `⌘0` focuses the sidebar.
 
 ---
 

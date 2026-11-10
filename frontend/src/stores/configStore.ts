@@ -8,7 +8,11 @@ interface ConfigStore {
   error: string | null;
   fetchConfig: (ownsRequest?: () => boolean) => Promise<AppConfig>;
   updateConfig: (updates: UpdateConfigRequest) => Promise<AppConfig>;
+  /** Follow `config:updated` from main; returns the unsubscribe. */
+  subscribeToUpdates: () => () => void;
 }
+
+let configUpdateUnsubscribe: (() => void) | null = null;
 
 export function areKeyboardShortcutsEnabled(config: AppConfig | null): boolean {
   return config !== null && config.keyboardShortcutsEnabled !== false;
@@ -45,6 +49,18 @@ export const useConfigStore = create<ConfigStore>((set, get) => ({
   config: null,
   isLoading: false,
   error: null,
+
+  subscribeToUpdates: () => {
+    if (!configUpdateUnsubscribe) {
+      configUpdateUnsubscribe = window.electronAPI?.events?.onConfigUpdated?.((config) => {
+        if (JSON.stringify(get().config) !== JSON.stringify(config)) set({ config });
+      }) ?? null;
+    }
+    return () => {
+      configUpdateUnsubscribe?.();
+      configUpdateUnsubscribe = null;
+    };
+  },
 
   fetchConfig: async (ownsRequest = () => true) => {
     if (ownsRequest()) set({ isLoading: true, error: null });

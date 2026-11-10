@@ -18,7 +18,7 @@ const states: MachineState[] = [
 ];
 
 const entry = (id: string, name: string, os: MachineEntry['os'], active = false): MachineEntry => ({
-  id, name, os, kind: id === 'local' ? 'local' : 'tailnet', slot: 2, active, presence: 'solid',
+  id, name, os, kind: id === 'local' ? 'local' : 'tailnet', slot: 2, letters: name.slice(0, 1).toUpperCase(), markKey: name, customMark: false, active, presence: 'solid',
   stateText: '', subtitle: '', action: active ? 'none' : 'switch',
 });
 const entries = [entry('local', 'studio-mac', 'macOS', true), entry('build-box', 'build-box', 'Linux')];

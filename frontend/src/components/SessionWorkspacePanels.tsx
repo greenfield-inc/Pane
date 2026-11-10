@@ -17,6 +17,11 @@ import { SelectionLoading } from './ui/SelectionLoading';
 import { useOuterPanelResize } from '../hooks/useOuterPanelResize';
 import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
+import { cycleIndex } from '../utils/arrayUtils';
+import { RestoreRegionButton } from './RestoreRegionButton';
+import { useRegionActions } from '../hooks/useRegionNavigation';
+import { useProjectViewActionsStore, type ProjectViewActions } from '../stores/projectViewActionsStore';
+import { announceTerminalReflow } from '../utils/terminalReflow';
 import {
   activatePanelInLayout,
   addPanelToGroup,
@@ -30,6 +35,7 @@ import {
   reconcile,
   removePanelFromLayout,
   showPanelInSplit,
+  splitGroup,
   subsetInsertIndex,
   updateSizes,
   type DropZone,
@@ -81,6 +87,9 @@ export function SessionWorkspacePanels({
   stageNotice,
   chromeInline = false,
   focusWithin = true,
+  hidden = false,
+  tileMaximized = false,
+  onToggleTileMaximize,
 }: {
   agentPanel: ToolPanel; agentPanelIds: string[];
   overviewContent: ReactNode; changesContent: ReactNode; toolbarActions?: ReactNode;
@@ -97,6 +106,12 @@ export function SessionWorkspacePanels({
    * autofocus its panels, or the last tile to mount would steal the caret.
    */
   focusWithin?: boolean;
+  /** Another tile is maximized over this one: everything stays mounted, terminals deactivate. */
+  hidden?: boolean;
+  /** This Session's tile is maximized over the other tiles (P4). */
+  tileMaximized?: boolean;
+  /** Maximize this Session's tile, or restore; absent while it is the only tile. */
+  onToggleTileMaximize?: () => void;
 }) {
   const titleBarSlot = useTitleBarSlotStore(state => state.trailingSlot);
   const trailingSlot = chromeInline ? null : titleBarSlot;
@@ -168,7 +183,24 @@ export function SessionWorkspacePanels({
     const focusedGroupId = next.focusedGroupId && findGroup(next.root, next.focusedGroupId)
       ? next.focusedGroupId
       : primaryGroup(next.root).id;
-    const repaired: SessionPanelLayout = { ...next, focusedGroupId, zoomedGroupId: null };
+    // Maximize (P4) holds while its group exists, keeps focus, and the groups
+    // stay the same; a split, a drop or a close restores, as in a worktree Pane.
+    let zoomedGroupId = next.zoomedGroupId && findGroup(next.root, next.zoomedGroupId) ? next.zoomedGroupId : null;
+    if (zoomedGroupId) {
+      const previous = usePanelStore.getState().layouts[sessionId];
+      const groupIds = (layout: SessionPanelLayout['root']): string => {
+        const ids: string[] = [];
+        const walk = (node: SessionPanelLayout['root']) => {
+          if (node.type === 'group') ids.push(node.id);
+          else node.children.forEach(walk);
+        };
+        walk(layout);
+        return ids.join('|');
+      };
+      if (previous && groupIds(previous.root) !== groupIds(next.root)) zoomedGroupId = null;
+      if (zoomedGroupId !== focusedGroupId) zoomedGroupId = null;
+    }
+    const repaired: SessionPanelLayout = { ...next, focusedGroupId, zoomedGroupId };
     const store = usePanelStore.getState();
     store.setLayout(sessionId, repaired);
     store.setFocusedGroup(sessionId, focusedGroupId);
@@ -361,6 +393,94 @@ export function SessionWorkspacePanels({
   }, [sessionId, applyLayout]);
   const handleClose = useCallback((panel: ToolPanel) => { void closePanel(panel); }, [closePanel]);
 
+  // Maximize (P4): the split takes the Session's stage, and a tiled Session's
+  // tile takes the window, so a chat fills the whole main area. Restoring
+  // undoes both. A single, untiled Session has nothing to grow over.
+  const zoomedGroupId = layout?.zoomedGroupId ?? null;
+  const maximized = Boolean(zoomedGroupId) || tileMaximized;
+  const toggleMaximize = useCallback((groupId?: string) => {
+    const current = usePanelStore.getState().layouts[sessionId];
+    if (!current) return;
+    announceTerminalReflow();
+    if (current.zoomedGroupId || tileMaximized) {
+      if (current.zoomedGroupId) applyLayout({ ...current, zoomedGroupId: null });
+      if (tileMaximized) onToggleTileMaximize?.();
+      return;
+    }
+    const target = groupId ?? current.focusedGroupId ?? primaryGroup(current.root).id;
+    if (current.root.type === 'split') applyLayout({ ...current, focusedGroupId: target, zoomedGroupId: target });
+    onToggleTileMaximize?.();
+  }, [sessionId, applyLayout, tileMaximized, onToggleTileMaximize]);
+  const canMaximize = layout?.root.type === 'split' || Boolean(onToggleTileMaximize) || maximized;
+  const stageRef = useRef<HTMLDivElement>(null);
+  useRegionActions(stageRef, { toggleMaximize: canMaximize ? () => toggleMaximize() : undefined });
+  const [asideMaximized, setAsideMaximized] = useState(false);
+  const asideRef = useRef<HTMLElement>(null);
+  useRegionActions(asideRef, {
+    toggleMaximize: () => setAsideMaximized(value => !value),
+    minimize: () => { setAsideMaximized(false); setSidebarVisible(false); },
+  });
+  const terminalRegionRef = useRef<HTMLDivElement>(null);
+  useRegionActions(terminalRegionRef, { minimize: () => setShowTerminal(false) });
+
+  // The focused tile answers the window's tab, split, terminal and right-panel
+  // keys (SessionView routes them here while a Session is shown, P3).
+  const latestTools = useRef({ toggleTool, addTool, tabs });
+  useEffect(() => { latestTools.current = { toggleTool, addTool, tabs }; });
+  useEffect(() => {
+    if (!focusWithin || !loaded) return;
+    const owner = Symbol(`session-${sessionId}`);
+    const focusedGroup = () => {
+      const current = usePanelStore.getState().layouts[sessionId];
+      if (!current) return null;
+      return { current, group: findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root) };
+    };
+    const groupTabs = () => {
+      const focused = focusedGroup();
+      if (!focused) return [];
+      const byId = new Map(latestTools.current.tabs.map(panel => [panel.id, panel]));
+      return focused.group.panelIds.map(id => byId.get(id)).filter((panel): panel is ToolPanel => Boolean(panel));
+    };
+    const activePanel = () => {
+      const focused = focusedGroup();
+      return groupTabs().find(panel => panel.id === focused?.group.activePanelId) ?? null;
+    };
+    const actions: ProjectViewActions = {
+      toggleDetail: () => setSidebarVisible(value => !value),
+      showInspector: () => { void latestTools.current.toggleTool('explorer'); },
+      addTerminal: () => { void latestTools.current.addTool({ type: 'terminal', title: 'Terminal' }); },
+      tabCount: () => groupTabs().length,
+      selectTab: (index) => {
+        const focused = focusedGroup();
+        const panel = groupTabs()[index];
+        if (focused && panel) selectPanel(focused.group.id, panel);
+      },
+      cycleTab: (direction) => {
+        const focused = focusedGroup();
+        const panels = groupTabs();
+        const index = cycleIndex(panels.findIndex(panel => panel.id === focused?.group.activePanelId), panels.length, direction);
+        if (focused && index !== -1) selectPanel(focused.group.id, panels[index]);
+      },
+      canCloseActiveTab: () => Boolean(activePanel()) && activePanel()?.id !== agentPanelId,
+      closeActiveTab: () => { const panel = activePanel(); if (panel) handleClose(panel); },
+      canSplit: () => {
+        const focused = focusedGroup();
+        return Boolean(focused && focused.group.panelIds.length >= 2 && focused.group.activePanelId);
+      },
+      split: (direction) => {
+        const focused = focusedGroup();
+        const moving = focused?.group.activePanelId;
+        if (!focused || !moving || focused.group.panelIds.length < 2) return;
+        const root = splitGroup(focused.current.root, focused.group.id, moving, direction, true);
+        applyLayout({ ...focused.current, root, focusedGroupId: findGroupContainingPanel(root, moving)?.id ?? focused.current.focusedGroupId });
+      },
+      toggleTerminal: () => { void latestTools.current.toggleTool('terminal'); },
+    };
+    const bridge = useProjectViewActionsStore.getState();
+    bridge.setSessionActions(owner, actions);
+    return () => useProjectViewActionsStore.getState().setSessionActions(owner, null);
+  }, [focusWithin, loaded, sessionId, agentPanelId, selectPanel, handleClose, applyLayout]);
+
   // Tab drag and drop, the same gesture as a worktree Pane: a group's centre
   // takes the tab, an edge splits, a strip slot inserts. The state is local to
   // this mounted Session, so a tiled neighbour never offers itself as a target.
@@ -406,7 +526,7 @@ export function SessionWorkspacePanels({
   const tabStrip = (
     <div data-testid="session-workspace-tabs" className="flex min-w-0 items-center">
       <PanelTabStrip panels={primaryTabs} activePanelId={primary?.activePanelId ?? agentPanelId} idNamespace={`session-${sessionId}`}
-        alwaysShowClose
+        alwaysShowClose isFocused={focusWithin} quietFocus
         onPanelSelect={panel => { if (primary) selectPanel(primary.id, panel); }}
         onPanelClose={handleClose}
         onDragStart={setDraggedPanelId} onDragEnd={endTabDrag}
@@ -439,14 +559,16 @@ export function SessionWorkspacePanels({
           {!isSplit && tabStrip}
           {!isSplit && <SessionAddToolMenu disabled={!loaded} onAdd={tool => { void addTool(tool); }} />}
         </div>
+        {!isSplit && maximized && <RestoreRegionButton className="mr-1" onRestore={() => toggleMaximize()} />}
         {!trailingSlot && titleBarActions}
       </div>}
       {error && <p role="alert" className="px-3 py-1 text-xs text-status-error">{error}</p>}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="relative min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden" inert={asideMaximized ? true : undefined}>
+          <div ref={stageRef} data-focus-region="main" className="relative min-h-0 flex-1">
             {stageNotice}
             {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
+              hidden={hidden} onToggleMaximize={toggleMaximize}
               isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
               onFocusGroup={focusGroup} alwaysShowClose keepPermanentTabsInGroups
               renderAddTool={renderGroupAddTool}
@@ -454,7 +576,7 @@ export function SessionWorkspacePanels({
               onDropZoneChange={handleDropZoneChange} onDropTab={handleDropTab} onDragStart={setDraggedPanelId}
               onDragEnd={endTabDrag} onStripDrop={handleStripDrop} />}
           </div>
-          <div className="flex flex-shrink-0 flex-col border-t border-border-primary" style={{ height: showTerminal ? '35%' : 32 }}>
+          <div ref={terminalRegionRef} data-focus-region="terminal" data-region-open={showTerminal && Boolean(terminal)} className="flex flex-shrink-0 flex-col border-t border-border-primary" style={{ height: showTerminal ? '35%' : 32 }}>
             <button type="button" disabled={!loaded} aria-label={showTerminal ? 'Collapse terminal' : 'Expand terminal'}
               aria-expanded={showTerminal} onClick={() => { void toggleTool('terminal'); }}
               className="flex h-8 flex-shrink-0 items-center gap-2 px-3 text-xs text-text-secondary hover:bg-surface-hover">
@@ -463,14 +585,18 @@ export function SessionWorkspacePanels({
               <span className="text-[11px] font-medium uppercase tracking-wider">Terminal</span>
             </button>
             {terminal && <div className="relative min-h-0 flex-1" style={{ display: showTerminal ? 'block' : 'none' }}>
-              <PanelContainer panel={terminal} isActive={showTerminal} autoFocus={false} />
+              <PanelContainer panel={terminal} isActive={showTerminal && !hidden} autoFocus={false} />
             </div>}
           </div>
         </div>
-        {showSidebar && <aside aria-label={sidebarTab === 'overview' ? 'Session overview' : sidebarTab === 'files' ? 'Session files' : 'Session changes'}
-          className="relative flex min-w-0 flex-shrink-0 flex-col border-l border-border-primary" style={{ width: filesResize.renderedPx }}>
-          <OuterResizeSeparator label="Resize Session sidebar" orientation="vertical" value={filesResize.effectivePx}
-            minimum={filesResize.floor} maximum={filesResize.cap} {...filesResize.separatorHandlers} />
+        {showSidebar && <aside ref={asideRef} data-focus-region="right-panel" aria-label={sidebarTab === 'overview' ? 'Session overview' : sidebarTab === 'files' ? 'Session files' : 'Session changes'}
+          // Maximized, it covers the stage and terminal, which keep their size underneath (P4).
+          className={asideMaximized
+            ? 'absolute inset-0 z-20 flex min-w-0 flex-col bg-bg-primary'
+            : 'relative flex min-w-0 flex-shrink-0 flex-col border-l border-border-primary'}
+          style={asideMaximized ? undefined : { width: filesResize.renderedPx }}>
+          {!asideMaximized && <OuterResizeSeparator label="Resize Session sidebar" orientation="vertical" value={filesResize.effectivePx}
+            minimum={filesResize.floor} maximum={filesResize.cap} {...filesResize.separatorHandlers} />}
           <div role="tablist" aria-label="Session inspector" className="flex h-8 flex-shrink-0 items-stretch border-b border-border-primary bg-surface-secondary px-1">
             {SESSION_INSPECTOR_TABS.map(tab => (
               <button key={tab} type="button" role="tab" aria-selected={sidebarTab === tab}
@@ -486,6 +612,7 @@ export function SessionWorkspacePanels({
                 {tab === 'overview' ? 'Overview' : tab === 'files' ? 'Files' : 'Changes'}
               </button>
             ))}
+            {asideMaximized && <RestoreRegionButton className="my-0.5 ml-1 h-7" onRestore={() => setAsideMaximized(false)} />}
           </div>
           <div className="relative min-h-0 flex-1 overflow-y-auto">
             {sidebarTab === 'overview' && overviewContent}

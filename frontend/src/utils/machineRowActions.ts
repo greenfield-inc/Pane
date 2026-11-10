@@ -55,6 +55,17 @@ function memoryFor(target: MachineTarget): HostNavigationMemory {
 }
 
 /**
+ * Leaves the row in the machine's navigation memory, so a switch to that machine
+ * lands on it. The switch's own restore opens it, so nothing is sent to the
+ * machine while it is still restoring and would refuse the write.
+ */
+export async function rememberOnMachine(machineId: string, target: MachineTarget): Promise<void> {
+  const hostId = machineId === LOCAL_MACHINE_ID ? null : machineId;
+  const saved = await window.electronAPI.uiState.saveNavigationMemory(hostId, memoryFor(target));
+  if (!saved.success) throw new Error(saved.error ?? 'Pane could not remember the row to open.');
+}
+
+/**
  * Opens a row from any machine. On the machine the app is on it opens as a click does today.
  * On another machine it makes that machine the one the app is on, after leaving the row in
  * that machine's navigation memory, which the switch restores. An offline machine says so.
@@ -78,9 +89,7 @@ export async function openOnMachine(machineId: string, target: MachineTarget): P
   if (!state.switchMachine) return;
   useAllMachinesStore.setState({ offlineNotice: null });
   try {
-    const hostId = machineId === LOCAL_MACHINE_ID ? null : machineId;
-    const saved = await window.electronAPI.uiState.saveNavigationMemory(hostId, memoryFor(target));
-    if (!saved.success) throw new Error(saved.error ?? 'Pane could not remember the row to open.');
+    await rememberOnMachine(machineId, target);
     const outcome = await state.switchMachine(machineId);
     if (!outcome.ok) showActionError(`Could not open ${target.name} on ${name}`, outcome.needsPassword ? `${name} needs its password. Enter it in Remote Access settings, then try again.` : outcome.error);
   } catch (error) {

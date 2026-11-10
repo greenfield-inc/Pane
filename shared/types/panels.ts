@@ -58,6 +58,16 @@ export interface TerminalAgentReport {
   reportedAt: string;
 }
 
+/** A SessionStart hook's report of the conversation a terminal tab's Claude is on. */
+export interface TerminalConversationReport {
+  id: string;
+  /** The hook's `source`: startup, resume, clear or compact. */
+  source?: string;
+  /** The terminal launch that reported it; a new one starts with every process. */
+  launchId: string;
+  reportedAt: string;
+}
+
 /** Why and when a tab was paused. */
 export interface TerminalPausedMark {
   at: string;
@@ -150,6 +160,11 @@ export interface TerminalPanelState {
   agentSessionId?: string;           // Agent-generated session ID for resuming conversations
   /** Latest `runpane report` from this panel's agent. */
   agentReport?: TerminalAgentReport;
+  /**
+   * The conversation the tab's Claude last reported from its SessionStart hook (`runpane panels conversation`,
+   * D-269), and the launch it reported from. Pane is sure of it only while that launch is the one running.
+   */
+  conversationReport?: TerminalConversationReport;
   /** Stable orchestration identity for resumed Session terminals. */
   orchestrationSessionId?: string;
   /** Session-owned working directory, also used by legacy shared terminal owners. */

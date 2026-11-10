@@ -6,7 +6,7 @@
  */
 
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { Pause, Pencil, Play, X } from 'lucide-react';
+import { MessageSquare, Pause, Pencil, Play, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { ToolPanel, LogsPanelState, pausedMarkOf } from '../../../../shared/types/panels';
 import { Dropdown, type DropdownItem } from '../ui/Dropdown';
@@ -21,7 +21,11 @@ import { PanelTabStatusDot } from './PanelTabStatusDot';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
 import { getPanelIcon } from './panelIcon';
+import { useFocusRegionStore } from '../../services/regionFocus';
 import { editorPanelState, pinEditorPanel } from '../../services/openFileInEditor';
+import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
+import { SwitchToChatDialog } from './SwitchToChat';
+import { isAgentTerminal } from '../../utils/agentTerminal';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,6 +44,11 @@ export interface PanelTabStripProps {
   isPrimary?: boolean;
   /** Whether this strip is inside a focused group. */
   isFocused?: boolean;
+  /**
+   * Quiet focus (D-237): the active tab keeps its accent only while this is the
+   * focused group and keyboard focus is in the main area; otherwise it dims.
+   */
+  quietFocus?: boolean;
   /** Show shortcut hints (only for primary group in PanelTabBar). */
   showShortcutHints?: boolean;
   /** Keep close buttons visible when the strip lives in window chrome. */
@@ -82,6 +91,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   onPanelClose,
   isPrimary = false,
   isFocused = false,
+  quietFocus = false,
   showShortcutHints = false,
   alwaysShowClose = false,
   variant = 'bar',
@@ -114,6 +124,8 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   }, [activePanelId, panels]);
 
   const [menuPanelId, setMenuPanelId] = useState<string | null>(null);
+  const chatTabsEnabled = useConfigStore(state => isChatTabsEnabled(state.config));
+  const [switchingPanel, setSwitchingPanel] = useState<ToolPanel | null>(null);
   const hotkeys = useHotkeyStore(s => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
@@ -250,6 +262,8 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   // Shortcut hints are only truthful when the hotkeys actually target this
   // strip's panels: Mod+Shift+1-9 act on the focused group, so hide hints
   // while a different group has focus.
+  const mainHasFocus = useFocusRegionStore((state) => state.region === null || state.region === 'main');
+  const dimActive = quietFocus && !(isFocused && mainHasFocus);
   const shortcutHintsEnabled = showShortcutHints && isPrimary && isFocused;
 
   // Memoize the shortcut hints
@@ -299,6 +313,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
       className={cn(
         "flex items-center overflow-x-auto scrollbar-none min-w-0",
         !compact && "panel-tab-strip",
+        dimActive && "panel-tab-strip-dimmed",
         // The strip hugs its tabs so the "+" sits right after the last one;
         // while a tab is being dragged it grows to offer the trailing drop zone.
         compact ? "max-w-full" : isTabDragging ? "flex-1" : "flex-initial max-w-full",
@@ -366,9 +381,10 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         // The hover tooltip stays hidden while this tab's right-click menu is open, so it never covers the menu.
         const tooltipTab = tooltipContent && tabButton ? <Tooltip content={menuPanelId === panel.id ? null : tooltipContent} side="bottom">{tabButton}</Tooltip> : tabButton;
         const onMenuOpenChange = (open: boolean) => setMenuPanelId(open ? panel.id : current => (current === panel.id ? null : current));
-        // Right-click: rename, pause or resume, then close past a divider. A disabled tab offers none.
+        // Right-click: rename, switch to chat, pause or resume, then close past a divider. A disabled tab offers none.
         const menuItems: DropdownItem[] = isDisabled ? [] : [
           ...(!isPermanent && !isDiffPanel ? [{ id: 'rename', label: 'Rename tab…', icon: Pencil, onClick: () => startRename(panel) }] : []),
+          ...(chatTabsEnabled && isAgentTerminal(panel) ? [{ id: 'switch-to-chat', label: 'Switch to chat…', icon: MessageSquare, onClick: () => setSwitchingPanel(panel) }] : []),
           ...(panel.type === 'terminal' ? [isPaused
             ? { id: 'resume', label: 'Resume tab', icon: FilledPlay, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, false) }
             : { id: 'pause', label: 'Pause tab', icon: Pause, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, true) }] : []),
@@ -394,7 +410,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                       : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-8"),
                   ),
               isActive
-                ? "text-text-primary"
+                ? (dimActive ? "text-text-tertiary" : "text-text-primary")
                 : isDisabled
                   ? "text-text-muted opacity-50"
                   : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover",
@@ -488,6 +504,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           onDrop={handleStripDrop}
         />
       )}
+      {switchingPanel && <SwitchToChatDialog panel={switchingPanel} isOpen onClose={() => setSwitchingPanel(null)} />}
     </div>
   );
 });

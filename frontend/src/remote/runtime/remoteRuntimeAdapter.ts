@@ -1,6 +1,6 @@
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { ChatTabClient, ChatTabCreate } from '../../../../shared/types/chatTab';
-import { decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
+import { decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
@@ -150,6 +150,9 @@ export class RemoteRuntimeAdapter {
     permission: (panelId, requestId, optionId) => this.invoke('chat-tab:permission', [panelId, requestId, optionId]),
     answer: (panelId, questionId, response) => this.invoke('chat-tab:answer', [panelId, questionId, response]),
     restart: panelId => this.invoke('chat-tab:restart', [panelId]),
+    conversations: async panelId => decodeChatConversations(await this.invoke('chat-tab:conversations', [panelId])),
+    resume: (panelId, sessionId) => this.invoke('chat-tab:resume', [panelId, sessionId]),
+    dismissBanner: panelId => this.invoke('chat-tab:dismiss-banner', [panelId]),
     signIn: panelId => this.invoke('chat-tab:sign-in', [panelId]),
     onEvent: callback => this.onEvent(event => { if (event.channel === 'chat-tab:event') callback(decodeChatTabEvent(event.args[0])); }),
     onState: callback => this.onEvent(event => { if (event.channel === 'chat-tab:state') callback(decodeChatTabView(event.args[0])); }),

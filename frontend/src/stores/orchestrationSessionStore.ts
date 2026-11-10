@@ -23,6 +23,12 @@ interface OrchestrationSessionState {
   availability: OrchestrationSessionAvailability;
   error: string | null;
   selectionError: string | null;
+  /**
+   * Counts this desktop's own selections on the current host: clicks, and
+   * landing on the Session it remembered for this host. Zero means what is
+   * selected is the host's last-used Session or nothing, which a stored
+   * Session layout may override.
+   */
   selectionRevision: number;
   selectionVisits: Record<string, number>;
   /** Bumps on every host switch, so host-scoped UI state (such as a pending Undo) can tell hosts apart. */
@@ -71,13 +77,29 @@ function activeSessionIdFromList(
   return selected && !isArchivedOrchestrationSession(selected) ? selected.id : undefined;
 }
 
+/**
+ * Landing on this desktop's remembered Session is its own choice, as much as a
+ * click is, so it counts as a selection. Without that, a host switch that
+ * restores the remembered Session would let the stored layout's focused tile
+ * replace it.
+ */
+function revisionAfter(state: OrchestrationSessionState, selectedSessionId: string | undefined): number {
+  const adoptsRemembered = selectedSessionId !== undefined && selectedSessionId === preferredSessionId
+    && selectedSessionId !== state.selectedSessionId;
+  return adoptsRemembered ? state.selectionRevision + 1 : state.selectionRevision;
+}
+
 function applyList(data: OrchestrationSessionListResult, ownSelectionId?: string): void {
-  useOrchestrationSessionStore.setState({
-    sessions: data.sessions,
-    selectedSessionId: activeSessionIdFromList(data.sessions, ownSelectionId)
-      ?? activeSessionIdFromList(data.sessions, data.selectedSessionId),
-    availability: 'ready',
-    error: null,
+  useOrchestrationSessionStore.setState((state) => {
+    const selectedSessionId = activeSessionIdFromList(data.sessions, ownSelectionId)
+      ?? activeSessionIdFromList(data.sessions, data.selectedSessionId);
+    return {
+      sessions: data.sessions,
+      selectedSessionId,
+      selectionRevision: revisionAfter(state, selectedSessionId),
+      availability: 'ready',
+      error: null,
+    };
   });
 }
 
@@ -159,6 +181,7 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
         return {
           sessions: data.sessions,
           selectedSessionId,
+          selectionRevision: revisionAfter(state, selectedSessionId),
           selectionVisits: selectedSessionId && selectedSessionId !== state.selectedSessionId
             ? { ...state.selectionVisits, [selectedSessionId]: (state.selectionVisits[selectedSessionId] ?? 0) + 1 }
             : state.selectionVisits,
@@ -188,7 +211,7 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     const remembered = activeSessionIdFromList(state.sessions, sessionId);
     if (remembered && state.availability === 'ready' && pendingSelectionGeneration === null
       && state.selectedSessionId !== remembered) {
-      set({ selectedSessionId: remembered, selectionError: null });
+      set({ selectedSessionId: remembered, selectionRevision: revisionAfter(state, remembered), selectionError: null });
     }
   },
 

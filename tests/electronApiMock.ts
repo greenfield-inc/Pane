@@ -131,6 +131,8 @@ export type ElectronApiMockOptions = {
   paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage };
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
+  /** machines:run answers by machine, then command type. Absent: `{ success: true }`. */
+  machineRunAnswers?: Record<string, Record<string, JsonValue>>;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -151,6 +153,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const pendingPermissions: PanePermissionRequest[] = [];
     const feedbackSubmissions: SubmitFeedbackRequest[] = [];
     const openedExternalUrls: string[] = [];
+    const panelCreates: JsonObject[] = [];
     const diffManifestCalls: Array<{ sessionId: string; scope: DiffScope }> = [];
     const fileDiffCalls: Array<{ sessionId: string; scope: DiffScope; path: string }> = [];
     const clone = <T>(value: T): T => structuredClone(value);
@@ -790,7 +793,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       },
       run: (machineId: string, command: MachineCommand) => {
         machineRuns.push({ machineId, command: clone(command) });
-        return Promise.resolve({ machineId, data: { success: true } });
+        const answer = mockOptions.machineRunAnswers?.[machineId]?.[command.type];
+        return Promise.resolve({ machineId, data: clone(answer ?? { success: true }) });
       },
       retry: () => Promise.resolve(),
       onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
@@ -1218,6 +1222,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           };
           mockPanels.push(panel);
           setActiveMockPanel(sessionId, panel.id);
+          panelCreates.push(clone(panel));
           emit('panel:created', clone(panel));
           return success(clone(panel));
         },
@@ -1841,6 +1846,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getOpenedExternalUrls() {
           return clone(openedExternalUrls);
         },
+        /** Every panel the renderer created through `panels.createPanel`, in order. */
+        getPanelCreates() {
+          return clone(panelCreates);
+        },
         getPreferenceWrites() {
           return clone(preferenceWrites);
         },
@@ -2008,7 +2017,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           notifySnapshot = clone(snapshot);
           emit('notify:snapshot', clone(snapshot));
         },
-        emitNotifyNavigate(target: 'inbox' | 'settings' | { approval: string }) {
+        emitNotifyNavigate(target: 'inbox' | 'toggle-inbox' | 'settings' | { approval: string }) {
           emit('notify:navigate', target);
         },
         getMachineRuns() {

@@ -71,6 +71,11 @@ from .local_control import (
     run_repos_update,
     run_repos_rename,
     run_report,
+    run_panels_conversation,
+    run_panels_conversation_hook,
+    CONVERSATION_ID_PATTERN,
+    CONVERSATION_SOURCES,
+    missing_conversation_error,
     run_inbox,
     run_inbox_ack,
     run_sessions_associate,
@@ -162,6 +167,8 @@ FLAG_OWNERS = {
     "--deny": ("autopilot answer",),
     "--because": ("autopilot answer",),
     "--reason": ("secrets request", "autopilot close"),
+    "--conversation": ("panels conversation",),
+    "--hook": ("panels conversation",),
 }
 HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
@@ -291,6 +298,10 @@ class ParsedArgs:
     summary: Optional[str] = None
     summary_file: Optional[str] = None
     question: Optional[str] = None
+    # panels conversation: --conversation, --source (what started it), and --hook.
+    conversation_id: Optional[str] = None
+    conversation_source: Optional[str] = None
+    hook: bool = False
     expect_report: Optional[bool] = None
     wait_for_result: bool = False
     wait_timeout_ms: Optional[int] = None
@@ -332,6 +343,10 @@ class ParsedArgs:
 
 def main(argv: Optional[List[str]] = None) -> int:
     effective_argv = sys.argv[1:] if argv is None else argv
+    # A Claude Code SessionStart hook: silent and exit 0 whatever happens, so it runs before anything that can print.
+    hooked = run_conversation_hook_from_argv(effective_argv)
+    if hooked is not None:
+        return hooked
     telemetry_context = create_initial_telemetry_context(effective_argv)
     try:
         if not effective_argv:
@@ -366,6 +381,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         own_args = effective_argv[: effective_argv.index("--")] if "--" in effective_argv else effective_argv
         print_failure(error, "--json" in own_args)
         return 1
+
+
+def is_conversation_hook_argv(argv: List[str]) -> bool:
+    words = [arg for index, arg in enumerate(argv) if not arg.startswith("-") and (index == 0 or argv[index - 1] != "--pane-dir")]
+    return words[:2] == ["panels", "conversation"] and "--hook" in argv
+
+
+def run_conversation_hook_from_argv(argv: List[str], env: Optional[Dict[str, str]] = None) -> Optional[int]:
+    """`runpane panels conversation --hook` straight from argv, before telemetry or any output. None for any other command line."""
+    if not is_conversation_hook_argv(argv):
+        return None
+    try:
+        parsed = parse_args(argv)
+        if parsed.command != "panels conversation" or not parsed.hook:
+            return 0
+        pane_dir = parsed.pane_dir
+    except BaseException:
+        return 0
+    return run_panels_conversation_hook(env, pane_dir=pane_dir)
 
 
 def print_failure(error: Exception, as_json: bool) -> None:
@@ -600,6 +634,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         apply_watch_defaults(parsed)
     if parsed.command == "report":
         validate_report_args(parsed)
+    if parsed.command == "panels conversation":
+        validate_conversation_args(parsed)
     validate_wait_for_result_args(parsed)
     if parsed.command == "inbox ack" and not parsed.all and not parsed.inbox_ids:
         raise ValueError("runpane inbox ack needs the item ids to clear, or --all --session <id|name>.")
@@ -707,6 +743,21 @@ def validate_report_args(parsed: ParsedArgs) -> None:
         raise ValueError("runpane report accepts either --summary or --summary-file, not both.")
     if parsed.report_state == "blocked" and not (parsed.question or "").strip():
         raise ValueError('runpane report --state blocked requires --question "<what you need answered>".')
+
+
+def validate_conversation_args(parsed: ParsedArgs) -> None:
+    if parsed.hook:
+        if (parsed.conversation_id is not None or parsed.conversation_source is not None or parsed.panel_id is not None
+                or parsed.pane_id is not None or parsed.json):
+            raise RunpaneError(
+                "ERR_RUNPANE_INVALID_ARGUMENT",
+                "runpane panels conversation --hook reads the conversation from the hook's stdin and the panel from PANE_PANEL_ID, "
+                "so it takes no --conversation, --source, --panel, --pane or --json. Nothing was recorded.",
+                "Run `runpane panels conversation --hook` from a SessionStart hook, or report by hand with `runpane panels conversation --conversation <id>`.",
+            )
+        return
+    if parsed.conversation_id is None:
+        raise missing_conversation_error()
 
 
 def validate_panes_archive_args(parsed: ParsedArgs) -> None:
@@ -975,6 +1026,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--report":
         parsed.report = True
         return
+    if flag == "--hook":
+        parsed.hook = True
+        return
     if flag == "--fix":
         raise ValueError("runpane doctor --fix updates npm installs of runpane, so it runs only in the npm CLI. Run: npx --yes runpane@latest doctor --fix")
     if flag == "--read-only":
@@ -1188,6 +1242,11 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
             raise ValueError("--interval-ms must be a positive number.")
         parsed.interval_ms = interval_ms
         return
+    if flag == "--source" and parsed.command == "panels conversation":
+        if value not in CONVERSATION_SOURCES:
+            raise ValueError(f"--source must be one of: {', '.join(CONVERSATION_SOURCES)}.")
+        parsed.conversation_source = value
+        return
     if flag == "--source":
         if value not in {"user", "agent"}:
             raise ValueError("--source must be one of: user, agent.")
@@ -1303,6 +1362,11 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--question":
         parsed.question = value
+        return
+    if flag == "--conversation":
+        if not CONVERSATION_ID_PATTERN.fullmatch(value):
+            raise ValueError('--conversation must be a conversation id: up to 256 letters, digits, ".", "_", ":" or "-", starting with a letter or digit.')
+        parsed.conversation_id = value
         return
     if flag == "--ttl":
         parsed.lock_ttl_ms = parse_lock_ttl(value)
@@ -1648,6 +1712,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panels resume": lambda parsed, context: run_panels_resume(parsed),
     "panels pause": lambda parsed, context: run_pause(parsed, "panel", "pause"),
     "panels last-message": lambda parsed, context: run_panels_last_message(parsed),
+    "panels conversation": lambda parsed, context: run_panels_conversation(parsed),
     "report": lambda parsed, context: run_report(parsed),
     "notify": lambda parsed, context: run_notify(parsed),
     "inbox": lambda parsed, context: run_inbox(parsed),

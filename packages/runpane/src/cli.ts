@@ -34,6 +34,8 @@ import {
   runPanelsCreate,
   runPanelsInput,
   runPanelsLastMessage,
+  runPanelsConversation,
+  runConversationHookFromArgv,
   runPanelsList,
   runPanelsOutput,
   runPanelsScreen,
@@ -110,6 +112,9 @@ import {
 const SOURCE = 'npm' as const;
 
 export async function main(argv: string[]): Promise<number> {
+  // A Claude Code SessionStart hook: silent and exit 0 whatever happens, so it runs before anything that can print.
+  const hooked = await runConversationHookFromArgv(argv);
+  if (hooked !== null) return hooked;
   assertSupportedCliRuntime(process.versions.node, process.versions.electron);
   if (argv[0] === '__update-runner' && argv.length === 2) return runUpdateHelper(argv[1]);
   const handedOff = await handOffToManagedCli(argv);
@@ -379,6 +384,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'panels last-message': async (parsed, telemetryContext) => {
     return runPanelsLastMessage(parsed);
   },
+  'panels conversation': async (parsed) => runPanelsConversation(parsed),
   'report': async (parsed, telemetryContext) => {
     return runReport(parsed);
   },

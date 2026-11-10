@@ -351,7 +351,11 @@ The watch also reports when the ground under the PR moves. `pr.base_changed`
 GitHub after a stack parent merges and its branch is deleted; `base.from` and
 `base.to` name the old and new base. `pr.base_deleted` (`BASE DELETED`) fires
 when the base branch no longer exists; GitHub may close the PR right after.
-Both arrive at once under `--follow`. Rebase onto the new base and recheck CI.
+Both arrive at once under `--follow`. When the PR below this one in a stack
+merged with a merge commit and this PR now targets the branch it merged into,
+the retarget is done: confirm the diff shows only this PR's commits and recheck
+required checks (`gh pr checks <number> --required`); do not rebase or push.
+After any other base change, rebase onto the new base and recheck CI.
 
 The daemon batches up to 25 fingerprints per host every two minutes (plus up
 to ten seconds of jitter), reads details on changes and at a 30-minute

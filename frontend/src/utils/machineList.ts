@@ -1,4 +1,5 @@
 import { assignMachineColorSlots, preferredMachineColorSlot } from '../../../shared/utils/machineColor';
+import { assignMachineLetters, machineMarkKey, resolveMachineMark, type MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import type { TailnetMachine, TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import type { RemoteDaemonHostRuntimeState, RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
 import type { ConnectionPresence } from '../../../shared/remoteClient/connectionPresence';
@@ -23,7 +24,14 @@ export interface MachineEntry {
   name: string;
   os: MachineOs | null;
   kind: 'local' | 'tailnet' | 'code';
+  /** Its colour slot, a saved colour included. */
   slot: number;
+  /** Its letter mark, saved letters included. */
+  letters: string;
+  /** Where its saved mark lives in `AppConfig.machineMarks`. */
+  markKey: string;
+  /** A mark saved on this computer changed its letters or colour. */
+  customMark: boolean;
   active: boolean;
   presence: MachinePresence;
   /** "Ready", "Agents run here", "Reconnecting…": the state part of the subtitle. */
@@ -45,6 +53,8 @@ export interface MachineListInput {
   localOs: MachineOs | null;
   /** The active connection after the grace window (`useConnectionPresence`); without it the raw status decides. */
   connectionPresence?: ConnectionPresence;
+  /** Marks chosen on this computer (`AppConfig.machineMarks`). */
+  marks?: MachineMarkOverrides;
 }
 
 const TAILNET_STATE_TEXT = {
@@ -86,7 +96,19 @@ function subtitle(os: MachineOs | null, ...parts: Array<string | false | null | 
  * machines in the order the listing gives, then saved Tailscale machines it did not list,
  * then hosts added with a connection code.
  */
-export function buildMachineList({ connectionState, profiles, tailnet, localName, localOs, connectionPresence }: MachineListInput): MachineEntry[] {
+export function buildMachineList(input: MachineListInput): MachineEntry[] {
+  const machines = listMachines(input);
+  const letters = assignMachineLetters(machines.map((machine) => machine.name));
+  return machines.map((machine) => {
+    const markKey = machineMarkKey(machine);
+    const mark = resolveMachineMark({ letters: letters.get(machine.name) ?? '?', slot: machine.slot }, input.marks?.[markKey]);
+    return { ...machine, slot: mark.slot, letters: mark.letters, markKey, customMark: mark.custom };
+  });
+}
+
+type ListedMachine = Omit<MachineEntry, 'letters' | 'markKey' | 'customMark'>;
+
+function listMachines({ connectionState, profiles, tailnet, localName, localOs, connectionPresence }: MachineListInput): ListedMachine[] {
   const remote = connectionState.mode === 'remote';
   const activeProfileId = remote ? connectionState.activeProfileId : null;
   const listed = tailnet?.ok ? tailnet.machines : [];
@@ -98,7 +120,7 @@ export function buildMachineList({ connectionState, profiles, tailnet, localName
   const slotFor = (name: string) => slots.get(name) ?? preferredMachineColorSlot(name);
   const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
 
-  const local: MachineEntry = {
+  const local: ListedMachine = {
     id: LOCAL_RUNTIME_ID,
     name: localName ?? THIS_COMPUTER,
     os: localOs,
@@ -112,9 +134,9 @@ export function buildMachineList({ connectionState, profiles, tailnet, localName
     action: remote ? 'switch' : 'none',
   };
 
-  const remoteEntry = (entry: Omit<MachineEntry, 'active' | 'presence' | 'stateText' | 'subtitle' | 'action'>, idle: {
+  const remoteEntry = (entry: Omit<ListedMachine, 'active' | 'presence' | 'stateText' | 'subtitle' | 'action'>, idle: {
     presence: MachinePresence; stateText: string; action: MachineAction; extra?: Array<string | false | undefined>;
-  }): MachineEntry => {
+  }): ListedMachine => {
     const active = entry.profile !== undefined && entry.profile.id === activeProfileId;
     // An active machine that now wants a password asks for it instead of retrying the stored one.
     const needsPassword = active && connectionState.status !== 'connected' && idle.action === 'password';

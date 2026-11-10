@@ -2,6 +2,7 @@ import type { PaneSecretMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
+import type { MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { WorkspaceAccessConfig } from '../../../shared/types/workspaceAccess';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
@@ -9,6 +10,7 @@ import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscri
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
 import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
+import type { KeyboardShortcutOverrides } from '../../../shared/utils/keyboardBindings';
 import type { SessionRetention } from '../../../shared/types/orchestrationSession';
 
 interface TerminalShortcut {
@@ -194,6 +196,11 @@ export interface AppConfig {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
+  // Changed keys, by catalog id (shared/constants/keyboardShortcuts.ts). A missing id
+  // follows the default, null unassigns it, and an update replaces the whole map ({} resets all).
+  keyboardShortcutOverrides?: KeyboardShortcutOverrides;
+  // 'pending' until the person dismisses the one-time notice of keys the VS Code keymap moved.
+  keymapNotice?: 'pending' | 'seen';
   // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
@@ -206,6 +213,8 @@ export interface AppConfig {
   terminalPowerMode?: TerminalPowerMode;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
+  /** Machine marks chosen on this computer only (D-252), keyed by `machineMarkKey`. Absent: automatic. */
+  machineMarks?: MachineMarkOverrides;
   // Codeless remote access over Tailscale (runpane workspace and desktop remote mode)
   workspaces?: WorkspaceAccessConfig;
   terminalFontFamily?: string;
@@ -293,6 +302,11 @@ export interface UpdateConfigRequest {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
+  // Changed keys, by catalog id (shared/constants/keyboardShortcuts.ts). A missing id
+  // follows the default, null unassigns it, and an update replaces the whole map ({} resets all).
+  keyboardShortcutOverrides?: KeyboardShortcutOverrides;
+  // 'pending' until the person dismisses the one-time notice of keys the VS Code keymap moved.
+  keymapNotice?: 'pending' | 'seen';
   // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
@@ -305,6 +319,8 @@ export interface UpdateConfigRequest {
   terminalPowerMode?: TerminalPowerMode;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
+  /** Machine marks chosen on this computer only (D-252), keyed by `machineMarkKey`. Absent: automatic. */
+  machineMarks?: MachineMarkOverrides;
   terminalFontFamily?: string;
   terminalFontSize?: number;
 }

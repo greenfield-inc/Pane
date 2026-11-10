@@ -211,6 +211,10 @@ interface ElectronAPI {
     create(request: import('../../../shared/types/chatTab').ChatTabCreate): Promise<{ panelId: string }>;
     /** Switch to chat: moves a terminal Claude or Codex tab into a chat tab. */
     switch(panelId: string): Promise<import('../../../shared/types/chatTab').ChatTabSwitchResult>;
+    /** What switching every terminal agent tab of a Session would do; changes nothing. */
+    previewSessionSwitch(sessionId: string): Promise<import('../../../shared/types/chatTab').SessionChatSwitchPreview>;
+    /** Switches the confirmed tabs of a Session one by one. */
+    switchSession(sessionId: string, panelIds: string[]): Promise<import('../../../shared/types/chatTab').SessionChatSwitchResult>;
     keys(): Promise<Record<'claude' | 'codex', boolean>>;
     setKey(agent: 'claude' | 'codex', key: string | null): Promise<Record<'claude' | 'codex', boolean>>;
   };
@@ -557,6 +561,8 @@ interface ElectronAPI {
 
   // Event listeners for real-time updates
   events: {
+    /** Config changed in main (Settings, another window, or a hand edit of config.json). */
+    onConfigUpdated: (callback: (config: AppConfig) => void) => () => void;
     onPermissionRequest: (callback: (request: PanePermissionRequest) => void) => () => void;
     onPermissionResolved: (callback: (event: PanePermissionResolvedEvent) => void) => () => void;
     onSessionCreationFailed: (callback: (failure: { name: string; error: string }) => void) => () => void;
@@ -604,6 +610,8 @@ interface ElectronAPI {
     
     onTerminalOutput: (callback: (output: import('../../../shared/types/panels').TerminalOutputEvent) => void) => () => void;
     onTerminalCliReady: (callback: (data: { panelId: string }) => void) => () => void;
+    /** The panel's terminal started a new process in place (a failed Switch to chat, Resume); its view should redraw. */
+    onTerminalRelaunched: (callback: (data: { sessionId: string; panelId: string }) => void) => () => void;
     onTerminalExited: (callback: (data: { sessionId: string; panelId: string; exitCode: number; signal: number | null }) => void) => () => void;
     onTerminalAlternateScreen: (callback: (data: { panelId: string; active: boolean }) => void) => () => void;
     /**

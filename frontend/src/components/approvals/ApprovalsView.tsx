@@ -20,6 +20,7 @@ import { useNow } from '../notify/useNow';
 import { SessionBeside } from '../PaneChatView';
 import { APPROVALS_SORTS, approvalRowLines, besideOf, connectedOf, groupApprovals, offlineRowText, readApprovalsSort, relayReadOnlyLine, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
 import { MachineContext } from './MachineContext';
+import { handleApprovalsEscape } from './approvalsNavigation';
 import { toggleApprovals } from './approvalsNavigation';
 import { useObservedContentBox } from '../../hooks/useObservedContentBox';
 import { useOuterPanelResize } from '../../hooks/useOuterPanelResize';
@@ -60,7 +61,7 @@ function useMachineMark() {
   const machines = useAllMachinesStore((state) => state.entries);
   return (machineId: string | undefined, dimmed = false) => {
     const machine = machineId ? machines.find((entry) => entry.id === machineId) : undefined;
-    return machine ? <MachineMark os={machine.os} slot={machine.slot} presence={dimmed ? 'dimmed' : 'solid'} size="logo" /> : null;
+    return machine ? <MachineMark letters={machine.letters} slot={machine.slot} presence={dimmed ? 'dimmed' : 'solid'} size="logo" /> : null;
   };
 }
 
@@ -289,6 +290,11 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const snapshot = useNotifyStore((state) => state.snapshot);
   // Approvals turned off (here, or saved off and restored on launch): back to the view you left, as the row would.
   const turnedOff = snapshot?.settings.enabled === false;
+  // Esc goes back to where you were, unless an answer is being typed (D-251).
+  useEffect(() => {
+    window.addEventListener('keydown', handleApprovalsEscape);
+    return () => window.removeEventListener('keydown', handleApprovalsEscape);
+  }, []);
   useEffect(() => {
     if (turnedOff) toggleApprovals();
   }, [turnedOff]);
@@ -475,7 +481,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const enabled = snapshot?.settings.enabled ?? true;
   const importError = snapshot?.importError;
   return (
-    <div ref={inboxBox.ref} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary min-[1100px]:flex-row" data-testid="notify-inbox">
+    <div ref={inboxBox.ref} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary min-[1100px]:flex-row" data-testid="notify-inbox" data-focus-region="approvals">
       <section
         aria-label="Approvals"
         // Stacked (a narrow window), the list takes the height when nothing shows beside it.

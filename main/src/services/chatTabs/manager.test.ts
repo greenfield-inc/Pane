@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,7 @@ import { PaneError } from '../../../../shared/paneError';
 import type { PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import { ChatTabManager, type ChatTabLauncher, type ChatTabManagerOptions, type ChatTabStore } from './manager';
 import { ChatTabNotifyBridge } from './notifyBridge';
+import { ChatTabRuntime } from './runtime';
 
 const AGENT = path.join(__dirname, 'testing', 'scriptedAgent.mjs');
 const cleanup: Array<() => Promise<void> | void> = [];
@@ -586,5 +587,201 @@ describe('chat tab manager', () => {
     await manager.configure('p1', 'model', 'fast');
     await manager.restart('p1');
     expect(manager.view('p1').controls.find(control => control.id === 'model')?.currentValue).toBe('fast');
+  });
+});
+
+describe('past conversations: most recent, the picker and /resume (D-282)', () => {
+  /** Starts a tab, has one exchange in it, and closes it; returns its conversation. */
+  async function converse(manager: ChatTabManager, store: MemoryStore, directory: string, panelId: string, text: string): Promise<string> {
+    store.add(panelId, newTab(directory));
+    await manager.ensure(panelId);
+    manager.send(panelId, { operationId: `op-${panelId}`, text });
+    await expect.poll(() => manager.receipt(panelId, `op-${panelId}`)?.state).toBe('completed');
+    await manager.close(panelId);
+    // Distinct modification times, newest last.
+    await new Promise(resolve => setTimeout(resolve, 20));
+    return store.state(panelId)!.acpSessionId!;
+  }
+
+  function setup(env: NodeJS.ProcessEnv = {}) {
+    const open = new Map<string, { panelId: string; title: string }>();
+    const h = harness(new MemoryStore(), env, undefined, { openConversations: () => open });
+    return { ...h, open };
+  }
+
+  it('opens the newest conversation in the folder that no other tab has open, with the banner (J4, J5)', async () => {
+    const { manager, store, directory, open } = setup();
+    const older = await converse(manager, store, directory, 'a', 'mine');
+    const newer = await converse(manager, store, directory, 'b', 'other tab');
+    open.set(newer, { panelId: 'b', title: 'Other' });
+    store.add('chat', { ...newTab(directory), open: 'most-recent' });
+    await manager.ensure('chat');
+    expect(store.state('chat')).toMatchObject({ acpSessionId: older, banner: { kind: 'most-recent' } });
+    expect(store.state('chat')?.open).toBeUndefined();
+    const view = manager.view('chat');
+    expect(view.banner).toEqual({ kind: 'most-recent' });
+    expect(replyText(view)).toBe('You said: mine');
+  });
+
+  it('starts new with the "nothing to open" note when every conversation is open elsewhere (J5)', async () => {
+    const { manager, store, directory, open } = setup();
+    open.set(await converse(manager, store, directory, 'a', 'one'), { panelId: 'a', title: 'A' });
+    store.add('chat', { ...newTab(directory), open: 'most-recent' });
+    await manager.ensure('chat');
+    const state = store.state('chat')!;
+    expect(state.banner).toEqual({ kind: 'none' });
+    expect(state.acpSessionId).toMatch(/^scripted-/);
+    expect(open.has(state.acpSessionId!)).toBe(false);
+  });
+
+  it('starts new with the "couldn\'t list" note, and its reason, when listing fails (J7)', async () => {
+    const { manager, store, directory } = setup({ SCRIPTED_AGENT_LIST_FAILS: '1' });
+    store.add('chat', { ...newTab(directory), open: 'most-recent' });
+    await manager.ensure('chat');
+    expect(store.state('chat')?.banner).toMatchObject({ kind: 'list-failed', reason: expect.stringContaining('not signed in') });
+    expect(store.state('chat')?.acpSessionId).toMatch(/^scripted-/);
+  });
+
+  it('lists the folder newest first across pages, marking this tab\'s and other tabs\' conversations (J6)', async () => {
+    const { manager, store, directory, open } = setup();
+    const first = await converse(manager, store, directory, 'a', 'first');
+    const second = await converse(manager, store, directory, 'b', 'second');
+    const third = await converse(manager, store, directory, 'c', 'third');
+    open.set(second, { panelId: 'b', title: 'Reviewer' });
+    store.add('chat', { ...newTab(directory), acpSessionId: first });
+    await manager.ensure('chat');
+    const list = await manager.conversations('chat');
+    expect(list.map(entry => entry.sessionId)).toEqual([third, second, first]);
+    expect(list[0]).toMatchObject({ title: 'third' });
+    expect(list[0].updatedAt).toBeTruthy();
+    expect(list[1]).toMatchObject({ openIn: { panelId: 'b', title: 'Reviewer' } });
+    expect(list[2]).toMatchObject({ current: true });
+  });
+
+  it('reloads the tab on a picked conversation with its history, clearing the banner (J6)', async () => {
+    const { manager, store, directory } = setup();
+    const first = await converse(manager, store, directory, 'a', 'first');
+    const second = await converse(manager, store, directory, 'b', 'second');
+    store.add('chat', { ...newTab(directory), acpSessionId: first, banner: { kind: 'most-recent' } });
+    await manager.ensure('chat');
+    await manager.resume('chat', second);
+    expect(store.state('chat')).toMatchObject({ acpSessionId: second });
+    expect(store.state('chat')?.banner).toBeUndefined();
+    expect(replyText(manager.view('chat'))).toBe('You said: second');
+  });
+
+  it('refuses a conversation open in another tab, and any pick mid-turn, changing nothing (J6)', async () => {
+    const { manager, store, directory, open } = setup();
+    const first = await converse(manager, store, directory, 'a', 'first');
+    const second = await converse(manager, store, directory, 'b', 'second');
+    open.set(second, { panelId: 'b', title: 'Reviewer' });
+    store.add('chat', { ...newTab(directory), acpSessionId: first });
+    await manager.ensure('chat');
+    await expect(manager.resume('chat', second)).rejects.toMatchObject({ code: 'CHAT_RESUME_OPEN_ELSEWHERE', message: expect.stringContaining('Reviewer') });
+    open.clear();
+    manager.send('chat', { operationId: 'slow-1', text: 'slow' });
+    await expect.poll(() => manager.view('chat', 0).status).toBe('working');
+    await expect(manager.resume('chat', second)).rejects.toMatchObject({ code: 'CHAT_RESUME_BUSY' });
+    expect(store.state('chat')?.acpSessionId).toBe(first);
+    await manager.cancel('chat');
+  });
+
+  /** Occupancy read from the store at the moment it is asked, as Pane reads its panels. */
+  function liveSetup() {
+    const store = new MemoryStore();
+    const h = harness(store, {}, undefined, {
+      openConversations: panelId => new Map([...store.panels.keys()].flatMap(other => {
+        const id = other === panelId ? undefined : store.state(other)?.acpSessionId;
+        return id ? [[id, { panelId: other, title: other }] as const] : [];
+      })),
+    });
+    return h;
+  }
+
+  it('never gives two switches listing at the same time the same conversation (review F-2)', async () => {
+    const { manager, store, directory } = liveSetup();
+    const seed = await converse(manager, store, directory, 'seed', 'saved conversation');
+    store.panels.delete('seed');
+    // Both lists are in flight together and resolve together.
+    const original = ChatTabRuntime.prototype.list;
+    let calls = 0;
+    let unlock!: () => void;
+    const barrier = new Promise<void>(resolve => { unlock = resolve; });
+    vi.spyOn(ChatTabRuntime.prototype, 'list').mockImplementation(async function (this: ChatTabRuntime, cwd, limit) {
+      const result = await original.call(this, cwd, limit);
+      if (++calls === 2) unlock();
+      await barrier;
+      return result;
+    });
+    cleanup.push(() => vi.restoreAllMocks());
+    store.add('switch-a', { ...newTab(directory), open: 'most-recent' });
+    store.add('switch-b', { ...newTab(directory), open: 'most-recent' });
+    await Promise.all([manager.ensure('switch-a'), manager.ensure('switch-b')]);
+    const a = store.state('switch-a')!;
+    const b = store.state('switch-b')!;
+    expect(a.acpSessionId).not.toBe(b.acpSessionId);
+    expect([a.acpSessionId, b.acpSessionId]).toContain(seed);
+    expect([a.banner?.kind, b.banner?.kind].sort()).toEqual(['most-recent', 'none']);
+  });
+
+  it('keeps queued prompts with their conversation: /resume is refused while any wait (review F-3)', async () => {
+    const { manager, store, directory } = setup();
+    const next = await converse(manager, store, directory, 'next', 'other conversation');
+    store.add('old', newTab(directory));
+    await manager.ensure('old');
+    const old = store.state('old')!.acpSessionId!;
+    // The turn fails on sign-in with a second prompt queued behind it.
+    manager.send('old', { operationId: 'signout-op', text: 'signout' });
+    manager.send('old', { operationId: 'queued-old', text: 'work intended for old conversation' });
+    await expect.poll(() => manager.view('old', 0, false).status).toBe('stopped');
+    expect(store.state('old')?.queue?.map(item => item.operationId)).toEqual(['queued-old']);
+    await expect(manager.resume('old', next)).rejects.toMatchObject({ code: 'CHAT_RESUME_QUEUED', message: expect.stringContaining('A message is waiting') });
+    expect(store.state('old')?.acpSessionId).toBe(old);
+    expect(manager.receipt('old', 'queued-old')?.state).toBe('accepted');
+    // Once it is removed, the pick goes ahead.
+    manager.unqueue('old', 'queued-old');
+    await manager.resume('old', next);
+    expect(store.state('old')?.acpSessionId).toBe(next);
+    expect(JSON.stringify(manager.view('old').transcript?.messages)).not.toContain('work intended for old conversation');
+  });
+
+  it('follows the list to its end to find an older free conversation (review F-4)', async () => {
+    const { manager, store, directory } = liveSetup();
+    // 101 saved conversations, listed two to a page; the newest 100 are open in other tabs.
+    const agentStore = path.join(directory, 'agent');
+    mkdirSync(agentStore, { recursive: true });
+    for (let index = 0; index <= 100; index++) {
+      const file = path.join(agentStore, `seed-${index}.json`);
+      writeFileSync(file, JSON.stringify({ cwd: directory, updates: [], config: { model: 'default', mode: 'default' }, meta: null }));
+      const at = new Date(1_700_000_000_000 + index * 1000);
+      utimesSync(file, at, at);
+      if (index > 0) store.add(`occupied-${index}`, { ...newTab(directory), acpSessionId: `seed-${index}`, status: 'stopped' });
+    }
+    store.add('switch', { ...newTab(directory), open: 'most-recent' });
+    await manager.ensure('switch');
+    expect(store.state('switch')).toMatchObject({ acpSessionId: 'seed-0', banner: { kind: 'most-recent' } });
+  });
+
+  it('does not claim the folder has none when the list was cut short (review F-4)', async () => {
+    const { manager, store, directory, open } = setup();
+    open.set(await converse(manager, store, directory, 'a', 'one'), { panelId: 'a', title: 'A' });
+    const original = ChatTabRuntime.prototype.list;
+    vi.spyOn(ChatTabRuntime.prototype, 'list').mockImplementation(async function (this: ChatTabRuntime, cwd, limit) {
+      return { ...(await original.call(this, cwd, limit)), complete: false };
+    });
+    cleanup.push(() => vi.restoreAllMocks());
+    store.add('chat', { ...newTab(directory), open: 'most-recent' });
+    await manager.ensure('chat');
+    expect(store.state('chat')?.banner).toEqual({ kind: 'list-failed', reason: 'Pane lists only the newest 2,000, and every one of those is open in another tab' });
+  });
+
+  it('closes the banner when the person dismisses it', async () => {
+    const { manager, store, directory } = setup();
+    store.add('chat', { ...newTab(directory), banner: { kind: 'known-empty' } });
+    await manager.ensure('chat');
+    expect(manager.view('chat', 0).banner).toEqual({ kind: 'known-empty' });
+    manager.dismissBanner('chat');
+    expect(manager.view('chat', 0).banner).toBeUndefined();
+    expect(store.state('chat')?.banner).toBeUndefined();
   });
 });

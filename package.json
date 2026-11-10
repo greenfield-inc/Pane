@@ -79,6 +79,7 @@
     "anim:evidence:remote": "playwright test -c playwright.anim.remote.config.ts",
     "anim:evidence:render": "node scripts/render-anim-evidence.mjs",
     "typecheck": "pnpm run -r typecheck",
+    "check:fast": "node scripts/check-fast.mjs",
     "postinstall": "electron-builder install-app-deps",
     "electron:rebuild": "pnpm exec electron-rebuild --force --only better-sqlite3-multiple-ciphers --module-dir ./main",
     "setup": "pnpm install && pnpm run electron:rebuild && pnpm run build:main",

@@ -290,6 +290,14 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
+  // A browser tab's page took keyboard focus (a click inside it never reaches this DOM).
+  ipcRenderer.on('browser-panel:page-focused', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:page-focused', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:page-focused to window:', e);
+    }
+  });
   // Escape pressed in a browser tab's page while its Pane find bar is open.
   ipcRenderer.on('browser-panel:find-escape', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
     try {
@@ -475,6 +483,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     create: (request: ChatTabCreate) => invokeIpc('chat-tab:create', request),
     switch: (panelId: string) => invokeIpc('chat-tab:switch', panelId),
+    previewSessionSwitch: (sessionId: string) => invokeIpc('chat-tab:preview-session-switch', sessionId),
+    switchSession: (sessionId: string, panelIds: string[]) => invokeIpc('chat-tab:switch-session', sessionId, panelIds),
     get: (panelId: string, limit?: number) => invokeIpc('chat-tab:get', panelId, limit),
     history: (panelId: string, before: number, limit: number) => invokeIpc('chat-tab:history', panelId, before, limit),
     send: (panelId: string, request: ChatTabSend) => invokeIpc('chat-tab:send', panelId, request),
@@ -489,6 +499,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     permission: (panelId: string, requestId: string, optionId: string) => invokeIpc('chat-tab:permission', panelId, requestId, optionId),
     answer: (panelId: string, questionId: string, response: ChatTabAnswer) => invokeIpc('chat-tab:answer', panelId, questionId, response),
     restart: (panelId: string) => invokeIpc('chat-tab:restart', panelId),
+    conversations: (panelId: string) => invokeIpc('chat-tab:conversations', panelId),
+    resume: (panelId: string, sessionId: string) => invokeIpc('chat-tab:resume', panelId, sessionId),
+    dismissBanner: (panelId: string) => invokeIpc('chat-tab:dismiss-banner', panelId),
     signIn: (panelId: string) => invokeIpc('chat-tab:sign-in', panelId),
     keys: () => invokeIpc('chat-tab:keys'),
     setKey: (agent: 'claude' | 'codex', key: string | null) => invokeIpc('chat-tab:set-key', agent, key),
@@ -915,6 +928,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Event listeners for real-time updates
   events: {
+    /** Config changed in main (Settings, another window, or a hand edit of config.json). */
+    onConfigUpdated: (callback: (config: AppConfig) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config);
+      ipcRenderer.on('config:updated', wrappedCallback);
+      return () => ipcRenderer.removeListener('config:updated', wrappedCallback);
+    },
     onPermissionRequest: (callback: (request: PermissionRequest) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, request: PermissionRequest) => callback(request);
       ipcRenderer.on('permission:request', wrappedCallback);
@@ -1101,6 +1120,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, output: TerminalOutputEvent) => callback(output);
       ipcRenderer.on('terminal:output', wrappedCallback);
       return () => ipcRenderer.removeListener('terminal:output', wrappedCallback);
+    },
+
+    onTerminalRelaunched: (callback: (data: { sessionId: string; panelId: string }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, data: { sessionId: string; panelId: string }) => callback(data);
+      ipcRenderer.on('terminal:relaunched', wrappedCallback);
+      return () => ipcRenderer.removeListener('terminal:relaunched', wrappedCallback);
     },
 
     onTerminalCliReady: (callback: (data: { panelId: string }) => void) => {

@@ -1,6 +1,6 @@
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
+import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MessageSquare, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { SessionApprovalsCount } from './approvals/ApprovalsCount';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -24,6 +24,8 @@ import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../
 import { dropOrder, stepOrder, type SessionDropTarget } from '../utils/sessionReorder';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { MoveSessionToHostDialog } from './MoveSessionToHostDialog';
+import { SessionSwitchToChatDialog, useSessionSwitchPreview } from './SessionSwitchToChat';
+import type { SessionChatSwitchPreview } from '../../../shared/types/chatTab';
 import { archiveOrchestrationSession, clearArchivedToast, restoreArchivedPanes, setArchivedToast, setOrchestrationSessionPinned, useArchivedSessionToastStore } from './orchestrationSessionActions';
 import { useMoveToHostBlockedReason } from '../hooks/useMoveToHostBlockedReason';
 import { PausedGlyph } from './ui/AgentStatusDot';
@@ -434,6 +436,9 @@ export function OrchestrationSessionNav({
       <button
         type="button"
         data-testid={rowId}
+        data-sidebar-item
+        data-sidebar-key={`session-${placement}-${session.id}`}
+        aria-current={isOpen ? 'page' : undefined}
         aria-label={isLegacy ? label : `Open Session ${session.name}`}
         // Dragging a row tiles the Session beside another, the same gesture
         // as dragging a tab, or reorders it within its own list. Repository
@@ -468,7 +473,7 @@ export function OrchestrationSessionNav({
             className={cn('pointer-events-none absolute inset-x-3 z-20 h-0.5 rounded-full bg-interactive', drag.indicator === 'before' ? '-top-px' : '-bottom-px')}
           />
         )}
-        <div className={cn(
+        <div data-sidebar-row data-sidebar-selected={isOpen || undefined} className={cn(
           'group/orchestration-row relative mx-2 flex h-7 w-[calc(100%-1rem)] items-center rounded-md text-[13px] transition-colors',
           isOpen ? 'bg-surface-selected text-text-primary' : 'text-text-secondary hover:bg-surface-hover',
         )}>
@@ -607,6 +612,7 @@ export function OrchestrationSessionNav({
           <div data-testid="orchestration-pinned-section-header" className="group/section flex items-center justify-between gap-2 pl-4 pr-3 py-1">
             <button
               type="button"
+              data-sidebar-item
               aria-expanded={isPinnedSectionExpanded}
               aria-controls="orchestration-pinned-list"
               onClick={() => setPinnedSectionExpanded(!isPinnedSectionExpanded)}
@@ -634,6 +640,7 @@ export function OrchestrationSessionNav({
         <div data-testid="sessions-section-header" className="pane-sidebar-sessions-header group/section sticky top-0 bottom-8 z-30 mt-3 flex h-8 shrink-0 items-center justify-between gap-2 bg-surface-secondary pl-4 pr-3 py-1">
           <button
             type="button"
+            data-sidebar-item
             aria-expanded={sectionExpanded}
             aria-controls="orchestration-sessions-list"
             onClick={() => setSectionExpanded(!sectionExpanded)}
@@ -707,6 +714,9 @@ export function OrchestrationSessionNav({
   );
 }
 
+/** This sidebar lists the Sessions of the host the window shows. */
+const HERE = { kind: 'here' } as const;
+
 interface SessionContextMenuProps {
   menu: SessionContextMenuState | null;
   onClose: () => void;
@@ -722,6 +732,9 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Offered only when some terminal agent tab in the Session can switch.
+  const switchPreview = useSessionSwitchPreview(HERE, menu?.sessionId ?? null);
+  const [switching, setSwitching] = useState<{ sessionName: string; preview: SessionChatSwitchPreview } | null>(null);
 
   useEffect(() => {
     if (menu?.trigger) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
@@ -777,6 +790,15 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
         }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename Session…</span>
         </PopoverButton>
+        {switchPreview && (
+          <PopoverButton role="menuitem" onClick={() => {
+            if (!menu) return;
+            menu.returnFocusTo?.focus();
+            setSwitching({ sessionName: menu.sessionName, preview: switchPreview }); onClose();
+          }}>
+            <span className="flex items-center gap-2"><MessageSquare className="h-4 w-4" />Switch to chat…</span>
+          </PopoverButton>
+        )}
         <PopoverButton
           role="menuitem"
           // Focusable while unavailable, so arrow keys reach it and its reason is announced.
@@ -800,6 +822,7 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
         </PopoverButton>
       </div>
     </TerminalPopover>
+    {switching && <SessionSwitchToChatDialog where={HERE} sessionName={switching.sessionName} preview={switching.preview} onClose={() => setSwitching(null)} />}
     <Modal isOpen={renaming !== null} onClose={() => { if (!busy) setRenaming(null); }} ariaLabel="Rename Session">
       <form onSubmit={event => {
         event.preventDefault();

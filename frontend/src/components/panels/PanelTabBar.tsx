@@ -20,7 +20,7 @@ import { visibleAgentPresets } from '../../utils/agentPresets';
 import { PanelTabStrip } from './PanelTabStrip';
 import { getPanelIcon } from './panelIcon';
 import { PromoteChatButton } from './PromoteChatButton';
-import { SwitchToChatButton } from './SwitchToChatButton';
+import { SwitchToChatPaletteEntry } from './SwitchToChat';
 import { CustomCommandForm } from './CustomCommandForm';
 import { AgentFarmProfileDialog } from '../chatTab/AgentFarmProfileDialog';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
@@ -322,7 +322,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   useHotkey({
     id: 'open-add-tool',
     label: 'Open Add Tool menu',
-    keys: 'mod+t',
     category: 'tabs',
     action: () => setShowDropdown(true),
   });
@@ -367,7 +366,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   useHotkey({
     id: 'run-dev-server',
     label: 'Run Dev Server',
-    keys: 'mod+shift+d',
     category: 'tools',
     action: handleRunDevServer,
     enabled: () => !!session,
@@ -423,7 +421,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   const rightActions = (
         <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
-          {activePanel && <SwitchToChatButton key={`switch-${activePanel.id}`} panel={activePanel} palette="pane" />}
+          {activePanel && <SwitchToChatPaletteEntry key={`switch-${activePanel.id}`} panel={activePanel} view="pane" />}
           {activePanel && <PromoteChatButton key={activePanel.id} panel={activePanel} paneName={session?.name} />}
           {/* Run Dev Server button */}
           {session && (
@@ -534,6 +532,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           onPanelClose={handlePanelClose}
           isPrimary
           isFocused={primaryGroupFocused ?? true}
+          quietFocus
           showShortcutHints={!tabsInGroups}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
