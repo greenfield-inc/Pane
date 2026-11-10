@@ -350,8 +350,9 @@ jobs:
 
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.
+  # Each OS runs the suite in two vitest shards, each about half of it.
   cross-os-main-tests:
-    name: Main Process Tests (${{ matrix.os }})
+    name: Main Process Tests (${{ matrix.os }}, ${{ matrix.shard }}/2)
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.main == 'true'
     runs-on: ${{ matrix.os }}
@@ -359,6 +360,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-2022]
+        shard: [1, 2]
 
     steps:
     # The default Windows TEMP is on the runner's slow C: drive; the database
@@ -389,6 +391,7 @@ jobs:
       run: pnpm install --ignore-scripts
 
     - name: Start main process type checking
+      if: matrix.shard == 1
       shell: bash
       run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
 
@@ -401,10 +404,10 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/2 --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
     - name: Finish main process type checking
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && matrix.shard == 1 }}
       shell: bash
       run: scripts/ci-background.sh wait typecheck
 
