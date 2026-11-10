@@ -6,7 +6,7 @@ import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
-import type { TerminalShortcut } from '../../../types/config';
+import type { TerminalShortcut, UpdateConfigRequest } from '../../../types/config';
 import type { KeyboardShortcutOverrides } from '../../../../../shared/utils/keyboardBindings';
 import { formatKeyDisplay } from '../../../utils/hotkeyUtils';
 import { buildShortcutMap, resolveShortcutEnvironment } from '../../../utils/shortcutMap';
@@ -64,10 +64,13 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
   const invalid = shortcuts.some((shortcut) => !shortcut.label.trim() || !shortcut.key || !shortcut.text.trim())
     || duplicateKeys.size > 0
     || snippetConflicts.size > 0;
-  // Conflicts are validated across both drafts, but each Apply persists only its
-  // own section, so neither may save while the other draft is unsaved.
-  const applyOverridesBlockedBySnippets = snippetsDirty;
-  const applySnippetsBlockedByOverrides = overridesDirty;
+  // Conflicts are validated across both drafts, so with both sections edited either
+  // Apply saves both in one config update, once both are valid.
+  const bothDirty = snippetsDirty && overridesDirty;
+  const canApply = dirty && !conflicted && !(snippetsDirty && invalid);
+  const applyLabel = bothDirty ? 'Apply both' : 'Apply';
+  const overridesBlockedReason = bothDirty && invalid && !conflicted ? 'Fix the Terminal snippets below to apply both.' : null;
+  const snippetsBlockedReason = bothDirty && conflicted && snippetConflicts.size === 0 ? 'Resolve the Key bindings conflicts above to apply both.' : null;
 
   const update = (index: number, patch: Partial<TerminalShortcut>) => {
     setShortcuts((current) => current.map((shortcut, shortcutIndex) => (
@@ -75,14 +78,13 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
     )));
   };
 
-  const apply = async () => {
-    if (invalid || applySnippetsBlockedByOverrides) return;
-    await persistence.saveConfig('terminal-shortcuts', { terminalShortcuts: shortcuts });
-  };
-
-  const applyOverrides = async () => {
-    if (conflicted || applyOverridesBlockedBySnippets) return;
-    await persistence.saveConfig('keyboard-shortcut-map', { keyboardShortcutOverrides: overridesDraft });
+  /** Saves every edited section in one update; the save state shows on the section whose Apply was used. */
+  const apply = async (settingId: 'keyboard-shortcut-map' | 'terminal-shortcuts') => {
+    if (!canApply) return;
+    const patch: UpdateConfigRequest = {};
+    if (overridesDirty) patch.keyboardShortcutOverrides = overridesDraft;
+    if (snippetsDirty) patch.terminalShortcuts = shortcuts;
+    await persistence.saveConfig(settingId, patch);
   };
 
   return (
@@ -127,8 +129,9 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
             terminalShortcuts={shortcuts}
             customCommands={customCommands}
             onDraftChange={setOverridesDraft}
-            onApply={applyOverrides}
-            applyBlockedReason={applyOverridesBlockedBySnippets ? 'Apply or discard the Terminal snippet changes below first.' : null}
+            onApply={() => void apply('keyboard-shortcut-map')}
+            applyLabel={applyLabel}
+            applyBlockedReason={overridesBlockedReason}
           />
         </SettingRow>
         <button
@@ -225,10 +228,10 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
                 Add Shortcut
               </Button>
               <div className="flex items-center gap-2">
-                {applySnippetsBlockedByOverrides && snippetsDirty && (
-                  <span className="text-xs text-text-tertiary">Apply or discard the Key bindings changes above first.</span>
+                {snippetsBlockedReason && (
+                  <span className="text-xs text-text-tertiary">{snippetsBlockedReason}</span>
                 )}
-                <Button type="button" size="sm" disabled={!snippetsDirty || invalid || applySnippetsBlockedByOverrides} onClick={apply}>Apply</Button>
+                <Button type="button" size="sm" disabled={!snippetsDirty || !canApply} onClick={() => void apply('terminal-shortcuts')}>{applyLabel}</Button>
               </div>
             </div>
           </div>

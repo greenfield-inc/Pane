@@ -29,6 +29,8 @@ interface KeyboardShortcutMapProps {
   customCommands: readonly CustomCommand[];
   onDraftChange: (next: KeyboardShortcutOverrides) => void;
   onApply: () => void;
+  /** "Apply both" when Apply also saves the Terminal snippets. */
+  applyLabel?: string;
   /** When set, Apply is disabled and this text explains why. */
   applyBlockedReason?: string | null;
 }
@@ -47,7 +49,7 @@ const STATE_LABELS = {
 } satisfies Record<ShortcutMapRow['state'], string | null>;
 
 export function KeyboardShortcutMap({
-  map, draft, dirty, terminalShortcuts, customCommands, onDraftChange, onApply, applyBlockedReason = null,
+  map, draft, dirty, terminalShortcuts, customCommands, onDraftChange, onApply, applyLabel = 'Apply', applyBlockedReason = null,
 }: KeyboardShortcutMapProps) {
   const [query, setQuery] = useState(() => useShortcutMapQueryStore.getState().query);
   // The palette's search is used once, by the table it opened.
@@ -199,7 +201,7 @@ export function KeyboardShortcutMap({
           {applyBlockedReason && dirty && (
             <span className="text-xs text-text-tertiary">{applyBlockedReason}</span>
           )}
-          <Button type="button" size="sm" disabled={!dirty || conflicted || Boolean(applyBlockedReason)} onClick={onApply}>Apply</Button>
+          <Button type="button" size="sm" disabled={!dirty || conflicted || Boolean(applyBlockedReason)} onClick={onApply}>{applyLabel}</Button>
         </div>
       </div>
       <ConfirmDialog

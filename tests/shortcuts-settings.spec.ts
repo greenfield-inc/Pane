@@ -232,6 +232,53 @@ test('a failed Apply keeps the draft, reports the error, and stays retryable', a
   expect(await configUpdates(page)).toContainEqual({ keyboardShortcutOverrides: { 'git-pull': 'mod+alt+j' } });
 });
 
+test('valid edits in both the key table and Terminal snippets save together in one config update', async ({ page }) => {
+  await mock(page);
+  const map = await openShortcuts(page);
+  const row = map.locator('[data-shortcut-id="git-pull"]');
+  await row.getByRole('button', { name: 'Record shortcut for Git: Pull' }).click();
+  await page.keyboard.press('ControlOrMeta+Alt+J');
+  await expect(row.getByText('Customized')).toBeVisible();
+  const snippets = page.locator('[data-setting-id="terminal-shortcuts"]');
+  await snippets.getByLabel('Label', { exact: true }).fill('Lint everything');
+
+  const tableApply = map.getByRole('button', { name: 'Apply both' });
+  const snippetsApply = snippets.getByRole('button', { name: 'Apply both' });
+  await expect(tableApply).toBeEnabled();
+  await expect(snippetsApply).toBeEnabled();
+  await snippetsApply.click();
+
+  await expect(map.getByRole('button', { name: 'Apply' })).toBeDisabled();
+  await expect(snippets.getByRole('button', { name: 'Apply' })).toBeDisabled();
+  await expect(row.getByText('Customized')).toBeVisible();
+  await expect(snippets.getByLabel('Label', { exact: true })).toHaveValue('Lint everything');
+  expect(await configUpdates(page)).toContainEqual({
+    keyboardShortcutOverrides: { 'git-pull': 'mod+alt+j' },
+    terminalShortcuts: [{ ...SNIPPET, label: 'Lint everything' }],
+  });
+});
+
+test('with both sections edited, an invalid snippet blocks saving both and says why', async ({ page }) => {
+  await mock(page);
+  const map = await openShortcuts(page);
+  const row = map.locator('[data-shortcut-id="git-pull"]');
+  await row.getByRole('button', { name: 'Record shortcut for Git: Pull' }).click();
+  await page.keyboard.press('ControlOrMeta+Alt+J');
+  await expect(row.getByText('Customized')).toBeVisible();
+  const snippets = page.locator('[data-setting-id="terminal-shortcuts"]');
+  await snippets.getByLabel('Label', { exact: true }).fill('');
+  await expect(map.getByRole('button', { name: 'Apply both' })).toBeDisabled();
+  await expect(map.getByText('Fix the Terminal snippets below to apply both.')).toBeVisible();
+  await snippets.getByLabel('Label', { exact: true }).fill('Lint again');
+  await expect(map.getByText('Fix the Terminal snippets below to apply both.')).toHaveCount(0);
+  await map.getByRole('button', { name: 'Apply both' }).click();
+  await expect(map.getByRole('button', { name: 'Apply' })).toBeDisabled();
+  expect(await configUpdates(page)).toContainEqual({
+    keyboardShortcutOverrides: { 'git-pull': 'mod+alt+j' },
+    terminalShortcuts: [{ ...SNIPPET, label: 'Lint again' }],
+  });
+});
+
 test('Help and the Add Tool menu show the effective chord after a remap and after reset', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window.navigator, 'platform', { configurable: true, get: () => 'Linux x86_64' });
