@@ -1,24 +1,26 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { Pencil } from 'lucide-react';
 import { MACHINE_COLOR_NAMES } from '../../../../shared/utils/machineColor';
-import { normalizeMarkLetters, type MachineColorName, type MachineMarkOverride } from '../../../../shared/utils/machineMarks';
+import { normalizeMarkLetters, type MachineColorName } from '../../../../shared/utils/machineMarks';
 import { useConfigStore } from '../../stores/configStore';
 import { showActionError } from '../../stores/errorStore';
 import { machineColorVar } from './MachineMark';
+import { createMarkSaver, type MarkChange } from './machineMarkSaves';
 import type { MachineEntry } from '../../utils/machineList';
 
 const POPOVER_WIDTH = 268;
 const GAP = 8;
 
-/** Saves one machine's mark on this computer; an empty override goes back to automatic. */
-async function saveMark(key: string, change: (current: MachineMarkOverride) => MachineMarkOverride): Promise<void> {
-  const { config, updateConfig } = useConfigStore.getState();
-  const marks = { ...config?.machineMarks };
-  const next = change(marks[key] ?? {});
-  if (next.letters || next.color) marks[key] = next;
-  else delete marks[key];
+// One queue for every editor: they all write the same machineMarks map.
+const queueMarkSave = createMarkSaver({
+  read: () => useConfigStore.getState().config?.machineMarks,
+  write: async (machineMarks) => { await useConfigStore.getState().updateConfig({ machineMarks }); },
+});
+
+/** Saves one machine's mark on this computer, after any save still in flight; an empty override goes back to automatic. */
+async function saveMark(key: string, change: MarkChange): Promise<void> {
   try {
-    await updateConfig({ machineMarks: marks });
+    await queueMarkSave(key, change);
   } catch (cause) {
     showActionError('Could not save the machine mark', cause instanceof Error ? cause.message : 'The config file could not be written. Nothing changed; try again.');
   }

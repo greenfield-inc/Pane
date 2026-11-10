@@ -30,6 +30,13 @@ function unpickable(machine: MachineEntry): boolean {
   return machine.action === 'none' && !machine.active;
 }
 
+/** A digit typed into a field, or anywhere in a dialog such as a machine's mark editor, is not a machine pick. */
+function typingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable
+    || target.closest('[role="dialog"]') !== null;
+}
+
 /** Picks which machine runs agents: this computer, a saved host, or any machine on Tailscale. */
 export function RemoteHostSwitcher({
   trigger,
@@ -81,6 +88,7 @@ export function RemoteHostSwitcher({
     if (!open) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (typingTarget(event.target)) return;
       const digit = /^(?:Digit|Numpad)([0-9])$/.exec(event.code)?.[1];
       if (digit === undefined) return;
       const index = digit === '0' ? (allMachines ? 0 : -1) : (allMachines ? 0 : -1) + Number(digit);

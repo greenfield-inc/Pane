@@ -466,6 +466,27 @@ test('the switcher\'s pencil changes a machine\'s letter and colour on this comp
   await relaunched.close();
 });
 
+test('typing a digit in the mark editor\'s letter field sets the mark instead of picking a machine', async ({ page }) => {
+  await openAllMachines(page);
+  await page.getByRole('button', { name: 'Showing all machines. Switch machine' }).click();
+  await page.getByRole('menuitemradio', { name: /travel-laptop/ }).hover();
+  await page.getByRole('button', { name: 'Change the mark for travel-laptop' }).click();
+  const popover = page.getByRole('dialog', { name: 'Mark for travel-laptop' });
+  const field = popover.getByLabel('Letter for travel-laptop');
+  await expect(field).toBeFocused();
+  // 1 would pick this computer and 2 build-box while the switcher is open.
+  await page.keyboard.type('A1');
+  await expect(field).toHaveValue('A1');
+  await expect(popover).toBeVisible();
+  await expect(page.getByRole('menu', { name: 'Agents run on' })).toBeVisible();
+  await expect(page.getByRole('menuitemradio', { name: /travel-laptop/ }).getByTestId('machine-mark')).toHaveText('A1');
+  expect(await (await mock(page)).evaluate(api => api.getConfig().machineMarks ?? null)).toEqual({ 'travel-laptop': { letters: 'A1' } });
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Showing all machines. Switch machine' })).toBeVisible();
+  await expect(page.getByTestId('all-machines-sidebar')).toBeVisible();
+});
+
 // P6, journey 9: machines by key.
 test('⌘⌥O opens the switcher, 0 picks All machines and a digit picks that machine; ⌃⌘0 goes back and forth', async ({ page }) => {
   await openAllMachines(page);
