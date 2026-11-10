@@ -1690,7 +1690,7 @@ export class TerminalPanelManager extends EventEmitter {
       terminal.agentSessionScrapeBuffer = '';
       terminal.launchId = randomUUID();
     }
-    console.log(`[TerminalPanelManager] Relaunching panel ${panelId} in its shell: ${launch.commandToRun}`);
+    console.log(`[TerminalPanelManager] Relaunching panel ${panelId} in its shell, ${relaunchLogDetail(launch.customState)}.`);
     return launch;
   }
 
@@ -2123,7 +2123,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (initialCommand && launchResolution) {
       commandToRun = launchResolution.commandToRun;
       const isCliCommand = launchResolution.isCliCommand;
-      if (relaunch) console.log(`[TerminalPanelManager] Relaunching panel ${panel.id} in a new shell: ${commandToRun}`);
+      if (relaunch) console.log(`[TerminalPanelManager] Relaunching panel ${panel.id} in a new shell, ${relaunchLogDetail(launchResolution.customState)}.`);
 
       if (isCliCommand && !launchStatePersistedBeforeSpawn) {
         panel.state.customState = launchResolution.customState;
@@ -3657,3 +3657,10 @@ export class TerminalPanelManager extends EventEmitter {
 // Export singleton instance
 export const terminalPanelManager = new TerminalPanelManager();
 
+/**
+ * What a relaunch log line says about the launch: its conversation, never the command,
+ * which can carry inline credentials (`env KEY=… claude`) or an argument-mode prompt (review F-1).
+ */
+export function relaunchLogDetail(state: Pick<TerminalPanelState, 'agentSessionId'>): string {
+  return state.agentSessionId ? `on conversation ${state.agentSessionId}` : 'with no saved conversation';
+}

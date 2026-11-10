@@ -13,7 +13,7 @@ import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionCont
 import * as openCodeLaunch from './agents/opencodeLaunch';
 import * as claudePrompts from './claudePrompts';
 
-import { TerminalPanelManager } from './terminalPanelManager';
+import { TerminalPanelManager, relaunchLogDetail } from './terminalPanelManager';
 import { databaseService } from './database';
 import { ShellDetector } from '../utils/shellDetector';
 import * as shellPathUtils from '../utils/shellPath';
@@ -2902,4 +2902,14 @@ describe.skipIf(process.platform === 'win32')('TerminalPanelManager orphan reapi
     expect(processTree.isProcessAlive(terminal.workerPid)).toBe(false);
     expect(processTree.isProcessAlive(bystander.pid)).toBe(true);
   }, 30_000);
+});
+
+describe('relaunchLogDetail (review F-1)', () => {
+  it('names the conversation and never the launch command, which can carry credentials or a prompt', () => {
+    const state: TerminalPanelState = { initialCommand: 'env ANTHROPIC_API_KEY=sk-secret claude "fix the login bug"', agentSessionId: 'conv-1' };
+    const line = relaunchLogDetail(state);
+    expect(line).toBe('on conversation conv-1');
+    expect(line).not.toContain('sk-secret');
+    expect(relaunchLogDetail({})).toBe('with no saved conversation');
+  });
 });
