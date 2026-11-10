@@ -514,7 +514,10 @@ export class TerminalPanelManager extends EventEmitter {
       const expectedCustom = custom?.config.resumeTemplate.replace(/\{command\}|\{sessionId\}/g, token => token === '{command}' ? initialCommand : this.quoteCommandArgument(id));
       const exact = expectedCustom
         ? resolution.commandToRun === expectedCustom
-        : resolution.commandToRun.includes(id) && /(?:--resume(?:=|\s)|\bresume\s|--session(?:-id)?(?:=|\s))/.test(resolution.commandToRun);
+        : resolution.commandToRun.includes(id) && (resolution.customState.agentType === 'pi'
+          // Pi's --session-id reopens an existing session; Claude's starts a new one.
+          ? /--session-id(?:=|\s)/.test(resolution.commandToRun)
+          : /(?:--resume(?:=|\s)|\bresume\s|--session(?:=|\s))/.test(resolution.commandToRun));
       if (!exact || resolution.customState.agentSessionId !== id) {
         throw new PaneError('ERR_UPDATE_CONVERSATION', `Panel ${panelId} could not reopen its exact recorded conversation. No command or input was sent.`, 'Review the saved panel and resume the intended conversation manually.');
       }

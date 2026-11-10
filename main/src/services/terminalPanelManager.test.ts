@@ -1209,6 +1209,16 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(result.customState.initialInputSentAt).toBeUndefined();
   });
 
+  it('refuses a Claude update reopen that would start fresh on the recorded --session-id', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const sessionId = '6f1d2c3a-1111-4222-8333-444455556666';
+
+    // Without a known Claude session, the launch is `claude --session-id <id>`: a new conversation, not the recorded one.
+    expect(() => manager.resolveCliLaunchCommand('panel', 'claude', {
+      agentType: 'claude', agentSessionId: sessionId, updateResumeId: sessionId, wasInterrupted: true,
+    })).toThrowError(expect.objectContaining({ code: 'ERR_UPDATE_CONVERSATION' }));
+  });
+
   it('runs a Pi command that picks its own session unchanged', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
 

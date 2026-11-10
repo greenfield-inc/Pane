@@ -30,7 +30,7 @@ Before writing code, verify against the real binary (see the Cursor example):
 
 - Add the id to `enums.agents`.
 - Add `agentTemplates.<id> = { title, command, description }`.
-- Update the `<codex|claude|cursor|opencode|pi>` usage strings.
+- Update `<codex|claude|cursor>` usage strings.
 - Run `pnpm run generate-runpane-contract` and commit all regenerated artifacts.
 - `scripts/test-runpane-contract.js` (`checkAgentTemplateParity`) loops over the agent
   enum, so the new agent is exercised automatically.
