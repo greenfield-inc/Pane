@@ -5,7 +5,8 @@ name: Bench runner matrix (do not merge)
 # published, uploaded, signed or deployed. The other workflows are removed on
 # this branch so only the bench runs.
 on:
-  pull_request:
+  push:
+    branches: [bench/runner-matrix]
 
 permissions:
   contents: read
