@@ -4,7 +4,7 @@ import { Linking, Pressable, StyleSheet, TextInput, View, type StyleProp, type V
 import { useMarkdown } from 'react-native-marked';
 
 import { permissionSummary } from '@shared/chatTabPermissions';
-import { questionAnswer, questionFields, unshownRequiredFields } from '@shared/chatTabQuestions';
+import { questionAnswer, questionFields, questionSteps, steppedAnswer, stepSummary, unshownRequiredFields, type QuestionField } from '@shared/chatTabQuestions';
 import type { AgentChatPermission } from '@shared/types/agentChat';
 import type { ChatTabAnswer, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt } from '@shared/types/chatTab';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
@@ -55,34 +55,81 @@ export function ApprovalCard({ permission, agent, disabled, onAnswer }: { permis
   </View>;
 }
 
-/** An agent's question (ACP form elicitation) as a docked form. */
+/** One field of a question: its choices as buttons, or a text box. */
+function QuestionInput({ field, value, disabled, heading, onChange }: { field: QuestionField; value: JsonValue | undefined; disabled: boolean; heading: boolean; onChange: (value: JsonValue) => void }) {
+  const theme = useTheme();
+  return <View style={styles.field}>
+    {!!field.title && <Text variant={heading ? 'headline' : 'subhead'} style={{ color: heading ? theme.chat.foreground : theme.chat.mutedForeground }}>{field.title}</Text>}
+    {heading && !!field.description && <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>{field.description}</Text>}
+    {field.kind === 'single' || field.kind === 'multiple'
+      ? <View style={styles.choices}>{field.choices.map(choice => {
+        const chosen = field.kind === 'single' ? value === choice.value : Array.isArray(value) && value.includes(choice.value);
+        return <DockButton key={choice.value} testID={`chat-choice-${choice.value}`} title={choice.title} primary={chosen} disabled={disabled} onPress={() => {
+          if (field.kind === 'single') onChange(choice.value);
+          else { const list = Array.isArray(value) ? value : []; onChange(chosen ? list.filter(entry => entry !== choice.value) : [...list, choice.value]); }
+        }} />;
+      })}</View>
+      : <TextInput testID={`chat-field-${field.key}`} accessibilityLabel={field.title} placeholder={field.required ? 'Your answer' : 'Your own answer (optional)'} placeholderTextColor={theme.chat.mutedForeground} editable={!disabled}
+        value={typeof value === 'string' ? value : ''} onChangeText={onChange} style={[styles.input, { color: theme.chat.foreground, borderColor: theme.chat.border }]} />}
+  </View>;
+}
+
+/**
+ * An agent's question (ACP form elicitation) as a docked form. Several questions are taken
+ * one at a time (D-230): "1 of 2", Next and Back, Skip passes over one, and the last step
+ * reviews the answers beside Answer.
+ */
 export function QuestionCard({ question, disabled, onAnswer }: { question: ChatTabQuestion; disabled: boolean; onAnswer: (answer: ChatTabAnswer) => void }) {
   const theme = useTheme();
   const fields = questionFields(question.schema);
+  const steps = questionSteps(fields);
   const [values, setValues] = useState<Record<string, JsonValue>>({});
+  const [index, setIndex] = useState(0);
   const set = (key: string, value: JsonValue) => setValues(current => ({ ...current, [key]: value }));
   const unshown = unshownRequiredFields(question.schema);
-  const content = unshown.length ? undefined : questionAnswer(fields, values);
+  const stepped = steps.length > 1 && !unshown.length;
+  const answerFor = (given: Readonly<Record<string, JsonValue>>) => unshown.length ? undefined : stepped ? steppedAnswer(steps, given) : questionAnswer(fields, given);
+  const content = answerFor(values);
+  const answer = () => { if (content) onAnswer({ action: 'accept', content }); };
+  if (!stepped) {
+    return <View testID="chat-question" style={[styles.card, { borderColor: theme.chat.border, backgroundColor: theme.chat.card }]}>
+      <Text variant="headline" style={{ color: theme.chat.foreground }}>{question.message}</Text>
+      {fields.map(field => <QuestionInput key={field.key} field={field.title === question.message ? { ...field, title: '' } : field} heading={false} value={values[field.key]} disabled={disabled} onChange={value => set(field.key, value)} />)}
+      {unshown.length > 0 && <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Pane can't show {unshown.join(', ')}, so you can only skip this question.</Text>}
+      <View style={styles.row}>
+        <DockButton testID="chat-question-answer" title="Answer" primary disabled={disabled || !content} onPress={answer} />
+        <DockButton testID="chat-question-skip" title="Skip" disabled={disabled} onPress={() => onAnswer({ action: 'decline' })} />
+      </View>
+    </View>;
+  }
+  const step = steps[index] ?? [];
+  const last = index === steps.length - 1;
+  const skip = () => {
+    const cleared = { ...values };
+    for (const field of step) delete cleared[field.key];
+    setValues(cleared);
+    if (!last) { setIndex(index + 1); return; }
+    const rest = answerFor(cleared);
+    onAnswer(rest ? { action: 'accept', content: rest } : { action: 'decline' });
+  };
   return <View testID="chat-question" style={[styles.card, { borderColor: theme.chat.border, backgroundColor: theme.chat.card }]}>
-    <Text variant="headline" style={{ color: theme.chat.foreground }}>{question.message}</Text>
-    {fields.map(field => <View key={field.key} style={styles.field}>
-      {field.title !== question.message && <Text variant="subhead" style={{ color: theme.chat.mutedForeground }}>{field.title}</Text>}
-      {field.kind === 'single' || field.kind === 'multiple'
-        ? <View style={styles.choices}>{field.choices.map(choice => {
-          const current = values[field.key];
-          const chosen = field.kind === 'single' ? current === choice.value : Array.isArray(current) && current.includes(choice.value);
-          return <DockButton key={choice.value} testID={`chat-choice-${choice.value}`} title={choice.title} primary={chosen} disabled={disabled} onPress={() => {
-            if (field.kind === 'single') set(field.key, choice.value);
-            else { const list = Array.isArray(current) ? current : []; set(field.key, chosen ? list.filter(entry => entry !== choice.value) : [...list, choice.value]); }
-          }} />;
-        })}</View>
-        : <TextInput testID={`chat-field-${field.key}`} accessibilityLabel={field.title} placeholder={field.required ? 'Your answer' : 'Your own answer (optional)'} placeholderTextColor={theme.chat.mutedForeground} editable={!disabled}
-          value={typeof values[field.key] === 'string' ? String(values[field.key]) : ''} onChangeText={text => set(field.key, text)} style={[styles.input, { color: theme.chat.foreground, borderColor: theme.chat.border }]} />}
-    </View>)}
-    {unshown.length > 0 && <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Pane can't show {unshown.join(', ')}, so you can only skip this question.</Text>}
+    <View style={styles.head}>
+      <Text variant="subhead" style={{ color: theme.chat.mutedForeground, flex: 1 }}>{question.message}</Text>
+      <Text testID="chat-question-count" variant="footnote" style={{ color: theme.chat.mutedForeground }}>{index + 1} of {steps.length}</Text>
+    </View>
+    {step.map((field, position) => <QuestionInput key={field.key} field={field} heading={position === 0} value={values[field.key]} disabled={disabled} onChange={value => set(field.key, value)} />)}
+    {last && <View style={[styles.review, { borderColor: theme.chat.border }]}>
+      {steps.slice(0, -1).map((earlier, position) => <Pressable key={position} testID={`chat-question-review-${position}`} accessibilityRole="button" accessibilityLabel={`Change: ${earlier[0]?.title ?? ''}`} onPress={() => setIndex(position)} style={styles.reviewRow}>
+        <Text variant="footnote" numberOfLines={1} style={{ color: theme.chat.mutedForeground, maxWidth: '40%' }}>{earlier[0]?.title}</Text>
+        <Text variant="footnote" numberOfLines={1} style={{ color: theme.chat.foreground, flex: 1 }}>{stepSummary(earlier, values) ?? 'Skipped'}</Text>
+      </Pressable>)}
+    </View>}
     <View style={styles.row}>
-      <DockButton testID="chat-question-answer" title="Answer" primary disabled={disabled || !content} onPress={() => { if (content) onAnswer({ action: 'accept', content }); }} />
-      <DockButton testID="chat-question-skip" title="Skip" disabled={disabled} onPress={() => onAnswer({ action: 'decline' })} />
+      {last
+        ? <DockButton testID="chat-question-answer" title="Answer" primary disabled={disabled || !content} onPress={answer} />
+        : <DockButton testID="chat-question-next" title="Next" primary disabled={disabled || !stepSummary(step, values)} onPress={() => setIndex(index + 1)} />}
+      <DockButton testID="chat-question-skip" title="Skip" disabled={disabled} onPress={skip} />
+      {index > 0 && <DockButton testID="chat-question-back" title="Back" disabled={disabled} onPress={() => setIndex(index - 1)} />}
     </View>
   </View>;
 }
@@ -103,6 +150,9 @@ const styles = StyleSheet.create({
   choices: { gap: 8 },
   detail: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, padding: 8, maxHeight: 220, overflow: 'hidden' },
   field: { gap: 6 },
+  head: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
+  review: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 6, gap: 2 },
+  reviewRow: { flexDirection: 'row', gap: 12, minHeight: 32, alignItems: 'center' },
   input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, minHeight: 44, paddingHorizontal: 10, fontSize: 16 },
   queue: { gap: 6 },
   queued: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: StyleSheet.hairlineWidth, borderStyle: 'dashed', borderRadius: 12, paddingLeft: 12 },

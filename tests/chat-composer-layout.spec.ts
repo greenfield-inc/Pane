@@ -96,3 +96,11 @@ test('a wide column keeps "Opus 5.5 · Medium"', async ({ page }) => {
   await open(page, 'width=640&labels=opus');
   await expect(page.getByRole('button', { name: /Model and options/ })).toHaveAccessibleName('Model and options: Opus 5.5 · Medium');
 });
+
+test('a mode that never asks is amber on the desktop row (D-267)', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await open(page, 'width=640&labels=opus&mode=bypassPermissions');
+  await expect(page.getByRole('button', { name: /Mode: Bypass permissions/ })).toHaveAttribute('data-tone', 'warning');
+  await open(page, 'width=640&labels=opus&mode=acceptEdits');
+  await expect(page.getByRole('button', { name: /Mode: Accept edits/ })).not.toHaveAttribute('data-tone', 'warning');
+});
