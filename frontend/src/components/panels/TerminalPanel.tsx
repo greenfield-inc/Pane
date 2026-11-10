@@ -895,6 +895,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
   // Maximize and restore resize this terminal in one step: refit behind the
   // loading overlay instead of the debounced, unmasked resize (P4).
+  const reflowGenerationRef = useRef(0);
   useEffect(() => onTerminalReflow(() => {
     if (!isActiveRef.current || !xtermRef.current) return;
     // The layout change that follows comes from a store and renders at once,
@@ -903,14 +904,22 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       setIsRefreshing(true);
       setOverlayVisible(true);
     });
+    // Only the latest reflow lifts the mask, so an older one can never
+    // uncover a newer refresh; a failed refit still lifts it.
+    const generation = ++reflowGenerationRef.current;
     void (async () => {
-      // Let the new layout (Allotment shows or hides panes) settle first.
-      await waitForNextPaint();
-      await waitForNextPaint();
-      await resizePtyToFit();
-      repaintTerminal();
-      await waitForNextPaint();
-      setIsRefreshing(false);
+      try {
+        // Let the new layout (Allotment shows or hides panes) settle first.
+        await waitForNextPaint();
+        await waitForNextPaint();
+        await resizePtyToFit();
+        repaintTerminal();
+        await waitForNextPaint();
+      } catch (error) {
+        console.warn('[TerminalPanel] Refit after maximize or restore failed:', error);
+      } finally {
+        if (reflowGenerationRef.current === generation) setIsRefreshing(false);
+      }
     })();
   }), [resizePtyToFit, repaintTerminal]);
 
