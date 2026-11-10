@@ -1,5 +1,10 @@
 import type { AppConfig } from '../types/config';
-import { buildInterceptionSets, type InterceptionSets } from '../../../shared/utils/keyboardBindings';
+import {
+  buildInterceptionSets,
+  normalizeKeyboardShortcutOverrides,
+  resolveEffectiveChord,
+  type InterceptionSets,
+} from '../../../shared/utils/keyboardBindings';
 import {
   chordFromElectronInput,
   isModifierOnlyKey,
@@ -64,15 +69,27 @@ function interceptionSetsFor(config: WebviewKeyConfig, platform: KeyPlatform): I
   return sets;
 }
 
+const FIND_COMMANDS = ['find-in-tab', 'find-next', 'find-previous'] as const;
+const findChordsByConfig = new WeakMap<WebviewKeyConfig, Map<KeyPlatform, Set<string>>>();
+
 /**
- * Pane's find (Cmd/Ctrl+F, Cmd/Ctrl+G, Shift+Cmd/Ctrl+G) wins over a page's
- * own Cmd+F in browser tabs: Electron has no built-in find bar, so leaving
+ * Pane's Find keys (⌘F, ⌘G, ⇧⌘G by default, or the person's remaps) win over
+ * a page's own in browser tabs: Electron has no built-in find bar, so leaving
  * the key to the page did nothing on most pages.
  */
-function isFindKey(input: WebviewKeyInput): boolean {
-  if (input.alt) return false;
-  if (input.code === 'KeyG') return true;
-  return !input.shift && input.code === 'KeyF';
+function findChordsFor(config: WebviewKeyConfig, platform: KeyPlatform): Set<string> {
+  let byPlatform = findChordsByConfig.get(config);
+  if (!byPlatform) {
+    byPlatform = new Map();
+    findChordsByConfig.set(config, byPlatform);
+  }
+  let chords = byPlatform.get(platform);
+  if (!chords) {
+    const { overrides } = normalizeKeyboardShortcutOverrides(config.keyboardShortcutOverrides);
+    chords = new Set(FIND_COMMANDS.flatMap(id => resolveEffectiveChord(id, overrides, platform) ?? []));
+    byPlatform.set(platform, chords);
+  }
+  return chords;
 }
 
 /**
@@ -123,16 +140,15 @@ export function webviewKeysToForward(
     return shouldForwardCommandPaletteShortcut(context.config, input, platform) ? [input] : [];
   }
 
-  const mod = input.control || input.meta;
-  if (mod && isFindKey(input)) {
+  if (isAltGrInput(input)) return [];
+  const chord = chordFromElectronInput(input, platform);
+  if (!chord) return [];
+  if (findChordsFor(context.config, platform).has(chord)) {
     sequence.pending = null;
     return context.isBrowserTab ? [input] : [];
   }
-  if (isAltGrInput(input)) return [];
 
   const sets = interceptionSetsFor(context.config, platform);
-  const chord = chordFromElectronInput(input, platform);
-  if (!chord) return [];
 
   const pending = sequence.pending;
   sequence.pending = null;

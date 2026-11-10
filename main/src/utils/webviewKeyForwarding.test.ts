@@ -25,9 +25,14 @@ const ctrlShiftG = key('KeyG', 'G', { control: true, shift: true });
 const escape = key('Escape', 'Escape');
 
 describe('shouldForwardWebviewKey: find keys', () => {
-  it('forwards Cmd/Ctrl+F, Cmd/Ctrl+G and Shift+Cmd/Ctrl+G from a browser tab', () => {
-    for (const input of [cmdF, ctrlF, cmdG, shiftCmdG, ctrlShiftG]) {
+  it('forwards ⌘F, ⌘G and ⇧⌘G on macOS, and Ctrl+F, Ctrl+G and Ctrl+Shift+G elsewhere, from a browser tab', () => {
+    for (const input of [cmdF, cmdG, shiftCmdG]) {
       expect(shouldForwardWebviewKey(input, browserTab)).toBe(true);
+    }
+    for (const input of [ctrlF, ctrlShiftG]) {
+      expect(shouldForwardWebviewKey(input, { ...browserTab, platform: 'other' })).toBe(true);
+      // macOS Control+F is the page's own (Find is ⌘F there).
+      expect(shouldForwardWebviewKey(input, browserTab)).toBe(false);
     }
   });
 
@@ -135,5 +140,17 @@ describe('webviewKeysToForward: the VS Code keymap', () => {
     const remapped: WebviewKeyContext = { ...browserTab, config: { keyboardShortcutOverrides: { 'focus-sidebar': 'mod+shift+e' } } };
     expect(webviewKeysToForward(key('KeyE', 'E', { meta: true, shift: true }), remapped)).toHaveLength(1);
     expect(webviewKeysToForward(key('Digit0', '0', { meta: true }), remapped)).toEqual([]);
+  });
+});
+
+describe('webviewKeysToForward: remapped Find', () => {
+  it('takes the remapped Find key from a browser page and leaves the old one to the page', () => {
+    const remapped: WebviewKeyContext = { ...browserTab, config: { keyboardShortcutOverrides: { 'find-in-tab': 'mod+shift+h' } } };
+    const newKey = key('KeyH', 'H', { meta: true, shift: true });
+    expect(webviewKeysToForward(newKey, remapped)).toEqual([newKey]);
+    expect(webviewKeysToForward(cmdF, remapped)).toEqual([]);
+    // Next and previous keep their defaults; the Docs dialog keeps every key.
+    expect(webviewKeysToForward(cmdG, remapped)).toEqual([cmdG]);
+    expect(webviewKeysToForward(newKey, { ...remapped, isBrowserTab: false })).toEqual([]);
   });
 });
