@@ -162,8 +162,8 @@ test('Enter opens a Pane, a Session, a project or runs a command, and closes Sea
   await expect(page.getByRole('button', { name: 'Projects', pressed: true })).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(input).toBeHidden();
-  // Only the project view loads a project's main repository session.
-  await expect(page.getByLabel('Loading main repository session').first()).toBeVisible();
+  // Opening a project opens its (Main) Pane; the lookup is held, so it is still opening.
+  await expect(page.getByRole('status', { name: 'Opening repository' })).toBeVisible();
 
   input = await openSearch(page);
   await input.fill('> open settings');

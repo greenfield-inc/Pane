@@ -54,7 +54,7 @@ test('publishing the main checkout refreshes tracking only after a successful pu
   });
   await page.goto('/');
   await page.getByRole('button', { name: `Repository actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   if (await page.getByRole('button', { name: 'Show details', exact: true }).isVisible()) {
     await page.getByRole('button', { name: 'Show details', exact: true }).click();
   }

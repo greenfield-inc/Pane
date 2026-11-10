@@ -89,7 +89,7 @@ test('sidebar and tabs reconcile status without announcing snapshot completions'
   // The compact project's aggregate has its own subscription; it must stay
   // current across status changes and sidebar unmount/remount.
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
-  const projectBadge = page.getByRole('button', { name: 'Open main workspace for Status fixture', exact: true });
+  const projectBadge = page.getByRole('button', { name: 'Open the (Main) Pane for Status fixture', exact: true });
   await expect(projectBadge.locator('[aria-label="Agent working"]')).toBeVisible();
   await page.evaluate(() => window.__statusFixture.emit('idle', 'exit'));
   await expect(projectBadge.locator('[aria-label="Agent idle"]')).toBeVisible();

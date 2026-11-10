@@ -36,7 +36,7 @@ const worktreeSession = {
 const mainRepoSession = {
   ...baseSession,
   id: 'title-bar-main-repo',
-  name: 'bloom-mono',
+  name: '(Main) bloom-mono',
   worktreePath: '/tmp/bloom-mono',
   isMainRepo: true,
   displayOrder: 1,
@@ -94,11 +94,11 @@ test.describe('window title bar', () => {
     );
   });
 
-  test('shows only the project for the main-repo pane', async ({ page }) => {
+  test('names a (Main) Pane like any other Pane', async ({ page }) => {
     await openDesktop(page);
 
     await page.getByRole('button', { name: mainRepoSession.name, exact: true }).click();
-    await expect(titleBarLabel(page)).toHaveText(project.name);
+    await expect(titleBarLabel(page)).toHaveText(`${project.name}·${mainRepoSession.name}`);
   });
 
   test('clears the macOS traffic lights before app controls', async ({ page }) => {
@@ -169,7 +169,7 @@ test.describe('window title bar', () => {
       .toBe(`${project.name} · ${worktreeSession.name}`);
 
     await page.getByRole('button', { name: mainRepoSession.name, exact: true }).click();
-    await expect.poll(() => page.title()).toBe(project.name);
+    await expect.poll(() => page.title()).toBe(`${project.name} · ${mainRepoSession.name}`);
 
     // Leaving the pane for Pane Chat releases the name again.
     await page.getByRole('button', { name: 'Pane Chat' }).first().click();

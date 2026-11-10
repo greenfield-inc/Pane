@@ -20,7 +20,7 @@ class MemoryStorage implements Storage {
 describe('outer panel sizing', () => {
   it.each([
     ['worktreeInspector', 1040, 240, 720, 360],
-    ['projectInspector', 700, 240, 380, 360],
+    ['worktreeInspector', 700, 240, 380, 360],
     ['rightTerminal', 900, 200, 580, 350],
     ['bottomDetail', 500, 80, 340, 200],
   ] as const)('resolves %s against its immediate container', (surface, container, floor, cap, effective) => {
@@ -93,7 +93,7 @@ describe('outer panel preferences', () => {
 
   it('writes only the versioned key without altering legacy state', () => {
     const storage = new MemoryStorage();
-    const config = OUTER_PANEL_CONFIGS.projectInspector;
+    const config = OUTER_PANEL_CONFIGS.worktreeInspector;
     storage.setItem(config.legacyKey, '480');
     writeOuterPanelPreference(config, storage, 511.6);
     expect(storage.getItem(config.storageKey)).toBe('{"version":2,"preferredPx":512}');
