@@ -109,7 +109,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
 
   return (
     // Focusable, so its ← → keys belong to it alone; clicking anywhere in it gives it focus.
-    <div ref={rootRef} tabIndex={-1} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid="approval-column" data-item-id={item.id} data-narrow={narrow || undefined}>
+    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid="approval-column" data-item-id={item.id} data-narrow={narrow || undefined}>
       <ColumnHeader
         narrow={narrow}
         index={index}
@@ -269,8 +269,12 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
     const padded = questionsOf(item).map((_, at) => picks[at] ?? '');
     const answer: NotifyAnswer = item.agentPrompt && picks[0] ? { choice: picks[0] } : typed ? { picks: padded, text: typed } : { picks };
     setSending(true);
-    const accepted = await sendNotify({ type: 'answer', id: item.id, answer });
-    setSending(false);
+    let accepted = false;
+    try {
+      accepted = await sendNotify({ type: 'answer', id: item.id, answer });
+    } finally {
+      setSending(false);
+    }
     // Refused (machine offline, already answered, still reading): the words and picks stay.
     if (!accepted) return;
     if (typed && !item.agentPrompt) noteReplied(item.id);
