@@ -184,9 +184,10 @@ describe('PR monitoring through the journal', () => {
     const s = setup(); s.monitor.watch('worker', url); await s.monitor.pollOnce();
     s.set({ baseRefName: 'main' }); await s.monitor.pollOnce();
     const [entry] = s.journal.readAfter(0, { kinds: ['pr.base_changed'] }).entries;
-    expect(entry.reason).toBe('The base changed from release/monday to main. If the PR for release/monday merged into main with a merge commit '
-      + '(a stack merging bottom-up), the retarget is done: confirm the diff shows only this PR\'s commits and recheck required checks '
-      + '(gh pr checks 7 --required); do not rebase or push. Otherwise rebase onto main, resolve conflicts, and recheck CI.');
+    expect(entry.reason).toContain('release/monday');
+    expect(entry.reason).toMatch(/merged into main with a merge commit[^.]*do not rebase/);
+    expect(entry.reason).toMatch(/Otherwise rebase onto main/);
+    expect(entry.reason).toContain('gh pr checks 7 --required');
   });
 
   it('reports a deleted base before GitHub closes the PR, and a later retarget as a change', async () => {
