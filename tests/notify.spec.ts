@@ -210,6 +210,49 @@ test.describe('Approvals in the main window', () => {
     await expect(page.getByTestId('approvals-queue')).toHaveCount(0);
     await expect(page.getByTestId('approvals-nav')).toHaveAttribute('aria-pressed', 'false');
   });
+
+  test('F-15: words typed while Send is pending stay in the box once the send is accepted; only what was sent is cleared', async ({ page }) => {
+    const snapshot = notifyFixture();
+    snapshot.items = snapshot.items.filter(item => item.id === 'q-options');
+    snapshot.queue = ['q-options'];
+    await boot(page, snapshot);
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    const reply = column.getByTestId('approval-reply-box');
+    await reply.fill('Send only the first sentence.');
+    // A slow Send: main takes the command and answers only when the test says so.
+    await page.evaluate(() => {
+      // SAFETY: test-only fields this test sets on the page's window, read back below.
+      const held = window as typeof window & { heldCommand?: unknown; acceptSend?: () => void };
+      window.electronAPI.notify.run = async (command) => {
+        held.heldCommand = command;
+        await new Promise<void>(resolve => { held.acceptSend = resolve; });
+      };
+    });
+    await column.getByTestId('approval-send').click();
+    await expect(column.getByTestId('approval-send')).toBeDisabled();
+    await reply.fill('These words were never sent.');
+    // SAFETY: heldCommand is set by the held notify.run above.
+    expect(await page.evaluate(() => (window as typeof window & { heldCommand?: unknown }).heldCommand)).toMatchObject({ type: 'answer', answer: { text: 'Send only the first sentence.' } });
+    // SAFETY: acceptSend is set by the held notify.run above.
+    await page.evaluate(() => (window as typeof window & { acceptSend?: () => void }).acceptSend?.());
+    await expect(reply).toHaveValue('These words were never sent.');
+    await expect(column.getByTestId('approval-send')).toBeEnabled();
+  });
+
+  test('F-15: with nothing changed while Send was pending, an accepted send clears the box', async ({ page }) => {
+    const snapshot = notifyFixture();
+    snapshot.items = snapshot.items.filter(item => item.id === 'q-options');
+    snapshot.queue = ['q-options'];
+    await boot(page, snapshot);
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    const reply = column.getByTestId('approval-reply-box');
+    await reply.fill('Keep Redis, but only for now.');
+    await column.getByTestId('approval-send').click();
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-options', answer: { picks: [''], text: 'Keep Redis, but only for now.' } }]);
+    await expect(reply).toHaveValue('');
+  });
 });
 
 test.describe('Notify secret requests', () => {

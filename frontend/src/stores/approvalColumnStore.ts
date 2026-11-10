@@ -28,6 +28,11 @@ interface ApprovalColumnState {
   /** What's typed and picked on each approval (by `<id>:<version>`), kept until its Send is accepted (F-4). */
   drafts: Record<string, ApprovalDraft>;
   setDraft(key: string, draft: ApprovalDraft | null): void;
+  /**
+   * After an accepted Send: clears the draft only if it is still what was sent, and says whether it
+   * did. Words or picks changed while Send was pending stay (F-15).
+   */
+  clearSentDraft(key: string, sent: ApprovalDraft): boolean;
   openApproval(surface: ApprovalSurface, itemId: string, tab?: string): void;
   setTab(surface: ApprovalSurface, itemId: string, tab: string): void;
   openNested(surface: ApprovalSurface, itemId: string, nested: string | undefined): void;
@@ -35,7 +40,7 @@ interface ApprovalColumnState {
   noteReplied(itemId: string | null): void;
 }
 
-export const useApprovalColumnStore = create<ApprovalColumnState>((set) => ({
+export const useApprovalColumnStore = create<ApprovalColumnState>((set, get) => ({
   open: {},
   lastReplied: null,
   drafts: {},
@@ -45,6 +50,12 @@ export const useApprovalColumnStore = create<ApprovalColumnState>((set) => ({
     else delete drafts[key];
     return { drafts };
   }),
+  clearSentDraft: (key, sent) => {
+    const current = get().drafts[key];
+    if (current && (current.text !== sent.text || current.picks.length !== sent.picks.length || current.picks.some((pick, at) => pick !== sent.picks[at]))) return false;
+    get().setDraft(key, null);
+    return true;
+  },
   openApproval: (surface, itemId, tab = 'qa') => set((state) => ({ open: { ...state.open, [surface]: { itemId, tab } } })),
   // Approvals opens its column from the list's selection, so a tab can be the first thing set.
   setTab: (surface, itemId, tab) => set((state) => ({ open: { ...state.open, [surface]: { itemId, tab } } })),

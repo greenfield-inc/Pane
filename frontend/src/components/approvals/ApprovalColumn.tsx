@@ -249,11 +249,18 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
   const draftKey = `${item.id}:${item.version ?? 1}`;
   const draft = useApprovalColumnStore((state) => state.drafts[draftKey]);
   const setDraft = useApprovalColumnStore((state) => state.setDraft);
+  const clearSentDraft = useApprovalColumnStore((state) => state.clearSentDraft);
   const picks = draft?.picks ?? NO_PICKS;
   const text = draft?.text ?? '';
   const setPicks = (update: (current: string[]) => string[]) => setDraft(draftKey, { picks: update(picks), text });
   const setText = (value: string) => setDraft(draftKey, { picks, text: value });
   const [sending, setSending] = useState(false);
+  // Paged away while Send was pending: the column already shows something else, so nothing moves it (F-15).
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => { shown.current = false; };
+  }, []);
   const lastReplied = useApprovalColumnStore((state) => state.lastReplied);
   const noteReplied = useApprovalColumnStore((state) => state.noteReplied);
   const waiting = item.state === 'waiting';
@@ -278,8 +285,9 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
     // Refused (machine offline, already answered, still reading): the words and picks stay.
     if (!accepted) return;
     if (typed && !item.agentPrompt) noteReplied(item.id);
-    setDraft(draftKey, null);
-    const next = nextAfterSend(order, item.id, byId);
+    // Only what was sent is cleared: words or picks changed while Send was pending stay in the box (F-15).
+    if (!clearSentDraft(draftKey, { picks, text })) return;
+    const next = shown.current ? nextAfterSend(order, item.id, byId) : undefined;
     if (next) onSelect(next);
   };
   const before = previousVersion(item);
