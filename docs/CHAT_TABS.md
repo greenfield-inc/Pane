@@ -153,8 +153,10 @@ says, and after running the chat tab suites against it.
   - **Agents working** ("3 working"), in a Session orchestrator's chat and in
     Autopilot's: how many of the Session's agents are working right now (for
     Autopilot, across every Session it walks), counted from the Session
-    overview. Agents waiting, idle or finished don't count, and the item is
-    hidden when none is working. It opens a list of each one with its tab; a
+    overview: one per tab whose agent is working, so a Pane with an implementer
+    and a reviewer both working counts two. Tabs waiting, idle or finished
+    don't count, and the item is hidden when none is working. A change re-reads
+    only the Session it names. It opens a list of each agent with its tab; a
     row opens that tab (the PWA opens its Pane);
   - **Pull request** ("#1272 · Open", the chat's Pane's PR) opens it on GitHub;
     the PWA reads it from the host's git status;

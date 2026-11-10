@@ -11,7 +11,7 @@ function overview(state: 'done' | 'blocked', attachedAt = '2026-11-01T10:00:00.0
 
 function fakeSource(first: SessionWorkersOverview) {
   let current: SessionWorkersOverview | null = first;
-  const listeners = new Set<() => void>();
+  const listeners = new Set<(sessionId?: string) => void>();
   const source: SessionWorkerSource = {
     overview: vi.fn(async () => current),
     onChange: callback => { listeners.add(callback); return () => listeners.delete(callback); },
@@ -19,7 +19,7 @@ function fakeSource(first: SessionWorkersOverview) {
   return {
     source,
     set: (next: SessionWorkersOverview | null) => { current = next; },
-    emit: () => listeners.forEach(listener => listener()),
+    emit: (sessionId?: string) => listeners.forEach(listener => listener(sessionId)),
     listeners,
   };
 }
@@ -83,7 +83,7 @@ describe('watchManySessionWorkers (D-276)', () => {
       ['s1', { session: { associations: [] }, panes: [{ paneId: 'a', name: 'csv-export', missing: false, archived: false, panels: [{ state: 'working', panelId: 'a1', title: 'Claude Code' }] }] }],
       ['s2', { session: { associations: [] }, panes: [{ paneId: 'b', name: 'docs', missing: false, archived: false, panels: [{ state: 'idle' }] }] }],
     ]);
-    const listeners = new Set<() => void>();
+    const listeners = new Set<(sessionId?: string) => void>();
     const source: SessionWorkerSource = {
       overview: vi.fn(async (id: string) => panes.get(id)),
       onChange: callback => { listeners.add(callback); return () => listeners.delete(callback); },
@@ -93,8 +93,39 @@ describe('watchManySessionWorkers (D-276)', () => {
     await vi.runAllTimersAsync();
     expect(source.overview).toHaveBeenCalledTimes(2);
     expect(seen.at(-1)).toEqual(['docs:idle', 'csv-export:running']);
-    expect(listeners.size).toBe(2);
+    expect(listeners.size).toBe(1);
     stop();
     expect(listeners.size).toBe(0);
+  });
+  it('reads again only the Session a change names, and every Session for a change naming none (review F-3 on #1281)', async () => {
+    const fake = fakeSource(overview('done'));
+    watchManySessionWorkers(fake.source, ['s1', 's2', 's3'], () => undefined);
+    await vi.runAllTimersAsync();
+    vi.mocked(fake.source.overview).mockClear();
+    fake.emit('s2'); fake.emit('s2'); fake.emit('elsewhere');
+    await vi.runAllTimersAsync();
+    expect(vi.mocked(fake.source.overview).mock.calls).toEqual([['s2']]);
+    vi.mocked(fake.source.overview).mockClear();
+    fake.emit();
+    await vi.runAllTimersAsync();
+    expect(vi.mocked(fake.source.overview).mock.calls).toEqual([['s1'], ['s2'], ['s3']]);
+  });
+
+  it('never has two reads of a Session out at once: changes during a read ask for one more after it (review F-3 on #1281)', async () => {
+    const fake = fakeSource(overview('done'));
+    const answers: Array<() => void> = [];
+    vi.mocked(fake.source.overview).mockImplementation(() => new Promise(resolve => { answers.push(() => resolve(overview('blocked'))); }));
+    const seen: ChatWorkerLine[][] = [];
+    watchSessionWorkers(fake.source, 's1', workers => seen.push(workers), 10);
+    expect(fake.source.overview).toHaveBeenCalledTimes(1);
+    for (let burst = 0; burst < 3; burst += 1) { fake.emit('s1'); await vi.advanceTimersByTimeAsync(20); }
+    expect(fake.source.overview).toHaveBeenCalledTimes(1);
+    answers.shift()?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fake.source.overview).toHaveBeenCalledTimes(2);
+    answers.shift()?.();
+    await vi.runAllTimersAsync();
+    expect(fake.source.overview).toHaveBeenCalledTimes(2);
+    expect(seen).toHaveLength(2);
   });
 });

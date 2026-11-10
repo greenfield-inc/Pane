@@ -6,7 +6,7 @@ import { openFileInEditor } from '../../services/openFileInEditor';
 import { showActionError } from '../../stores/errorStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSessionWorkers } from './sessionWorkers';
-import { DESKTOP_WORKERS, useOpenWorkerTab } from './desktopSessionWorkers';
+import { DESKTOP_WORKERS, openWorkerTab } from './desktopSessionWorkers';
 import { savedFilePath } from './chatAttachments';
 import type { ChatTurnActions } from './ChatTurns';
 
@@ -23,7 +23,6 @@ function worktreeRelative(file: string, cwd: string | undefined): string {
 /** The desktop's chat tab: the Session orchestrator's chat lists its workers (D-18). */
 export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   const machine = useActiveMachineStore(state => state.machine);
-  const openWorker = useOpenWorkerTab();
   // The Pane's pull request, for the chat's status bar; each field selected alone so other git changes do not re-render the chat.
   const prNumber = useSessionStore(store => store.sessions.find(session => session.id === panel.sessionId)?.gitStatus?.prNumber);
   const prUrl = useSessionStore(store => store.sessions.find(session => session.id === panel.sessionId)?.gitStatus?.prUrl);
@@ -39,10 +38,10 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   // Stable, so a re-render here does not re-render every turn of the chat.
   const cwd = state?.cwd;
   const actions = useMemo<ChatTurnActions>(() => ({
-    onOpenWorker: openWorker,
+    onOpenWorker: (paneId: string, panelId?: string) => { void openWorkerTab(paneId, panelId); },
     onViewDiff: file => void openFileInEditor({ sessionId: panel.sessionId, filePath: worktreeRelative(file, cwd), pin: true, diff: { kind: 'scope', scope: { kind: 'session' } } })
       .catch(error => showActionError('Could not open the diff', error)),
-  }), [cwd, openWorker, panel.sessionId]);
+  }), [cwd, panel.sessionId]);
   return <ChatTabPanel
     saveFile={saveFile}
     workers={workers}

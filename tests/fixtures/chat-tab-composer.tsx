@@ -68,7 +68,7 @@ if (params.has('status')) {
 const agentCount = Number(params.get('agents') ?? 0);
 const workingNames = ['csv-export', 'switch-to-chat', 'onboarding-copy', 'docs-pass'];
 const workers = params.has('agents') ? [
-  ...workingNames.slice(0, agentCount).map((name, index) => ({ paneId: `p${index + 1}`, name, state: 'running' as const, label: 'Running', tab: { panelId: `t${index + 1}`, title: index === 1 ? 'Codex' : 'Claude Code' } })),
+  ...workingNames.slice(0, agentCount).map((name, index) => ({ paneId: `p${index + 1}`, name, state: 'running' as const, label: 'Running', working: [{ panelId: `t${index + 1}`, title: index === 1 ? 'Codex' : 'Claude Code' }] })),
   { paneId: 'pw', name: 'approvals-global', state: 'waiting' as const, label: 'Waiting' },
   { paneId: 'pi', name: 'release-notes', state: 'idle' as const, label: 'Idle' },
 ] : undefined;

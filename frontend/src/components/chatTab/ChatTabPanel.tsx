@@ -6,7 +6,7 @@ import {
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns, messageTime, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import { chatTurns, messageTime, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -165,10 +165,10 @@ export interface ChatTabPanelProps {
   /** The Pane's pull request, for the status bar. */
   pr?: ChatStatusPullRequest;
   /**
-   * The agents working, for the status bar's "N working" (D-276). Defaults to the `workers`
-   * that are working; Autopilot passes the workers of every Session it walks.
+   * The agents working, for the status bar's "N working" (D-276). Defaults to the working tabs
+   * of `workers`; Autopilot passes the workers of every Session it walks.
    */
-  working?: readonly ChatWorkerLine[];
+  working?: readonly WorkingAgent[];
 }
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */

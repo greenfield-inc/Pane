@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import type { ChatTabContextUsage, ChatTabTask } from '../../../../shared/types/chatTab';
-import type { ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import type { WorkingAgent } from '../../../../shared/chatTabPresentation';
 import {
   contextLeft, DEFAULT_STATUS_ITEMS, prStateName, readStatusItems, STATUS_ITEM_NAMES, STATUS_ITEMS, taskAge, writeStatusItems, type StatusItem,
 } from '../../../../shared/chatStatusBar';
@@ -49,8 +49,8 @@ export interface ChatStatusBarProps {
   tasks?: readonly ChatTabTask[];
   queued: number;
   pr?: ChatStatusPullRequest;
-  /** The Session's agents actively working (D-276): in a Session orchestrator's or Autopilot's chat. */
-  agents?: readonly ChatWorkerLine[];
+  /** The Session's agents actively working, one per tab (D-276): in a Session orchestrator's or Autopilot's chat. */
+  agents?: readonly WorkingAgent[];
   /** Opens an agent's tab, or its Pane when the tab is unknown. */
   onOpenAgent?: (paneId: string, panelId?: string) => void;
   working: boolean;
@@ -107,11 +107,11 @@ export function ChatStatusBar({ context, tasks = [], queued, pr, agents = [], on
           footer={({ close }) => <div className="chat-status-panel">
             <p className="chat-status-panel-title">Working now</p>
             <ul className="chat-status-agents">
-              {agents.map(agent => <li key={agent.paneId}>
-                <button type="button" disabled={!onOpenAgent} onClick={() => { close(); onOpenAgent?.(agent.paneId, agent.tab?.panelId); }}
-                  title={onOpenAgent ? `Open ${agent.tab?.title ? `${agent.name} › ${agent.tab.title}` : agent.name}` : undefined}>
+              {agents.map((agent, index) => <li key={`${agent.paneId}:${agent.panelId ?? index}`}>
+                <button type="button" disabled={!onOpenAgent} onClick={() => { close(); onOpenAgent?.(agent.paneId, agent.panelId); }}
+                  title={onOpenAgent ? `Open ${agent.title ? `${agent.name} › ${agent.title}` : agent.name}` : undefined}>
                   <span className="chat-status-agent-name">{agent.name}</span>
-                  {agent.tab?.title && <span className="chat-status-panel-muted">{agent.tab.title}</span>}
+                  {agent.title && <span className="chat-status-panel-muted">{agent.title}</span>}
                 </button>
               </li>)}
             </ul>

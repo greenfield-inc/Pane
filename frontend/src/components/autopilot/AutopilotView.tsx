@@ -9,7 +9,7 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import type { ChatRendering } from '../chatTab/chatRendering';
 import type { ChatTurnActions } from '../chatTab/ChatTurns';
 import { useManySessionWorkers } from '../chatTab/sessionWorkers';
-import { DESKTOP_WORKERS, useOpenWorkerTab } from '../chatTab/desktopSessionWorkers';
+import { DESKTOP_WORKERS, openWorkerTab } from '../chatTab/desktopSessionWorkers';
 import { workingAgents } from '../../../../shared/chatTabPresentation';
 import { AutopilotItemRows } from './AutopilotItemRows';
 import { AutopilotDecisionCard } from './AutopilotDecisionCard';
@@ -267,8 +267,7 @@ export function AutopilotView() {
   const walkIds = useMemo(() => snapshot?.walk.sessions.map(session => session.id) ?? [], [snapshot?.walk.sessions]);
   const walkWorkers = useManySessionWorkers(DESKTOP_WORKERS, walkIds);
   const working = useMemo(() => workingAgents(walkWorkers), [walkWorkers]);
-  const openWorker = useOpenWorkerTab();
-  const actions = useMemo<ChatTurnActions>(() => ({ onOpenWorker: openWorker }), [openWorker]);
+  const actions = useMemo<ChatTurnActions>(() => ({ onOpenWorker: (paneId, panelId) => { void openWorkerTab(paneId, panelId); } }), []);
   // The chat's width is the person's (drag its edge; double-click resets). Too narrow for the chat
   // and the stack at their minimums, the chat keeps its fluid width.
   const viewBox = useObservedContentBox<HTMLDivElement>();
