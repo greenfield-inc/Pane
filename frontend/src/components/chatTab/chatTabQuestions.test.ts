@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { questionAnswer, questionFields, unshownRequiredFields } from '../../../../shared/chatTabQuestions';
+import { answeredFields, questionAnswer, questionFields, questionSteps, steppedAnswer, stepSummary, unshownRequiredFields } from '../../../../shared/chatTabQuestions';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 describe('question form fields', () => {
@@ -58,5 +58,51 @@ describe('question form fields', () => {
     expect(unshownRequiredFields(schema)).toEqual(['Target']);
     expect(unshownRequiredFields({ type: 'object', properties: { target: { type: 'object' } } })).toEqual([]);
     expect(unshownRequiredFields({ type: 'object', properties: {} })).toEqual([]);
+  });
+});
+
+describe('one question at a time (D-230)', () => {
+  const schema: JsonValue = {
+    type: 'object',
+    properties: {
+      question_0: { type: 'string', title: '#1491 P1', description: 'Start the agent review?', oneOf: [{ const: 'Ready', title: 'Ready: start agent review' }, { const: 'Wait', title: 'Wait for plan v9' }] },
+      question_0_custom: { type: 'string', title: 'Other', description: 'Type your own answer (optional).' },
+      question_1: { type: 'string', title: 'Versioning', oneOf: [{ const: 'All', title: 'Take all four' }, { const: 'Some', title: 'Change some' }] },
+      question_1_custom: { type: 'string', title: 'Other' },
+    },
+  };
+  const fields = questionFields(schema);
+
+  it('groups each choice with the Other box after it', () => {
+    expect(questionSteps(fields).map(step => step.map(field => field.key))).toEqual([['question_0', 'question_0_custom'], ['question_1', 'question_1_custom']]);
+  });
+
+  it('asks independent questions one at a time, choice or not (review F-4)', () => {
+    const keys = (schema: JsonValue) => questionSteps(questionFields(schema)).map(step => step.map(field => field.key));
+    // A form with no choices: a project name, then a retention period.
+    expect(keys({ required: ['name', 'days'], properties: { name: { type: 'string', title: 'Project name' }, days: { type: 'integer', title: 'Keep logs for (days)' } } })).toEqual([['name'], ['days']]);
+    expect(keys({ properties: { why: { type: 'string' }, pick: { type: 'string', enum: ['a'] } } })).toEqual([['why'], ['pick']]);
+    // A required text question after a choice is its own question, not the choice's Other box.
+    expect(keys({ required: ['pick', 'reason'], properties: { pick: { type: 'string', enum: ['a', 'b'] }, reason: { type: 'string', title: 'Why?' } } })).toEqual([['pick'], ['reason']]);
+    // An optional box titled Other right after a choice stays with it, whatever its key.
+    expect(keys({ properties: { pick: { type: 'string', enum: ['a'] }, note: { type: 'string', title: 'Other' }, flag: { type: 'boolean', title: 'Notify me' } } })).toEqual([['pick', 'note'], ['flag']]);
+    // A companion keyed after its choice stays with it, wherever its title says.
+    expect(keys({ properties: { colour: { type: 'string', enum: ['red'] }, colour_other: { type: 'string', title: 'Something else' } } })).toEqual([['colour', 'colour_other']]);
+  });
+
+  it('sums a step up for the review: the pick, the note, or skipped', () => {
+    const [first, second] = questionSteps(fields);
+    expect(stepSummary(first, { question_0: 'Ready', question_0_custom: 'after lunch' })).toBe('Ready: start agent review · after lunch');
+    expect(stepSummary(first, { question_0_custom: 'Do it Friday' })).toBe('Do it Friday');
+    expect(stepSummary(second, {})).toBeUndefined();
+  });
+
+  it('answers only the questions given something, and nothing when every one is skipped', () => {
+    const steps = questionSteps(fields);
+    expect(questionAnswer(answeredFields(steps, new Set([1])), { question_0: 'Ready', question_1: 'All' })).toEqual({ question_0: 'Ready' });
+    expect(steppedAnswer(steps, { question_1: 'All' })).toEqual({ question_1: 'All' });
+    expect(steppedAnswer(steps, {})).toBeUndefined();
+    const required = questionSteps(questionFields({ required: ['a', 'b'], properties: { a: { type: 'string', enum: ['x'] }, b: { type: 'string', enum: ['y'] } } }));
+    expect(steppedAnswer(required, { b: 'y' })).toEqual({ b: 'y' });
   });
 });

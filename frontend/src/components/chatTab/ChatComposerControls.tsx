@@ -13,12 +13,12 @@ const MODE_ICONS = new Map<string, LucideIcon>([
   ['bypassPermissions', ShieldOff], ['dontAsk', ShieldOff], ['agent-full-access', ShieldOff],
 ]);
 
-/** The permission mode, as a quiet chip that opens the mode list. */
+/** The permission mode, as a quiet chip that opens the mode list; amber for a mode that never asks (D-267). */
 export function ChatModeChip({ control, disabled, configure }: { control: AgentChatConfigOption; disabled: boolean; configure: Configure }) {
   const Icon = MODE_ICONS.get(control.currentValue) ?? Shield;
   return <Dropdown className="chat-anchor chat-anchor-mode" position="top-left" width="md" selectedId={control.currentValue} selectedMark="check" menuLabel={control.name}
     items={control.options.map(option => ({ id: option.value, label: option.name, onClick: () => { if (option.value !== control.currentValue) configure(control.id, option.value); } }))}
-    trigger={<button type="button" disabled={disabled} title={`${control.name}: ${choiceName(control)}`} className="chat-chip">
+    trigger={<button type="button" disabled={disabled} title={`${control.name}: ${choiceName(control)}`} className="chat-chip" data-tone={isRiskyMode(control) ? 'warning' : undefined}>
       <Icon className="chat-chip-icon" aria-hidden />
       <span className="sr-only">{control.name}: </span><span className="chat-chip-label">{choiceName(control)}</span>
     </button>} />;

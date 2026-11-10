@@ -5,7 +5,9 @@ export type OuterPanelSurface =
   | 'projectInspector'
   | 'bottomTerminal'
   | 'rightTerminal'
-  | 'bottomDetail';
+  | 'bottomDetail'
+  | 'approvalsList'
+  | 'autopilotChat';
 
 export interface OuterPanelBounds {
   floor: number;
@@ -18,6 +20,12 @@ export interface OuterPanelSize extends OuterPanelBounds {
 
 export interface OuterPanelConfig {
   axis: 'width' | 'height';
+  /**
+   * Which edge of its container the panel sits on. 'end' (the default) is a right or bottom
+   * panel: dragging its separator toward the start grows it. 'start' is a left panel: dragging
+   * right grows it.
+   */
+  edge?: 'start' | 'end';
   storageKey: string;
   legacyKey: string;
   legacyMin: number;
@@ -39,6 +47,16 @@ const bottomBounds = (maximum: number | undefined, minimum: number) => (containe
   const rawCap = Math.max(0, Math.min(maximum ?? height, height, Math.max(32, height - 160)));
   const cap = rawCap >= 64 ? rawCap : Math.min(32, height);
   return { floor: cap >= 64 ? Math.min(minimum, cap) : cap, cap };
+};
+
+/**
+ * One side of a two-column split: at least `minimum`, leaving at least `reserve` for the other
+ * side. Too narrow for both, the cap is 0 (unusable), so the view keeps its own narrow layout.
+ */
+const splitBounds = (minimum: number, reserve: number, maximum: number) => (containerPx: number): OuterPanelBounds => {
+  const rawCap = Math.min(maximum, normalizeContainer(containerPx) - reserve);
+  const cap = rawCap >= minimum ? rawCap : 0;
+  return { floor: Math.min(minimum, cap), cap };
 };
 
 export const OUTER_PANEL_CONFIGS = {
@@ -91,6 +109,30 @@ export const OUTER_PANEL_CONFIGS = {
     legacyDefault: 200,
     defaultPx: () => 200,
     bounds: bottomBounds(400, 80),
+  },
+  // Approvals: the list on the left, the Session beside it taking the rest.
+  approvalsList: {
+    axis: 'width',
+    edge: 'start',
+    storageKey: 'pane-approvals-list-width:v2',
+    legacyKey: 'pane-approvals-list-width',
+    legacyMin: 260,
+    legacyMax: 1200,
+    legacyDefault: 400,
+    defaultPx: () => 400,
+    bounds: splitBounds(260, 360, 1200),
+  },
+  // Autopilot: its chat on the left, the stack on the right taking the rest.
+  autopilotChat: {
+    axis: 'width',
+    edge: 'start',
+    storageKey: 'pane-autopilot-chat-width:v2',
+    legacyKey: 'pane-autopilot-chat-width',
+    legacyMin: 380,
+    legacyMax: 1600,
+    legacyDefault: 560,
+    defaultPx: (width) => clamp(Math.round(width * 0.44), 380, 720),
+    bounds: splitBounds(380, 300, 1600),
   },
 } satisfies Record<OuterPanelSurface, OuterPanelConfig>;
 
@@ -148,6 +190,12 @@ export function readOuterPanelPreference(config: OuterPanelConfig, storage: Stor
 export function writeOuterPanelPreference(config: OuterPanelConfig, storage: Storage, preferredPx: number): void {
   const value = clamp(Math.round(preferredPx), 1, 8192);
   storage.setItem(config.storageKey, JSON.stringify({ version: 2, preferredPx: value }));
+}
+
+/** Forgets the remembered size (both keys), so the panel goes back to its default. */
+export function clearOuterPanelPreference(config: OuterPanelConfig, storage: Storage): void {
+  storage.removeItem(config.storageKey);
+  storage.removeItem(config.legacyKey);
 }
 
 const v2PreferenceSchema = boundary.object({

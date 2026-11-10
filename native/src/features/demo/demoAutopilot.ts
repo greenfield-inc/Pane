@@ -103,7 +103,11 @@ export class DemoAutopilot {
       case 'chat-tab:send': return toJson(this.send(second as ChatTabSend));
       case 'chat-tab:receipt': return toJson(this.receipts.get(String(second)) ?? null);
       case 'chat-tab:cancel':
-      case 'chat-tab:unqueue': return null;
+      case 'chat-tab:unqueue':
+      case 'chat-tab:send-now':
+      case 'chat-tab:edit-queued':
+      case 'chat-tab:clear':
+      case 'chat-tab:stop-task': return null;
       default: return undefined;
     }
   }

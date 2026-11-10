@@ -100,21 +100,21 @@ describe('worker lines in the Session chat', () => {
     ]);
   });
 
-  it('mentions a worker only when it finished, reported or is asking in the latest turn (D-201)', () => {
+  it('mentions a worker only when it finished or failed during the latest finished turn, never one asking (D-223)', () => {
     const turns: ChatTurn[] = [
       { id: 't1', items: [], running: false, startedAt: '2026-11-03T11:40:00.000Z', endedAt: '2026-11-03T11:41:00.000Z' },
       { id: 't2', items: [], running: false, startedAt: '2026-11-03T11:50:00.000Z', endedAt: '2026-11-03T11:51:00.000Z' },
     ];
     const worker = (paneId: string, state: ChatWorkerLine['state'], reportedAt?: string): ChatWorkerLine => ({ paneId, name: paneId, state, label: state, reportedAt });
     const notes = workerNotes(turns, [
-      worker('running', 'running'), worker('switch-to-chat', 'waiting'), worker('approvals-global', 'done', '2026-11-03T11:50:30.000Z'),
+      worker('running', 'running'), worker('switch-to-chat', 'waiting', '2026-11-03T11:50:10.000Z'), worker('approvals-global', 'done', '2026-11-03T11:50:30.000Z'),
       worker('broke', 'failed', '2026-11-03T11:50:40.000Z'), worker('said', 'idle', '2026-11-03T11:50:50.000Z'),
-      worker('old-done', 'done', '2026-11-03T11:00:00.000Z'), worker('idle', 'idle'),
+      worker('old-done', 'done', '2026-11-03T11:00:00.000Z'), worker('after', 'done', '2026-11-03T11:52:00.000Z'), worker('idle', 'idle'),
     ]);
-    expect(notes.map(note => note.text)).toEqual(['switch-to-chat is asking you', 'approvals-global finished', 'broke failed', 'said reported']);
-    // A running turn has no start of its own yet: it began when the one before it ended.
-    const running = workerNotes([turns[0], { id: 't2', items: [], running: true }], [worker('since', 'done', '2026-11-03T11:45:00.000Z'), worker('before', 'done', '2026-11-03T11:30:00.000Z')]);
-    expect(running.map(note => note.text)).toEqual(['since finished']);
+    expect(notes.map(note => note.text)).toEqual(['approvals-global finished', 'broke failed']);
+    // While a turn runs nothing floats above the composer: the turn has not reported anything yet.
+    const running = workerNotes([turns[0], { id: 't2', items: [], running: true }], [worker('since', 'done', '2026-11-03T11:45:00.000Z')]);
+    expect(running).toEqual([]);
   });
 });
 

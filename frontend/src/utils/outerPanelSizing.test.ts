@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clearOuterPanelPreference,
   OUTER_PANEL_CONFIGS,
   readOuterPanelPreference,
   resolveOuterPanelRenderPolicy,
@@ -66,7 +67,48 @@ describe('outer panel sizing', () => {
   });
 });
 
+describe('two-column split surfaces', () => {
+  it.each([
+    // The approvals list leaves the Session beside it 360px.
+    ['approvalsList', 1400, 260, 1040, 400],
+    ['approvalsList', 620, 260, 260, 260],
+    // The Autopilot chat starts at 44% of the view (380 to 720) and leaves the stack 300px.
+    ['autopilotChat', 1200, 380, 900, 528],
+    ['autopilotChat', 2400, 380, 1600, 720],
+    ['autopilotChat', 800, 380, 500, 380],
+  ] as const)('resolves %s at %ipx', (surface, container, floor, cap, effective) => {
+    expect(resolveOuterPanelSize(OUTER_PANEL_CONFIGS[surface], container)).toEqual({ floor, cap, effectivePx: effective });
+  });
+
+  it.each([
+    ['approvalsList', 619],
+    ['autopilotChat', 679],
+  ] as const)('hands %s back to its own narrow layout below both minimums (%ipx)', (surface, container) => {
+    const config = OUTER_PANEL_CONFIGS[surface];
+    const policy = resolveOuterPanelRenderPolicy(config, resolveOuterPanelSize(config, container, 500), true);
+    expect(policy.separatorVisible).toBe(false);
+    expect(policy.bodyActive).toBe(false);
+  });
+
+  it('sits on the start edge, so dragging toward the end grows it', () => {
+    expect(OUTER_PANEL_CONFIGS.approvalsList.edge).toBe('start');
+    expect(OUTER_PANEL_CONFIGS.autopilotChat.edge).toBe('start');
+    expect(OUTER_PANEL_CONFIGS.worktreeInspector).not.toHaveProperty('edge');
+  });
+});
+
 describe('outer panel preferences', () => {
+  it('clears both keys on reset, so the default applies again', () => {
+    const storage = new MemoryStorage();
+    const config = OUTER_PANEL_CONFIGS.worktreeInspector;
+    storage.setItem(config.legacyKey, '500');
+    writeOuterPanelPreference(config, storage, 640);
+    clearOuterPanelPreference(config, storage);
+    expect(storage.getItem(config.storageKey)).toBeNull();
+    expect(storage.getItem(config.legacyKey)).toBeNull();
+    expect(readOuterPanelPreference(config, storage)).toBeUndefined();
+  });
+
   it('prefers a valid v2 value and accepts only integer values from 1 through 8192', () => {
     const storage = new MemoryStorage();
     const config = OUTER_PANEL_CONFIGS.worktreeInspector;
