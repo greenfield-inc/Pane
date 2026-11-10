@@ -36,6 +36,7 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
   sessionFolder: boundary.optional(boundary.string),
   autopilotRunId: boundary.optional(boundary.string),
   agentReport: boundary.optional(report),
+  clearedAt: boundary.optional(boundary.string),
   notice: boundary.optional(boundary.string),
   open: boundary.optional(boundary.literal('most-recent')),
   banner: boundary.optional(boundary.union(

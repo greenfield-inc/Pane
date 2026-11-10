@@ -18,6 +18,9 @@
 //                       topmost Session's items on the stack, and lists them in an
 //                       autopilot-items block (the real CLI, through the daemon)
 //   approve it          Autopilot told to approve: says where the buttons are, as the skill says
+//   usage               reports context usage (usage_update 1234 of 200000), then replies
+//   task [quick]        starts a background shell (an async task) and replies; it runs until stopped
+//                       with _session/async_task/stop, or with "quick" ends by itself shortly after
 //   background          replies, then runs a turn of its own with no prompt open (as Claude does for a
 //                       finished background task), announced as an async task to a client that takes them
 //
@@ -33,6 +36,8 @@ const store = process.env.SCRIPTED_AGENT_STORE ?? path.join(process.cwd(), '.scr
 mkdirSync(store, { recursive: true });
 const file = id => path.join(store, `${id}.json`);
 const sessions = new Map();
+/** Background tasks still running, by id: the session they belong to. Never persisted, as a real adapter's are not. */
+const liveTasks = new Map();
 let clientCapabilities = {};
 
 /** A turn the agent starts by itself: it works on after the prompt ended, like claude-agent-acp's autonomous turn. */
@@ -112,7 +117,15 @@ const app = agent()
     return start + 2 < all.length ? { sessions: page, nextCursor: String(start + 2) } : { sessions: page };
   })
   .onRequest(methods.agent.session.close, () => ({}))
-  .onRequest('_session/async_task/stop', { parse: value => value }, ({ params }) => { const session = sessions.get(params.sessionId); if (session) session.ownTurnStopped = true; return { stopped: true }; })
+  .onRequest('_session/async_task/stop', { parse: value => value }, async ({ params, client }) => {
+    const session = sessions.get(params.sessionId);
+    if (liveTasks.get(params.asyncTaskId) === params.sessionId && liveTasks.delete(params.asyncTaskId)) {
+      await client.notify(methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: 'async_task_state_update', asyncTaskId: params.asyncTaskId, state: 'stopped' } });
+      return { stopped: true };
+    }
+    if (session) session.ownTurnStopped = true;
+    return { stopped: true };
+  })
   .onNotification(methods.agent.session.cancel, ({ params }) => { const session = sessions.get(params.sessionId); if (session) session.cancelled = true; })
   .onRequest(methods.agent.session.prompt, async ({ params, client }) => {
     const id = params.sessionId;
@@ -193,6 +206,20 @@ const app = agent()
       await send({ sessionUpdate: 'tool_call', toolCallId, title: 'Edit notes.txt', kind: 'edit', status: 'in_progress', locations: [{ path: path.join(session.cwd, 'notes.txt') }] });
       await send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed', content: [{ type: 'diff', path: path.join(session.cwd, 'notes.txt'), oldText: 'a\n', newText: 'b\n' }] });
       await say('Edited.');
+      return { stopReason: 'end_turn' };
+    }
+    if (word === 'usage') {
+      await client.notify(methods.client.session.update, { sessionId: id, update: { sessionUpdate: 'usage_update', used: 1234, size: 200000 } });
+      await say('Counted.');
+      return { stopReason: 'end_turn' };
+    }
+    if (word === 'task') {
+      const asyncTaskId = `task-${randomUUID()}`;
+      liveTasks.set(asyncTaskId, id);
+      const notify = update => client.notify(methods.client.session.update, { sessionId: id, update });
+      await notify({ sessionUpdate: 'async_task_spawned', asyncTaskId, name: 'Shell', taskType: 'bash', description: 'npm run watch', showInTranscript: true, canStop: true });
+      if (rest[0] === 'quick') setTimeout(() => { if (liveTasks.delete(asyncTaskId)) void notify({ sessionUpdate: 'async_task_state_update', asyncTaskId, state: 'completed' }); }, 150);
+      await say('Started a task.');
       return { stopReason: 'end_turn' };
     }
     if (word === 'background') {

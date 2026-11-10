@@ -64,6 +64,8 @@ export interface ChatPanelState {
   open?: 'most-recent';
   /** What Switch to chat did, shown on the chat until it is closed or another conversation is picked. */
   banner?: ChatTabSwitchBanner;
+  /** When /clear last started a fresh conversation in this tab; shown as a divider at its start. */
+  clearedAt?: string;
 }
 
 /**
@@ -186,12 +188,38 @@ export interface ChatTabView {
   messageCount: number;
   /** What Switch to chat did (D-282), until closed or another conversation is picked. */
   banner?: ChatTabSwitchBanner;
+  /**
+   * How full the conversation's context window is, as the adapter last reported it (ACP `usage_update`).
+   * Absent until the adapter reports usage; viewers then show nothing rather than a guess.
+   */
+  context?: ChatTabContextUsage;
+  /** Background work the agent is running beside its turns (Claude's background shells and subagents). */
+  tasks?: ChatTabTask[];
+  /** When /clear last started a fresh conversation in this tab. */
+  clearedAt?: string;
+}
+
+/** Tokens in the conversation's context and the size of its window. */
+export interface ChatTabContextUsage { used: number; size: number }
+
+/** One piece of background work, as the adapter's async task updates describe it. */
+export interface ChatTabTask {
+  id: string;
+  /** The adapter's task type, such as `bash` or `subagent`. */
+  kind: string;
+  /** What it is doing, when the adapter says. */
+  title?: string;
+  startedAt: string;
+  /** False when the adapter says the task cannot be stopped from the client (a Monitor); absent means it can. */
+  canStop?: false;
 }
 
 export interface ChatTabSend {
   operationId: string;
   text: string;
   images?: Array<{ mimeType: string; data: string }>;
+  /** Send now: the message goes ahead of the queue and interrupts the running turn. Not part of the message's fingerprint. */
+  now?: boolean;
 }
 
 export type ChatTabChange =
@@ -238,6 +266,14 @@ export interface ChatTabClient {
   send(panelId: string, request: ChatTabSend): Promise<AgentChatReceipt>;
   receipt(panelId: string, operationId: string): Promise<AgentChatReceipt | undefined>;
   unqueue(panelId: string, operationId: string): Promise<void>;
+  /** Moves a queued message to the front and interrupts the running turn, so it is sent next, now. */
+  sendNow(panelId: string, operationId: string): Promise<void>;
+  /** Replaces a queued message's text; its images are kept. */
+  editQueued(panelId: string, operationId: string, text: string): Promise<void>;
+  /** Ends the agent and starts a fresh conversation in the same tab, with the same agent and settings (/clear). */
+  clear(panelId: string): Promise<void>;
+  /** Stops one background task without ending the turn. */
+  stopTask(panelId: string, taskId: string): Promise<void>;
   configure(panelId: string, configId: string, value: string): Promise<void>;
   cancel(panelId: string): Promise<void>;
   permission(panelId: string, requestId: string, optionId: string): Promise<void>;

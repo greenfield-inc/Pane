@@ -74,6 +74,8 @@ interface Tab {
   notice?: string;
   published?: AgentState;
   launch?: ResolvedLaunch;
+  /** /clear is replacing the agent with a fresh conversation; it has not stopped. */
+  clearing?: boolean;
 }
 
 const DEFAULT_VIEW_LIMIT = 200;
@@ -127,6 +129,8 @@ export class ChatTabManager {
   }
 
   isRunning(panelId: string): boolean { return !!this.tabs.get(panelId)?.runtime?.isAlive(); }
+  /** /clear is starting a fresh conversation: the agent is between processes, not stopped. */
+  isClearing(panelId: string): boolean { return this.tabs.get(panelId)?.clearing === true; }
   runningPanelIds(): string[] { return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() ? [panelId] : []); }
   processId(panelId: string): number | undefined { return this.tabs.get(panelId)?.runtime?.pid; }
   /** Adapter process IDs of a Pane's running chat tabs, for archive cleanup. */
@@ -173,7 +177,7 @@ export class ChatTabManager {
     }
     if (!request.operationId || request.operationId.length > 128) throw new PaneError('CHAT_PROMPT_INVALID', 'The message has no valid send ID. Nothing was sent.', 'Send it again.');
     if (!request.text.trim() && !request.images?.length) throw new PaneError('CHAT_PROMPT_EMPTY', 'The message is empty. Nothing was sent.', 'Type a message or attach an image.');
-    if (request.text.length + (request.images ?? []).reduce((sum, image) => sum + image.data.length, 0) > PROMPT_BYTES_LIMIT) {
+    if (promptSize(request) > PROMPT_BYTES_LIMIT) {
       throw new PaneError('CHAT_PROMPT_TOO_LARGE', 'The message is larger than 8 MiB. Nothing was sent.', 'Send a shorter message or a smaller image.');
     }
     if (request.images?.some(image => !/^image\/(png|jpeg|webp|gif)$/.test(image.mimeType) || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.data))) {
@@ -188,12 +192,81 @@ export class ChatTabManager {
     catch (error) { throw new PaneError('CHAT_PROMPT_NOT_SAVED', `The message could not be saved on this machine (${reasonOf(error)}). Nothing was sent.`, 'Check free disk space, then send it again.'); }
     const queued: ChatTabQueuedPrompt = { operationId: request.operationId, text: request.text.slice(0, QUEUE_PREVIEW), queuedAt: new Date().toISOString(), stored: true };
     if (request.images?.length) queued.imageCount = request.images.length;
-    try { this.update(panelId, current => ({ ...current, receipts: [...(current.receipts ?? []), receipt].slice(-RECEIPT_LIMIT), queue: [...(current.queue ?? []), queued] })); }
+    // Send now goes ahead of everything already waiting.
+    const queue = (current: ChatPanelState) => request.now ? [queued, ...(current.queue ?? [])] : [...(current.queue ?? []), queued];
+    try { this.update(panelId, current => ({ ...current, receipts: [...(current.receipts ?? []), receipt].slice(-RECEIPT_LIMIT), queue: queue(current) })); }
     catch (error) { this.bodies.remove(panelId, request.operationId); throw error; }
     this.publish(panelId);
-    if (tab.runtime?.isAlive()) this.drain(panelId);
-    else void this.ensure(panelId).catch(() => undefined);
+    if (!tab.runtime?.isAlive()) void this.ensure(panelId).catch(() => undefined);
+    else if (request.now) this.interruptForQueue(panelId);
+    else this.drain(panelId);
     return structuredClone(receipt);
+  }
+
+  /** Moves a queued message to the front and interrupts the running turn, so it is delivered next. */
+  sendNow(panelId: string, operationId: string): void {
+    const item = this.queued(panelId, operationId);
+    this.update(panelId, current => ({ ...current, queue: [item, ...(current.queue ?? []).filter(entry => entry.operationId !== operationId)] }));
+    this.publish(panelId);
+    if (this.tabs.get(panelId)?.runtime?.isAlive()) this.interruptForQueue(panelId);
+  }
+
+  /** Replaces a queued message's text and keeps its images. Its receipt is unchanged, so a retried send of the original still finds it. */
+  editQueued(panelId: string, operationId: string, text: string): void {
+    const item = this.queued(panelId, operationId);
+    const body = item.stored ? this.bodies.read(panelId, operationId) : { text: item.text, images: item.images };
+    if (!body) throw new PaneError('CHAT_QUEUED_COPY_MISSING', 'The saved copy of this queued message is missing, so it was not changed.', 'Remove it from the queue and send it again.');
+    const edited = { text, images: body.images };
+    if (!text.trim() && !edited.images?.length) throw new PaneError('CHAT_PROMPT_EMPTY', 'The edited message is empty. The queued message was not changed.', 'Type a message, or remove it from the queue.');
+    if (promptSize(edited) > PROMPT_BYTES_LIMIT) throw new PaneError('CHAT_PROMPT_TOO_LARGE', 'The edited message is larger than 8 MiB. The queued message was not changed.', 'Shorten the message.');
+    try { this.bodies.write(panelId, operationId, edited); }
+    catch (error) { throw new PaneError('CHAT_PROMPT_NOT_SAVED', `The edited message could not be saved on this machine (${reasonOf(error)}). The queued message was not changed.`, 'Check free disk space, then edit it again.'); }
+    const replacement: ChatTabQueuedPrompt = { operationId, text: text.slice(0, QUEUE_PREVIEW), queuedAt: item.queuedAt, stored: true };
+    if (edited.images?.length) replacement.imageCount = edited.images.length;
+    try {
+      this.update(panelId, current => ({ ...current, queue: current.queue?.map(entry => entry.operationId === operationId ? replacement : entry) }));
+    } catch (error) {
+      // The queue still shows the old text, so the delivered body must stay the old one too (review F-1).
+      try {
+        if (item.stored) this.bodies.write(panelId, operationId, body);
+        else this.bodies.remove(panelId, operationId);
+      } catch (restore) {
+        throw new PaneError('CHAT_QUEUED_EDIT_UNCERTAIN', `The edit could not be saved, and the original text could not be put back (${reasonOf(restore)}), so this queued message may send the edited text.`, 'Remove it from the queue and send it again.');
+      }
+      throw error;
+    }
+    this.publish(panelId);
+  }
+
+  /**
+   * /clear: ends the agent and starts a fresh conversation in the same tab, with the same launch
+   * and saved settings. What waits in the queue is sent into the new conversation.
+   */
+  async clear(panelId: string): Promise<void> {
+    this.refuseStopped(panelId, 'cleared');
+    const tab = this.tab(panelId);
+    tab.clearing = true;
+    try {
+      await tab.starting?.catch(() => undefined);
+      this.refuseStopped(panelId, 'cleared');
+      // The release clears the runtime at once; the state below is saved before anything can start again,
+      // so a send or a view during the stop starts the new conversation, never the old one.
+      const releasing = this.release(tab);
+      const interrupted = this.required(panelId).turn;
+      tab.notice = undefined;
+      tab.ownTurnStartedAt = undefined;
+      this.update(panelId, current => ({
+        ...current, acpSessionId: undefined, turn: undefined, clearedAt: new Date().toISOString(), status: 'starting', problem: undefined, notice: undefined, open: undefined, banner: undefined,
+        receipts: current.receipts?.map(receipt => receipt.operationId === interrupted?.operationId && receipt.state === 'accepted' ? { ...receipt, state: 'failed', error: 'Cleared before the turn finished.' } : receipt),
+      }));
+      await releasing;
+      await this.ensure(panelId);
+    } finally { tab.clearing = false; }
+  }
+
+  /** Stops one background task; the turn goes on. */
+  async stopTask(panelId: string, taskId: string): Promise<void> {
+    await this.liveRuntime(panelId).stopTask(taskId);
   }
 
   unqueue(panelId: string, operationId: string): void {
@@ -206,6 +279,33 @@ export class ChatTabManager {
     }));
     this.bodies.remove(panelId, operationId);
     this.publish(panelId);
+  }
+
+  private queued(panelId: string, operationId: string): ChatTabQueuedPrompt {
+    const item = this.required(panelId).queue?.find(entry => entry.operationId === operationId);
+    if (!item) throw new PaneError('CHAT_NOT_QUEUED', 'That message is no longer waiting; it was already sent or removed.', 'Look at the conversation for it.');
+    return item;
+  }
+
+  private refuseStopped(panelId: string, what: string): void {
+    const state = this.required(panelId);
+    if (state.status !== 'stopped') return;
+    throw new PaneError('CHAT_STOPPED', `This chat is stopped${state.problem ? `: ${state.problem.message}` : '.'} It was not ${what}.`, state.problem?.next ?? 'Press Restart to start it again.');
+  }
+
+  /**
+   * Send now: the message is first in the queue, so ending the running turn (a prompt, the
+   * agent's own turn, or one being delivered) makes drain deliver it next. Cancelling also
+   * withdraws an open approval or question, which ends a turn blocked on it.
+   */
+  private interruptForQueue(panelId: string): void {
+    const tab = this.tab(panelId);
+    const runtime = tab.runtime;
+    if (!runtime?.isAlive()) return;
+    if (!runtime.isRunning() && !runtime.isWorkingAlone() && !tab.delivering) { this.drain(panelId); return; }
+    void runtime.cancel().catch(error => {
+      console.warn(`[ChatTabs] Send now could not interrupt ${panelId}'s turn: ${reasonOf(error)}. The message is sent when the turn ends.`);
+    });
   }
 
   async cancel(panelId: string): Promise<void> {
@@ -266,7 +366,7 @@ export class ChatTabManager {
     const open = this.options.openConversations?.(panelId).get(sessionId);
     if (open) throw new PaneError('CHAT_RESUME_OPEN_ELSEWHERE', `That conversation is open in tab "${open.title}", so it was not opened here.`, 'Switch to that tab, or close it first and pick again.');
     console.log(`[ChatTabs] ${panelId} continues conversation ${sessionId}${state.acpSessionId ? ` instead of ${state.acpSessionId}` : ''}.`);
-    this.update(panelId, current => ({ ...current, acpSessionId: sessionId, open: undefined, banner: undefined, turn: undefined }));
+    this.update(panelId, current => ({ ...current, acpSessionId: sessionId, open: undefined, banner: undefined, clearedAt: undefined, turn: undefined }));
     await this.restart(panelId);
   }
 
@@ -488,8 +588,10 @@ export class ChatTabManager {
     this.update(panelId, current => ({ ...current, queue: current.queue?.slice(1), turn: { operationId: next.operationId, startedAt }, status: 'working' }));
     this.bodies.remove(panelId, next.operationId);
     const finish = (outcome: 'completed' | 'failed', stopReason: string, error?: PaneError) => {
+      // A turn of a released runtime ends after the release: the next runtime's delivery is not its to end.
+      if (tab.run !== generation) return;
       tab.delivering = false;
-      if (tab.run !== generation || !this.options.store.state(panelId)) return;
+      if (!this.options.store.state(panelId)) return;
       const marker = tab.transcript?.endTurn({ type: 'pane_turn', stopReason, startedAt, endedAt: new Date().toISOString() });
       if (marker) this.options.send('chat-tab:event', marker);
       tab.notice = stopReason === 'refusal' ? 'The agent declined this request.' : stopReason === 'max_tokens' ? 'The reply hit the length limit.' : stopReason === 'max_turn_requests' ? 'The turn hit its step limit.' : undefined;
@@ -595,6 +697,7 @@ export class ChatTabManager {
       // While history replays the window is incomplete; viewers fetch it once the tab has started.
       transcript: tab.transcript && limit > 0 && !tab.loading && !tab.starting ? tab.transcript.snapshot(limit) : undefined,
       messageCount: tab.transcript?.count() ?? 0,
+      ...extras(state, runtime),
     };
     if (state.banner) view.banner = state.banner;
     return view;
@@ -650,6 +753,21 @@ function toAgentState(view: ChatTabView): AgentState {
   if (view.status === 'blocked' || (view.status === 'stopped' && view.problem)) return 'blocked';
   if (view.status === 'working' || view.status === 'starting') return 'working';
   return view.status === 'idle' ? 'idle' : 'unknown';
+}
+
+function promptSize(body: Pick<ChatTabSend, 'text' | 'images'>): number {
+  return body.text.length + (body.images ?? []).reduce((sum, image) => sum + image.data.length, 0);
+}
+
+/** Context usage, background tasks and the last /clear, each only when there is one. */
+function extras(state: ChatPanelState, runtime: ChatTabRuntime | undefined): Pick<ChatTabView, 'context' | 'tasks' | 'clearedAt'> {
+  const result: Pick<ChatTabView, 'context' | 'tasks' | 'clearedAt'> = {};
+  const usage = runtime?.usage();
+  if (usage && usage.size > 0) result.context = usage;
+  const tasks = runtime?.tasks() ?? [];
+  if (tasks.length) result.tasks = tasks;
+  if (state.clearedAt) result.clearedAt = state.clearedAt;
+  return result;
 }
 
 /** Newest first by the agent's `updatedAt`, undated last; the agent's own order breaks ties. */

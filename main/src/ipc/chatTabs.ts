@@ -25,7 +25,7 @@ import type { TerminalPanelState } from '../../../shared/types/panels';
 
 const agentSchema = boundary.enumeration('claude', 'codex');
 const imageSchema = boundary.object({ mimeType: boundary.string, data: boundary.string });
-const sendSchema = boundary.object({ operationId: boundary.nonEmptyString, text: boundary.string, images: boundary.optional(boundary.array(imageSchema)) });
+const sendSchema = boundary.object({ operationId: boundary.nonEmptyString, text: boundary.string, images: boundary.optional(boundary.array(imageSchema)), now: boundary.optional(boundary.boolean) });
 const createSchema = boundary.object({
   sessionId: boundary.nonEmptyString,
   agent: boundary.optional(agentSchema),
@@ -55,7 +55,7 @@ const agentFarmProfiles = new AgentFarmProfiles({
   checkCli: (agent, context) => installAdapter(agent, printedCli(agent, context.env, findExecutableInPath), context),
 });
 
-const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key'] as const;
+const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key'] as const;
 
 function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
 
@@ -93,6 +93,10 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   registry.register('chat-tab:send', (id: string, request: PaneCommandValue) => manager.send(panelId(id), decodeBoundary(request, sendSchema)));
   registry.register('chat-tab:receipt', (id: string, operationId: string) => manager.receipt(panelId(id), decodeBoundary(operationId, boundary.nonEmptyString)) ?? null);
   registry.register('chat-tab:unqueue', (id: string, operationId: string) => { manager.unqueue(panelId(id), decodeBoundary(operationId, boundary.nonEmptyString)); return undefined; });
+  registry.register('chat-tab:send-now', (id: string, operationId: string) => { manager.sendNow(panelId(id), decodeBoundary(operationId, boundary.nonEmptyString)); return undefined; });
+  registry.register('chat-tab:edit-queued', (id: string, operationId: string, text: string) => { manager.editQueued(panelId(id), decodeBoundary(operationId, boundary.nonEmptyString), decodeBoundary(text, boundary.string)); return undefined; });
+  registry.register('chat-tab:clear', async (id: string) => { await manager.clear(panelId(id)); });
+  registry.register('chat-tab:stop-task', async (id: string, taskId: string) => { await manager.stopTask(panelId(id), decodeBoundary(taskId, boundary.nonEmptyString)); });
   registry.register('chat-tab:configure', async (id: string, configId: string, chosen: string) => { await manager.configure(panelId(id), decodeBoundary(configId, boundary.nonEmptyString), decodeBoundary(chosen, boundary.string)); });
   registry.register('chat-tab:cancel', async (id: string) => { await manager.cancel(panelId(id)); });
   registry.register('chat-tab:permission', (id: string, requestId: string, optionId: string) => { manager.answerPermission(panelId(id), decodeBoundary(requestId, boundary.nonEmptyString), decodeBoundary(optionId, boundary.string)); return undefined; });

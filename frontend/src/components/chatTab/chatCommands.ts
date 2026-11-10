@@ -20,6 +20,17 @@ export function matchingCommands(draft: string, commands: readonly ChatTabComman
     .slice(0, 12);
 }
 
+/** Pane's own /clear (D-211): a fresh conversation in the same tab, with the same agent and settings. Never sent to the agent. */
+export const CLEAR_COMMAND: ChatTabCommand = { name: 'clear', description: 'Start a fresh conversation in this tab' };
+
+/** The agent's commands with Pane's own; an agent's /clear is replaced by Pane's, which works the same for every agent. */
+export function withPaneCommands(commands: readonly ChatTabCommand[]): ChatTabCommand[] {
+  return [CLEAR_COMMAND, ...commands.filter(command => command.name !== CLEAR_COMMAND.name)];
+}
+
+/** The draft is the /clear command alone. */
+export function isClearCommand(draft: string): boolean { return draft.trim() === `/${CLEAR_COMMAND.name}`; }
+
 /** A message that is exactly /resume: Pane opens its picker instead of sending it. */
 export function isResumeCommand(text: string): boolean {
   return text.trim() === `/${RESUME_COMMAND.name}`;

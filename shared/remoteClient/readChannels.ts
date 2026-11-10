@@ -72,6 +72,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   // Read a branch's changes; the phone's and the PWA's Diff tabs.
   'sessions:get-diff-manifest',
   'sessions:get-file-diff',
+  // A Pane's git status, for the chat's PR item: returns the cached status and starts a refresh, safe to resend.
+  'sessions:get-git-status',
 ]);
 
 
