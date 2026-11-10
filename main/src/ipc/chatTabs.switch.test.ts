@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { IpcMain } from 'electron';
@@ -7,6 +7,8 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { resetPaneRuntimeForTests, setPaneRuntime, type PaneRuntime } from '../core/runtime';
 import type { ConfigManager } from '../services/configManager';
 import type { SessionManager } from '../services/sessionManager';
+import type { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
+import type { SessionChatSwitchPreview } from '../../../shared/types/chatTab';
 import type { AppConfig } from '../types/config';
 import type { Session } from '../types/session';
 import type { AppServices } from './types';
@@ -28,7 +30,9 @@ function partial<Contract>(value: Partial<Contract>): Contract {
 // so its chat starts without the owner's key or secret project variables.
 describe.skipIf(process.platform === 'win32')('switching a teammate\'s terminal to chat', () => {
   const originalPath = process.env.PATH;
+  const originalClaudeConfig = process.env.CLAUDE_CONFIG_DIR;
   let bin: string;
+  let claudeConfig: string;
 
   beforeEach(() => {
     // A stand-in claude on PATH, so the launch gets as far as choosing the key.
@@ -37,12 +41,20 @@ describe.skipIf(process.platform === 'win32')('switching a teammate\'s terminal 
     chmodSync(path.join(bin, 'claude'), 0o755);
     process.env.PATH = `${bin}${path.delimiter}${originalPath}`;
     clearShellPathCache();
+    // Claude has saved the conversation, so the switch tries to reopen it.
+    claudeConfig = mkdtempSync(path.join(os.tmpdir(), 'pane-switch-claude-'));
+    mkdirSync(path.join(claudeConfig, 'projects', '-tmp-pane-switch'), { recursive: true });
+    writeFileSync(path.join(claudeConfig, 'projects', '-tmp-pane-switch', 'conv-1.jsonl'), '');
+    process.env.CLAUDE_CONFIG_DIR = claudeConfig;
   });
 
   afterEach(() => {
     process.env.PATH = originalPath;
     clearShellPathCache();
     rmSync(bin, { recursive: true, force: true });
+    rmSync(claudeConfig, { recursive: true, force: true });
+    if (originalClaudeConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = originalClaudeConfig;
     resetPaneRuntimeForTests();
   });
 
@@ -84,5 +96,42 @@ describe.skipIf(process.platform === 'win32')('switching a teammate\'s terminal 
     await launcher.resolve(chat, state);
     await launcher.resolve({ ...chat, metadata: { ...chat.metadata, teammate: undefined } }, state);
     expect(launched.map(env => env.ANTHROPIC_API_KEY)).toEqual([undefined, 'sk-owner']);
+  });
+});
+
+// Review F-1 on #1274: a Session that links only some tabs of a Pane switches only those tabs.
+describe('which tabs a Session switch to chat covers', () => {
+  afterEach(() => resetPaneRuntimeForTests());
+
+  it('takes its own Pane\'s tabs, every tab of a whole-Pane link, and only the linked tabs of a selective one', async () => {
+    setPaneRuntime(partial<PaneRuntime>({ eventSink: { send: vi.fn() }, getConfigManager: () => partial<ConfigManager>({ getConfig: () => partial<AppConfig>({ chatTabsEnabled: true }) }) }));
+    const id = (name: string) => `${name}-${Math.random().toString(36).slice(2)}`;
+    const own = id('own'), selective = id('selective'), whole = id('whole');
+    for (const paneId of [own, selective, whole]) {
+      databaseService.createSession({ id: paneId, name: paneId, initial_prompt: '', worktree_name: paneId, worktree_path: '/tmp/pane-switch', project_id: null, tool_type: 'none' });
+    }
+    const sessionManager = partial<SessionManager>({ getSession: paneId => partial<Session>({ name: paneId, worktreePath: '/tmp/pane-switch', archived: false }), getProjectContext: () => null });
+    let membership: ReturnType<OrchestrationSessionManager['workspaceMembership']>;
+    const orchestrationSessionManager = partial<OrchestrationSessionManager>({ workspaceMembership: sessionId => (sessionId === 's-1' ? membership : undefined) });
+    const registry = new PaneCommandRegistry();
+    const services = partial<AppServices>({ sessionManager, orchestrationSessionManager });
+    registerPanelHandlers(partial<IpcMain>({ handle: vi.fn() }), services, registry);
+    registerChatTabHandlers(partial<IpcMain>({ handle: vi.fn() }), services, registry);
+    const tab = async (paneId: string, title: string) => {
+      const opened = await registry.invoke('panels:create', [{ sessionId: paneId, type: 'terminal', title, activate: false, initialState: { customState: { agentType: 'claude', launchCommand: 'claude' } } }]);
+      // SAFETY: panels:create answers { success, data: ToolPanel }.
+      return (opened as { data: ToolPanel }).data.id;
+    };
+    const orchestrator = await tab(own, 'orchestrator');
+    const linked = await tab(selective, 'A');
+    await tab(selective, 'B');
+    const c = await tab(whole, 'C');
+    const d = await tab(whole, 'D');
+    membership = { panes: new Map([[selective, [linked]], [whole, []]]), ownPaneIds: new Set([own]), ownPanelIds: new Set([orchestrator]) };
+
+    // SAFETY: chat-tab:preview-session-switch answers a SessionChatSwitchPreview.
+    const preview = await registry.invoke('chat-tab:preview-session-switch', ['s-1']) as SessionChatSwitchPreview;
+    expect(preview.items.map(item => item.panelId)).toEqual([orchestrator, linked, c, d]);
+    await expect(registry.invoke('chat-tab:preview-session-switch', ['gone'])).rejects.toMatchObject({ code: 'CHAT_SESSION_MISSING' });
   });
 });
