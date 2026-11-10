@@ -123,6 +123,7 @@ import { terminalPanelManager } from './services/terminalPanelManager';
 import { markTerminalPanelsInterrupted } from './services/terminalShutdown';
 import { panelManager } from './services/panelManager';
 import { worktreePoolManager } from './services/worktreePoolManager';
+import { removePaneFsmonitorConfig } from './services/gitPerformanceConfig';
 import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
 import { MachineConnections } from './services/machineConnections';
@@ -1402,6 +1403,11 @@ if (launchRemoteSetup) {
     const currentVersion = app.getVersion();
     const lastVersion = databaseService.getLastAppVersion();
     const isFirstLaunch = lastVersion === null;
+    // Runs in the background; it reads lastVersion before recordAppOpen below replaces it.
+    void removePaneFsmonitorConfig(lastVersion, databaseService.getAllProjects().flatMap(project => {
+      const context = project.path ? sessionManager.getProjectContextByProjectId(project.id) : null;
+      return context ? [{ path: project.path, commandRunner: context.commandRunner }] : [];
+    }));
     analyticsLaunchContext = {
       appVersion: currentVersion,
       previousVersion: lastVersion,

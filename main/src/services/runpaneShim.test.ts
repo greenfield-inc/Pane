@@ -27,8 +27,9 @@ beforeEach(() => {
   fs.writeFileSync(bundledCliPath, "console.log('pane-runpane ' + process.env.PANE_DIR + ' ' + process.argv.slice(2).join(' '));\n");
 });
 
-afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  // On Windows a just-exited node.exe can hold its folder for a moment: EBUSY. Retry the delete.
+  await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 function install(): RunpaneShimState {

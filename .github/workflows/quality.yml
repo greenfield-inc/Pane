@@ -73,14 +73,21 @@ jobs:
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
 
+    # The unit tests load the real electron package (main/src/utils/shellPath.ts).
+    - name: Fetch Electron
+      uses: ./.github/actions/fetch-electron
+
     - name: Rebuild native modules for Node tests
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
+    # CI retries a failed unit test once; the retry report lists every retried
+    # test in the job summary, so flaky tests stay visible (--retry, see
+    # CONTRIBUTING.md). Playwright journeys are never retried.
     - name: Run main process test suite
-      run: CI=1 pnpm --filter main exec vitest run
+      run: CI=1 pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
     - name: Run frontend unit tests
-      run: CI=1 pnpm --filter frontend test
+      run: CI=1 pnpm --filter frontend exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
@@ -133,7 +140,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
+    # The action downloads lychee from GitHub's releases, which fail for hours
+    # at a time, so a failed first try runs once more. A broken link fails both.
     - name: Check markdown links
+      id: links
+      continue-on-error: true
       uses: lycheeverse/lychee-action@v2
       with:
         args: >-
@@ -142,8 +153,24 @@ jobs:
           './**/*.md'
         fail: true
 
-  # Runs beside quality-checks so the Electron smoke path does not wait on
-  # unit tests.
+    - name: Wait before checking links again
+      if: steps.links.outcome == 'failure'
+      run: sleep 20
+
+    - name: Check markdown links again
+      if: steps.links.outcome == 'failure'
+      uses: lycheeverse/lychee-action@v2
+      with:
+        args: >-
+          --offline --include-fragments --no-progress
+          --exclude-path node_modules --exclude-path dist-electron
+          './**/*.md'
+        fail: true
+
+  # Runs beside quality-checks so the smoke path does not wait on unit tests.
+  # The minimal and renderer suites load the renderer from Vite with a mocked
+  # Electron API. The chat tab journeys launch main/dist in real Electron, so
+  # better-sqlite3 is still rebuilt for Electron, in the background.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke:
@@ -158,7 +185,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install
+      run: pnpm install --ignore-scripts
 
     # The browser download and apt packages overlap the build steps below.
     # apt upgrades libraries Electron loads, so the wait step comes before
@@ -166,14 +193,17 @@ jobs:
     - name: Start Playwright browser dependencies install
       run: scripts/ci-background.sh start playwright pnpm exec playwright install --with-deps chromium
 
-    - name: Rebuild native modules for Electron smoke tests
-      run: pnpm run electron:rebuild
+    # The install skipped Electron's binary download, and Electron 42+ logs a
+    # first-use fetch to stdout, so fetch it first to keep require('electron')
+    # printing only the path.
+    - name: Fetch Electron
+      uses: ./.github/actions/fetch-electron
+
+    - name: Start native module rebuild for Electron
+      run: scripts/ci-background.sh start electron-rebuild pnpm run electron:rebuild
 
     - name: Configure Electron sandbox
       run: |
-        # Electron 42+ fetches its binary on first use and logs that to stdout,
-        # so fetch it first to keep require('electron') printing only the path.
-        node node_modules/electron/install.js
         electron_path="$(node -p "require('electron')")"
         electron_dir="$(dirname "${electron_path}")"
         sudo chown root "${electron_dir}/chrome-sandbox"
@@ -190,20 +220,25 @@ jobs:
       env:
         PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
 
+    - name: Run maintained functional smoke tests
+      run: pnpm test:ci:minimal
+
+    # The two suites above need no native module, so the rebuild finishes
+    # behind them; only the Electron launches below wait for it.
+    - name: Finish native module rebuild for Electron
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh wait electron-rebuild
+
     - name: Verify sandboxed Electron preload
+      if: ${{ !cancelled() }}
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
     # Launches Electron from the build above with a scripted ACP agent; never a real account.
-    # It runs before the smoke suite, whose electron-dev (tsc -w) overwrites the bundled preload in main/dist.
     - name: Run chat tab journeys
+      if: ${{ !cancelled() }}
       run: xvfb-run -a pnpm test:chat-tabs
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
-
-    - name: Run maintained functional smoke tests
-      run: xvfb-run -a pnpm test:ci:minimal
-      env:
-        PANE_DIR: ${{ runner.temp }}/pane-ci
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
   # change on a PR; always runs on pushes to main. Each OS is tested once at
@@ -250,8 +285,21 @@ jobs:
     - name: Build npm wrapper
       run: pnpm --filter runpane build
 
-    - name: Run wrapper contract tests
-      run: node scripts/test-runpane-contract.js
+    # Packing runs runpane's prepack, which rebuilds dist/, so the package
+    # smoke tests run before anything else reads dist/.
+    - name: Run package manager smoke tests
+      run: node scripts/test-runpane-package-smoke.js
+
+    # The two slow suites (about 95 and 120 s on Windows) use their own temp
+    # directories, so they run in the background beside the short ones. Each
+    # Finish step prints that suite's output and fails with it.
+    - name: Start wrapper contract tests
+      shell: bash
+      run: scripts/ci-background.sh start contract node scripts/test-runpane-contract.js
+
+    - name: Start handoff tests
+      shell: bash
+      run: scripts/ci-background.sh start handoff node --test scripts/test-runpane-handoff.js
 
     - name: Check patched Node runtime guard
       run: node --test scripts/test-runpane-node-runtime.js
@@ -259,20 +307,24 @@ jobs:
     - name: Run MCP server tests
       run: node --test scripts/test-runpane-mcp.js
 
-    - name: Run package manager smoke tests
-      run: node scripts/test-runpane-package-smoke.js
-
     - name: Run workspace routing tests
       run: node --test scripts/test-runpane-workspace.js
-
-    - name: Run handoff tests
-      run: node --test scripts/test-runpane-handoff.js
 
     - name: Run managed CLI hand-off tests
       run: node --test scripts/test-runpane-managed-cli.js
 
     - name: Run wrapper telemetry tests
       run: node --test scripts/test-runpane-telemetry.js
+
+    - name: Finish wrapper contract tests
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: scripts/ci-background.sh wait contract
+
+    - name: Finish handoff tests
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: scripts/ci-background.sh wait handoff
 
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.
@@ -318,11 +370,16 @@ jobs:
       shell: bash
       run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
 
+    # The unit tests load the real electron package (main/src/utils/shellPath.ts);
+    # without this, each test worker downloads Electron and they collide on Windows.
+    - name: Fetch Electron
+      uses: ./.github/actions/fetch-electron
+
     - name: Rebuild native modules for Node tests
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main test
+      run: pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
     - name: Finish main process type checking
       if: ${{ !cancelled() }}

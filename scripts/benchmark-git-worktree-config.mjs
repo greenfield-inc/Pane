@@ -88,6 +88,7 @@ async function measure(name, config, env = {}) {
     results.gitStatus.push(await timed(() => git(worktree, ['status', '--porcelain'])));
   }
   commandEnv = process.env;
+  // A core.fsmonitor in the user's global config starts daemons in these repos.
   for (const cwd of [worktree, repo]) await git(cwd, ['fsmonitor--daemon', 'stop']).catch(() => {});
   return Object.fromEntries(Object.entries(results).map(([key, values]) => [key, median(values)]));
 }
@@ -95,7 +96,6 @@ async function measure(name, config, env = {}) {
 try {
   const buildOptions = await git(root, ['version', '--build-options']);
   const fastConfig = { 'feature.manyFiles': 'true' };
-  if (buildOptions.includes('fsmonitor--daemon')) fastConfig['core.fsmonitor'] = 'true';
   const before = await measure('default', {});
   const after = await measure('fast', fastConfig);
   const afterWithoutOptionalLocks = await measure('fast-no-optional-locks', fastConfig, { GIT_OPTIONAL_LOCKS: '0' });

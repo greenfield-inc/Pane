@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ToolPanel, TerminalPanelState } from '../../../../shared/types/panels';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
-import { switchToChat, terminalConversation, terminalRestored, type SessionAdoption, type SwitchToChatPorts } from './switchToChat';
+import { savedConversation, switchToChat, terminalConversation, terminalRestored, type SessionAdoption, type SwitchToChatPorts } from './switchToChat';
 import { withSessionFolderAccess } from '../agents/sessionFolderAccess';
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 
@@ -219,5 +219,17 @@ describe('which conversation a terminal is running (review F-9)', () => {
   it('is never guessed for a Codex terminal that has reported none, even when another conversation is active in its folder', () => {
     expect(terminalConversation({ agentType: 'codex' }, undefined)).toEqual({ problem: expect.stringContaining('Codex reports its conversation ID only when it exits') });
     expect(terminalConversation({ agentType: 'claude' }, undefined)).toEqual({ problem: 'this terminal has no saved conversation ID' });
+  });
+});
+
+describe('whether a Claude conversation can be reopened (QA on #1274)', () => {
+  it('is refused until Claude has saved it, which it does after the first message', async () => {
+    expect(await savedConversation({ id: 'conv-a' }, 'claude', async () => false)).toEqual({ problem: expect.stringContaining('has not saved this conversation yet'), unsaved: true });
+    expect(await savedConversation({ id: 'conv-a' }, 'claude', async () => true)).toEqual({ id: 'conv-a' });
+  });
+
+  it('is not checked for Codex, or when the ID is already unknown', async () => {
+    expect(await savedConversation({ id: 'c-1' }, 'codex', async () => false)).toEqual({ id: 'c-1' });
+    expect(await savedConversation({ problem: 'no ID' }, 'claude', async () => true)).toEqual({ problem: 'no ID' });
   });
 });
