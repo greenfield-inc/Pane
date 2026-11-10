@@ -78,6 +78,12 @@ export type ChatTabSwitchBanner =
   | { kind: 'known-empty' }
   | { kind: 'list-failed'; reason: string };
 
+/**
+ * The most conversations Pane lists for one folder (picker and Switch to chat). A picker showing
+ * this many may have older ones left out, and says so.
+ */
+export const CHAT_CONVERSATION_LIMIT = 2000;
+
 /** One past conversation in a chat tab's folder, for the picker (/resume, "Pick another"). */
 export interface ChatTabConversation {
   sessionId: string;
@@ -91,8 +97,9 @@ export interface ChatTabConversation {
 }
 
 /**
- * Switch to chat reopened the conversation in chat tab `panelId`; any failure to do so is an error,
- * with the terminal running again. `terminalKept`: the chat has the conversation, but the
+ * Switch to chat reopened the conversation in chat tab `panelId`. A failure is an error: before the
+ * terminal stopped, nothing changed; after, `CHAT_SWITCH_FAILED` (Pane was sure of a conversation with
+ * messages) restarts the terminal on it, and `CHAT_SWITCH_NOT_STARTED` leaves it stopped. `terminalKept`: the chat has the conversation, but the
  * terminal tab could not be closed or the Session could not be moved; `reason` says what to do.
  */
 export interface ChatTabSwitchResult {

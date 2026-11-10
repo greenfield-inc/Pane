@@ -57,7 +57,8 @@ Pane never asks the running Claude.
   "Opened the most recent conversation here" and **Pick another**. The terminal
   has just stopped, so its own conversation counts, and it is usually the one.
   With none left the chat starts new with a note; if listing fails (for example
-  Codex signed out) it starts new and says why.
+  Codex signed out), or every one of the newest 2,000 is open elsewhere, it
+  starts new and says why. Two chats opened at once never get the same one.
 
 Nothing is touched when a turn is in progress (Pane asks you to wait or stop
 it) or when the launch can't be kept: the chat gets the plain agent and its
@@ -97,7 +98,10 @@ picker lists the folder's conversations newest first, with a filter. The tab's
 own is marked "open here"; one open in another Pane tab shows "Open in tab …"
 and can't be picked, so two processes never write one conversation. Picking one
 reloads the tab on it with its history; the tab keeps its Session. Picking is
-refused while the agent is in the middle of a turn. A conversation running
+refused while the agent is in the middle of a turn, and while messages wait in
+the queue, since they were written for the current conversation (remove them or
+let them send first). Pane lists up to the newest 2,000 conversations of a
+folder; past that the picker says older ones aren't shown. A conversation running
 outside Pane (a plain shell `claude`) can't be detected and is listed like any
 other. The picker works in the desktop chat tab, the Autopilot view and the
 remote web app.

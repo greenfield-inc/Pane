@@ -4,7 +4,7 @@ import type { ContentBlock, McpServer, NewSessionRequest, SessionInfo } from '@a
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ToolPanel } from '../../../../shared/types/panels';
-import type { ChatPanelState, ChatTabConversation, ChatTabSwitchBanner, ChatTabEvent, ChatTabAnswer, ChatTabProblem, ChatTabQueuedPrompt, ChatTabSend, ChatTabStatus, ChatTabView } from '../../../../shared/types/chatTab';
+import { CHAT_CONVERSATION_LIMIT, type ChatPanelState, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabView } from '../../../../shared/types/chatTab';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
@@ -234,7 +234,8 @@ export class ChatTabManager {
     const state = this.required(panelId);
     const runtime = this.liveRuntime(panelId);
     const elsewhere = this.options.openConversations?.(panelId) ?? new Map();
-    return newestFirst(await runtime.list(state.cwd)).map(session => {
+    const { sessions } = await runtime.list(state.cwd);
+    return newestFirst(sessions).map(session => {
       const entry: ChatTabConversation = { sessionId: session.sessionId };
       if (session.title) entry.title = session.title;
       if (session.updatedAt) entry.updatedAt = session.updatedAt;
@@ -258,6 +259,10 @@ export class ChatTabManager {
       throw new PaneError('CHAT_RESUME_BUSY', 'The agent is in the middle of a turn, so the conversation was not changed.', 'Wait for it to finish, or press Stop, then pick again.');
     }
     if (sessionId === state.acpSessionId) return;
+    // A queued prompt was written for this conversation; it is never sent into another one (review F-3).
+    if (state.queue?.length) {
+      throw new PaneError('CHAT_RESUME_QUEUED', `${state.queue.length === 1 ? 'A message is' : `${state.queue.length} messages are`} waiting to be sent in this conversation, so the conversation was not changed.`, 'Remove the waiting messages from the queue, or let them send, then pick again.');
+    }
     const open = this.options.openConversations?.(panelId).get(sessionId);
     if (open) throw new PaneError('CHAT_RESUME_OPEN_ELSEWHERE', `That conversation is open in tab "${open.title}", so it was not opened here.`, 'Switch to that tab, or close it first and pick again.');
     console.log(`[ChatTabs] ${panelId} continues conversation ${sessionId}${state.acpSessionId ? ` instead of ${state.acpSessionId}` : ''}.`);
@@ -354,8 +359,11 @@ export class ChatTabManager {
     try {
       await runtime.start();
       if (this.required(panelId).open === 'most-recent' && !this.required(panelId).acpSessionId) {
-        const chosen = await this.mostRecent(panelId, runtime);
+        const listed = await this.listForSwitch(panelId, runtime);
         if (tab.run !== generation) return;
+        // Chosen against who has which conversation now, and saved in the same step: with no await
+        // between, a tab or terminal that took one while the list loaded is seen (review F-2).
+        const chosen = this.mostRecent(panelId, listed);
         this.update(panelId, current => ({ ...current, open: undefined, acpSessionId: chosen.sessionId, banner: chosen.banner }));
       }
       const state = this.required(panelId);
@@ -397,21 +405,32 @@ export class ChatTabManager {
     }
   }
 
+  /** The folder's conversations for Switch to chat, newest first, or why they could not be listed. */
+  private async listForSwitch(panelId: string, runtime: ChatTabRuntime): Promise<SwitchListing> {
+    try {
+      const listed = await runtime.list(this.required(panelId).cwd);
+      return { sessions: newestFirst(listed.sessions), complete: listed.complete };
+    } catch (error) {
+      console.warn(`[ChatTabs] ${panelId} could not list its folder's conversations, so it starts a new one: ${reasonOf(error)}`);
+      return { error: reasonOf(error).replace(/\.$/, '') };
+    }
+  }
+
   /**
    * Switch to chat when Pane wasn't sure of the terminal's conversation (D-282): the folder's newest
    * conversation that no other Pane tab has open. None left, or no list, starts a new one, and says so.
+   * Synchronous, so the caller can save the choice before anything else claims it.
    */
-  private async mostRecent(panelId: string, runtime: ChatTabRuntime): Promise<{ sessionId?: string; banner: ChatTabSwitchBanner }> {
+  private mostRecent(panelId: string, listed: SwitchListing): SwitchChoice {
+    if ('error' in listed) return { banner: { kind: 'list-failed', reason: listed.error } };
+    const { sessions, complete } = listed;
     const elsewhere = this.options.openConversations?.(panelId) ?? new Map();
-    let sessions: SessionInfo[];
-    try { sessions = newestFirst(await runtime.list(this.required(panelId).cwd)); }
-    catch (error) {
-      console.warn(`[ChatTabs] ${panelId} could not list its folder's conversations, so it starts a new one: ${reasonOf(error)}`);
-      return { banner: { kind: 'list-failed', reason: reasonOf(error).replace(/\.$/, '') } };
-    }
     const chosen = sessions.find(session => !elsewhere.has(session.sessionId));
-    console.log(`[ChatTabs] ${panelId} opens ${chosen ? `the folder's most recent conversation ${chosen.sessionId}` : 'a new conversation'}: ${sessions.length} listed, ${sessions.length - sessions.filter(session => !elsewhere.has(session.sessionId)).length} open in other tabs.`);
-    return chosen ? { sessionId: chosen.sessionId, banner: { kind: 'most-recent' } } : { banner: { kind: 'none' } };
+    console.log(`[ChatTabs] ${panelId} opens ${chosen ? `the folder's most recent conversation ${chosen.sessionId}` : 'a new conversation'}: ${sessions.length} listed${complete ? '' : ' (list cut short)'}, ${sessions.filter(session => elsewhere.has(session.sessionId)).length} open in other tabs.`);
+    if (chosen) return { sessionId: chosen.sessionId, banner: { kind: 'most-recent' } };
+    // Every listed one is taken, but the list stopped early: older ones may be free, so this is not "none".
+    if (!complete) return { banner: { kind: 'list-failed', reason: `Pane lists only the newest ${CHAT_CONVERSATION_LIMIT.toLocaleString('en-US')}, and every one of those is open in another tab` } };
+    return { banner: { kind: 'none' } };
   }
 
   private async applySettings(panelId: string, runtime: ChatTabRuntime): Promise<void> {
@@ -640,6 +659,12 @@ function newestFirst(sessions: SessionInfo[]): SessionInfo[] {
     .sort((a, b) => (a.at === b.at ? 0 : b.at > a.at ? 1 : -1) || a.index - b.index)
     .map(entry => entry.session);
 }
+
+/** The folder's conversations for Switch to chat, newest first (`complete`: nothing was left out), or why there are none. */
+type SwitchListing = { sessions: SessionInfo[]; complete: boolean } | { error: string };
+
+/** The conversation Switch to chat opens, none for a new one, and the banner that says so. */
+interface SwitchChoice { sessionId?: string; banner: ChatTabSwitchBanner }
 
 function safeName(panelId: string): string { return createHash('sha256').update(panelId).digest('hex').slice(0, 32); }
 

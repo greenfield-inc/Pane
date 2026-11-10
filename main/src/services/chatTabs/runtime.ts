@@ -4,7 +4,7 @@ import {
   type PromptResponse, type AnyMessage, type Stream, type RequestPermissionRequest, type SessionInfo, type SessionNotification, type RequestPermissionResponse, type SessionConfigOption, type SessionUpdate,
 } from '@agentclientprotocol/sdk';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
-import type { ChatTabCommand } from '../../../../shared/types/chatTab';
+import { CHAT_CONVERSATION_LIMIT, type ChatTabCommand } from '../../../../shared/types/chatTab';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { AgentProcess, type AgentCommand } from './agentProcess';
@@ -106,18 +106,24 @@ export class ChatTabRuntime {
   canLoad(): boolean { return this.initialization?.agentCapabilities?.loadSession === true; }
   canList(): boolean { return Boolean(this.initialization?.agentCapabilities?.sessionCapabilities?.list); }
 
-  /** The agent's saved conversations in `cwd` (ACP session/list), following its cursor; at most `limit`. */
-  async list(cwd: string, limit = 500): Promise<SessionInfo[]> {
+  /**
+   * The agent's saved conversations in `cwd` (ACP session/list), following its cursor to the end.
+   * `complete` is false when Pane stopped at `limit` conversations, so later ones were not listed (review F-4).
+   */
+  async list(cwd: string, limit = CHAT_CONVERSATION_LIMIT): Promise<{ sessions: SessionInfo[]; complete: boolean }> {
     if (!this.canList()) throw new PaneError('CHAT_LIST_UNSUPPORTED', 'This agent adapter cannot list saved conversations.', 'Update Pane, or keep working in this conversation.');
     const sessions: SessionInfo[] = [];
+    const seen = new Set<string>();
     let cursor: string | undefined;
-    for (let page = 0; page < 50 && sessions.length < limit; page++) {
+    // Every page is asked for at most once; an adapter that repeats a cursor has nothing further to give.
+    do {
+      if (cursor) seen.add(cursor);
       const response = await this.bounded(this.agent().request(methods.agent.session.list, cursor ? { cwd, cursor } : { cwd })).catch(error => { throw chatFailure(error, { code: 'CHAT_LIST_FAILED', next: 'Try again, or keep working in this conversation.' }); });
       sessions.push(...response.sessions);
       cursor = response.nextCursor ?? undefined;
-      if (!cursor) break;
-    }
-    return sessions.slice(0, limit);
+    } while (cursor && !seen.has(cursor) && sessions.length < limit);
+    const complete = !(cursor && !seen.has(cursor)) && sessions.length <= limit;
+    return { sessions: sessions.slice(0, limit), complete };
   }
 
   async start(): Promise<InitializeResponse> {
