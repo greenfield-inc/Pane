@@ -128,7 +128,9 @@ describe('NotifyQueue replies (the reply contract)', () => {
     queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Can it be undone?' } });
     const result: NotifyResult = await call;
     expect(result).toMatchObject({ reply: 'Can it be undone?', id: 'q20' });
-    expect('replyId' in result && result.replyId).toBe(item(queue, 'q20')?.reply?.id);
+    // Its continuation id is its own: never the reply's public id, which every screen sees (F-6).
+    expect('replyId' in result && result.replyId).toEqual(expect.any(String));
+    expect('replyId' in result && result.replyId).not.toBe(item(queue, 'q20')?.reply?.id);
     expect('next' in result && 'replyId' in result && result.next).toContain(`--took ${'replyId' in result ? result.replyId : ''} answer`);
     expect(typed).toEqual([]);
     expect(item(queue, 'q20')).toMatchObject({ state: 'waiting', reply: { state: 'reading', reader: { kind: 'asker' } } });
@@ -154,6 +156,25 @@ describe('NotifyQueue replies (the reply contract)', () => {
     queue.run({ type: 'answer', id: 'q50', answer: { picks: ['Tag it'] } });
     await vi.advanceTimersByTimeAsync(3_000);
     await expect(updated).resolves.toEqual({ answer: 'Tag it' });
+  });
+
+  it('F-6: the id a reader outside Pane continues with is in no snapshot, so another tab can\'t use what it sees', async () => {
+    const outside: NotifySource = { name: 'release-scripts', agent: 'Claude', cwd: '/tmp/release' };
+    const queue = queueWith();
+    const call = queue.ask({ question: { ui: 'options', title: 'Q-50: Tag the release?', choices: [{ label: 'Tag it' }, { label: 'Wait' }] }, source: outside, id: 'q50' });
+    queue.run({ type: 'answer', id: 'q50', answer: { picks: [], text: 'What goes in it?' } });
+    const result = await call;
+    if (!('replyId' in result)) throw new Error(`expected a reply result, got ${JSON.stringify(result)}`);
+    const seen = item(queue, 'q50')?.reply?.id;
+    if (!seen) throw new Error('expected the reply to be shared');
+    // What every screen and phone gets never holds the continuation id.
+    expect(JSON.stringify(queue.sharedState())).not.toContain(result.replyId);
+    expect(JSON.stringify(queue.snapshot())).not.toContain(result.replyId);
+    expect(() => queue.took({ panelId: 'some-tab' }, seen, 'answer')).toThrow(/Only the agent reading|no waiting approval/);
+    expect(() => queue.update({ panelId: 'some-tab' }, seen, { asked: 'x', whatChanged: 'y' })).toThrow(/Only the agent reading|no waiting approval/);
+    expect(() => queue.took({}, seen, 'answer')).toThrow(/Only the agent reading|no waiting approval/);
+    expect(item(queue, 'q50')).toMatchObject({ state: 'waiting', reply: { state: 'reading' } });
+    expect(queue.took({}, result.replyId, 'answer')).toMatchObject({ took: 'answer', id: 'q50' });
   });
 
   it('J7: --took question, then --update makes v2 with the question, what changed and v1 kept', async () => {
@@ -361,6 +382,56 @@ describe('NotifyQueue replies (the reply contract)', () => {
     queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'B' } });
     await vi.advanceTimersByTimeAsync(1);
     tabs.set('orch', 'delivered');
+    queue.flushTabMessages();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([['orch', 'reply: Q-20 → "B" (by you)']]);
+  });
+
+  it('F-2: a second reply is refused while the first is still being typed into its reader\'s tab, so --took never records unread words', async () => {
+    let release: (outcome: 'delivered') => void = () => undefined;
+    const queue = (() => {
+      const first = queueWith();
+      void first.ask({ question: q20, source: orchestrator, id: 'q20' });
+      first.dispose();
+      return queueWith({
+        typeIntoTab: (panelId, text) => new Promise((resolve) => {
+          release = (outcome) => {
+            typed.push([panelId, text]);
+            resolve(outcome);
+          };
+        }),
+      });
+    })();
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'A: Do not proceed' } });
+    await vi.advanceTimersByTimeAsync(1);
+    // A is on its way into the tab: B can't replace it.
+    expect(() => queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'B: What will be deleted?' } })).toThrow(/still reading your last reply/);
+    release('delivered');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([['orch', 'reply: Q-20 → "A: Do not proceed" (by you)']]);
+    queue.took({ panelId: 'orch' }, 'Q-20', 'answer');
+    expect(item(queue, 'q20')).toMatchObject({ state: 'answered', answerSummary: 'A: Do not proceed' });
+  });
+
+  it('F-2: a line its tab turned away as busy releases the reply, so a newer one can replace it', async () => {
+    let outcome: 'busy' | 'delivered' = 'busy';
+    const queue = (() => {
+      const first = queueWith();
+      void first.ask({ question: q20, source: orchestrator, id: 'q20' });
+      first.dispose();
+      return queueWith({
+        typeIntoTab: async (panelId, text) => {
+          if (outcome === 'delivered') typed.push([panelId, text]);
+          return outcome;
+        },
+      });
+    })();
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'A' } });
+    await vi.advanceTimersByTimeAsync(1);
+    // Turned away as busy, A was never typed: B replaces it.
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'B' } });
+    await vi.advanceTimersByTimeAsync(1);
+    outcome = 'delivered';
     queue.flushTabMessages();
     await vi.advanceTimersByTimeAsync(1);
     expect(typed).toEqual([['orch', 'reply: Q-20 → "B" (by you)']]);

@@ -15643,7 +15643,7 @@ export const RUNPANE_CONTRACT = {
             "replyId": {
               "type": "string",
               "minLength": 1,
-              "description": "This reply. Pass it to --took and --update: only this call was given it, so it lets its agent continue, also from outside a Pane tab."
+              "description": "This call's private id for the reply (not the id other screens show). Pass it to --took and --update: only this call was given it, so it lets its agent continue, also from outside a Pane tab."
             },
             "next": {
               "type": "string"

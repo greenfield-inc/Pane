@@ -100,6 +100,11 @@ interface Entry {
   restored?: boolean;
   /** Readers the current reply was already offered to and couldn't take it, by panel id ('call' for an open call). */
   replyTried?: Set<string>;
+  /**
+   * The id the open call that got the current reply continues with (D-294). Only that call's result
+   * holds it: it is kept here, never on the item, so no snapshot, history or other screen sees it.
+   */
+  continuation?: string;
 }
 
 /** What an item's asker is told when it has no open call: typed into its tab, once, when it's at its prompt. */
@@ -251,6 +256,8 @@ export class NotifyQueue extends EventEmitter {
   private quitting = false;
   private tabMessages: TabMessage[] = [];
   private readonly tabsTyping = new Set<string>();
+  /** Replies whose line is being typed into their reader's tab right now: not replaceable until it's known whether it went. */
+  private readonly repliesTyping = new Set<string>();
   private lastInUse: boolean | undefined;
 
   constructor(private readonly env: NotifyQueueEnvironment) {
@@ -771,7 +778,8 @@ export class NotifyQueue extends EventEmitter {
     const { item } = entry;
     const earlier = item.reply;
     // One reply at a time with its reader: --took names the approval, so it must mean the reply the reader has.
-    if (earlier?.state === 'reading' && earlier.deliveredAt !== undefined) {
+    // A line still being typed may already be in the tab, so it counts as read until the tab says otherwise.
+    if (earlier?.state === 'reading' && (earlier.deliveredAt !== undefined || this.repliesTyping.has(earlier.id))) {
       const reader = earlier.reader?.name ?? 'its reader';
       throw new PaneError('ERR_NOTIFY_REPLY_BEING_READ', `${reader.charAt(0).toUpperCase()}${reader.slice(1)} is still reading your last reply, so this one wasn't sent. Your words are still in the box.`, 'Send it once the approval says how your last reply was taken, or pick an option to answer now.');
     }
@@ -836,7 +844,10 @@ export class NotifyQueue extends EventEmitter {
     if (!reader.panelId) {
       entry.replyTried?.add('call');
       item.reply.deliveredAt = Date.now();
-      const result: NotifyResult = { reply: reply.text, id: item.id, replyId: reply.id, next: tookNext(item, reply.id) };
+      // Its own id, not the reply's: the reply's id is on every screen, and this one names this call (F-6).
+      const continuation = randomUUID();
+      entry.continuation = continuation;
+      const result: NotifyResult = { reply: reply.text, id: item.id, replyId: continuation, next: tookNext(item, continuation) };
       if (reply.picks?.length) Object.assign(result, { picks: reply.picks });
       if (entry.waiter) entry.waiter.resolve(result);
       else entry.pending = result;
@@ -880,7 +891,7 @@ export class NotifyQueue extends EventEmitter {
     this.save(entry);
     this.changed();
     // A reader with no tab is known by its reply id, so its next step names that (D-294).
-    const nextRef = reply.reader && !reply.reader.panelId ? reply.id : entry.item.id;
+    const nextRef = reply.reader && !reply.reader.panelId && entry.continuation ? entry.continuation : entry.item.id;
     return { took: 'question', id: entry.item.id, next: `Find out, then run runpane notify --update ${nextRef} --asked "<their question>" --what-changed "<one line per change>" with any changed --title, --context, --choices, --questions or --links. It waits for the answer.` };
   }
 
@@ -1003,8 +1014,8 @@ export class NotifyQueue extends EventEmitter {
    */
   private forReader(caller: NotifyReaderCaller, ref: string, what: 'took' | 'update'): Entry {
     const wanted = ref.trim();
-    // A reply's id names its approval too: it is how a reader with no Pane tab continues (D-294).
-    const candidates = [...this.entries.values()].filter(({ item }) => item.state === 'waiting' && (item.id === wanted || item.reply?.id === wanted || leadingQn(item.title) === wanted));
+    // An open call's continuation id names its approval too: it is how a reader with no Pane tab continues (D-294).
+    const candidates = [...this.entries.values()].filter(entry => entry.item.state === 'waiting' && (entry.item.id === wanted || (entry.continuation !== undefined && entry.continuation === wanted) || leadingQn(entry.item.title) === wanted));
     if (candidates.length === 0) {
       throw new PaneError('ERR_NOTIFY_GONE', `There's no waiting approval ${wanted} on ${this.machine()}: it was answered or closed. Nothing was changed.`, 'Check the id or Q-n in the reply: line, or read the answer you already have.');
     }
@@ -1019,9 +1030,9 @@ export class NotifyQueue extends EventEmitter {
   private mayRead(entry: Entry, caller: NotifyReaderCaller, ref: string): boolean {
     const { item } = entry;
     const reader = item.reply?.reader;
-    // The open call the reply went back to holds its id, and nobody else was given it: that call's
-    // agent continues with it, from a terminal outside Pane as from a tab (D-294).
-    if (reader && !reader.panelId && item.reply?.id === ref) return true;
+    // The open call the reply went back to holds its continuation id, and nobody else was given it:
+    // that call's agent continues with it, from a terminal outside Pane as from a tab (D-294).
+    if (reader && !reader.panelId && entry.continuation !== undefined && entry.continuation === ref) return true;
     const panelId = caller.panelId;
     if (!panelId) return false;
     if (reader?.panelId) return reader.panelId === panelId || panelId === item.source.panelId;
@@ -1150,6 +1161,7 @@ export class NotifyQueue extends EventEmitter {
     for (const message of [...this.tabMessages]) {
       if (this.tabsTyping.has(message.panelId)) continue;
       this.tabsTyping.add(message.panelId);
+      if (message.reply) this.repliesTyping.add(message.reply);
       let again = false;
       void type(message.panelId, message.text).then((outcome) => {
         if (outcome === 'busy') return;
@@ -1168,6 +1180,7 @@ export class NotifyQueue extends EventEmitter {
         console.warn(`[Notify] Couldn't type into tab ${message.panelId}; the next sweep tries again:`, error);
       }).finally(() => {
         this.tabsTyping.delete(message.panelId);
+        if (message.reply) this.repliesTyping.delete(message.reply);
         // Only after a message went: a busy tab waits for its next idle or the next sweep.
         if (again && this.tabMessages.some(other => other.panelId === message.panelId)) this.flushTabMessages();
       });
