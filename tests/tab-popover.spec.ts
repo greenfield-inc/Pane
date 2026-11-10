@@ -191,3 +191,35 @@ test('inspector arrows move selection and focus through every tab', async ({ pag
   await expect(tabs.getByRole('tab', { name: 'Changes' })).toBeFocused();
   await page.screenshot({ path: testInfo.outputPath('inspector-keyboard.png') });
 });
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`a terminal agent tab switches to chat from its right-click menu, with no button in the tab bar (${scheme})`, async ({ page }, testInfo) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await installElectronApiMock(page, {
+      platform: 'darwin', initialProjects: [project], initialSessions: [session], activeProjectId: project.id,
+      initialConfig: { chatTabsEnabled: true, appearanceMode: 'system' },
+      initialPanels: [{ ...panel, title: 'Claude', metadata: { ...panel.metadata, permanent: false }, state: { ...panel.state, customState: { agentType: 'claude', agentSessionId: 'conv-1' } } }],
+    });
+    await page.addInitScript(() => {
+      const switched: string[] = [];
+      Object.assign(window.electronAPI, { chatTab: { switch: async (panelId: string) => { switched.push(panelId); return { panelId: 'chat-1', terminalKept: false }; } } });
+      Object.assign(window, { __switchedToChat: switched });
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
+    await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Switch to chat' })).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Claude' }).click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Switch to chat…' })).toBeVisible();
+    // The menu slides in; shoot it where it settles.
+    await page.getByRole('menu').evaluate(menu => Promise.all(menu.getAnimations({ subtree: true }).map(animation => animation.finished)));
+    await page.screenshot({ path: testInfo.outputPath(`tab-switch-to-chat-menu-${scheme}.png`) });
+    await page.getByRole('menuitem', { name: 'Switch to chat…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Switch to chat' });
+    await dialog.getByRole('button', { name: 'Switch to chat' }).click();
+    await expect(dialog).toBeHidden();
+    // SAFETY: the init script above defines it.
+    expect(await page.evaluate(() => (window as typeof window & { __switchedToChat: string[] }).__switchedToChat)).toEqual([panel.id]);
+  });
+}

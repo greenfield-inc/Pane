@@ -211,6 +211,10 @@ interface ElectronAPI {
     create(request: import('../../../shared/types/chatTab').ChatTabCreate): Promise<{ panelId: string }>;
     /** Switch to chat: moves a terminal Claude or Codex tab into a chat tab. */
     switch(panelId: string): Promise<import('../../../shared/types/chatTab').ChatTabSwitchResult>;
+    /** What switching every terminal agent tab of a Session would do; changes nothing. */
+    previewSessionSwitch(sessionId: string): Promise<import('../../../shared/types/chatTab').SessionChatSwitchPreview>;
+    /** Switches the confirmed tabs of a Session one by one. */
+    switchSession(sessionId: string, panelIds: string[]): Promise<import('../../../shared/types/chatTab').SessionChatSwitchResult>;
     keys(): Promise<Record<'claude' | 'codex', boolean>>;
     setKey(agent: 'claude' | 'codex', key: string | null): Promise<Record<'claude' | 'codex', boolean>>;
   };

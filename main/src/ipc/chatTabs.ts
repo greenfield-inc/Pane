@@ -17,6 +17,8 @@ import { adapterEntry, adapterFileForPlainNode, installAdapter } from '../servic
 import { findExecutableInPath } from '../utils/shellPath';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { switchToChat, terminalConversation, terminalRestored, type SwitchToChatPorts, type TranscriptLookup } from '../services/chatTabs/switchToChat';
+import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
+import { previewSessionSwitch, switchSessionToChat, type SessionSwitchPorts } from '../services/chatTabs/switchSession';
 import { getAppDirectory } from '../utils/appDirectory';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from '../services/claudeSessionTranscript';
 import type { TerminalPanelState } from '../../../shared/types/panels';
@@ -53,7 +55,7 @@ const agentFarmProfiles = new AgentFarmProfiles({
   checkCli: (agent, context) => installAdapter(agent, printedCli(agent, context.env, findExecutableInPath), context),
 });
 
-const CHAT_TAB_CHANNELS = ['create', 'switch', 'get', 'history', 'send', 'receipt', 'unqueue', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key'] as const;
+const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key'] as const;
 
 function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
 
@@ -79,6 +81,13 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     return createChatTab(services, request);
   });
   registry.register('chat-tab:switch', (id: string) => switchToChat(panelId(id), switchPorts(services, registry)));
+  // A whole Session, from its right-click menu, here or from All machines (machines:run).
+  registry.register('chat-tab:preview-session-switch', (id: string) => previewSessionSwitch(decodeBoundary(id, boundary.nonEmptyString), sessionSwitchPorts(services, registry)));
+  registry.register('chat-tab:switch-session', (id: string, panelIds?: PaneCommandValue) => switchSessionToChat(
+    decodeBoundary(id, boundary.nonEmptyString),
+    panelIds === undefined || panelIds === null ? undefined : decodeBoundary(panelIds, boundary.array(boundary.nonEmptyString)),
+    sessionSwitchPorts(services, registry),
+  ));
   registry.register('chat-tab:get', (id: string, limit?: number) => manager.view(panelId(id), limit === undefined ? undefined : decodeBoundary(limit, boundary.number)));
   registry.register('chat-tab:history', (id: string, before: number, limit: number) => manager.history(panelId(id), decodeBoundary(before, boundary.number), decodeBoundary(limit, boundary.number)));
   registry.register('chat-tab:send', (id: string, request: PaneCommandValue) => manager.send(panelId(id), decodeBoundary(request, sendSchema)));
@@ -150,6 +159,31 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
 const REOPEN_LIMIT_MS = 3 * 60_000;
 const resumeResultSchema = boundary.object({ readiness: boundary.optional(boundary.object({ ok: boundary.boolean, blocked: boundary.optional(boundary.object({ message: boundary.string })), reason: boundary.optional(boundary.object({ code: boundary.string, message: boundary.string })), state: boundary.optional(boundary.object({ running: boundary.boolean })) })) });
 const deleteResultSchema = boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) });
+
+/**
+ * A Session's terminal tabs, as its membership has them: every tab of its own Pane, then for each
+ * Pane in it that is not archived, every tab when the whole Pane is linked, or only its linked tabs.
+ */
+function sessionSwitchPorts(services: AppServices, registry: PaneCommandRegistry): SessionSwitchPorts {
+  return {
+    ...switchPorts(services, registry),
+    sessionTerminals: sessionId => {
+      const membership = services.orchestrationSessionManager?.workspaceMembership(sessionId);
+      if (!membership) return undefined;
+      const panes: Array<[string, readonly string[]]> = [...membership.ownPaneIds].map(paneId => [paneId, []]);
+      for (const [paneId, panelIds] of membership.panes) if (!membership.ownPaneIds.has(paneId)) panes.push([paneId, panelIds]);
+      return panes.flatMap(([paneId, linked]) => {
+        const paneName = membership.ownPaneIds.has(paneId) ? 'Session' : services.sessionManager.getSession(paneId)?.name ?? paneId;
+        const terminals = panelManager.getPanelsBySessionAndType(paneId, 'terminal');
+        // The Pane's terminal dock is a plain shell below the tabs, not a tab: leave it out.
+        const dock = getDockTerminalPanel(terminals);
+        return terminals.filter(panel => panel !== dock && (linked.length === 0 || linked.includes(panel.id)))
+          .sort((a, b) => (a.metadata.position ?? 0) - (b.metadata.position ?? 0))
+          .map(panel => ({ panel, paneName }));
+      });
+    },
+  };
+}
 
 /** Whether a Claude conversation has a transcript Pane can see; two sharing an ID is not a conversation Pane can be sure of. */
 const transcriptLookup: TranscriptLookup = id => {

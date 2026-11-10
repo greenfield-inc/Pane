@@ -1,5 +1,5 @@
 import http from 'http';
-import net from 'net';
+import net, { type LookupFunction } from 'net';
 import { EventEmitter } from 'events';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -14,10 +14,20 @@ import type { WorkspaceProbeResult } from '../../services/tailnetMachines';
 import { RemotePaneClientController } from './remotePaneClient';
 import type { ConnectionCheckDependencies } from './connectionChecks';
 
+const controllers: RemotePaneClientController[] = [];
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
+  // Disconnect first: a host stopped under a connected client keeps its busy connection open,
+  // the client reconnects over it, and the stop never finishes.
+  for (const controller of controllers.splice(0)) await controller.switchToLocalMode();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
+
+/** A resolver that knows no names, as this computer is for a ts.net host before Tailscale answers. */
+const resolvesNothing: LookupFunction = (hostname, _options, callback) => {
+  const error: NodeJS.ErrnoException = Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' });
+  queueMicrotask(() => callback(error, '', 0));
+};
 
 const TOKEN = 'check-token';
 
@@ -67,8 +77,9 @@ function createController(dependencies: Partial<ConnectionCheckDependencies> = {
     analyticsManager: { track: (name, properties) => { events.push({ name, properties: properties ?? {} }); } },
     appVersion: '2.4.202',
     checkDependencies: { listSshHosts: async () => [], runSsh: async () => {}, ...dependencies },
+    dnsLookup: resolvesNothing,
   });
-  cleanups.push(() => controller.switchToLocalMode().then(() => undefined));
+  controllers.push(controller);
   return { controller, events };
 }
 

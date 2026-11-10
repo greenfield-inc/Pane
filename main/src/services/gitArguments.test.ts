@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'fs';
+import { rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -15,7 +16,7 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerFileHandlers } from '../ipc/file';
 import { registerGitHandlers } from '../ipc/git';
 import { detectProjectConfig } from './projectConfigDetector';
-import { forceRemoveWorktree } from './gitPerformanceConfig';
+import { forceRemoveWorktree, stopFsmonitorDaemon } from './gitPerformanceConfig';
 import { worktreePoolManager } from './worktreePoolManager';
 import { fastGetAheadBehind } from './gitPlumbingCommands';
 
@@ -30,7 +31,18 @@ beforeEach(() => {
   git('config', 'user.email', 'fixture@example.invalid');
   git('commit', '--allow-empty', '-m', 'Initial');
 });
-afterEach(() => rmSync(directory, { recursive: true, force: true }));
+afterEach(async () => {
+  // A claim replenishes the reserve after it returns, running git in the fixture; on Windows
+  // a folder a process runs in cannot be deleted.
+  await worktreePoolManager.idle();
+  // A developer's own core.fsmonitor makes Git keep a watcher daemon in each worktree.
+  // Stop them as Pane does before removing a worktree.
+  const worktrees = git('worktree', 'list', '--porcelain').split('\n')
+    .filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
+  const runner = new CommandRunner({ path: directory });
+  for (const worktree of worktrees) await stopFsmonitorDaemon(worktree, runner);
+  await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+});
 
 it('counts commits relative to a literal dollar-bearing branch', async () => {
   git('branch', 'base$PANE_AUDIT_LITERAL;branch&literal');

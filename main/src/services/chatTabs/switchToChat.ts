@@ -84,6 +84,9 @@ export interface SwitchToChatPorts {
   sessionLaunchCommand(panelId: string): string | undefined;
 }
 
+/** A switch that passed every check: the terminal, the chat it opens, and what Pane knows of its conversation. */
+export interface PreparedSwitch { panel: ToolPanel; chatState: ChatPanelState; conversation: TerminalConversation }
+
 /** Next steps after a failure past the stop: with the terminal back, and with it stopped. */
 const TRY_AGAIN_OR_TERMINAL = 'Press Try again, or keep working in the terminal.';
 const TRY_AGAIN = 'Press Try again, or open a chat tab from the + menu and type /resume to pick the conversation.';
@@ -104,6 +107,15 @@ function firstSentence(reason: string): string {
  * restarts the terminal only on a conversation Pane is sure of. It never sends anything to the agent.
  */
 export async function switchToChat(panelId: string, ports: SwitchToChatPorts): Promise<ChatTabSwitchResult> {
+  const prepared = await prepareSwitch(panelId, ports);
+  return switchPrepared(prepared, ports);
+}
+
+/**
+ * Every check a switch makes before it touches the agent: throws the PaneError the switch would
+ * throw, or returns the chat it would open. Sends the agent nothing, so a preview can ask it.
+ */
+export async function prepareSwitch(panelId: string, ports: SwitchToChatPorts): Promise<PreparedSwitch> {
   if (!ports.chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine. Nothing was switched.', 'Turn on Chat tabs in Settings > Advanced > Experimental, then try again.');
   const panel = ports.panel(panelId);
   if (!panel) throw new PaneError('CHAT_PANEL_MISSING', 'That tab no longer exists. Nothing was switched.', 'Open the agent tab again.');
@@ -140,7 +152,12 @@ export async function switchToChat(panelId: string, ports: SwitchToChatPorts): P
   if (converted.settings) chatState.settings = converted.settings;
   if (state.orchestrationSessionId) chatState.orchestrationSessionId = state.orchestrationSessionId;
   if (state.sessionFolder) chatState.sessionFolder = state.sessionFolder;
+  return { panel, chatState, conversation };
+}
 
+/** Switches a tab `prepareSwitch` cleared; it checks nothing again. */
+export async function switchPrepared({ panel, chatState, conversation }: PreparedSwitch, ports: SwitchToChatPorts): Promise<ChatTabSwitchResult> {
+  const panelId = panel.id;
   try { await ports.terminal.stop(panelId); }
   catch (error) { throw new PaneError('CHAT_SWITCH_BUSY', `The agent could not be stopped cleanly: ${reasonOf(error)}. Nothing was switched.`, 'Wait for it to finish, or stop it (Esc in the terminal), then switch again.'); }
 

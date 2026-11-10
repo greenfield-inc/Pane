@@ -155,9 +155,10 @@ To test approvals' timers without waiting, start a dev build with
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
-  (`tests/electronApiMock.ts`). To start Vite, Playwright runs `pnpm electron-dev`
-  on port `4521`, which also opens an Electron window against your data
-  directory, so set `PANE_DIR` for the run. Don't run two Playwright commands on the
+  (`tests/electronApiMock.ts`). `pnpm test:ci:minimal` starts Vite alone. To
+  start Vite, `pnpm test` and `pnpm test:ci` run `pnpm electron-dev` on port
+  `4521`, which also opens an Electron window against your data directory, so
+  set `PANE_DIR` for the run. Don't run two Playwright commands on the
   same port at once: the second can attach to or kill the first one's server.
   Use `PLAYWRIGHT_PORT` to separate them:
   ```bash
@@ -277,25 +278,63 @@ happened, why, what changed, and what to do next.
 1. Update or delete any doc your change makes wrong (see the docs rule in
    [AGENTS.md](AGENTS.md#docs)).
 2. Add tests for new functionality, and make sure `pnpm typecheck`, `pnpm lint`
-   and the tests pass.
+   and the tests pass. `pnpm check:fast` runs, in a few minutes, the checks
+   behind most red CI runs: the type check and lint, the offline markdown link
+   check (when [lychee](https://lychee.cli.rs) is installed), the renderer-test
+   type check, and the unit tests your branch's changes reach in each workspace
+   it changed. Run it before you push; it does not replace CI.
 3. If you added or updated dependencies, run `pnpm run generate-notices` and
    commit the updated `NOTICES` file.
 4. Open the pull request with a clear description, linked issues, the commands
    you ran, and screenshots for UI changes.
 
 CI runs typecheck, lint, a markdown link check, unit tests on Linux, macOS and
-Windows, and the Playwright smoke suite. React Doctor also comments on new React
+Windows, and the Playwright smoke suite. CI retries a failed unit test once
+(`--retry=1`; local runs never retry) and lists every retried test in the job
+summary, with a warning on each test that passed only on its retry: that test
+is flaky, so fix it. Playwright journeys are not retried. React Doctor also comments on new React
 findings in `frontend/`; it is advisory. To see its findings before you push:
 
 ```bash
 pnpm exec react-doctor frontend --scope changed
 ```
 
-Maintainers attach PR screenshots by uploading them to the `pr-assets` release
-(`gh release upload pr-assets <file> --clobber`, named
+Maintainers attach PR screenshots by uploading them to the `pr-assets-2` release
+(`gh release upload pr-assets-2 <file> --clobber`, named
 `pr-<number>-<name>-<hash>.png`) and linking the release download URL.
+The older `pr-assets` release is full (GitHub allows 1,000 assets per
+release); images already there keep working.
 
 Releases, CI and deploys are covered in [RUNBOOK.md](RUNBOOK.md).
+
+### Merging
+
+A pull request is ready to merge when `CI result` is green and its review is
+done. Watch only the required check (`gh pr checks <number> --required`; a PR
+based on another branch has no required checks, so watch its `CI result`
+check by name until it targets `main`). The other checks (Markdown Links,
+Native Android Build, Native OTA Updates, Native Runtime, React Doctor, Notes
+Native QA, the package builds) are advisory: look at them when they fail, but
+they never hold a merge. `CI result` does not wait for Markdown Links, so check
+it yourself when you change docs.
+
+A single pull request is squash-merged.
+
+A stack (each pull request based on the one below) is merged bottom-up with
+**Create a merge commit**, never squash, and nothing is rebased between merges:
+
+1. Before the first merge, bring the stack up to date once: each branch must
+   contain the final head of the branch below it. If one does not, rebase the
+   stack bottom to top in one pass and let CI run on all of them at the same
+   time.
+2. Merge the bottom pull request with a merge commit.
+3. Point the next one at `main` (`gh pr edit <number> --base main`; branches
+   are not deleted on merge here, so GitHub does not do it). Its diff now shows
+   only its own commits, and the green `CI result` on its head still counts.
+   Do not rebase or push it.
+4. Merge it with a merge commit, and repeat up the stack.
+
+Agents merge only when the person asks for that pull request.
 
 ### Manual Testing
 

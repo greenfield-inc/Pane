@@ -48,7 +48,7 @@ const eventChannels = new Set<string>(MACHINE_EVENT_CHANNELS);
 const isMachineEventChannel = (channel: string): channel is MachineEventChannel => eventChannels.has(channel);
 const itemSchema = boundary.object({ kind: boundary.enumeration('pane', 'session'), id: boundary.nonEmptyString });
 const commandTypeSchema = boundary.object({
-  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session'),
+  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session', 'preview-switch-to-chat', 'switch-to-chat'),
 });
 const commandSchemas = {
   notify: boundary.object({ command: boundary.jsonObject }),
@@ -60,6 +60,8 @@ const commandSchemas = {
   rename: boundary.object({ target: itemSchema, name: boundary.nonEmptyString }),
   'create-pane': boundary.object({ request: boundary.jsonObject }),
   'create-session': boundary.object({ input: boundary.jsonObject }),
+  'preview-switch-to-chat': boundary.object({ sessionId: boundary.nonEmptyString }),
+  'switch-to-chat': boundary.object({ sessionId: boundary.nonEmptyString, panelIds: boundary.array(boundary.nonEmptyString) }),
 };
 
 /**
@@ -240,7 +242,7 @@ function toInvocation(command: PaneCommandValue): Invocation {
   if (!type) {
     const named = decodeOptionalBoundary(command, boundary.object({ type: boundary.string }))?.type;
     throw new PaneError('ERR_MACHINE_COMMAND_REFUSED',
-      `Pane can't run ${named ? `"${named}"` : 'that command'} on another machine: only answering Notify and permissions, pin, pause, resume, archive, rename and create are allowed. Nothing was sent.`,
+      `Pane can't run ${named ? `"${named}"` : 'that command'} on another machine: only answering Notify and permissions, pin, pause, resume, archive, rename, create and switching a Session to chat are allowed. Nothing was sent.`,
       'Switch to that machine to do this there.');
   }
   try {
@@ -282,6 +284,12 @@ function toInvocation(command: PaneCommandValue): Invocation {
       case 'create-session':
         // This desktop shows chat tabs, so the Session may start as one (D-203).
         return { channel: 'orchestration-sessions:create', args: [decodeBoundary(command, commandSchemas['create-session']).input, { chatTabs: true }] };
+      case 'preview-switch-to-chat':
+        return { channel: 'chat-tab:preview-session-switch', args: [decodeBoundary(command, commandSchemas['preview-switch-to-chat']).sessionId] };
+      case 'switch-to-chat': {
+        const { sessionId, panelIds } = decodeBoundary(command, commandSchemas['switch-to-chat']);
+        return { channel: 'chat-tab:switch-session', args: [sessionId, panelIds] };
+      }
     }
   } catch (error) {
     throw new PaneError('ERR_MACHINE_COMMAND_INVALID',
