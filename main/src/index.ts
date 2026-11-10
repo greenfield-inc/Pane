@@ -1320,9 +1320,10 @@ if (launchRemoteSetup) {
       app.dock?.setIcon(path.join(__dirname, '../assets/icon-macos.png'));
     }
     // The menu's keys follow Pane's: an item steps aside from a key a Pane
-    // command owns now, and Settings… shows Open Settings' current key.
-    const installMenu = () => {
-      const config = configManager.getConfig();
+    // command owns now, and Settings… shows Open Settings' current key. Config
+    // loads in initializeServices, so the menu starts on the default keys and
+    // is rebuilt from the person's once it has loaded.
+    const installMenu = (config: Parameters<typeof activePaneChords>[0] & Parameters<typeof settingsMenuAccelerator>[0]) => {
       installApplicationMenu({
         isPackaged: app.isPackaged,
         onAction: sendMenuAction,
@@ -1330,8 +1331,7 @@ if (launchRemoteSetup) {
         settingsAccelerator: settingsMenuAccelerator(config),
       });
     };
-    installMenu();
-    configManager.on('config-updated', installMenu);
+    installMenu({});
 
     // A second Pane launched only to open a link hands it to the running Pane and exits.
     if (pendingPaneLink && process.platform !== 'darwin' && await forwardPaneLinkToRunningPane(pendingPaneLink, getAppDirectory())) {
@@ -1347,6 +1347,8 @@ if (launchRemoteSetup) {
     // after the window opens reads the cache instead of blocking on the shell.
     void warmShellPath();
     await initializeServices();
+    installMenu(configManager.getConfig());
+    configManager.on('config-updated', () => installMenu(configManager.getConfig()));
     if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     void addRunpaneToUserPathBestEffort();
     if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') setTimeout(() => syncPaneMcpForApp({
