@@ -74,13 +74,19 @@ jobs:
         echo "$reason" >> "$GITHUB_STEP_SUMMARY"
         echo "build=$build" >> "$GITHUB_OUTPUT"
 
+  # One job per ABI, side by side. A PR build is a compile check, so it builds
+  # arm64-v8a only.
   android:
-    name: Android dev client
+    name: Android dev client (${{ matrix.abi }})
     needs: fingerprint
     # The fingerprint job is skipped outside PRs; those always build.
     if: ${{ !cancelled() && (needs.fingerprint.result == 'skipped' || needs.fingerprint.outputs.build == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: ${{ fromJSON(github.event_name == 'pull_request' && '["arm64-v8a"]' || '["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]') }}
 
     steps:
     - name: Checkout code
@@ -127,9 +133,6 @@ jobs:
       working-directory: native
       run: pnpm exec expo prebuild --platform android --no-install
 
-    # A PR build is a compile check, so one ABI is enough.
     - name: Build debug APK
       working-directory: native/android
-      env:
-        ABI_FLAG: ${{ github.event_name == 'pull_request' && '-PreactNativeArchitectures=arm64-v8a' || '' }}
-      run: ./gradlew assembleDebug --no-daemon --build-cache $ABI_FLAG
+      run: ./gradlew assembleDebug --no-daemon --build-cache -PreactNativeArchitectures=${{ matrix.abi }}
