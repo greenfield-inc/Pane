@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type Ref } from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import type { ChatTabConversation } from '../../../../shared/types/chatTab';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
@@ -19,13 +19,16 @@ export interface ConversationPickerViewProps {
   onOpen: () => void;
   onCancel: () => void;
   onKey: (event: KeyboardEvent) => void;
+  /** The live picker opens it as a modal; a static render leaves it closed. */
+  dialogRef?: Ref<HTMLDialogElement>;
 }
 
 /** The picker as drawn (picker-v3): header, filter, rows, keys and buttons. */
-export function ConversationPickerView({ rows, filter, selected, busy, error, now, onFilter, onSelect, onOpen, onCancel, onKey }: ConversationPickerViewProps) {
+export function ConversationPickerView({ rows, filter, selected, busy, error, now, onFilter, onSelect, onOpen, onCancel, onKey, dialogRef }: ConversationPickerViewProps) {
   const shown = rows ? filterConversations(rows, filter) : [];
   const chosen = shown[selected];
-  return <div role="dialog" aria-modal="true" aria-label="Continue a past conversation" className="chat-picker" onKeyDown={onKey}>
+  return <dialog ref={dialogRef} aria-label="Continue a past conversation" className="chat-picker" onKeyDown={onKey}
+    onMouseDown={event => { if (event.target === event.currentTarget) onCancel(); }}>
     <div className="chat-picker-head">
       <p className="chat-picker-title">Continue a past conversation</p>
       <p className="chat-picker-subline">Conversations in this folder, newest first. Picking one reloads this chat on it.</p>
@@ -57,7 +60,7 @@ export function ConversationPickerView({ rows, filter, selected, busy, error, no
       <button type="button" className="chat-button chat-button-outline" onClick={onCancel}>Cancel</button>
       <button type="button" className="chat-button chat-button-primary" disabled={busy || !chosen || !canPick(chosen)} onClick={onOpen}>Open</button>
     </div>
-  </div>;
+  </dialog>;
 }
 
 /**
@@ -92,6 +95,29 @@ export function ConversationPicker({ load, onResume, onClose }: {
     return () => { live = false; };
   }, [load]);
   const shown = useMemo(() => rows ? filterConversations(rows, filter) : [], [rows, filter]);
+  // A modal dialog (focus stays in it, Esc closes it) drawn over this chat's column, as designed:
+  // the layer marks the column, and the dialog is placed on it and follows its size.
+  const layer = useRef<HTMLDivElement>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const element = dialog.current;
+    const column = layer.current;
+    if (!element || !column) return;
+    const place = () => {
+      const rect = column.getBoundingClientRect();
+      const width = Math.min(rect.width - 32, parseFloat(getComputedStyle(element).maxWidth) || rect.width - 32);
+      element.style.top = `${rect.top + 12}px`;
+      element.style.left = `${rect.left + (rect.width - width) / 2}px`;
+      element.style.width = `${width}px`;
+      element.style.maxHeight = `${Math.max(160, rect.height - 24)}px`;
+    };
+    place();
+    if (!element.open) element.showModal();
+    const observer = new ResizeObserver(place);
+    observer.observe(column);
+    window.addEventListener('resize', place);
+    return () => { observer.disconnect(); window.removeEventListener('resize', place); if (element.open) element.close(); };
+  }, []);
 
   const open = async () => {
     const row = shown[selected];
@@ -118,9 +144,10 @@ export function ConversationPicker({ load, onResume, onClose }: {
       setSelected(index => stepPickable(shown, index, event.key === 'ArrowDown' ? 1 : -1));
     }
   };
-  return <div className="chat-picker-layer" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+  // The layer dims this chat under the picker; a click outside the picker reaches the dialog's backdrop and closes it.
+  return <div ref={layer} aria-hidden="true" className="chat-picker-layer">
     <ConversationPickerView rows={rows} filter={filter} selected={selected} busy={busy} error={error}
       onFilter={value => { setFilter(value); setSelected(Math.max(0, firstPickable(rows ? filterConversations(rows, value) : []))); }}
-      onSelect={setSelected} onOpen={() => void open()} onCancel={onClose} onKey={onKey} />
+      onSelect={setSelected} onOpen={() => void open()} onCancel={onClose} onKey={onKey} dialogRef={dialog} />
   </div>;
 }

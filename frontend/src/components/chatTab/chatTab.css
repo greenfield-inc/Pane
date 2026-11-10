@@ -215,7 +215,9 @@
 
 /* "Continue a past conversation" (D-277): a card over the chat, opened by /resume or Pick another. */
 .chat-picker-layer { position:absolute; inset:0; z-index:30; display:flex; justify-content:center; align-items:flex-start; padding:12px 16px; background:color-mix(in oklab,var(--chat-background) 55%,transparent); }
-.chat-picker { display:flex; flex-direction:column; width:100%; max-width:var(--thread-max-width); max-height:calc(100% - 24px); overflow:hidden; border:1px solid var(--chat-border); border-radius:12px; background:var(--chat-background); box-shadow:0 8px 24px color-mix(in oklab,var(--chat-foreground) 12%,transparent); font-size:14px; }
+.chat-picker { position:fixed; inset:auto; margin:0; padding:0; color:var(--chat-foreground); display:flex; flex-direction:column; width:100%; max-width:var(--thread-max-width); max-height:calc(100% - 24px); overflow:hidden; border:1px solid var(--chat-border); border-radius:12px; background:var(--chat-background); box-shadow:0 8px 24px color-mix(in oklab,var(--chat-foreground) 12%,transparent); font-size:14px; }
+.chat-picker::backdrop { background:transparent; }
+.chat-picker:not([open]) { display:none; }
 .chat-picker-head { display:flex; flex-direction:column; gap:2px; padding:14px 16px 10px; }
 .chat-picker-title { font-weight:600; font-size:15px; }
 .chat-picker-subline { font-size:13px; color:var(--chat-muted-foreground); }
