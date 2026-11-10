@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, blacksmith-2vcpu-ubuntu-2404, blacksmith-4vcpu-ubuntu-2404, blacksmith-8vcpu-ubuntu-2404, blacksmith-16vcpu-ubuntu-2404]
+        runner: [ubuntu-latest, blacksmith-2vcpu-ubuntu-2404]
     steps:
     - uses: actions/checkout@v7
     - uses: ./.github/actions/setup-pnpm
@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, blacksmith-4vcpu-ubuntu-2404, blacksmith-8vcpu-ubuntu-2404, blacksmith-16vcpu-ubuntu-2404]
+        runner: [blacksmith-2vcpu-ubuntu-2404]
     steps:
     - uses: actions/checkout@v7
     - uses: ./.github/actions/setup-pnpm
@@ -59,33 +59,6 @@ jobs:
     - run: xvfb-run -a pnpm test:ci:minimal
       env:
         PANE_DIR: ${{ runner.temp }}/pane-ci
-
-  main-tests-windows:
-    name: main-tests-windows (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [windows-2022, blacksmith-4vcpu-windows-2025, blacksmith-8vcpu-windows-2025]
-    steps:
-    - shell: bash
-      run: |
-        echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-        echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
-    - shell: pwsh
-      continue-on-error: true
-      run: Add-MpPreference -ExclusionPath $env:RUNNER_TEMP, $env:GITHUB_WORKSPACE
-    - uses: actions/checkout@v7
-    - uses: ./.github/actions/setup-pnpm
-    - run: pnpm install --ignore-scripts
-    - shell: bash
-      run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
-    - run: pnpm rebuild better-sqlite3-multiple-ciphers
-    - run: pnpm --filter main exec vitest run
-    - if: ${{ !cancelled() }}
-      shell: bash
-      run: scripts/ci-background.sh wait typecheck
 
   main-tests-macos:
     name: main-tests-macos (${{ matrix.runner }})
@@ -135,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [windows-2022, blacksmith-4vcpu-windows-2025, blacksmith-8vcpu-windows-2025]
+        runner: [blacksmith-2vcpu-windows-2025]
     steps:
     - uses: actions/checkout@v7
     - uses: ./.github/actions/setup-pnpm
@@ -150,7 +123,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, blacksmith-4vcpu-ubuntu-2404, blacksmith-8vcpu-ubuntu-2404]
+        runner: [blacksmith-2vcpu-ubuntu-2404]
     steps:
     - uses: actions/checkout@v7
     - uses: ./.github/actions/setup-pnpm
