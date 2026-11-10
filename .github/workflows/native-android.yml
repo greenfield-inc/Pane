@@ -95,6 +95,13 @@ jobs:
         distribution: temurin
         java-version: '17'
 
+    # Caches the Gradle user home (dependencies, wrapper, compiled build logic)
+    # and serves the Gradle build cache. Only main writes the cache; PRs read
+    # main's. The build cache is keyed by task inputs, so it never serves
+    # output built from other sources.
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v6
+
     - name: Install dependencies
       run: pnpm install --frozen-lockfile --ignore-scripts
 
@@ -122,4 +129,4 @@ jobs:
       working-directory: native/android
       env:
         ABI_FLAG: ${{ github.event_name == 'pull_request' && '-PreactNativeArchitectures=arm64-v8a' || '' }}
-      run: ./gradlew assembleDebug --no-daemon $ABI_FLAG
+      run: ./gradlew assembleDebug --no-daemon --build-cache $ABI_FLAG
