@@ -20,7 +20,11 @@ side of it, and keeps its name in the CLI, the MCP server and the code.
 | `info` | One line, with at most one `action` button (`{label, url}`). It returns at once and hides after a few seconds. | `{delivered: "screen" \| "inbox"}` |
 
 Every card takes a `title` (one line on the strip, wrapping to three) and an
-optional `context` shown under **Details** and in the round. Any card also
+optional `context` shown under **Details** and in the round. A `context` that
+is a status file or a `needs_you` block, as JSON, never shows raw: Pane shows
+its question and `why`, adds its `files` as links, and turns an `ask` with no
+`suggestions` into an `options` card with the question's `options` as choices;
+other JSON shows one `summary`, `step` or `title` line, or none. Any card also
 takes up to 6 `links` (`--links`), related files and pages shown as chips:
 `{label, path}` for a file on the asking machine (relative to its working
 directory) or `{label, url}` for an http or https page. Older Panes ignore them.

@@ -526,7 +526,7 @@ describe('Approvals items, through the registered handlers', () => {
       quiet: true,
       originKind: 'worker',
       title: 'Use the invoice id or number in the PDF filename?',
-      // One human line from the status file, which opens beside the card as its link.
+      // The question's why from the status file, never its JSON (the title already asks it); the file opens beside the card.
       context: 'Ids are stable; numbers can be reissued.',
       source: { paneId: 'worker', panelId: 'worker-panel', name: 'api-fix', session: { id: launch.id, name: launch.name, paneId: launch.paneId } },
       connected: { kind: 'session', id: launch.id },
@@ -544,6 +544,44 @@ describe('Approvals items, through the registered handlers', () => {
     inbox.end({ id: 'in-1', how: 'acked', decision: 'D-9' });
     await flush();
     expect(pane.notify.snapshot().items).toMatchObject([{ id: 'in-1', state: 'expired', decision: 'D-9', closed: { reason: 'its orchestrator dealt with it' } }]);
+    pane.notify.dispose();
+  });
+
+  it("builds a worker's card from the needs_you in its cut-short status file: choices, files and why, never raw JSON (Q-80)", async () => {
+    const status = {
+      profile: 'greenfield/implementer', state: 'blocked', step: 'P-16 built; blocked on gcloud reauthentication', validation: 'full',
+      needs_you: {
+        id: 'Q-80', kind: 'approval', title: 'gcloud sign-in expired',
+        questions: [{ q: 'Please run `! gauth-bloom` in this tab so I can apply the staging DDL.', why: 'Every QA journey waits on it.', options: ['Done, signed in (recommended)', 'Skip staging for now'] }],
+        files: ['/work/api-fix/wire-contract.md'], blocking: true,
+      },
+      assumptions: Array.from({ length: 30 }, (_, index) => `D-${index}: a long logged assumption that pushes the file past the journal's cut`),
+    };
+    const item = blocked(Date.now());
+    const report = { ...item.report, state: 'blocked' as const, reportedAt: item.at, question: 'Q-80: gcloud sign-in expired. Please run gauth-bloom.', summary: `${JSON.stringify(status, null, 1).slice(0, 2_000)}\n[summary truncated]`, summaryTruncated: true as const };
+    const pane = await startWithSessions(inboxOf([{ ...item, report }]));
+    const [card] = pane.notify.snapshot().items;
+    expect(card).toMatchObject({
+      ui: 'options',
+      title: 'Q-80: gcloud sign-in expired. Please run gauth-bloom.',
+      context: 'Please run `! gauth-bloom` in this tab so I can apply the staging DDL.\n\nEvery QA journey waits on it.',
+      choices: [{ label: 'Done, signed in', recommended: true }, { label: 'Skip staging for now' }],
+      links: [{ label: 'api-fix status', path: '/work/api-fix/status.json' }, { label: 'wire-contract.md', path: '/work/api-fix/wire-contract.md' }],
+    });
+    expect(card.context).not.toContain('{');
+    pane.notify.dispose();
+  });
+
+  it('builds a notify card from a needs_you block sent as its context, and shows a plain line for other JSON', async () => {
+    const pane = await startWithSessions();
+    const needsYou = { id: 'Q-4', title: 'Invoice filename', questions: [{ q: 'Use the invoice id or number?', why: 'Ids are stable.', options: ['Invoice id (recommended)', 'Invoice number'] }], files: ['/work/options.html#decision-2'] };
+    void pane.registry.invoke('runpane:notify', [{ ui: 'ask', title: 'Q-4: Invoice filename', context: JSON.stringify(needsYou, null, 2), caller: { paneId: 'session-pane', panelId: 'orchestrator-panel' } }]);
+    void pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Post the plan?', context: JSON.stringify({ state: 'ready', step: 'Plan written', checks: { passed: [] } }), caller: { paneId: 'session-pane', panelId: 'orchestrator-panel' } }]);
+    await flush();
+    expect(pane.notify.snapshot().items).toMatchObject([
+      { ui: 'options', title: 'Q-4: Invoice filename', context: 'Use the invoice id or number?\n\nIds are stable.', choices: [{ label: 'Invoice id', recommended: true }, { label: 'Invoice number' }], links: [{ label: 'options.html', path: '/work/options.html#decision-2' }] },
+      { ui: 'approve', title: 'Post the plan?', context: 'Plan written' },
+    ]);
     pane.notify.dispose();
   });
 

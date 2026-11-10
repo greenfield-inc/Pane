@@ -7,6 +7,7 @@ import type { ConfigManager } from '../configManager';
 import type { AppConfig } from '../../types/config';
 import {
   DEFAULT_NOTIFY_SETTINGS,
+  NOTIFY_LINKS_MAX,
   type NotifyCaller,
   type NotifyAgentAction,
   type NotifyCommand,
@@ -36,7 +37,7 @@ import type { RunpaneInboxItem } from '../../../../shared/types/runpaneOrchestra
 import type { ApprovalStore } from '../approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../../database/jsonStoreImport';
 import type { SessionInboxEnded } from '../sessionInbox';
-import { workerReportContext } from './workerContext';
+import { workerReportCard } from './workerContext';
 
 const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
 const agentName = (agentType: string | undefined): string => (agentType ? AGENT_NAMES.get(agentType) : undefined) ?? 'Agent';
@@ -229,6 +230,11 @@ export class NotifyService {
       if (carded.has(once)) continue;
       carded.add(once);
       const session = this.deps.sessionRecord?.(entry.sessionId);
+      // The status file's needs_you, never its JSON: the question's why, its options and files.
+      const card = workerReportCard(entry.report?.summary, question);
+      // D-81: the worker's status file, which its report named, opens beside the card.
+      const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
+      const links = [...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)].slice(0, NOTIFY_LINKS_MAX);
       const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: entry.paneName, agent: agentName(entry.agentType) };
       if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };
       this.queue.addWorkerQuestion({
@@ -238,10 +244,9 @@ export class NotifyService {
         at,
         // The Session it was filed in, even after the worker has moved or the Session closed.
         connected: { kind: 'session', id: entry.sessionId, name: session?.name ?? 'Closed Session', paneId: session?.paneId ?? '' },
-        // D-81: the worker's status file, which its report named, opens beside the card.
-        links: entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : undefined,
-        // What the worker was doing, in a line: a status file opens beside the card as its link.
-        context: workerReportContext(entry.report?.summary),
+        links: links.length ? links : undefined,
+        context: card.context,
+        choices: card.choices,
       });
     }
   }
