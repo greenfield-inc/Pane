@@ -3618,3 +3618,23 @@ test('in a Session, ⌘⌥+arrows move between splits, the tab keys work, and �
   await restore.click();
   await expect(page.locator(`[data-panel-group-id="${rightId}"]`)).toBeVisible();
 });
+
+test('a Session inspector opened later still minimizes and maximizes by key (F-3)', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('aside', 'Aside demo', '', '', '2026-09-16T12:00:00.000Z')]);
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-aside').click();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  const aside = page.getByRole('complementary', { name: 'Session overview' });
+  await expect(aside).toBeVisible();
+  await aside.getByRole('tab', { name: 'Overview', exact: true }).focus();
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.down(mod);
+  await page.keyboard.press('k');
+  await page.keyboard.press('m');
+  await page.keyboard.up(mod);
+  await expect(aside.getByTestId('restore-region')).toBeVisible();
+  await aside.getByTestId('restore-region').click();
+  await aside.getByRole('tab', { name: 'Overview', exact: true }).focus();
+  await page.keyboard.press('ControlOrMeta+Shift+M');
+  await expect(page.getByRole('complementary', { name: /Session (overview|files|changes)/ })).toHaveCount(0);
+});

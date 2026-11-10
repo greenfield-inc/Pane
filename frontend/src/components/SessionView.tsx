@@ -765,6 +765,8 @@ export const SessionView = memo(() => {
   useEffect(() => {
     localStorage.setItem('pane-detail-collapsed', String(isDetailCollapsed));
   }, [isDetailCollapsed]);
+  // The swapped layout's bottom inspector maximizes over the work area above it (P4).
+  const bottomPanelMaximized = useNavigationStore(state => state.maximizedRegion === 'right-panel') && !isDetailCollapsed;
   /** Show the inspector on the given tab, whichever layout is active. */
   const openInspector = useCallback((tab: InspectorTab) => {
     setInspectorTab(tab);
@@ -1995,15 +1997,18 @@ export const SessionView = memo(() => {
           {swappedLayoutRendered && defaultTerminalPanel ? (
             <>
               {/* SWAPPED LAYOUT: Center column with panels on top, horizontal detail panel on bottom */}
-              <div ref={centerColumnBox.ref} className="pane-center-column flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+              <div ref={centerColumnBox.ref} className="pane-center-column relative flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
                 {/* Top: active panel content */}
-                <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
+                <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor" inert={bottomPanelMaximized ? true : undefined}>
                   {editorStageElement || emptyStage}
                   {livePreviewPrompt}
                 </div>
 
                 {/* Bottom: horizontal detail panel */}
                 <DetailPanel
+                  maximized={bottomPanelMaximized}
+                  onToggleMaximize={() => setMaximizedRegion(bottomPanelMaximized ? null : 'right-panel')}
+                  onMinimize={() => { setMaximizedRegion(null); if (!isDetailCollapsed) toggleDetailCollapse(); }}
                   isVisible={true}
                   onToggle={toggleDetailCollapse}
                   width={0}

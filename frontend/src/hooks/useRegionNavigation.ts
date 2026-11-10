@@ -60,15 +60,32 @@ export function useRegionNavigation(): void {
  */
 export function useRegionActions(ref: RefObject<Element | null>, actions: RegionActions): void {
   const latest = useRef(actions);
-  useEffect(() => { latest.current = actions; });
+  const registered = useRef<{ element: Element; key: string; unregister: () => void } | null>(null);
   const canMaximize = Boolean(actions.toggleMaximize);
   const canMinimize = Boolean(actions.minimize);
+  // Runs after every commit: a region rendered conditionally (a Session's
+  // inspector opened later, a panel reopened) gets its actions as soon as
+  // its element exists, and loses them when the element goes.
   useEffect(() => {
+    latest.current = actions;
     const element = ref.current;
-    if (!element || (!canMaximize && !canMinimize)) return undefined;
-    return registerRegionActions(element, {
-      toggleMaximize: canMaximize ? () => latest.current.toggleMaximize?.() : undefined,
-      minimize: canMinimize ? () => latest.current.minimize?.() : undefined,
-    });
-  }, [ref, canMaximize, canMinimize]);
+    const key = `${canMaximize}:${canMinimize}`;
+    const current = registered.current;
+    if (current && current.element === element && current.key === key) return;
+    current?.unregister();
+    registered.current = null;
+    if (!element || (!canMaximize && !canMinimize)) return;
+    registered.current = {
+      element,
+      key,
+      unregister: registerRegionActions(element, {
+        toggleMaximize: canMaximize ? () => latest.current.toggleMaximize?.() : undefined,
+        minimize: canMinimize ? () => latest.current.minimize?.() : undefined,
+      }),
+    };
+  });
+  useEffect(() => () => {
+    registered.current?.unregister();
+    registered.current = null;
+  }, []);
 }

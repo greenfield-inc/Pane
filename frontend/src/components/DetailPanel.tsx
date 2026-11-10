@@ -133,6 +133,9 @@ export function DetailPanel({
         changesPanel={changesPanel}
         changesCount={changesCount}
         isMainRepo={isMainRepo}
+        maximized={maximized}
+        onToggleMaximize={onToggleMaximize}
+        onMinimize={onMinimize}
       />
     );
   }
