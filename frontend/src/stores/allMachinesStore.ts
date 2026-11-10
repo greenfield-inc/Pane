@@ -4,6 +4,7 @@ import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { useErrorStore } from './errorStore';
 import { seedArrangement, type MachineRef, type MachineSnapshot, type MachineView, type SeededArrangement } from '../utils/allMachinesTree';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { machineLetter } from '../../../shared/utils/machineMarks';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
 import {
   type MachineConnectionsEvent,
@@ -351,7 +352,7 @@ export function machineViews(state: Pick<AllMachinesState, 'machines' | 'snapsho
   const menuPlace = new Map(state.entries.map((entry, index) => [entry.id, index]));
   const place = (id: string) => menuPlace.get(id) ?? state.entries.length;
   return [...state.machines].sort((a, b) => place(a.id) - place(b.id)).map((machine) => ({
-    machine: entries.get(machine.id) ?? { id: machine.id, name: machine.label, os: null, slot: 0 },
+    machine: entries.get(machine.id) ?? { id: machine.id, name: machine.label, os: null, slot: 0, letters: machineLetter(machine.label) },
     snapshot: state.snapshots[machine.id] ?? null,
     offline: isMachineDimmed(machine, now),
   }));

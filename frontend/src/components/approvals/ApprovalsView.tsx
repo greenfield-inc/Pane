@@ -20,8 +20,29 @@ import { ApprovalColumn, ApprovalChip } from './ApprovalColumn';
 import { cardChip } from './approvalCard';
 import { APPROVALS_SORTS, approvalIdsInListOrder, approvalRowLines, besideOf, connectedOf, groupApprovals, groupCountText, offlineRowText, readApprovalsSort, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
 import { MachineContext } from './MachineContext';
+import { handleApprovalsEscape } from './approvalsNavigation';
 import { toggleApprovals } from './approvalsNavigation';
 import { useSidebarSessionOrder } from './useSidebarSessionOrder';
+import { useObservedContentBox } from '../../hooks/useObservedContentBox';
+import { useOuterPanelResize } from '../../hooks/useOuterPanelResize';
+import { OuterResizeSeparator } from '../ui/OuterResizeSeparator';
+import { OUTER_PANEL_CONFIGS } from '../../utils/outerPanelSizing';
+
+/** Side by side from 1100px (the `min-[1100px]:` layout below); stacked under it. */
+const SIDE_BY_SIDE = '(min-width: 1100px)';
+
+function useSideBySide() {
+  const [matches, setMatches] = useState(() => window.matchMedia(SIDE_BY_SIDE).matches);
+  useEffect(() => {
+    const query = window.matchMedia(SIDE_BY_SIDE);
+    const onChange = () => setMatches(query.matches);
+    onChange();
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  return matches;
+}
+
 
 function ItemIcon({ item }: { item: NotifyItem }) {
   const className = 'mt-0.5 h-4 w-4 shrink-0';
@@ -36,7 +57,7 @@ function useMachineMark() {
   const machines = useAllMachinesStore((state) => state.entries);
   return (machineId: string | undefined, dimmed = false) => {
     const machine = machineId ? machines.find((entry) => entry.id === machineId) : undefined;
-    return machine ? <MachineMark os={machine.os} slot={machine.slot} presence={dimmed ? 'dimmed' : 'solid'} size="logo" /> : null;
+    return machine ? <MachineMark letters={machine.letters} slot={machine.slot} presence={dimmed ? 'dimmed' : 'solid'} size="logo" /> : null;
   };
 }
 
@@ -171,10 +192,20 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const snapshot = useNotifyStore((state) => state.snapshot);
   // Approvals turned off (here, or saved off and restored on launch): back to the view you left, as the row would.
   const turnedOff = snapshot?.settings.enabled === false;
+  // Esc goes back to where you were, unless an answer is being typed (D-251).
+  useEffect(() => {
+    window.addEventListener('keydown', handleApprovalsEscape);
+    return () => window.removeEventListener('keydown', handleApprovalsEscape);
+  }, []);
   useEffect(() => {
     if (turnedOff) toggleApprovals();
   }, [turnedOff]);
   const [tab, setTab] = useState<ApprovalsTab>('waiting');
+  // The list's width is the person's (drag the edge; double-click resets), side by side only.
+  const inboxBox = useObservedContentBox<HTMLDivElement>();
+  const sideBySide = useSideBySide();
+  const listResize = useOuterPanelResize({ config: OUTER_PANEL_CONFIGS.approvalsList, containerPx: inboxBox.width, enabled: sideBySide });
+  const listSized = listResize.separatorVisible;
   const selectedId = useNavigationStore((state) => state.selectedApprovalId);
   const selectApproval = useNavigationStore((state) => state.selectApproval);
   const activePaneId = useSessionStore((state) => state.activeSessionId);
@@ -356,11 +387,12 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const enabled = snapshot?.settings.enabled ?? true;
   const importError = snapshot?.importError;
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary min-[1100px]:flex-row" data-testid="notify-inbox">
+    <div ref={inboxBox.ref} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary min-[1100px]:flex-row" data-testid="notify-inbox" data-focus-region="approvals">
       <section
         aria-label="Approvals"
         // Stacked (a narrow window), the list takes the height when nothing shows beside it.
         className={cn('flex min-h-0 flex-col border-b border-border-primary bg-bg-secondary min-[1100px]:max-h-none min-[1100px]:w-[400px] min-[1100px]:flex-none min-[1100px]:shrink-0 min-[1100px]:border-b-0 min-[1100px]:border-r', !selected ? 'flex-1' : 'max-h-[45%] shrink-0')}
+        style={listSized ? { width: listResize.renderedPx } : undefined}
         data-testid="approvals-queue"
       >
         <header className="flex h-[50px] shrink-0 items-center gap-2.5 px-4">
@@ -442,7 +474,12 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         </div>
       </section>
 
-      <section aria-label="Beside the approval" className={cn('min-h-0 min-w-0 flex-1 flex-col', !selected ? 'hidden min-[1100px]:flex' : 'flex')} data-testid="approvals-beside">
+      <section aria-label="Beside the approval" className={cn('relative min-h-0 min-w-0 flex-1 flex-col', !selected ? 'hidden min-[1100px]:flex' : 'flex')} data-testid="approvals-beside">
+        {/* On the list's edge (this section's left), above the list's own border. */}
+        {listSized && (
+          <OuterResizeSeparator label="Resize approvals list" orientation="vertical" value={listResize.effectivePx}
+            minimum={listResize.floor} maximum={listResize.cap} {...listResize.separatorHandlers} />
+        )}
         {selected && (
           <ApprovalColumn
             surface="approvals"

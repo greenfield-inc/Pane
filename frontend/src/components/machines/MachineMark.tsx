@@ -1,28 +1,22 @@
 import type { CSSProperties } from 'react';
-import { Server } from 'lucide-react';
-import { AppleIcon, LinuxIcon, WindowsIcon } from '../ui/BrandIcons';
 import { cn } from '../../utils/cn';
 import type { MachineOs, MachinePresence } from '../../utils/machineList';
 
-const OS_LOGOS = {
-  macOS: AppleIcon,
-  Windows: WindowsIcon,
-  Linux: LinuxIcon,
-} satisfies Record<MachineOs, typeof AppleIcon>;
-
-// Tile size in px and logo size classes; every state of one size keeps the same box.
+// Tile size in px and letter sizes (one letter, two letters); every state of one size keeps the same box.
 const SIZES = {
-  logo: { tile: 14, logo: 'h-3.5 w-3.5' },
-  sm: { tile: 20, logo: 'h-3 w-3' },
-  md: { tile: 28, logo: 'h-4 w-4' },
-  rail: { tile: 32, logo: 'h-[18px] w-[18px]' },
-  lg: { tile: 44, logo: 'h-6 w-6' },
+  logo: { tile: 14, one: 'text-[11px]', two: 'text-[9px]' },
+  row: { tile: 18, one: 'text-[11px]', two: 'text-[9px]' },
+  sm: { tile: 20, one: 'text-[11px]', two: 'text-[9.5px]' },
+  md: { tile: 28, one: 'text-[14px]', two: 'text-[12px]' },
+  rail: { tile: 32, one: 'text-[15px]', two: 'text-[13px]' },
+  lg: { tile: 44, one: 'text-[20px]', two: 'text-[17px]' },
 } as const;
 
 type MachineMarkSize = keyof typeof SIZES;
 
 interface MachineMarkProps {
-  os: MachineOs | null;
+  /** One or two letters, from `MachineEntry.letters`. */
+  letters: string;
   slot: number;
   presence?: MachinePresence;
   size: MachineMarkSize;
@@ -34,13 +28,17 @@ export function machineColorVar(slot: number): string {
   return `var(--color-machine-${slot + 1})`;
 }
 
+/** "travel-laptop · macOS": what a mark's tooltip says. */
+export function machineMarkTitle(machine: { name: string; os: MachineOs | null }): string {
+  return machine.os ? `${machine.name} · ${machine.os}` : machine.name;
+}
+
 /**
- * A machine's OS logo in its colour: on a soft tile, or bare at `logo` size.
+ * A machine's letters in its colour: on a soft tile, or bare at `logo` size.
  * Pulsing while reconnecting, dimmed when it cannot be reached.
  */
-export function MachineMark({ os, slot, presence = 'solid', size, className }: MachineMarkProps) {
-  const Logo = os ? OS_LOGOS[os] : Server;
-  const { tile, logo } = SIZES[size];
+export function MachineMark({ letters, slot, presence = 'solid', size, className }: MachineMarkProps) {
+  const { tile, one, two } = SIZES[size];
   const color = machineColorVar(slot);
   const style: CSSProperties = { width: tile, height: tile, color };
   if (size !== 'logo') style.backgroundColor = `color-mix(in srgb, ${color} 16%, transparent)`;
@@ -49,26 +47,39 @@ export function MachineMark({ os, slot, presence = 'solid', size, className }: M
     <span
       aria-hidden="true"
       data-presence={presence}
+      data-testid="machine-mark"
       className={cn(
-        'pane-machine-mark inline-flex flex-none items-center justify-center',
-        size === 'lg' ? 'rounded-lg' : 'rounded-md',
+        'pane-machine-mark inline-flex flex-none items-center justify-center overflow-hidden',
+        size === 'lg' ? 'rounded-lg' : size === 'logo' || size === 'row' ? 'rounded' : 'rounded-md',
         className,
       )}
       style={style}
     >
-      <Logo className={cn('pane-machine-logo', logo, !os && 'stroke-[1.75]')} />
+      <span className={cn('pane-machine-letters font-semibold leading-none tracking-tight', letters.length > 1 ? two : one)}>{letters}</span>
+    </span>
+  );
+}
+
+/**
+ * A row's machine: its 18px mark, read as "on travel-laptop". The row puts it in a fixed
+ * 18px box, so names of any length line up down the list.
+ */
+export function MachineRowMark({ machine, className }: { machine: { name: string; letters: string; slot: number }; className?: string }) {
+  return (
+    <span role="img" aria-label={`on ${machine.name}`} data-testid="machine-row-mark" className={cn('inline-flex flex-none', className)}>
+      <MachineMark letters={machine.letters} slot={machine.slot} size="row" />
     </span>
   );
 }
 
 /** The first three machines' marks, overlapping: All machines in the machine pill and menu. */
-export function MachineMarkStack({ machines }: { machines: ReadonlyArray<{ id: string; os: MachineOs | null; slot: number }> }) {
+export function MachineMarkStack({ machines }: { machines: ReadonlyArray<{ id: string; letters: string; slot: number }> }) {
   return (
     <span className="flex flex-none items-center" aria-hidden="true">
       {machines.slice(0, 3).map((machine, index) => (
         <MachineMark
           key={machine.id}
-          os={machine.os}
+          letters={machine.letters}
           slot={machine.slot}
           size="sm"
           className={cn('rounded-full ring-2 ring-surface-secondary', index > 0 && '-ml-1.5')}

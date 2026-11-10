@@ -290,6 +290,14 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
+  // A browser tab's page took keyboard focus (a click inside it never reaches this DOM).
+  ipcRenderer.on('browser-panel:page-focused', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:page-focused', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:page-focused to window:', e);
+    }
+  });
   // Escape pressed in a browser tab's page while its Pane find bar is open.
   ipcRenderer.on('browser-panel:find-escape', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
     try {
@@ -482,6 +490,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     send: (panelId: string, request: ChatTabSend) => invokeIpc('chat-tab:send', panelId, request),
     receipt: (panelId: string, operationId: string) => invokeIpc('chat-tab:receipt', panelId, operationId).then(receipt => receipt ?? undefined),
     unqueue: (panelId: string, operationId: string) => invokeIpc('chat-tab:unqueue', panelId, operationId),
+    sendNow: (panelId: string, operationId: string) => invokeIpc('chat-tab:send-now', panelId, operationId),
+    editQueued: (panelId: string, operationId: string, text: string) => invokeIpc('chat-tab:edit-queued', panelId, operationId, text),
+    clear: (panelId: string) => invokeIpc('chat-tab:clear', panelId),
+    stopTask: (panelId: string, taskId: string) => invokeIpc('chat-tab:stop-task', panelId, taskId),
     configure: (panelId: string, configId: string, value: string) => invokeIpc('chat-tab:configure', panelId, configId, value),
     cancel: (panelId: string) => invokeIpc('chat-tab:cancel', panelId),
     permission: (panelId: string, requestId: string, optionId: string) => invokeIpc('chat-tab:permission', panelId, requestId, optionId),
@@ -913,6 +925,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Event listeners for real-time updates
   events: {
+    /** Config changed in main (Settings, another window, or a hand edit of config.json). */
+    onConfigUpdated: (callback: (config: AppConfig) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config);
+      ipcRenderer.on('config:updated', wrappedCallback);
+      return () => ipcRenderer.removeListener('config:updated', wrappedCallback);
+    },
     onPermissionRequest: (callback: (request: PermissionRequest) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, request: PermissionRequest) => callback(request);
       ipcRenderer.on('permission:request', wrappedCallback);

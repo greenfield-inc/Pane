@@ -4,8 +4,8 @@ import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 
-const studio: MachineRef = { id: 'local', name: 'studio-mac', os: 'macOS', slot: 0 };
-const build: MachineRef = { id: 'build-box-profile', name: 'build-box', os: 'Linux', slot: 1 };
+const studio: MachineRef = { id: 'local', name: 'studio-mac', os: 'macOS', slot: 0, letters: 'S' };
+const build: MachineRef = { id: 'build-box-profile', name: 'build-box', os: 'Linux', slot: 1, letters: 'B' };
 
 const pane = (id: string, name: string, extra: Partial<Session> = {}): Session => ({
   id, name, worktreePath: `/code/${name}`, prompt: '', status: 'running', createdAt: '2026-10-30T09:00:00Z', output: [], jsonMessages: [], ...extra,
@@ -162,7 +162,7 @@ describe('buildAllMachinesTree', () => {
     const tree = buildAllMachinesTree([
       view(studio, snapshot([project(1, 'Acme-Web', [], 'github.com/acme/web')])),
       view(build, snapshot([project(2, 'acme-web', [])])),
-      view({ id: 'old', name: 'old-mac', os: 'macOS', slot: 2 }, snapshot([project(3, 'scratch', [])])),
+      view({ id: 'old', name: 'old-mac', os: 'macOS', slot: 2, letters: 'O' }, snapshot([project(3, 'scratch', [])])),
     ]);
 
     expect(tree.projects.map(row => [row.name, row.entries.map(entry => entry.machine.name)])).toEqual([
@@ -239,7 +239,7 @@ describe('seedArrangement', () => {
   it('keeps machine-menu order when a later machine answers first, for Sessions and a shared project\'s Panes', () => {
     const studioView = view(studio, snapshot([project(1, 'web', [pane('a', 'studio-pane')], 'github.com/acme/web')], { sessions: sessionsOf(studio, ['Studio session']) }));
     const buildView = view(build, snapshot([project(9, 'web-clone', [pane('b', 'build-pane')], 'github.com/acme/web')], { sessions: sessionsOf(build, ['Build session']) }));
-    const third: MachineRef = { id: 'devbox', name: 'devbox', os: 'Linux', slot: 2 };
+    const third: MachineRef = { id: 'devbox', name: 'devbox', os: 'Linux', slot: 2, letters: 'D' };
     const thirdView = view(third, snapshot([project(4, 'web', [pane('c', 'devbox-pane')], 'github.com/acme/web')], { sessions: sessionsOf(third, ['Devbox session']) }));
     // Menu order: studio, build, devbox. They answer devbox, then studio, then build.
     const empty = { sessions: null, panes: {}, seeded: [] };
@@ -258,7 +258,7 @@ describe('seedArrangement', () => {
 
   it('puts a late machine\'s first look after the rows of machines before it, keeping your moves', () => {
     // studio and devbox looked first and you moved devbox's Session to the top; build-box answers last.
-    const third: MachineRef = { id: 'devbox', name: 'devbox', os: 'Linux', slot: 2 };
+    const third: MachineRef = { id: 'devbox', name: 'devbox', os: 'Linux', slot: 2, letters: 'D' };
     const arranged = { sessions: ['devbox:devbox-Devbox session', 'local:local-Studio session'], panes: {}, seeded: ['sessions:local', 'sessions:devbox'] };
     const views = [
       view(studio, snapshot([], { sessions: sessionsOf(studio, ['Studio session']) })),

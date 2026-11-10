@@ -235,16 +235,17 @@ test.describe('Settings', () => {
     await expect(page.getByRole('heading', { name: 'Terminal', exact: true })).toBeVisible();
   });
 
-  test('opens the terminal shortcut editor through the typed hotkey target', async ({ page }) => {
+  test('opens Keyboard Shortcuts with the two-step key ⌘K ⌘S (D-250)', async ({ page }) => {
     await installElectronApiMock(page);
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
 
-    await page.keyboard.press('Control+Alt+/');
+    await page.keyboard.press('ControlOrMeta+k');
+    await page.keyboard.press('ControlOrMeta+s');
 
     await expect(page.getByTestId('settings-page')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Shortcuts', exact: true })).toBeVisible();
-    await expect(page.locator('[data-setting-id="terminal-shortcuts"]')).toBeFocused();
+    await expect(page.locator('[data-setting-id="keyboard-shortcut-map"]')).toBeFocused();
   });
 
   test('disables Pane keyboard shortcut interception from shortcut settings', async ({ page }) => {

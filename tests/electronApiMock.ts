@@ -153,6 +153,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const pendingPermissions: PanePermissionRequest[] = [];
     const feedbackSubmissions: SubmitFeedbackRequest[] = [];
     const openedExternalUrls: string[] = [];
+    const panelCreates: JsonObject[] = [];
     const diffManifestCalls: Array<{ sessionId: string; scope: DiffScope }> = [];
     const fileDiffCalls: Array<{ sessionId: string; scope: DiffScope; path: string }> = [];
     const clone = <T>(value: T): T => structuredClone(value);
@@ -1221,6 +1222,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           };
           mockPanels.push(panel);
           setActiveMockPanel(sessionId, panel.id);
+          panelCreates.push(clone(panel));
           emit('panel:created', clone(panel));
           return success(clone(panel));
         },
@@ -1844,6 +1846,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getOpenedExternalUrls() {
           return clone(openedExternalUrls);
         },
+        /** Every panel the renderer created through `panels.createPanel`, in order. */
+        getPanelCreates() {
+          return clone(panelCreates);
+        },
         getPreferenceWrites() {
           return clone(preferenceWrites);
         },
@@ -2011,7 +2017,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           notifySnapshot = clone(snapshot);
           emit('notify:snapshot', clone(snapshot));
         },
-        emitNotifyNavigate(target: 'inbox' | 'settings' | { approval: string }) {
+        emitNotifyNavigate(target: 'inbox' | 'toggle-inbox' | 'settings' | { approval: string }) {
           emit('notify:navigate', target);
         },
         getMachineRuns() {

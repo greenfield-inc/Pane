@@ -232,7 +232,7 @@ function MachinesHost() {
   const { machines, select: selectMachine } = useMachines({ connectionState });
   useEffect(() => {
     useAllMachinesStore.setState({
-      entries: machines.map(({ id, name, os, slot, active }) => ({ id, name, os, slot, active })),
+      entries: machines.map(({ id, name, os, slot, letters, active }) => ({ id, name, os, slot, letters, active })),
       menuShown: true,
       switchMachine: async (machineId) => {
         const machine = machines.find(entry => entry.id === machineId);

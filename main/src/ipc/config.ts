@@ -26,6 +26,12 @@ export function registerConfigHandlers(
   { app, configManager, claudeCodeManager, databaseService, getMainWindow, sessionManager }: AppServices,
   commandRegistry?: PaneCommandRegistry,
 ): void {
+  // The renderer follows config edits made outside it (keyboard overrides from a
+  // hand-edited config.json, a second window), not only its own updates.
+  configManager.on('config-updated', (config: AppConfig) => {
+    getMainWindow()?.webContents.send('config:updated', config);
+  });
+
   if (commandRegistry) {
     const buildAffordances = (): RemotePwaAffordances => {
       const config = configManager.getConfig();

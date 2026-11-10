@@ -33,6 +33,12 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   const machine = useActiveMachineStore(state => state.machine);
   const setActiveSession = useSessionStore(store => store.setActiveSession);
   const navigateToSessions = useNavigationStore(store => store.navigateToSessions);
+  // The Pane's pull request, for the chat's status bar; each field selected alone so other git changes do not re-render the chat.
+  const prNumber = useSessionStore(store => store.sessions.find(session => session.id === panel.sessionId)?.gitStatus?.prNumber);
+  const prUrl = useSessionStore(store => store.sessions.find(session => session.id === panel.sessionId)?.gitStatus?.prUrl);
+  const prState = useSessionStore(store => store.sessions.find(session => session.id === panel.sessionId)?.gitStatus?.prState);
+  const prDraft = useSessionStore(store => store.sessions.find(session => session.id === panel.sessionId)?.gitStatus?.prIsDraft);
+  const pr = useMemo(() => prNumber ? { number: prNumber, url: prUrl, state: prState, draft: prDraft } : undefined, [prNumber, prUrl, prState, prDraft]);
   // SAFETY: the panel type 'chat' carries ChatPanelState as its custom state.
   const state = panel.state.customState as ChatPanelState | undefined;
   const workers = useSessionWorkers(DESKTOP_WORKERS, state?.orchestrationSessionId);
@@ -56,5 +62,6 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     actions={actions}
     // A Session's orchestrator chat shows its approvals as light cards above the composer (P5).
     dock={state?.orchestrationSessionId ? <SessionApprovalCards sessionId={state.orchestrationSessionId} /> : undefined}
+    pr={pr}
   />;
 }

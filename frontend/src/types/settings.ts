@@ -84,6 +84,7 @@ export type SettingsSettingId =
   | 'apns-credentials'
   | 'pane-secrets'
   | 'keyboard-shortcuts'
+  | 'keyboard-shortcut-map'
   | 'command-palette-shortcut'
   | 'kitty-keyboard'
   | 'terminal-shortcuts'

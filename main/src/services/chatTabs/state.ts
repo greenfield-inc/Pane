@@ -36,6 +36,7 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
   sessionFolder: boundary.optional(boundary.string),
   autopilotRunId: boundary.optional(boundary.string),
   agentReport: boundary.optional(report),
+  clearedAt: boundary.optional(boundary.string),
 });
 
 /** A chat panel's saved state, or undefined when the row does not hold one. */

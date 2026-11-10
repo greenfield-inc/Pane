@@ -21,6 +21,7 @@ import { PanelTabStatusDot } from './PanelTabStatusDot';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
 import { getPanelIcon } from './panelIcon';
+import { useFocusRegionStore } from '../../services/regionFocus';
 import { editorPanelState, pinEditorPanel } from '../../services/openFileInEditor';
 import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
 import { SwitchToChatDialog } from './SwitchToChat';
@@ -43,6 +44,11 @@ export interface PanelTabStripProps {
   isPrimary?: boolean;
   /** Whether this strip is inside a focused group. */
   isFocused?: boolean;
+  /**
+   * Quiet focus (D-237): the active tab keeps its accent only while this is the
+   * focused group and keyboard focus is in the main area; otherwise it dims.
+   */
+  quietFocus?: boolean;
   /** Show shortcut hints (only for primary group in PanelTabBar). */
   showShortcutHints?: boolean;
   /** Keep close buttons visible when the strip lives in window chrome. */
@@ -85,6 +91,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   onPanelClose,
   isPrimary = false,
   isFocused = false,
+  quietFocus = false,
   showShortcutHints = false,
   alwaysShowClose = false,
   variant = 'bar',
@@ -255,6 +262,8 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   // Shortcut hints are only truthful when the hotkeys actually target this
   // strip's panels: Mod+Shift+1-9 act on the focused group, so hide hints
   // while a different group has focus.
+  const mainHasFocus = useFocusRegionStore((state) => state.region === null || state.region === 'main');
+  const dimActive = quietFocus && !(isFocused && mainHasFocus);
   const shortcutHintsEnabled = showShortcutHints && isPrimary && isFocused;
 
   // Memoize the shortcut hints
@@ -304,6 +313,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
       className={cn(
         "flex items-center overflow-x-auto scrollbar-none min-w-0",
         !compact && "panel-tab-strip",
+        dimActive && "panel-tab-strip-dimmed",
         // The strip hugs its tabs so the "+" sits right after the last one;
         // while a tab is being dragged it grows to offer the trailing drop zone.
         compact ? "max-w-full" : isTabDragging ? "flex-1" : "flex-initial max-w-full",
@@ -400,7 +410,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                       : cn("min-w-[8rem] text-sm", isPermanent ? "px-3" : "px-3 pr-8"),
                   ),
               isActive
-                ? "text-text-primary"
+                ? (dimActive ? "text-text-tertiary" : "text-text-primary")
                 : isDisabled
                   ? "text-text-muted opacity-50"
                   : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover",

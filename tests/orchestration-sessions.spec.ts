@@ -3587,6 +3587,65 @@ test('Not now hides the Pane Chat offer for the rest of the run', async ({ page 
   expect((await paneChatOfferRecord(page)).creates).toEqual([]);
 });
 
+// P3 and P4 in a Session (journeys 4 and 5): the window's focus, tab and
+// maximize keys work in a Session's splits as they do in a worktree Pane.
+test('in a Session, ⌘⌥+arrows move between splits, the tab keys work, and ⌘K ⌘M maximizes a split and restores', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('keys', 'Keys demo', '', '', '2026-09-16T12:00:00.000Z')]);
+  await page.goto('/');
+  const { groupStrips } = await openSplitSession(page, 'keys', ['plan.html']);
+  const groups = page.locator('.pane-chat-shell [data-panel-group-id]');
+  await expect(groups).toHaveCount(2);
+  const focusedGroup = () => page.evaluate(() => document.activeElement?.closest('[data-panel-group-id]')?.getAttribute('data-panel-group-id') ?? document.activeElement?.closest('[data-focus-region]')?.getAttribute('data-focus-region') ?? null);
+  const [leftId, rightId] = await groups.evaluateAll(elements => elements.map(element => element.getAttribute('data-panel-group-id')));
+
+  await page.keyboard.press('ControlOrMeta+0');
+  await expect.poll(focusedGroup).toBe('sidebar');
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await expect.poll(focusedGroup).toBe(leftId);
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await expect.poll(focusedGroup).toBe(rightId);
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowLeft');
+  await expect.poll(focusedGroup).toBe(leftId);
+
+  // Next tab in the focused split: the conversation's group holds two tabs.
+  const leftTabs = groupStrips.nth(0).getByRole('tab');
+  const selectedBefore = await leftTabs.evaluateAll(tabs => tabs.findIndex(tab => tab.getAttribute('aria-selected') === 'true'));
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+BracketRight' : 'Control+PageDown');
+  await expect.poll(() => leftTabs.evaluateAll(tabs => tabs.findIndex(tab => tab.getAttribute('aria-selected') === 'true'))).not.toBe(selectedBefore);
+
+  // Maximize the split (⌘ held through both steps, as a terminal may have focus).
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.down(mod);
+  await page.keyboard.press('k');
+  await page.keyboard.press('m');
+  await page.keyboard.up(mod);
+  await expect(page.locator(`[data-panel-group-id="${rightId}"]`)).toBeHidden();
+  const restore = page.locator(`[data-panel-group-id="${leftId}"]`).getByTestId('restore-region');
+  await expect(restore).toHaveAttribute('aria-pressed', 'true');
+  await restore.click();
+  await expect(page.locator(`[data-panel-group-id="${rightId}"]`)).toBeVisible();
+});
+
+test('a Session inspector opened later still minimizes and maximizes by key (F-3)', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('aside', 'Aside demo', '', '', '2026-09-16T12:00:00.000Z')]);
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-aside').click();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  const aside = page.getByRole('complementary', { name: 'Session overview' });
+  await expect(aside).toBeVisible();
+  await aside.getByRole('tab', { name: 'Overview', exact: true }).focus();
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.down(mod);
+  await page.keyboard.press('k');
+  await page.keyboard.press('m');
+  await page.keyboard.up(mod);
+  await expect(aside.getByTestId('restore-region')).toBeVisible();
+  await aside.getByTestId('restore-region').click();
+  await aside.getByRole('tab', { name: 'Overview', exact: true }).focus();
+  await page.keyboard.press('ControlOrMeta+Shift+M');
+  await expect(page.getByRole('complementary', { name: /Session (overview|files|changes)/ })).toHaveCount(0);
+});
+
 for (const scheme of ['light', 'dark'] as const) {
   test(`Switch to chat on a Session lists what will switch and skip, then sums up (${scheme})`, async ({ page }, testInfo) => {
     await page.emulateMedia({ colorScheme: scheme });
