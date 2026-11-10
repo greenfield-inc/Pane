@@ -1,0 +1,188 @@
+name: Bench runner matrix (do not merge)
+
+# Bench only: copies of Pane's critical CI and release jobs with runs-on from a
+# matrix, to compare GitHub standard runners with Blacksmith sizes. Nothing is
+# published, uploaded, signed or deployed. The other workflows are removed on
+# this branch so only the bench runs.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gate-linux:
+    name: gate-linux (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, blacksmith-2vcpu-ubuntu-2404, blacksmith-4vcpu-ubuntu-2404, blacksmith-8vcpu-ubuntu-2404, blacksmith-16vcpu-ubuntu-2404]
+    steps:
+    - uses: actions/checkout@v7
+    - uses: ./.github/actions/setup-pnpm
+    - run: pnpm install --ignore-scripts
+    - run: pnpm rebuild better-sqlite3-multiple-ciphers
+    - run: CI=1 pnpm --filter main exec vitest run
+    - run: CI=1 pnpm --filter frontend test
+
+  smoke-linux:
+    name: smoke-linux (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, blacksmith-4vcpu-ubuntu-2404, blacksmith-8vcpu-ubuntu-2404, blacksmith-16vcpu-ubuntu-2404]
+    steps:
+    - uses: actions/checkout@v7
+    - uses: ./.github/actions/setup-pnpm
+    - run: pnpm install
+    - run: scripts/ci-background.sh start playwright pnpm exec playwright install --with-deps chromium
+    - run: pnpm run electron:rebuild
+    - run: |
+        node node_modules/electron/install.js
+        electron_path="$(node -p "require('electron')")"
+        electron_dir="$(dirname "${electron_path}")"
+        sudo chown root "${electron_dir}/chrome-sandbox"
+        sudo chmod 4755 "${electron_dir}/chrome-sandbox"
+    - run: pnpm build:main
+    - run: scripts/ci-background.sh wait playwright
+    - run: pnpm test:renderer-selection
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
+    - run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
+    - run: xvfb-run -a pnpm test:chat-tabs
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+    - run: xvfb-run -a pnpm test:ci:minimal
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-ci
+
+  main-tests-windows:
+    name: main-tests-windows (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, blacksmith-2vcpu-windows-2025, blacksmith-4vcpu-windows-2025, blacksmith-8vcpu-windows-2025]
+    steps:
+    - shell: bash
+      run: |
+        echo "TEMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+        echo "TMP=$RUNNER_TEMP" >> "$GITHUB_ENV"
+    - shell: pwsh
+      continue-on-error: true
+      run: Add-MpPreference -ExclusionPath $env:RUNNER_TEMP, $env:GITHUB_WORKSPACE
+    - uses: actions/checkout@v7
+    - uses: ./.github/actions/setup-pnpm
+    - run: pnpm install --ignore-scripts
+    - shell: bash
+      run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
+    - run: pnpm rebuild better-sqlite3-multiple-ciphers
+    - run: pnpm --filter main exec vitest run
+    - if: ${{ !cancelled() }}
+      shell: bash
+      run: scripts/ci-background.sh wait typecheck
+
+  main-tests-macos:
+    name: main-tests-macos (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, blacksmith-6vcpu-macos-latest]
+    steps:
+    - uses: actions/checkout@v7
+    - uses: ./.github/actions/setup-pnpm
+    - run: pnpm install --ignore-scripts
+    - shell: bash
+      run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
+    - run: pnpm rebuild better-sqlite3-multiple-ciphers
+    - run: pnpm --filter main exec vitest run
+    - if: ${{ !cancelled() }}
+      shell: bash
+      run: scripts/ci-background.sh wait typecheck
+
+  android-apk:
+    name: android-apk (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, blacksmith-4vcpu-ubuntu-2404, blacksmith-8vcpu-ubuntu-2404, blacksmith-16vcpu-ubuntu-2404]
+    steps:
+    - uses: actions/checkout@v7
+    - uses: ./.github/actions/setup-pnpm
+    - uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '17'
+    - run: pnpm install --frozen-lockfile --ignore-scripts
+    - name: Write Firebase Android config
+      env:
+        GOOGLE_SERVICES_JSON: ${{ secrets.PANE_ANDROID_GOOGLE_SERVICES_JSON }}
+      run: |
+        if [ -n "$GOOGLE_SERVICES_JSON" ]; then printf '%s' "$GOOGLE_SERVICES_JSON" | base64 --decode > native/google-services.json; fi
+    - working-directory: native
+      run: pnpm exec expo prebuild --platform android --no-install
+    - name: Build debug APK (all 4 ABIs, no Gradle cache)
+      working-directory: native/android
+      run: ./gradlew assembleDebug --no-daemon
+
+  release-mac:
+    name: release-mac (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, blacksmith-6vcpu-macos-latest]
+    steps:
+    - uses: actions/checkout@v7
+    - uses: ./.github/actions/setup-pnpm
+    - run: pnpm install --ignore-scripts
+    - name: Build unsigned arm64 dmg and zip (no publish)
+      env:
+        CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        CSC_DISABLE: 'true'
+      run: |
+        pnpm run build:frontend && pnpm run build:main && pnpm run inject-build-info && pnpm run generate-notices
+        node scripts/configure-build.js
+        pnpm exec electron-builder --mac dmg:arm64 zip:arm64 --publish never
+
+  release-windows:
+    name: release-windows (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2022, blacksmith-4vcpu-windows-2025, blacksmith-8vcpu-windows-2025]
+    steps:
+    - uses: actions/checkout@v7
+    - uses: ./.github/actions/setup-pnpm
+    - run: pnpm install --frozen-lockfile
+    - name: Build Windows x64 installer (no publish)
+      run: node scripts/build-win.js x64
+
+  release-linux:
+    name: release-linux (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, blacksmith-4vcpu-ubuntu-2404, blacksmith-8vcpu-ubuntu-2404]
+    steps:
+    - uses: actions/checkout@v7
+    - uses: ./.github/actions/setup-pnpm
+    - run: |
+        echo 'CFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
+        echo 'CXXFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
+    - run: pnpm install --frozen-lockfile
+    - run: pnpm run build:linux:x64
