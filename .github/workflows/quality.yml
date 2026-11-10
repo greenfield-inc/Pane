@@ -350,17 +350,21 @@ jobs:
 
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.
-  # Each OS runs the suite in two vitest shards, each about half of it.
+  # Windows runs the suite in two vitest shards, each about half of it. macOS
+  # runs it whole: the org has 5 macOS runners, and a second macOS job waited
+  # longer for one than the shard saved.
   cross-os-main-tests:
-    name: Main Process Tests (${{ matrix.os }}, ${{ matrix.shard }}/2)
+    name: Main Process Tests (${{ matrix.os }}${{ matrix.shards > 1 && format(', {0}/{1}', matrix.shard, matrix.shards) || '' }})
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.main == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-2022]
-        shard: [1, 2]
+        include:
+          - { os: macos-latest, shard: 1, shards: 1 }
+          - { os: windows-2022, shard: 1, shards: 2 }
+          - { os: windows-2022, shard: 2, shards: 2 }
 
     steps:
     # The default Windows TEMP is on the runner's slow C: drive; the database
@@ -404,7 +408,7 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/2 --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
     - name: Finish main process type checking
       if: ${{ !cancelled() && matrix.shard == 1 }}
