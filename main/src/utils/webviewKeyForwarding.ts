@@ -6,6 +6,7 @@ import {
   type InterceptionSets,
 } from '../../../shared/utils/keyboardBindings';
 import {
+  bindingSteps,
   chordFromElectronInput,
   isModifierOnlyKey,
   keyPlatformFor,
@@ -70,26 +71,45 @@ function interceptionSetsFor(config: WebviewKeyConfig, platform: KeyPlatform): I
 }
 
 const FIND_COMMANDS = ['find-in-tab', 'find-next', 'find-previous'] as const;
-const findChordsByConfig = new WeakMap<WebviewKeyConfig, Map<KeyPlatform, Set<string>>>();
+
+/** Pane's Find keys in browser tabs: single-step keys, and two-step keys by first step. */
+interface FindKeys {
+  single: Set<string>;
+  sequences: Map<string, Set<string>>;
+}
+
+const findKeysByConfig = new WeakMap<WebviewKeyConfig, Map<KeyPlatform, FindKeys>>();
 
 /**
- * Pane's Find keys (⌘F, ⌘G, ⇧⌘G by default, or the person's remaps) win over
- * a page's own in browser tabs: Electron has no built-in find bar, so leaving
- * the key to the page did nothing on most pages.
+ * Pane's Find keys (⌘F, ⌘G, ⇧⌘G by default, or the person's remaps, two-step
+ * ones included) win over a page's own in browser tabs: Electron has no
+ * built-in find bar, so leaving the key to the page did nothing on most pages.
  */
-function findChordsFor(config: WebviewKeyConfig, platform: KeyPlatform): Set<string> {
-  let byPlatform = findChordsByConfig.get(config);
+function findKeysFor(config: WebviewKeyConfig, platform: KeyPlatform): FindKeys {
+  let byPlatform = findKeysByConfig.get(config);
   if (!byPlatform) {
     byPlatform = new Map();
-    findChordsByConfig.set(config, byPlatform);
+    findKeysByConfig.set(config, byPlatform);
   }
-  let chords = byPlatform.get(platform);
-  if (!chords) {
+  let keys = byPlatform.get(platform);
+  if (!keys) {
     const { overrides } = normalizeKeyboardShortcutOverrides(config.keyboardShortcutOverrides);
-    chords = new Set(FIND_COMMANDS.flatMap(id => resolveEffectiveChord(id, overrides, platform) ?? []));
-    byPlatform.set(platform, chords);
+    keys = { single: new Set(), sequences: new Map() };
+    for (const id of FIND_COMMANDS) {
+      const binding = resolveEffectiveChord(id, overrides, platform);
+      if (!binding) continue;
+      const [first, second] = bindingSteps(binding);
+      if (!second) {
+        keys.single.add(first);
+        continue;
+      }
+      const seconds = keys.sequences.get(first) ?? new Set<string>();
+      seconds.add(second);
+      keys.sequences.set(first, seconds);
+    }
+    byPlatform.set(platform, keys);
   }
-  return chords;
+  return keys;
 }
 
 /**
@@ -143,20 +163,20 @@ export function webviewKeysToForward(
   if (isAltGrInput(input)) return [];
   const chord = chordFromElectronInput(input, platform);
   if (!chord) return [];
-  if (findChordsFor(context.config, platform).has(chord)) {
-    sequence.pending = null;
-    return context.isBrowserTab ? [input] : [];
-  }
-
   const sets = interceptionSetsFor(context.config, platform);
+  // Find is Pane's only in browser tabs; the Docs dialog keeps every Find key.
+  const find: FindKeys = context.isBrowserTab
+    ? findKeysFor(context.config, platform)
+    : { single: new Set(), sequences: new Map() };
 
   const pending = sequence.pending;
   sequence.pending = null;
   if (pending && now - pending.at <= WEBVIEW_SEQUENCE_TIMEOUT_MS
-    && sets.webviewSequences.get(pending.chord)?.has(chord)) {
+    && (sets.webviewSequences.get(pending.chord)?.has(chord) || find.sequences.get(pending.chord)?.has(chord))) {
     return [pending.input, input];
   }
-  if (sets.webviewSequences.has(chord)) {
+  if (find.single.has(chord)) return [input];
+  if (sets.webviewSequences.has(chord) || find.sequences.has(chord)) {
     sequence.pending = { input, chord, at: now };
     return [];
   }

@@ -153,4 +153,28 @@ describe('webviewKeysToForward: remapped Find', () => {
     expect(webviewKeysToForward(cmdG, remapped)).toEqual([cmdG]);
     expect(webviewKeysToForward(newKey, { ...remapped, isBrowserTab: false })).toEqual([]);
   });
+
+  it('takes a two-step Find key from a browser page, both steps together (F-6)', () => {
+    const twoStep: WebviewKeyContext = { ...browserTab, config: { keyboardShortcutOverrides: { 'find-in-tab': 'mod+k mod+h' } } };
+    const cmdK = key('KeyK', 'k', { meta: true });
+    const cmdH = key('KeyH', 'h', { meta: true });
+    const sequence = createWebviewSequenceState();
+    // The page keeps ⌘K (many sites' search) until the second step makes it Pane's.
+    expect(webviewKeysToForward(cmdK, twoStep, sequence, 1_000)).toEqual([]);
+    expect(webviewKeysToForward(cmdH, twoStep, sequence, 1_200)).toEqual([cmdK, cmdH]);
+    // ⌘H alone, a late second step, and the Docs dialog stay with the page.
+    expect(webviewKeysToForward(cmdH, twoStep, createWebviewSequenceState(), 1_000)).toEqual([]);
+    const late = createWebviewSequenceState();
+    webviewKeysToForward(cmdK, twoStep, late, 1_000);
+    expect(webviewKeysToForward(cmdH, twoStep, late, 1_000 + WEBVIEW_SEQUENCE_TIMEOUT_MS + 1)).toEqual([]);
+    const docs = createWebviewSequenceState();
+    const docsContext = { ...twoStep, isBrowserTab: false };
+    expect(webviewKeysToForward(cmdK, docsContext, docs, 1_000)).toEqual([]);
+    expect(webviewKeysToForward(cmdH, docsContext, docs, 1_200)).toEqual([]);
+    // ⌘K ⌘M still reaches Maximize alongside the two-step Find.
+    const both = createWebviewSequenceState();
+    const cmdM = key('KeyM', 'm', { meta: true });
+    webviewKeysToForward(cmdK, twoStep, both, 1_000);
+    expect(webviewKeysToForward(cmdM, twoStep, both, 1_100)).toEqual([cmdK, cmdM]);
+  });
 });
