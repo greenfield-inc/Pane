@@ -318,20 +318,20 @@ const HOLD_CURSOR_MS = 3000;
 let releaseCursorHold: (() => void) | null = null;
 
 /**
- * Space opens a Pane but keeps the cursor in the list (D-234). The opened
- * Pane's terminal or composer focuses itself as it mounts; for a moment
- * after Space, that focus goes back to the cursor row. A click anywhere ends
- * the hold at once.
+ * Keeps focus on `target` for a moment while a view mounts around it: a newly
+ * opened Pane's terminal or composer focuses itself as it loads, and that
+ * focus is handed back. A click anywhere ends the hold at once. Used by Space
+ * in the sidebar ("open and stay", D-234) and by Approvals' return (D-239).
  */
-function holdSidebarCursor(): void {
+export function holdFocusOn(target: () => HTMLElement | null): void {
   releaseCursorHold?.();
   const until = Date.now() + HOLD_CURSOR_MS;
   const onFocusIn = (event: FocusEvent) => {
     if (Date.now() > until) { release(); return; }
+    const element = target();
     // SAFETY: focusin targets on the window are elements.
-    if (regionOf(event.target as Element | null) === 'sidebar') return;
-    const cursor = sidebarCursor;
-    if (cursor?.isConnected) requestAnimationFrame(() => cursor.focus({ preventScroll: true }));
+    if (!element?.isConnected || element.contains(event.target as Node | null)) return;
+    requestAnimationFrame(() => element.focus({ preventScroll: true }));
   };
   const release = () => {
     window.removeEventListener('focusin', onFocusIn, true);
@@ -343,6 +343,10 @@ function holdSidebarCursor(): void {
   window.addEventListener('focusin', onFocusIn, true);
   window.addEventListener('mousedown', release, true);
   releaseCursorHold = release;
+}
+
+function holdSidebarCursor(): void {
+  holdFocusOn(() => sidebarCursor);
 }
 
 function refocus(item: HTMLElement): void {

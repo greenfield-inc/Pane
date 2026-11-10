@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { useSessionStore } from '../../stores/sessionStore';
+import { holdFocusOn } from '../../services/regionFocus';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 /**
@@ -35,6 +36,8 @@ interface ReturnPlace {
   page: { x: number; y: number } | null;
   /** Short words for the back hint: the Pane or Session name and the tab. */
   label: string | null;
+  /** The sidebar row the cursor was on (its `data-sidebar-key`), found again after a re-render. */
+  sidebarKey: string | null;
 }
 
 let pendingReturn: ReturnPlace | null = null;
@@ -107,11 +110,16 @@ function pageScrollOf(read: JsonValue): ReturnPlace['page'] {
 }
 
 function captureReturnPlace(): CapturedReturn {
-  const active = document.activeElement;
-  const group = active?.closest<HTMLElement>('[data-panel-group-id]')
-    ?? document.querySelector<HTMLElement>('[data-focus-region="main"] [data-panel-group-id][data-group-focused="true"]');
-  const tabPanel = group?.querySelector<HTMLElement>('[role="tabpanel"]:not([aria-hidden="true"])') ?? null;
+  // Clicking the sidebar's Approvals row focuses it; where you were is the work, not that row.
+  const focused = document.activeElement;
+  const active = focused?.closest('[data-sidebar-key="approvals"], [data-compact-rail-item]') ? null : focused;
   const region = active?.closest('[data-focus-region]')?.getAttribute('data-focus-region') ?? null;
+  // Only focus in the main area (or nowhere, or a browser page) falls back to
+  // its focused split; the sidebar, right panel and terminal keep their place.
+  const inMain = !region || region === 'main';
+  const group = active?.closest<HTMLElement>('[data-panel-group-id]')
+    ?? (inMain ? document.querySelector<HTMLElement>('[data-focus-region="main"] [data-panel-group-id][data-group-focused="true"]') : null);
+  const tabPanel = group?.querySelector<HTMLElement>('[role="tabpanel"]:not([aria-hidden="true"])') ?? null;
   const scroll = tabPanel
     ? scrollers(tabPanel).flatMap(element => {
       const path = childPath(tabPanel, element);
@@ -129,6 +137,7 @@ function captureReturnPlace(): CapturedReturn {
     scroll,
     page: null,
     label,
+    sidebarKey: active?.closest('[data-sidebar-key]')?.getAttribute('data-sidebar-key') ?? null,
   };
   const guest = tabPanel?.querySelector('webview') ?? null;
   const page = isGuestPage(guest)
@@ -164,8 +173,18 @@ function restoreReturnPlace(place: ReturnPlace): void {
       if (group) {
         focusPlace(tabPanel ?? group, place.focusKind);
         focused = true;
+      } else if (place.sidebarKey) {
+        const key = place.sidebarKey;
+        const findRow = () => document.querySelector<HTMLElement>(`[data-sidebar-key="${CSS.escape(key)}"]`);
+        const row = findRow();
+        if (row) {
+          row.focus({ preventScroll: true });
+          // The Pane remounting beside it focuses its own terminal; keep the cursor here.
+          holdFocusOn(findRow);
+          focused = true;
+        }
       } else if (!place.groupId && place.region) {
-        const region = document.querySelector<HTMLElement>(`[data-focus-region="${CSS.escape(place.region)}"]`);
+        const region = document.querySelector<HTMLElement>(`[data-focus-region="${CSS.escape(place.region)}"]:not([data-region-open="false"])`);
         if (region) { focusPlace(region, place.focusKind); focused = true; }
       }
     }
