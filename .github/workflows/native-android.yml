@@ -101,6 +101,9 @@ jobs:
     # output built from other sources.
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v6
+      # BENCH ONLY: write the cache from this branch so run 2 reads run 1's.
+      with:
+        cache-read-only: false
 
     - name: Install dependencies
       run: pnpm install --frozen-lockfile --ignore-scripts
