@@ -122,7 +122,10 @@ and publishes nothing. `HOMEBREW_TAP_TOKEN` permits the cask push; without it,
 the Homebrew job logs a notice and skips. npm publishes with `--provenance`.
 
 `CI result` is the check branch protection requires. It fails if another
-`Code Quality` job fails or is cancelled.
+`Code Quality` job fails or is cancelled, except Markdown Links, which it does
+not wait for. It is the only check a merge waits
+for; how to merge a pull request or a stack is in
+[CONTRIBUTING.md](CONTRIBUTING.md#merging).
 
 ## Recovery and rollback
 

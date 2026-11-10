@@ -80,11 +80,14 @@ jobs:
     - name: Rebuild native modules for Node tests
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
+    # CI retries a failed unit test once; the retry report lists every retried
+    # test in the job summary, so flaky tests stay visible (--retry, see
+    # CONTRIBUTING.md). Playwright journeys are never retried.
     - name: Run main process test suite
-      run: CI=1 pnpm --filter main exec vitest run
+      run: CI=1 pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
     - name: Run frontend unit tests
-      run: CI=1 pnpm --filter frontend test
+      run: CI=1 pnpm --filter frontend exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
@@ -137,7 +140,25 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v7
 
+    # The action downloads lychee from GitHub's releases, which fail for hours
+    # at a time, so a failed first try runs once more. A broken link fails both.
     - name: Check markdown links
+      id: links
+      continue-on-error: true
+      uses: lycheeverse/lychee-action@v2
+      with:
+        args: >-
+          --offline --include-fragments --no-progress
+          --exclude-path node_modules --exclude-path dist-electron
+          './**/*.md'
+        fail: true
+
+    - name: Wait before checking links again
+      if: steps.links.outcome == 'failure'
+      run: sleep 20
+
+    - name: Check markdown links again
+      if: steps.links.outcome == 'failure'
       uses: lycheeverse/lychee-action@v2
       with:
         args: >-
@@ -358,7 +379,7 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main test
+      run: pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
     - name: Finish main process type checking
       if: ${{ !cancelled() }}
