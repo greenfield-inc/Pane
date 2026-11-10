@@ -4,18 +4,23 @@ name: Native Android Build
 # push-capable Android builds work on any machine, not only where
 # native/google-services.json happens to exist.
 #
-# The debug APK carries no JavaScript, so only native code can change it. On a
-# PR the build runs when the Expo Android fingerprint (native/fingerprint.config.js)
-# differs from the base, or this workflow changed, and builds one ABI
-# (arm64-v8a) as a compile check. Pushes to main and manual runs build all four.
+# The debug APK carries no JavaScript, so only native code can change it. A PR
+# or a push to main builds when the Expo Android fingerprint
+# (native/fingerprint.config.js) differs from the base (the PR's base, or the
+# commit before the push), or this workflow changed. A PR builds one ABI
+# (arm64-v8a) as a compile check; pushes build all four. The weekly run and
+# manual runs always build all four, so the full build stays covered and the
+# Gradle cache stays warm.
 on:
   push:
     branches: [ main ]
-    paths: [ 'native/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml' ]
+    paths: [ 'native/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml', 'scripts/ci-native-fingerprint.sh' ]
   pull_request:
     # shared/ is not a fingerprint input, but the native app imports it, so a
     # shared/ change runs the cheap fingerprint job, which says why it skips.
     paths: [ 'native/**', 'shared/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml', 'scripts/ci-native-fingerprint.sh' ]
+  schedule:
+    - cron: '17 6 * * 1'
   workflow_dispatch:
 
 concurrency:
@@ -25,7 +30,7 @@ concurrency:
 jobs:
   fingerprint:
     name: Android fingerprint
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -41,21 +46,25 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Fingerprint the head and the base
+      if: github.event.before != '0000000000000000000000000000000000000000'
       env:
-        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
       run: scripts/ci-native-fingerprint.sh "$BASE_SHA" android
 
     - name: Compare
       id: compare
       env:
-        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
       run: |
         set -euo pipefail
-        if ! git diff --quiet "$BASE_SHA" HEAD -- .github/workflows/native-android.yml scripts/ci-native-fingerprint.sh; then
-          reason="This PR changes the Android build workflow; building the APK."
+        if [ "$BASE_SHA" = 0000000000000000000000000000000000000000 ]; then
+          reason="This push has no previous commit to compare with; building the APK."
+          build=true
+        elif ! git diff --quiet "$BASE_SHA" HEAD -- .github/workflows/native-android.yml scripts/ci-native-fingerprint.sh; then
+          reason="This change touches the Android build workflow; building the APK."
           build=true
         elif cmp -s "$RUNNER_TEMP/base-android" "$RUNNER_TEMP/head-android"; then
-          reason="The Android fingerprint is unchanged ($(cat "$RUNNER_TEMP/head-android")), so this PR cannot change the APK; skipping the build."
+          reason="The Android fingerprint is unchanged ($(cat "$RUNNER_TEMP/head-android")), so this change cannot change the APK; skipping the build."
           build=false
         else
           reason="The Android fingerprint changed ($(cat "$RUNNER_TEMP/base-android") -> $(cat "$RUNNER_TEMP/head-android")); building the APK."
