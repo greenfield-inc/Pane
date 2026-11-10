@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [windows-2022, blacksmith-2vcpu-windows-2025, blacksmith-4vcpu-windows-2025, blacksmith-8vcpu-windows-2025]
+        runner: [windows-2022, blacksmith-4vcpu-windows-2025, blacksmith-8vcpu-windows-2025]
     steps:
     - shell: bash
       run: |
@@ -106,33 +106,6 @@ jobs:
     - if: ${{ !cancelled() }}
       shell: bash
       run: scripts/ci-background.sh wait typecheck
-
-  android-apk:
-    name: android-apk (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 50
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-latest, blacksmith-4vcpu-ubuntu-2404, blacksmith-8vcpu-ubuntu-2404, blacksmith-16vcpu-ubuntu-2404]
-    steps:
-    - uses: actions/checkout@v7
-    - uses: ./.github/actions/setup-pnpm
-    - uses: actions/setup-java@v5
-      with:
-        distribution: temurin
-        java-version: '17'
-    - run: pnpm install --frozen-lockfile --ignore-scripts
-    - name: Write Firebase Android config
-      env:
-        GOOGLE_SERVICES_JSON: ${{ secrets.PANE_ANDROID_GOOGLE_SERVICES_JSON }}
-      run: |
-        if [ -n "$GOOGLE_SERVICES_JSON" ]; then printf '%s' "$GOOGLE_SERVICES_JSON" | base64 --decode > native/google-services.json; fi
-    - working-directory: native
-      run: pnpm exec expo prebuild --platform android --no-install
-    - name: Build debug APK (all 4 ABIs, no Gradle cache)
-      working-directory: native/android
-      run: ./gradlew assembleDebug --no-daemon
 
   release-mac:
     name: release-mac (${{ matrix.runner }})
