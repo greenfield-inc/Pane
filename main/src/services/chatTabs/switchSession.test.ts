@@ -22,10 +22,12 @@ function session(tabs: Tab[]) {
     paneDirectory: () => '/work',
     terminal: {
       busy: async id => byId.get(id)?.busy === true,
-      conversationId: async id => {
+      conversation: async id => {
         const tab = byId.get(id);
-        if (tab?.unsaved) return { problem: 'Claude has not saved this conversation yet. It saves it after the first message', unsaved: true };
-        return tab?.noConversation ? { problem: tab.noConversation } : { id: `conv-${id}` };
+        // As terminalConversation says: Codex terminals never report their conversation (D-282).
+        if (tab?.state.agentType === 'codex') return { sure: false, why: 'Codex terminals do not report their conversation' };
+        if (tab?.noConversation) return { sure: false, why: tab.noConversation };
+        return { sure: true, id: `conv-${id}`, messages: !tab?.unsaved };
       },
       stop: async id => { log.push(`stop ${id}`); },
       restart: async id => { log.push(`restart ${id}`); },
@@ -38,6 +40,7 @@ function session(tabs: Tab[]) {
         if (reason) throw new PaneError('CHAT_START_FAILED', reason, 'Keep working in the terminal.');
         log.push(`started ${chatOf.get(id)}`);
       },
+      banner: id => byId.get(chatOf.get(id) ?? '')?.unsaved ? { kind: 'known-empty' } : undefined,
       close: async () => undefined,
       activate: async () => undefined,
     },
@@ -56,7 +59,7 @@ describe('switching a whole Session to chat', () => {
     { id: 'orchestrator', pane: 'own', state: claude },
     { id: 'auth', pane: 'auth-fix', state: claude },
     { id: 'busy', pane: 'auth-fix', state: claude, busy: true },
-    { id: 'plain', pane: 'docs', state: codex, noConversation: 'Codex reports its conversation ID only when it exits' },
+    { id: 'plain', pane: 'docs', state: codex },
     { id: 'shell', pane: 'docs', state: shell },
     { id: 'codex', pane: 'docs', state: { agentType: 'codex', agentSessionId: 'c-1' } },
   ];
@@ -70,7 +73,7 @@ describe('switching a whole Session to chat', () => {
       ['busy', 'auth-fix', 'busy'],
       ['plain', 'docs', 'plain-codex'],
       ['shell', 'docs', 'not-agent'],
-      ['codex', 'docs', 'switch'],
+      ['codex', 'docs', 'plain-codex'],
     ]);
     expect(preview.items.find(item => item.panelId === 'busy')?.skip?.reason).toBe('Claude is in the middle of a turn.');
     // Nothing has run yet, so no reason says "Nothing was switched".
@@ -83,13 +86,12 @@ describe('switching a whole Session to chat', () => {
     const { ports, log } = session(tabs);
     const result = await switchSessionToChat('s-1', undefined, ports);
     expect(result.items.map(item => [item.panelId, item.result])).toEqual([
-      ['orchestrator', 'switched'], ['auth', 'switched'], ['busy', 'skipped'], ['plain', 'skipped'], ['shell', 'skipped'], ['codex', 'switched'],
+      ['orchestrator', 'switched'], ['auth', 'switched'], ['busy', 'skipped'], ['plain', 'skipped'], ['shell', 'skipped'], ['codex', 'skipped'],
     ]);
     // One at a time: each tab is stopped, reopened and closed before the next starts.
     expect(log).toEqual([
       'stop orchestrator', 'started orchestrator', 'close orchestrator',
       'stop auth', 'started auth', 'close auth',
-      'stop codex', 'started codex', 'close codex',
     ]);
   });
 
@@ -101,7 +103,7 @@ describe('switching a whole Session to chat', () => {
     ]);
     const result = await switchSessionToChat('s-1', undefined, ports);
     expect(result.items.map(item => [item.panelId, item.result])).toEqual([['first', 'switched'], ['middle', 'failed'], ['last', 'switched']]);
-    expect(result.items[1].skip?.reason).toMatch(/Resource not found.*running the same conversation again/);
+    expect(result.items[1].skip?.reason).toMatch(/Resource not found.*back on the same conversation/);
     expect(log).toEqual(['stop first', 'started first', 'close first', 'stop middle', 'restart middle', 'stop last', 'started last', 'close last']);
   });
 
@@ -109,17 +111,24 @@ describe('switching a whole Session to chat', () => {
     const { ports, log } = session(tabs);
     const result = await switchSessionToChat('s-1', ['auth', 'busy', 'elsewhere'], ports);
     expect(result.items.map(item => [item.panelId, item.result, item.skip?.kind])).toEqual([
-      ['orchestrator', 'skipped', 'unconfirmed'], ['auth', 'switched', undefined], ['busy', 'skipped', 'busy'], ['plain', 'skipped', 'plain-codex'], ['shell', 'skipped', 'not-agent'], ['codex', 'skipped', 'unconfirmed'],
+      ['orchestrator', 'skipped', 'unconfirmed'], ['auth', 'switched', undefined], ['busy', 'skipped', 'busy'], ['plain', 'skipped', 'plain-codex'], ['shell', 'skipped', 'not-agent'], ['codex', 'skipped', 'plain-codex'],
     ]);
     expect(result.items[0].skip?.reason).toMatch(/not on the list when you confirmed/);
     expect(log).toEqual(['stop auth', 'started auth', 'close auth']);
   });
 
-  it('skips a Claude tab that has never had a message, saying why in plain words', async () => {
-    const { ports, log } = session([{ id: 'fresh', pane: 'auth-fix', state: claude, unsaved: true }]);
+  it('skips a tab Pane is not sure of, saying why in plain words (D-282: only one tab at a time opens a guess)', async () => {
+    const { ports, log } = session([{ id: 'old', pane: 'auth-fix', state: claude, noConversation: 'the terminal has not reported its conversation' }]);
     const preview = await previewSessionSwitch('s-1', ports);
-    expect(preview.items[0].skip).toEqual({ kind: 'no-conversation', reason: 'Claude has not saved this conversation yet. It saves it after the first message.' });
+    expect(preview.items[0].skip).toEqual({ kind: 'no-conversation', reason: "Pane isn't sure which conversation this tab is on (the terminal has not reported its conversation). Switch it from its tab's menu to pick one" });
     expect(log).toEqual([]);
+  });
+
+  it('switches a Claude tab that has never had a message to a new chat (D-282)', async () => {
+    const { ports, log } = session([{ id: 'fresh', pane: 'auth-fix', state: claude, unsaved: true }]);
+    const result = await switchSessionToChat('s-1', undefined, ports);
+    expect(result.items.map(item => [item.panelId, item.result])).toEqual([['fresh', 'switched']]);
+    expect(log).toEqual(['stop fresh', 'started fresh', 'close fresh']);
   });
 
   it('refuses a Session that does not exist', async () => {

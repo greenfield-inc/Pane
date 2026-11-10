@@ -26,6 +26,7 @@ import { windowsPathToWSLMount } from '../utils/wslUtils';
 import * as shellPathUtils from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
 import * as openCodeLaunch from './agents/opencodeLaunch';
+import * as claudePrompts from './claudePrompts';
 import * as processTree from '../utils/processTree';
 import { ArchiveProcessTracker } from './archiveProcessTracker';
 import { ExpectedReportTracker } from './expectedReports';
@@ -166,6 +167,9 @@ function makePanel(id: string): ToolPanel {
     metadata: { createdAt: '2026-09-11T00:00:00.000Z', lastActiveAt: '2026-09-11T00:00:00.000Z', position: 0 },
   };
 }
+
+// Direct Claude launches get Pane's --settings file (tested in claudePrompts); these tests read the rest of the command.
+beforeEach(() => { vi.spyOn(claudePrompts, 'withClaudePromptHooks').mockImplementation((_panelId, command) => command); });
 
 describe('terminal panel persistence', () => {
   let tempDir: string;

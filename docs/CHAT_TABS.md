@@ -33,9 +33,9 @@ orchestrator in a terminal. Open chat tabs keep working.
 ## Switching a terminal tab to chat
 
 **Switch to chat** (right-click a terminal Claude or Codex tab, or the command
-palette) reopens the same conversation in a chat tab, or fails cleanly (D-129,
-D-184, D-229). It shows only with chat tabs on, and it never sends anything to
-your agent.
+palette) continues the terminal's conversation in a chat tab (D-129, D-184,
+D-229, D-282). It shows only with chat tabs on, asks with one plain
+confirmation, and never sends anything to your agent.
 
 Right-click a Session in the sidebar (or on All machines, where it runs on the
 Session's own machine) and choose **Switch to chat…** to switch every terminal
@@ -43,51 +43,85 @@ agent tab in it: the orchestrator, and the agent tabs of each Pane in it (all of
 a Pane's tabs when the whole Pane is in the Session, otherwise only the tabs
 added to it). A dialog
 first lists the tabs that will switch and the ones it will skip, with why (busy
-mid-turn, plain Codex with no conversation ID yet, a Claude tab with no saved
-conversation, not an agent, a launch chat can't run). A Pane's terminal dock is
+mid-turn, a tab Pane isn't sure of the conversation for, which includes every
+Codex terminal, not an agent, a launch chat can't run). A Session switch opens
+only conversations Pane is sure of; switch an unsure tab from its own menu to
+get the most recent one and **Pick another**. A Pane's terminal dock is
 not a tab and isn't listed. Pane then switches them one at a time the same way
-as one tab, so a tab that fails gets its terminal back and the others carry on,
+as one tab, so a tab that fails is put back the way one tab's switch puts it
+back and the others carry on,
 and the dialog ends with a summary such as "4 switched, 1 skipped: busy". Each
 tab is checked again just before it switches; one that wasn't on the confirmed
 list (busy then, or opened since) is left as it is. The item is left out when
 nothing in the Session can switch.
 
-Nothing is touched when:
+**Which conversation opens.** Pane learns a terminal's conversation from Claude
+Code's `SessionStart` hook, which fires on start, `/resume`, `/clear` and
+compact (D-269). Pane adds the hook to plain `claude` tabs through the tab's
+`--settings` file, and Agent Farm ships it in the plugin it compiles for every
+Claude it launches. The hook runs `runpane panels conversation --hook`, which
+records the conversation on the tab and as the one its next restart resumes.
+Pane never asks the running Claude.
 
-- a turn is in progress: Pane asks you to wait or stop it;
-- the launch can't be kept: the chat gets the plain agent and its skip-approvals
-  mode, or the Agent Farm profile and its args (a Session's own saved launch for
-  its orchestrator). A `--model` flag becomes the chat's model, and Claude in a
-  Session's Pane keeps its read-only Session folder access (`--settings` there,
-  `claudeCode.options.settings` here). Any other flag or a wrapper command is
-  refused by name;
-- Pane can't tell which conversation the terminal is running. It uses only an
-  ID tied to that terminal: the one Pane started or resumed it with, or the one
-  its launch reported (Agent Farm). It never guesses from the folder, since
-  another terminal there can be writing a different conversation. A running Codex
-  reports its ID only when it exits, so a Codex terminal Pane didn't start with
-  an ID usually can't switch;
-- Claude hasn't saved the conversation yet. Claude saves it after the first
-  message, so a Claude tab that has never had one can't switch.
+- **Sure**: the hook reported since the terminal's current launch started. The
+  chat loads that conversation with ACP `session/load`, with its history and no
+  banner. If it has no messages yet, the chat starts new with a "Started a new
+  conversation" note instead.
+- **Not sure**: no report from this launch (a terminal started before the update
+  or by an older Agent Farm, WSL and SSH tabs) and every Codex terminal. The chat
+  lists the folder's conversations (ACP `session/list`), leaves out any open in
+  another Pane tab on this machine, and opens the newest, with the banner
+  "Opened the most recent conversation here" and **Pick another**. The terminal
+  has just stopped, so its own conversation counts, and it is usually the one.
+  With none left the chat starts new with a note; if listing fails (for example
+  Codex signed out), or every one of the newest 2,000 is open elsewhere, it
+  starts new and says why. Two chats opened at once never get the same one.
 
-Otherwise Pane stops the terminal agent, opens the chat tab and loads the
-conversation with ACP `session/load`, so the history shows, then closes the
+Nothing is touched when a turn is in progress (Pane asks you to wait or stop
+it) or when the launch can't be kept: the chat gets the plain agent and its
+skip-approvals mode, or the Agent Farm profile and its args (a Session's own
+saved launch for its orchestrator). A `--model` flag becomes the chat's model,
+and Claude in a Session's Pane keeps its read-only Session folder access
+(`--settings` there, `claudeCode.options.settings` here). Any other flag or a
+wrapper command is refused by name.
+
+Otherwise Pane stops the terminal agent, opens the chat tab, then closes the
 terminal tab. The chat takes the terminal's exact place in the tab order and is
 selected. A Session's orchestrator becomes its chat tab.
 
-Two Codex cases fail cleanly today. A terminal Codex that runs through Codex's
-shared background service (`codex app-server daemon`) stays that thread's writer
-after the terminal stops, so chat is refused with "in use by another Codex
-client". A Codex conversation started by Agent Farm can't be reopened because its
-saved ID is Agent Farm's own.
+If the chat fails after the terminal stopped, the dialog says what happened,
+with **Try again** (the reason is also in Pane's log, as `[ChatTabs]`), and the
+chat tab is removed. When Pane was sure, the terminal restarts on that
+conversation ("The chat couldn't open it … The terminal is back on the same
+conversation"); if that restart fails too, it says the terminal is stopped and
+the conversation is saved. When Pane wasn't sure, or the conversation had no
+messages, the terminal stays stopped ("The chat couldn't start"), since a
+restart could open the wrong conversation or start an empty one. A terminal
+restarted in place redraws at once. In the rare case that the chat has the
+conversation but the Session could not move to it, or the terminal tab could not
+be closed, the dialog says so and both tabs stay, since removing either could
+lose the Session's tab. Pane rebuilds no telemetry for the switch.
 
-If the conversation doesn't reopen within three minutes, or at all, the dialog
-gives the reason (also in Pane's log, as `[ChatTabs]`), the chat tab is removed,
-and the terminal comes back running the same conversation. In the rare case that
-the chat has the conversation but the Session could not move to it, or the
-terminal tab could not be closed, the dialog says so and both tabs stay, since
-removing either could lose the Session's tab. Pane rebuilds no telemetry for the
-switch.
+A terminal Codex that runs through Codex's shared background service
+(`codex app-server daemon`) stays that thread's writer after the terminal stops,
+so loading it in chat fails with "in use by another Codex client".
+
+## Continuing a past conversation (/resume)
+
+Any chat tab can continue another conversation from its folder. Type `/resume`
+(the composer menu lists it as Pane's own, since Claude Code hides its `/resume`
+from chat and Codex has none) or press **Pick another** on the banner. The
+picker lists the folder's conversations newest first, with a filter. The tab's
+own is marked "open here"; one open in another Pane tab shows "Open in tab …"
+and can't be picked, so two processes never write one conversation. Picking one
+reloads the tab on it with its history; the tab keeps its Session. Picking is
+refused while the agent is in the middle of a turn, and while messages wait in
+the queue, since they were written for the current conversation (remove them or
+let them send first). Pane lists up to the newest 2,000 conversations of a
+folder; past that the picker says older ones aren't shown. A conversation running
+outside Pane (a plain shell `claude`) can't be detected and is listed like any
+other. The picker works in the desktop chat tab, the Autopilot view and the
+remote web app.
 
 ## Where the agent runs, and sign-in
 

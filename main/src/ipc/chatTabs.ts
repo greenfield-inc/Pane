@@ -16,11 +16,11 @@ import { chatTabEnv } from '../services/chatTabs/launch';
 import { adapterEntry, adapterFileForPlainNode, installAdapter } from '../services/agentChat/adapterSetup';
 import { findExecutableInPath } from '../utils/shellPath';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import { savedConversation, switchToChat, terminalConversation, terminalRestored, type SwitchToChatPorts } from '../services/chatTabs/switchToChat';
-import { claudeTranscriptFiles } from '../services/agentTranscript/claude';
+import { switchToChat, terminalConversation, terminalRestored, type SwitchToChatPorts, type TranscriptLookup } from '../services/chatTabs/switchToChat';
 import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
 import { previewSessionSwitch, switchSessionToChat, type SessionSwitchPorts } from '../services/chatTabs/switchSession';
 import { getAppDirectory } from '../utils/appDirectory';
+import { canReadClaudeTranscripts, findClaudeSessionTranscript } from '../services/claudeSessionTranscript';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 
 const agentSchema = boundary.enumeration('claude', 'codex');
@@ -55,7 +55,7 @@ const agentFarmProfiles = new AgentFarmProfiles({
   checkCli: (agent, context) => installAdapter(agent, printedCli(agent, context.env, findExecutableInPath), context),
 });
 
-const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'sign-in', 'keys', 'set-key'] as const;
+const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key'] as const;
 
 function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
 
@@ -106,6 +106,9 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     return undefined;
   });
   registry.register('chat-tab:restart', async (id: string) => { await manager.restart(panelId(id)); });
+  registry.register('chat-tab:conversations', (id: string) => manager.conversations(panelId(id)));
+  registry.register('chat-tab:resume', async (id: string, sessionId: string) => { await manager.resume(panelId(id), decodeBoundary(sessionId, boundary.nonEmptyString)); });
+  registry.register('chat-tab:dismiss-banner', (id: string) => { manager.dismissBanner(panelId(id)); return undefined; });
   registry.register('chat-tab:sign-in', async (id: string) => {
     // Sign-in sets the owner's own agent account on this machine.
     const teammate = teammatePaneCaller();
@@ -186,6 +189,16 @@ function sessionSwitchPorts(services: AppServices, registry: PaneCommandRegistry
   };
 }
 
+/** Whether a Claude conversation has a transcript Pane can see; two sharing an ID is not a conversation Pane can be sure of. */
+const transcriptLookup: TranscriptLookup = id => {
+  if (!canReadClaudeTranscripts()) return 'unknown';
+  try { return findClaudeSessionTranscript(id) ? 'found' : 'missing'; }
+  catch (error) {
+    console.warn(`[ChatTabs] Could not tell whether conversation ${id} has messages: ${error instanceof Error ? error.message : String(error)}`);
+    return 'ambiguous';
+  }
+};
+
 /** Switch to chat over the real terminal, chat tab and Session owners. */
 function switchPorts(services: AppServices, registry: PaneCommandRegistry): SwitchToChatPorts {
   const manager = getChatTabManager();
@@ -199,13 +212,10 @@ function switchPorts(services: AppServices, registry: PaneCommandRegistry): Swit
     paneDirectory: paneId => services.sessionManager.getSession(paneId)?.worktreePath,
     terminal: {
       busy: id => terminalPanelManager.isAgentMidTurn(id),
-      conversationId: async id => {
-        const panel = panelManager.getPanel(id);
+      conversation: async id => {
         // SAFETY: Switch to chat only asks this of terminal panels, which persist TerminalPanelState.
-        const state = (panel?.state.customState ?? {}) as TerminalPanelState;
-        const cwd = state.resumeDirectory ?? (panel && services.sessionManager.getSession(panel.sessionId)?.worktreePath);
-        return savedConversation(terminalConversation(state, terminalPanelManager.getLaunchSessionId(id)), state.agentType,
-          async conversationId => !cwd || (await claudeTranscriptFiles(cwd, conversationId, 0)).length > 0);
+        const state = (panelManager.getPanel(id)?.state.customState ?? {}) as TerminalPanelState;
+        return terminalConversation(state, terminalPanelManager.currentLaunchId(id), transcriptLookup);
       },
       stop: id => terminalPanelManager.stopForPromotion(id),
       restart: async id => {
@@ -225,6 +235,7 @@ function switchPorts(services: AppServices, registry: PaneCommandRegistry): Swit
         const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PaneError('CHAT_SWITCH_TIMEOUT', 'The agent did not reopen the conversation within 3 minutes.', 'Keep working in the terminal, then try again.')), REOPEN_LIMIT_MS); });
         return Promise.race([manager.ensure(id), limit]).finally(() => clearTimeout(timer));
       },
+      banner: id => manager.view(id, 0, false).banner,
       close: async id => { await manager.close(id); await panelManager.deletePanel(id); },
       activate: async id => {
         const panel = panelManager.getPanel(id);

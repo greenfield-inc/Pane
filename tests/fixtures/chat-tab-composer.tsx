@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
 import type { AgentChatConfigOption } from '../../shared/types/agentChat';
-import type { ChatTabAnswer, ChatTabClient, ChatTabSend, ChatTabView } from '../../shared/types/chatTab';
+import type { ChatTabAnswer, ChatTabClient, ChatTabConversation, ChatTabSend, ChatTabSwitchBanner, ChatTabView } from '../../shared/types/chatTab';
 import '../../frontend/src/index.css';
 
 // A chat tab's composer in a column of a chosen width (?width=360), with Claude's settings.
@@ -35,6 +35,23 @@ const view: ChatTabView = {
     { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Nothing is waiting on you right now.' }] },
   ] },
 };
+// ?banner=most-recent|none|known-empty|list-failed: what Switch to chat did (D-282); ✕ closes it.
+const bannerParam = params.get('banner');
+const banner: ChatTabSwitchBanner | undefined = bannerParam === 'most-recent' || bannerParam === 'none' || bannerParam === 'known-empty' ? { kind: bannerParam }
+  : bannerParam === 'list-failed' ? { kind: 'list-failed', reason: 'Codex is signed out' } : undefined;
+if (banner) view.banner = banner;
+// The folder's conversations for the picker (/resume, Pick another); ?conversations=none lists none, ?busy=1 refuses a pick mid-turn.
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+const conversations: ChatTabConversation[] = params.get('conversations') === 'none' ? [] : [
+  { sessionId: 'c-1', title: 'Orchestrate Pane UI/UX improvements', updatedAt: minutesAgo(2), current: true },
+  { sessionId: 'c-2', title: 'Plan the approvals inbox', updatedAt: minutesAgo(60 * 24 + 30) },
+  { sessionId: 'c-3', title: 'Session orchestrator', updatedAt: minutesAgo(60 * 24 * 5) },
+  { sessionId: 'c-4', title: 'Review PR #1274', updatedAt: minutesAgo(12), openIn: { panelId: 'p-review', title: 'Review' } },
+];
+declare global { interface Window { qaResumed: string[]; qaDismissed: number } }
+window.qaResumed = [];
+window.qaDismissed = 0;
+const stateListeners = new Set<(next: ChatTabView) => void>();
 // ?queue=2: messages waiting behind a running turn (D-211); ?cleared=1: the conversation started fresh with /clear.
 const queued = Number(params.get('queue') ?? 0);
 view.queue = Array.from({ length: queued }, (_, index) => ({ operationId: `q${index + 1}`, text: ['Also run the linter before you push', 'Then open a draft PR'][index] ?? `Queued ${index + 1}`, queuedAt: '2026-11-08T10:00:00.000Z', stored: true }));
@@ -85,7 +102,16 @@ const client: ChatTabClient = {
   get: async () => structuredClone(view), history: async () => [], send: async (_panel, request) => { window.qaSent.push(request); return { operationId: request.operationId, state: 'accepted' }; }, receipt: async () => undefined,
   unqueue: async (_panel, id) => { window.qaCalls.push(`unqueue:${id}`); }, sendNow: async (_panel, id) => { window.qaCalls.push(`sendNow:${id}`); },
   editQueued: async (_panel, id, text) => { window.qaCalls.push(`edit:${id}:${text}`); }, clear: async () => { window.qaCalls.push('clear'); }, stopTask: async (_panel, id) => { window.qaCalls.push(`stopTask:${id}`); }, cancel: async () => {}, permission: async () => {}, answer: async (_panel, _id, response) => { window.qaAnswers.push(response); }, restart: async () => {}, signIn: async () => ({ panelId: 'composer' }),
-  configure: async (_panel, id, value) => { window.qaCalls.push(`configure:${id}:${value}`); }, onEvent: () => () => {}, onState: () => () => {},
+  configure: async (_panel, id, value) => { window.qaCalls.push(`configure:${id}:${value}`); }, onEvent: () => () => {},
+  onState: callback => { stateListeners.add(callback); return () => stateListeners.delete(callback); },
+  conversations: async () => structuredClone(conversations),
+  resume: async (_panel, sessionId) => {
+    if (params.has('busy')) throw new Error("Error invoking remote method 'daemon:invoke': Error [CHAT_RESUME_BUSY]: Claude is in the middle of a turn, so the chat stayed on this conversation. Next: Stop the turn or wait for it to finish, then pick again.");
+    window.qaResumed.push(sessionId);
+    delete view.banner;
+    stateListeners.forEach(listener => listener(structuredClone(view)));
+  },
+  dismissBanner: async () => { window.qaDismissed++; delete view.banner; stateListeners.forEach(listener => listener(structuredClone(view))); },
 };
 const width = Number(params.get('width') ?? 360);
 createRoot(document.getElementById('root')!).render(

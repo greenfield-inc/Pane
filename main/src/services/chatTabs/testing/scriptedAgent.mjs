@@ -24,10 +24,10 @@
 //   background          replies, then runs a turn of its own with no prompt open (as Claude does for a
 //                       finished background task), announced as an async task to a client that takes them
 //
-// SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired.
+// SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired; SCRIPTED_AGENT_LIST_FAILS=1 refuses session/list.
 import { agent, methods, ndJsonStream, RequestError } from '@agentclientprotocol/sdk';
 import { Readable, Writable } from 'node:stream';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -67,7 +67,7 @@ function configOptions(session) {
 const app = agent()
   .onRequest(methods.agent.initialize, ({ params }) => {
     clientCapabilities = params.clientCapabilities ?? {};
-    return { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: { close: {} } } };
+    return { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: { close: {}, list: {} } } };
   })
   .onRequest(methods.agent.session.new, async ({ params, client }) => {
     if (process.env.SCRIPTED_AGENT_SIGNED_OUT === '1') throw RequestError.authRequired();
@@ -101,6 +101,20 @@ const app = agent()
     // Like the real adapters, report the changed setting to the client.
     await client.notify(methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: 'config_option_update', configOptions: configOptions(session) } });
     return {};
+  })
+  // Newest first, two to a page, so clients must follow the cursor. SCRIPTED_AGENT_LIST_FAILS=1 refuses (a signed-out Codex).
+  .onRequest(methods.agent.session.list, ({ params }) => {
+    if (process.env.SCRIPTED_AGENT_LIST_FAILS === '1') throw RequestError.internalError(undefined, 'not signed in');
+    const all = readdirSync(store).filter(name => name.endsWith('.json')).flatMap(name => {
+      const sessionId = name.slice(0, -'.json'.length);
+      const saved = JSON.parse(readFileSync(file(sessionId), 'utf8'));
+      if (params.cwd && saved.cwd !== params.cwd) return [];
+      const first = saved.updates.find(update => update.sessionUpdate === 'user_message_chunk' && update.content?.type === 'text');
+      return [{ sessionId, cwd: saved.cwd, title: first?.content.text.slice(0, 80) ?? null, updatedAt: statSync(file(sessionId)).mtime.toISOString() }];
+    }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const start = Number(params.cursor ?? 0);
+    const page = all.slice(start, start + 2);
+    return start + 2 < all.length ? { sessions: page, nextCursor: String(start + 2) } : { sessions: page };
   })
   .onRequest(methods.agent.session.close, () => ({}))
   .onRequest('_session/async_task/stop', { parse: value => value }, async ({ params, client }) => {

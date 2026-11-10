@@ -959,6 +959,25 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "panels conversation",
+      "summary": "Record which conversation a terminal panel's agent is on, so Switch to chat and restarts open that one. A Claude Code SessionStart hook runs it with --hook.",
+      "usage": [
+        "runpane panels conversation --conversation <id> [--source startup|resume|clear|compact] [--panel <panel-id>] [--pane <pane-id>] [--json] [--pane-dir <path>]",
+        "runpane panels conversation --hook [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "idempotent": true,
+      "toolsets": [
+        "panels"
+      ],
+      "jsonSchemas": [
+        "panelConversationRequest",
+        "panelConversationResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "panes git-status",
       "summary": "Read the git status of a Pane worktree: uncommitted, unpushed, and behind-main counts.",
       "usage": [
@@ -2264,7 +2283,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--source",
         "value": "<user|agent>",
-        "description": "Identify whether a local-control mutation is user-initiated or agent/orchestrator-initiated."
+        "description": "Identify whether a local-control mutation is user-initiated or agent/orchestrator-initiated. On panels conversation it is instead what started the conversation: startup, resume, clear, or compact."
       },
       {
         "name": "--strategy",
@@ -2425,6 +2444,11 @@ export const RUNPANE_CONTRACT = {
         "name": "--question",
         "value": "<text>",
         "description": "What a blocked worker needs answered; required with --state blocked."
+      },
+      {
+        "name": "--conversation",
+        "value": "<id>",
+        "description": "The conversation (agent session) id a panel's agent is on, for runpane panels conversation."
       },
       {
         "name": "--cwd",
@@ -2789,6 +2813,10 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--deny",
         "description": "autopilot answer only: deny the item."
+      },
+      {
+        "name": "--hook",
+        "description": "runpane panels conversation: read a Claude Code SessionStart hook's JSON from stdin and report it for PANE_PANEL_ID. Prints nothing and always exits 0."
       }
     ]
   },
@@ -2856,6 +2884,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels conversation (--conversation <id> [--source startup|resume|clear|compact]|--hook) [--json]",
         "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
@@ -3448,6 +3477,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels conversation (--conversation <id> [--source startup|resume|clear|compact]|--hook) [--json]",
         "",
         "Run \"runpane help panels create\" or another command-specific topic for options."
       ],
@@ -4184,6 +4214,32 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
       ],
+      "panels conversation": [
+        "Usage:",
+        "  runpane panels conversation --conversation <id> [--source startup|resume|clear|compact] [--panel <panel-id>] [--pane <pane-id>] [--json] [--pane-dir <path>]",
+        "  runpane panels conversation --hook [--pane-dir <path>]",
+        "",
+        "Records which conversation a terminal panel's agent is on. Switch to chat, and every restart",
+        "of the panel, open the conversation recorded since its agent started. Inside a Pane terminal",
+        "the panel comes from PANE_SESSION_ID and PANE_PANEL_ID.",
+        "",
+        "--hook is for a Claude Code SessionStart command hook: it reads the hook's JSON from stdin",
+        "(session_id, source; at most 64 KiB, for at most 2 seconds) and reports it for PANE_PANEL_ID.",
+        "It prints nothing and always exits 0, so it never shows in Claude's context or blocks Claude:",
+        "outside Pane, with bad input, when Pane is not running, or with an older Pane.",
+        "",
+        "Options:",
+        "  --conversation <id>            Conversation (agent session) id",
+        "  --source <source>              What started it: startup, resume, clear, or compact",
+        "  --hook                         Read a SessionStart hook's JSON from stdin, silently",
+        "  --panel <panel-id>             Panel id when not running inside a Pane terminal",
+        "  --pane <pane-id>               Pane id, with --panel",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Example:",
+        "  runpane panels conversation --conversation 0b6c5f0e-8d1a-4f43-9a51-2f7d0c1e9b44 --source resume"
+      ],
       "lock": [
         "Usage:",
         "  runpane lock <acquire|release|list> [options]",
@@ -4784,6 +4840,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels conversation (--conversation <id> [--source startup|resume|clear|compact]|--hook) [--json]",
         "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
@@ -5374,6 +5431,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels conversation (--conversation <id> [--source startup|resume|clear|compact]|--hook) [--json]",
         "",
         "Run \"runpane help panels create\" or another command-specific topic for options."
       ],
@@ -6070,6 +6128,32 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
       ],
+      "panels conversation": [
+        "Usage:",
+        "  runpane panels conversation --conversation <id> [--source startup|resume|clear|compact] [--panel <panel-id>] [--pane <pane-id>] [--json] [--pane-dir <path>]",
+        "  runpane panels conversation --hook [--pane-dir <path>]",
+        "",
+        "Records which conversation a terminal panel's agent is on. Switch to chat, and every restart",
+        "of the panel, open the conversation recorded since its agent started. Inside a Pane terminal",
+        "the panel comes from PANE_SESSION_ID and PANE_PANEL_ID.",
+        "",
+        "--hook is for a Claude Code SessionStart command hook: it reads the hook's JSON from stdin",
+        "(session_id, source; at most 64 KiB, for at most 2 seconds) and reports it for PANE_PANEL_ID.",
+        "It prints nothing and always exits 0, so it never shows in Claude's context or blocks Claude:",
+        "outside Pane, with bad input, when Pane is not running, or with an older Pane.",
+        "",
+        "Options:",
+        "  --conversation <id>            Conversation (agent session) id",
+        "  --source <source>              What started it: startup, resume, clear, or compact",
+        "  --hook                         Read a SessionStart hook's JSON from stdin, silently",
+        "  --panel <panel-id>             Panel id when not running inside a Pane terminal",
+        "  --pane <pane-id>               Pane id, with --panel",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Example:",
+        "  runpane panels conversation --conversation 0b6c5f0e-8d1a-4f43-9a51-2f7d0c1e9b44 --source resume"
+      ],
       "lock": [
         "Usage:",
         "  python -m runpane lock <acquire|release|list> [options]",
@@ -6691,6 +6775,7 @@ export const RUNPANE_CONTRACT = {
       "runpane agents send --pane <pane-id> --text \"Also add a test\" --yes --json",
       "runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json",
       "runpane panels last-message --panel <panel-id> --json",
+      "runpane panels conversation --conversation <id> --source resume --json",
       "runpane panels close --panel <panel-id> --yes --json",
       "runpane panels resume --panel <panel-id> --wait-ready --yes --json",
       "runpane panels resume --session <id|name> --wait-ready --yes --json",
@@ -6768,6 +6853,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`, Agent Farm `agent-farm run <profile> --resume <id>` with the ID Agent Farm printed; the result's `agentSessionId` names it), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`); one whose agent exited back to its shell is stopped, and resume runs its saved command again in that shell (`action: \"resumed\"`). If that command exits at once, `--wait-ready` returns `ok: false` with `reason.code: \"command-exited\"` and the error line it printed. `--panel` also resumes a paused tab. `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope and skips paused ones, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, or once an agent exits back to its shell, stopped panels report `running: false` (`initialized` stays true while the shell lives) in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
       "`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does, without asking, keeps its agent's conversation, and marks it paused. A chat tab can't pause yet: `panels pause --panel` on one fails with `ERR_RUNPANE_CHAT_NOT_PAUSABLE`, and `panes pause` and `sessions pause` leave its agent running and count it in `chatTabsNotPaused`. A paused tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, chatTabsNotPaused, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: \"manual\" | \"auto\", idleHours? }`) and `inactiveSince`, the latest terminal output or input in its tabs or the last time the person selected it; `panels list` reports each tab's `paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.",
       "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
+      "`runpane panels conversation --conversation <id> [--source startup|resume|clear|compact]` records which conversation a terminal panel's agent is on (daemon action `runpane:panels:conversation`, request `{ panelId, paneId?, conversationId, source? }`, result `{ ok: true, paneId, panelId, conversationId, source?, sure }`; `sure` is true when the report came since the panel's agent started). It is not an `agent.report` event. The panel comes from `--panel` (with an optional `--pane`), else `PANE_PANEL_ID` and `PANE_SESSION_ID`, as for `runpane report`. `runpane panels conversation --hook` is the command for a Claude Code `SessionStart` hook: it reads the hook's JSON from stdin (`session_id`, `source`; at most 64 KiB, for at most 2 seconds), reports it for `PANE_PANEL_ID`, prints nothing on stdout or stderr, and always exits 0: outside Pane, on bad input, when Pane is not running, and with a Pane that predates the action. Without `--hook` it prints `Recorded conversation <id> for panel <panel-id>.` and fails like any other command.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
       "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
@@ -7494,6 +7580,32 @@ export const RUNPANE_CONTRACT = {
         "--limit",
         "5000",
         "--json"
+      ],
+      [
+        "panels",
+        "conversation",
+        "--conversation",
+        "0b6c5f0e-8d1a-4f43-9a51-2f7d0c1e9b44",
+        "--source",
+        "resume",
+        "--panel",
+        "panel-1",
+        "--pane",
+        "session-1",
+        "--json"
+      ],
+      [
+        "panels",
+        "conversation",
+        "--conversation=abc",
+        "--source=compact",
+        "--pane-dir",
+        "/tmp/pane"
+      ],
+      [
+        "panels",
+        "conversation",
+        "--hook"
       ],
       [
         "panes",
@@ -13203,6 +13315,80 @@ export const RUNPANE_CONTRACT = {
           "additionalProperties": false
         }
       ]
+    },
+    "panelConversationRequest": {
+      "type": "object",
+      "description": "What runpane panels conversation sends the daemon (runpane:panels:conversation).",
+      "required": [
+        "panelId",
+        "conversationId"
+      ],
+      "properties": {
+        "panelId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "paneId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conversationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source": {
+          "enum": [
+            "startup",
+            "resume",
+            "clear",
+            "compact"
+          ],
+          "description": "What started the conversation, as Claude Code's SessionStart hook names it."
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelConversationResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "paneId",
+        "panelId",
+        "conversationId",
+        "sure"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "conversationId": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "startup",
+            "resume",
+            "clear",
+            "compact"
+          ],
+          "description": "What started the conversation, as Claude Code's SessionStart hook names it."
+        },
+        "sure": {
+          "type": "boolean",
+          "description": "True when this report came since the panel's agent started, so Pane knows the panel is on this conversation."
+        },
+        "generation": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
     },
     "agentDoctorResult": {
       "type": "object",
@@ -19774,6 +19960,61 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "Without a transcript (a shell panel, another agent, or no reply yet) the result is `{ ok: false, reason: \"transcript-unavailable\" }` and the command exits 1. Use `panels screen` then.",
           "A worker that ran `runpane report` already handed back its state, PR, head, and summary; read those with `agents status` before reading the whole reply."
+        ]
+      },
+      "panels conversation": {
+        "name": "panels conversation",
+        "summary": "Record which conversation a terminal panel's agent is on, so Switch to chat and restarts open that one. A Claude Code SessionStart hook runs it with --hook.",
+        "details": "Pane calls this for you: the Claude Code SessionStart hook that Agent Farm and Pane's plain claude tabs install runs `runpane panels conversation --hook` on start, /resume, /clear and compact. Run it yourself only to tell Pane a panel is on a conversation it could not learn from the hook.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--conversation",
+            "value": "<id>",
+            "required": false,
+            "description": "Conversation (agent session) id the panel is on."
+          },
+          {
+            "name": "--source",
+            "value": "<startup|resume|clear|compact>",
+            "required": false,
+            "description": "What started the conversation."
+          },
+          {
+            "name": "--panel",
+            "value": "<panel-id>",
+            "required": false,
+            "description": "Panel id; defaults to PANE_PANEL_ID inside a Pane terminal."
+          },
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": false,
+            "description": "Pane id, with --panel; defaults to PANE_SESSION_ID."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panels conversation --conversation <id> --source resume --json"
+        ],
+        "jsonSchemas": [
+          "panelConversationRequest",
+          "panelConversationResult"
+        ],
+        "notes": [
+          "`sure` in the result is true when the report came since the panel's agent started; a Switch to chat or restart opens a sure conversation, and otherwise opens the folder's most recent one.",
+          "`--hook` reads the hook's stdin, prints nothing and always exits 0; it is not offered over MCP."
         ]
       },
       "panels create": {

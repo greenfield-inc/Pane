@@ -1,10 +1,10 @@
 import {
   client, methods, RequestError, type ClientConnection, type ContentBlock, type CreateElicitationRequest, type CreateElicitationResponse,
   type InitializeResponse, type LoadSessionRequest, type LoadSessionResponse, type NewSessionRequest, type NewSessionResponse,
-  type PromptResponse, type AnyMessage, type Stream, type RequestPermissionRequest, type SessionNotification, type RequestPermissionResponse, type SessionConfigOption, type SessionUpdate,
+  type PromptResponse, type AnyMessage, type Stream, type RequestPermissionRequest, type SessionInfo, type SessionNotification, type RequestPermissionResponse, type SessionConfigOption, type SessionUpdate,
 } from '@agentclientprotocol/sdk';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
-import type { ChatTabCommand, ChatTabContextUsage, ChatTabTask } from '../../../../shared/types/chatTab';
+import { CHAT_CONVERSATION_LIMIT, type ChatTabCommand, type ChatTabContextUsage, type ChatTabTask } from '../../../../shared/types/chatTab';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { AgentProcess, type AgentCommand } from './agentProcess';
@@ -110,6 +110,27 @@ export class ChatTabRuntime {
   isAlive(): boolean { return this.process.running && !this.stopping; }
   supportsImages(): boolean { return this.initialization?.agentCapabilities?.promptCapabilities?.image === true; }
   canLoad(): boolean { return this.initialization?.agentCapabilities?.loadSession === true; }
+  canList(): boolean { return Boolean(this.initialization?.agentCapabilities?.sessionCapabilities?.list); }
+
+  /**
+   * The agent's saved conversations in `cwd` (ACP session/list), following its cursor to the end.
+   * `complete` is false when Pane stopped at `limit` conversations, so later ones were not listed (review F-4).
+   */
+  async list(cwd: string, limit = CHAT_CONVERSATION_LIMIT): Promise<{ sessions: SessionInfo[]; complete: boolean }> {
+    if (!this.canList()) throw new PaneError('CHAT_LIST_UNSUPPORTED', 'This agent adapter cannot list saved conversations.', 'Update Pane, or keep working in this conversation.');
+    const sessions: SessionInfo[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    // Every page is asked for at most once; an adapter that repeats a cursor has nothing further to give.
+    do {
+      if (cursor) seen.add(cursor);
+      const response = await this.bounded(this.agent().request(methods.agent.session.list, cursor ? { cwd, cursor } : { cwd })).catch(error => { throw chatFailure(error, { code: 'CHAT_LIST_FAILED', next: 'Try again, or keep working in this conversation.' }); });
+      sessions.push(...response.sessions);
+      cursor = response.nextCursor ?? undefined;
+    } while (cursor && !seen.has(cursor) && sessions.length < limit);
+    const complete = !(cursor && !seen.has(cursor)) && sessions.length <= limit;
+    return { sessions: sessions.slice(0, limit), complete };
+  }
 
   async start(): Promise<InitializeResponse> {
     await this.process.started();

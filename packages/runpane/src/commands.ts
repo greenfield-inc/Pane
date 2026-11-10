@@ -145,6 +145,12 @@ export interface ParsedArgs {
   summary?: string;
   summaryFile?: string;
   question?: string;
+  /** panels conversation `--conversation`: the conversation (agent session) id the panel is on. */
+  conversationId?: string;
+  /** panels conversation `--source`: what started that conversation. */
+  conversationSource?: ConversationSource;
+  /** panels conversation `--hook`: read a SessionStart hook's stdin, silently. */
+  hook?: boolean;
   /** panels create|submit, panes create `--wait`: block until that panel reports, misses its report, is blocked, or exits. */
   waitForResult?: boolean;
   /** `--timeout` with `--wait`: give up after this long (exit 124). */
@@ -225,6 +231,17 @@ const REPORT_STATES: readonly ReportState[] = ['ready', 'blocked', 'failed', 'do
 const reportStateSchema = boundary.enumeration('ready', 'blocked', 'failed', 'done');
 const HEAD_PATTERN = /^[0-9a-fA-F]{7,40}$/;
 
+/** `runpane panels conversation --source`: what started the conversation, as Claude Code's SessionStart hook names it. */
+export type ConversationSource = 'startup' | 'resume' | 'clear' | 'compact';
+export const CONVERSATION_SOURCES: readonly ConversationSource[] = ['startup', 'resume', 'clear', 'compact'];
+const conversationSourceSchema = boundary.enumeration('startup', 'resume', 'clear', 'compact');
+/** A conversation id runpane passes on: Claude and Codex session ids are UUIDs; this also bounds anything a hook sends. */
+export const CONVERSATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+
+function isConversationSource(value: string): value is ConversationSource {
+  return CONVERSATION_SOURCES.some((source) => source === value);
+}
+
 const COMMAND_MATCHERS = RUNPANE_CONTRACT.commands
   .map((command) => ({ name: command.name, tokens: command.name.split(' ') }))
   .sort((a, b) => b.tokens.length - a.tokens.length);
@@ -263,6 +280,8 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--deny', ['autopilot answer']],
   ['--because', ['autopilot answer']],
   ['--reason', ['secrets request', 'autopilot close']],
+  ['--conversation', ['panels conversation']],
+  ['--hook', ['panels conversation']],
 ]);
 const LOCAL_VALUE_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localValue);
 const LOCAL_BOOLEAN_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localBoolean);
@@ -406,6 +425,7 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   }
   if (parsed.command === 'watch') applyWatchDefaults(parsed);
   if (parsed.command === 'report') validateReportArgs(parsed);
+  if (parsed.command === 'panels conversation') validateConversationArgs(parsed);
   validateWaitForResultArgs(parsed);
   if (parsed.command === 'inbox ack' && !parsed.all && !parsed.inboxIds?.length) {
     throw new Error('runpane inbox ack needs the item ids to clear, or --all --session <id|name>.');
@@ -550,6 +570,30 @@ function validateReportArgs(parsed: ParsedArgs): void {
   if (parsed.reportState === 'blocked' && !parsed.question?.trim()) {
     throw new Error('runpane report --state blocked requires --question "<what you need answered>".');
   }
+}
+
+function validateConversationArgs(parsed: ParsedArgs): void {
+  if (parsed.hook) {
+    if (parsed.conversationId !== undefined || parsed.conversationSource !== undefined || parsed.panelId !== undefined
+      || parsed.paneId !== undefined || parsed.json) {
+      throw new RunpaneError(
+        'ERR_RUNPANE_INVALID_ARGUMENT',
+        'runpane panels conversation --hook reads the conversation from the hook\'s stdin and the panel from PANE_PANEL_ID, '
+          + 'so it takes no --conversation, --source, --panel, --pane or --json. Nothing was recorded.',
+        'Run `runpane panels conversation --hook` from a SessionStart hook, or report by hand with `runpane panels conversation --conversation <id>`.',
+      );
+    }
+    return;
+  }
+  if (parsed.conversationId === undefined) throw missingConversationError();
+}
+
+export function missingConversationError(): RunpaneError {
+  return new RunpaneError(
+    'ERR_RUNPANE_INVALID_ARGUMENT',
+    'runpane panels conversation needs --conversation <id>, or --hook when a Claude Code SessionStart hook runs it. Nothing was recorded.',
+    'Run `runpane panels conversation --conversation <id> [--source startup|resume|clear|compact]`.',
+  );
 }
 
 function validateStackPushArgs(parsed: ParsedArgs): void {
@@ -854,6 +898,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.report = true;
     return;
   }
+  if (flag === '--hook') {
+    parsed.hook = true;
+    return;
+  }
   if (flag === '--fix') {
     if (parsed.command !== 'doctor') {
       throw new Error('--fix is only valid with runpane doctor.');
@@ -1146,6 +1194,13 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.intervalMs = intervalMs;
     return;
   }
+  if (flag === '--source' && parsed.command === 'panels conversation') {
+    if (!isConversationSource(value)) {
+      throw new Error(`--source must be one of: ${CONVERSATION_SOURCES.join(', ')}.`);
+    }
+    parsed.conversationSource = decodeBoundary(value, conversationSourceSchema);
+    return;
+  }
   if (flag === '--source') {
     if (!['user', 'agent'].includes(value)) {
       throw new Error('--source must be one of: user, agent.');
@@ -1282,6 +1337,13 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--question') {
     parsed.question = value;
+    return;
+  }
+  if (flag === '--conversation') {
+    if (!CONVERSATION_ID_PATTERN.test(value)) {
+      throw new Error('--conversation must be a conversation id: up to 256 letters, digits, ".", "_", ":" or "-", starting with a letter or digit.');
+    }
+    parsed.conversationId = value;
     return;
   }
   if (flag === '--ttl') {

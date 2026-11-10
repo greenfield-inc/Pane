@@ -148,6 +148,7 @@ runpane agents status --pane <pane-id> --json
 runpane agents send --pane <pane-id> --text "Also add a test" --yes --json
 runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json
 runpane panels last-message --panel <panel-id> --json
+runpane panels conversation --conversation <id> --source resume --json
 runpane panels close --panel <panel-id> --yes --json
 runpane panels resume --panel <panel-id> --wait-ready --yes --json
 runpane panels resume --session <id|name> --wait-ready --yes --json
@@ -283,6 +284,8 @@ The orchestrator guide prescribes submit without `--wait`, followed by its named
 
 `runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: "transcript-unavailable" }` and exits 1.
 
+`runpane panels conversation --conversation <id> [--source startup|resume|clear|compact]` records which conversation a terminal panel's agent is on (daemon action `runpane:panels:conversation`, request `{ panelId, paneId?, conversationId, source? }`, result `{ ok: true, paneId, panelId, conversationId, source?, sure }`; `sure` is true when the report came since the panel's agent started). It is not an `agent.report` event. The panel comes from `--panel` (with an optional `--pane`), else `PANE_PANEL_ID` and `PANE_SESSION_ID`, as for `runpane report`. `runpane panels conversation --hook` is the command for a Claude Code `SessionStart` hook: it reads the hook's JSON from stdin (`session_id`, `source`; at most 64 KiB, for at most 2 seconds), reports it for `PANE_PANEL_ID`, prints nothing on stdout or stderr, and always exits 0: outside Pane, on bad input, when Pane is not running, and with a Pane that predates the action. Without `--hook` it prints `Recorded conversation <id> for panel <panel-id>.` and fails like any other command.
+
 Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.
 
 `runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.
@@ -356,6 +359,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panels resume`: Restart a stopped terminal panel in place, resuming its agent's conversation.
 - `panels pause`: Pause a terminal tab: stop its process and keep its agent's conversation until it is resumed.
 - `panels last-message`: Read an agent's last reply from its transcript, without scraping the screen.
+- `panels conversation`: Record which conversation a terminal panel's agent is on, so Switch to chat and restarts open that one. A Claude Code SessionStart hook runs it with --hook.
 - `panes git-status`: Read the git status of a Pane worktree: uncommitted, unpushed, and behind-main counts.
 - `panes commit`: Stage all changes in a Pane worktree and commit them.
 - `panes push`: Push a Pane branch to its remote.
@@ -482,6 +486,8 @@ runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>
 runpane panels resume (--session <id|name>|--all-stopped) [--wait-ready] [--ready-timeout-ms <ms>] [--concurrency <count>] --yes [--json] [--pane-dir <path>]
 runpane panels pause --panel <panel-id> --yes [--json] [--pane-dir <path>]
 runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
+runpane panels conversation --conversation <id> [--source startup|resume|clear|compact] [--panel <panel-id>] [--pane <pane-id>] [--json] [--pane-dir <path>]
+runpane panels conversation --hook [--pane-dir <path>]
 runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]
 runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]
 runpane panes push --pane <pane-id> --yes [--json] [--pane-dir <path>]
@@ -706,6 +712,7 @@ These flags are consumed by local daemon-control commands:
 --summary <text>
 --summary-file <path|->
 --question <text>
+--conversation <id>
 --cwd <path>
 --note-file <path|->
 --machine <name>
@@ -786,6 +793,7 @@ These flags are consumed by local daemon-control commands:
 --next
 --approve
 --deny
+--hook
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, use Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane`), which reaches the Windows named-pipe daemon through WSL interop; older Pane builds need `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'`.

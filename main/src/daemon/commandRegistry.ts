@@ -160,11 +160,18 @@ export class PaneCommandRegistry {
   }
 }
 
-/** Electron IPC keeps only an error's message, so a PaneError's next step joins its message. */
+/**
+ * Electron IPC keeps only an error's `toString()`, so a PaneError's next step joins its message and
+ * its code goes in the name, as Node writes coded errors: `Error [CODE]: message Next: next`.
+ * The renderer reads the code back with `ipcErrorCode` and strips it with `ipcErrorMessage`.
+ */
 export async function rejectWithPaneErrorText<T>(result: Promise<T>): Promise<T> {
   try {
     return await result;
   } catch (error) {
-    throw error instanceof PaneError ? new Error(paneErrorText(error)) : error;
+    if (!(error instanceof PaneError)) throw error;
+    const wire = new Error(paneErrorText(error));
+    wire.name = `Error [${error.code}]`;
+    throw wire;
   }
 }
