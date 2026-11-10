@@ -486,3 +486,45 @@ test('maximize and restore refit a visible terminal behind its loading overlay',
   })).toBe(true);
   await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
 });
+
+test('a failed refit still lifts the terminal\'s overlay (F-1)', async ({ page }) => {
+  await openFixture(page);
+  await page.evaluate(() => {
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = (channel: string, ...args: unknown[]) => channel === 'terminal:resize'
+      ? Promise.reject(new Error('resize refused'))
+      : invoke(channel, ...args);
+  });
+  await page.locator('[data-panel-group-id="g-left"] .xterm-helper-textarea').focus();
+  await maximizeKey(page);
+  await expect(page.locator('[data-panel-group-id="g-right"]')).toBeHidden();
+  await expect(page.locator('[data-panel-group-id="g-left"]').getByRole('status', { name: 'Loading terminal' })).toHaveCount(0, { timeout: 5000 });
+});
+
+test('in the swapped layout, the bottom inspector maximizes, restores and minimizes (F-4)', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('pane-layout-swapped', 'true'));
+  await openFixture(page);
+  const inspector = page.locator('.pane-detail-panel-horizontal');
+  await expect(inspector).toBeVisible();
+  await inspector.locator('button').first().focus();
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'right-panel' });
+  await maximizeKey(page);
+  await expect(inspector.getByTestId('restore-region')).toBeVisible();
+  await inspector.getByTestId('restore-region').click();
+  await expect(inspector.getByTestId('restore-region')).toHaveCount(0);
+  await inspector.locator('button').first().focus();
+  await page.keyboard.press('ControlOrMeta+Shift+M');
+  await expect(inspector).toHaveAttribute('data-region-open', 'false');
+});
+
+test('Approvals returns to a sidebar row when that is where focus was (F-5)', async ({ page }) => {
+  await openFixture(page, { approvals: true });
+  await page.keyboard.press('ControlOrMeta+0');
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'sidebar', label: 'billing-migration' });
+  await pressApprovalsKey(page);
+  await expect(page.getByTestId('approvals-queue')).toBeVisible();
+  await pressApprovalsKey(page);
+  await expect(page.getByTestId('approvals-queue')).toHaveCount(0);
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'sidebar', label: 'billing-migration' });
+});

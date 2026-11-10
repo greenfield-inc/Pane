@@ -229,11 +229,15 @@ function actionsFor(item: SearchItem, context: ActionContext): LauncherAction[] 
   }
 }
 
+/** What saving a key came to: saved, refused because another command has it, or not written. */
+type KeySaveResult = { kind: 'saved' } | { kind: 'conflict'; message: string } | { kind: 'failed' };
+
 /**
  * Saves one command's key (undefined resets it to its default, null leaves it
- * without one). Returns the conflict that stopped it, or null once saved.
+ * without one). A conflict is refused before anything is written; a failed
+ * write shows its error and is never reported as saved.
  */
-async function saveKeyOverride(id: string, chord: string | null | undefined): Promise<string | null> {
+async function saveKeyOverride(id: string, chord: string | null | undefined): Promise<KeySaveResult> {
   const config = useConfigStore.getState().config;
   const { overrides } = normalizeKeyboardShortcutOverrides(config?.keyboardShortcutOverrides);
   const next = { ...overrides };
@@ -243,14 +247,14 @@ async function saveKeyOverride(id: string, chord: string | null | undefined): Pr
   const map = buildShortcutMap({ overridesRaw: next, ...sources, environment: rendererPlatform(), keyPlatform: rendererKeyPlatform() });
   const conflicts = map.rows.find(row => row.id === id)?.conflicts ?? [];
   if (chord && conflicts.length > 0) {
-    return `${formatKeyDisplay(chord)} is already ${conflicts.map(other => labelForId(other, sources)).join(' and ')}`;
+    return { kind: 'conflict', message: `${formatKeyDisplay(chord)} is already ${conflicts.map(other => labelForId(other, sources)).join(' and ')}` };
   }
   try {
     await useConfigStore.getState().updateConfig({ keyboardShortcutOverrides: next });
-    return null;
+    return { kind: 'saved' };
   } catch (cause) {
     showActionError('Could not save the key', cause);
-    return null;
+    return { kind: 'failed' };
   }
 }
 
@@ -293,7 +297,8 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
     isRemote,
     onChangeKey: (id, label) => { setKeyStatus(''); setRecordingKey({ id, label }); },
     onResetKey: (id) => {
-      void saveKeyOverride(id, undefined).then(() => {
+      void saveKeyOverride(id, undefined).then(result => {
+        if (result.kind !== 'saved') return;
         setKeyStatus(`Reset to ${formatKeyDisplay(resolveDefaultChord(id, rendererKeyPlatform()) ?? '') || 'no key'}`);
         setActionsKey(null);
       });
@@ -303,12 +308,17 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
       setTimeout(() => useHotkeyStore.getState().hotkeys.get('open-shortcut-settings')?.action(), AFTER_CLOSE_MS);
     },
   }), [onNewPane, isRemote]);
-  const finishRecorded = (outcome: Promise<string | null>, done: string) => {
+  const finishRecorded = (outcome: Promise<KeySaveResult>, done: string) => {
     const target = recordingRef.current;
-    void outcome.then(conflict => {
-      if (conflict && target) {
-        setKeyStatus(`${conflict}. Press another key, or Esc.`);
+    void outcome.then(result => {
+      if (result.kind === 'conflict' && target) {
+        setKeyStatus(`${result.message}. Press another key, or Esc.`);
         setRecordingKey(target);
+        return;
+      }
+      // A failed write has shown its error; the key stays as it was.
+      if (result.kind === 'failed') {
+        setKeyStatus('The key was not saved.');
         return;
       }
       setKeyStatus(done);
