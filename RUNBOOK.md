@@ -63,6 +63,10 @@ worktree and run it again.
 
 ### What the tag runs
 
+macOS arm64 and x64 build, sign and notarize in separate jobs
+(`build:mac:arm64`, `build:mac:x64`) and never publish. The `publish` job merges
+their two `latest-mac.yml` files with `scripts/merge-mac-latest.js` into the
+single file a two-arch build writes, and uploads the macOS assets.
 Linux x64 and ARM64 packages build separately on native x64 and ARM64 runners.
 The packaged SQLite ELF architecture must match the target before either format
 can upload; a host x64 SQLite binary cannot ship inside an ARM64 app. Use
@@ -79,15 +83,16 @@ outside SQLite's runtime-dispatched AEGIS cipher code, since those crash older
 CPUs with SIGILL. It also fails if objdump prints no instructions for a module.
 
 ```
-build (macOS + Linux) ─┐                        ┌─ notify-website
+build (macOS arm64,   ─┐
+  macOS x64, Linux)    │                        ┌─ notify-website
                        ├─ publish ──────────────┼─ homebrew (after packaging)
 build-windows (x64,  ──┘                        ├─ publish-npm   ┐
   arm64)                validate-runpane-packages ┴─ publish-pypi  ┘
 ```
 
-`publish` merges the Windows updater files, computes `SHA256SUMS.txt` and
-`continuity.json`, uploads them with the Windows installers, and publishes the
-draft release. `publish-npm` and `publish-pypi` each need both `publish` and
+`publish` merges the macOS and Windows updater files, computes
+`SHA256SUMS.txt` and `continuity.json`, uploads them with the macOS and
+Windows installers, and publishes the draft release. `publish-npm` and `publish-pypi` each need both `publish` and
 `validate-runpane-packages`.
 
 ### Verify

@@ -36,16 +36,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, ubuntu-24.04-arm]
         include:
+          # Each macOS arch builds, signs and notarizes in its own job and never
+          # publishes; the publish job merges latest-mac.yml and uploads.
           - os: macos-latest
-            release_cmd: release:mac
-            ci_cmd: build:mac:ci
+            artifact: macos-arm64
+            release_cmd: build:mac:arm64
+            ci_cmd: build:mac:arm64
             artifact_path: |
               dist-electron/*.dmg
               dist-electron/*.zip
+              dist-electron/*.blockmap
+              dist-electron/latest-mac.yml
+          - os: macos-latest
+            artifact: macos-x64
+            release_cmd: build:mac:x64
+            ci_cmd: build:mac:x64
+            artifact_path: |
+              dist-electron/*.dmg
+              dist-electron/*.zip
+              dist-electron/*.blockmap
               dist-electron/latest-mac.yml
           - os: ubuntu-latest
+            artifact: ubuntu-latest
             release_cmd: release:linux:x64
             ci_cmd: build:linux:x64
             artifact_path: |
@@ -53,6 +66,7 @@ jobs:
               dist-electron/*.AppImage
               dist-electron/latest-linux.yml
           - os: ubuntu-24.04-arm
+            artifact: ubuntu-24.04-arm
             release_cmd: release:linux:arm64
             ci_cmd: build:linux:arm64
             artifact_path: |
@@ -60,6 +74,7 @@ jobs:
               dist-electron/*.AppImage
               dist-electron/latest-linux-arm64.yml
 
+    name: build (${{ matrix.artifact }})
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
@@ -156,14 +171,14 @@ jobs:
 
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: pane-${{ matrix.os }}-${{ env.RELEASE_TAG }}
+        name: pane-${{ matrix.artifact }}-${{ env.RELEASE_TAG }}
         path: ${{ matrix.artifact_path }}
         if-no-files-found: error
         retention-days: ${{ env.ARTIFACT_DAYS }}
 
-  # One job after every build: merges the updater files, computes the
-  # checksums, then uploads and publishes. Dry runs stop after the merge and
-  # checksums and keep them as an artifact to check.
+  # One job after every build: merges the macOS and Windows updater files,
+  # computes the checksums, then uploads and publishes. Dry runs stop after the
+  # merge and checksums and keep them as an artifact to check.
   publish:
     needs: [build, build-windows]
     runs-on: ubuntu-latest
@@ -191,14 +206,29 @@ jobs:
         path: windows-artifacts/arm64
     - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
-        pattern: pane-macos-*-${{ env.RELEASE_TAG }}
-        path: release-files
-        merge-multiple: true
+        name: pane-macos-arm64-${{ env.RELEASE_TAG }}
+        path: mac-artifacts/arm64
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        name: pane-macos-x64-${{ env.RELEASE_TAG }}
+        path: mac-artifacts/x64
     - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
         pattern: pane-ubuntu-*-${{ env.RELEASE_TAG }}
         path: release-files
         merge-multiple: true
+
+    - name: Merge macOS updater metadata
+      run: |
+        mkdir -p mac-release
+        for arch in arm64 x64; do
+          cp mac-artifacts/$arch/*-macOS-$arch.{zip,dmg,zip.blockmap,dmg.blockmap} mac-release/
+        done
+        node scripts/merge-mac-latest.js \
+          mac-artifacts/arm64/latest-mac.yml \
+          mac-artifacts/x64/latest-mac.yml \
+          mac-release/latest-mac.yml
+        cp mac-release/* release-files/
 
     - name: Merge Windows updater metadata
       run: |
@@ -243,10 +273,10 @@ jobs:
         if-no-files-found: error
         retention-days: ${{ env.ARTIFACT_DAYS }}
 
-    - name: Upload Windows assets and checksums
+    - name: Upload macOS and Windows assets and checksums
       if: env.PUBLISH == 'true'
       run: |
-        gh release upload "$RELEASE_TAG" windows-release/* checksums/SHA256SUMS.txt checksums/continuity.json \
+        gh release upload "$RELEASE_TAG" mac-release/* windows-release/* checksums/SHA256SUMS.txt checksums/continuity.json \
           --repo "${{ github.repository }}" --clobber
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -398,8 +428,9 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
-        name: pane-macos-latest-${{ env.RELEASE_TAG }}
+        pattern: pane-macos-*-${{ env.RELEASE_TAG }}
         path: release-files
+        merge-multiple: true
     - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
       with:
         pattern: pane-windows-*-${{ env.RELEASE_TAG }}

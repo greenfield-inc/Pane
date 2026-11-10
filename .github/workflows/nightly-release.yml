@@ -77,9 +77,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # One job per macOS arch, as in build.yml.
           - os: macos-latest
-            command: build:mac:ci
-            artifact_name: pane-macos
+            command: build:mac:arm64
+            artifact_name: pane-macos-arm64
+            artifact_path: |
+              dist-electron/*.dmg
+          - os: macos-latest
+            command: build:mac:x64
+            artifact_name: pane-macos-x64
             artifact_path: |
               dist-electron/*.dmg
           - os: ubuntu-latest
