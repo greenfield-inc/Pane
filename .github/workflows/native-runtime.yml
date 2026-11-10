@@ -7,7 +7,7 @@ name: Native Runtime
 # labels native-change PRs.
 on:
   pull_request:
-    paths: [ 'native/**', 'pnpm-lock.yaml', '.github/workflows/native-runtime.yml' ]
+    paths: [ 'native/**', 'pnpm-lock.yaml', '.github/workflows/native-runtime.yml', 'scripts/ci-native-fingerprint.sh' ]
 
 concurrency:
   group: native-runtime-${{ github.event.pull_request.number }}
@@ -33,31 +33,10 @@ jobs:
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
 
-    - name: Fingerprint the head
-      run: |
-        set -euo pipefail
-        pnpm install --frozen-lockfile --ignore-scripts
-        cd native
-        for platform in ios android; do
-          node node_modules/expo-updates/bin/cli.js fingerprint:generate --platform "$platform" | jq -r .hash > "$RUNNER_TEMP/head-$platform"
-        done
-        jq -r .expo.runtimeVersion app.json > "$RUNNER_TEMP/head-runtime"
-
-    # With the head's expo-updates, so both sides use one fingerprint version,
-    # and a base without expo-updates still gets one.
-    - name: Fingerprint the base
+    - name: Fingerprint the head and the base
       env:
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
-      run: |
-        set -euo pipefail
-        git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
-        cd "$RUNNER_TEMP/base"
-        pnpm install --frozen-lockfile --ignore-scripts
-        cd native
-        for platform in ios android; do
-          node "$GITHUB_WORKSPACE/native/node_modules/expo-updates/bin/cli.js" fingerprint:generate --platform "$platform" | jq -r .hash > "$RUNNER_TEMP/base-$platform"
-        done
-        jq -r .expo.runtimeVersion app.json > "$RUNNER_TEMP/base-runtime"
+      run: scripts/ci-native-fingerprint.sh "$BASE_SHA" ios android
 
     - name: Compare
       env:

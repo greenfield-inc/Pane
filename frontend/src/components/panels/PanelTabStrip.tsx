@@ -6,7 +6,7 @@
  */
 
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { Pause, Pencil, Play, X } from 'lucide-react';
+import { MessageSquare, Pause, Pencil, Play, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { ToolPanel, LogsPanelState, pausedMarkOf } from '../../../../shared/types/panels';
 import { Dropdown, type DropdownItem } from '../ui/Dropdown';
@@ -23,6 +23,9 @@ import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
 import { getPanelIcon } from './panelIcon';
 import { useFocusRegionStore } from '../../services/regionFocus';
 import { editorPanelState, pinEditorPanel } from '../../services/openFileInEditor';
+import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
+import { SwitchToChatDialog } from './SwitchToChat';
+import { isAgentTerminal } from '../../utils/agentTerminal';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -121,6 +124,8 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   }, [activePanelId, panels]);
 
   const [menuPanelId, setMenuPanelId] = useState<string | null>(null);
+  const chatTabsEnabled = useConfigStore(state => isChatTabsEnabled(state.config));
+  const [switchingPanel, setSwitchingPanel] = useState<ToolPanel | null>(null);
   const hotkeys = useHotkeyStore(s => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
@@ -376,9 +381,10 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         // The hover tooltip stays hidden while this tab's right-click menu is open, so it never covers the menu.
         const tooltipTab = tooltipContent && tabButton ? <Tooltip content={menuPanelId === panel.id ? null : tooltipContent} side="bottom">{tabButton}</Tooltip> : tabButton;
         const onMenuOpenChange = (open: boolean) => setMenuPanelId(open ? panel.id : current => (current === panel.id ? null : current));
-        // Right-click: rename, pause or resume, then close past a divider. A disabled tab offers none.
+        // Right-click: rename, switch to chat, pause or resume, then close past a divider. A disabled tab offers none.
         const menuItems: DropdownItem[] = isDisabled ? [] : [
           ...(!isPermanent && !isDiffPanel ? [{ id: 'rename', label: 'Rename tab…', icon: Pencil, onClick: () => startRename(panel) }] : []),
+          ...(chatTabsEnabled && isAgentTerminal(panel) ? [{ id: 'switch-to-chat', label: 'Switch to chat…', icon: MessageSquare, onClick: () => setSwitchingPanel(panel) }] : []),
           ...(panel.type === 'terminal' ? [isPaused
             ? { id: 'resume', label: 'Resume tab', icon: FilledPlay, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, false) }
             : { id: 'pause', label: 'Pause tab', icon: Pause, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, true) }] : []),
@@ -498,6 +504,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           onDrop={handleStripDrop}
         />
       )}
+      {switchingPanel && <SwitchToChatDialog panel={switchingPanel} isOpen onClose={() => setSwitchingPanel(null)} />}
     </div>
   );
 });

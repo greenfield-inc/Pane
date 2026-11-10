@@ -483,6 +483,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     create: (request: ChatTabCreate) => invokeIpc('chat-tab:create', request),
     switch: (panelId: string) => invokeIpc('chat-tab:switch', panelId),
+    previewSessionSwitch: (sessionId: string) => invokeIpc('chat-tab:preview-session-switch', sessionId),
+    switchSession: (sessionId: string, panelIds: string[]) => invokeIpc('chat-tab:switch-session', sessionId, panelIds),
     get: (panelId: string, limit?: number) => invokeIpc('chat-tab:get', panelId, limit),
     history: (panelId: string, before: number, limit: number) => invokeIpc('chat-tab:history', panelId, before, limit),
     send: (panelId: string, request: ChatTabSend) => invokeIpc('chat-tab:send', panelId, request),

@@ -15,7 +15,7 @@ import type {
 import type { SessionTileNode, SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { SessionProvider } from '../contexts/SessionContext';
-import { SwitchToChatButton } from './panels/SwitchToChatButton';
+import { SwitchToChatPaletteEntry } from './panels/SwitchToChat';
 import { PanelContainer } from './panels/PanelContainer';
 import { DropOverlay } from './panels/DropOverlay';
 import { SessionWorkspacePanels } from './SessionWorkspacePanels';
@@ -862,7 +862,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
   }, [onOverviewUpdate]);
 
   const sessionControls = (<>
-    <SwitchToChatButton key={view.panel.id} panel={view.panel} palette={chrome.isFocused ? 'session' : undefined} className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary" />
+    {chrome.isFocused && <SwitchToChatPaletteEntry key={view.panel.id} panel={view.panel} view="session" />}
     <Tooltip content="Session settings" side="bottom">
       <button type="button" aria-label="Session settings" onClick={() => setShowSettings(true)}
         className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary">

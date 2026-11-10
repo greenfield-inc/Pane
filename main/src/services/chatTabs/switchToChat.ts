@@ -38,6 +38,18 @@ export function terminalConversation(state: Pick<TerminalPanelState, 'agentType'
   return { problem: state.agentType === 'codex' ? 'Codex reports its conversation ID only when it exits, and this terminal has not reported one yet' : 'this terminal has no saved conversation ID' };
 }
 
+/** The conversation a terminal runs, or why it can't be reopened: unknown, or known but `unsaved`. */
+export type TerminalConversation = { id: string } | { problem: string; unsaved?: true };
+
+/**
+ * A Claude conversation can be reopened only once Claude has saved it, which it does after the
+ * first message: before that, reopening it fails and so does resuming it in the terminal.
+ */
+export async function savedConversation(found: TerminalConversation, agent: TerminalPanelState['agentType'], isSaved: (id: string) => Promise<boolean>): Promise<TerminalConversation> {
+  if ('problem' in found || agent !== 'claude' || await isSaved(found.id)) return found;
+  return { problem: 'Claude has not saved this conversation yet. It saves it after the first message', unsaved: true };
+}
+
 /** What a switch needs from the rest of Pane; ipc/chatTabs.ts wires the real ones. */
 export interface SwitchToChatPorts {
   chatTabsEnabled(): boolean;
@@ -48,7 +60,7 @@ export interface SwitchToChatPorts {
     /** Whether the agent is in the middle of a turn; false when it is not running. */
     busy(panelId: string): Promise<boolean>;
     /** The ID of the conversation this terminal is running, or why it is not known. Sends the agent nothing. */
-    conversationId(panelId: string): Promise<{ id: string } | { problem: string }>;
+    conversationId(panelId: string): Promise<TerminalConversation>;
     /** Ends the agent once it is idle, with its conversation saved. */
     stop(panelId: string): Promise<void>;
     /** Starts the agent again on the same conversation, and waits until it is ready. */
@@ -69,6 +81,9 @@ export interface SwitchToChatPorts {
   sessionLaunchCommand(panelId: string): string | undefined;
 }
 
+/** A switch that passed every check: the terminal, the chat it opens, and the conversation that moves. */
+export interface PreparedSwitch { panel: ToolPanel; chatState: ChatPanelState; conversation: { id: string } }
+
 const RESUMED = 'Switched from a terminal tab. The conversation continues here.';
 const NOTHING_SWITCHED = 'Keep working in the terminal.';
 
@@ -79,6 +94,15 @@ const NOTHING_SWITCHED = 'Keep working in the terminal.';
  * anything to the person's agent.
  */
 export async function switchToChat(panelId: string, ports: SwitchToChatPorts): Promise<ChatTabSwitchResult> {
+  const prepared = await prepareSwitch(panelId, ports);
+  return switchPrepared(prepared, ports);
+}
+
+/**
+ * Every check a switch makes before it touches the agent: throws the PaneError the switch would
+ * throw, or returns the chat it would open. Sends the agent nothing, so a preview can ask it.
+ */
+export async function prepareSwitch(panelId: string, ports: SwitchToChatPorts): Promise<PreparedSwitch> {
   if (!ports.chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine. Nothing was switched.', 'Turn on Chat tabs in Settings > Advanced > Experimental, then try again.');
   const panel = ports.panel(panelId);
   if (!panel) throw new PaneError('CHAT_PANEL_MISSING', 'That tab no longer exists. Nothing was switched.', 'Open the agent tab again.');
@@ -102,13 +126,19 @@ export async function switchToChat(panelId: string, ports: SwitchToChatPorts): P
   const conversation = await ports.terminal.conversationId(panelId);
   if ('problem' in conversation) {
     console.warn(`[ChatTabs] Did not switch ${panelId} to chat: ${conversation.problem}.`);
-    throw new PaneError('CHAT_SWITCH_NO_CONVERSATION', `Pane could not tell which conversation this terminal is running: ${conversation.problem}. Nothing was switched.`, NOTHING_SWITCHED);
+    const why = 'unsaved' in conversation ? `${conversation.problem}.` : `Pane could not tell which conversation this terminal is running: ${conversation.problem}.`;
+    throw new PaneError('CHAT_SWITCH_NO_CONVERSATION', `${why} Nothing was switched.`, NOTHING_SWITCHED);
   }
   const chatState: ChatPanelState = { agent, launch: converted.launch, cwd, status: 'starting', acpSessionId: conversation.id, notice: RESUMED };
   if (converted.settings) chatState.settings = converted.settings;
   if (state.orchestrationSessionId) chatState.orchestrationSessionId = state.orchestrationSessionId;
   if (state.sessionFolder) chatState.sessionFolder = state.sessionFolder;
+  return { panel, chatState, conversation };
+}
 
+/** Switches a tab `prepareSwitch` cleared; it checks nothing again. */
+export async function switchPrepared({ panel, chatState, conversation }: PreparedSwitch, ports: SwitchToChatPorts): Promise<ChatTabSwitchResult> {
+  const panelId = panel.id;
   try { await ports.terminal.stop(panelId); }
   catch (error) { throw new PaneError('CHAT_SWITCH_BUSY', `The agent could not be stopped cleanly: ${reasonOf(error)}. Nothing was switched.`, 'Wait for it to finish, or stop it (Esc in the terminal), then switch again.'); }
 

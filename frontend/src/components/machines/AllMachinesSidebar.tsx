@@ -1,11 +1,13 @@
 import { SessionApprovalsCount } from '../approvals/ApprovalsCount';
 import { useEffect, useState } from 'react';
-import { Archive, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
+import { Archive, Check, ChevronDown, ChevronRight, MessageSquare, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
 import { AgentStatusDot, PausedGlyph } from '../ui/AgentStatusDot';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
 import { PermissionDialog } from '../PermissionDialog';
+import { SessionSwitchToChatDialog, useSessionSwitchPreview } from '../SessionSwitchToChat';
+import type { SessionChatSwitchPreview } from '../../../../shared/types/chatTab';
 import { MachineMark, MachineRowMark, machineMarkTitle } from './MachineMark';
 import { Tooltip } from '../ui/Tooltip';
 import { machineLetter } from '../../../../shared/utils/machineMarks';
@@ -79,7 +81,10 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
   const noun = pane ? 'Pane' : 'Session';
   const act = (run: () => Promise<void>) => { onClose(); void run(); };
   const permission = pane?.permission ?? null;
-  return (
+  // A Session's own machine says whether any of its terminal agent tabs can switch to chat.
+  const switchPreview = useSessionSwitchPreview({ kind: 'machine', machineId }, session?.session.id ?? null);
+  const [switching, setSwitching] = useState<{ machineId: string; sessionName: string; preview: SessionChatSwitchPreview } | null>(null);
+  return (<>
     <TerminalPopover visible={menu !== null} x={menu?.x ?? 0} y={menu?.y ?? 0} onClose={onClose}>
       <div role="menu" aria-label={`${noun} actions`}>
         {permission && (
@@ -102,13 +107,19 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
         <PopoverButton role="menuitem" onClick={() => { if (menu) onRename(menu); onClose(); }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename {noun}…</span>
         </PopoverButton>
+        {session && switchPreview && (
+          <PopoverButton role="menuitem" onClick={() => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview: switchPreview }); onClose(); }}>
+            <span className="flex items-center gap-2"><MessageSquare className="h-4 w-4" />Switch to chat…</span>
+          </PopoverButton>
+        )}
         <div className="my-1 border-t border-border-primary" />
         <PopoverButton role="menuitem" variant="danger" onClick={() => act(() => runOnMachine(machineId, { type: 'archive', target: ref }, `Could not archive the ${noun}`))}>
           <span className="flex items-center gap-2"><Archive className="h-4 w-4" />Archive</span>
         </PopoverButton>
       </div>
     </TerminalPopover>
-  );
+    {switching && <SessionSwitchToChatDialog where={{ kind: 'machine', machineId: switching.machineId }} sessionName={switching.sessionName} preview={switching.preview} onClose={() => setSwitching(null)} />}
+  </>);
 }
 
 /** A pinned row keeps its pin visible at rest, as today's sidebar does. */

@@ -131,6 +131,8 @@ export type ElectronApiMockOptions = {
   paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage };
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
+  /** machines:run answers by machine, then command type. Absent: `{ success: true }`. */
+  machineRunAnswers?: Record<string, Record<string, JsonValue>>;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -791,7 +793,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       },
       run: (machineId: string, command: MachineCommand) => {
         machineRuns.push({ machineId, command: clone(command) });
-        return Promise.resolve({ machineId, data: { success: true } });
+        const answer = mockOptions.machineRunAnswers?.[machineId]?.[command.type];
+        return Promise.resolve({ machineId, data: clone(answer ?? { success: true }) });
       },
       retry: () => Promise.resolve(),
       onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
