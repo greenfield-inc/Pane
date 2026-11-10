@@ -136,6 +136,13 @@ not wait for. It is the only check a merge waits
 for; how to merge a pull request or a stack is in
 [CONTRIBUTING.md](CONTRIBUTING.md#merging).
 
+`node scripts/ci-timings.mjs --since <date> --until <time>` writes
+`ci-timings.json`: the wall time (first job start to last job end, attempt 1)
+of every successful run of the CI, release and deploy workflows in that window,
+annotated with the CI speed PRs each run contains. It reads the API through
+`gh` and caches each run's jobs, so a re-run of the same window makes only the
+listing calls.
+
 ## Recovery and rollback
 
 - **Never retag a version.** To undo a bad release, fix `main` and cut a new
