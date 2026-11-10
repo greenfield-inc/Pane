@@ -36,6 +36,11 @@ function escapeAnnotation(text) {
   return text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
 }
 
+// A property value (file=...) also ends at ',' and ':'.
+function escapeProperty(text) {
+  return escapeAnnotation(text).replaceAll(':', '%3A').replaceAll(',', '%2C');
+}
+
 export default class RetryReport {
   /** @type {Retried[]} */
   retried = [];
@@ -93,7 +98,7 @@ export default class RetryReport {
     const text = lines.join('\n');
     console.log(`\n${text}`);
     for (const test of this.retried.filter((t) => t.passed)) {
-      console.log(`::warning file=${escapeAnnotation(repoPath(test.file))},title=Flaky test retried::${escapeAnnotation(`${test.name} failed, then passed on retry. Fix it; see the job summary.`)}`);
+      console.log(`::warning file=${escapeProperty(repoPath(test.file))},title=Flaky test retried::${escapeAnnotation(`${test.name} failed, then passed on retry. Fix it; see the job summary.`)}`);
     }
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${text}\n`);
   }

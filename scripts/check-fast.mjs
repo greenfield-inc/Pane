@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // pnpm check:fast: the checks that catch most red CI runs, in a few minutes,
 // before a push. It runs the type check and lint (side by side), the offline
-// markdown link check, the renderer-test type check, and the unit tests that
+// markdown link check (when lychee is installed), the renderer-test type check, and the unit tests that
 // the branch's changes reach, in each workspace the branch changed. It does
 // not run the Playwright journeys, the runpane wrapper suites or other OSes;
 // CI still does. Exits non-zero when any check fails.
@@ -9,7 +9,7 @@ import { spawn, spawnSync } from 'node:child_process';
 
 const TEST_WORKSPACES = ['main', 'frontend', 'native', 'mobile', 'glasses'];
 // shared/ is imported by these, so a shared/ change runs their tests too.
-const SHARED_DEPENDENTS = ['main', 'frontend'];
+const SHARED_DEPENDENTS = ['main', 'frontend', 'native', 'glasses'];
 
 function git(args) {
   const result = spawnSync('git', args, { encoding: 'utf8' });

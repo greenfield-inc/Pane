@@ -17,9 +17,9 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
 - Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x); `.nvmrc` pins 22.23.4. Use pnpm 10. Setup `pnpm run setup`; run
   `PANE_DIR=~/.pane_test pnpm dev` (not `electron-dev`: its watcher overwrites
   the bundled preload). Build the local CLI with `pnpm --filter runpane build`.
-- Before a push: `pnpm check:fast` (type check, lint, offline links, renderer
-  test types, and the unit tests your changes reach), plus any other tests your
-  change touches.
+- Before a push: `pnpm check:fast` (type check, lint, offline links when
+  lychee is installed, renderer test types, and the unit tests your changes
+  reach), plus any other tests your change touches.
 - Tests: `pnpm --filter frontend test`. Main: `npm rebuild
   better-sqlite3-multiple-ciphers` first (setup builds it for Electron), then
   `pnpm --filter main exec vitest run` (plain `pnpm --filter main test` is watch
