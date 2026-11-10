@@ -28,7 +28,9 @@ export function installApplicationMenu(options: {
 
   const paneChords = options.paneChords ?? new Set<string>();
   // An item whose key a Pane command now owns keeps showing it but lets the
-  // window have it, so a remap never also triggers the menu.
+  // window have it, so a remap never also triggers the menu. registerAccelerator
+  // covers Windows and Linux; on macOS main takes the key in before-input-event
+  // (menuKeyTakenFromWindow, whose chord list matches this menu's).
   const keyed = (item: MenuItemConstructorOptions, chord: string, accelerator: string): MenuItemConstructorOptions => ({
     ...item,
     accelerator,

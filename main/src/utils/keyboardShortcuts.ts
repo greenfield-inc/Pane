@@ -89,3 +89,90 @@ export function settingsMenuAccelerator(
   if (!areKeyboardShortcutsEnabled(config)) return null;
   return menuAcceleratorFor(effectiveChordFor(config, 'open-settings', platform));
 }
+
+/**
+ * Keys macOS's application menu answers (nativeMenus.ts), less Settings…,
+ * whose key is Open Settings' own. Keep the two lists in step.
+ */
+const MAC_MENU_CHORDS = new Set([
+  'mod+r', 'mod+shift+r', 'mod+alt+i',
+  'mod+h', 'mod+alt+h', 'mod+q',
+  'mod+shift+0', 'mod+=', 'mod+-', 'mod+ctrl+f',
+  'mod+m', 'mod+w',
+]);
+
+/** Edit menu keys stay with text editing even when a Pane command is bound to them. */
+const TEXT_EDITING_CHORDS = new Set(['mod+z', 'mod+shift+z', 'mod+x', 'mod+c', 'mod+v', 'mod+alt+shift+v', 'mod+a']);
+
+const MENU_SEQUENCE_TIMEOUT_MS = 2000;
+
+/** The first step of a Pane two-step key pressed in the window, so its second step can be taken from the menu. */
+export interface MenuKeyState {
+  pending: { chord: string; at: number } | null;
+}
+
+export function createMenuKeyState(): MenuKeyState {
+  return { pending: null };
+}
+
+type MenuKeyConfig = Pick<AppConfig, 'keyboardShortcutsEnabled' | 'keyboardShortcutOverrides' | 'terminalShortcuts' | 'customCommands'>;
+
+interface PaneKeys {
+  single: Set<string>;
+  sequences: Map<string, Set<string>>;
+  settings: string | null;
+}
+
+const paneKeysByConfig = new WeakMap<MenuKeyConfig, PaneKeys>();
+
+function paneKeysFor(config: MenuKeyConfig, platform: KeyPlatform): PaneKeys {
+  const cached = paneKeysByConfig.get(config);
+  if (cached) return cached;
+  const keys: PaneKeys = { single: new Set(), sequences: new Map(), settings: effectiveChordFor(config, 'open-settings', platform) };
+  for (const { chord } of collectActiveBindings({
+    overrides: config.keyboardShortcutOverrides,
+    terminalShortcuts: config.terminalShortcuts,
+    customCommands: config.customCommands,
+    keyPlatform: platform,
+  })) {
+    const [first, second] = chord.split(' ');
+    if (!second) {
+      keys.single.add(first);
+      continue;
+    }
+    const seconds = keys.sequences.get(first) ?? new Set<string>();
+    seconds.add(second);
+    keys.sequences.set(first, seconds);
+  }
+  paneKeysByConfig.set(config, keys);
+  return keys;
+}
+
+/**
+ * Whether main takes this press from macOS's menu and hands it to the
+ * renderer: the menu item's key now belongs to a Pane command, alone or as the
+ * second step of a two-step key (⌘K ⌘M against Window › Minimize).
+ * `registerAccelerator: false` does nothing on macOS, but preventDefault in
+ * before-input-event stops menu shortcuts on every platform.
+ */
+export function menuKeyTakenFromWindow(
+  input: ElectronKeyboardInputLike & { type: string },
+  config: MenuKeyConfig,
+  state: MenuKeyState,
+  now: number = Date.now(),
+  platform: KeyPlatform = keyPlatformFor(process.platform),
+): boolean {
+  if (platform !== 'mac' || input.type !== 'keyDown' || !areKeyboardShortcutsEnabled(config)) return false;
+  const chord = chordFromElectronInput(input, platform);
+  if (!chord) return false;
+  const keys = paneKeysFor(config, platform);
+  const pending = state.pending;
+  state.pending = keys.sequences.has(chord) ? { chord, at: now } : null;
+  const menuKey = (MAC_MENU_CHORDS.has(chord) || chord === keys.settings) && !TEXT_EDITING_CHORDS.has(chord);
+  if (!menuKey) return false;
+  if (pending && now - pending.at <= MENU_SEQUENCE_TIMEOUT_MS && keys.sequences.get(pending.chord)?.has(chord)) {
+    state.pending = null;
+    return true;
+  }
+  return keys.single.has(chord);
+}

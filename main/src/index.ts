@@ -80,7 +80,14 @@ import * as path from 'path';
 import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
 import type { ConfigManager } from './services/configManager';
-import { activePaneChords, areKeyboardShortcutsEnabled, isWindowCloseInput, settingsMenuAccelerator } from './utils/keyboardShortcuts';
+import {
+  activePaneChords,
+  areKeyboardShortcutsEnabled,
+  createMenuKeyState,
+  isWindowCloseInput,
+  menuKeyTakenFromWindow,
+  settingsMenuAccelerator,
+} from './utils/keyboardShortcuts';
 import { createWebviewSequenceState, webviewKeysToForward } from './utils/webviewKeyForwarding';
 import {
   parseStoredOverlayColors,
@@ -755,12 +762,16 @@ async function createWindow() {
   } // end devToolsHandlersRegistered guard
 
   // Prevent Ctrl+W / Cmd+W from closing the Electron window so the renderer
-  // can use it to close tabs. We intercept at before-input-event and re-emit
-  // the key as a DOM keydown via IPC so the renderer's hotkey system sees it.
+  // can use it to close tabs, and take a macOS menu key a Pane command owns now
+  // (⌘H remapped, the ⌘M of ⌘K ⌘M) from the menu. We intercept at
+  // before-input-event, where preventDefault also stops menu shortcuts, and
+  // re-emit the key as a DOM keydown via IPC so the renderer's hotkey system sees it.
+  const menuKeys = createMenuKeyState();
   mainWindow.webContents.on('before-input-event', (event, input) => {
     const config = configManager.getConfig();
     if (!areKeyboardShortcutsEnabled(config)) return;
-    if (input.type === 'keyDown' && isWindowCloseInput(input)) {
+    const takeFromMenu = menuKeyTakenFromWindow(input, config, menuKeys);
+    if (input.type === 'keyDown' && (isWindowCloseInput(input) || takeFromMenu)) {
       event.preventDefault();
       mainWindow?.webContents.send('synthetic-keydown', {
         key: input.key,
