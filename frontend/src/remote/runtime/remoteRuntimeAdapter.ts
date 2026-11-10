@@ -23,12 +23,10 @@ import type {
 } from '../../../../shared/types/voiceTranscription';
 import type { Project } from '../../types/project';
 import type { SessionWorkerSource } from '../../components/chatTab/sessionWorkers';
+import { watchHostSessionChanges } from './hostSessionChanges';
 import { savedFilePath } from '../../components/chatTab/chatAttachments';
 import type { CreateSessionRequest, Session, SessionOutput } from '../../types/session';
 import { RemoteDaemonBrowserClient, type RemoteBrowserConnectionState } from './remoteDaemonBrowserClient';
-
-/** The host's Session events name the Session that changed. */
-const sessionChangeSchema = boundary.object({ sessionId: boundary.nonEmptyString });
 
 export interface RemoteProjectWithSessions extends Project {
   sessions?: Session[];
@@ -161,16 +159,7 @@ export class RemoteRuntimeAdapter {
   /** A Session's overview on the host, read again when its Panes, states or reports change or the connection returns. */
   readonly sessionWorkers: SessionWorkerSource = {
     overview: sessionId => this.invoke<OrchestrationSessionOverview>('orchestration-sessions:overview', [{ sessionId }]),
-    onChange: callback => {
-      const stopEvents = this.onEvent(event => {
-        if (event.channel === 'orchestration-sessions:overview-updated' || event.channel === 'orchestration-sessions:changed') {
-          callback(decodeOptionalBoundary(event.args[0], sessionChangeSchema)?.sessionId);
-        }
-      });
-      // A reconnect may have missed changes to any Session.
-      const stopStatus = this.onStatus(state => { if (state.status === 'connected') callback(); });
-      return () => { stopEvents(); stopStatus(); };
-    },
+    onChange: callback => watchHostSessionChanges(this, callback),
   };
 
   getProjectsWithSessions(): Promise<RemoteProjectWithSessions[]> {

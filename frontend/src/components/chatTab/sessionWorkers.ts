@@ -17,24 +17,61 @@ export interface SessionWorkerSource {
   onChange(callback: (sessionId?: string) => void): () => void;
 }
 
+/** One Session's overview reads, shared by every watch of it through the same source. */
+interface SharedOverview {
+  listeners: Set<(overview: SessionWorkersOverview) => void>;
+  reading: boolean;
+  again: boolean;
+}
+/** One watch's hold on a Session's overview reads. */
+interface OverviewFollow {
+  /** Reads when no read is out; otherwise waits for that one. */
+  join(): void;
+  /** Reads, or reads once more after the read that is out. */
+  refresh(): void;
+  stop(): void;
+}
+const sharedOverviews = new WeakMap<SessionWorkerSource, Map<string, SharedOverview>>();
+
 /**
- * Reads one Session's overview at most once at a time: asked again while a read is out, it reads
- * once more after that read ends, however often it was asked (review F-3 on #1281).
+ * Follows one Session's overview with at most one read out at a time per source and Session,
+ * however many watches there are, so a watch replaced mid-read (Autopilot's walk changing) joins
+ * the read already out instead of starting another (review F-3 on #1281). `refresh` asks for a
+ * read: during one, it reads once more after it. `join` reads only when none is out. Reads still
+ * queued when the last watch stops are dropped.
  */
-function overviewReader(source: SessionWorkerSource, sessionId: string, onOverview: (overview: SessionWorkersOverview) => void): () => void {
-  let reading = false;
-  let again = false;
+function followOverview(source: SessionWorkerSource, sessionId: string, listener: (overview: SessionWorkersOverview) => void): OverviewFollow {
+  let bySession = sharedOverviews.get(source);
+  if (!bySession) { bySession = new Map(); sharedOverviews.set(source, bySession); }
+  const sessions = bySession;
+  let shared = sessions.get(sessionId);
+  if (!shared) { shared = { listeners: new Set(), reading: false, again: false }; sessions.set(sessionId, shared); }
+  const entry = shared;
+  entry.listeners.add(listener);
   const read = (): void => {
-    if (reading) { again = true; return; }
-    reading = true;
-    source.overview(sessionId)
-      .then(overview => { if (overview) onOverview(overview); }, () => undefined)
-      .finally(() => {
-        reading = false;
-        if (again) { again = false; read(); }
-      });
+    entry.reading = true;
+    source.overview(sessionId).then(overview => {
+      if (!overview) return;
+      for (const each of [...entry.listeners]) {
+        // One watch's failure must not stop the others or the next read.
+        try { each(overview); } catch (error) { console.warn('[sessionWorkers] Could not apply a Session overview:', error); }
+      }
+    }, () => undefined).finally(() => {
+      entry.reading = false;
+      if (entry.again && entry.listeners.size) { entry.again = false; read(); }
+      else if (!entry.listeners.size) sessions.delete(sessionId);
+    });
   };
-  return read;
+  return {
+    join: () => { if (!entry.reading) read(); },
+    refresh: () => { if (entry.reading) entry.again = true; else read(); },
+    stop: () => {
+      entry.listeners.delete(listener);
+      if (entry.listeners.size) return;
+      entry.again = false;
+      if (!entry.reading) sessions.delete(sessionId);
+    },
+  };
 }
 
 /**
@@ -65,7 +102,7 @@ export function watchManySessionWorkers(source: SessionWorkerSource, sessionIds:
   const ids = [...new Set(sessionIds)];
   let live = true;
   const bySession = new Map<string, ChatWorkerLine[]>();
-  const readers = new Map(ids.map(id => [id, overviewReader(source, id, overview => {
+  const follows = new Map(ids.map(id => [id, followOverview(source, id, overview => {
     if (!live) return;
     const attached = new Map(overview.session.associations.map(association => [association.paneId, association.attachedAt]));
     bySession.set(id, workerLines(overview.panes, attached));
@@ -76,17 +113,17 @@ export function watchManySessionWorkers(source: SessionWorkerSource, sessionIds:
   let timer: ReturnType<typeof setTimeout> | undefined;
   const flush = () => {
     timer = undefined;
-    for (const id of due) readers.get(id)?.();
+    for (const id of due) follows.get(id)?.refresh();
     due.clear();
   };
   const unsubscribe = source.onChange(sessionId => {
-    if (sessionId !== undefined && !readers.has(sessionId)) return;
+    if (sessionId !== undefined && !follows.has(sessionId)) return;
     for (const id of sessionId === undefined ? ids : [sessionId]) due.add(id);
     if (timer) clearTimeout(timer);
     timer = setTimeout(flush, burstMs);
   });
-  readers.forEach(read => read());
-  return () => { live = false; if (timer) clearTimeout(timer); unsubscribe(); };
+  follows.forEach(follow => follow.join());
+  return () => { live = false; if (timer) clearTimeout(timer); unsubscribe(); follows.forEach(follow => follow.stop()); };
 }
 
 /** The worker lines of several Sessions; `sessionIds` is compared by value, so a new array with the same ids keeps the watches. */

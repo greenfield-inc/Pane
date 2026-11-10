@@ -128,4 +128,30 @@ describe('watchManySessionWorkers (D-276)', () => {
     expect(fake.source.overview).toHaveBeenCalledTimes(2);
     expect(seen).toHaveLength(2);
   });
+  it('a watch replaced mid-read joins the read already out, and a stopped watch queues nothing (review F-3 follow-up on #1281)', async () => {
+    const fake = fakeSource(overview('done'));
+    const answers: Array<() => void> = [];
+    vi.mocked(fake.source.overview).mockImplementation(() => new Promise(resolve => { answers.push(() => resolve(overview('blocked'))); }));
+    const first = watchManySessionWorkers(fake.source, ['s1'], () => undefined, 10);
+    fake.emit('s1');
+    await vi.advanceTimersByTimeAsync(20);
+    // S1's read is out and a refresh is queued behind it; Autopilot's walk changes.
+    first();
+    const seen: string[][] = [];
+    watchManySessionWorkers(fake.source, ['s1', 's2'], workers => seen.push(workers.map(worker => worker.state)), 10);
+    expect(vi.mocked(fake.source.overview).mock.calls).toEqual([['s1'], ['s2']]);
+    while (answers.length) { answers.shift()?.(); await vi.advanceTimersByTimeAsync(0); }
+    await vi.runAllTimersAsync();
+    expect(vi.mocked(fake.source.overview).mock.calls).toEqual([['s1'], ['s2']]);
+    expect(seen.at(-1)).toEqual(['waiting', 'waiting']);
+  });
+
+  it('keeps reading when one watch fails to apply an overview', async () => {
+    const fake = fakeSource(overview('done'));
+    const seen: ChatWorkerLine[][] = [];
+    watchSessionWorkers(fake.source, 's1', () => { throw new Error('bad overview'); });
+    watchSessionWorkers(fake.source, 's1', workers => seen.push(workers));
+    await vi.runAllTimersAsync();
+    expect(seen).toHaveLength(1);
+  });
 });
