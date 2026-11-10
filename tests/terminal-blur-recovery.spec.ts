@@ -322,12 +322,35 @@ test('battery saver retains delayed detach and full recovery', async ({ page }) 
   expect(fullDepthCount(logs)).toBe(fullDepthBeforeBlur + 1);
 });
 
-test('panel hide and show retains the masked hot activation', async ({ page }) => {
+test('panel hide and show at an unchanged size shows the hot activation without a mask', async ({ page }) => {
+  const { panel } = await bootFixture(page);
+  const before = await readSnapshot(panel);
+  await page.getByRole('tab', { name: secondaryPanel.title, exact: true }).click();
+  const secondary = page.getByRole('tabpanel', { name: secondaryPanel.title });
+  await expect(secondary).toBeVisible();
+  await expect(secondary.getByTestId('terminal-activation-mask')).toHaveCount(0);
+  await resetMaskAppearances(page);
+  await page.getByRole('tab', { name: primaryPanel.title, exact: true }).click();
+  await expect.poll(() => lifecycleLogs(page).then((logs) => logs.some((line) => (
+    line.includes(`Activation depth for panel ${primaryPanel.id}: hot`)
+  )))).toBe(true);
+  expect(await maskAppearances(page, panel)).toEqual([]);
+  expect(await readSnapshot(panel)).toEqual(before);
+  // The hidden panel kept its WebGL renderer, so showing it attached no new one.
+  expect((await lifecycleLogs(page)).some((line) => (
+    line.includes(`WebGL renderer detached for panel ${primaryPanel.id} reason=panel-hidden`)
+  ))).toBe(false);
+});
+
+test('panel hide and show after a resize retains the masked hot activation', async ({ page }) => {
   const { panel } = await bootFixture(page);
   await page.getByRole('tab', { name: secondaryPanel.title, exact: true }).click();
   const secondary = page.getByRole('tabpanel', { name: secondaryPanel.title });
   await expect(secondary).toBeVisible();
   await expect(secondary.getByTestId('terminal-activation-mask')).toHaveCount(0);
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('Playwright viewport is unset; this test resizes it.');
+  await page.setViewportSize({ width: viewport.width - 120, height: viewport.height - 80 });
   await resetMaskAppearances(page);
   await page.getByRole('tab', { name: primaryPanel.title, exact: true }).click();
   await expect.poll(() => lifecycleLogs(page).then((logs) => logs.some((line) => (
@@ -359,6 +382,11 @@ for (const alternateScreen of [false, true]) {
     const before = await readSnapshot(panel);
     await page.getByRole('tab', { name: secondaryPanel.title, exact: true }).click();
     await expect(page.getByRole('tabpanel', { name: secondaryPanel.title }).getByTestId('terminal-activation-mask')).toHaveCount(0);
+    // Resize while hidden: an unchanged-size hot activation is unmasked, and
+    // this test covers the masked one.
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error('Playwright viewport is unset; this test resizes it.');
+    await page.setViewportSize({ width: viewport.width - 120, height: viewport.height - 80 });
     await pauseClock(page);
     const stateCallsBefore = await mockEvaluate(page, mock => mock.getInvokeCalls('terminal:getState').length);
     await page.evaluate(panelId => {
@@ -385,7 +413,12 @@ for (const alternateScreen of [false, true]) {
     for (let elapsed = 0; elapsed < 250; elapsed += 25) await page.clock.runFor(25);
     await expect(panel.getByTestId('terminal-activation-mask')).toHaveCount(0);
     expect(await mockEvaluate(page, mock => mock.getInvokeCalls('terminal:getState').length)).toBe(stateCallsBefore);
-    expect(await readSnapshot(panel)).toEqual(before);
+    // The resize changes the row count (and the alternate screen's blank rows),
+    // so compare the written content and bottom-follow.
+    const written = (lines: string[]) => lines.filter(line => line.trim() !== '');
+    const after = await readSnapshot(panel);
+    expect(written(after.lines)).toEqual(written(before.lines));
+    expect(after.viewportY).toBe(after.baseY);
   });
 }
 
