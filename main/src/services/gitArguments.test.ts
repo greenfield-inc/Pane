@@ -35,7 +35,7 @@ afterEach(async () => {
   // A claim replenishes the reserve after it returns, running git in the fixture; on Windows
   // a folder a process runs in cannot be deleted.
   await worktreePoolManager.idle();
-  // Pane turns on core.fsmonitor, and Git then keeps a watcher daemon in each worktree.
+  // A developer's own core.fsmonitor makes Git keep a watcher daemon in each worktree.
   // Stop them as Pane does before removing a worktree.
   const worktrees = git('worktree', 'list', '--porcelain').split('\n')
     .filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));
