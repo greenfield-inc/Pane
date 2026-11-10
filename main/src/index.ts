@@ -80,7 +80,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
 import type { ConfigManager } from './services/configManager';
-import { areKeyboardShortcutsEnabled, isCloseTabInput } from './utils/keyboardShortcuts';
+import { activePaneChords, areKeyboardShortcutsEnabled, isWindowCloseInput, settingsMenuAccelerator } from './utils/keyboardShortcuts';
 import { createWebviewSequenceState, webviewKeysToForward } from './utils/webviewKeyForwarding';
 import {
   parseStoredOverlayColors,
@@ -760,7 +760,7 @@ async function createWindow() {
   mainWindow.webContents.on('before-input-event', (event, input) => {
     const config = configManager.getConfig();
     if (!areKeyboardShortcutsEnabled(config)) return;
-    if (input.type === 'keyDown' && isCloseTabInput(config, input)) {
+    if (input.type === 'keyDown' && isWindowCloseInput(input)) {
       event.preventDefault();
       mainWindow?.webContents.send('synthetic-keydown', {
         key: input.key,
@@ -1319,7 +1319,19 @@ if (launchRemoteSetup) {
     if (process.platform === 'darwin') {
       app.dock?.setIcon(path.join(__dirname, '../assets/icon-macos.png'));
     }
-    installApplicationMenu({ isPackaged: app.isPackaged, onAction: sendMenuAction });
+    // The menu's keys follow Pane's: an item steps aside from a key a Pane
+    // command owns now, and Settings… shows Open Settings' current key.
+    const installMenu = () => {
+      const config = configManager.getConfig();
+      installApplicationMenu({
+        isPackaged: app.isPackaged,
+        onAction: sendMenuAction,
+        paneChords: activePaneChords(config),
+        settingsAccelerator: settingsMenuAccelerator(config),
+      });
+    };
+    installMenu();
+    configManager.on('config-updated', installMenu);
 
     // A second Pane launched only to open a link hands it to the running Pane and exits.
     if (pendingPaneLink && process.platform !== 'darwin' && await forwardPaneLinkToRunningPane(pendingPaneLink, getAppDirectory())) {
