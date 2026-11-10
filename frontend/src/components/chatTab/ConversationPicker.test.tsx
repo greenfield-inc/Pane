@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { ChatTabConversation } from '../../../../shared/types/chatTab';
-import { canPick, conversationTime, filterConversations, firstPickable, stepPickable } from './pickerRows';
+import { CHAT_CONVERSATION_LIMIT, type ChatTabConversation } from '../../../../shared/types/chatTab';
+import { canPick, conversationTime, enterOpens, filterConversations, firstPickable, stepPickable } from './pickerRows';
 import { ConversationPickerView } from './ConversationPicker';
 
 const now = new Date('2026-11-08T15:00:00');
@@ -69,5 +69,18 @@ describe('the conversation picker (D-277, D-282)', () => {
 
   it('can\'t Open while the selection is a row open elsewhere', () => {
     expect(view({ selected: 1 })).toMatch(/<button[^>]*disabled=""[^>]*>Open</);
+  });
+
+  it('opens on Enter from the filter or list, but lets a focused Cancel or Open button take its own Enter (review F-5)', () => {
+    expect(enterOpens('INPUT')).toBe(true);
+    expect(enterOpens('LI')).toBe(true);
+    expect(enterOpens('BUTTON')).toBe(false);
+    expect(enterOpens(undefined)).toBe(true);
+  });
+
+  it('says when older conversations were left out of a long list (review F-4)', () => {
+    const many = Array.from({ length: CHAT_CONVERSATION_LIMIT }, (_, index) => ({ sessionId: `s${index}`, title: `Conversation ${index}` }));
+    expect(text(view({ rows: many }))).toContain('Pane lists the newest 2,000 conversations, so older ones aren\'t shown here.');
+    expect(text(view())).not.toContain('Pane lists the newest');
   });
 });

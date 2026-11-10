@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type Ref } from 'react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
-import type { ChatTabConversation } from '../../../../shared/types/chatTab';
+import { CHAT_CONVERSATION_LIMIT, type ChatTabConversation } from '../../../../shared/types/chatTab';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
-import { canPick, conversationTime, conversationTitle, filterConversations, firstPickable, stepPickable } from './pickerRows';
+import { canPick, conversationTime, conversationTitle, enterOpens, filterConversations, firstPickable, stepPickable } from './pickerRows';
 
 export interface ConversationPickerViewProps {
   /** Undefined while loading. */
@@ -53,6 +53,7 @@ export function ConversationPickerView({ rows, filter, selected, busy, error, no
             </li>;
           })}
         </ul>}
+    {rows && rows.length >= CHAT_CONVERSATION_LIMIT && <p className="chat-picker-subline">Pane lists the newest {CHAT_CONVERSATION_LIMIT.toLocaleString('en-US')} conversations, so older ones aren't shown here. To continue an older one, resume it from a terminal tab.</p>}
     <div className="chat-picker-foot">
       <span className="chat-picker-keys" aria-hidden="true">
         <kbd><ArrowUp /></kbd><kbd><ArrowDown /></kbd> move · <kbd>Enter</kbd> open · <kbd>Esc</kbd> close
@@ -138,7 +139,11 @@ export function ConversationPicker({ load, onResume, onClose }: {
   const onKey = (event: KeyboardEvent) => {
     if (event.nativeEvent.isComposing) return;
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClose(); return; }
-    if (event.key === 'Enter') { event.preventDefault(); void open(); return; }
+    // Enter opens from the filter or the list; on a focused button it presses that button (Cancel cancels, review F-5).
+    if (event.key === 'Enter') {
+      if (!enterOpens(event.target instanceof HTMLElement ? event.target.tagName : undefined)) return;
+      event.preventDefault(); void open(); return;
+    }
     if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && shown.length) {
       event.preventDefault();
       setSelected(index => stepPickable(shown, index, event.key === 'ArrowDown' ? 1 : -1));

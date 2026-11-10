@@ -47,3 +47,8 @@ export function conversationTime(iso: string | undefined, now: Date = new Date()
   if (sameDay(at, yesterday)) return 'Yesterday';
   return at.toLocaleDateString('en-US', at.getFullYear() === now.getFullYear() ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
 }
+
+/** Enter opens the selection from the filter or the list; a focused button gets its own press instead (review F-5). */
+export function enterOpens(focusedTag: string | undefined): boolean {
+  return focusedTag !== 'BUTTON';
+}
