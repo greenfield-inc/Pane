@@ -266,8 +266,9 @@ jobs:
   # change on a PR; always runs on pushes to main. Each OS is tested once at
   # the runtime floors (Node 22.23.4 / Python 3.8) and once at current (Node 24.22.1 /
   # Python 3.13) instead of the full Node x Python cross product. The Linux
-  # floor entry is pinned to ubuntu-24.04: setup-python has no Python 3.8 build
-  # for Ubuntu 26.04 (ubuntu-latest).
+  # floor entry runs on ubuntu-24.04. It was pinned there because setup-python
+  # has no Python 3.8 build for Ubuntu 26.04 (ubuntu-latest); uv now installs
+  # 3.8, so that reason no longer applies.
   runpane-wrapper-tests:
     name: Runpane Wrapper (${{ matrix.os }}, Node ${{ matrix.node-version }}, Python ${{ matrix.python-version }})
     needs: changes
@@ -294,7 +295,7 @@ jobs:
         node-version: ${{ matrix.node-version }}
 
     # Python 3.8 is not preinstalled on macOS or Windows runners, and
-    # setup-python took 37-62 s to fetch it there. uv installs its standalone
+    # setup-python took 31-56 s to fetch it there. uv installs its standalone
     # CPython build in a few seconds. The test scripts read PYTHON.
     - name: Setup Python
       if: matrix.python-version != '3.8'
@@ -305,6 +306,11 @@ jobs:
     - name: Setup uv for Python 3.8
       if: matrix.python-version == '3.8'
       uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      with:
+        # A pinned uv, so a new uv release can't change the required jobs.
+        version: '0.13.7'
+        # Nothing here reuses uv's package cache.
+        enable-cache: false
 
     - name: Install Python 3.8 with uv
       if: matrix.python-version == '3.8'
