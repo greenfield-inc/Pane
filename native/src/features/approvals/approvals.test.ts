@@ -6,6 +6,7 @@ import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 import {
   answeredItems,
   approvalItems,
+  approvalLinkTarget,
   approvalKindLabel,
   approvalListOrder,
   approvalOrder,
@@ -17,6 +18,7 @@ import {
   groupApprovals,
   isStale,
   itemEntry,
+  linkIcon,
   machineOfflineLine,
   nextApproval,
   NO_PROJECT,
@@ -420,5 +422,28 @@ describe('what an opened item is connected to (J32)', () => {
     expect(connectedLink(item('o', 1, { source: { ...source, paneId: 'p3' } }), 'Mac mini')).toMatchObject({ kind: 'pane', text: 'Pane · api-fix · Mac mini', target: { kind: 'pane', paneId: 'p3' } });
     expect(connectedLink(item('o', 1, { source: { ...source, autopilot: true } }), 'Mac mini').kind).toBe('autopilot');
     expect(connectedLink(item('o', 1, { source }), 'Mac mini')).toEqual({ kind: 'machine', text: 'Mac mini', target: null });
+  });
+});
+
+describe('a link to another approval', () => {
+  const now = 10 * 24 * 60 * 60 * 1000;
+  const answered = item('answered-q', now - 60_000, { state: 'answered', resolvedAt: now - 30_000 });
+  const old = item('old-q', 1_000, { state: 'answered', resolvedAt: 2_000 });
+  const links = at(loose, answered, old);
+
+  it('opens the item it names in the list that holds it, so Next steps through that list', () => {
+    expect(approvalLinkTarget(links, 'loose', now)).toEqual({ id: 'loose', list: 'waiting' });
+    expect(approvalLinkTarget(links, 'answered-q', now)).toEqual({ id: 'answered-q', list: 'answered' });
+  });
+
+  it('finds nothing for a Q-n or an item past a day, so the card says to open it on the computer', () => {
+    expect(approvalLinkTarget(links, 'Q-20', now)).toBeNull();
+    expect(approvalLinkTarget(links, 'old-q', now)).toBeNull();
+  });
+
+  it('gives each kind of link its own icon', () => {
+    expect(linkIcon({ label: 'Q-19', approval: 'Q-19' }).ios).toBe('checkmark.circle');
+    expect(linkIcon({ label: 'Build', url: 'http://localhost:5173/' }).ios).toBe('globe');
+    expect(linkIcon({ label: 'plan.md', path: '/repo/plan.md' }).ios).toBe('doc.text');
   });
 });

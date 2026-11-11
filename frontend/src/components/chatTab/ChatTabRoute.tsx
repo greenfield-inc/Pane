@@ -9,6 +9,7 @@ import { useSessionWorkers } from './sessionWorkers';
 import { DESKTOP_WORKERS, openWorkerTab } from './desktopSessionWorkers';
 import { savedFilePath } from './chatAttachments';
 import type { ChatTurnActions } from './ChatTurns';
+import { SessionApprovalCards } from '../approvals/SessionApprovalCards';
 
 
 const ChatTabPanel = lazy(() => import('./ChatTabPanel'));
@@ -50,6 +51,8 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     machine={machine}
     placeholder={state?.orchestrationSessionId ? 'Ask the Session anything' : undefined}
     actions={actions}
+    // A Session's orchestrator chat shows its approvals as light cards above the composer (P5).
+    dock={state?.orchestrationSessionId ? <SessionApprovalCards sessionId={state.orchestrationSessionId} /> : undefined}
     pr={pr}
   />;
 }

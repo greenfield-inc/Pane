@@ -57,6 +57,14 @@ describe('chat tab prompts in Notify', () => {
     expect(answers).toEqual([['1:q1', { action: 'accept', content: { question_0: 'blue' } }], ['1:q9', { action: 'accept', content: { question_0_custom: 'Teal' } }]]);
   });
 
+  it('J12: a choice with a free-text field takes typed words as its answer; one without has no reply box', () => {
+    const { queue, asked } = fakeQueue();
+    const bridge = new ChatTabNotifyBridge({ queue, enabled: () => true, source: () => ({ name: 'pane', agent: 'Claude' }), answerPermission: () => undefined, answerQuestion: () => undefined });
+    const choiceOnly = { ...colour, id: '1:q7', schema: { properties: { question_0: colour.schema.properties.question_0 } } };
+    bridge.observe({ ...base, questions: [colour, choiceOnly] });
+    expect(asked.map(item => [item.question.replyIsAnswer, item.question.optionsOnly])).toEqual([[true, undefined], [undefined, true]]);
+  });
+
   it('asks a form\'s fields one at a time, with progress, and answers once with every field', async () => {
     const { queue, asked } = fakeQueue();
     const answers: unknown[] = [];

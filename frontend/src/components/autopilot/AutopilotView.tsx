@@ -3,7 +3,10 @@ import { FolderOpen, MoreHorizontal, Navigation, Pause, Play, Plus, Shield } fro
 import type { AutopilotSnapshot } from '../../../../shared/types/autopilot';
 import { cn } from '../../utils/cn';
 import { markAutopilotOpened, moveAutopilotStack, runAutopilot, shownStackEntry, useAutopilotStore, useRenderedItems } from '../../stores/autopilotStore';
-import { useNotifyStore } from '../../stores/notifyStore';
+import { countsAsWaiting, useNotifyStore } from '../../stores/notifyStore';
+import { useApprovalColumnStore } from '../../stores/approvalColumnStore';
+import { ApprovalColumn } from '../approvals/ApprovalColumn';
+import { ApprovalOrigin } from '../approvals/ApprovalOrigin';
 import { useActiveMachineStore } from '../../stores/activeMachineStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import type { ChatRendering } from '../chatTab/chatRendering';
@@ -28,9 +31,10 @@ import { AWAY_BLOCK, controlLine, ITEMS_BLOCK, LOG_BLOCK, queuedControlLabel } f
 
 const ChatTabPanel = lazy(() => import('../chatTab/ChatTabPanel'));
 
-/** ← → step the stack, unless the person is typing or a page has focus. */
-function useStackKeys() {
+/** ← → step the stack, unless the person is typing or a page has focus, or an approval covers it (F-9). */
+function useStackKeys(covered: boolean) {
   useEffect(() => {
+    if (covered) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -41,7 +45,7 @@ function useStackKeys() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [covered]);
 }
 
 /** Running on <Session> / Paused, and every Session with its count (D-59). */
@@ -262,7 +266,8 @@ export function AutopilotView() {
   const pending = useAutopilotStore((state) => state.pending);
   const machine = useActiveMachineStore((state) => state.machine);
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
-  useStackKeys();
+  const approvalOpen = useApprovalColumnStore((state) => state.open.autopilot !== undefined);
+  useStackKeys(approvalOpen);
   // "N working" above the chat box counts the agents working in every Session Autopilot walks (D-276).
   const walkIds = useMemo(() => snapshot?.walk.sessions.map(session => session.id) ?? [], [snapshot?.walk.sessions]);
   const walkWorkers = useManySessionWorkers(DESKTOP_WORKERS, walkIds);
@@ -320,7 +325,36 @@ export function AutopilotView() {
           ) : <StartCard snapshot={snapshot} pending={pending} />}
         </div>
       </section>
+      <StackWithApproval />
+    </div>
+  );
+}
+
+/**
+ * The Stack, with an approval's column laid over it when one is open from the chat (J16). The
+ * Stack stays mounted underneath, so ✕ shows the same entry, with its pages as they were.
+ */
+function StackWithApproval() {
+  const open = useApprovalColumnStore((state) => state.open.autopilot);
+  const items = useNotifyStore((state) => state.snapshot?.items);
+  const order = useMemo(() => (items ?? []).filter(countsAsWaiting).sort((a, b) => a.createdAt - b.createdAt).map((item) => item.id), [items]);
+  return (
+    <div className="relative flex min-h-0 min-w-0 flex-1">
       <AutopilotStack />
+      {open && (
+        <div className="absolute inset-0 z-30 flex bg-bg-primary" data-testid="autopilot-approval">
+          <ApprovalColumn
+            surface="autopilot"
+            itemId={open.itemId}
+            order={order}
+            onSelect={(id) => useApprovalColumnStore.getState().openApproval('autopilot', id)}
+            groupLabel="Waiting on you"
+            closeLabel="Back to the Stack"
+            onClose={() => useApprovalColumnStore.getState().close('autopilot')}
+            renderOrigin={(item) => <ApprovalOrigin item={item} />}
+          />
+        </div>
+      )}
     </div>
   );
 }

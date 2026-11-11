@@ -465,6 +465,8 @@ function runCliOnce(runtime, args, paneDir, timeoutMs = 20_000, extraEnv = {}, i
     PANE_DIR: paneDir,
     PYTHONDONTWRITEBYTECODE: '1',
     PYTHONPATH: pythonSource,
+    // The suite reads output as UTF-8; a Windows runner's console code page would turn ` · ` into `�`.
+    PYTHONIOENCODING: 'utf-8',
     RUNPANE_TELEMETRY_DISABLED: '1',
   };
   delete env.PANE_PANEL_ID;
@@ -6123,9 +6125,22 @@ async function checkNotifyParity() {
     [{ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' }, 'Saved as stripe/STRIPE_SECRET_KEY'],
     [{ status: 'declined' }, 'Declined'],
     [{ waiting: true, id: 'n-1', next: 'Call `runpane notify --resume n-1` now.' }, 'Still waiting (id n-1). Call `runpane notify --resume n-1` now.'],
+    // A typed reply may be an answer or a question; the reader says which with --took.
+    [{ reply: 'Only if it can be undone', picks: ['Yes', 'One train'], id: 'n-1', replyId: 'r-1', next: 'Run `runpane notify --took r-1 answer` if this answers it.' },
+      'Reply r-1 on n-1: "Only if it can be undone" (picked: Yes · One train). Run `runpane notify --took r-1 answer` if this answers it.'],
+    // A partial pick keeps its question's place (D-294 replies carry their own id).
+    [{ reply: 'Only the train', picks: ['', 'One train'], id: 'n-1', replyId: 'r-2', next: 'Run `runpane notify --took r-2 answer` if this answers it.' },
+      'Reply r-2 on n-1: "Only the train" (picked: — · One train). Run `runpane notify --took r-2 answer` if this answers it.'],
+    [{ answer: 'Yes · One train', answers: ['Yes', 'One train'] }, 'Answer: Yes · One train'],
+    [{ took: 'question', id: 'n-1' }, 'Taken as a question (id n-1).'],
   ];
   const links = [{ label: 'Notes', path: 'docs/RELEASE.md' }, { label: 'PR #812', url: 'https://github.com/org/repo/pull/812' }];
   const notifyLinks = JSON.stringify(links);
+  const questions = [
+    { title: 'Release notes', choices: [{ label: 'Ship', recommended: true }, { label: 'Hold' }] },
+    { title: 'Intel build', choices: [{ label: 'Include' }, { label: 'Skip', detail: 'Ships a day sooner' }] },
+  ];
+  const notifyQuestions = JSON.stringify(questions);
   const frames = { npm: [], pip: [] };
   try {
     for (const runtime of ['npm', 'pip']) {
@@ -6158,6 +6173,28 @@ async function checkNotifyParity() {
         return { result: { approved: true } };
       }, () => runCliOnce(runtime, ['notify', '--resume', 'n-1', '--json'], paneDir, 20_000, outsidePane));
       assert.deepStrictEqual(JSON.parse(resumed.stdout), { approved: true });
+      // --took takes its id and then answer or question; --update needs asked and whatChanged.
+      const took = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { took: 'answer', id: 'n-1' } };
+      }, () => runCliOnce(runtime, ['notify', '--took', 'Q-20', 'answer'], paneDir, 20_000, outsidePane));
+      assert.strictEqual(took.stdout.trim(), 'Taken as the answer (id n-1).', `${runtime} notify --took: ${took.stderr}`);
+      await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { took: 'question', id: 'n-1' } };
+      }, () => runCliOnce(runtime, ['notify', '--took=Q-20', 'question', '--status', 'Checking the logs', '--json'], paneDir, 20_000, outsidePane));
+      const updated = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { answer: 'Turn it on' } };
+      }, () => runCliOnce(runtime, [
+        'notify', '--update', 'Q-20', '--asked', 'Can it be undone?', '--what-changed', 'Added: Settings turns it off',
+        '--context', 'It can be undone.', '--choices', '[{"label":"Turn it on","was":"Yes"},{"label":"Wait"}]', '--links', '[{"label":"Q-19","approval":"Q-19"}]', '--json',
+      ], paneDir, 20_000, insidePane));
+      assert.deepStrictEqual(JSON.parse(updated.stdout), { answer: 'Turn it on' }, `${runtime} notify --update: ${updated.stderr}`);
+      await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { answer: 'Ship · Skip', answers: ['Ship', 'Skip'] } };
+      }, () => runCliOnce(runtime, ['notify', '--ui', 'options', '--title', 'Ship 2.5?', '--questions', notifyQuestions, '--json'], paneDir, 20_000, outsidePane));
 
       // No Pane is listening: an unavailable result, not an error, so the agent asks in its terminal.
       const offline = await runCliOnce(runtime, [...ask, '--json'], paneDir, 20_000, insidePane);
@@ -6173,18 +6210,39 @@ async function checkNotifyParity() {
     returnAfterMs: 50000,
     caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
   };
-  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 3).fill('runpane:notify'));
+  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 7).fill('runpane:notify'));
   assert.deepStrictEqual(frames.npm[0].args, [question]);
-  assert.deepStrictEqual(frames.npm.at(-3).args, [{ ui: 'info', title: 'Notes are ready', links, caller: { cwd: rootDir } }]);
-  assert.deepStrictEqual(frames.npm.at(-2).args, [{
+  assert.deepStrictEqual(frames.npm.at(-7).args, [{ ui: 'info', title: 'Notes are ready', links, caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-6).args, [{
     ui: 'approve', title: 'Drop the table?', detail: 'DROP TABLE t;', detailLabel: 'Show the SQL', caller: { cwd: rootDir },
   }]);
-  assert.deepStrictEqual(frames.npm.at(-1).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-5).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-4).args, [{ took: 'Q-20', tookAs: 'answer', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-3).args, [{ took: 'Q-20', tookAs: 'question', status: 'Checking the logs', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-2).args, [{
+    update: 'Q-20', asked: 'Can it be undone?', whatChanged: 'Added: Settings turns it off', context: 'It can be undone.',
+    choices: [{ label: 'Turn it on', was: 'Yes' }, { label: 'Wait' }], links: [{ label: 'Q-19', approval: 'Q-19' }],
+    returnAfterMs: 50000, caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
+  }]);
+  assert.deepStrictEqual(frames.npm.at(-1).args, [{ ui: 'options', title: 'Ship 2.5?', questions, caller: { cwd: rootDir } }]);
+  const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
+  const ajv = new Ajv({ allErrors: true });
+  const { $schema: _metaSchema, ...contractDocument } = contract;
+  ajv.addSchema(contractDocument, 'contract');
+  for (const frame of frames.npm) {
+    const valid = ajv.compile({ $ref: 'contract#/jsonSchemas/notifyRequest' });
+    assert.ok(valid(frame.args[0]), `notify sends what notifyRequest promises: ${ajv.errorsText(valid.errors)}`);
+  }
+  for (const [result] of results) {
+    const valid = ajv.compile({ $ref: 'contract#/jsonSchemas/notifyResult' });
+    assert.ok(valid(result), `notifyResult covers ${JSON.stringify(result)}: ${ajv.errorsText(valid.errors)}`);
+  }
   assert.deepStrictEqual(frames.pip.map((frame) => frame.args), frames.npm.map((frame) => frame.args), 'Python and Node notify sent different requests');
 
   // Invalid input fails before any request, naming the field, the same way in both wrappers.
   const sevenLinks = JSON.stringify(Array.from({ length: 7 }, (_, index) => ({ label: `l${index}`, path: `f${index}.md` })));
   const tenChoices = JSON.stringify(Array.from({ length: 10 }, (_, index) => ({ label: `c${index}` })));
+  const twoQuestions = '[{"title":"A","choices":[{"label":"a"}]},{"title":"B","choices":[{"label":"b"}]}]';
   const invalid = [
     ['ui', ['--title', 'x'], 'ui is required: options, approve, ask, or info.'],
     ['ui', ['--ui', 'poll', '--title', 'x'], 'ui must be options, approve, ask, or info; got "poll".'],
@@ -6208,12 +6266,42 @@ async function checkNotifyParity() {
     ['resume', ['--resume', 'n-1', '--links', '[{"label":"Notes","path":"a.md"}]'], 'resume keeps waiting on an earlier question, so it takes no other fields; remove links.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '{"label":"Notes","path":"a.md"}'], undefined],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', sevenLinks], 'links takes up to 6 links; got 7.'],
-    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":"a.md","url":"https://example.com"}]'], 'links[0] has both "path" and "url"; give one.'],
-    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes"}]'], 'links[0] needs one of "path" (a file) or "url" (a web page).'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":"a.md","url":"https://example.com"}]'], 'links[0] has more than one of "path", "url" and "approval"; give one.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","approval":"Q-1","url":"https://example.com"}]'], 'links[0] has more than one of "path", "url" and "approval"; give one.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes"}]'], 'links[0] needs one of "path" (a file), "url" (a web page) or "approval" (another approval\'s id or Q-n).'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Q-1","approval":" "}]'], 'links[0] approval must be another approval\'s id or Q-n.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":" "}]'], 'links[0] path must be non-empty text.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"PR","url":"https://example.com"},{"label":"Files","url":"file:///etc/hosts"}]'], 'links[1] url must start with http:// or https://.'],
-    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"","url":"https://example.com"}]'], 'links[0] must be an object with a non-empty "label" and one of "path" or "url".'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"","url":"https://example.com"}]'], 'links[0] must be an object with a non-empty "label" and one of "path", "url" or "approval".'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', `[{"label":"${'x'.repeat(81)}","path":"a.md"}]`], 'links[0] label takes up to 80 characters; got 81.'],
+    ['questions', ['--ui', 'ask', '--title', 'x', '--questions', twoQuestions], 'questions is only for ui options; this call is ui ask.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a"}]', '--questions', twoQuestions], 'questions asks several questions in place of choices; give choices or questions, not both.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', '[{"title":"A","choices":[{"label":"a"}]}]'], 'questions takes 2 to 4 questions; got 1. For one question, use choices.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', JSON.stringify(Array(5).fill({ title: 'A', choices: [{ label: 'a' }] }))], 'questions takes 2 to 4 questions; got 5. For one question, use choices.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', '{"title":"A"}'], undefined],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', '[{"title":"A","choices":[{"label":"a"}]},{"title":""}]'], 'questions[1] must be an object with a non-empty "title" and "choices", a JSON array of 1 to 9 choices.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', '[{"title":"A","choices":[{"label":"a"}]},{"title":"B","choices":[]}]'], 'questions[1].choices takes 1 to 9 choices; got 0.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', `[{"title":"A","choices":[{"label":"a"}]},{"title":"B","choices":${tenChoices}}]`], 'questions[1].choices takes 1 to 9 choices; got 10.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', '[{"title":"A","choices":[{"label":"a"}]},{"title":"B","choices":[{"label":"b"},{"label":"b"}]}]'], 'questions[1].choices[1] repeats the label "b"; each choice needs its own label.'],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a","was":"b"}]'], 'choices[0] has "was", the old label of a reworded choice, which only --update takes.'],
+    ['took', ['--took', 'Q-20'], 'took needs answer or question after the id: answer if the reply answers the question, question if it asks one.'],
+    ['took', ['--took', 'Q-20', 'maybe'], 'took takes answer or question after the id; got "maybe".'],
+    ['took', ['--took', ' ', 'answer'], "took must be the approval's id or Q-n, such as --took Q-20 answer."],
+    ['took', ['--took', 'Q-20', 'answer', '--ui', 'ask', '--title', 'x'], 'took records how a reply was taken, so it takes no other fields; remove ui, title.'],
+    ['took', ['--took', 'Q-20', 'answer', '--update', 'Q-20'], 'took records how a reply was taken, so it takes no other fields; remove update.'],
+    ['tookAs', ['--took-as', 'answer'], 'tookAs goes with took: --took <id|Q-n> answer|question.'],
+    ['status', ['--took', 'Q-20', 'answer', '--status', 'Checking'], 'status says what you are doing about a question, so it goes with --took <id> question.'],
+    ['status', ['--took', 'Q-20', 'question', '--status', ' '], 'status must be non-empty text, such as "Checking the logs".'],
+    ['status', ['--ui', 'ask', '--title', 'x', '--status', 'Checking'], 'status goes with --took <id|Q-n> question.'],
+    ['update', ['--update', 'Q-20', '--ui', 'ask', '--asked', 'Why?', '--what-changed', 'x'], "update changes only title, context, choices, questions and links, and keeps the approval's ui; remove ui."],
+    ['update', ['--update', 'Q-20', '--detail', 'x', '--relays', 'in-1', '--asked', 'Why?', '--what-changed', 'x'], "update changes only title, context, choices, questions and links, and keeps the approval's ui; remove detail, relays."],
+    ['update', ['--update', ' ', '--asked', 'Why?', '--what-changed', 'x'], "update must be the approval's id or Q-n, such as --update Q-20."],
+    ['asked', ['--update', 'Q-20', '--what-changed', 'x'], "asked is required with update: the person's question, as they typed it."],
+    ['whatChanged', ['--update', 'Q-20', '--asked', 'Why?'], 'whatChanged is required with update: one line per change, such as "Added: it can be undone from Settings".'],
+    ['asked', ['--ui', 'ask', '--title', 'x', '--asked', 'Why?'], 'asked goes with --update <id|Q-n>, which saves a new version of an approval.'],
+    ['title', ['--update', 'Q-20', '--asked', 'Why?', '--what-changed', 'x', '--title', ' '], 'title must be non-empty text; leave it out to keep the current one.'],
+    ['questions', ['--update', 'Q-20', '--asked', 'Why?', '--what-changed', 'x', '--choices', '[{"label":"a"}]', '--questions', twoQuestions], 'questions asks several questions in place of choices; give choices or questions, not both.'],
+    ['resume', ['--resume', 'n-1', '--took', 'Q-20', 'answer'], 'resume keeps waiting on an earlier question, so it takes no other fields; remove took, tookAs.'],
   ];
   const { main } = require(npmCli);
   const nodeFailures = [];
@@ -6568,6 +6656,9 @@ async function checkAutopilotParity() {
     ['autopilot', 'close', 'n-1', '--because', 'D-1'],
     ['autopilot', 'answer', 'n-1', '--reason', 'Old'],
     ['notify', '--approve'],
+    ['panes', 'list', '--took', 'Q-20', 'answer'],
+    ['inbox', '--update', 'Q-20'],
+    ['notify', '--took', 'Q-20', 'answer', '--took-as', 'question'],
   ];
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
   const nodeErrors = invalid.map((args) => { try { parseRunpaneArgs(args); return 'accepted'; } catch (error) { return error.message; } });
@@ -6598,6 +6689,9 @@ print(json.dumps(errors))
     '--because is only valid with runpane autopilot answer.',
     '--reason is only valid with runpane secrets request or runpane autopilot close.',
     '--approve is only valid with runpane autopilot answer.',
+    '--took is only valid with runpane notify.',
+    '--update is only valid with runpane notify.',
+    'Say answer or question once: after --took <id|Q-n>, or as --took-as.',
   ]);
   // Every fixture above is what the published, closed schemas promise.
   for (const [name, value] of [
@@ -6610,6 +6704,10 @@ print(json.dumps(errors))
     ['autopilotCloseRequest', { id: 'n-1', reason: 'Old' }],
     ['autopilotRewriteRequest', { id: 'n-1', ui: 'ask', title: 'Which?', suggestions: ['main'] }],
     ['notifyRequest', { relays: 'in-1', aboutSession: 'Release', ui: 'ask', title: 'Which?', caller: {} }],
+    ['notifyRequest', { took: 'Q-20', tookAs: 'question', status: 'Checking', caller: {} }],
+    ['notifyRequest', { update: 'Q-20', asked: 'Why?', whatChanged: 'Added a choice', choices: [{ label: 'Wait', was: 'Hold' }], caller: {} }],
+    ['notifyResult', { took: 'answer', id: 'n-1', next: 'Done.' }],
+    ['notifyResult', { reply: 'Why?', id: 'n-1', replyId: 'r-1', next: 'Run --took.' }],
     ['inboxListResult', { ok: true, session: { id: 's-1', name: 'Release' }, items: [], answers: [{ id: 'n-7', title: 'Q', answer: 'Yes', by: 'you', worker: 'W', answeredAt: 'now', delivered: 'tab', decision: 'D-1' }] }],
     ['autopilotWaitingResult', { ok: true, items: [{ ...waitingItem('n-1', { quiet: true, stale: true, connected: { kind: 'session', id: 's-1', name: 'Release', paneId: 'p-1' } }) }], offline: ['A'], cantSee: ['B'] }],
   ]) {
