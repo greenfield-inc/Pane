@@ -194,7 +194,9 @@ function docUri(docPath: string): string {
  */
 function rewriteCliHints(text: string, allTools: readonly McpTool[], served: ReadonlyMap<string, McpTool>): string {
   const byLongestCommand = [...allTools].sort((a, b) => b.command.length - a.command.length);
-  return text.replace(/`runpane ([^`]+)`/g, (whole, spoken: string) => {
+  return text.replace(/`runpane ([^`]+)`/g, (whole, written: string) => {
+    // `notify --took <id> answer` puts its second value after the id; the tool takes it as tookAs.
+    const spoken = written.replace(/--took (\S+) (answer|question)\b/, '--took $1 --took-as $2');
     const tool = byLongestCommand.find((candidate) => spoken === candidate.command || spoken.startsWith(`${candidate.command} `));
     if (!tool) return whole;
     const inputs = [...spoken.slice(tool.command.length).matchAll(/--([a-z][a-z0-9-]*)(?:[ =]("[^"]*"|<[^>]+>|[^\s-]\S*))?/g)]

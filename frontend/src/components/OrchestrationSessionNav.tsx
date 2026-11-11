@@ -2,6 +2,8 @@ import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './C
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MessageSquare, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { SessionApprovalsCount } from './approvals/ApprovalsCount';
+import { SessionApprovalsCountButton } from './approvals/SessionApprovals';
+import { openApprovalsFromCount } from './approvals/useSessionApprovals';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import {
@@ -444,7 +446,7 @@ export function OrchestrationSessionNav({
         // as dragging a tab, or reorders it within its own list. Repository
         // rows carry only text/plain, so the drags never answer each other.
         {...drag.source}
-        onClick={() => { resumeChatOnOpen(session); void openSession(session.id); }}
+        onClick={event => { openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
         onContextMenu={event => handleSessionContextMenu(event, session)}
         onKeyDown={event => handleSessionKeyDown(event, session, placement)}
         className="flex min-w-0 flex-1 items-center gap-2 rounded pl-2 pr-2 py-1 text-left focus:outline-none"
@@ -458,7 +460,7 @@ export function OrchestrationSessionNav({
           <>
             <SessionActivityDot session={session} paneIds={visiblePaneIds} />
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
-            <SessionApprovalsCount sessionId={session.id} otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
+            <SessionApprovalsCount sessionId={session.id} opensApprovals otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
           </>
         )}
       </button>
@@ -493,6 +495,7 @@ export function OrchestrationSessionNav({
               ? 'bg-[linear-gradient(var(--color-surface-selected),var(--color-surface-selected))]'
               : 'group-hover/orchestration-row:bg-[linear-gradient(var(--color-surface-hover),var(--color-surface-hover))]',
           )}>
+            <SessionApprovalsCountButton sessionId={session.id} onOpenSession={() => { resumeChatOnOpen(session); void openSession(session.id); }} />
             <button
               type="button"
               aria-label={`Actions for ${label}`}
@@ -548,7 +551,7 @@ export function OrchestrationSessionNav({
               title={session.name}
               {...drag.source}
               {...drag.target}
-              onClick={() => { resumeChatOnOpen(session); void openSession(session.id); }}
+              onClick={event => { openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
               onContextMenu={event => handleSessionContextMenu(event, session)}
               onKeyDown={event => handleSessionKeyDown(event, session, 'rail')}
               className={cn(

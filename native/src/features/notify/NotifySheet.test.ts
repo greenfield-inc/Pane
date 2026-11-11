@@ -27,8 +27,21 @@ const { shared, command } = vi.hoisted(() => {
     source: { paneId: 'pane-1', name: 'auth-refactor', agent: 'Claude' },
     secret: { project: 'stripe', name: 'STRIPE_SECRET_KEY' },
   };
-  const shared: NotifySharedState = { machine: 'Work Mac', epoch: 'e1', revision: 1, enabled: true, queue: ['q-secret'], hidden: [], items: [secret] };
-  return { shared, command: { isPending: false, isError: false, mutate: () => undefined } };
+  const trains: NotifyItem = {
+    id: 'q-trains', ui: 'options', title: 'Turn on trains?', state: 'waiting', createdAt: 2_000,
+    source: { paneId: 'pane-1', name: 'doozy-overhaul', agent: 'Claude' },
+    choices: [{ label: 'Yes, turn it on', was: 'Yes' }, { label: 'No' }],
+    version: 2, readyAgain: 3_000,
+    revision: { asked: 'Can it be undone?', whatChanged: ['Added an undo step'], by: 'doozy-overhaul', at: 3_000 },
+  };
+  const both: NotifyItem = {
+    id: 'q-both', ui: 'options', title: 'Set up trains', state: 'waiting', createdAt: 2_500,
+    source: { paneId: 'pane-1', name: 'doozy-overhaul', agent: 'Claude' },
+    questions: [{ title: 'Turn it on?', choices: [{ label: 'Yes' }, { label: 'No' }] }, { title: 'How many?', choices: [{ label: 'One train' }] }],
+    reply: { id: 'r1', text: 'Why one?', at: 2_600, state: 'question', reader: { kind: 'asker', name: 'doozy-overhaul' } },
+  };
+  const shared: NotifySharedState = { machine: 'Work Mac', epoch: 'e1', revision: 1, enabled: true, queue: ['q-secret', 'q-trains', 'q-both'], hidden: [], items: [secret, trains, both] };
+  return { shared, command: { isPending: false, isError: false, mutate: vi.fn() } };
 });
 vi.mock('./hooks', () => ({
   useNotifyShared: () => ({ data: shared, isPending: false, isError: false }),
@@ -58,5 +71,36 @@ describe('NotifySheet', () => {
     expect(field?.props.multiline).toBeUndefined();
     expect(tree.find(element => element.props.testID === 'notify-secret-one-line')?.props.children)
       .toBe('Takes one line. Answer a multi-line value, such as a PEM key, on your computer.');
+  });
+});
+
+describe('NotifySheet replies (P7)', () => {
+  const byId = (tree: ReactElement<Props>[], testID: string) => tree.filter(element => element.props.testID === testID);
+  const text = (element: ReactElement<Props> | undefined) => element?.props.children;
+
+  it('shows a revised approval’s What changed and "Updated · ready again", and marks a reworded choice', () => {
+    const tree = elements(createElement(NotifySheet, { notifyId: 'q-trains' }));
+    expect(text(byId(tree, 'notify-reply-state')[0])).toBe('Updated · ready again · v2');
+    expect(text(byId(tree, 'notify-revision-asked')[0])).toBe('You asked: “Can it be undone?”');
+    expect(byId(tree, 'notify-revision-line').map(text)).toEqual(['• Added an undo step']);
+    expect(tree.some(element => element.props.children === 'Reworded, was “Yes”')).toBe(true);
+  });
+
+  it('keeps a tapped choice with nothing typed as today’s choice answer', () => {
+    command.mutate.mockClear();
+    const tree = elements(createElement(NotifySheet, { notifyId: 'q-trains' }));
+    (byId(tree, 'notify-choice-0')[0]?.props.onPress as () => void)();
+    expect(command.mutate).toHaveBeenCalledWith([{ type: 'answer', id: 'q-trains', answer: { choice: 'Yes, turn it on' } }]);
+  });
+
+  it('shows each of several questions with its choices, and how the last reply was taken', () => {
+    const tree = elements(createElement(NotifySheet, { notifyId: 'q-both' }));
+    expect(byId(tree, 'notify-question-0')).toHaveLength(1);
+    expect(byId(tree, 'notify-question-1')).toHaveLength(1);
+    expect(byId(tree, 'notify-choice-0-1')).toHaveLength(1);
+    expect(text(byId(tree, 'notify-reply-state')[0])).toBe('Taken as a question: asking doozy-overhaul');
+    expect(text(byId(tree, 'notify-reply-detail')[0])).toBe('Getting more context…');
+    // Nothing picked or typed yet: Send waits.
+    expect(byId(tree, 'notify-send-reply')[0]?.props.disabled).toBe(true);
   });
 });

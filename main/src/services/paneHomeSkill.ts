@@ -326,6 +326,44 @@ call through the CLI:
 \`info\`. On \`waiting\`, run \`runpane notify --resume <id> --json\`; on
 \`unavailable\`, ask in the terminal.
 
+Write every approval so it reads on its own (Pane builds its Summary from
+these fields): a title of about 80 characters; \`--context\` saying why it
+matters; each choice with what it does (\`detail\`) and one \`recommended\`; and
+\`--links\` to every reference: files, PRs, and other approvals
+(\`{"label":"Q-12","approval":"<id|Q-n>"}\`). Related questions go in one
+options card: \`--questions '[{"title":"<question>","choices":[...]},...]'\`
+(2 to 4, one pick each) instead of \`--choices\`.
+
+**When the person types a reply.** Picks alone come back as before: \`{answer}\`, or
+\`answer: Q-n → <answer> (by you)\` in your tab. Anything typed comes back as a
+reply: the open call's result \`{reply, picks?, id, replyId, next}\` (pass its
+\`replyId\` to \`--took\` and \`--update\`: only your call was given it, so it works
+from outside a Pane tab too), or this line in your tab:
+\`reply: Q-n → "<their words>" (picked: <picks>) (by you)\` (\`(picked: …)\`
+only when they picked something; without a Q-n it names the title and ends
+\`[id <item id>]\`). A reply is an answer or a question about the approval,
+and you decide which:
+
+- **An answer:** run \`runpane notify --took <id|Q-n> answer --json\`, then act
+  on it.
+- **A question:** run \`runpane notify --took <id|Q-n> question --json\` at
+  once (the approval reads "Getting more context…"; \`--status "<text>"\` says
+  what you're doing instead). Find out, then run
+  \`runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>" --json\`
+  with any changed \`--title\`, \`--context\`, \`--choices\`, \`--questions\` or
+  \`--links\`. A reworded choice carries \`"was":"<old label>"\`. That saves a
+  new version of the same approval, shown as "Updated · ready again"; never
+  post a second approval for it. \`--update\` waits for the answer like a
+  notify call.
+- **The person can fix how you took it.**
+  \`correction: Q-n → that was a question: "…" (by you)\` means treat it as a
+  question: update the approval.
+  \`correction: Q-n → that was your answer: "…" (by you)\` means it is recorded
+  as the answer: act on it.
+
+Only the reply's reader may run \`--took\` and \`--update\`: the asker, else the
+orchestrator that relayed a worker's question, else Autopilot.
+
 Who asks depends on your role:
 
 - **A worker in a Session** (\`PANE_SESSION_DIR\` is set and
@@ -336,12 +374,15 @@ Who asks depends on your role:
   question there). It shows at once in Approvals with an answer box, and it rings when
   your orchestrator relays it or after 10 minutes. The answer reaches this tab as
   \`answer: Q-n → <answer> (by you)\`; \`closed: Q-n (by you)\` and
-  \`correction: Q-n → <answer> (by you)\` are the person's word too.
+  \`correction: Q-n → <answer> (by you)\` are the person's word too. A typed
+  reply reaches this tab as a \`reply:\` line: read it as above (\`--took\` and
+  \`--update\` aren't new asks, so a worker runs them).
 - **A Session orchestrator** (\`PANE_ORCHESTRATION_SESSION_ID\` is set) keeps
   each item that waits on the person posted once, as a background
   \`runpane notify ... --links '<files>' --json\` titled with its Q-n, and
   stays free to talk: follow "What waits on the person" in
-  \`runpane docs read --doc skills/pane-orchestration/SKILL.md\`.
+  \`runpane docs read --doc skills/pane-orchestration/SKILL.md\`. A reply to a
+  worker's question it relayed comes to it when the worker can't read it.
 - **Any other agent** calls \`notify\` as above.
 
 For an API key, token or password, call the \`secrets_request\` tool (or

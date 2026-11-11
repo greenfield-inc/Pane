@@ -124,7 +124,8 @@ export function relatedDocs(item: NotifyItem, entry?: AutopilotStackEntry): Rela
   const page = (label: string, url: string) => add({ key: `url:${url}`, kind: 'url', label, url, icon: 'globe', detail: urlDetail(url) });
   for (const link of item.links ?? []) {
     if ('path' in link) file(link.label, link.path);
-    else page(link.label, link.url);
+    else if ('url' in link) page(link.label, link.url);
+    // Another approval isn't a document: its card opens it.
   }
   for (const tab of entry?.tabs ?? []) {
     if (tab.kind === 'file') file(tab.label, tab.path);

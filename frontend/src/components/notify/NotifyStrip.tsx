@@ -35,7 +35,7 @@ export function NotifyStrip({ snapshot, narrow, menuPlacement, onFieldFocusReque
       onCommand={runNotify}
       queue={queuePosition(snapshot, item.id)}
       shortcutHint={snapshot.firstRun ? shortcutLabel(snapshot.settings.shortcut, isMac()) : undefined}
-      hideAt={strip.kind === 'info' ? strip.hideAt : undefined}
+      hideAt={strip.kind === 'info' || strip.kind === 'updated' ? strip.hideAt : undefined}
       hideAfterMs={snapshot.settings.updatesHideAfterSeconds * 1000}
       showDetails={snapshot.settings.showDetails}
       narrow={narrow}

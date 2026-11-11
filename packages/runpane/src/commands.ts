@@ -192,6 +192,15 @@ export interface ParsedArgs {
   notifyLinks?: string;
   notifyRelays?: string;
   notifyAboutSession?: string;
+  notifyQuestions?: string;
+  /** `notify --took <id|Q-n> answer|question`: the approval, and the word after it (or `--took-as`). */
+  notifyTook?: string;
+  notifyTookAs?: string;
+  notifyStatus?: string;
+  /** `notify --update <id|Q-n> --asked <text> --what-changed <text>` */
+  notifyUpdate?: string;
+  notifyAsked?: string;
+  notifyWhatChanged?: string;
   /** loops: the loop id, its cron, and create's --paused. */
   loopId?: string;
   cron?: string;
@@ -258,6 +267,13 @@ const AUTOPILOT_ITEM_COMMANDS = new Set(['autopilot answer', 'autopilot close', 
 const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--relays', ['notify']],
   ['--about-session', ['notify']],
+  ['--questions', ['notify']],
+  ['--took', ['notify']],
+  ['--took-as', ['notify']],
+  ['--status', ['notify', 'update']],
+  ['--update', ['notify']],
+  ['--asked', ['notify']],
+  ['--what-changed', ['notify']],
   ['--decision', ['inbox ack']],
   ['--choice', ['autopilot answer']],
   ['--approve', ['autopilot answer']],
@@ -675,6 +691,16 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
     const owners = FLAG_OWNERS.get(arg);
     if (isLocalCommand && owners && !owners.includes(parsed.command)) {
       throw new Error(`${arg} is only valid with runpane ${owners.join(' or runpane ')}.`);
+    }
+    // `notify --took <id|Q-n> answer|question`: the word after the id says how the reply was taken.
+    if (parsed.command === 'notify' && arg === '--took') {
+      parsed.notifyTook = readValue(args, ++index, arg, literalValues);
+      const word = args[index + 1];
+      if (word !== undefined && !word.startsWith('-')) {
+        setNotifyTookAs(parsed, word);
+        index++;
+      }
+      continue;
     }
     if (isLocalCommand && LOCAL_BOOLEAN_FLAGS.has(arg)) {
       parseLocalBooleanFlag(arg, parsed);
@@ -1382,6 +1408,30 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.notifyAboutSession = value;
     return;
   }
+  if (flag === '--questions') {
+    parsed.notifyQuestions = value;
+    return;
+  }
+  if (flag === '--took-as') {
+    setNotifyTookAs(parsed, value);
+    return;
+  }
+  if (flag === '--status') {
+    parsed.notifyStatus = value;
+    return;
+  }
+  if (flag === '--update') {
+    parsed.notifyUpdate = value;
+    return;
+  }
+  if (flag === '--asked') {
+    parsed.notifyAsked = value;
+    return;
+  }
+  if (flag === '--what-changed') {
+    parsed.notifyWhatChanged = value;
+    return;
+  }
   if (flag === '--decision') {
     parsed.inboxDecision = value;
     return;
@@ -1404,6 +1454,11 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
+}
+
+function setNotifyTookAs(parsed: ParsedArgs, value: string): void {
+  if (parsed.notifyTookAs !== undefined) throw new Error('Say answer or question once: after --took <id|Q-n>, or as --took-as.');
+  parsed.notifyTookAs = value;
 }
 
 function splitList(value: string): string[] {
@@ -1500,7 +1555,7 @@ function readValue(args: string[], index: number, flag: string, literalValues: S
   const clearable = REPO_SETTING_FLAGS.includes(flag);
   if (clearable && value === '') return value;
   const freeText = (clearable && !/^--[a-z][a-z-]*$/.test(value ?? ''))
-    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains', '--because', '--reason', '--choice'].includes(flag);
+    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains', '--because', '--reason', '--choice', '--asked', '--what-changed'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

@@ -629,7 +629,7 @@ export class AutopilotManager extends EventEmitter {
       const item = this.ports.notify.items().find(candidate => candidate.id === request.item);
       if (!item) throw new PaneError('AUTOPILOT_STACK_INVALID', `No waiting item has the id ${request.item}. Nothing was added.`, 'List what waits with runpane autopilot waiting --json and use an id from it.');
       const label = item.agentPrompt ? 'Permission' : item.ui === 'approve' ? 'Approval' : 'Question';
-      const linkTabs: AutopilotTab[] = (item.links ?? []).map(link => 'path' in link ? { kind: 'file', label: link.label, path: link.path } : { kind: 'url', label: link.label, url: link.url });
+      const linkTabs: AutopilotTab[] = (item.links ?? []).map(link => 'path' in link ? { kind: 'file', label: link.label, path: link.path } : 'approval' in link ? { kind: 'item', label: link.label, notifyId: link.approval } : { kind: 'url', label: link.label, url: link.url });
       return {
         id, addedAt,
         ref: { kind: 'item', notifyId: item.id },
@@ -835,7 +835,7 @@ function waitingItem(item: NotifyItem, now: number, onStack: boolean, byAutopilo
     kind,
     agent: item.source.agent,
     pane: item.source.name,
-    links: (item.links ?? []).map(link => 'path' in link ? { label: link.label, path: link.path } : { label: link.label, url: link.url }),
+    links: (item.links ?? []).flatMap((link): AutopilotWaitingItem['links'] => 'path' in link ? [{ label: link.label, path: link.path }] : 'url' in link ? [{ label: link.label, url: link.url }] : []),
     createdAt: item.createdAt,
     ageMs: Math.max(0, now - item.createdAt),
     machine: item.machine ?? 'this machine',

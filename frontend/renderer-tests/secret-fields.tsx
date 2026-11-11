@@ -8,7 +8,7 @@ import '../src/index.css';
 // The three places a person types a secret, each recording what it would save.
 const saved: string[] = [];
 const record = (command: NotifyCommand) => {
-  if (command.type === 'answer' && 'text' in command.answer) saved.push(command.answer.text);
+  if (command.type === 'answer' && 'text' in command.answer && command.answer.text !== undefined) saved.push(command.answer.text);
 };
 Object.defineProperty(window, 'electronAPI', { configurable: true, value: {
   paneSecrets: {

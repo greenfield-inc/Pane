@@ -73,6 +73,9 @@ const ANSWER_ROUTES: Array<[string, PaneCommandValue[]]> = [
   ['notify:remote-command', [{ type: 'dismiss', id: 'n-1' }]],
   ['notify:remote-command', [{ type: 'skip', id: 'n-1' }]],
   ['notify:remote-command', [{ type: 'remind', id: 'n-1', after: '1h' }]],
+  // F-1: the fix of how a reply was taken is the person's, both ways.
+  ['notify:remote-command', [{ type: 'fix-reply', id: 'n-1', as: 'answer' }]],
+  ['notify:remote-command', [{ type: 'fix-reply', id: 'n-1', as: 'question' }]],
 ];
 
 const refuse = (channel: string, args: PaneCommandValue[], caller: PaneDaemonCaller | undefined) =>

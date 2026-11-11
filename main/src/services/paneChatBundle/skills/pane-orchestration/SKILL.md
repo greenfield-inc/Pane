@@ -346,6 +346,12 @@ You are in orchestrator mode: this Session's work moves through you.
 - **Ask through Approvals, always with context:** say in `--context` why it
   needs them and what each option means, list the options with the one you
   recommend first, and pass the related files, PRs and pages as `--links`.
+  Pane builds the approval's Summary from these fields, so: a title of about
+  80 characters, context as why it matters, each choice with what it does
+  (`detail`) and one `recommended`, and links to every reference, other
+  approvals included (`{"label":"Q-12","approval":"<id|Q-n>"}`). Related
+  questions go in one options card with `--questions
+  '[{"title":"<question>","choices":[...]},...]'` instead of `--choices`.
 
 The rest of this section is how, while Approvals is on in Pane (its Settings
 switch, on by default).
@@ -362,7 +368,9 @@ approval, a PR ready to merge, and a next step only they can take.
   inbox` lists that answer with `undelivered`, read why: if Pane can't see
   what runs in the tab, pass it on yourself with `runpane panels submit`; if
   its tab closed, there is no worker left to tell, so don't resubmit it.
-  Record the decision either way.
+  Record the decision either way. A question you relayed stays open after its
+  worker's tab closes, because you can still read a reply to it: the reply
+  comes to you.
 - **Post your own item when it appears**, titled with its Q-n, with the files
   it is about (the worker's status file, plan or page) and its PR as `--links`.
   Post or relay with the CLI as a background command, one per item, so you stay
@@ -390,6 +398,28 @@ approval, a PR ready to merge, and a next step only they can take.
   can receive `closed: Q-n (by you)` or `correction: Q-n → <answer> (by you)`.
   Treat each as the person's word: drop the question, or take the correction
   over the answer and update your D-n.
+- **Read a typed reply as an answer or a question.** Picks alone come back as
+  `answer:`. Anything typed comes back as a reply: your open call's result
+  `{reply, picks?, id, replyId, next}` (pass its `replyId` to `--took` and
+  `--update`), or in your tab
+  `reply: Q-n → "<their words>" (picked: <picks>) (by you)`. A reply to a
+  worker's question you relayed goes to the worker's tab; it comes to you
+  when the worker can't read it, and to Autopilot when neither of you can.
+  - If it answers, run `runpane notify --took <id|Q-n> answer`, record it and
+    act on it.
+  - If it's a question, run `runpane notify --took <id|Q-n> question` at once
+    (the approval reads "Getting more context…"), find out, then run
+    `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"`
+    as a background command, with any changed `--title`, `--context`,
+    `--choices`, `--questions` or `--links`. A reworded choice carries
+    `"was":"<old label>"`. It saves a new version of the same approval
+    ("Updated · ready again") and waits for the answer like a notify call.
+    Never post a second approval for it.
+  - `correction: Q-n → that was a question: "…" (by you)` means treat it as a
+    question: update the approval. `correction: Q-n → that was your answer:
+    "…" (by you)` means it is recorded as the answer: act on it.
+
+  Only the reply's reader may run `--took` and `--update`.
 - **Stop waiting on an item** that is superseded or no longer needed: stop its
   background command (TaskStop in Claude Code). Never leave a stale card up.
 - **When you start, resume or wake, reconcile** your open background calls
