@@ -59,9 +59,10 @@ app:
   Pane's Workspaces (`:8443`) or phone-page handlers, even with
   `workspaces.enabled` in its config.
 - **A second Pane on one data directory** (one whose daemon socket another Pane
-  already serves) runs no scrollback retention, archive cleanup or reserve
-  worktree cleanup, starts no remote host listener and leaves Tailscale Serve
-  alone. It logs `Another Pane already serves <dir>` at startup. Quit it and
+  already serves) runs no scrollback retention, archive cleanup, reserve
+  worktree cleanup or upgrade-time git config cleanup, starts no remote host
+  listener, leaves Tailscale Serve alone, and on quit leaves the other Pane's
+  daemon socket in place. It logs `Another Pane already serves <dir>` at startup. Quit it and
   give it its own `PANE_DIR`.
 - **Analytics** are on by default in a fresh data directory. Setting
   `analytics.enabled: false` in config alone does not prevent the first-render

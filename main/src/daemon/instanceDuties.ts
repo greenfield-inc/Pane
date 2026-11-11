@@ -9,7 +9,7 @@
  * installed Pane's Workspaces and phone pages.
  */
 export interface InstanceDuties {
-  /** Scrollback retention, archive cleanup resume, reserve worktree cleanup. */
+  /** Scrollback retention, archive cleanup resume, reserve worktree cleanup, the one-time fsmonitor removal. */
   housekeeping: boolean;
   /** The remote daemon host listener, which binds a fixed port. */
   remoteTransport: boolean;

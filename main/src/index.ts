@@ -1442,7 +1442,8 @@ if (launchRemoteSetup) {
     const lastVersion = databaseService.getLastAppVersion();
     const isFirstLaunch = lastVersion === null;
     // Runs in the background; it reads lastVersion before recordAppOpen below replaces it.
-    void removePaneFsmonitorConfig(lastVersion, databaseService.getAllProjects().flatMap(project => {
+    // Only the Pane that owns this data directory: it edits the repositories' git config.
+    if (paneDaemonHost?.duties.housekeeping) void removePaneFsmonitorConfig(lastVersion, databaseService.getAllProjects().flatMap(project => {
       const context = project.path ? sessionManager.getProjectContextByProjectId(project.id) : null;
       return context ? [{ path: project.path, commandRunner: context.commandRunner }] : [];
     }));

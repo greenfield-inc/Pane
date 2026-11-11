@@ -572,4 +572,17 @@ describe('isPaneDaemonListening', () => {
     await server.stop();
     await expect(isPaneDaemonListening(appDirectory)).resolves.toBe(false);
   });
+
+  it('keeps answering for the first Pane after a second one on the same directory quits', async () => {
+    const appDirectory = createTempAppDirectory();
+    const first = new PaneDaemonServer(new PaneCommandRegistry(), appDirectory);
+    activeServers.push(first);
+    await first.start();
+
+    const second = new PaneDaemonServer(new PaneCommandRegistry(), appDirectory);
+    await expect(second.start()).rejects.toThrow('already listening');
+    await second.stop();
+
+    await expect(isPaneDaemonListening(appDirectory)).resolves.toBe(true);
+  });
 });

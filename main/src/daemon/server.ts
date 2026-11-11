@@ -190,11 +190,15 @@ export class PaneDaemonServer {
       this.dropClient(clientId);
     }
 
-    if (server) {
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve());
-      });
+    if (!server) {
+      // Never listened: the socket file, if any, is another Pane's, and removing it would
+      // make the next Pane on this data directory believe it owns it.
+      return;
     }
+
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
 
     if (this.endpoint.transport === 'unix' && fs.existsSync(this.endpoint.path)) {
       fs.unlinkSync(this.endpoint.path);
