@@ -13,6 +13,7 @@
 import { create } from 'zustand';
 import { useNavigationStore } from '../stores/navigationStore';
 import {
+  sidebarListKey,
   stepStop,
   stopInDirection,
   type FocusDirection,
@@ -133,7 +134,11 @@ function currentStop(stops: readonly FocusStop<HTMLElement>[]): FocusStop<HTMLEl
     ?? null;
 }
 
+/** A chat tab's message box. */
+const CHAT_COMPOSER = '[data-chat-composer]';
+
 const FOCUS_TARGETS = [
+  CHAT_COMPOSER,
   '.xterm-helper-textarea',
   'textarea:not([disabled])',
   '[contenteditable="true"]',
@@ -360,7 +365,7 @@ function refocus(item: HTMLElement): void {
 }
 
 /**
- * Arrow keys walk the sidebar's rows, top buttons included (D-239): ↑ ↓ move,
+ * Arrow keys walk the sidebar's rows, top buttons included (D-239): ↑ ↓ (or k j) move,
  * Home End jump, ← → collapse or expand (or step to the parent row), Enter
  * opens and moves focus into the work, Space opens and keeps the cursor, Esc
  * goes back to where focus was. Alt+↑/↓ stays row reordering.
@@ -384,7 +389,7 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
     next.scrollIntoView({ block: 'nearest' });
   };
 
-  switch (event.key) {
+  switch (sidebarListKey(event.key)) {
     case 'ArrowDown':
       if (!event.shiftKey) moveTo(items[index + 1]);
       return;
@@ -427,7 +432,11 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       item.click();
       // A toggle (a project or section) stays in the list; a row opens its work.
       if (item.hasAttribute('aria-expanded')) refocus(item);
-      else requestAnimationFrame(() => requestAnimationFrame(focusMainArea));
+      else requestAnimationFrame(() => requestAnimationFrame(() => {
+        focusMainArea();
+        // A chat that is still loading takes focus into its message box once it shows (D-328).
+        focusChatSoon();
+      }));
       return;
     case ' ':
       event.preventDefault();
@@ -447,4 +456,85 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
     }
     default:
   }
+}
+
+// --- Enter goes to the chat (D-328) ---
+
+/** Where Enter has a meaning of its own: fields, terminals, buttons, links, tabs, rows of a list. */
+const OWNS_ENTER = [
+  'input', 'textarea', 'select', 'button', 'a[href]', 'summary', 'webview', '.xterm',
+  '[contenteditable]:not([contenteditable="false"])',
+  ...['button', 'link', 'tab', 'menuitem', 'menuitemradio', 'menuitemcheckbox', 'option', 'combobox', 'textbox',
+    'checkbox', 'radio', 'switch', 'slider', 'spinbutton', 'treeitem', 'gridcell', 'row'].map(role => `[role="${role}"]`),
+].join(', ');
+/** Menus, pickers and dialogs: Enter there is theirs, as is everything inside them. */
+const OVERLAY = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"], [role="menu"], [role="listbox"], [role="tree"], [role="grid"]';
+
+/** The chat's message box on screen: the focused split's, else the first one in the main area. */
+function chatComposerOnScreen(): HTMLElement | null {
+  return queryShown(`[data-focus-region="main"] [data-panel-group-id][data-group-focused="true"] ${CHAT_COMPOSER}`)[0]
+    ?? queryShown(`[data-focus-region="main"] ${CHAT_COMPOSER}`)[0]
+    ?? null;
+}
+
+/**
+ * Enter with focus on no control (the page, a split, a region) moves focus
+ * into the chat's message box when a chat tab is on screen (D-328). Enter in
+ * a field, terminal, button, tab, menu, picker or dialog keeps its meaning.
+ */
+export function handleEnterToChat(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.repeat) return;
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+  const target = event.target instanceof HTMLElement && event.target !== document.body ? event.target : null;
+  if (target && (target.closest(OWNS_ENTER) || target.closest(OVERLAY))) return;
+  if (queryShown('[aria-modal="true"]').length > 0) return;
+  const box = chatComposerOnScreen();
+  if (!box) return;
+  event.preventDefault();
+  releaseCursorHold?.();
+  box.focus({ preventScroll: true });
+}
+
+/** How long Enter keeps steering focus into a chat that is loading or settling. */
+const CHAT_WAIT_MS = 3000;
+let cancelChatWait: (() => void) | null = null;
+
+/**
+ * After Enter opens something (a Pane from the sidebar, a tab), focus goes
+ * into its chat's message box as soon as the chat shows, and stays there
+ * while the view settles: a Pane that opens hands focus to a scroll surface
+ * (its commit history) when its main tab has none of its own. The wait ends
+ * on a click, a key, or focus moving to a control, terminal or the sidebar.
+ */
+export function focusChatSoon(): void {
+  cancelChatWait?.();
+  const landed = document.activeElement;
+  // Focus on no control (the page, a region, a scroll surface) is still free to move.
+  const isFree = (element: Element | null) => !element || element === document.body || element === landed
+    || (regionOf(element) !== 'sidebar' && !element.closest(OWNS_ENTER) && !element.closest(OVERLAY));
+  let box: HTMLElement | null = null;
+  const attempt = () => {
+    const active = document.activeElement;
+    if (box?.isConnected && active === box) return;
+    if (!isFree(active)) { cancel(); return; }
+    box = chatComposerOnScreen();
+    box?.focus({ preventScroll: true });
+  };
+  const onFocusIn = () => requestAnimationFrame(attempt);
+  const observer = new MutationObserver(attempt);
+  const cancel = () => {
+    observer.disconnect();
+    window.removeEventListener('focusin', onFocusIn, true);
+    window.removeEventListener('mousedown', cancel, true);
+    window.removeEventListener('keydown', cancel, true);
+    clearTimeout(timer);
+    if (cancelChatWait === cancel) cancelChatWait = null;
+  };
+  const timer = setTimeout(cancel, CHAT_WAIT_MS);
+  observer.observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('focusin', onFocusIn, true);
+  window.addEventListener('mousedown', cancel, true);
+  window.addEventListener('keydown', cancel, true);
+  cancelChatWait = cancel;
+  attempt();
 }

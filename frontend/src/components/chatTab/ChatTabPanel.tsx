@@ -473,7 +473,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         <ComposerPrimitive.Root className="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
-          <ComposerPrimitive.Input readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? 'Ask anything'} rows={1}
+          <ComposerPrimitive.Input data-chat-composer readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? 'Ask anything'} rows={1}
             // Pasted images and files attach through attachFiles, which shows any refusal.
             addAttachmentOnPaste={false}
             onPaste={event => {

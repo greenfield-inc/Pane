@@ -85,7 +85,8 @@ export const REFERENCE_ROWS: readonly ReferenceRow[] = [
   { id: 'reference-terminal-copy', label: 'Terminal: Copy selection', chord: 'mod+c' },
   { id: 'reference-terminal-paste', label: 'Terminal: Paste', chord: 'mod+v' },
   { id: 'reference-terminal-clear', label: 'Terminal: Clear (⌘K alone; ⌘K then a second key runs a two-step key)', chord: 'mod+k' },
-  { id: 'reference-sidebar-list', label: 'Sidebar: move, open, open and stay, collapse or expand, back', chord: 'ArrowUp ArrowDown Enter Space ArrowLeft ArrowRight Escape' },
+  { id: 'reference-sidebar-list', label: 'Sidebar: move, open, open and stay, collapse or expand, back', chord: 'ArrowUp ArrowDown k j Enter Space ArrowLeft ArrowRight Escape' },
+  { id: 'reference-chat-enter', label: 'Chat: into the message box (when focus is on no field or control)', chord: 'Enter' },
   { id: 'reference-approvals-back', label: 'Approvals: back to where you were (when not typing an answer)', chord: 'Escape' },
 ];
 

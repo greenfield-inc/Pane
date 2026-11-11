@@ -21,7 +21,7 @@ import { PanelTabStatusDot } from './PanelTabStatusDot';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 import { getPanelTabId, getPanelTabPanelId } from './panelTabIds';
 import { getPanelIcon } from './panelIcon';
-import { useFocusRegionStore } from '../../services/regionFocus';
+import { focusChatSoon, useFocusRegionStore } from '../../services/regionFocus';
 import { editorPanelState, pinEditorPanel } from '../../services/openFileInEditor';
 import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
 import { SwitchToChatDialog } from './SwitchToChat';
@@ -281,7 +281,10 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
 
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      if (!currentDisabled) onPanelSelect(currentPanel);
+      if (currentDisabled) return;
+      onPanelSelect(currentPanel);
+      // Enter on a chat tab goes on into its message box; Space only shows the tab (D-328).
+      if (event.key === 'Enter' && currentPanel.type === 'chat') focusChatSoon();
       return;
     }
 
