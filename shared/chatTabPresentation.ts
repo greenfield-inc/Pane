@@ -359,14 +359,22 @@ export interface ChatWorkerLine {
   attachedAt?: string;
   /** When its report last changed. */
   reportedAt?: string;
+  /** Its tabs whose agent is working now, whatever the Pane's report says (D-276). */
+  working?: WorkingTab[];
 }
+
+/** A tab whose agent is working; the panel id is missing only when the overview did not name it. */
+export interface WorkingTab { panelId?: string; title: string }
+
+/** One agent working now (D-276): a Pane's tab, so a Pane with two working tabs is two agents. */
+export interface WorkingAgent extends WorkingTab { paneId: string; name: string }
 
 export interface WorkerPaneInput {
   paneId: string;
   name: string;
   missing: boolean;
   archived: boolean;
-  panels: Array<{ state: string; missing?: boolean }>;
+  panels: Array<{ state: string; missing?: boolean; panelId?: string; title?: string }>;
   report?: { state: string; pr?: number; summary?: string; question?: string; reportedAt?: string };
   git?: { prNumber?: number };
 }
@@ -391,8 +399,17 @@ export function workerLines(panes: readonly WorkerPaneInput[], attachedAt: Reado
     const at = attachedAt.get(pane.paneId);
     if (at) line.attachedAt = at;
     if (report?.reportedAt) line.reportedAt = report.reportedAt;
+    // Every working tab counts, even beside a blocked sibling or after the Pane reported (review F-1 on #1281).
+    const working = pane.missing ? [] : pane.panels.filter(panel => panel.state === 'working' && !panel.missing)
+      .map(panel => panel.panelId ? { panelId: panel.panelId, title: panel.title ?? '' } : { title: panel.title ?? '' });
+    if (working.length) line.working = working;
     return line;
   });
+}
+
+/** The agents actively working (D-276): one per working tab, never a waiting, idle or finished one. */
+export function workingAgents(workers: readonly ChatWorkerLine[] | undefined): WorkingAgent[] {
+  return (workers ?? []).flatMap(worker => (worker.working ?? []).map(tab => ({ paneId: worker.paneId, name: worker.name, ...tab })));
 }
 
 /** When something happened, short for the chat and full for a tooltip (D-202). */
