@@ -313,3 +313,9 @@ a.chat-status-item:hover,button.chat-status-item:hover:not(:disabled),.chat-stat
 @container chat-footer (max-width:560px) { .chat-status-hint-text { display:none; } }
 @container chat-footer (max-width:520px) { .chat-status-hint { display:none; } }
 .chat-status-panel-foot > * { white-space:nowrap; }
+/* "N working" (D-276): who is working now, each row opening its tab. */
+.chat-status-agents { display:flex; flex-direction:column; gap:2px; margin:0 -6px; padding:0; list-style:none; }
+.chat-status-agents button { display:flex; align-items:baseline; gap:8px; width:100%; min-width:0; padding:5px 6px; border-radius:6px; text-align:left; color:var(--color-text-primary); }
+.chat-status-agents button:hover:not(:disabled) { background:var(--color-surface-hover); }
+.chat-status-agent-name { font-weight:500; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-status-agents .chat-status-panel-muted { flex-shrink:0; margin-left:auto; font-size:12px; }

@@ -95,9 +95,34 @@ describe('worker lines in the Session chat', () => {
     ], new Map([['b', '2026-11-03T11:42:00.000Z']]));
     expect(lines).toEqual([
       { paneId: 'a', name: 'cmd-f-find', state: 'done', label: 'Done', detail: 'PR #1230 ready', pr: 1230 },
-      { paneId: 'b', name: 'csv-export', state: 'running', label: 'Running', attachedAt: '2026-11-03T11:42:00.000Z' },
+      { paneId: 'b', name: 'csv-export', state: 'running', label: 'Running', attachedAt: '2026-11-03T11:42:00.000Z', working: [{ title: '' }] },
       { paneId: 'c', name: 'notify-sound', state: 'waiting', label: 'Waiting', detail: 'Which sound?' },
     ]);
+  });
+
+  it('counts only the agents actively working, each with the tab that is working (D-276)', async () => {
+    const { workerLines, workingAgents } = await import('../../../../shared/chatTabPresentation');
+    const lines = workerLines([
+      { paneId: 'a', name: 'csv-export', missing: false, archived: false, panels: [{ state: 'idle', panelId: 'a1', title: 'Codex' }, { state: 'working', panelId: 'a2', title: 'Claude Code' }] },
+      { paneId: 'b', name: 'asks', missing: false, archived: false, panels: [{ state: 'blocked', panelId: 'b1', title: 'Claude Code' }] },
+      { paneId: 'd', name: 'idle', missing: false, archived: false, panels: [{ state: 'idle', panelId: 'd1', title: 'Claude Code' }] },
+      { paneId: 'e', name: 'gone', missing: true, archived: false, panels: [{ state: 'working', panelId: 'e1', title: 'Claude Code' }] },
+    ]);
+    expect(workingAgents(lines)).toEqual([{ paneId: 'a', name: 'csv-export', panelId: 'a2', title: 'Claude Code' }]);
+    expect(lines.find(line => line.name === 'asks')?.working).toBeUndefined();
+    expect(workingAgents(undefined)).toEqual([]);
+  });
+
+  it('counts every working tab of a Pane, beside a blocked sibling or after its report (review F-1 on #1281)', async () => {
+    const { workerLines, workingAgents } = await import('../../../../shared/chatTabPresentation');
+    const lines = workerLines([
+      { paneId: 'a', name: 'pair', missing: false, archived: false, panels: [{ state: 'working', panelId: 'a1', title: 'Implement' }, { state: 'working', panelId: 'a2', title: 'Review' }] },
+      { paneId: 'b', name: 'split', missing: false, archived: false, panels: [{ state: 'blocked', panelId: 'b1', title: 'Asks' }, { state: 'working', panelId: 'b2', title: 'Builds' }] },
+      { paneId: 'c', name: 'reported', missing: false, archived: false, panels: [{ state: 'working', panelId: 'c1', title: 'Review' }], report: { state: 'done' } },
+    ]);
+    expect(workingAgents(lines).map(agent => `${agent.name} › ${agent.title}`)).toEqual(['pair › Implement', 'pair › Review', 'split › Builds', 'reported › Review']);
+    // The Pane's own line keeps its summary: the split Pane still reads as waiting on the person.
+    expect(lines.find(line => line.name === 'split')?.state).toBe('waiting');
   });
 
   it('mentions a worker only when it finished or failed during the latest finished turn, never one asking (D-223)', () => {
