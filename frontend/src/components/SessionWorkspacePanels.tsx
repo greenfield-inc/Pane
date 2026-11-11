@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, PanelRight, Terminal } from 'lucide-react';
 import type { PanelLayoutNode, SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
@@ -20,6 +20,13 @@ import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
 import { cycleIndex } from '../utils/arrayUtils';
 import { RestoreRegionButton } from './RestoreRegionButton';
 import { useRegionActions } from '../hooks/useRegionNavigation';
+import {
+  approvalColumnTabCount,
+  focusedApprovalColumn,
+  leaveApprovalColumn,
+  showApprovalColumnTab,
+  useFocusRegionStore,
+} from '../services/regionFocus';
 import { useProjectViewActionsStore, type ProjectViewActions } from '../stores/projectViewActionsStore';
 import { announceTerminalReflow } from '../utils/terminalReflow';
 import {
@@ -73,7 +80,8 @@ interface Overlay { left: number; top: number; width: number; height: number }
  */
 export interface StageApproval {
   open: boolean;
-  render: (closeLabel: string, onClose: () => void) => ReactNode;
+  /** `focused`: keyboard focus is in the column, so its active tab carries the accent (D-335). */
+  render: (closeLabel: string, onClose: () => void, focused: boolean) => ReactNode;
   onClose: () => void;
 }
 
@@ -471,17 +479,26 @@ export function SessionWorkspacePanels({
       const focused = focusedGroup();
       return groupTabs().find(panel => panel.id === focused?.group.activePanelId) ?? null;
     };
+    // While the approval column has focus, the tab keys walk its tabs instead of a split's (D-336).
+    const column = () => focusedApprovalColumn(containerRef.current);
     const actions: ProjectViewActions = {
       toggleDetail: () => setSidebarVisible(value => !value),
       showInspector: () => { void latestTools.current.toggleTool('explorer'); },
       addTerminal: () => { void latestTools.current.addTool({ type: 'terminal', title: 'Terminal' }); },
-      tabCount: () => groupTabs().length,
+      tabCount: () => {
+        const approvals = column();
+        return approvals ? approvalColumnTabCount(approvals) : groupTabs().length;
+      },
       selectTab: (index) => {
+        const approvals = column();
+        if (approvals) { showApprovalColumnTab(approvals, () => index); return; }
         const focused = focusedGroup();
         const panel = groupTabs()[index];
         if (focused && panel) selectPanel(focused.group.id, panel);
       },
       cycleTab: (direction) => {
+        const approvals = column();
+        if (approvals) { showApprovalColumnTab(approvals, (current, count) => cycleIndex(current, count, direction)); return; }
         const focused = focusedGroup();
         const panels = groupTabs();
         const index = cycleIndex(panels.findIndex(panel => panel.id === focused?.group.activePanelId), panels.length, direction);
@@ -580,6 +597,17 @@ export function SessionWorkspacePanels({
   }, [approvalOpen, right, loaded]);
   // The person closed the split under it: the column keeps its own.
   const placement = approvalMode === 'over' && !right ? 'split' : approvalMode;
+  // The column is a focus stop of its own (data-focus-region="approvals"); while it has focus, its
+  // active tab carries the accent and the chat's dims, as a split's would (D-249, D-335).
+  const approvalFocused = useFocusRegionStore(state => state.region === 'approvals') && focusWithin;
+  // Esc in the column (not while typing a reply) goes back to the chat beside it (D-336).
+  const escapeApprovalColumn = (event: ReactKeyboardEvent) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName))) return;
+    event.preventDefault();
+    leaveApprovalColumn();
+  };
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const rightGroupIds = useMemo(() => (right ? groupsIn(right).map(group => group.id) : []), [right]);
   useLayoutEffect(() => {
@@ -639,8 +667,8 @@ export function SessionWorkspacePanels({
           <div ref={stageRef} data-focus-region="main" className="relative min-h-0 flex-1">
             {stageNotice}
             {approval && placement === 'over' && overlay && (
-              <div className="absolute z-30 flex min-h-0 min-w-0 border-l border-border-primary bg-bg-primary" style={overlay} data-testid="session-approval-overlay">
-                {approval.render(underneath ? `Back to ${underneath}` : 'Back', approval.onClose)}
+              <div className="absolute z-30 flex min-h-0 min-w-0 border-l border-border-primary bg-bg-primary" style={overlay} data-testid="session-approval-overlay" data-focus-region="approvals" onKeyDown={escapeApprovalColumn}>
+                {approval.render(underneath ? `Back to ${underneath}` : 'Back', approval.onClose, approvalFocused)}
               </div>
             )}
             {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
@@ -666,8 +694,8 @@ export function SessionWorkspacePanels({
           </div>
         </div>
         {approval && placement === 'split' && (
-          <div className="flex min-h-0 w-1/2 min-w-[360px] flex-shrink-0 flex-col border-l border-border-primary" data-testid="session-approval-split">
-            {approval.render('Close split', approval.onClose)}
+          <div className="flex min-h-0 w-1/2 min-w-[360px] flex-shrink-0 flex-col border-l border-border-primary" data-testid="session-approval-split" data-focus-region="approvals" onKeyDown={escapeApprovalColumn}>
+            {approval.render('Close split', approval.onClose, approvalFocused)}
           </div>
         )}
         {showSidebar && <aside ref={asideRef} data-focus-region="right-panel" aria-label={sidebarTab === 'overview' ? 'Session overview' : sidebarTab === 'files' ? 'Session files' : 'Session changes'}

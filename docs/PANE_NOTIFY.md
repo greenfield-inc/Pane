@@ -218,7 +218,11 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   it was asked, left out when you're already in it. In a **Session**, the
   column lays over the Session's right split view without resizing it, and ✕
   ("Back to <tab>") shows the split again as it was; with no split open it
-  opens a split of its own, and ✕ ("Close split") collapses it. The right
+  opens a split of its own, and ✕ ("Close split") collapses it. There it is a
+  focus stop of its own: Focus Right (⌘⌥→) and F6 move into it from the chat,
+  the tab keys (⌘⇧[ ⌘⇧], ⌘⇧1-9) walk its tabs while it has focus, Focus Left
+  or Esc go back to the chat's message box, and its active tab carries the
+  accent only while it has focus, as a split's does. The right
   sidebar (Overview, Files, Changes) is never covered. The Session's title
   bar shows **Approvals n · n ready**, and a Session row's count in the
   sidebar opens the newest ready-again approval, or the first waiting one. A

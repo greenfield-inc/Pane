@@ -336,14 +336,14 @@ Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ct
 | `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Keyboard Shortcuts |
 | `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` (or `k` `j`) move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
 | `Enter` | With a chat on screen and focus on no field or control, move into its message box |
-| `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel or sidebar in that direction |
-| `F6` / `⇧F6` | Next / previous region (sidebar, splits, right panel, terminal) |
+| `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel, approval column or sidebar in that direction; the focused split's active tab carries the accent underline |
+| `F6` / `⇧F6` | Next / previous region (sidebar, splits, approval column, right panel, terminal) |
 | `⌘K ⌘M` / `Ctrl+K Ctrl+M` | Maximize the focused split, Session tile, sidebar or right panel; again to restore |
 | `⌘⇧M` / `Ctrl+Shift+M` | Minimize the focused sidebar, right panel or terminal |
 | `⌘B` / `Ctrl+B` | Toggle sidebar |
 | `⌘⌥B` / `Ctrl+Alt+B` | Toggle right panel |
 | `` ⌃` `` / `` Ctrl+` `` | Toggle terminal |
-| `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab |
+| `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab in the focused split, or in a Session's approval column while it has focus (`Esc` there goes back to the chat) |
 | `⌃⇧Space` | Approvals, and back to exactly where you were (also `Esc`); change it in Settings → Notify |
 | `⌘⌥O` / `Ctrl+Alt+O` | Machine switcher (then `0` for All machines, `1-9` for a machine) |
 | `⌃⌘]` `⌃⌘[` / `Ctrl+Alt+Shift+]` `[` | Next / previous machine |
