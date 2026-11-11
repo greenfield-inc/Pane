@@ -580,7 +580,8 @@ describe('isPaneDaemonListening', () => {
     await first.start();
 
     const second = new PaneDaemonServer(new PaneCommandRegistry(), appDirectory);
-    await expect(second.start()).rejects.toThrow('already listening');
+    // Unix sockets refuse with "already listening", Windows named pipes with EADDRINUSE.
+    await expect(second.start()).rejects.toThrow();
     await second.stop();
 
     await expect(isPaneDaemonListening(appDirectory)).resolves.toBe(true);
