@@ -223,3 +223,25 @@ for (const scheme of ['light', 'dark'] as const) {
     expect(await page.evaluate(() => (window as typeof window & { __switchedToChat: string[] }).__switchedToChat)).toEqual([panel.id]);
   });
 }
+
+test('a terminal agent tab shows Switch to chat with chat tabs off, disabled, and Turn on brings it back (D-337)', async ({ page }, testInfo) => {
+  await installElectronApiMock(page, {
+    platform: 'darwin', initialProjects: [project], initialSessions: [session], activeProjectId: project.id,
+    initialConfig: { chatTabsEnabled: false, appearanceMode: 'system' },
+    initialPanels: [{ ...panel, title: 'Claude', metadata: { ...panel.metadata, permanent: false }, state: { ...panel.state, customState: { agentType: 'claude', agentSessionId: 'conv-1' } } }],
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
+  await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
+
+  await page.getByRole('tab', { name: 'Claude' }).click({ button: 'right' });
+  const item = page.getByRole('menuitem', { name: /^Switch to chat…/ });
+  await expect(item).toContainText('Chat tabs are off on this machine');
+  await expect(item).toBeDisabled();
+  await page.getByRole('menu').evaluate(menu => Promise.all(menu.getAnimations({ subtree: true }).map(animation => animation.finished)));
+  await page.screenshot({ path: testInfo.outputPath('tab-switch-to-chat-off.png') });
+
+  await page.getByRole('menuitem', { name: 'Turn on chat tabs' }).click();
+  await expect(item).toBeEnabled();
+  await expect(page.getByRole('menuitem', { name: 'Turn on chat tabs' })).toHaveCount(0);
+});

@@ -1,6 +1,6 @@
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MessageSquare, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
+import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { SessionApprovalsCount } from './approvals/ApprovalsCount';
 import { SessionApprovalsCountButton } from './approvals/SessionApprovals';
 import { openApprovalsFromCount } from './approvals/useSessionApprovals';
@@ -26,7 +26,7 @@ import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../
 import { dropOrder, stepOrder, type SessionDropTarget } from '../utils/sessionReorder';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { MoveSessionToHostDialog } from './MoveSessionToHostDialog';
-import { SessionSwitchToChatDialog, useSessionSwitchPreview } from './SessionSwitchToChat';
+import { SessionSwitchMenuItem, SessionSwitchToChatDialog, useSessionSwitchPreview } from './SessionSwitchToChat';
 import type { SessionChatSwitchPreview } from '../../../shared/types/chatTab';
 import { archiveOrchestrationSession, clearArchivedToast, restoreArchivedPanes, setArchivedToast, setOrchestrationSessionPinned, useArchivedSessionToastStore } from './orchestrationSessionActions';
 import { useMoveToHostBlockedReason } from '../hooks/useMoveToHostBlockedReason';
@@ -735,8 +735,8 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  // Offered only when some terminal agent tab in the Session can switch.
-  const switchPreview = useSessionSwitchPreview(HERE, menu?.sessionId ?? null);
+  // Always shown: checking, ready, or why nothing in the Session can switch.
+  const switchMenu = useSessionSwitchPreview(HERE, menu?.sessionId ?? null);
   const [switching, setSwitching] = useState<{ sessionName: string; preview: SessionChatSwitchPreview } | null>(null);
 
   useEffect(() => {
@@ -793,15 +793,11 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
         }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename Session…</span>
         </PopoverButton>
-        {switchPreview && (
-          <PopoverButton role="menuitem" onClick={() => {
-            if (!menu) return;
-            menu.returnFocusTo?.focus();
-            setSwitching({ sessionName: menu.sessionName, preview: switchPreview }); onClose();
-          }}>
-            <span className="flex items-center gap-2"><MessageSquare className="h-4 w-4" />Switch to chat…</span>
-          </PopoverButton>
-        )}
+        <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => {
+          if (!menu) return;
+          menu.returnFocusTo?.focus();
+          setSwitching({ sessionName: menu.sessionName, preview }); onClose();
+        }} />
         <PopoverButton
           role="menuitem"
           // Focusable while unavailable, so arrow keys reach it and its reason is announced.

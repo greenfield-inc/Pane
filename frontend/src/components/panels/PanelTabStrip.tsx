@@ -6,7 +6,7 @@
  */
 
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { MessageSquare, Pause, Pencil, Play, X } from 'lucide-react';
+import { Pause, Pencil, Play, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { ToolPanel, LogsPanelState, pausedMarkOf } from '../../../../shared/types/panels';
 import { Dropdown, type DropdownItem } from '../ui/Dropdown';
@@ -25,7 +25,7 @@ import { focusChatSoon, useFocusRegionStore } from '../../services/regionFocus';
 import { editorPanelState, pinEditorPanel } from '../../services/openFileInEditor';
 import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
 import { SwitchToChatDialog } from './SwitchToChat';
-import { isAgentTerminal } from '../../utils/agentTerminal';
+import { switchToChatMenuItems } from './switchToChatMenu';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -389,7 +389,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         // Right-click: rename, switch to chat, pause or resume, then close past a divider. A disabled tab offers none.
         const menuItems: DropdownItem[] = isDisabled ? [] : [
           ...(!isPermanent && !isDiffPanel ? [{ id: 'rename', label: 'Rename tab…', icon: Pencil, onClick: () => startRename(panel) }] : []),
-          ...(chatTabsEnabled && isAgentTerminal(panel) ? [{ id: 'switch-to-chat', label: 'Switch to chat…', icon: MessageSquare, onClick: () => setSwitchingPanel(panel) }] : []),
+          ...switchToChatMenuItems(panel, chatTabsEnabled, () => setSwitchingPanel(panel)),
           ...(panel.type === 'terminal' ? [isPaused
             ? { id: 'resume', label: 'Resume tab', icon: FilledPlay, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, false) }
             : { id: 'pause', label: 'Pause tab', icon: Pause, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, true) }] : []),

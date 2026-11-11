@@ -1,12 +1,12 @@
 import { SessionApprovalsCount } from '../approvals/ApprovalsCount';
 import { useEffect, useState } from 'react';
-import { Archive, Check, ChevronDown, ChevronRight, MessageSquare, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
+import { Archive, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
 import { AgentStatusDot, PausedGlyph } from '../ui/AgentStatusDot';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
 import { PermissionDialog } from '../PermissionDialog';
-import { SessionSwitchToChatDialog, useSessionSwitchPreview } from '../SessionSwitchToChat';
+import { SessionSwitchMenuItem, SessionSwitchToChatDialog, useSessionSwitchPreview } from '../SessionSwitchToChat';
 import type { SessionChatSwitchPreview } from '../../../../shared/types/chatTab';
 import { MachineMark, MachineRowMark, machineMarkTitle } from './MachineMark';
 import { Tooltip } from '../ui/Tooltip';
@@ -81,8 +81,8 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
   const noun = pane ? 'Pane' : 'Session';
   const act = (run: () => Promise<void>) => { onClose(); void run(); };
   const permission = pane?.permission ?? null;
-  // A Session's own machine says whether any of its terminal agent tabs can switch to chat.
-  const switchPreview = useSessionSwitchPreview({ kind: 'machine', machineId }, session?.session.id ?? null);
+  // A Session's own machine says whether any of its terminal agent tabs can switch to chat, and if not, why.
+  const switchMenu = useSessionSwitchPreview({ kind: 'machine', machineId }, session?.session.id ?? null, menu?.machine.name || 'that machine');
   const [switching, setSwitching] = useState<{ machineId: string; sessionName: string; preview: SessionChatSwitchPreview } | null>(null);
   return (<>
     <TerminalPopover visible={menu !== null} x={menu?.x ?? 0} y={menu?.y ?? 0} onClose={onClose}>
@@ -107,10 +107,8 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
         <PopoverButton role="menuitem" onClick={() => { if (menu) onRename(menu); onClose(); }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename {noun}…</span>
         </PopoverButton>
-        {session && switchPreview && (
-          <PopoverButton role="menuitem" onClick={() => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview: switchPreview }); onClose(); }}>
-            <span className="flex items-center gap-2"><MessageSquare className="h-4 w-4" />Switch to chat…</span>
-          </PopoverButton>
+        {session && (
+          <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview }); onClose(); }} />
         )}
         <div className="my-1 border-t border-border-primary" />
         <PopoverButton role="menuitem" variant="danger" onClick={() => act(() => runOnMachine(machineId, { type: 'archive', target: ref }, `Could not archive the ${noun}`))}>
