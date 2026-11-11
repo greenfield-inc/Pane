@@ -85,6 +85,15 @@ export interface StageApproval {
   onClose: () => void;
 }
 
+/** Esc in a Session's approval column (not while typing a reply) goes back to the chat beside it (D-336). */
+function escapeApprovalColumn(event: ReactKeyboardEvent): void {
+  if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName))) return;
+  event.preventDefault();
+  leaveApprovalColumn();
+}
+
 function layoutPanelIds(layout: SessionPanelLayout | null | undefined): Set<string> {
   const ids = new Set<string>();
   const walk = (node: SessionPanelLayout['root']) => {
@@ -600,14 +609,6 @@ export function SessionWorkspacePanels({
   // The column is a focus stop of its own (data-focus-region="approvals"); while it has focus, its
   // active tab carries the accent and the chat's dims, as a split's would (D-249, D-335).
   const approvalFocused = useFocusRegionStore(state => state.region === 'approvals') && focusWithin;
-  // Esc in the column (not while typing a reply) goes back to the chat beside it (D-336).
-  const escapeApprovalColumn = (event: ReactKeyboardEvent) => {
-    if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName))) return;
-    event.preventDefault();
-    leaveApprovalColumn();
-  };
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const rightGroupIds = useMemo(() => (right ? groupsIn(right).map(group => group.id) : []), [right]);
   useLayoutEffect(() => {
