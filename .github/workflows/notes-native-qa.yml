@@ -46,16 +46,20 @@ jobs:
         shell: bash
         # No install scripts: the next step builds SQLite for Electron once.
         run: pnpm install --frozen-lockfile --ignore-scripts 2>&1 | tee "$AGENT_FARM_ARTIFACT_BUNDLE/evidence/native/build/install.log"
-      # SQLite built for Electron depends only on the OS, arch, Electron
-      # version and the module's own version, so it is cached on those and
-      # rebuilt only on a miss (no Electron 43 prebuilt exists to download).
+      # SQLite built for Electron depends only on the runner image, arch,
+      # Electron version and the module's installed folder, so it is cached on
+      # those and rebuilt only on a miss (no Electron 43 prebuilt exists to
+      # download). Only pull requests and manual runs save it, so it speeds up
+      # a PR's later runs, not its first.
       - name: Key the Electron SQLite build
         id: sqlite
         shell: bash
         run: |
           electron="$(node -p "require('./node_modules/electron/package.json').version")"
-          module="$(node -p "require('./main/node_modules/better-sqlite3-multiple-ciphers/package.json').version")"
-          echo "key=electron-sqlite-${{ runner.os }}-${{ runner.arch }}-electron${electron}-module${module}" >> "$GITHUB_OUTPUT"
+          # The .pnpm folder name carries the version, patch hash and peer suffix.
+          module="$(cd node_modules/.pnpm && printf '%s\n' better-sqlite3-multiple-ciphers@* | sort | paste -sd+ -)"
+          # The runner image fixes the compiler and system headers the build used.
+          echo "key=electron-sqlite-${ImageOS}-${ImageVersion}-${{ runner.arch }}-electron${electron}-${module}" >> "$GITHUB_OUTPUT"
       - name: Restore the Electron SQLite build
         id: sqlite-cache
         uses: actions/cache@v5
