@@ -3844,11 +3844,11 @@ test('D-335: the split keys move focus between the Session chat and its approval
   }
 });
 
-const PERSON_KEY_OVERRIDES = { 'cycle-tab-prev-a': 'mod+[', 'cycle-tab-next-d': 'mod+]', 'focus-group-left': 'mod+shift+[', 'focus-group-right': 'mod+shift+]', 'focus-sidebar': 'mod+e' };
+const PERSON_KEY_OVERRIDES = { 'cycle-tab-prev-a': 'mod+alt+[', 'cycle-tab-next-d': 'mod+alt+]', 'focus-group-left': 'mod+shift+[', 'focus-group-right': 'mod+shift+]', 'focus-sidebar': 'mod+e' };
 const MAC = process.platform === 'darwin';
 const JOURNEY_KEYS = [
   { name: 'the person\'s keys', config: { appearanceMode: 'fixed', theme: 'light-rounded', keyboardShortcutOverrides: PERSON_KEY_OVERRIDES },
-    sidebar: 'ControlOrMeta+e', left: 'ControlOrMeta+Shift+BracketLeft', right: 'ControlOrMeta+Shift+BracketRight', prevTab: 'ControlOrMeta+BracketLeft', nextTab: 'ControlOrMeta+BracketRight' },
+    sidebar: 'ControlOrMeta+e', left: 'ControlOrMeta+Shift+BracketLeft', right: 'ControlOrMeta+Shift+BracketRight', prevTab: 'ControlOrMeta+Alt+BracketLeft', nextTab: 'ControlOrMeta+Alt+BracketRight' },
   { name: 'the default keys', config: { appearanceMode: 'fixed', theme: 'dark' },
     sidebar: 'ControlOrMeta+0', left: 'ControlOrMeta+Alt+ArrowLeft', right: 'ControlOrMeta+Alt+ArrowRight',
     prevTab: MAC ? 'Meta+Shift+BracketLeft' : 'Control+PageUp', nextTab: MAC ? 'Meta+Shift+BracketRight' : 'Control+PageDown' },
@@ -3858,7 +3858,7 @@ for (const keys of JOURNEY_KEYS) {
   test(`D-336: the keyboard journey, sidebar → chat → approval column and back, with ${keys.name}`, async ({ page }, testInfo) => {
     const now = new Date(0).toISOString();
     const chatAgent = { id: '__orchestration_panel_plans_claude', sessionId: '__orchestration_session_plansterminal__', type: 'chat', title: 'Plan demo · Claude Code',
-      state: { isActive: true, hasBeenViewed: true, customState: { agent: 'claude', launch: { kind: 'new' }, cwd: '/tmp/pane-fixtures', status: 'idle' } },
+      state: { isActive: true, hasBeenViewed: true, customState: { agent: 'claude', launch: { kind: 'new' }, cwd: '/tmp/pane-fixtures', status: 'idle', orchestrationSessionId: 'plans' } },
       metadata: { createdAt: now, lastActiveAt: now, position: 0 } };
     await installSessionsFixture(page, [
       sessionFixture('alpha', 'Alpha work', '', '', now),
@@ -3932,6 +3932,26 @@ for (const keys of JOURNEY_KEYS) {
     await expect(column.getByTestId('approval-column')).toBeFocused();
     await expect(columnTab).toHaveText('Questions & answers');
     await step('column', 'column');
+    // The chat's card for the open approval: a neutral grey outline and an "Open" label, never blue (D-343).
+    const cards = page.getByTestId('session-approval-card');
+    const openCard = cards.and(page.locator('[data-open]'));
+    await expect(openCard).toHaveCount(1);
+    await expect(openCard.getByTestId('session-approval-card-open-label')).toHaveText('Open');
+    await expect(cards.getByTestId('session-approval-card-open-label')).toHaveCount(1);
+    const outline = await openCard.evaluate((card) => {
+      const probe = (value: string) => {
+        const el = document.createElement('span');
+        el.style.color = value;
+        document.body.append(el);
+        const color = getComputedStyle(el).color;
+        el.remove();
+        return color;
+      };
+      const ring = /(rgba?\([^)]*\)) 0px 0px 0px 1px/.exec(getComputedStyle(card).boxShadow)?.[1];
+      return { ring, grey: probe('var(--color-text-tertiary)'), accent: probe('var(--color-interactive-primary)') };
+    });
+    expect(outline.ring).toBe(outline.grey);
+    expect(outline.ring).not.toBe(outline.accent);
     // 6. The tab keys walk the column's tabs while it has focus.
     await page.keyboard.press(keys.nextTab);
     await expect(columnTab).toHaveText('Summary');

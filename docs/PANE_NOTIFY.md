@@ -228,7 +228,8 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   sidebar opens the newest ready-again approval, or the first waiting one. A
   Session's orchestrator chat docks light cards above its composer: title,
   one line, a one-question approval's options as buttons, and **Open on the
-  right**. In **Autopilot**, the column covers the Stack (✕ "Back to the
+  right**. The card open in the column has a darker grey outline and an
+  **Open** label. In **Autopilot**, the column covers the Stack (✕ "Back to the
   Stack"), and Autopilot's decision cards gain **Open**. In a Session and in
   Autopilot, the chat tab is live too: an orchestrator's item shows its
   Session, and a worker's or a Pane's item shows the tab that asked.
