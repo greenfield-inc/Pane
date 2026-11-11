@@ -2,6 +2,7 @@ import { useEffect, useRef, type RefObject } from 'react';
 import { useHotkey } from './useHotkey';
 import {
   focusSidebar,
+  handleEnterToChat,
   handleSidebarListKey,
   minimizeAtFocus,
   moveFocus,
@@ -26,8 +27,8 @@ function useDirectionHotkey({ id, dir, label }: typeof DIRECTIONS[number]): void
 
 /**
  * Keyboard focus across the whole window (P3): ⌘0 to the sidebar, ⌘⌥+arrows
- * across region edges, F6 / ⇧F6 through the regions, and the sidebar as a
- * keyboard list. Mounted once, at the app root.
+ * across region edges, F6 / ⇧F6 through the regions, the sidebar as a
+ * keyboard list, and Enter into the chat on screen. Mounted once, at the app root.
  */
 export function useRegionNavigation(): void {
   useEffect(() => {
@@ -37,9 +38,11 @@ export function useRegionNavigation(): void {
     };
     window.addEventListener('focusin', onFocusIn, true);
     window.addEventListener('keydown', handleSidebarListKey);
+    window.addEventListener('keydown', handleEnterToChat);
     return () => {
       window.removeEventListener('focusin', onFocusIn, true);
       window.removeEventListener('keydown', handleSidebarListKey);
+      window.removeEventListener('keydown', handleEnterToChat);
     };
   }, []);
 

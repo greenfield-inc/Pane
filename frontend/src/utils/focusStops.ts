@@ -96,3 +96,14 @@ export function stepStop<Ref>(
   if (index === -1) return delta === 1 ? ordered[0] : ordered[ordered.length - 1];
   return ordered[(index + delta + ordered.length) % ordered.length];
 }
+
+/**
+ * The sidebar list's key, with j and k read as ↓ and ↑ (vim keys). The list
+ * handles keys only while one of its rows has focus, so typing in a field is
+ * never read this way. Shifted J and K stay themselves.
+ */
+export function sidebarListKey(key: string): string {
+  if (key === 'j') return 'ArrowDown';
+  if (key === 'k') return 'ArrowUp';
+  return key;
+}

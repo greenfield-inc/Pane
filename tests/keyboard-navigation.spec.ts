@@ -102,6 +102,34 @@ test('⌘0 puts the cursor on the open Pane, and the arrows walk up into the top
   await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'sidebar' });
 });
 
+test('j and k move down and up the sidebar like the arrows, but only while a row has focus', async ({ page }) => {
+  await openFixture(page);
+  await page.keyboard.press('ControlOrMeta+0');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'sidebar', label: 'auth-refactor' });
+
+  // The sidebar lists billing-migration above auth-refactor, and the project row above both.
+  await page.keyboard.press('k');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ label: 'billing-migration' });
+  await page.keyboard.press('k');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ label: 'Collapse project Nav fixture' });
+  await page.keyboard.press('j');
+  await page.keyboard.press('j');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ label: 'auth-refactor' });
+  // The arrows still work, and shifted J and K are not moves.
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ label: 'billing-migration' });
+  await page.keyboard.press('Shift+J');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ label: 'billing-migration' });
+
+  // Outside the sidebar, j is just a letter: it reaches the terminal and focus stays there.
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'main' });
+  await page.keyboard.press('j');
+  await page.keyboard.press('k');
+  await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'main' });
+});
+
 test('Space opens a Pane and keeps the cursor; Enter opens it and moves into its split; Esc goes back', async ({ page }) => {
   await openFixture(page);
   await page.keyboard.press('ControlOrMeta+0');
