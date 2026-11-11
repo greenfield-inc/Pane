@@ -249,7 +249,7 @@ body.understory {
    Underline themes keep their own indicator (more specific, below). */
 .panel-tab-strip-focused [aria-selected="true"] {
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000),
-    inset 0 -2px 0 0 var(--color-interactive);
+    inset 0 -2px 0 0 var(--color-interactive-primary);
 }
 
 /* Fill themes mark the active tab with a background; an inactive split's keeps

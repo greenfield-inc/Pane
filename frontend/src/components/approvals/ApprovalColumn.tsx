@@ -106,7 +106,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
   if (!item) {
     return (
       // No tabs to mark: a thin accent edge along the top says it has focus.
-      <div className={cn('flex min-h-0 flex-1 flex-col bg-bg-primary', focused && 'shadow-[inset_0_2px_0_0_var(--color-interactive)]')} data-testid="approval-column" data-focused={focused}>
+      <div className={cn('flex min-h-0 flex-1 flex-col bg-bg-primary', focused && 'shadow-[inset_0_2px_0_0_var(--color-interactive-primary)]')} data-testid="approval-column" data-focused={focused}>
         <ColumnHeader index={0} total={0} groupLabel={groupLabel} closeLabel={closeLabel} onClose={onClose} onStep={step} dots={[]} chip={null} />
         <p className="m-auto px-6 text-center text-[13px] text-text-tertiary">That approval is no longer here: it was answered or closed.</p>
       </div>

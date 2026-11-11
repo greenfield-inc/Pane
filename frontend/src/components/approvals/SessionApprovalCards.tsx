@@ -43,8 +43,10 @@ function LightCard({ item, sessionId, open }: { item: NotifyItem; sessionId: str
   const buttons = questions.length === 1 && item.ui === 'options' && !item.agentPrompt?.inTerminal && !isBeingRead(item) && !item.unreachable ? questions[0].choices : [];
   const qn = /^\s*(Q-\d+)/.exec(item.title)?.[1];
   const who = item.source.autopilot ? 'Autopilot' : item.source.session?.orchestrator ? `${item.source.session.name} orchestrator` : `${item.source.name}${item.originKind === 'worker' ? ', relayed' : ''}`;
+  // The card open on the right is marked quietly: the accent belongs to whichever side has keyboard focus (D-336).
   return (
-    <div className={cn('rounded-2xl bg-surface-primary px-3.5 pb-2.5 pt-3 shadow-card ring-1', open ? 'ring-2 ring-interactive' : item.source.autopilot ? 'ring-autopilot-border' : 'ring-border-secondary')} data-testid="session-approval-card" data-item-id={item.id}>
+    <div className={cn('rounded-2xl bg-surface-primary px-3.5 pb-2.5 pt-3 shadow-card ring-1',
+      open ? 'ring-border-hover' : item.source.autopilot ? 'ring-autopilot-border' : 'ring-border-secondary')} data-testid="session-approval-card" data-item-id={item.id} data-open={open || undefined}>
       <div className="flex items-center gap-1.5 text-[12px] font-medium uppercase tracking-wide text-text-tertiary">
         {item.source.autopilot ? <Navigation className="h-3.5 w-3.5 text-autopilot" aria-hidden="true" /> : <CircleAlert className="h-3.5 w-3.5 text-status-warning" aria-hidden="true" />}
         <span className="min-w-0 truncate">{item.source.autopilot ? 'Autopilot asks' : 'Approval'}{qn ? ` · ${qn}` : ''} · <span className="normal-case">{who}</span></span>

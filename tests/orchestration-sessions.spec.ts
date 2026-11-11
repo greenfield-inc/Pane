@@ -3879,11 +3879,22 @@ for (const keys of JOURNEY_KEYS) {
     const columnTab = column.getByTestId('approval-tab').and(page.locator('[aria-selected="true"]'));
     const row = (name: string) => page.getByRole('button', { name: `Open Session ${name}`, exact: true });
 
-    /** Which regions carry a focus mark: the sidebar (it has focus), the chat's accent, the column's accent. */
+    /**
+     * Which regions carry a focus mark, read from what is drawn, not from class names: the sidebar
+     * (it has focus), an accent underline under the chat's active tab, under the column's active tab.
+     */
     const marks = () => page.evaluate(() => {
+      const transparent = (color: string) => color === 'transparent' || /^rgba\(\d+, \d+, \d+, 0\)$/.test(color);
+      const underlined = (tab: Element) => {
+        const style = getComputedStyle(tab);
+        const inset = /(rgba?\([^)]*\)|oklch\([^)]*\)|color\([^)]*\)) 0px -2px 0px 0px inset/.exec(style.boxShadow);
+        const shadow = Boolean(inset && !transparent(inset[1]));
+        const border = parseFloat(style.borderBottomWidth) >= 2 && !transparent(style.borderBottomColor);
+        return shadow || border;
+      };
       const sidebar = Boolean(document.activeElement?.closest('[data-focus-region="sidebar"]'));
-      const chat = document.querySelectorAll('.panel-tab-strip-focused').length;
-      const column = document.querySelectorAll('[data-approval-tab][data-focused="true"]').length;
+      const chat = Array.from(document.querySelectorAll('.panel-tab-strip [role="tab"][aria-selected="true"]')).filter(underlined).length;
+      const column = Array.from(document.querySelectorAll('[data-approval-tab][aria-selected="true"]')).filter(underlined).length;
       return { sidebar: sidebar ? 1 : 0, chat, column };
     });
     let shot = 0;
@@ -3944,6 +3955,13 @@ for (const keys of JOURNEY_KEYS) {
     await page.keyboard.press('Escape');
     await expect(chatBox).toBeFocused();
     await step('esc-from-column', 'chat');
+    // Closing the column from the keyboard puts focus back in the chat, never on nothing.
+    await page.keyboard.press(keys.right);
+    await column.getByTestId('approval-column-close').focus();
+    await page.keyboard.press('Enter');
+    await expect(column).toHaveCount(0);
+    await expect(chatBox).toBeFocused();
+    await step('closed-column', 'chat');
   });
 }
 

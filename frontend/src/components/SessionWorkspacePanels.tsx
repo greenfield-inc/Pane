@@ -609,6 +609,16 @@ export function SessionWorkspacePanels({
   // The column is a focus stop of its own (data-focus-region="approvals"); while it has focus, its
   // active tab carries the accent and the chat's dims, as a split's would (D-249, D-335).
   const approvalFocused = useFocusRegionStore(state => state.region === 'approvals') && focusWithin;
+  // The column going away (✕, Esc on ✕, an answer) with focus in it would leave focus on nothing: it goes to the chat.
+  const approvalWasOpen = useRef(approvalOpen);
+  useEffect(() => {
+    const closed = approvalWasOpen.current && !approvalOpen;
+    approvalWasOpen.current = approvalOpen;
+    if (!closed || !focusWithin) return;
+    requestAnimationFrame(() => {
+      if (!document.activeElement || document.activeElement === document.body) leaveApprovalColumn();
+    });
+  }, [approvalOpen, focusWithin]);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const rightGroupIds = useMemo(() => (right ? groupsIn(right).map(group => group.id) : []), [right]);
   useLayoutEffect(() => {
