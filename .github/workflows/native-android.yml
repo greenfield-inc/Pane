@@ -144,9 +144,11 @@ jobs:
       working-directory: native/android
       run: ./gradlew assembleDebug --no-daemon --build-cache -PreactNativeArchitectures=${{ matrix.abi }}
 
-    # The ABI jobs share one entry: the first to finish saves it.
+    # The ABI jobs share one entry, saved by the arm64-v8a job (the ABI pull
+    # requests build); the others would spend about 25 s packing it only to
+    # lose the race to save.
     - name: Save the Gradle cache
-      if: github.event_name != 'pull_request' && steps.gradle-cache.outputs.cache-hit != 'true'
+      if: github.event_name != 'pull_request' && matrix.abi == 'arm64-v8a' && steps.gradle-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v5
       with:
         path: |
