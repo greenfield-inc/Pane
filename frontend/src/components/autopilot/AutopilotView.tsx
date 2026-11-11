@@ -10,6 +10,10 @@ import { ApprovalOrigin } from '../approvals/ApprovalOrigin';
 import { useActiveMachineStore } from '../../stores/activeMachineStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import type { ChatRendering } from '../chatTab/chatRendering';
+import type { ChatTurnActions } from '../chatTab/ChatTurns';
+import { useManySessionWorkers } from '../chatTab/sessionWorkers';
+import { DESKTOP_WORKERS, openWorkerTab } from '../chatTab/desktopSessionWorkers';
+import { workingAgents } from '../../../../shared/chatTabPresentation';
 import { AutopilotItemRows } from './AutopilotItemRows';
 import { AutopilotDecisionCard } from './AutopilotDecisionCard';
 import { SentinelAwayCard, SentinelLogRows } from './AutopilotSentinelLog';
@@ -264,6 +268,11 @@ export function AutopilotView() {
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
   const approvalOpen = useApprovalColumnStore((state) => state.open.autopilot !== undefined);
   useStackKeys(approvalOpen);
+  // "N working" above the chat box counts the agents working in every Session Autopilot walks (D-276).
+  const walkIds = useMemo(() => snapshot?.walk.sessions.map(session => session.id) ?? [], [snapshot?.walk.sessions]);
+  const walkWorkers = useManySessionWorkers(DESKTOP_WORKERS, walkIds);
+  const working = useMemo(() => workingAgents(walkWorkers), [walkWorkers]);
+  const actions = useMemo<ChatTurnActions>(() => ({ onOpenWorker: (paneId, panelId) => { void openWorkerTab(paneId, panelId); } }), []);
   // The chat's width is the person's (drag its edge; double-click resets). Too narrow for the chat
   // and the stack at their minimums, the chat keeps its fluid width.
   const viewBox = useObservedContentBox<HTMLDivElement>();
@@ -309,6 +318,8 @@ export function AutopilotView() {
                 // Stopped on purpose (before Start): the Start card above stands in for the stopped notice.
                 stoppedNotice={<span hidden />}
                 dock={<CurrentDock snapshot={snapshot} />}
+                working={working}
+                actions={actions}
               />
             </Suspense>
           ) : <StartCard snapshot={snapshot} pending={pending} />}
