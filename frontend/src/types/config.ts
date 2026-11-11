@@ -1,5 +1,6 @@
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
+import type { CustomLink } from '../../../shared/types/customLinks';
 import type { MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
@@ -177,6 +178,8 @@ export interface AppConfig {
   analytics?: AnalyticsConfig;
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
+  // Terminal text matching a pattern opens a link, e.g. issue keys opening the issue tracker
+  customLinks?: CustomLink[];
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
@@ -261,6 +264,7 @@ export interface UpdateConfigRequest {
   htmlFileOpenMode?: HtmlFileOpenMode;
   analytics?: AnalyticsConfig;
   customCommands?: CustomCommand[];
+  customLinks?: CustomLink[];
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;

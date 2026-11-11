@@ -187,6 +187,7 @@ test.describe('Settings', () => {
       'General',
       'Appearance',
       'Terminal',
+      'Links',
       'AI & Agents',
       'Worktrees & Git',
       'Notifications',
@@ -473,6 +474,31 @@ test.describe('Settings', () => {
     expect(updates.at(-1)?.worktreeFileSync).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: '.env.local', enabled: true }),
     ]));
+  });
+
+  test('applies a custom terminal link after trying it on sample text', async ({ page }) => {
+    await bootSettings(page);
+    await page.getByRole('button', { name: 'Links', exact: true }).click();
+    await page.getByRole('button', { name: 'Add Link' }).click();
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Jira');
+    await page.getByRole('textbox', { name: 'Pattern', exact: true }).fill('\\bPROJ-\\d+\\b');
+    await page.getByRole('textbox', { name: 'Link', exact: true }).fill('https://example.atlassian.net/browse/$0');
+    await page.getByRole('textbox', { name: 'Try it', exact: true }).fill('Fixes PROJ-12');
+    await expect(page.getByRole('list', { name: 'Links found' }))
+      .toHaveText('PROJ-12 → https://example.atlassian.net/browse/PROJ-12');
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const updates = await page.evaluate(() => (
+      window as typeof window & { __paneTestElectronMock: SettingsMock }
+    ).__paneTestElectronMock.getConfigUpdates());
+    expect(updates.at(-1)?.customLinks).toEqual([expect.objectContaining({
+      enabled: true,
+      label: 'Jira',
+      pattern: '\\bPROJ-\\d+\\b',
+      urlTemplate: 'https://example.atlassian.net/browse/$0',
+    })]);
   });
 
   test('guards category navigation when a staged form is dirty', async ({ page }) => {

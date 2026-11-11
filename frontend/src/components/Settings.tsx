@@ -6,6 +6,7 @@ import { SettingsLayout } from './settings/SettingsLayout';
 import { GeneralSettings } from './settings/categories/GeneralSettings';
 import { AppearanceSettings } from './settings/categories/AppearanceSettings';
 import { TerminalSettings } from './settings/categories/TerminalSettings';
+import { LinksSettings } from './settings/categories/LinksSettings';
 import { AIAgentsSettings } from './settings/categories/AIAgentsSettings';
 import { WorktreesGitSettings } from './settings/categories/WorktreesGitSettings';
 import { NotificationSettings } from './NotificationSettings';
@@ -188,6 +189,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <AppearanceSettings persistence={persistence} />;
       case 'terminal':
         return <TerminalSettings persistence={persistence} systemMonoFonts={systemMonoFonts} />;
+      case 'links':
+        return <LinksSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'ai-agents':
         return <AIAgentsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'usage':

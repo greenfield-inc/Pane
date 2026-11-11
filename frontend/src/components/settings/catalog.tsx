@@ -9,6 +9,7 @@ import {
   GitBranch,
   Keyboard,
   KeyRound,
+  Link,
   Link2,
   Monitor,
   Navigation,
@@ -53,6 +54,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     icon: Terminal,
     settingIds: ['terminal-font-family', 'terminal-font-size', 'terminal-power-mode', 'terminal-reference-paste-mode', 'terminal-reference-line-count', 'terminal-shell'],
     aliases: ['font', 'shell', 'scrollback', 'gpu', 'battery'],
+  },
+  {
+    id: 'links',
+    label: 'Links',
+    description: 'Your own clickable links in terminal output, such as issue keys.',
+    icon: Link,
+    settingIds: ['custom-links'],
+    aliases: ['link', 'url', 'regex', 'pattern', 'issue', 'ticket', 'jira', 'linear', 'tracker', 'clickable'],
   },
   {
     id: 'ai-agents',
