@@ -4,6 +4,7 @@ import type {
   NotifyActor,
   NotifyAgentAction,
   NotifyAnswer,
+  NotifyChoice,
   NotifyClosed,
   NotifyConnected,
   NotifyInstructionsFile,
@@ -135,6 +136,8 @@ export interface WorkerQuestion {
   links?: NotifyQuestion['links'];
   /** The worker's report summary: what it was doing when it asked. */
   context?: string;
+  /** The options its status file's question offers: the card asks with them instead of a text box. */
+  choices?: NotifyChoice[];
 }
 
 export interface NotifyQueueEnvironment {
@@ -469,7 +472,7 @@ export class NotifyQueue extends EventEmitter {
     if (this.entries.has(question.id) || this.isRewrittenFrom(question.id) || this.env.store?.readItem(question.id)) return;
     const item: NotifyItem = {
       id: question.id,
-      ui: 'ask',
+      ui: question.choices?.length ? 'options' : 'ask',
       title: question.question,
       source: this.withSession(question.source),
       state: 'waiting',
@@ -480,6 +483,7 @@ export class NotifyQueue extends EventEmitter {
     if (Date.now() - question.at < relayAfterMs()) item.quiet = true;
     if (question.links?.length) item.links = question.links;
     if (question.context) item.context = question.context;
+    if (question.choices?.length) item.choices = question.choices;
     item.connected = question.connected ?? connectedOf(item, this.machine());
     const entry: Entry = { item, resumeLoop: false };
     this.entries.set(item.id, entry);

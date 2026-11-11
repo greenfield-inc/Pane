@@ -22,6 +22,7 @@ import { LOCAL_MACHINE_ID, type MachineState } from '../../../shared/types/machi
 import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
+import { statusCard } from '../services/notify/workerContext';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
@@ -673,6 +674,8 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
     if (request.choices) checkChoices(request.choices, 'choices');
     if (request.questions) checkQuestions(request.questions);
     if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
+    // The new version's context reads like a new card's; the card keeps its ui, and its links unless given.
+    readStatusContext(request, false);
     return request;
   }
   if (request.asked !== undefined || request.whatChanged !== undefined) throw invalid('asked and whatChanged only go with update.');
@@ -706,7 +709,32 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.action !== undefined && ui !== 'info') throw invalid(`action only goes with ui: info, not ${ui}.`);
   if (request.action && !/^https?:\/\//i.test(request.action.url)) throw invalid('action.url must be an http(s) URL.');
   if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
+  readStatusContext(request, true);
   return request;
+}
+
+/**
+ * A context sent as a status file or a needs_you block (JSON) becomes the card it describes:
+ * its question and why as the context, its options as choices on a question that has none, its
+ * files as links. Other JSON shows as one plain line, or none; the raw text never shows.
+ */
+function readStatusContext(request: NotifyRequest, newCard: boolean): void {
+  if (!request.context) return;
+  const card = statusCard(request.context, request.title ?? '');
+  if (!card) return;
+  // An update without a line for the person clears the old context rather than keeping it.
+  if (card.context) request.context = card.context;
+  else if (newCard) delete request.context;
+  else request.context = '';
+  if (!newCard) return;
+  if (card.choices && request.ui === 'ask' && !request.suggestions?.length) {
+    request.ui = 'options';
+    request.choices = card.choices;
+  }
+  if (card.links) {
+    const files = card.links.map(link => ('path' in link && request.caller.cwd && !path.isAbsolute(link.path) ? { ...link, path: path.resolve(request.caller.cwd, link.path) } : link));
+    request.links = [...request.links ?? [], ...files].slice(0, NOTIFY_LINKS_MAX);
+  }
 }
 
 /** 1 to 9 choices with different labels. */
