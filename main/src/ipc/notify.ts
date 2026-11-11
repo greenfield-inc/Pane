@@ -674,6 +674,8 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
     if (request.choices) checkChoices(request.choices, 'choices');
     if (request.questions) checkQuestions(request.questions);
     if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
+    // The new version's context reads like a new card's; the card keeps its ui, and its links unless given.
+    readStatusContext(request, false);
     return request;
   }
   if (request.asked !== undefined || request.whatChanged !== undefined) throw invalid('asked and whatChanged only go with update.');
@@ -707,7 +709,7 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.action !== undefined && ui !== 'info') throw invalid(`action only goes with ui: info, not ${ui}.`);
   if (request.action && !/^https?:\/\//i.test(request.action.url)) throw invalid('action.url must be an http(s) URL.');
   if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
-  readStatusContext(request);
+  readStatusContext(request, true);
   return request;
 }
 
@@ -716,12 +718,15 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
  * its question and why as the context, its options as choices on a question that has none, its
  * files as links. Other JSON shows as one plain line, or none; the raw text never shows.
  */
-function readStatusContext(request: NotifyRequest): void {
-  if (!request.context || !request.title) return;
-  const card = statusCard(request.context, request.title);
+function readStatusContext(request: NotifyRequest, newCard: boolean): void {
+  if (!request.context) return;
+  const card = statusCard(request.context, request.title ?? '');
   if (!card) return;
+  // An update without a line for the person clears the old context rather than keeping it.
   if (card.context) request.context = card.context;
-  else delete request.context;
+  else if (newCard) delete request.context;
+  else request.context = '';
+  if (!newCard) return;
   if (card.choices && request.ui === 'ask' && !request.suggestions?.length) {
     request.ui = 'options';
     request.choices = card.choices;

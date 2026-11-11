@@ -585,6 +585,26 @@ describe('Approvals items, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it('keeps a notify context that is prose starting with a bracket, and reads a status-JSON context on --update too', async () => {
+    const pane = await startWithSessions();
+    const caller = { paneId: 'loose', panelId: 'loose-panel' };
+    void pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Merge #12?', context: '[PR #12](https://github.com/x/y/pull/12) is ready: merge it?', caller }]);
+    const asked = pane.registry.invoke<NotifyResult>('runpane:notify', [{ ui: 'ask', title: 'Q-5: Retry policy?', context: 'Which retry policy?', caller }]);
+    await flush();
+    const [merge, retry] = pane.notify.snapshot().items;
+    expect(merge).toMatchObject({ title: 'Merge #12?', context: '[PR #12](https://github.com/x/y/pull/12) is ready: merge it?' });
+    pane.notify.queue.run({ type: 'answer', id: retry.id, answer: { picks: [], text: 'What do the others do?' } });
+    const reply = await asked;
+    if (!('replyId' in reply)) throw new Error(`expected a reply, got ${JSON.stringify(reply)}`);
+    await pane.registry.invoke('runpane:notify', [{ took: reply.replyId, tookAs: 'question', caller }]);
+    const status = { state: 'blocked', step: 'Retry policy', needs_you: { questions: [{ q: 'Exponential or fixed?', why: 'The others use exponential.', options: ['Exponential (recommended)', 'Fixed'] }] } };
+    void pane.registry.invoke('runpane:notify', [{ update: reply.replyId, asked: 'What do the others do?', whatChanged: 'Added why', context: JSON.stringify(status, null, 2), caller }]);
+    await flush();
+    const updated = pane.notify.snapshot().items.find(item => item.id === retry.id);
+    expect(updated).toMatchObject({ ui: 'ask', version: 2, context: 'Exponential or fixed?\n\nThe others use exponential.' });
+    pane.notify.dispose();
+  });
+
   it('files a card under the Session the worker reported to, even after the worker moved, and closes it when that Session closes', async () => {
     const moved = { ...blocked(Date.now() - 11 * 60_000), sessionId: 'session-2' };
     const pane = await startWithSessions(inboxOf([moved]));

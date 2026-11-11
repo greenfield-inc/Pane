@@ -58,11 +58,15 @@ describe("a card built from a worker's status JSON", () => {
     expect(statusCard(JSON.stringify({ state: 'blocked', step: 'Retry policy', checks: { passed: [] } }), 'T')).toEqual({ context: 'Retry policy' });
     expect(statusCard('{\n "state": "blocked",\n "title": "Invoice PDFs",\n "checks": {\n  "passed": [\n[summary truncated]', 'T')).toEqual({ context: 'Invoice PDFs' });
     expect(statusCard('{"checks": {"passed": []}}', 'T')).toEqual({});
-    expect(statusCard('{ not json at all', 'T')).toEqual({});
+    expect(statusCard('{ "checks": { "passed": [\n[summary truncated]', 'T')).toEqual({});
+    expect(statusCard('{"state": "blocked", "checks": {', 'T')).toEqual({});
   });
 
-  it('leaves prose alone', () => {
+  it('leaves prose alone, even when it starts with a bracket or brace', () => {
     expect(statusCard('Copied carts; the old table is still read.', 'T')).toBeUndefined();
+    for (const prose of ['[WIP] Copied carts; the old table is still read.', '[PR #12](https://github.com/x/y/pull/12) is ready: merge it?', '{draft} Use ids', '{ not json at all', '[1/3] Step one'])
+      expect(statusCard(prose, 'T'), prose).toBeUndefined();
+    expect(workerReportCard('[WIP] Copied carts.', 'T')).toEqual({ context: '[WIP] Copied carts.' });
   });
 });
 

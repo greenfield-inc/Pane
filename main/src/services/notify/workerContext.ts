@@ -157,13 +157,17 @@ function cardOf(needsYou: NeedsYou, title: string): StatusCard {
  * A card's content from text that is a status file or a `needs_you` block, sent as JSON (often
  * cut short by the journal): the question and why as context, its options as choices, its files
  * as links. JSON it doesn't recognize gives one plain line (summary, step or title) or nothing,
- * never the raw text. Undefined when the text isn't JSON, so prose stays as written.
+ * never the raw text. Undefined when the text isn't JSON (prose starting with a bracket included),
+ * so prose stays as written.
  */
 export function statusCard(text: string, title: string): StatusCard | undefined {
   const trimmed = text.trim();
   if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return undefined;
   const body = trimmed.endsWith(TRUNCATION_MARKER) ? trimmed.slice(0, -TRUNCATION_MARKER.length).trimEnd() : trimmed;
   const json = parse(body);
+  // Prose can start with a bracket ("[WIP] …", a Markdown link): only JSON, or JSON the journal
+  // cut short (its marker, or a key right after the opening bracket), is read as JSON.
+  if (json === undefined && body === trimmed && !/^[{[]\s*"/u.test(body)) return undefined;
   const needsYou = needsYouOf(json, body);
   if (needsYou) {
     const card = cardOf(needsYou, title);
