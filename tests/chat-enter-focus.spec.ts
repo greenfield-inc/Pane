@@ -100,3 +100,70 @@ test('Enter with focus on no control moves into the chat; Enter on a tab shows i
   await expect(page.getByRole('button', { name: 'Expand project Chat fixture', exact: true })).toBeFocused();
   await expect(messageBox(page)).not.toBeFocused();
 });
+
+// Two splits, each able to show a chat: Enter must stay in the split it was pressed in.
+const splitProject = { id: 79, name: 'Split fixture', path: '/tmp/split-fixture', active: true, created_at: now, updated_at: now };
+const splitPanel = (id: string, type: 'terminal' | 'chat', title: string, position: number, isActive = false) => ({
+  id, sessionId: 'sp', type, title,
+  state: {
+    isActive, hasBeenViewed: true,
+    customState: type === 'chat'
+      ? { agent: 'claude', launch: { kind: 'new' }, cwd: '/tmp/split-fixture/sp', status: 'idle' }
+      : { isInitialized: false },
+  },
+  metadata: { createdAt: now, lastActiveAt: now, position },
+});
+const splitPanels = [
+  splitPanel('dock', 'terminal', 'Terminal', 0),
+  splitPanel('chat-left', 'chat', 'Left chat', 1, true),
+  splitPanel('shell-right', 'terminal', 'Right shell', 2),
+  splitPanel('chat-right', 'chat', 'Right chat', 3),
+];
+const splitLayout = {
+  version: 1,
+  focusedGroupId: 'g-right',
+  root: {
+    type: 'split', id: 's-root', direction: 'row', sizes: [1, 1],
+    children: [
+      { type: 'group', id: 'g-left', panelIds: ['chat-left'], activePanelId: 'chat-left' },
+      { type: 'group', id: 'g-right', panelIds: ['shell-right', 'chat-right'], activePanelId: 'shell-right' },
+    ],
+  },
+};
+
+test('Enter stays in its own split: a chat tab opens into its own message box, never the other split\'s chat', async ({ page }) => {
+  await installElectronApiMock(page, {
+    initialProjects: [splitProject],
+    initialSessions: [{ ...pane('sp', 'split-pane', 0), worktreePath: '/tmp/split-fixture/sp', projectId: splitProject.id }],
+    initialPanels: splitPanels, initialLayout: splitLayout, activeProjectId: splitProject.id,
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Expand project Split fixture', exact: true }).click();
+  await page.getByRole('button', { name: 'split-pane', exact: true }).click();
+  const left = page.locator('[data-panel-group-id="g-left"] [data-chat-composer]');
+  const right = page.locator('[data-panel-group-id="g-right"] [data-chat-composer]');
+  const rightSplit = page.locator('[data-panel-group-id="g-right"]');
+  await expect(left).toBeVisible();
+  await expect(page.locator('[data-panel-group-id="g-right"] .xterm-helper-textarea')).toHaveCount(1);
+
+  // Focus on the right split, which shows a shell: Enter does not jump into the left split's chat.
+  await rightSplit.evaluate((element: HTMLElement) => { element.setAttribute('tabindex', '-1'); element.focus(); });
+  await expect(rightSplit).toHaveAttribute('data-group-focused', 'true');
+  await page.keyboard.press('Enter');
+  await expect(left).not.toBeFocused();
+  await expect(rightSplit).toBeFocused();
+
+  // Enter in the right split's terminal is the terminal's, with a chat on screen in the other split.
+  const shell = page.locator('[data-panel-group-id="g-right"] .xterm-helper-textarea');
+  await shell.focus();
+  await page.keyboard.press('Enter');
+  await expect(shell).toBeFocused();
+
+  // Enter on the right split's chat tab lands in the right chat, and what is typed goes there.
+  await page.getByRole('tab', { name: 'Right chat', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(right).toBeFocused();
+  await page.keyboard.type('xyz');
+  await expect(right).toHaveValue('xyz');
+  await expect(left).toHaveValue('');
+});

@@ -850,7 +850,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       });
       const done = () => Promise.resolve();
       return {
-        get: (panelId: string) => Promise.resolve(view(panelId)),
+        // The chat loads a moment late, as a real one does, so tests exercise the wait for it.
+        get: (panelId: string) => new Promise((resolve) => { setTimeout(() => resolve(view(panelId)), 300); }),
         history: () => Promise.resolve([]),
         send: () => Promise.resolve({ status: 'sent' }),
         receipt: () => Promise.resolve(undefined),

@@ -435,7 +435,8 @@ export function handleSidebarListKey(event: KeyboardEvent): void {
       else requestAnimationFrame(() => requestAnimationFrame(() => {
         focusMainArea();
         // A chat that is still loading takes focus into its message box once it shows (D-328).
-        focusChatSoon();
+        const chat = chatShownInFocusedSplit();
+        if (chat !== null) focusChatSoon(chat);
       }));
       return;
     case ' ':
@@ -470,11 +471,31 @@ const OWNS_ENTER = [
 /** Menus, pickers and dialogs: Enter there is theirs, as is everything inside them. */
 const OVERLAY = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"], [role="menu"], [role="listbox"], [role="tree"], [role="grid"]';
 
-/** The chat's message box on screen: the focused split's, else the first one in the main area. */
+const FOCUSED_SPLIT = '[data-focus-region="main"] [data-panel-group-id][data-group-focused="true"]';
+
+/** The message box of one chat tab, by its panel id. */
+function composerOf(panelId: string): HTMLElement | null {
+  return queryShown(`[data-focus-region="main"] [data-chat-composer="${CSS.escape(panelId)}"]`)[0] ?? null;
+}
+
+/**
+ * The chat's message box on screen: the focused split's. Another split's chat
+ * is never chosen while a split has focus; only a view without splits falls
+ * back to the first chat in the main area.
+ */
 function chatComposerOnScreen(): HTMLElement | null {
-  return queryShown(`[data-focus-region="main"] [data-panel-group-id][data-group-focused="true"] ${CHAT_COMPOSER}`)[0]
-    ?? queryShown(`[data-focus-region="main"] ${CHAT_COMPOSER}`)[0]
-    ?? null;
+  if (queryShown(FOCUSED_SPLIT).length > 0) return queryShown(`${FOCUSED_SPLIT} ${CHAT_COMPOSER}`)[0] ?? null;
+  return queryShown(`[data-focus-region="main"] ${CHAT_COMPOSER}`)[0] ?? null;
+}
+
+/**
+ * Whether the focused split's selected tab is a chat: its panel id when it is,
+ * null when it is something else, undefined when the tabs are not shown yet.
+ */
+function chatShownInFocusedSplit(): string | null | undefined {
+  const tab = queryShown(`${FOCUSED_SPLIT} [role="tab"][aria-selected="true"][data-panel-id]`)[0];
+  if (!tab) return undefined;
+  return tab.getAttribute('data-panel-type') === 'chat' ? tab.getAttribute('data-panel-id') : null;
 }
 
 /**
@@ -500,39 +521,47 @@ const CHAT_WAIT_MS = 3000;
 let cancelChatWait: (() => void) | null = null;
 
 /**
- * After Enter opens something (a Pane from the sidebar, a tab), focus goes
+ * After Enter opens something (a Pane from the sidebar, a chat tab), focus goes
  * into its chat's message box as soon as the chat shows, and stays there
  * while the view settles: a Pane that opens hands focus to a scroll surface
- * (its commit history) when its main tab has none of its own. The wait ends
- * on a click, a key, or focus moving to a control, terminal or the sidebar.
+ * (its commit history) when its main tab has none of its own. Given a panel
+ * id, only that chat's box is taken, never another split's. The wait ends on
+ * a click, a key, or focus moving to a control, terminal or the sidebar.
  */
-export function focusChatSoon(): void {
+export function focusChatSoon(panelId?: string): void {
   cancelChatWait?.();
   const landed = document.activeElement;
   // Focus on no control (the page, a region, a scroll surface) is still free to move.
   const isFree = (element: Element | null) => !element || element === document.body || element === landed
     || (regionOf(element) !== 'sidebar' && !element.closest(OWNS_ENTER) && !element.closest(OVERLAY));
+  const target = () => (panelId ? composerOf(panelId) : chatComposerOnScreen());
   let box: HTMLElement | null = null;
+  let frame = 0;
   const attempt = () => {
+    frame = 0;
     const active = document.activeElement;
     if (box?.isConnected && active === box) return;
     if (!isFree(active)) { cancel(); return; }
-    box = chatComposerOnScreen();
+    box = target();
     box?.focus({ preventScroll: true });
   };
-  const onFocusIn = () => requestAnimationFrame(attempt);
-  const observer = new MutationObserver(attempt);
+  // DOM changes and focus moves are read once per frame, not on every mutation.
+  const soon = () => { if (!frame) frame = requestAnimationFrame(attempt); };
+  const observer = new MutationObserver(soon);
   const cancel = () => {
     observer.disconnect();
-    window.removeEventListener('focusin', onFocusIn, true);
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+    window.removeEventListener('focusin', soon, true);
     window.removeEventListener('mousedown', cancel, true);
     window.removeEventListener('keydown', cancel, true);
     clearTimeout(timer);
     if (cancelChatWait === cancel) cancelChatWait = null;
   };
   const timer = setTimeout(cancel, CHAT_WAIT_MS);
+  // The body, not the main area: the Pane being opened may not have mounted its main area yet.
   observer.observe(document.body, { childList: true, subtree: true });
-  window.addEventListener('focusin', onFocusIn, true);
+  window.addEventListener('focusin', soon, true);
   window.addEventListener('mousedown', cancel, true);
   window.addEventListener('keydown', cancel, true);
   cancelChatWait = cancel;
