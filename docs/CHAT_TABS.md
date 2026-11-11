@@ -8,9 +8,10 @@ back into a terminal. A terminal Claude or Codex tab can move the other way
 with **Switch to chat** (below). "Claude in Terminal" and "Codex in Terminal"
 in the + menu open terminal agent tabs, as before.
 
-Chat tabs are experimental. Turn them on in **Settings → Advanced → Chat tabs**.
-While they are off, the + menu has no chat entries and new Sessions open their
-orchestrator in a terminal. Open chat tabs keep working.
+A fresh install starts with chat tabs on. An existing install keeps the setting
+it had, so one that never turned them on stays off until you switch
+**Settings → Advanced → Chat tabs**. While they are off, the + menu has no chat
+entries and new Sessions open their orchestrator in a terminal. Open chat tabs keep working.
 
 ## Opening one
 

@@ -100,7 +100,8 @@ export class ConfigManager extends EventEmitter {
       defaultPermissionMode: 'ignore',
       defaultModel: 'sonnet',
       defaultOrchestratorAgent: DEFAULT_PANE_CHAT_AGENT,
-      chatTabsEnabled: false,
+      // A fresh install opens agents as chat tabs (D-329).
+      chatTabsEnabled: true,
       autopilotEnabled: false,
       notesEnabled: false,
       autoStartOnBoot: true,
@@ -244,6 +245,8 @@ export class ConfigManager extends EventEmitter {
         defaultOrchestratorAgent: normalizePaneChatAgent(
           loadedConfig.defaultOrchestratorAgent ?? this.config.defaultOrchestratorAgent,
         ),
+        // A config saved without the key had chat tabs off; only a fresh install starts with them on (D-329).
+        chatTabsEnabled: loadedConfig.chatTabsEnabled ?? false,
         // Configs saved before the VS Code keymap (D-236) get a one-time notice of the moved keys.
         keymapNotice: loadedConfig.keymapNotice ?? 'pending',
         // Configs saved before this setting existed kept the machine awake while plugged in.
