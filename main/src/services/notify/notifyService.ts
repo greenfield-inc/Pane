@@ -255,6 +255,7 @@ export class NotifyService {
         links: links.length ? links : undefined,
         context: card.context,
         choices: card.choices,
+        questions: card.questions,
       });
     }
   }

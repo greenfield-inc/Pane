@@ -1,6 +1,6 @@
 import path from 'path';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import { NOTIFY_LINKS_MAX, type NotifyChoice, type NotifyLink } from '../../../../shared/types/notify';
+import { NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQuestion } from '../../../../shared/types/notify';
 
 /** The longest context a card carries; cards clamp it to a few lines with Show more. */
 const MAX_CONTEXT = 2_000;
@@ -28,6 +28,8 @@ type NeedsYou = NonNullable<ReturnType<typeof needsYouSchema.decode>>;
 export interface StatusCard {
   context?: string;
   choices?: NotifyChoice[];
+  /** Several questions, each with its own buttons, when every one has options to press. */
+  questions?: NotifySubQuestion[];
   links?: NotifyLink[];
 }
 
@@ -127,6 +129,12 @@ function linkOf(file: string): NotifyLink | undefined {
   return { label: label.slice(0, 80), path: target };
 }
 
+function listed(questions: NonNullable<NeedsYou['questions']>): string {
+  const list = questions.map((question, index) => `${index + 1}. ${question.q?.trim() ?? ''}${question.options?.length ? ` (${question.options.join(' / ')})` : ''}`.trimEnd());
+  const whys = questions.map(question => question.why?.trim()).filter((why): why is string => Boolean(why));
+  return [...list, ...whys].join('\n');
+}
+
 function cardOf(needsYou: NeedsYou, title: string): StatusCard {
   const questions = (needsYou.questions ?? []).filter(question => question.q?.trim() || question.options?.length);
   const parts: string[] = [];
@@ -138,11 +146,21 @@ function cardOf(needsYou: NeedsYou, title: string): StatusCard {
     if (question.why?.trim()) parts.push(question.why.trim());
     const choices = question.options ? choicesOf(question.options) : undefined;
     if (choices) card.choices = choices;
+  } else if (questions.length > 1 && questions.length <= NOTIFY_QUESTIONS_MAX && questions.every(question => question.q?.trim() && question.options?.length)) {
+    // Each question gets its own buttons; the needs_you `why` below is the card's subtitle.
+    const subQuestions = questions.map(question => {
+      const choices = choicesOf(question.options ?? []);
+      if (!choices) return undefined;
+      const why = question.why?.trim();
+      const sub: NotifySubQuestion = { title: question.q?.trim() ?? '', choices };
+      if (why) sub.why = why;
+      return sub;
+    });
+    if (subQuestions.every((sub): sub is NotifySubQuestion => sub !== undefined)) card.questions = subQuestions;
+    else parts.push(listed(questions));
   } else if (questions.length > 1) {
-    // One set of buttons can't answer several questions: they are listed, and answered in words.
-    const list = questions.map((question, index) => `${index + 1}. ${question.q?.trim() ?? ''}${question.options?.length ? ` (${question.options.join(' / ')})` : ''}`.trimEnd());
-    const whys = questions.map(question => question.why?.trim()).filter((why): why is string => Boolean(why));
-    parts.push([...list, ...whys].join('\n'));
+    // Some question has nothing to press: they are listed, and answered in words.
+    parts.push(listed(questions));
   } else if (needsYou.title?.trim() && !sameText(needsYou.title.trim(), title)) {
     parts.push(needsYou.title.trim());
   }
@@ -171,7 +189,7 @@ export function statusCard(text: string, title: string): StatusCard | undefined 
   const needsYou = needsYouOf(json, body);
   if (needsYou) {
     const card = cardOf(needsYou, title);
-    if (card.context || card.choices || card.links) return card;
+    if (card.context || card.choices || card.questions || card.links) return card;
   }
   const line = plainLine(json, body);
   return line ? { context: cut(line) } : {};

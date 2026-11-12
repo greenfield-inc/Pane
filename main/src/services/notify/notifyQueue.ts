@@ -5,6 +5,7 @@ import type {
   NotifyAgentAction,
   NotifyAnswer,
   NotifyChoice,
+  NotifySubQuestion,
   NotifyClosed,
   NotifyConnected,
   NotifyInstructionsFile,
@@ -138,6 +139,8 @@ export interface WorkerQuestion {
   context?: string;
   /** The options its status file's question offers: the card asks with them instead of a text box. */
   choices?: NotifyChoice[];
+  /** Several questions from its status file, each with its own buttons, instead of `choices`. */
+  questions?: NotifySubQuestion[];
 }
 
 export interface NotifyQueueEnvironment {
@@ -472,7 +475,7 @@ export class NotifyQueue extends EventEmitter {
     if (this.entries.has(question.id) || this.isRewrittenFrom(question.id) || this.env.store?.readItem(question.id)) return;
     const item: NotifyItem = {
       id: question.id,
-      ui: question.choices?.length ? 'options' : 'ask',
+      ui: question.choices?.length || question.questions?.length ? 'options' : 'ask',
       title: question.question,
       source: this.withSession(question.source),
       state: 'waiting',
@@ -483,7 +486,8 @@ export class NotifyQueue extends EventEmitter {
     if (Date.now() - question.at < relayAfterMs()) item.quiet = true;
     if (question.links?.length) item.links = question.links;
     if (question.context) item.context = question.context;
-    if (question.choices?.length) item.choices = question.choices;
+    if (question.questions?.length) item.questions = question.questions;
+    else if (question.choices?.length) item.choices = question.choices;
     item.connected = question.connected ?? connectedOf(item, this.machine());
     const entry: Entry = { item, resumeLoop: false };
     this.entries.set(item.id, entry);

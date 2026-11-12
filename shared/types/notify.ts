@@ -38,6 +38,8 @@ export interface NotifyChoice {
 export interface NotifySubQuestion {
   title: string;
   choices: NotifyChoice[];
+  /** Why this question matters, shown under it. Older machines ignore it. */
+  why?: string;
 }
 
 /** An options approval asks 2 to this many questions at once; each takes one pick. */

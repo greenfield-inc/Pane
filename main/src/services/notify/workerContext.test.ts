@@ -49,9 +49,20 @@ describe("a card built from a worker's status JSON", () => {
     });
   });
 
-  it('asks several questions in its context, with no choices, since one set of buttons cannot answer them all', () => {
-    const card = statusCard(JSON.stringify({ needs_you: { questions: [{ q: 'Id or number?', options: ['Id', 'Number'] }, { q: 'Keep old PDFs?', why: 'They are linked from emails.', options: ['Yes', 'No'] }] } }), 'Two invoice questions');
-    expect(card).toEqual({ context: '1. Id or number? (Id / Number)\n2. Keep old PDFs? (Yes / No)\nThey are linked from emails.' });
+  it('gives each of several questions its own buttons, with the top-level why as the subtitle', () => {
+    const card = statusCard(JSON.stringify({ needs_you: { why: 'Invoices ship Friday.', questions: [{ q: 'Id or number?', options: ['Id (recommended)', 'Number'] }, { q: 'Keep old PDFs?', why: 'They are linked from emails.', options: ['Yes', 'No'] }] } }), 'Two invoice questions');
+    expect(card).toEqual({
+      context: 'Invoices ship Friday.',
+      questions: [
+        { title: 'Id or number?', choices: [{ label: 'Id', recommended: true }, { label: 'Number' }] },
+        { title: 'Keep old PDFs?', why: 'They are linked from emails.', choices: [{ label: 'Yes' }, { label: 'No' }] },
+      ],
+    });
+  });
+
+  it('lists several questions in words when one of them has no options to press', () => {
+    const card = statusCard(JSON.stringify({ needs_you: { questions: [{ q: 'Id or number?', options: ['Id', 'Number'] }, { q: 'Anything else?' }] } }), 'Two invoice questions');
+    expect(card).toEqual({ context: '1. Id or number? (Id / Number)\n2. Anything else?' });
   });
 
   it('shows one plain line for JSON it does not recognize, even cut short, and never the raw text', () => {
