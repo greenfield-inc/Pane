@@ -54,12 +54,12 @@ describe("an approval's Summary page", () => {
 
   it("takes a worker's .html --summary-file as its page, and any other file as its status file", () => {
     expect(summaryFiles('/w/Q-80-summary.html', undefined)).toEqual({ summaryPage: '/w/Q-80-summary.html' });
-    expect(summaryFiles('/w/status.json', 'pages/summary.html')).toEqual({ statusFile: '/w/status.json', summaryPage: '/w/pages/summary.html' });
+    expect(summaryFiles('/w/status.json', 'pages/summary.html')).toEqual({ statusFile: '/w/status.json', summaryPage: path.resolve('/w/pages/summary.html') });
     // Written from the worker's folder (the worktree), with the status file in tmp/: found one folder up.
     fs.mkdirSync(path.join(dir, 'tmp'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'tmp', 'summary.html'), '<p>Q-80</p>');
     expect(summaryFiles(path.join(dir, 'tmp', 'status.json'), 'tmp/summary.html').summaryPage).toBe(path.join(dir, 'tmp', 'summary.html'));
-    expect(summaryFiles('/w/tmp/status.json', 'tmp/missing.html').summaryPage).toBe('/w/tmp/missing.html');
+    expect(summaryFiles('/w/tmp/status.json', 'tmp/missing.html').summaryPage).toBe(path.resolve('/w/tmp/missing.html'));
     expect(summaryFiles(undefined, undefined)).toEqual({});
   });
 });
