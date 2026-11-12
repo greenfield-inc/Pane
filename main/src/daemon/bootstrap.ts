@@ -146,6 +146,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   const configManager = new ConfigManager();
   await configManager.initialize();
+  // Outside edits to config.json (by hand, a script, an agent) reload at once.
+  configManager.startWatching();
   installPaneRuntime(rendererEventSink, configManager, options.getPtyHostRuntime, getWebviewContextMap);
 
   const logger = new Logger(configManager);
