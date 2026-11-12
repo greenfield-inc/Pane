@@ -46,6 +46,7 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 | `secrets` | `secrets_list`, `secrets_delete`. No tool sets or reads a value: agents use secrets through `runpane secrets exec` ([Pane secrets](PANE_SECRETS.md)) |
 | `docs`, `links`, `admin` | documentation, deep-link, and diagnostic tools |
 | `all` / `read` | every tool / every read-only tool |
+| `chatgpt` | the Chat agents panel for ChatGPT desktop: `agents_panel` plus two tools only the panel calls. See [ChatGPT desktop plugin](CHATGPT_PLUGIN.md). |
 
 Choose with `runpane mcp --toolsets core,git` (comma-separated). `--read-only` keeps only read-only tools from whatever is selected. The Pane app registers `core` by default; **Settings → AI & Agents → Pane tools to register** switches it to `all`. Each command's toolsets live in the contract's `toolsets` field.
 

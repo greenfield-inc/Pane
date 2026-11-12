@@ -128,3 +128,6 @@ docs/posts/
 
 # Generated from the Excalidraw dependency for offline drawing support
 frontend/public/excalidraw-assets/
+
+# ChatGPT plugin server, built by `pnpm build:chatgpt-plugin`
+plugins/pane/server/
