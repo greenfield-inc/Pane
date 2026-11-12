@@ -167,14 +167,39 @@ jobs:
           './**/*.md'
         fail: true
 
-  # Runs beside quality-checks so the smoke path does not wait on unit tests.
-  # The minimal and renderer suites load the renderer from Vite with a mocked
-  # Electron API. The chat tab journeys launch main/dist in real Electron, so
-  # better-sqlite3 is still rebuilt for Electron, in the background.
+  # The smoke suites run beside quality-checks in three jobs. The two browser
+  # shards split the minimal suite, which loads the renderer from Vite with a
+  # mocked Electron API. The Electron job runs the renderer selection races
+  # (also Vite) while better-sqlite3 rebuilds for Electron, then the journeys
+  # that launch main/dist in real Electron.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
-  functional-smoke:
-    name: Functional Smoke
+  functional-smoke-browser:
+    name: Functional Smoke (browser ${{ matrix.shard }}/2)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    - name: Install Playwright browser dependencies
+      run: pnpm exec playwright install --with-deps chromium
+
+    - name: Run maintained functional smoke tests
+      run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/2
+
+  functional-smoke-electron:
+    name: Functional Smoke (Electron)
     runs-on: ubuntu-24.04
 
     steps:
@@ -215,16 +240,13 @@ jobs:
     - name: Finish Playwright browser dependencies install
       run: scripts/ci-background.sh wait playwright
 
+    # Needs no native module, so the rebuild finishes behind it; only the
+    # Electron launches below wait for it.
     - name: Verify renderer selection races
       run: pnpm test:renderer-selection
       env:
         PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
 
-    - name: Run maintained functional smoke tests
-      run: pnpm test:ci:minimal
-
-    # The two suites above need no native module, so the rebuild finishes
-    # behind them; only the Electron launches below wait for it.
     - name: Finish native module rebuild for Electron
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait electron-rebuild
@@ -328,15 +350,21 @@ jobs:
 
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.
+  # Windows runs the suite in two vitest shards, each about half of it. macOS
+  # runs it whole: the org has 5 macOS runners, and a second macOS job waited
+  # longer for one than the shard saved.
   cross-os-main-tests:
-    name: Main Process Tests (${{ matrix.os }})
+    name: Main Process Tests (${{ matrix.os }}${{ matrix.shards > 1 && format(', {0}/{1}', matrix.shard, matrix.shards) || '' }})
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.main == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-2022]
+        include:
+          - { os: macos-latest, shard: 1, shards: 1 }
+          - { os: windows-2022, shard: 1, shards: 2 }
+          - { os: windows-2022, shard: 2, shards: 2 }
 
     steps:
     # The default Windows TEMP is on the runner's slow C: drive; the database
@@ -367,6 +395,7 @@ jobs:
       run: pnpm install --ignore-scripts
 
     - name: Start main process type checking
+      if: matrix.shard == 1
       shell: bash
       run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
 
@@ -379,10 +408,10 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
     - name: Finish main process type checking
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && matrix.shard == 1 }}
       shell: bash
       run: scripts/ci-background.sh wait typecheck
 
@@ -390,7 +419,7 @@ jobs:
   # cancelled ones fail it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, typecheck-lint, functional-smoke, runpane-wrapper-tests, cross-os-main-tests]
+    needs: [changes, quality-checks, typecheck-lint, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
