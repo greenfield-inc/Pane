@@ -195,7 +195,8 @@
       ],
       "toolsets": [
         "core",
-        "admin"
+        "admin",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "doctorResult"
@@ -267,7 +268,8 @@
       ],
       "toolsets": [
         "core",
-        "repos"
+        "repos",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "repoListResult"
@@ -285,7 +287,8 @@
       "idempotent": true,
       "toolsets": [
         "core",
-        "repos"
+        "repos",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "repoAddRequest",
@@ -417,7 +420,8 @@
       ],
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "paneListResult"
@@ -447,7 +451,8 @@
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "workspaceStateResult"
@@ -632,7 +637,8 @@
       "mutates": true,
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "paneArchiveRequest",
@@ -851,7 +857,8 @@
       "mutates": true,
       "toolsets": [
         "core",
-        "panels"
+        "panels",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "panelInputRequest",
@@ -989,7 +996,8 @@
       },
       "toolsets": [
         "core",
-        "git"
+        "git",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "daemonActionResult"
@@ -1103,7 +1111,8 @@
       },
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "daemonActionResult"
@@ -1339,7 +1348,8 @@
       ],
       "toolsets": [
         "core",
-        "links"
+        "links",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "linkCreateResult"
@@ -1380,7 +1390,8 @@
       ],
       "toolsets": [
         "core",
-        "docs"
+        "docs",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "docsSearchResult"
@@ -1398,7 +1409,8 @@
       ],
       "toolsets": [
         "core",
-        "docs"
+        "docs",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "docsReadResult"
@@ -1418,7 +1430,8 @@
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "agentTaskResult"
@@ -1436,7 +1449,8 @@
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "agentStatusResult"
@@ -1455,7 +1469,8 @@
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "agentSendResult"

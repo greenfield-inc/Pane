@@ -197,7 +197,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "admin"
+        "admin",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "doctorResult"
@@ -269,7 +270,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "repos"
+        "repos",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "repoListResult"
@@ -287,7 +289,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "repos"
+        "repos",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "repoAddRequest",
@@ -419,7 +422,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "paneListResult"
@@ -449,7 +453,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "workspaceStateResult"
@@ -634,7 +639,8 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "paneArchiveRequest",
@@ -853,7 +859,8 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "toolsets": [
         "core",
-        "panels"
+        "panels",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "panelInputRequest",
@@ -991,7 +998,8 @@ export const RUNPANE_CONTRACT = {
       },
       "toolsets": [
         "core",
-        "git"
+        "git",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "daemonActionResult"
@@ -1105,7 +1113,8 @@ export const RUNPANE_CONTRACT = {
       },
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "daemonActionResult"
@@ -1341,7 +1350,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "links"
+        "links",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "linkCreateResult"
@@ -1382,7 +1392,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "docs"
+        "docs",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "docsSearchResult"
@@ -1400,7 +1411,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "docs"
+        "docs",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "docsReadResult"
@@ -1420,7 +1432,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "agentTaskResult"
@@ -1438,7 +1451,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "agentStatusResult"
@@ -1457,7 +1471,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "agentSendResult"
