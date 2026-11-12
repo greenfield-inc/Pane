@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions, type WebContents } from 'electron';
+import type { ContextMenuEntry } from '../../../shared/types/contextMenu';
 
 export const APP_MENU_ACTION_CHANNEL = 'app:menu-action';
 export type AppMenuAction = 'open-about' | 'open-settings';
@@ -114,11 +115,15 @@ export function installApplicationMenu(options: {
 }
 
 const MAX_LOOK_UP_LABEL = 24;
+// The close callback is not ordered against the chosen item's click on every
+// platform, so a dismissal is only reported after the click has had its turn.
+const CONTEXT_MENU_DISMISS_GRACE_MS = 100;
 
 /**
  * Right-click on editable fields and selected text opens the native edit menu.
- * Pane's own menus (sidebar rows, file tree) call preventDefault on the DOM
- * event, so Chromium never raises this event for them.
+ * Pane's own menus (sidebar rows, file tree, terminals through
+ * showContextMenu) call preventDefault on the DOM event, so Chromium never
+ * raises this event for them.
  */
 export function attachEditContextMenu(contents: WebContents): void {
   contents.on('context-menu', (_event, params) => {
@@ -160,5 +165,34 @@ export function attachEditContextMenu(contents: WebContents): void {
     // A webview's menu opens over the window that hosts it.
     const window = BrowserWindow.fromWebContents(contents.hostWebContents ?? contents) ?? undefined;
     Menu.buildFromTemplate(items).popup({ window });
+  });
+}
+
+/**
+ * Shows a renderer-described menu (the terminal's right-click menu) and
+ * resolves with the chosen item's id, or null when it is dismissed. The
+ * renderer must have prevented the DOM contextmenu event, or Chromium raises
+ * attachEditContextMenu's menu as well.
+ */
+export function showContextMenu(contents: WebContents, entries: ContextMenuEntry[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    const template = entries.map((entry): MenuItemConstructorOptions => {
+      if (entry.type === 'separator') return { type: 'separator' };
+      return {
+        label: entry.label,
+        enabled: entry.enabled,
+        accelerator: entry.accelerator,
+        registerAccelerator: false,
+        click: () => {
+          if (entry.type === 'paste') contents.paste();
+          resolve(entry.id);
+        },
+      };
+    });
+    const window = BrowserWindow.fromWebContents(contents) ?? undefined;
+    Menu.buildFromTemplate(template).popup({
+      window,
+      callback: () => setTimeout(() => resolve(null), CONTEXT_MENU_DISMISS_GRACE_MS),
+    });
   });
 }

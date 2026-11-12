@@ -1,12 +1,23 @@
-import React, { lazy, Suspense, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import type { Terminal } from '@xterm/xterm';
 import { Copy, ExternalLink, FolderOpen, Globe, FileText, X } from 'lucide-react';
 import { TerminalPopover, PopoverButton } from './TerminalPopover';
 import { InterceptorToast } from './InterceptorToast';
 import NotesDialog from '../panels/notes/NotesDialog';
-import { resolveTerminalPath } from './resolveTerminalPath';
+import type { TerminalFilePath } from './resolveTerminalPath';
+import {
+  findSelectionTargets,
+  terminalContextMenuChoiceSchema,
+  terminalContextMenuEntries,
+  type SelectionTargets,
+  type TerminalContextMenuAction,
+} from './terminalSelectionActions';
 import { copyTerminalText } from '../../utils/terminalClipboard';
+import { isMac } from '../../utils/platformUtils';
 import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
+import { useCommittedRef } from '../../hooks/useCommittedRef';
+import { decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 
 const NotesPanel = lazy(() => import('../panels/notes/NotesPanel'));
 
@@ -15,6 +26,8 @@ export interface SelectionPopoverProps {
   x: number;
   y: number;
   text: string;
+  /** Right-clicking this terminal shows the same actions in a native menu. */
+  terminal?: Terminal | null;
   workingDirectory?: string;
   panelTitle?: string;
   homeDirectory?: string;
@@ -24,25 +37,19 @@ export interface SelectionPopoverProps {
   onClose: () => void;
 }
 
-const URL_PATTERN = /https?:\/\/[^\s<>"{}|\\^`[\]]+/;
+const NO_TARGETS: SelectionTargets = { url: null, file: null };
 
-// File path patterns - detect Unix paths, Windows paths, and relative paths with extensions
-const FILE_PATH_PATTERNS = [
-  /^[.~]?\/[\w\-./]+/, // Unix absolute or relative paths starting with / ./ ~/
-  /^[A-Za-z]:[\\/][\w\-.\\/]+/, // Windows absolute paths C:\ or C:/
-  /^[\w\-./\\]+\.[a-z]{1,10}(:\d+)?$/i, // Relative paths with extension like foo.ts, foo.ts:42, or dir\foo.ts
-];
-
-function isFilePath(text: string): boolean {
-  const trimmed = text.trim();
-  return FILE_PATH_PATTERNS.some(pattern => pattern.test(trimmed));
-}
-
+/**
+ * What Pane offers for selected terminal text, in two places: the popover
+ * that follows a selection, and the native right-click menu, which adds Copy,
+ * Paste and Select All.
+ */
 export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   visible,
   x,
   y,
   text,
+  terminal,
   workingDirectory,
   panelTitle,
   homeDirectory,
@@ -57,69 +64,137 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   const [errorToast, setErrorToast] = useState<string | null>(null);
 
   // Skip computation when not visible
-  const trimmedText = visible ? text.trim() : '';
-  const urlMatch = visible ? trimmedText.match(URL_PATTERN) : null;
-  const isUrl = urlMatch !== null;
-  const isFile = visible && !isUrl && isFilePath(trimmedText);
+  const { url, file: filePath } = visible ? findSelectionTargets(text, workingDirectory ?? '', homeDirectory) : NO_TARGETS;
+  const isUrl = url !== null;
+  const isFile = filePath !== null;
 
-  const filePath = isFile ? resolveTerminalPath(trimmedText, workingDirectory ?? '', homeDirectory) : null;
-
-  const handleCopy = async () => {
+  const copy = async (value: string): Promise<boolean> => {
     try {
-      await copyTerminalText(text);
-      onClose();
+      await copyTerminalText(value);
+      return true;
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
       setErrorToast('Failed to copy terminal text');
+      return false;
     }
   };
 
+  const openInBrowser = async (target: string) => {
+    try {
+      await onOpenInBrowser(target);
+    } catch (error) {
+      console.error('Failed to open URL in browser panel:', error);
+    }
+  };
+
+  const showInExplorer = async (target: TerminalFilePath) => {
+    if (isRemoteMode) {
+      console.warn('Show in Explorer is only available in local mode.');
+      return;
+    }
+    if (!target.absolutePath) return;
+    try {
+      const result: { success: boolean; error?: string } = await window.electronAPI.invoke(
+        'app:showItemInFolder',
+        target.absolutePath,
+        sessionId
+      );
+      if (!result?.success) {
+        setErrorToast(result?.error || 'Failed to show in file manager');
+      }
+    } catch (error) {
+      console.error('Failed to show in explorer:', error);
+      setErrorToast('Failed to show in file manager');
+    }
+  };
+
+  const addToNotes = (value: string) => {
+    setCapture({ text: value, source: [panelTitle, workingDirectory, sessionId].filter(Boolean).join(' · '), at: new Date().toISOString() });
+  };
+
+  const handleCopy = async () => {
+    if (await copy(text)) onClose();
+  };
+
   const handleOpenUrl = () => {
-    if (urlMatch) {
-      // Extract just the URL, not surrounding text like "error: https://..."
-      window.electronAPI.openExternal(urlMatch[0]);
+    if (url) {
+      window.electronAPI.openExternal(url);
       onClose();
     }
   };
 
   const handleOpenInBrowser = async () => {
-    if (urlMatch && sessionId) {
-      try {
-        await onOpenInBrowser(urlMatch[0]);
-      } catch (error) {
-        console.error('Failed to open URL in browser panel:', error);
-      } finally {
-        onClose();
-      }
+    if (url && sessionId) {
+      await openInBrowser(url);
+      onClose();
     }
   };
 
   const handleShowInExplorer = async () => {
-    if (isFile) {
-      if (isRemoteMode) {
-        console.warn('Show in Explorer is only available in local mode.');
-        onClose();
-        return;
-      }
+    if (!filePath || (!isRemoteMode && !filePath.absolutePath)) return;
+    await showInExplorer(filePath);
+    onClose();
+  };
 
-      const resolvedPath = filePath?.absolutePath;
-      if (!resolvedPath) return;
-      try {
-        const result: { success: boolean; error?: string } = await window.electronAPI.invoke(
-          'app:showItemInFolder',
-          resolvedPath,
-          sessionId
-        );
-        if (!result?.success) {
-          setErrorToast(result?.error || 'Failed to show in file manager');
-        }
-      } catch (error) {
-        console.error('Failed to show in explorer:', error);
-        setErrorToast('Failed to show in file manager');
-      }
-      onClose();
+  const runMenuAction = async (action: TerminalContextMenuAction, selection: string, targets: SelectionTargets) => {
+    switch (action) {
+      case 'copy':
+        await copy(selection);
+        return;
+      case 'paste':
+        // Main performed the paste natively, into the terminal it focused.
+        return;
+      case 'select-all':
+        terminal?.selectAll();
+        return;
+      case 'add-to-notes':
+        addToNotes(selection);
+        return;
+      case 'open-in-browser':
+        if (targets.url) await openInBrowser(targets.url);
+        return;
+      case 'open-url':
+        if (targets.url) window.electronAPI.openExternal(targets.url);
+        return;
+      case 'show-in-explorer':
+        if (targets.file) await showInExplorer(targets.file);
+        return;
     }
   };
+
+  const menuContextRef = useCommittedRef({ workingDirectory, homeDirectory, sessionId, isRemoteMode, notesEnabled, onClose, runMenuAction });
+  useEffect(() => {
+    const element = terminal?.element;
+    if (!terminal || !element) return;
+    // xterm's own contextmenu handler, on a child, has run by now and may
+    // have selected the word under the pointer (macOS); preventing the event
+    // keeps Chromium from raising the generic edit menu as well.
+    const showMenu = (event: MouseEvent) => {
+      event.preventDefault();
+      const context = menuContextRef.current;
+      context.onClose();
+      const selection = terminal.hasSelection() ? terminal.getSelection() : '';
+      const targets = findSelectionTargets(selection, context.workingDirectory ?? '', context.homeDirectory);
+      const entries = terminalContextMenuEntries({
+        selection,
+        targets,
+        hasSession: Boolean(context.sessionId),
+        notesEnabled: context.notesEnabled,
+        isRemoteMode: context.isRemoteMode,
+        isMac: isMac(),
+      });
+      // Paste lands in the focused element, so the terminal must hold focus.
+      terminal.focus();
+      void window.electronAPI.invoke('app:show-context-menu', entries)
+        .then((choice) => {
+          const action = decodeBoundary(choice, terminalContextMenuChoiceSchema);
+          return action ? menuContextRef.current.runMenuAction(action, selection, targets) : undefined;
+        })
+        .catch((error) => console.error('Failed to show the terminal context menu:', error));
+    };
+    element.addEventListener('contextmenu', showMenu);
+    return () => element.removeEventListener('contextmenu', showMenu);
+  }, [terminal, menuContextRef]);
 
   return (
     <>
@@ -131,7 +206,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         </span>
       </PopoverButton>
       {notesEnabled && sessionId && <PopoverButton onClick={() => {
-        setCapture({ text, source: [panelTitle, workingDirectory, sessionId].filter(Boolean).join(' · '), at: new Date().toISOString() });
+        addToNotes(text);
         onClose();
       }}><span className="flex items-center gap-2"><FileText className="h-4 w-4" />Add to notes</span></PopoverButton>}
       {isUrl && sessionId && (

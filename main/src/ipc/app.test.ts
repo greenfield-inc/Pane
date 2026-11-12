@@ -1,4 +1,4 @@
-import type { IpcMain } from 'electron';
+import { Menu, type IpcMain } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
@@ -79,5 +79,33 @@ describe('window background color IPC', () => {
     expect(handlers.get('window:set-background-color')?.({}, {
       theme: 'forge', color: '#112233',
     })).toEqual({ success: false, error: 'background apply failed' });
+  });
+});
+
+describe('context menu IPC', () => {
+  function registerContextMenuHandler() {
+    const handlers = new Map<string, (event: { sender: object }, entries: PaneCommandValue) => Promise<string | null>>();
+    const ipcMain = { handle: (channel: string, handler: (event: { sender: object }, entries: PaneCommandValue) => Promise<string | null>) => handlers.set(channel, handler) };
+    // SAFETY: The context menu handler reads no AppServices member.
+    registerAppHandlers(ipcMain as IpcMain, { app: {} } as AppServices);
+    return handlers.get('app:show-context-menu');
+  }
+
+  it('refuses a malformed menu before showing anything', () => {
+    const buildFromTemplate = vi.mocked(Menu.buildFromTemplate);
+    buildFromTemplate.mockClear();
+
+    expect(() => registerContextMenuHandler()?.({ sender: {} }, [{ type: 'item', id: 'copy' }])).toThrow();
+    expect(buildFromTemplate).not.toHaveBeenCalled();
+  });
+
+  it('shows a valid menu for the sending window', () => {
+    const popup = vi.fn();
+    // SAFETY: The handler reads only popup from the built menu.
+    vi.mocked(Menu.buildFromTemplate).mockReturnValueOnce({ popup } as Electron.Menu);
+
+    void registerContextMenuHandler()?.({ sender: {} }, [{ type: 'item', id: 'copy', label: 'Copy', enabled: true }]);
+
+    expect(popup).toHaveBeenCalledOnce();
   });
 });

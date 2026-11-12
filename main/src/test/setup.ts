@@ -61,7 +61,7 @@ export const powerMonitor = Object.assign(new EventEmitter(), {
   isOnBatteryPower: vi.fn(() => false),
 });
 
-export const BrowserWindow = Object.assign(vi.fn(), { getAllWindows: vi.fn(() => []) });
+export const BrowserWindow = Object.assign(vi.fn(), { getAllWindows: vi.fn(() => []), fromWebContents: vi.fn(() => null) });
 
 export const nativeTheme = {
   // SAFETY: Test stub models Electron's writable three-value themeSource property.
