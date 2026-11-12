@@ -399,8 +399,8 @@ open Pane on the other machine, or sign in to Tailscale. While you view a host
 connected with a pairing code rather than over Tailscale, the item is disabled,
 because Pane can't tell which machine that is. In All machines, the same item
 is in each Session's menu and moves the Session from its own machine, without
-switching to it; it is disabled, with the reason, while that machine is
-offline or was paired with a code. Choosing a machine
+switching to it; it is disabled, with the reason, while that machine isn't
+connected or was paired with a code. Choosing a machine
 sends the Session's agent a prompt to hand the Session off with
 [`runpane handoff`](RUNPANE_WORKSPACES.md#hand-a-task-to-another-machine) and
 the `handoff` skill.
