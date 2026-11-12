@@ -216,8 +216,9 @@ export function workerReportCard(summary: string | undefined, question: string):
  * old paragraph, and checked. Throws the check's refusal (a PaneError); `quietly` keeps a card that
  * fails as it was sent instead, for reports recorded before the check existed.
  */
-export function workerCard(summary: string | undefined, question: string, options: { quietly?: boolean } = {}): StatusCard & { title: string; asSent?: AdmittedCard['asSent']; warnings: string[] } {
-  const card = workerReportCard(summary, question);
+export function workerCard(summary: string | undefined, question: string, options: { quietly?: boolean; summaryPath?: string } = {}): StatusCard & { title: string; asSent?: AdmittedCard['asSent']; warnings: string[] } {
+  // An .html passed as --summary-file is the card's Summary page, never its subtitle.
+  const card = options.summaryPath && /\.html?$/iu.test(options.summaryPath) ? {} : workerReportCard(summary, question);
   const fields = { title: question, context: card.context, choices: card.choices, questions: card.questions, links: card.links };
   let admitted: AdmittedCard;
   try {
@@ -227,5 +228,7 @@ export function workerCard(summary: string | undefined, question: string, option
     return { ...card, title: question, warnings: [] };
   }
   const { title, context, choices, questions, links } = admitted.card;
-  return { title, context, choices, questions, links, summaryPage: card.summaryPage, asSent: admitted.asSent, warnings: admitted.warnings };
+  // A status file's options are plain labels, with no field for a consequence: that warning is no use to a worker.
+  const warnings = admitted.warnings.filter(warning => !warning.startsWith('Some options have no consequence'));
+  return { title, context, choices, questions, links, summaryPage: card.summaryPage, asSent: admitted.asSent, warnings };
 }

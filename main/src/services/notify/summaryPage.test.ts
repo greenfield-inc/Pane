@@ -49,12 +49,16 @@ describe("an approval's Summary page", () => {
   it("falls back to the template, saying so, when the asker's page is gone", () => {
     const page = summaryPage({ ...q80, summaryPage: path.join(dir, 'removed.html') });
     expect(page.kind).toBe('template');
-    expect(page.kind === 'template' && page.html).toContain('removed.html, is gone');
+    expect(page.kind === 'template' && page.html).toContain('wasn’t found at');
   });
 
   it("takes a worker's .html --summary-file as its page, and any other file as its status file", () => {
     expect(summaryFiles('/w/Q-80-summary.html', undefined)).toEqual({ summaryPage: '/w/Q-80-summary.html' });
     expect(summaryFiles('/w/status.json', 'pages/summary.html')).toEqual({ statusFile: '/w/status.json', summaryPage: '/w/pages/summary.html' });
+    // Written from the worker's folder (the worktree), with the status file in tmp/: found one folder up.
+    fs.mkdirSync(path.join(dir, 'tmp'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tmp', 'summary.html'), '<p>Q-80</p>');
+    expect(summaryFiles(path.join(dir, 'tmp', 'status.json'), 'tmp/summary.html').summaryPage).toBe(path.join(dir, 'tmp', 'summary.html'));
     expect(summaryFiles(undefined, undefined)).toEqual({});
   });
 });

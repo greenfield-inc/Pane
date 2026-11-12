@@ -118,3 +118,10 @@ describe("a worker's card as runpane report posts it", () => {
     expect(workerCard(status, 'x'.repeat(200), { quietly: true }).title).toBe('x'.repeat(200));
   });
 });
+
+describe("a worker's .html --summary-file", () => {
+  it('is its Summary page, never its subtitle', () => {
+    const card = workerCard('<!doctype html><html><body><h1>Q-80</h1></body></html>', 'Q-80: Sign in to gcloud?', { summaryPath: '/w/Q-80-summary.html' });
+    expect(card.context).toBeUndefined();
+  });
+});

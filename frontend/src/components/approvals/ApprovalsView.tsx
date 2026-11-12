@@ -107,7 +107,8 @@ function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; 
           {item.unreachable ? ` · ${item.machine ?? 'its machine'} can't be reached` : ''}
         </span>
       </span>
-      <span className="flex shrink-0 flex-col items-end gap-1">
+      {/* The chip may name a long reader: it gives way to the title, never the other way round. */}
+      <span className="flex min-w-0 max-w-[45%] shrink-0 flex-col items-end gap-1">
         <span className="text-[12px] tabular-nums text-text-tertiary">{relativeAge(item.resolvedAt ?? item.createdAt, now)}</span>
         {chip && chip.tone !== 'success' && <ApprovalChip chip={chip} testId="approvals-row-chip" />}
         {taken?.kind === 'taken' && <ApprovalChip chip={{ tone: 'success', text: 'Taken as your answer' }} testId="approvals-row-chip" />}

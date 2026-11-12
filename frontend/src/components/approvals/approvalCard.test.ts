@@ -77,6 +77,9 @@ describe('the approval card', () => {
     expect(latestReplied([reading, taken], 's1', new Set())?.id).toBe('c');
     expect(latestReplied([reading, taken], 's1', new Set(['r2']))?.id).toBe('b');
     expect(latestReplied([reading, taken], 'other', new Set())).toBeUndefined();
+    // --update clears the reply it answered: the line still says it came back ready again.
+    const ready = { ...q20, id: 'd', readyAgain: 30 };
+    expect(latestReplied([reading, taken, ready], 's1', new Set())?.id).toBe('d');
   });
 
   it('recommended picks start selected', () => {

@@ -7,7 +7,7 @@ import { runNotify, selectNotifyItems, useNotifyStore } from '../../stores/notif
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
-import { dockApprovals, latestReplied, questionsOf, referenceCount } from './approvalCard';
+import { dockApprovals, latestReplied, questionsOf, referenceCount, statusKey } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
 
 /**
@@ -114,7 +114,7 @@ function ReplyStatusLine({ sessionId }: { sessionId: string }) {
   if (!item || !status) return null;
   const Icon = status.kind === 'reading' ? Loader2 : status.kind === 'taken' || status.kind === 'sent' ? Check : status.kind === 'ready-again' ? Sparkles : CircleAlert;
   const fix = status.kind === 'taken' && !item.reply?.fixed ? { as: 'question' as const, label: 'It was a question' } : status.kind === 'asking' && !item.reply?.fixed ? { as: 'answer' as const, label: 'It was my answer' } : undefined;
-  const dismiss = () => setDismissed((current) => new Set([...current, item.reply?.id ?? item.id]));
+  const dismiss = () => setDismissed((current) => new Set([...current, statusKey(item)]));
   return (
     <div className={cn('flex items-center gap-2 rounded-xl px-3.5 py-2 text-[13.5px]', LINE_TONE[status.tone])} role="status" data-testid="session-approval-status" data-kind={status.kind} data-item-id={item.id}>
       <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden="true">
@@ -131,7 +131,7 @@ function ReplyStatusLine({ sessionId }: { sessionId: string }) {
           Reopen
         </button>
       )}
-      {(status.kind === 'taken' || status.kind === 'sent') && (
+      {(status.kind === 'taken' || status.kind === 'sent' || status.kind === 'ready-again') && (
         <button type="button" aria-label="Dismiss" onClick={dismiss} className="shrink-0 text-text-tertiary hover:text-text-primary"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
       )}
     </div>

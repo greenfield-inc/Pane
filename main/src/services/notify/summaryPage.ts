@@ -126,7 +126,7 @@ function askerPage(file: string): NotifySummaryPage {
   try {
     stat = fs.statSync(file);
   } catch {
-    return { kind: 'missing', path: file, message: `The Summary page ${path.basename(file)} is gone: there is no file at ${file} any more, so Pane can't show it. Its worktree may have been removed.` };
+    return { kind: 'missing', path: file, message: `The Summary page ${path.basename(file)} wasn't found at ${file}, so Pane can't show it. Its worktree may have been removed, or the path is wrong.` };
   }
   if (!stat.isFile()) return { kind: 'missing', path: file, message: `${file} is not a file, so Pane can't show it as the Summary.` };
   if (stat.size > PAGE_LIMIT_BYTES) return { kind: 'missing', path: file, message: `${path.basename(file)} is larger than 4 MiB, too large to show here. Open it from References instead.` };
@@ -139,7 +139,7 @@ export function summaryPage(item: NotifyItem, theme: SummaryTheme = 'light'): No
     const page = askerPage(item.summaryPage);
     // A page that's gone falls back to the template, which says so in its footer's place.
     if (page.kind !== 'missing') return page;
-    return { kind: 'template', html: summaryTemplate(item, theme).replace('(no Summary was sent)', `(the Summary page it sent, ${escape(path.basename(item.summaryPage))}, is gone)`) };
+    return { kind: 'template', html: summaryTemplate(item, theme).replace('(no Summary was sent)', `(the Summary page it sent wasn’t found at ${escape(item.summaryPage)})`) };
   }
   return { kind: 'template', html: summaryTemplate(item, theme) };
 }

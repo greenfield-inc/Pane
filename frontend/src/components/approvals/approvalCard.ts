@@ -172,7 +172,7 @@ function originPanel(item: NotifyItem): string | undefined {
 /** "doozy-overhaul asks · relayed · Doozy · tylers-mac-mini": who asked, from where. */
 export function askedBy(item: NotifyItem): string[] {
   const parts = [`${item.source.session?.orchestrator ? `${item.source.session.name} orchestrator` : item.source.name} asks`];
-  if (item.relayedBy || item.originKind === 'worker') parts.push('relayed');
+  if (item.relayedBy) parts.push(`relayed by ${item.relayedBy.name}`);
   const session = item.source.session?.name ?? (item.connected?.kind === 'session' ? item.connected.name : undefined);
   if (session && !item.source.session?.orchestrator) parts.push(session);
   if (item.machine) parts.push(item.machine);
@@ -224,9 +224,16 @@ export function bridgedFrom(item: NotifyItem, chatPanelId: string | undefined): 
  * most recently, while its reply is being read, asked about or came back ready again, or once it
  * was taken as the answer (until the person dismisses it).
  */
+/** The key ReplyStatusLine dismisses a line by: the reply, or the ready-again version. */
+export function statusKey(item: NotifyItem): string {
+  return item.reply?.id ?? `ready:${item.id}:${item.readyAgain ?? ''}`;
+}
+
 export function latestReplied(items: readonly NotifyItem[], sessionId: string, dismissed: ReadonlySet<string>): NotifyItem | undefined {
+  // An --update clears the reply it answers, so a ready-again approval is found by readyAgain alone.
+  const key = statusKey;
   return items
-    .filter(item => item.reply && !dismissed.has(item.reply.id) && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId)))
+    .filter(item => (item.reply || item.readyAgain !== undefined) && !dismissed.has(key(item)) && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId)))
     .filter(item => (item.state === 'waiting' && (item.reply?.state === 'reading' || item.reply?.state === 'question' || item.reply?.state === 'unread' || item.readyAgain !== undefined))
       || (item.state === 'answered' && item.reply?.state === 'answer'))
     .sort((a, b) => (b.readyAgain ?? b.reply?.at ?? 0) - (a.readyAgain ?? a.reply?.at ?? 0))[0];

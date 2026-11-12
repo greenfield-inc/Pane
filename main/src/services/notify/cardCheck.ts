@@ -66,14 +66,14 @@ export function checkCard(card: CardFields): CardCheck {
     return { refusal: {
       code: 'ERR_NOTIFY_TITLE',
       message: 'The title has a line break, so the card was not posted. A title is one line saying what you need.',
-      next: 'Keep the first line as --title (about 80 to 100 characters) and move the rest to --context, the one- or two-sentence subtitle; put each question in --questions or --choices.',
+      next: 'Keep the first line as the title (--title, about 80 to 100 characters) and move the rest to the context (--context), the one- or two-sentence subtitle; put each question in questions or choices (--questions, --choices).',
     }, warnings: [] };
   }
   if (titleLength > CARD_TITLE_REFUSE) {
     return { refusal: {
       code: 'ERR_NOTIFY_TITLE',
       message: `The title is ${titleLength} characters, past the ${CARD_TITLE_REFUSE} a card takes, so it was not posted.`,
-      next: 'Shorten --title to about 80 to 100 characters saying what you need, put why it matters in --context (one or two sentences), each question in --questions or --choices, and files in --links.',
+      next: 'Shorten the title (--title) to about 80 to 100 characters saying what you need, put why it matters in the context (--context, one or two sentences), each question in questions or choices (--questions, --choices), and files in links (--links).',
     }, warnings: [] };
   }
   for (const question of asked(card)) {

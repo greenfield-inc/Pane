@@ -2548,7 +2548,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--context",
         "value": "<text>",
-        "description": "notify: background shown under Details."
+        "description": "notify: the card's subtitle: one or two sentences on why it matters (up to 240 characters)."
       },
       {
         "name": "--choices",
@@ -4140,7 +4140,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --ui <ui>                      options, approve, ask, or info",
         "  --title <text>                 The question or update in one line, about 80 characters",
-        "  --context <text>               Why it matters, shown under Details",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --questions <json>             options, instead of --choices: 2 to 4 of [{\"title\":\"...\",\"choices\":[...]}], one pick each",
         "  --detail <text>                approve: the command or SQL to approve",
@@ -4709,7 +4709,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --ui <ui>                      options, approve, or ask",
         "  --title <text>                 The question in one line",
-        "  --context <text>               Background shown under Details",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --links <json>                 Up to 6 related files or pages, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
@@ -6054,7 +6054,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --ui <ui>                      options, approve, ask, or info",
         "  --title <text>                 The question or update in one line, about 80 characters",
-        "  --context <text>               Why it matters, shown under Details",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --questions <json>             options, instead of --choices: 2 to 4 of [{\"title\":\"...\",\"choices\":[...]}], one pick each",
         "  --detail <text>                approve: the command or SQL to approve",
@@ -6577,7 +6577,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --ui <ui>                      options, approve, or ask",
         "  --title <text>                 The question in one line",
-        "  --context <text>               Background shown under Details",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --links <json>                 Up to 6 related files or pages, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
@@ -23047,7 +23047,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--context",
             "value": "<text>",
             "required": false,
-            "description": "Why it matters, shown under Details."
+            "description": "The card's subtitle: one or two sentences on why it matters, up to 240 characters."
           },
           {
             "name": "--choices",
@@ -23549,7 +23549,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--context",
             "value": "<text>",
             "required": false,
-            "description": "Background the person can open under Details."
+            "description": "The card's subtitle: one or two sentences on why it matters, up to 240 characters."
           },
           {
             "name": "--choices",

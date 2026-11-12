@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { app, BrowserWindow, globalShortcut } from 'electron';
 import { AUTOPILOT_OWNER_PANE_PREFIX } from '../../../../shared/types/autopilot';
 import { randomUUID } from 'crypto';
@@ -240,7 +241,7 @@ export class NotifyService {
       const session = this.deps.sessionRecord?.(entry.sessionId);
       // The status file's needs_you, never its JSON: the question's why, its options and files.
       // Tidied when the question is an old paragraph (P8); a report recorded before the check stays as sent.
-      const card = workerCard(entry.report?.summary, question, { quietly: true });
+      const card = workerCard(entry.report?.summary, question, { quietly: true, summaryPath: entry.report?.summaryPath });
       // D-81: the worker's status file, which its report named, opens beside the card.
       const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
       const links = [...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)].slice(0, NOTIFY_LINKS_MAX);
@@ -776,6 +777,23 @@ export function summaryFiles(summaryPath: string | undefined, needsYouPage: stri
   if (summaryPath && /\.html?$/iu.test(summaryPath)) return { summaryPage: summaryPath };
   const files: WorkerSummaryFiles = {};
   if (summaryPath) files.statusFile = summaryPath;
-  if (needsYouPage) files.summaryPage = path.isAbsolute(needsYouPage) || !summaryPath ? needsYouPage : path.resolve(path.dirname(summaryPath), needsYouPage);
+  if (needsYouPage) files.summaryPage = path.isAbsolute(needsYouPage) || !summaryPath ? needsYouPage : besideStatusFile(summaryPath, needsYouPage);
   return files;
+}
+
+/**
+ * A relative `summary` path, as a worker wrote it: from its working folder (usually the worktree,
+ * an ancestor of its status file) or from the status file's own folder. The nearest folder up from
+ * the status file that holds it wins; when none does, it reads from the status file's folder.
+ */
+function besideStatusFile(statusFile: string, page: string): string {
+  let folder = path.dirname(statusFile);
+  for (let depth = 0; depth < 6; depth += 1) {
+    const candidate = path.resolve(folder, page);
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(folder);
+    if (parent === folder) break;
+    folder = parent;
+  }
+  return path.resolve(path.dirname(statusFile), page);
 }

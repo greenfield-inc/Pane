@@ -168,9 +168,9 @@ function Chip({ chip, testId }: { chip: NonNullable<CardChip>; testId?: string }
   const tone = chip.tone === 'info' ? 'bg-status-info/10 text-status-info-on-tint' : chip.tone === 'warning' ? 'bg-status-warning/10 text-status-warning-on-tint' : chip.tone === 'success' ? 'bg-status-success/10 text-status-success-on-tint' : 'bg-surface-tertiary text-text-secondary';
   const Icon = chip.tone === 'info' ? Sparkles : chip.tone === 'warning' ? Loader2 : chip.tone === 'success' ? Check : Loader2;
   return (
-    <span className={cn('inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-medium', tone)} data-testid={testId ?? 'approval-chip'} data-tone={chip.tone}>
-      <span className="flex h-3 w-3 items-center justify-center" aria-hidden="true"><Icon className="h-3 w-3" /></span>
-      {chip.text}
+    <span className={cn('inline-flex h-[22px] min-w-0 max-w-full shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-medium', tone)} data-testid={testId ?? 'approval-chip'} data-tone={chip.tone} title={chip.text}>
+      <span className="flex h-3 w-3 shrink-0 items-center justify-center" aria-hidden="true"><Icon className="h-3 w-3" /></span>
+      <span className="truncate">{chip.text}</span>
     </span>
   );
 }
@@ -315,7 +315,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
           <div className="mt-2 rounded-lg bg-status-warning/10 px-3 py-2 text-[13px] text-status-warning-on-tint" data-testid="approval-tidied">
             <div className="flex items-start gap-2">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="min-w-0 flex-1">Tidied by Pane: sent as one {[...tidied.title].length}-character question. Split by rule; every word is the sender’s.</span>
+              <span className="min-w-0 flex-1">Tidied by Pane: sent as one {[...tidied.title].length}-character question and split by rule. Show as sent has it exactly as written.</span>
               <button type="button" className="shrink-0 font-medium hover:underline" aria-expanded={showSent} onClick={() => setShowSent((shown) => !shown)} data-testid="approval-show-as-sent">
                 {showSent ? 'Hide' : 'Show as sent'}
               </button>
@@ -359,7 +359,6 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
                 key={`${at}:${question.title}`}
                 question={question}
                 label={questions.length > 1 ? `Question ${at + 1} of ${questions.length}` : 'Question'}
-                noDetail={tidied ? 'No description was sent.' : undefined}
                 picked={picks[at]}
                 disabled={!waiting}
                 onPick={(label) => setPicks((current) => { const next = [...current]; next[at] = current[at] === label ? '' : label; return next; })}
@@ -490,7 +489,7 @@ function ReplyNotice({ item }: { item: NotifyItem }) {
   );
 }
 
-function QuestionBlock({ question, label, picked, disabled, onPick, showTitle, noDetail }: { question: CardQuestion; label: string; picked?: string; disabled: boolean; onPick: (label: string) => void; showTitle: boolean; noDetail?: string }) {
+function QuestionBlock({ question, label, picked, disabled, onPick, showTitle }: { question: CardQuestion; label: string; picked?: string; disabled: boolean; onPick: (label: string) => void; showTitle: boolean }) {
   return (
     <section className="mt-4 rounded-xl border border-border-secondary p-4" data-testid="approval-question">
       <div className="text-[12px] font-medium uppercase tracking-wide text-text-tertiary">{label}</div>
@@ -527,8 +526,7 @@ function QuestionBlock({ question, label, picked, disabled, onPick, showTitle, n
                   {choice.mark === 'new' && <span className="rounded bg-status-success/10 px-1.5 py-px text-[11px] font-semibold uppercase tracking-wide text-status-success-on-tint" data-testid="approval-mark">New</span>}
                   {choice.mark === 'reworded' && <span className="rounded bg-status-info/10 px-1.5 py-px text-[11px] font-semibold uppercase tracking-wide text-status-info-on-tint" data-testid="approval-mark">Reworded</span>}
                 </span>
-                {choice.detail ? <span className="mt-0.5 block text-[13px] leading-relaxed text-text-secondary">{choice.detail}</span>
-                  : noDetail && <span className="mt-0.5 block text-[13px] leading-relaxed text-text-tertiary">{noDetail}</span>}
+                {choice.detail && <span className="mt-0.5 block text-[13px] leading-relaxed text-text-secondary">{choice.detail}</span>}
                 {choice.before && (
                   <span className="mt-1 block text-[12.5px] leading-relaxed text-text-tertiary line-through" data-testid="approval-was">
                     was: {choice.before.label !== choice.label ? `${choice.before.label}${choice.before.detail ? `: ${choice.before.detail}` : ''}` : choice.before.detail ?? ''}
