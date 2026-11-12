@@ -19,6 +19,8 @@ interface NotifyChoice {
 interface NotifySubQuestion {
   title: string;
   choices: NotifyChoice[];
+  /** Why this question matters, shown under it. */
+  why?: string;
 }
 
 interface NotifyAction {
@@ -78,7 +80,10 @@ export interface NotifyRequest extends Partial<Omit<NotifyQuestion, 'ui'>> {
 
 type NotifyTookAs = 'answer' | 'question';
 
-export type NotifyResult =
+/** Any result may carry the card check's warnings: the card was posted anyway. */
+export type NotifyResult = NotifyResultBody & { warnings?: string[] };
+
+type NotifyResultBody =
   | { answer: string; note?: string; answers?: string[] }
   /** The person typed a reply: an answer or a question. Say which with `--took`. */
   | { reply: string; picks?: string[]; id: string; replyId: string; next: string }
@@ -116,7 +121,7 @@ const choiceSchema = boundary.object({
   recommended: boundary.optional(boundary.boolean),
   was: boundary.optional(boundary.nonEmptyString),
 });
-const subQuestionSchema = boundary.object({ title: boundary.nonEmptyString, choices: boundary.json });
+const subQuestionSchema = boundary.object({ title: boundary.nonEmptyString, choices: boundary.json, why: boundary.optional(boundary.string) });
 const actionSchema = boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString });
 const linkSchema = boundary.object({
   label: boundary.nonEmptyString,
@@ -125,7 +130,7 @@ const linkSchema = boundary.object({
   approval: boundary.optional(boundary.string),
 });
 const note = boundary.optional(boundary.string);
-export const notifyResultSchema: BoundarySchema<NotifyResult> = boundary.union(
+const notifyResultBodySchema: BoundarySchema<NotifyResultBody> = boundary.union(
   boundary.object({ waiting: boundary.literal(true), id: boundary.nonEmptyString, next: boundary.string }),
   boundary.object({ unavailable: boundary.string, next: boundary.string }),
   boundary.object({ took: boundary.enumeration('answer', 'question'), id: boundary.nonEmptyString, next: boundary.optional(boundary.string) }),
@@ -136,6 +141,14 @@ export const notifyResultSchema: BoundarySchema<NotifyResult> = boundary.union(
   boundary.object({ status: boundary.literal('saved'), project: boundary.string, name: boundary.string }),
   boundary.object({ status: boundary.literal('declined') }),
 );
+const warningsSchema = boundary.object({ warnings: boundary.optional(boundary.array(boundary.string)) });
+export const notifyResultSchema: BoundarySchema<NotifyResult> = {
+  decode(current) {
+    const body = notifyResultBodySchema.decode(current);
+    const { warnings } = warningsSchema.decode(current);
+    return warnings?.length ? { ...body, warnings } : body;
+  },
+};
 
 function invalid(field: string, problem: string, next = `Fix ${field} and call notify again.`): RunpaneError {
   return new RunpaneError('ERR_NOTIFY_INVALID', `${problem} Nothing was shown to the person.`, next);
@@ -358,7 +371,9 @@ function parseQuestions(text: string, allowWas: boolean): NotifySubQuestion[] {
   }
   return value.map((item, index) => {
     const question = decodeOr(item, subQuestionSchema, invalid('questions', `questions[${index}] must be an object with a non-empty "title" and "choices", a JSON array of 1 to ${MAX_CHOICES} choices.`));
-    return { title: question.title, choices: parseChoices(question.choices, 'questions', `questions[${index}].choices`, allowWas) };
+    const parsedQuestion: NotifySubQuestion = { title: question.title, choices: parseChoices(question.choices, 'questions', `questions[${index}].choices`, allowWas) };
+    if (question.why?.trim()) parsedQuestion.why = question.why;
+    return parsedQuestion;
   });
 }
 
@@ -391,6 +406,11 @@ function nonEmpty(value: string | undefined): string | undefined {
 
 /** One line for people: the answer or reply, Approved or Denied, where an update went, or what to do next. */
 export function describeNotifyResult(result: NotifyResult): string {
+  // The card check's warnings follow, one line each: the card was posted anyway.
+  return [describeNotifyOutcome(result), ...(result.warnings ?? []).map(warning => `Warning: ${warning}`)].join('\n');
+}
+
+function describeNotifyOutcome(result: NotifyResult): string {
   const withNote = (text: string, noteText: string | undefined) => (noteText ? `${text}. Note: ${noteText}` : text);
   if ('waiting' in result) return `Still waiting (id ${result.id}). ${result.next}`;
   if ('reply' in result) {
