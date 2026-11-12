@@ -144,7 +144,7 @@ export function canSend(item: NotifyItem, picks: readonly string[], text: string
   return questions.length > 0 && picks.length >= questions.length && questions.every((_, index) => Boolean(picks[index]));
 }
 
-/** The column's tabs, in order (D-224): Questions & answers, Summary, each reference, the chat where it was asked. */
+/** The column's tabs, in order (D-224): Decide, Summary, each reference, the chat where it was asked. */
 export type CardTab =
   | { kind: 'qa'; key: 'qa'; label: string }
   | { kind: 'summary'; key: 'summary'; label: string }

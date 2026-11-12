@@ -54,8 +54,9 @@ function CompactCard({ item, index, total, open, onStep, onOpen }: {
   const references = referenceCount(item);
   const stepButton = 'inline-flex h-6 w-6 items-center justify-center rounded-md border border-border-secondary text-text-secondary hover:bg-surface-hover disabled:opacity-40';
   return (
-    // D-343: the open card is outlined in grey with an "open" label; blue is only for focus.
-    <div className={cn('rounded-2xl bg-surface-primary px-4 pb-2.5 pt-3 shadow-card ring-1', open ? 'ring-2 ring-border-hover' : item.source.autopilot ? 'ring-autopilot-border' : 'ring-border-secondary')}
+    // The card open on the right gets a darker neutral outline and an "Open" label; blue stays for
+    // whichever side has keyboard focus (D-336, D-343).
+    <div className={cn('rounded-2xl bg-surface-primary px-4 pb-2.5 pt-3 shadow-card ring-1', open ? 'ring-text-tertiary' : item.source.autopilot ? 'ring-autopilot-border' : 'ring-border-secondary')}
       data-testid="session-approval-card" data-item-id={item.id} data-open={open || undefined}>
       <div className="flex items-center gap-1.5 text-[12.5px] text-text-tertiary">
         {/* Fixed box: the icon swaps, never its size. */}
@@ -64,7 +65,7 @@ function CompactCard({ item, index, total, open, onStep, onOpen }: {
         </span>
         {qn && <span className="shrink-0 font-semibold text-status-warning-on-tint">{qn}</span>}
         <span className="min-w-0 truncate">{[qn ? '' : 'Approval', who, count > 1 ? `${count} questions` : count === 1 ? '1 question' : '', relativeAge(item.createdAt, now)].filter(Boolean).join(' · ')}</span>
-        {open && <span className="ml-auto shrink-0 rounded-full bg-surface-tertiary px-2 py-px text-[12px] font-medium text-text-secondary" data-testid="session-approval-card-open-label">open</span>}
+        {open && <span className="ml-auto shrink-0 rounded-md bg-surface-secondary px-1.5 py-px text-[11px] font-semibold text-text-secondary" data-testid="session-approval-card-open-label">Open</span>}
       </div>
       <p className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-text-primary" data-testid="session-approval-card-title">{item.title}</p>
       {item.context && <p className="line-clamp-2 text-[13.5px] leading-snug text-text-secondary" data-testid="session-approval-card-subtitle">{item.context}</p>}

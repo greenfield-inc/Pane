@@ -243,7 +243,11 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   it was asked, left out when you're already in it. In a **Session**, the
   column lays over the Session's right split view without resizing it, and ✕
   ("Back to <tab>") shows the split again as it was; with no split open it
-  opens a split of its own, and ✕ ("Close split") collapses it. The right
+  opens a split of its own, and ✕ ("Close split") collapses it. There it is a
+  focus stop of its own: Focus Right (⌘⌥→) and F6 move into it from the chat,
+  the tab keys (⌘⇧[ ⌘⇧], ⌘⇧1-9) walk its tabs while it has focus, Focus Left
+  or Esc go back to the chat's message box, and its active tab carries the
+  accent only while it has focus, as a split's does. The right
   sidebar (Overview, Files, Changes) is never covered. The Session's title
   bar shows **Approvals n · n ready**, and a Session row's count in the
   sidebar opens the newest ready-again approval, or the first waiting one. A
@@ -255,7 +259,8 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   **Send** closes the column, and a status line in the chat names the agent
   reading the reply ("okta-sso-account is reading your reply to Q-42"), then
   how it was taken, with **Reopen**. "Taken as your answer" shows only on that
-  approval, its row and that line. In **Autopilot**, the column covers the Stack (✕ "Back to the
+  approval, its row and that line. The card open in the column has a darker
+  grey outline and an **open** label. In **Autopilot**, the column covers the Stack (✕ "Back to the
   Stack"), and Autopilot's decision cards gain **Open**. In a Session and in
   Autopilot, the chat tab is live too: an orchestrator's item shows its
   Session, and a worker's or a Pane's item shows the tab that asked.

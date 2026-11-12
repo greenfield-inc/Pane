@@ -22,7 +22,7 @@ import {
 
 /**
  * The approval column (P3, D-243): one tabbed column, shared by a Session, Autopilot and the
- * Approvals screen. Questions & answers first, with the pager and one reply box; then Summary,
+ * Approvals screen. Decide first, with the pager and one reply box; then Summary,
  * each reference, and the chat where it was asked.
  */
 export interface ApprovalColumnProps {
@@ -41,6 +41,11 @@ export interface ApprovalColumnProps {
   inChat?: string;
   /** The chat where it was asked, for the origin tab. */
   renderOrigin?: (item: NotifyItem) => ReactNode;
+  /**
+   * Beside a split (a Session's column): whether keyboard focus is in it. Its active tab then
+   * carries the accent only while it has focus, like a split's (D-249, D-335). Unset: always.
+   */
+  focused?: boolean;
   /** The items to read instead of the Notify store's (tests). */
   items?: readonly NotifyItem[];
   /** After an accepted Send (P7, D-344): a chat's column closes; the Approvals screen stays on the approval. */
@@ -80,7 +85,7 @@ const TONE_BOX = {
   info: 'bg-status-info/10',
 } satisfies Record<ReplyLine['tone'], string>;
 
-export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, closeLabel, onClose, inChat, renderOrigin, items: given, onSent }: ApprovalColumnProps) {
+export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, closeLabel, onClose, inChat, renderOrigin, focused, items: given, onSent }: ApprovalColumnProps) {
   const stored = useNotifyStore((state) => state.snapshot?.items);
   const items = given ?? stored;
   const byId = useMemo(() => new Map((items ?? []).map((item) => [item.id, item])), [items]);
@@ -101,7 +106,8 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
 
   if (!item) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col bg-bg-primary" data-testid="approval-column">
+      // No tabs to mark: a thin accent edge along the top says it has focus.
+      <div className={cn('flex min-h-0 flex-1 flex-col bg-bg-primary', focused && 'shadow-[inset_0_2px_0_0_var(--color-interactive-primary)]')} data-testid="approval-column" data-focused={focused}>
         <ColumnHeader index={0} total={0} groupLabel={groupLabel} closeLabel={closeLabel} onClose={onClose} onStep={step} dots={[]} chip={null} />
         <p className="m-auto px-6 text-center text-[13px] text-text-tertiary">That approval is no longer here: it was answered or closed.</p>
       </div>
@@ -110,7 +116,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
 
   return (
     // Focusable, so its ← → keys belong to it alone; clicking anywhere in it gives it focus.
-    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid="approval-column" data-item-id={item.id} data-narrow={narrow || undefined}>
+    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} data-focus-entry={focused !== undefined || undefined} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid="approval-column" data-item-id={item.id} data-narrow={narrow || undefined}>
       <ColumnHeader
         narrow={narrow}
         index={index}
@@ -122,7 +128,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
         dots={pager.map((id) => dotTone(byId.get(id), id === itemId))}
         chip={cardChip(item)}
       />
-      <TabBar tabs={tabs} active={tab?.key ?? 'qa'} onPick={(key) => setTab(surface, itemId, key)} />
+      <TabBar tabs={tabs} active={tab?.key ?? 'qa'} focused={focused} onPick={(key) => setTab(surface, itemId, key)} />
       <div className="relative min-h-0 flex-1">
         {(tab?.kind ?? 'qa') === 'qa' && (
           nested
@@ -190,7 +196,7 @@ function ColumnHeader({ index, total, groupLabel, closeLabel, onClose, onStep, d
           </span>
         ))}
       </span>
-      {/* Narrow, the Questions & answers tab says it's ready again; the header keeps to the pager and ✕. */}
+      {/* Narrow, the Decide tab says it's ready again; the header keeps to the pager and ✕. */}
       {chip && chip.tone !== 'success' && !narrow && <Chip chip={chip} />}
       {onClose && closeLabel && (
         <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel}
@@ -214,7 +220,7 @@ function tabIcon(tab: CardTab) {
   return null;
 }
 
-function TabBar({ tabs, active, onPick }: { tabs: CardTab[]; active: string; onPick: (key: string) => void }) {
+function TabBar({ tabs, active, focused, onPick }: { tabs: CardTab[]; active: string; focused?: boolean; onPick: (key: string) => void }) {
   return (
     // Tabs wrap onto a second row rather than scroll out of sight in a narrow column.
     <div role="tablist" aria-label="Approval" className="flex min-h-10 shrink-0 flex-wrap items-stretch border-b border-border-primary" data-testid="approval-tabs">
@@ -228,8 +234,10 @@ function TabBar({ tabs, active, onPick }: { tabs: CardTab[]; active: string; onP
             role="tab"
             aria-selected={selected}
             onClick={() => onPick(tab.key)}
-            className={cn('-mb-px inline-flex h-10 min-w-0 items-center gap-1.5 border-b-2 px-3 text-[13px]', selected ? 'border-interactive font-semibold text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary')}
+            className={cn('-mb-px inline-flex h-10 min-w-0 items-center gap-1.5 border-b-2 px-3 text-[13px]', selected ? cn('font-semibold text-text-primary', focused === false ? 'border-transparent' : 'border-interactive') : 'border-transparent text-text-secondary hover:text-text-primary')}
             data-testid="approval-tab"
+            data-approval-tab
+            data-focused={selected && focused !== undefined ? focused : undefined}
           >
             {tab.kind === 'qa'
               ? <span className="flex h-2 w-2 items-center justify-center" aria-hidden="true"><span className="h-1.5 w-1.5 rounded-full bg-status-warning" /></span>
@@ -242,7 +250,7 @@ function TabBar({ tabs, active, onPick }: { tabs: CardTab[]; active: string; onP
   );
 }
 
-/** Questions & answers: who asks, the question, how it changed, its options and the one reply box. */
+/** Decide: who asks, the question, how it changed, its options and the one reply box. */
 function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onSent?: () => void; tabs: CardTab[]; onOpenTab: (key: string) => void }) {
   const now = useNow();
   const questions = useMemo(() => markedQuestions(item), [item]);

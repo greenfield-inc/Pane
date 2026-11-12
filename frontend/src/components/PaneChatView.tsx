@@ -889,8 +889,8 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
             approval={chrome.inline ? undefined : {
               open: approvalOpen,
               onClose: () => useApprovalColumnStore.getState().close(`session:${view.session.id}`),
-              render: (closeLabel, onClose) => (
-                <SessionApprovalColumn sessionId={view.session.id} sessionName={view.session.name} inChat={view.panel.id} closeLabel={closeLabel} onClose={onClose} />
+              render: (closeLabel, onClose, focused) => (
+                <SessionApprovalColumn sessionId={view.session.id} sessionName={view.session.name} inChat={view.panel.id} closeLabel={closeLabel} onClose={onClose} focused={focused} />
               ),
             }}
             chromeInline={chrome.tiled || chrome.inline}
