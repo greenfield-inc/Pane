@@ -233,9 +233,10 @@ export function latestReplied(items: readonly NotifyItem[], sessionId: string, d
   // An --update clears the reply it answers, so a ready-again approval is found by readyAgain alone.
   const key = statusKey;
   return items
-    .filter(item => (item.reply || item.readyAgain !== undefined) && !dismissed.has(key(item)) && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId)))
-    .filter(item => (item.state === 'waiting' && (item.reply?.state === 'reading' || item.reply?.state === 'question' || item.reply?.state === 'unread' || item.readyAgain !== undefined))
-      || (item.state === 'answered' && item.reply?.state === 'answer'))
+    .filter(item => (item.reply || item.readyAgain !== undefined) && !dismissed.has(key(item))
+      && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId))
+      && ((item.state === 'waiting' && (item.reply?.state === 'reading' || item.reply?.state === 'question' || item.reply?.state === 'unread' || item.readyAgain !== undefined))
+        || (item.state === 'answered' && item.reply?.state === 'answer')))
     .sort((a, b) => (b.readyAgain ?? b.reply?.at ?? 0) - (a.readyAgain ?? a.reply?.at ?? 0))[0];
 }
 
