@@ -44,7 +44,8 @@ jobs:
         run: mkdir -p "$AGENT_FARM_ARTIFACT_BUNDLE/evidence/native/build"
       - name: Install dependencies
         shell: bash
-        run: pnpm install --frozen-lockfile 2>&1 | tee "$AGENT_FARM_ARTIFACT_BUNDLE/evidence/native/build/install.log"
+        # No install scripts: the next step builds SQLite for Electron once.
+        run: pnpm install --frozen-lockfile --ignore-scripts 2>&1 | tee "$AGENT_FARM_ARTIFACT_BUNDLE/evidence/native/build/install.log"
       - name: Build Electron native modules
         shell: bash
         run: pnpm electron:rebuild 2>&1 | tee "$AGENT_FARM_ARTIFACT_BUNDLE/evidence/native/build/native-build.log"
