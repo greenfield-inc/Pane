@@ -91,4 +91,4 @@ Node.js native modules on Windows are built with Visual Studio's C++ compiler. R
 
 ### Alternative: Use Pre-built Binaries
 
-If you only need to run Pane, [download the Windows installer](https://runpane.com/api/download?version=latest&platform=windows&arch=x64&format=exe&source=gh-docs) instead of building from source.
+If you only need to run Pane, [download the Windows installer](https://runpane.com/api/download?version=latest&platform=windows&arch=x64&format=exe&source=gh-docs) instead of building from source. If runpane.com doesn't respond, get `Pane-x.x.x-Windows-x64.exe` (or `-arm64.exe`) from [GitHub Releases](https://github.com/greenfield-inc/Pane/releases/latest?utm_source=github).
