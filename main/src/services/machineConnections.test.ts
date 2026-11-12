@@ -109,6 +109,19 @@ describe('MachineConnections', () => {
     ]);
   });
 
+  it('sends a Session\'s agent a message on that machine as the person, for Move to machine…', async () => {
+    const { machines, client, connect } = setup(['build-box']);
+    connect('build-box');
+
+    await machines.run('build-box', { type: 'submit-to-agent', panelId: 's-1-c', input: 'Hand this Session off.' });
+
+    expect(client('build-box').invoke.mock.calls).toEqual([
+      ['runpane:panels:submit', [{ panelId: 's-1-c', input: 'Hand this Session off.', source: 'user' }]],
+    ]);
+    await expect(machines.run('build-box', { type: 'submit-to-agent', panelId: 's-1-c', input: '' }))
+      .rejects.toThrow(/Pane can't send "submit-to-agent" to another machine/);
+  });
+
   it('sets a Pane\'s pin to the requested state in one host call', async () => {
     const { machines, client, connect } = setup(['build-box']);
     connect('build-box');

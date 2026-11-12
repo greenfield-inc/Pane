@@ -80,7 +80,9 @@ export type MachineCommand =
   | { type: 'create-session'; input: OrchestrationSessionCreateInput }
   /** What switching a Session's terminal agent tabs to chat would do, then doing it to the confirmed `panelIds`. */
   | { type: 'preview-switch-to-chat'; sessionId: string }
-  | { type: 'switch-to-chat'; sessionId: string; panelIds: string[] };
+  | { type: 'switch-to-chat'; sessionId: string; panelIds: string[] }
+  /** Sends `input` to an agent tab as the person's message (`runpane panels submit`); Move to machine… uses it. */
+  | { type: 'submit-to-agent'; panelId: string; input: string };
 
 /** A read's or command's answer, exactly as the machine gave it, tagged with that machine. */
 export interface MachineResult {

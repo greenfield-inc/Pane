@@ -3330,7 +3330,7 @@ async function recordAgentSubmissions(page: Page): Promise<() => Promise<unknown
   });
 }
 
-test('Move to host… sits between Rename and Archive in the Session menu, by mouse, keyboard and in the rail', async ({ page }) => {
+test('Move to machine… sits between Rename and Archive in the Session menu, by mouse, keyboard and in the rail', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')]);
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -3339,39 +3339,38 @@ test('Move to host… sits between Rename and Archive in the Session menu, by mo
   await expect(row).toBeVisible({ timeout: 10_000 });
   await row.click({ button: 'right' });
   const menu = page.getByRole('menu', { name: 'Session actions for Alpha' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Rename Session…', 'Move to host…', 'Archive Session']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Move to machine…', 'Archive Session']);
   await page.keyboard.press('Escape');
 
   await row.focus();
   await page.keyboard.press('Shift+F10');
   await expect(menu.getByRole('menuitem', { name: 'Pin Session' })).toBeFocused();
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('ArrowDown');
-  await expect(menu.getByRole('menuitem', { name: 'Move to host…' })).toBeFocused();
+  for (let step = 0; step < 3; step++) await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Move to machine…' })).toBeFocused();
   await page.screenshot({ path: 'tmp/verify/session-move-host/01-menu-keyboard.png' });
   // Closing the dialog returns focus to the row the menu was opened from, not the page.
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('dialog', { name: 'Move Session to another host' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Move Session to another host' })).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toBeHidden();
   await expect(row).toBeFocused();
 
   // The same from a mouse right-click, which never focused the row.
   await page.getByRole('button', { name: 'New Session' }).first().focus();
   await row.click({ button: 'right' });
-  await menu.getByRole('menuitem', { name: 'Move to host…' }).click();
-  await expect(page.getByRole('dialog', { name: 'Move Session to another host' })).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Move to machine…' }).click();
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Move Session to another host' })).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toBeHidden();
   await expect(row).toBeFocused();
 
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
   await page.getByTestId('compact-orchestration-session-alpha').click({ button: 'right' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Rename Session…', 'Move to host…', 'Archive Session']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Move to machine…', 'Archive Session']);
   await page.screenshot({ path: 'tmp/verify/session-move-host/01b-menu-rail.png' });
 });
 
-test('Move to host… lists only machines that can take the Session and asks its agent to hand off', async ({ page }) => {
+test('Move to machine… lists only machines that can take the Session and asks its agent to hand off', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const session = { ...sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z'), agent: 'codex' as const };
   await installSessionsFixture(page, [session], [], {
@@ -3386,9 +3385,9 @@ test('Move to host… lists only machines that can take the Session and asks its
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Move to host…' }).click();
+  await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
 
-  const dialog = page.getByRole('dialog', { name: 'Move Session to another host' });
+  const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog.getByRole('radio')).toHaveCount(4);
   await expect(dialog.getByRole('radio', { name: 'tylers-mac-mini', exact: true })).toBeEnabled();
   await expect(dialog.getByRole('radio', { name: 'tylers-mac-mini-1' })).toBeDisabled();
@@ -3414,7 +3413,7 @@ test('Move to host… lists only machines that can take the Session and asks its
   }]);
 });
 
-test('Move to host… viewing a Tailscale host offers this computer and leaves out the host', async ({ page }) => {
+test('Move to machine… viewing a Tailscale host offers this computer and leaves out the host', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     initialConfig: { remoteDaemon: { host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
       client: { mode: 'remote', activeProfileId: 'mini', profiles: [{ id: 'mini', label: 'tylers-mac-mini', baseUrl: 'https://tylers-mac-mini.tail1234.ts.net:8443', token: '', transport: 'http+sse', tailnetMachine: 'tylers-mac-mini', tailnetDomain: 'tail1234.ts.net' }] } } },
@@ -3423,13 +3422,13 @@ test('Move to host… viewing a Tailscale host offers this computer and leaves o
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Move to host…' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Move Session to another host' });
+  await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog.getByRole('radio')).toHaveCount(1);
   await expect(dialog.getByRole('radio', { name: 'devbox' })).toBeEnabled();
 });
 
-test('Move to host… with nothing reachable says why, names the fix, and sends nothing', async ({ page }) => {
+test('Move to machine… with nothing reachable says why, names the fix, and sends nothing', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     tailnetMachines: { ok: true, tailnet: 'example.github', domain: 'tail1234.ts.net', machines: [tailnetMachine('tylers-mac-mini', { state: 'offline' })] },
   });
@@ -3437,15 +3436,15 @@ test('Move to host… with nothing reachable says why, names the fix, and sends 
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Move to host…' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Move Session to another host' });
+  await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog).toContainText('No other machine can take this Session right now. Open Pane on the machine you want');
   await page.screenshot({ path: 'tmp/verify/session-move-host/03-nothing-reachable.png' });
   await expect(dialog.getByRole('button', { name: 'Move Session' })).toBeDisabled();
   expect(await submissions()).toEqual([]);
 });
 
-test('Move to host… is unavailable, with the reason, on a host paired with a code', async ({ page }) => {
+test('Move to machine… is unavailable, with the reason, on a host paired with a code', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     initialConfig: { remoteDaemon: { host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
       client: { mode: 'remote', activeProfileId: 'studio', profiles: [{ id: 'studio', label: 'Studio', baseUrl: 'https://studio.example:8443', token: 'paired', transport: 'http+sse' }] } } },
@@ -3453,22 +3452,22 @@ test('Move to host… is unavailable, with the reason, on a host paired with a c
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
-  const item = page.getByRole('menuitem', { name: 'Move to host…' });
+  const item = page.getByRole('menuitem', { name: 'Move to machine…' });
   await expect(item).toHaveAttribute('aria-disabled', 'true');
   await expect(item).toHaveAttribute('title', /pairing code, not over Tailscale/);
   await item.click({ force: true });
-  await expect(page.getByRole('dialog', { name: 'Move Session to another host' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toHaveCount(0);
 });
 
-test('Move to host… with Tailscale signed out passes on the reason and the fix', async ({ page }) => {
+test('Move to machine… with Tailscale signed out passes on the reason and the fix', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale, then try again.' },
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Move to host…' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Move Session to another host' });
+  await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog).toContainText('Tailscale is signed out. Sign in to Tailscale, then try again.');
   await expect(dialog.getByRole('button', { name: 'Move Session' })).toBeDisabled();
 });

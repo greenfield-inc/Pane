@@ -48,7 +48,7 @@ When you run in a Pane tab and the receiver is the same agent as you (Claude, Co
 
 ## Hand off a Session
 
-When you are a Session's agent (your terminal sets `PANE_ORCHESTRATION_SESSION_ID`) and the person asks to move the Session to another machine, for example through **Move to host…** in the Session's right-click menu, run the same steps from the Session's folder. There is no git to move, so skip step 3 and don't push anything.
+When you are a Session's agent (your terminal sets `PANE_ORCHESTRATION_SESSION_ID`) and the person asks to move the Session to another machine, for example through **Move to machine…** in the Session's right-click menu (in either sidebar), run the same steps from the Session's folder. There is no git to move, so skip step 3 and don't push anything.
 
 - Write the note from `runpane handoff --template` as above. Under "Git state", list each Pane this Session coordinates with its machine, branch and PR, or write "None". Name the files in the Session folder worth reading, with their full paths: the receiver can read them with `runpane workspace <this machine> read <path>`, but the Session folder is not copied.
 - Check it with `--dry-run`, then send it: `runpane handoff "<agent> on <machine>" --note-file <note>`. It writes the note to that machine's `~/.pane/handoffs/` and creates a Session there with this Session's name (numbered "<name> 2" if taken), goal and the agent you named. The JSON reports `receiver.route` `session` and the new `session`.
