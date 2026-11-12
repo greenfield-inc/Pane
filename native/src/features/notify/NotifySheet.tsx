@@ -14,7 +14,7 @@ import { monoFontFamily, useTheme } from '@/theme';
 import { Icon, Text, TextField } from '@/ui';
 
 import { useMachineNotifyCommand, useMachineNotifyShared, useNotifyCommand, useNotifyShared } from './hooks';
-import { type AnsweredHere, isReply, NOTIFY_KIND_LABEL, notifySheetState, optionsAnswer, replyStatus, revisionNote, type ReplyTone } from './notifyQuestions';
+import { type AnsweredHere, initialPicks, isReply, NOTIFY_KIND_LABEL, notifySheetState, optionsAnswer, replyStatus, revisionNote, type ReplyTone } from './notifyQuestions';
 
 /**
  * One Notify question, drawn like the desktop card (frontend/src/components/notify/NotifyCard.tsx) in the app's sheet chrome.
@@ -139,8 +139,8 @@ export function QuestionForm({ item, answer, busy, children }: {
   const [note, setNote] = useState('');
   const [text, setText] = useState('');
   const [showDetail, setShowDetail] = useState(false);
-  // Several questions: one pick each, sent together with Send.
-  const [picks, setPicks] = useState<string[]>([]);
+  // Several questions: one pick each, sent together with Send. Each starts on its recommended choice (J1).
+  const [picks, setPicks] = useState<string[]>(() => initialPicks(item));
   const trimmedNote = note.trim();
   // A permission prompt stays options only: its note rides on the choice, never as a reply.
   // A permission prompt and a choice-only chat question take only their options (F-10).
@@ -182,6 +182,7 @@ export function QuestionForm({ item, answer, busy, children }: {
           <View key={`${questionIndex}:${question.title}`} testID={`notify-question-${questionIndex}`} style={styles.choices}>
             <Text variant="footnote" tone="muted">{`Question ${questionIndex + 1} of ${item.questions?.length ?? 0}`}</Text>
             <Text variant="callout" style={styles.bold} selectable>{question.title}</Text>
+            {question.why?.trim() ? <Text testID={`notify-question-why-${questionIndex}`} variant="footnote" tone="secondary" selectable>{question.why.trim()}</Text> : null}
             {question.choices.map((choice, index) => (
               <ChoiceRow
                 key={choice.label}

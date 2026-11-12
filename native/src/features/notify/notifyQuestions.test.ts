@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 
-import { isReply, notifySheetState, optionsAnswer, replyStatus, revisionNote, waitingQuestions } from './notifyQuestions';
+import { approvalStatus } from '@shared/approvalStatus';
+
+import { initialPicks, isReply, notifySheetState, optionsAnswer, replyStateLine, replyStatus, revisionNote, waitingQuestions } from './notifyQuestions';
 
 const question: NotifyItem = {
   id: 'q1', ui: 'approve', title: 'Run the migration?', source: { paneId: 's1', name: 'api-fix', agent: 'Claude' }, state: 'waiting', createdAt: 2_000,
@@ -88,27 +90,48 @@ describe('the reply states (P7, J19)', () => {
     expect(replyStatus(options)).toBeNull();
   });
 
-  it('reads a reply as being read, by Autopilot when it is the reader', () => {
-    expect(replyStatus({ ...options, reply: reply({ picks: ['Yes, turn it on'] }) })).toEqual({ text: 'Reading your reply…', tone: 'muted', detail: 'You wrote: “Only if it can be undone” (picked: Yes, turn it on)' });
-    expect(replyStatus({ ...options, reply: reply({ picks: [''], reader: { kind: 'autopilot', name: 'Autopilot' } }) })?.text).toBe('Autopilot is reading your reply…');
+  // The words are the shared ones every surface uses (shared/approvalStatus.ts); the phone adds the quote and the fix.
+  it('names the reader for every kind while it reads the reply, and quotes what was sent', () => {
+    expect(replyStatus({ ...options, reply: reply({ picks: ['Yes, turn it on'], reader: { kind: 'asker', name: 'Okta' } }) })).toEqual({ text: 'Okta is reading your reply', tone: 'muted', detail: 'You wrote: “Only if it can be undone” (picked: Yes, turn it on)' });
+    expect(replyStatus({ ...options, reply: reply({ picks: [''], reader: { kind: 'autopilot', name: 'Autopilot' } }) })?.text).toBe('Autopilot is reading your reply');
+    expect(replyStatus({ ...options, reply: reply({ reader: { kind: 'orchestrator', name: 'The Doozy orchestrator' } }) })?.text).toBe('The Doozy orchestrator is reading your reply');
+    // No reader named: the asking Pane.
+    expect(replyStateLine({ ...options, source: { ...options.source, name: 'Api-fix' }, reply: reply({ reader: undefined }) })?.text).toBe('Api-fix is reading your reply');
   });
 
   it('says how a reply was taken, with the one-tap fix until the person makes one', () => {
-    expect(replyStatus({ ...options, state: 'answered', reply: reply({ state: 'answer' }) })).toMatchObject({ text: 'Taken as your answer', tone: 'success', fix: { as: 'question', label: 'It was a question' } });
-    expect(replyStatus({ ...options, reply: reply({ state: 'question' }) })).toEqual({ text: 'Taken as a question: asking doozy-overhaul', tone: 'warning', detail: 'Getting more context…', fix: { as: 'answer', label: 'It was my answer' } });
-    expect(replyStatus({ ...options, reply: reply({ state: 'question', status: 'Checking the rollback path', fixed: 'question' }) })).toEqual({ text: 'Taken as a question: asking doozy-overhaul', tone: 'warning', detail: 'Checking the rollback path' });
+    const okta = { kind: 'asker' as const, name: 'Okta' };
+    expect(replyStatus({ ...options, state: 'answered', answerSummary: 'Yes, turn it on', reply: reply({ state: 'answer', reader: okta }) })).toMatchObject({ text: 'Taken as your answer: “Only if it can be undone”', tone: 'success', fix: { as: 'question', label: 'It was a question' } });
+    expect(replyStatus({ ...options, reply: reply({ state: 'question', reader: okta }) })).toEqual({ text: 'Okta is getting more context', tone: 'warning', detail: 'You wrote: “Only if it can be undone”', fix: { as: 'answer', label: 'It was my answer' } });
+    expect(replyStatus({ ...options, reply: reply({ state: 'question', status: 'Getting more context…', reader: okta }) })?.text).toBe('Okta is getting more context');
+    expect(replyStatus({ ...options, reply: reply({ state: 'question', status: 'Checking the rollback path', fixed: 'question', reader: okta }) })).toEqual({ text: 'Okta is getting more context: Checking the rollback path', tone: 'warning', detail: 'You wrote: “Only if it can be undone”' });
   });
 
-  it('names the agent a built-in question went to, and says when no agent can read replies', () => {
-    expect(replyStatus({ ...options, state: 'answered', reply: reply({ state: 'sent' }) })?.text).toBe('Sent to Claude');
-    expect(replyStatus({ ...options, reply: reply({ state: 'unread', reader: undefined }) })?.text).toBe('No agent can read replies right now. You can still pick an option.');
+  it('says where a built-in question went, and when no agent can read replies', () => {
+    expect(replyStatus({ ...options, state: 'answered', reply: reply({ state: 'sent', reader: { kind: 'asker', name: 'Claude' } }) })?.text).toBe('Sent to Claude');
+    expect(replyStatus({ ...options, reply: reply({ state: 'unread', reader: undefined }) })?.text).toBe('No agent can read your reply right now. You can still pick an option.');
   });
 
-  it('reads "Updated · ready again" with its version until the person replies again', () => {
-    const updated: NotifyItem = { ...options, version: 2, readyAgain: 9_000, reply: reply({ state: 'question' }) };
-    expect(replyStatus(updated)).toEqual({ text: 'Updated · ready again · v2', tone: 'accent' });
-    expect(replyStatus({ ...updated, reply: reply({ at: 10_000 }) })?.text).toBe('Reading your reply…');
-    expect(replyStatus({ ...updated, state: 'answered', reply: undefined })).toBeNull();
+  it('reads "Updated · ready again" in blue once the approval came back updated', () => {
+    const updated: NotifyItem = { ...options, version: 2, readyAgain: 9_000 };
+    expect(replyStatus(updated)).toEqual({ text: 'Updated · ready again', tone: 'accent' });
+    expect(replyStatus({ ...updated, state: 'answered', readyAgain: undefined })).toBeNull();
+  });
+
+  it('uses the same words as every other surface', () => {
+    const items: NotifyItem[] = [
+      { ...options, reply: reply({}) },
+      { ...options, reply: reply({ state: 'question', status: 'Reading the logs' }) },
+      { ...options, readyAgain: 9_000 },
+      { ...options, state: 'answered', reply: reply({ state: 'answer', picks: ['Yes, turn it on'] }) },
+    ];
+    for (const item of items) expect(replyStateLine(item)?.text).toBe(approvalStatus(item)?.text);
+  });
+
+  it('starts each of several questions on its recommended choice', () => {
+    const two: NotifyItem = { ...options, choices: undefined, questions: [{ title: 'Turn it on?', choices: [{ label: 'Yes' }, { label: 'No', recommended: true }] }, { title: 'How many?', choices: [{ label: 'One' }] }] };
+    expect(initialPicks(two)).toEqual(['No', '']);
+    expect(initialPicks(options)).toEqual([]);
   });
 
   it('gives the detail screen What changed: the question asked and the asker’s lines', () => {
