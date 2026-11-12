@@ -25,8 +25,9 @@ import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { statusCard } from '../services/notify/workerContext';
 import { admitCard } from '../services/notify/cardAdmit';
 import { checkCard } from '../services/notify/cardCheck';
+import { summaryPage } from '../services/notify/summaryPage';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
-import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
@@ -174,6 +175,8 @@ const notifyItemSchema = boundary.object({
   questions: boundary.optional(boundary.array(subQuestionSchema)),
   replyIsAnswer: boundary.optional(boundary.boolean),
   asSent: boundary.optional(boundary.object({ title: boundary.string, context: boundary.optional(boundary.string) })),
+  summaryPage: boundary.optional(boundary.string),
+  statusFile: boundary.optional(boundary.string),
   optionsOnly: boundary.optional(boundary.boolean),
   detail: boundary.optional(boundary.string),
   detailLabel: boundary.optional(boundary.string),
@@ -433,6 +436,14 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   });
 
   commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
+  // An approval's Summary (P4): the asker's page or Pane's template, served with no scripts or network.
+  commandRegistry.register('notify:summary-page', async (id: PaneCommandValue, options?: PaneCommandValue): Promise<NotifySummaryPage> => {
+    const wanted = decodeBoundary(id, boundary.nonEmptyString);
+    const theme = decodeOptionalBoundary(options ?? {}, boundary.object({ theme: boundary.optional(boundary.enumeration('light', 'dark')) }))?.theme ?? 'light';
+    const item = notify.queue.snapshot().items.find(candidate => candidate.id === wanted && (candidate.machineId ?? 'local') === 'local');
+    if (!item) throw new PaneError('ERR_NOTIFY_GONE', `There's no approval ${wanted} on this machine any more, so it has no Summary to show. Nothing was changed.`, 'Open the approval again from Approvals.');
+    return summaryPage(item, theme);
+  });
   commandRegistry.register('notify:remote-command', async (command: PaneCommandValue, sender: PaneCommandValue) => {
     // A Mac names itself "studio.local" on its event stream; cards call it "studio".
     const device = decodeBoundary(sender, remoteSenderSchema).device.replace(/\.(local|lan|home|internal)$/i, '');
@@ -773,6 +784,7 @@ function readStatusContext(request: NotifyRequest, newCard: boolean): void {
     request.ui = 'options';
     request.choices = card.choices;
   }
+  if (card.summaryPage) request.summaryPage = request.caller.cwd && !path.isAbsolute(card.summaryPage) ? path.resolve(request.caller.cwd, card.summaryPage) : card.summaryPage;
   if (card.links) {
     const files = card.links.map(link => ('path' in link && request.caller.cwd && !path.isAbsolute(link.path) ? { ...link, path: path.resolve(request.caller.cwd, link.path) } : link));
     request.links = [...request.links ?? [], ...files].slice(0, NOTIFY_LINKS_MAX);

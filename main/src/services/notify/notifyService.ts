@@ -258,6 +258,7 @@ export class NotifyService {
         choices: card.choices,
         questions: card.questions,
         asSent: card.asSent,
+        ...summaryFiles(entry.report?.summaryPath, card.summaryPage),
       });
     }
   }
@@ -760,4 +761,16 @@ function notifySettings(config: AppConfig): NotifySettings {
 
 function appearanceKey(config: AppConfig): string {
   return JSON.stringify([config.appearanceMode, config.theme, config.systemLightTheme, config.systemDarkTheme, config.highContrast]);
+}
+
+/**
+ * A worker card's Summary page and status file (P4): an .html passed as --summary-file is its
+ * Summary; any other file is its status file, whose needs_you may name a Summary page beside it.
+ */
+export function summaryFiles(summaryPath: string | undefined, needsYouPage: string | undefined): { summaryPage?: string; statusFile?: string } {
+  if (summaryPath && /\.html?$/iu.test(summaryPath)) return { summaryPage: summaryPath };
+  const files: { summaryPage?: string; statusFile?: string } = {};
+  if (summaryPath) files.statusFile = summaryPath;
+  if (needsYouPage) files.summaryPage = path.isAbsolute(needsYouPage) || !summaryPath ? needsYouPage : path.resolve(path.dirname(summaryPath), needsYouPage);
+  return files;
 }

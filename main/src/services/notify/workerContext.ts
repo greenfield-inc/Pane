@@ -21,6 +21,7 @@ const needsYouSchema = boundary.object({
   why: boundary.optional(boundary.string),
   questions: boundary.optional(boundary.array(questionSchema)),
   files: boundary.optional(boundary.array(boundary.string)),
+  summary: boundary.optional(boundary.string),
 });
 
 type NeedsYou = NonNullable<ReturnType<typeof needsYouSchema.decode>>;
@@ -32,6 +33,8 @@ export interface StatusCard {
   /** Several questions, each with its own buttons, when every one has options to press. */
   questions?: NotifySubQuestion[];
   links?: NotifyLink[];
+  /** The asker's own Summary page (`summary` in needs_you), as written: maybe relative. */
+  summaryPage?: string;
 }
 
 function cut(text: string): string {
@@ -169,6 +172,7 @@ function cardOf(needsYou: NeedsYou, title: string): StatusCard {
   if (parts.length) card.context = cut(parts.join('\n\n'));
   const links = (needsYou.files ?? []).map(linkOf).filter((link): link is NotifyLink => link !== undefined).slice(0, NOTIFY_LINKS_MAX);
   if (links.length) card.links = links;
+  if (needsYou.summary?.trim() && /\.html?(#.*)?$/iu.test(needsYou.summary.trim())) card.summaryPage = needsYou.summary.trim();
   return card;
 }
 
@@ -190,7 +194,7 @@ export function statusCard(text: string, title: string): StatusCard | undefined 
   const needsYou = needsYouOf(json, body);
   if (needsYou) {
     const card = cardOf(needsYou, title);
-    if (card.context || card.choices || card.questions || card.links) return card;
+    if (card.context || card.choices || card.questions || card.links || card.summaryPage) return card;
   }
   const line = plainLine(json, body);
   return line ? { context: cut(line) } : {};
@@ -223,5 +227,5 @@ export function workerCard(summary: string | undefined, question: string, option
     return { ...card, title: question, warnings: [] };
   }
   const { title, context, choices, questions, links } = admitted.card;
-  return { title, context, choices, questions, links, asSent: admitted.asSent, warnings: admitted.warnings };
+  return { title, context, choices, questions, links, summaryPage: card.summaryPage, asSent: admitted.asSent, warnings: admitted.warnings };
 }

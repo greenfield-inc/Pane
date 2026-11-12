@@ -143,6 +143,9 @@ export interface WorkerQuestion {
   questions?: NotifySubQuestion[];
   /** Set when Pane tidied its question by rule: the question and context as sent. */
   asSent?: NotifyItem['asSent'];
+  /** Its own Summary page, and its status file (read for where it stands). */
+  summaryPage?: string;
+  statusFile?: string;
 }
 
 export interface NotifyQueueEnvironment {
@@ -489,6 +492,8 @@ export class NotifyQueue extends EventEmitter {
     if (question.links?.length) item.links = question.links;
     if (question.context) item.context = question.context;
     if (question.asSent) item.asSent = question.asSent;
+    if (question.summaryPage) item.summaryPage = question.summaryPage;
+    if (question.statusFile) item.statusFile = question.statusFile;
     if (question.questions?.length) item.questions = question.questions;
     else if (question.choices?.length) item.choices = question.choices;
     item.connected = question.connected ?? connectedOf(item, this.machine());

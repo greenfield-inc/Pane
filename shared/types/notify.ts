@@ -96,6 +96,13 @@ export interface NotifyQuestion {
    */
   asSent?: { title: string; context?: string };
   /**
+   * Set by the host: the asker's own Summary page (an .html passed as a worker's --summary-file,
+   * or `summary` in its needs_you). Absent: Pane writes the Summary from the card (P4).
+   */
+  summaryPage?: string;
+  /** Set by the host for a worker's card: its status file, read for "where it stands" on the Summary. */
+  statusFile?: string;
+  /**
    * Set by the chat tab bridge for a built-in question that takes only its own choices: typed text
    * can't answer it and nobody could read it as a reply, so it has no reply box.
    */
@@ -599,3 +606,18 @@ export interface NotifyWindowSize {
   width: number;
   height: number;
 }
+
+/**
+ * `notify:summary-page <id> [{ theme }]`: an approval's Summary as one HTML page, the same on the
+ * Mac, from another machine and on the phone. `page` is the asker's own page; `template` is the
+ * one Pane writes from the card and the worker's status file. Either renders with scripts and
+ * network off: the html carries a Content-Security-Policy that allows neither, and every viewer
+ * also turns scripts off. `missing` says why there is no page (the file was removed, say).
+ */
+export type NotifySummaryPage =
+  | { kind: 'page'; path: string; html: string }
+  | { kind: 'template'; html: string }
+  | { kind: 'missing'; path?: string; message: string };
+
+/** The policy every Summary page is served with: no scripts, no network, inline styles and data: images only. */
+export const NOTIFY_SUMMARY_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
