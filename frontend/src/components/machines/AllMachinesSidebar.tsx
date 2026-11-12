@@ -1,5 +1,5 @@
 import { SessionApprovalsCount } from '../approvals/ApprovalsCount';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Archive, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
 import { AgentStatusDot, PausedGlyph } from '../ui/AgentStatusDot';
 import { Button } from '../ui/Button';
@@ -86,6 +86,9 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
   const onThisMachine = useAllMachinesStore(state => state.entries.find(entry => entry.active)?.id === machineId);
   const switchMenu = useSessionSwitchPreview(onThisMachine ? { kind: 'here' } : { kind: 'machine', machineId }, session?.session.id ?? null, onThisMachine ? 'this machine' : menu?.machine.name || 'that machine');
   const [switching, setSwitching] = useState<{ machineId: string; sessionName: string; preview: SessionChatSwitchPreview } | null>(null);
+  // Where focus was when the menu opened, so Turn on chat tabs, which only closes it, can hand focus back.
+  const opener = useRef<HTMLElement | null>(null);
+  useEffect(() => { if (menu) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }, [menu]);
   return (<>
     <TerminalPopover visible={menu !== null} x={menu?.x ?? 0} y={menu?.y ?? 0} onClose={onClose}>
       <div role="menu" aria-label={`${noun} actions`}>
@@ -110,7 +113,7 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename {noun}…</span>
         </PopoverButton>
         {session && (
-          <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview }); onClose(); }} onClose={onClose} />
+          <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview }); onClose(); }} onClose={() => { opener.current?.focus(); onClose(); }} />
         )}
         <div className="my-1 border-t border-border-primary" />
         <PopoverButton role="menuitem" variant="danger" onClick={() => act(() => runOnMachine(machineId, { type: 'archive', target: ref }, `Could not archive the ${noun}`))}>

@@ -3724,6 +3724,8 @@ test('Switch to chat is always in the Session menu: checking, then why nothing s
   // Turn on closes the menu, so Archive never slides under the pointer; reopened, it checks the Session.
   await menu.getByRole('menuitem', { name: 'Turn on chat tabs' }).click();
   await expect(menu).toHaveCount(0);
+  // Focus goes back to the row, as after Escape, not to the page.
+  await expect(row).toBeFocused();
   await row.click({ button: 'right' });
   await expect(item).toHaveText('Switch to chat…Checking…');
   await expect(item).toHaveAttribute('aria-busy', 'true');

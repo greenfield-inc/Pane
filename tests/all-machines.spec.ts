@@ -384,6 +384,16 @@ test('a Session on the machine the app is on reads like the Sessions sidebar: th
   await page.screenshot({ path: testInfo.outputPath('all-machines-this-machine-off.png') });
   // Read here, as the Sessions sidebar does, not sent to a machine.
   expect(await (await mock(page)).evaluate(api => api.getMachineRuns().map(run => run.command.type))).toEqual([]);
+  await page.keyboard.press('Escape');
+
+  // From the keyboard, Turn on closes the menu and hands focus back to the button that opened it.
+  const actions = page.getByRole('button', { name: 'Actions for Spring sale launch' });
+  await actions.focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('menuitem', { name: 'Turn on chat tabs' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('menuitem', { name: 'Turn on chat tabs' })).toHaveCount(0);
+  await expect(actions).toBeFocused();
 });
 
 test('allowing a permission from the row menu shows what the agent will run on that machine first', async ({ page }, testInfo) => {
