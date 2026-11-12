@@ -767,9 +767,14 @@ function appearanceKey(config: AppConfig): string {
  * A worker card's Summary page and status file (P4): an .html passed as --summary-file is its
  * Summary; any other file is its status file, whose needs_you may name a Summary page beside it.
  */
-export function summaryFiles(summaryPath: string | undefined, needsYouPage: string | undefined): { summaryPage?: string; statusFile?: string } {
+export interface WorkerSummaryFiles {
+  summaryPage?: string;
+  statusFile?: string;
+}
+
+export function summaryFiles(summaryPath: string | undefined, needsYouPage: string | undefined): WorkerSummaryFiles {
   if (summaryPath && /\.html?$/iu.test(summaryPath)) return { summaryPage: summaryPath };
-  const files: { summaryPage?: string; statusFile?: string } = {};
+  const files: WorkerSummaryFiles = {};
   if (summaryPath) files.statusFile = summaryPath;
   if (needsYouPage) files.summaryPage = path.isAbsolute(needsYouPage) || !summaryPath ? needsYouPage : path.resolve(path.dirname(summaryPath), needsYouPage);
   return files;

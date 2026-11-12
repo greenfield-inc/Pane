@@ -131,7 +131,7 @@ the first answer from the terminal, Approvals, the strip or the phone wins.
   **No**, and its alert carries the same two buttons. The question's sheet has
   every choice.
 - **Answered in the terminal**: Pane closes the question and lists it in
-  Answered as "Answered in the terminal".
+  Done today as "Answered in the terminal".
 - **The whole command, plan or tool input** is on the card, so Yes never
   approves something you couldn't read. One over 32,000 characters is too long
   to show: its question offers no choices and says to answer in the terminal.
@@ -206,14 +206,14 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   shows an amber count of the approvals waiting from it. The row's count is the sum of every Session's count plus items not in a
   Session, across saved machines; in the one-machine sidebar its tooltip says
   how many of them wait on other machines. Beside
-  it, the queue has **Waiting** and **Answered** tabs and a **Group by** menu,
+  it, the queue has **Waiting** and **Done today** tabs and a **Group by** menu,
   remembered per device: **Most recent** (the default) lists items flat, newest
   first, each row naming its Session and machine; **By Session** and **By
   project** group them, each group placed by its newest item; **Sidebar order**
   groups by Session in the order the sidebar shows them (the All machines
   arrangement when that's on), following a drag there, with Sessions the
   sidebar doesn't show last, newest first. Each group is boxed under a header
-  with its name, machine mark and waiting count. Waiting sorts by when it was asked and Answered by when it was
+  with its name, machine mark and waiting count. Waiting sorts by when it was asked and Done today by when it was
   answered. A new item never moves the selection or the selected row. The
   list stays compact rows, each with a chip for "Reading your reply…",
   "Getting more context…" or "Updated · ready again". The selected item opens
@@ -224,14 +224,21 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   standalone item shows the asking Pane's tabs, with **Open in Pane** (or
   **Open on <machine>** for another machine's item). Below about 1,100px wide,
   the list stacks above the column. After a pick, the column shows "Sent:
-  …" with **Undo** for 3 seconds; the item then moves to Answered, which lists
-  the last 24 hours, updates (`ui info`) included. Inside Pane there is no
+  …" with **Undo** for 3 seconds; the item then moves to **Done today**,
+  which lists the last 24 hours, updates (`ui info`) included. Under Most
+  recent, once a typed reply is with an agent, Waiting splits into **Waiting
+  on you** and **With the agent**, each row naming who reads the reply. Inside Pane there is no
   floating strip and no Notify row in the sidebar.
 - **The approval column**: one tabbed column for an approval, the same on
   every surface. Its header pages through what's waiting (‹ n of N ›, dots, ←
-  and → while it has focus) and ✕ closes it. Its tabs are **Questions &
-  answers** (the options and one reply box), **Summary** (written by Pane from
-  the approval), each linked file (in the document viewer), URL (in the
+  and → while it has focus) and ✕ closes it. Its tabs are **Decide** (the
+  subtitle, each question with its why and options, recommended ones
+  pre-selected, the references and one reply box that grows up to half the
+  column), **Summary** (one HTML page: the asker's own, an `.html` passed as a
+  worker's `--summary-file` or `summary` in `needs_you`, else one Pane writes
+  from the card and the worker's status file; it renders with scripts and
+  network off, the same on the Mac, from another machine and on the phone),
+  each linked file (in the document viewer), URL (in the
   in-app browser) or other approval (in place, with Back), and the chat where
   it was asked, left out when you're already in it. In a **Session**, the
   column lays over the Session's right split view without resizing it, and ✕
@@ -240,9 +247,15 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   sidebar (Overview, Files, Changes) is never covered. The Session's title
   bar shows **Approvals n · n ready**, and a Session row's count in the
   sidebar opens the newest ready-again approval, or the first waiting one. A
-  Session's orchestrator chat docks light cards above its composer: title,
-  one line, a one-question approval's options as buttons, and **Open on the
-  right**. In **Autopilot**, the column covers the Stack (✕ "Back to the
+  Session's orchestrator chat docks one compact card above its composer:
+  who asks, the title and subtitle across the card, and a bottom row with ‹ n
+  of m ›, the reference count, Summary and **Open**; its pager stays in step
+  with the column's. The chat's own AskUserQuestion isn't docked: the chat
+  already shows Claude's card, and Approvals and the phone keep the copy.
+  **Send** closes the column, and a status line in the chat names the agent
+  reading the reply ("okta-sso-account is reading your reply to Q-42"), then
+  how it was taken, with **Reopen**. "Taken as your answer" shows only on that
+  approval, its row and that line. In **Autopilot**, the column covers the Stack (✕ "Back to the
   Stack"), and Autopilot's decision cards gain **Open**. In a Session and in
   Autopilot, the chat tab is live too: an orchestrator's item shows its
   Session, and a worker's or a Pane's item shows the tab that asked.
@@ -386,9 +399,9 @@ so older items simply have none.
 | State | Shows |
 | --- | --- |
 | Waiting, no reply | Waiting |
-| Reply delivered, not yet taken | "Reading your reply…" ("Autopilot is reading your reply…") |
+| Reply delivered, not yet taken | "<reader> is reading your reply…", naming the reader for every kind ("okta-sso-account", "The Doozy orchestrator", "Autopilot") |
 | Taken as an answer | "Taken as your answer", with **It was a question** |
-| Taken as a question | "Taken as a question: asking <reader>" and its status ("Getting more context…"), with **It was my answer** |
+| Taken as a question | "Taken as a question: <reader> is getting more context", with its status when the reader gave one, and **It was my answer** |
 | Updated | "Updated · ready again": your question quoted ("You asked"), What changed and by whom, choices marked NEW, REWORDED (the old label struck) or REMOVED, and a collapsed **Earlier version** |
 | No reader | "No agent can read replies right now. You can still pick an option." |
 | A chat tab's built-in question | "Sent to <agent>": the typed reply is its answer, so there is no fix |
@@ -414,7 +427,7 @@ An approval exists only while you can act on it and someone can take the answer
 | Pane restarts | Items whose asking tab still exists stay waiting. |
 | Unanswered for 3 days | Stale: moved to a collapsed **Stale** group at the bottom of Waiting. It never rings or pushes again. |
 | You close one | One action on any card, with an optional reason. Its asker's open call returns "The person closed this question.", or `closed: Q-n (by you)` is typed into its tab. **Reopen** puts it back. |
-| You or Autopilot answered | Answered lists it for 24 hours. |
+| You or Autopilot answered | Done today lists it for 24 hours. |
 
 The store keeps answered and closed items 7 days for the record and for
 orchestrators catching up on decisions (`runpane inbox`), then drops them. On the

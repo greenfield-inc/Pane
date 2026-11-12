@@ -76,13 +76,13 @@ function stateLabel(item: NotifyItem): string {
   return 'waiting on you';
 }
 
-const PALETTE: Record<SummaryTheme, string> = {
+const PALETTE = {
   light: '--bg:#ffffff;--text:#1f2328;--muted:#59636e;--line:#d1d9e0;--tint:#eef6ee;--accent:#1a7f37;--chip:#9a6700;--chipbg:#fff8c5;--code:#f6f8fa',
   dark: '--bg:#0d1117;--text:#e6edf3;--muted:#9198a1;--line:#3d444d;--tint:#12261e;--accent:#3fb950;--chip:#d29922;--chipbg:#2e2a1a;--code:#161b22',
-};
+} satisfies Record<SummaryTheme, string>;
 
 /** The page Pane writes when the asker sent none: the card, each option and its consequence, where it stands, references. */
-export function summaryTemplate(item: NotifyItem, theme: SummaryTheme = 'light'): string {
+function summaryTemplate(item: NotifyItem, theme: SummaryTheme = 'light'): string {
   const asked = new Date(item.createdAt);
   const time = `${String(asked.getHours()).padStart(2, '0')}:${String(asked.getMinutes()).padStart(2, '0')}`;
   const qn = /^(Q-\d+)\b/u.exec(item.title)?.[1];

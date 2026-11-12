@@ -631,7 +631,7 @@ describe('Approvals items, through the registered handlers', () => {
     const pane = await startWithSessions();
     const caller = { paneId: 'loose', panelId: 'loose-panel' };
     const choices = [{ label: 'Ship', detail: 'Goes out tonight.', recommended: true }, { label: 'Wait', detail: 'Ships Monday.' }];
-    const refused = async (request: Record<string, PaneCommandValue>) => pane.registry.invoke('runpane:notify', [{ ui: 'options', caller, choices, context: 'CI is green.', ...request }]).then(() => undefined, (error: unknown) => error);
+    const refused = async (request: Record<string, PaneCommandValue>) => pane.registry.invoke('runpane:notify', [{ ui: 'options', caller, choices, context: 'CI is green.', ...request }]).then(() => undefined, (error: PaneError) => error);
     expect(await refused({ title: 'x'.repeat(200) })).toMatchObject({ code: 'ERR_NOTIFY_TITLE', next: expect.stringContaining('--context') });
     expect(await refused({ title: 'Ship it?\nCI is green.' })).toMatchObject({ code: 'ERR_NOTIFY_TITLE' });
     expect(await refused({ title: 'Ship it?', choices: choices.map(choice => ({ ...choice, recommended: true })) })).toMatchObject({ code: 'ERR_NOTIFY_RECOMMENDED' });

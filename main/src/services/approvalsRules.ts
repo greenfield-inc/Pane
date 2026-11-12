@@ -6,7 +6,7 @@
  */
 
 /** Which card to use: Claude's own card for a quick question in the chat the person is in, an approval for everything else. */
-export const WHICH_CARD_RULE = [
+const WHICH_CARD_RULE = [
   '### Which card',
   '',
   "- **Claude's own card (AskUserQuestion)** only when all of these hold: you are answering the person's latest message in the chat they are typing in; the answer only steers this turn (nothing recorded as a decision, nothing for another agent, nothing irreversible or outward-facing); and the question stands on its own, without context, links or a Summary. Examples: \"Update the snapshot too, or leave it?\", \"Which of these two files did you mean?\"",
@@ -16,7 +16,7 @@ export const WHICH_CARD_RULE = [
 ].join('\n');
 
 /** What a good approval card holds. Pane refuses the two clear mistakes and warns on the rest. */
-export const CARD_CONTRACT = [
+const CARD_CONTRACT = [
   '### The card',
   '',
   '- **Title**: what you need, about 80 to 100 characters on one line. Pane refuses a title over 160 characters or with a line break.',
@@ -27,7 +27,7 @@ export const CARD_CONTRACT = [
 ].join('\n');
 
 /** After the person replies: say how you took it, and update the card when it was a question. */
-export const REPLY_RULE = [
+const REPLY_RULE = [
   '### Replies',
   '',
   '- A typed reply may be an answer or a question. Whoever reads it runs `runpane notify --took <id|Q-n> answer` or `--took <id|Q-n> question`.',

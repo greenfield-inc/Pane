@@ -13,11 +13,11 @@ import type { NotifyChoice, NotifyLink, NotifySubQuestion } from '../../../../sh
 /** A title past this is refused. */
 export const CARD_TITLE_REFUSE = 160;
 /** A title past this gets a warning. */
-export const CARD_TITLE_WARN = 100;
+const CARD_TITLE_WARN = 100;
 /** A subtitle past this gets a warning. */
-export const CARD_SUBTITLE_WARN = 240;
+const CARD_SUBTITLE_WARN = 240;
 /** More options than this get a warning. */
-export const CARD_OPTIONS_WARN = 4;
+const CARD_OPTIONS_WARN = 4;
 
 export interface CardFields {
   title: string;
@@ -27,7 +27,7 @@ export interface CardFields {
   links?: NotifyLink[];
 }
 
-export interface CardRefusal {
+interface CardRefusal {
   code: 'ERR_NOTIFY_TITLE' | 'ERR_NOTIFY_RECOMMENDED';
   message: string;
   next: string;

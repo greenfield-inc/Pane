@@ -1920,7 +1920,9 @@ export function registerRunpaneHandlers(
         report: journalAgentReport(report),
       });
       const sessionIds = await services.orchestrationSessionManager?.recordAgentReport(panel.id, report) ?? [];
-      return { ok: true, paneId: panel.sessionId, panelId: panel.id, report, sessionIds, liveWatchers, ...(warnings.length ? { warnings } : {}) };
+      const result: RunpaneReportResult = { ok: true, paneId: panel.sessionId, panelId: panel.id, report, sessionIds, liveWatchers };
+      if (warnings.length) result.warnings = warnings;
+      return result;
     }, result => ({ paneId: result.paneId, panelId: result.panelId, ok: result.ok }));
   });
 

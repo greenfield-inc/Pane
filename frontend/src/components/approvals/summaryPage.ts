@@ -17,7 +17,7 @@ const templateSchema = boundary.object({ kind: boundary.literal('template'), htm
 const missingSchema = boundary.object({ kind: boundary.literal('missing'), message: boundary.string });
 
 /** The id the holding machine knows the approval by: a saved machine's card is `<machineId>:<its id>`. */
-export function hostItemId(item: Pick<NotifyItem, 'id' | 'machineId'>): string {
+function hostItemId(item: Pick<NotifyItem, 'id' | 'machineId'>): string {
   const machine = item.machineId;
   return machine && machine !== 'local' && item.id.startsWith(`${machine}:`) ? item.id.slice(machine.length + 1) : item.id;
 }
