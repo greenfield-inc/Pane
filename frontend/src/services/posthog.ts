@@ -76,6 +76,7 @@ function contextProperties(identity = currentIdentity): Record<string, JsonValue
     app_version: identity.appVersion,
     platform: identity.platform,
     electron_version: identity.electronVersion,
+    ...identity.environment,
     web_attributed: Boolean(identity.webDistinctId || identity.webAttributionPresent),
     web_attribution_present: identity.webAttributionPresent,
     is_first_launch: identity.isFirstLaunch,
