@@ -127,7 +127,10 @@ Preview components never enter the editable auto-save path, even on errors.
   upgrade, preserving ordering across table rebuilds. Verify fresh and older
   databases in isolated tests; a standalone SQL file does not run an upgrade.
 - `config.json` holds app settings (`main/src/services/configManager.ts`,
-  types in `main/src/types/config.ts`).
+  types in `main/src/types/config.ts`). It can be edited outside Pane while
+  Pane runs: every save re-reads the file and writes only the keys it changes,
+  a watcher reloads outside edits and emits `config-updated`, and a file that
+  does not parse is never written over.
 - Worktrees go in `<repo>/worktrees/` unless the project sets another folder
   (`worktreeManager.ts`). A worktree on a remote-tracking base fetches that
   branch first (`worktreeBaseRefresh.ts`: capped at about 10 s, shared by

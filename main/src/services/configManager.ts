@@ -11,6 +11,7 @@ import fs from 'fs/promises';
 import { watch, type FSWatcher } from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { isDeepStrictEqual } from 'util';
 import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
@@ -22,6 +23,7 @@ import {
   type JsonValue,
 } from '../../../shared/validation/boundaryDecoder';
 import {
+  type KeyboardShortcutOverrides,
   collectActiveBindings,
   findChordConflicts,
   normalizeKeyboardShortcutOverrides,
@@ -67,6 +69,43 @@ function decodeMachineMarks(update: MachineMarkOverrides): MachineMarkOverrides 
   return marks;
 }
 
+const MAX_COMMIT_ATTEMPTS = 5;
+const WATCH_DEBOUNCE_MS = 150;
+const INVALID_CONFIG_RETRY_MS = 2_000;
+
+type DiskRead = { kind: 'missing' } | { kind: 'invalid'; reason: string } | { kind: 'ok'; text: string };
+type ConfigKey = keyof AppConfig;
+
+/** The updates whose value differs from `known`: what the caller is changing. */
+function pickChanged(known: AppConfig, updates: Partial<AppConfig>): Partial<AppConfig> {
+  const changed: Partial<AppConfig> = {};
+  // SAFETY: Object.keys of a Partial<AppConfig> are AppConfig keys.
+  for (const key of Object.keys(updates) as ConfigKey[]) {
+    if (!isDeepStrictEqual(updates[key], known[key])) Object.assign(changed, { [key]: updates[key] });
+  }
+  return changed;
+}
+
+/** `current` with the override ids that `update` sets or removes relative to `known`. */
+function mergeChangedOverrides(
+  known: KeyboardShortcutOverrides | undefined,
+  current: KeyboardShortcutOverrides | undefined,
+  update: KeyboardShortcutOverrides | undefined,
+): KeyboardShortcutOverrides | undefined {
+  const updateIds = decodeOptionalBoundary(update, boundary.jsonObject);
+  if (!updateIds || !update) return update;
+  const knownIds = { ...decodeOptionalBoundary(known, boundary.jsonObject) };
+  const merged = { ...decodeOptionalBoundary(current, boundary.jsonObject) };
+  for (const [id, value] of Object.entries(updateIds)) {
+    if (!isDeepStrictEqual(value, knownIds[id])) merged[id] = value;
+  }
+  for (const id of Object.keys(knownIds)) {
+    if (!(id in updateIds)) delete merged[id];
+  }
+  // SAFETY: every value came from one of the three override maps; the map is normalized again at runtime and kept verbatim like a hand edit.
+  return merged as KeyboardShortcutOverrides;
+}
+
 export class ConfigManager extends EventEmitter {
   private lastLoggedShortcutDiagnostics = '';
   private config: AppConfig;
@@ -76,6 +115,11 @@ export class ConfigManager extends EventEmitter {
   private lastConfigJson: string = '';
   private saveConfigQueue: Promise<void> = Promise.resolve();
   private hasReadConfigFile = false;
+  private diskCheckTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Keys changed in memory while config.json did not parse; saved once it does. */
+  private pendingKeys = new Set<ConfigKey>();
+  /** Pane's copy before the first change held back while config.json did not parse. */
+  private heldBase: AppConfig | null = null;
 
   constructor(defaultGitPath?: string) {
     super();
@@ -176,162 +220,217 @@ export class ConfigManager extends EventEmitter {
   }
 
   async initialize(): Promise<void> {
-    await this.enqueueConfigWrite(() => this.initializeFromDisk());
+    const { restamped } = await this.enqueueConfigWrite(() => this.initializeFromDisk(true));
+    // Lets key sharing pick up a key edited by hand.
+    if (restamped) this.emit('config-updated', this.config);
   }
 
-  private async initializeFromDisk(): Promise<void> {
-    // Ensure the config directory exists
+  /**
+   * Reads config.json and loads it if it changed since Pane last saw it. Only
+   * startup persists a migration here: a reload writes nothing, so it can never
+   * race an outside edit, and its migration is saved with the next update.
+   */
+  private async initializeFromDisk(persistMigration: boolean): Promise<{ changed: boolean; restamped: boolean }> {
+    const unchanged = { changed: false, restamped: false };
     await fs.mkdir(this.configDir, { recursive: true });
-    const lastRead = this.hasReadConfigFile ? this.config : null;
-
-    try {
-      const data = await fs.readFile(this.configPath, 'utf-8');
-      // SAFETY: initialize immediately normalizes boundary-sensitive fields before assigning the parsed config.
-      const loadedConfig = JSON.parse(data) as AppConfig;
-      // Drop keys from the removed Stravu integration so they leave the file on the next save.
-      for (const legacyKey of ['stravuApiKey', 'stravuServerUrl']) {
-        Reflect.deleteProperty(loadedConfig, legacyKey);
-      }
-      const normalizedAppearance = normalizeAppearance(loadedConfig);
-      for (const diagnostic of normalizedAppearance.diagnostics) {
-        console.error(`[ConfigManager] appearance: ${diagnostic}`);
-      }
-      
-      // Migrate legacy notification fields from older config files.
-      // notifyWhenBackgrounded -> enabled (if enabled is not explicitly set)
-      // notifyWhenViewingOtherPanel is dropped silently.
-      const incomingNotifications = decodeBoundary(
-        loadedConfig.notifications,
-        boundary.optional(boundary.object({
-          playSound: boundary.optional(boundary.boolean),
-          enabled: boundary.optional(boundary.boolean),
-          notifyWhenBackgrounded: boundary.optional(boundary.boolean),
-          notifyWhenViewingOtherPanel: boundary.optional(boundary.boolean),
-        })),
-      );
-      const migratedNotifications = incomingNotifications
-        ? {
-            playSound: incomingNotifications.playSound ?? this.config.notifications!.playSound,
-            enabled: incomingNotifications.enabled ?? incomingNotifications.notifyWhenBackgrounded ?? this.config.notifications!.enabled,
-          }
-        : this.config.notifications!;
-
-      // Merge loaded config with defaults, ensuring nested settings exist
-      this.config = {
-        ...this.config,
-        ...loadedConfig,
-        ...normalizedAppearance.appearance,
-        notifications: migratedNotifications,
-        sessionCreationPreferences: {
-          ...this.config.sessionCreationPreferences,
-          ...loadedConfig.sessionCreationPreferences,
-          selectedTools: {
-            ...this.config.sessionCreationPreferences?.selectedTools,
-            ...loadedConfig.sessionCreationPreferences?.selectedTools
-          },
-          claudeConfig: {
-            ...this.config.sessionCreationPreferences?.claudeConfig,
-            ...loadedConfig.sessionCreationPreferences?.claudeConfig
-          }
-        },
-        analytics: {
-          ...this.config.analytics!,
-          ...loadedConfig.analytics
-        },
-        agentContext: {
-          ...this.config.agentContext!,
-          ...loadedConfig.agentContext
-        },
-        defaultOrchestratorAgent: normalizePaneChatAgent(
-          loadedConfig.defaultOrchestratorAgent ?? this.config.defaultOrchestratorAgent,
-        ),
-        // A config saved without the key had chat tabs off; only a fresh install starts with them on (D-329).
-        chatTabsEnabled: loadedConfig.chatTabsEnabled ?? false,
-        // Configs saved before the VS Code keymap (D-236) get a one-time notice of the moved keys.
-        keymapNotice: loadedConfig.keymapNotice ?? 'pending',
-        // Configs saved before this setting existed kept the machine awake while plugged in.
-        keepAwakeWhilePluggedIn: loadedConfig.keepAwakeWhilePluggedIn ?? true,
-        remoteDaemon: normalizeRemoteDaemonConfig(loadedConfig.remoteDaemon),
-        // Use !== undefined to distinguish "user cleared all entries" (empty array → preserve)
-        // from "field absent in config file" (→ use defaults)
-        worktreeFileSync: loadedConfig.worktreeFileSync !== undefined
-          ? loadedConfig.worktreeFileSync
-          : DEFAULT_WORKTREE_FILE_SYNC_ENTRIES
-      };
-
-      let shouldPersistMigration = normalizedAppearance.migrated;
-      if (loadedConfig.agentContext?.registerMcp === undefined) {
-        this.config.agentContext = { ...this.config.agentContext, registerMcp: true };
-        shouldPersistMigration = true;
-        console.log('[ConfigManager] Pane now registers its MCP server with Claude Code, Codex, and Cursor.');
-      }
-      if ((loadedConfig.agentContext?.defaultsVersion ?? 0) < AGENT_CONTEXT_DEFAULTS_VERSION) {
-        // Version 2 stopped editing repositories by default. Configs saved under
-        // the old default carry managedAgentsMd: true without the user choosing
-        // it, so turn it off once; the caller then removes Pane's section from
-        // repos exactly as the settings toggle does. A later opt-in sticks.
-        this.config.agentContext = {
-          ...this.config.agentContext,
-          managedAgentsMd: false,
-          defaultsVersion: AGENT_CONTEXT_DEFAULTS_VERSION,
-          cleanupPending: true,
-        };
-        shouldPersistMigration = true;
-      }
-      if (this.config.analytics?.posthogHost === LEGACY_POSTHOG_HOST) {
-        this.config.analytics.posthogHost = DEFAULT_POSTHOG_HOST;
-        shouldPersistMigration = true;
-      }
-      const restamped = restampSharedCredentials(this.config, 'untimed');
-      if (restamped) {
-        this.config.sharedCredentials = restamped;
-        shouldPersistMigration = true;
-      }
-      // A switch that changed on disk since the last read here was edited by hand.
-      const switchRestamped = lastRead ? restampNotifySwitch(lastRead, this.config) : null;
-      if (switchRestamped !== null) {
-        this.config.notifyEnabledChangedAt = switchRestamped;
-        shouldPersistMigration = true;
-      }
-      if (!this.applyKeyboardShortcutOverrides(loadedConfig.keyboardShortcutOverrides)) {
-        delete this.config.keyboardShortcutOverrides;
-      }
-      if (shouldPersistMigration) {
-        await this.writeConfigToDisk(this.config);
-      }
-      this.hasReadConfigFile = true;
-      // Lets key sharing pick up a key edited by hand.
-      if (restamped || switchRestamped !== null) this.emit('config-updated', this.config);
-    } catch (error: unknown) {
-      let errorCode: string | undefined;
-      try {
-        errorCode = decodeBoundary(error, boundary.object({
-          code: boundary.optional(boundary.string),
-        })).code;
-      } catch {
-        errorCode = undefined;
-      }
-      const isNotFound = errorCode === 'ENOENT';
-      if (isNotFound) {
+    for (let attempt = 0; ; attempt++) {
+      const disk = await this.readConfigFile();
+      if (disk.kind === 'missing') {
         // Config file doesn't exist — create with defaults
-        await this.writeConfigToDisk(this.config);
-      } else {
-        // Config exists but is corrupted — log and keep defaults in memory
-        // Do NOT overwrite the file (user might want to recover it)
-        console.error('[ConfigManager] Failed to parse config file, using defaults:', error);
+        if (await this.commitConfig(this.config, disk) === 'conflict' && attempt < MAX_COMMIT_ATTEMPTS) continue;
+        return unchanged;
       }
+      if (disk.kind === 'invalid') {
+        // Do NOT overwrite the file (user might want to recover it)
+        this.logInvalidConfig(disk.reason);
+        return unchanged;
+      }
+      if (this.hasReadConfigFile && disk.text === this.lastConfigJson) return unchanged;
+      const loaded = this.tryLoadConfigText(disk.text);
+      if (!loaded) return unchanged;
+      const { persist, emit } = loaded;
+      if (persistMigration && persist && await this.commitConfig(this.config, disk) === 'conflict' && attempt < MAX_COMMIT_ATTEMPTS) continue;
+      return { changed: true, restamped: emit };
     }
   }
 
-  private async writeConfigToDisk(config: AppConfig): Promise<void> {
+  /** loadConfigText, logging instead of throwing when the file cannot be decoded. */
+  private tryLoadConfigText(data: string) {
+    try {
+      return this.loadConfigText(data);
+    } catch (error) {
+      this.logInvalidConfig(error instanceof Error ? error.message : 'could not be decoded');
+      return null;
+    }
+  }
+
+  /** Normalizes config.json's text onto the in-memory config. Throws when a field cannot be decoded. */
+  private loadConfigText(data: string) {
+    const lastRead = this.hasReadConfigFile ? this.config : null;
+    // SAFETY: initialize immediately normalizes boundary-sensitive fields before assigning the parsed config.
+    const loadedConfig = JSON.parse(data) as AppConfig;
+    // Drop keys from the removed Stravu integration so they leave the file on the next save.
+    for (const legacyKey of ['stravuApiKey', 'stravuServerUrl']) {
+      Reflect.deleteProperty(loadedConfig, legacyKey);
+    }
+    const normalizedAppearance = normalizeAppearance(loadedConfig);
+    for (const diagnostic of normalizedAppearance.diagnostics) {
+      console.error(`[ConfigManager] appearance: ${diagnostic}`);
+    }
+    
+    // Migrate legacy notification fields from older config files.
+    // notifyWhenBackgrounded -> enabled (if enabled is not explicitly set)
+    // notifyWhenViewingOtherPanel is dropped silently.
+    const incomingNotifications = decodeBoundary(
+      loadedConfig.notifications,
+      boundary.optional(boundary.object({
+        playSound: boundary.optional(boundary.boolean),
+        enabled: boundary.optional(boundary.boolean),
+        notifyWhenBackgrounded: boundary.optional(boundary.boolean),
+        notifyWhenViewingOtherPanel: boundary.optional(boundary.boolean),
+      })),
+    );
+    const migratedNotifications = incomingNotifications
+      ? {
+          playSound: incomingNotifications.playSound ?? this.config.notifications!.playSound,
+          enabled: incomingNotifications.enabled ?? incomingNotifications.notifyWhenBackgrounded ?? this.config.notifications!.enabled,
+        }
+      : this.config.notifications!;
+
+    // Merge loaded config with defaults, ensuring nested settings exist
+    this.config = {
+      ...this.config,
+      ...loadedConfig,
+      ...normalizedAppearance.appearance,
+      notifications: migratedNotifications,
+      sessionCreationPreferences: {
+        ...this.config.sessionCreationPreferences,
+        ...loadedConfig.sessionCreationPreferences,
+        selectedTools: {
+          ...this.config.sessionCreationPreferences?.selectedTools,
+          ...loadedConfig.sessionCreationPreferences?.selectedTools
+        },
+        claudeConfig: {
+          ...this.config.sessionCreationPreferences?.claudeConfig,
+          ...loadedConfig.sessionCreationPreferences?.claudeConfig
+        }
+      },
+      analytics: {
+        ...this.config.analytics!,
+        ...loadedConfig.analytics
+      },
+      agentContext: {
+        ...this.config.agentContext!,
+        ...loadedConfig.agentContext
+      },
+      defaultOrchestratorAgent: normalizePaneChatAgent(
+        loadedConfig.defaultOrchestratorAgent ?? this.config.defaultOrchestratorAgent,
+      ),
+      // A config saved without the key had chat tabs off; only a fresh install starts with them on (D-329).
+      chatTabsEnabled: loadedConfig.chatTabsEnabled ?? false,
+      // Configs saved before the VS Code keymap (D-236) get a one-time notice of the moved keys.
+      keymapNotice: loadedConfig.keymapNotice ?? 'pending',
+      // Configs saved before this setting existed kept the machine awake while plugged in.
+      keepAwakeWhilePluggedIn: loadedConfig.keepAwakeWhilePluggedIn ?? true,
+      remoteDaemon: normalizeRemoteDaemonConfig(loadedConfig.remoteDaemon),
+      // Use !== undefined to distinguish "user cleared all entries" (empty array → preserve)
+      // from "field absent in config file" (→ use defaults)
+      worktreeFileSync: loadedConfig.worktreeFileSync !== undefined
+        ? loadedConfig.worktreeFileSync
+        : DEFAULT_WORKTREE_FILE_SYNC_ENTRIES
+    };
+
+    let shouldPersistMigration = normalizedAppearance.migrated;
+    if (loadedConfig.agentContext?.registerMcp === undefined) {
+      this.config.agentContext = { ...this.config.agentContext, registerMcp: true };
+      shouldPersistMigration = true;
+      console.log('[ConfigManager] Pane now registers its MCP server with Claude Code, Codex, and Cursor.');
+    }
+    if ((loadedConfig.agentContext?.defaultsVersion ?? 0) < AGENT_CONTEXT_DEFAULTS_VERSION) {
+      // Version 2 stopped editing repositories by default. Configs saved under
+      // the old default carry managedAgentsMd: true without the user choosing
+      // it, so turn it off once; the caller then removes Pane's section from
+      // repos exactly as the settings toggle does. A later opt-in sticks.
+      this.config.agentContext = {
+        ...this.config.agentContext,
+        managedAgentsMd: false,
+        defaultsVersion: AGENT_CONTEXT_DEFAULTS_VERSION,
+        cleanupPending: true,
+      };
+      shouldPersistMigration = true;
+    }
+    if (this.config.analytics?.posthogHost === LEGACY_POSTHOG_HOST) {
+      this.config.analytics.posthogHost = DEFAULT_POSTHOG_HOST;
+      shouldPersistMigration = true;
+    }
+    const restamped = restampSharedCredentials(this.config, 'untimed');
+    if (restamped) {
+      this.config.sharedCredentials = restamped;
+      shouldPersistMigration = true;
+    }
+    // A switch that changed on disk since the last read here was edited by hand.
+    const switchRestamped = lastRead ? restampNotifySwitch(lastRead, this.config) : null;
+    if (switchRestamped !== null) {
+      this.config.notifyEnabledChangedAt = switchRestamped;
+      shouldPersistMigration = true;
+    }
+    if (!this.applyKeyboardShortcutOverrides(loadedConfig.keyboardShortcutOverrides)) {
+      delete this.config.keyboardShortcutOverrides;
+    }
+    this.hasReadConfigFile = true;
+    this.lastConfigJson = data;
+    return { persist: shouldPersistMigration, emit: restamped !== null || switchRestamped !== null };
+  }
+
+  private async readConfigFile(): Promise<DiskRead> {
+    let text: string;
+    try {
+      text = await fs.readFile(this.configPath, 'utf-8');
+    } catch (error) {
+      const { code, message } = decodeBoundary(error, boundary.object({
+        code: boundary.optional(boundary.string),
+        message: boundary.optional(boundary.string),
+      }));
+      if (code === 'ENOENT') return { kind: 'missing' };
+      return { kind: 'invalid', reason: message ?? 'unreadable' };
+    }
+    try {
+      JSON.parse(text);
+    } catch (error) {
+      return { kind: 'invalid', reason: error instanceof Error ? error.message : 'not JSON' };
+    }
+    return { kind: 'ok', text };
+  }
+
+  private logInvalidConfig(reason: string): void {
+    console.error(
+      `[ConfigManager] ${this.configPath} could not be read or is not valid JSON, so Pane is not saving over it. ` +
+      'Settings changed meanwhile stay in memory and are saved once the file parses again.',
+      reason,
+    );
+  }
+
+  /**
+   * Atomically replaces config.json with `config`, unless the file changed since
+   * `basis` was read: then nothing is written and the caller re-reads and retries.
+   */
+  private async commitConfig(config: AppConfig, basis: DiskRead): Promise<'written' | 'conflict'> {
     const configJson = JSON.stringify(config, null, 2);
     await fs.mkdir(this.configDir, { recursive: true });
     const tmpPath = `${this.configPath}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
-
     try {
       await fs.writeFile(tmpPath, configJson);
+      const now = await this.readConfigFile();
+      const unchanged = now.kind === basis.kind && (now.kind !== 'ok' || (basis.kind === 'ok' && now.text === basis.text));
+      if (!unchanged) {
+        await fs.unlink(tmpPath).catch(() => {});
+        return 'conflict';
+      }
       await fs.rename(tmpPath, this.configPath);
+      // What Pane wrote is what it has read: the watcher and the next write skip reloading it.
       this.lastConfigJson = configJson;
+      this.hasReadConfigFile = true;
+      return 'written';
     } catch (error) {
       await fs.unlink(tmpPath).catch(() => {});
       throw error;
@@ -344,89 +443,76 @@ export class ConfigManager extends EventEmitter {
     return queuedWrite;
   }
 
-  private async saveConfig(): Promise<void> {
-    await this.enqueueConfigWrite(() => this.writeConfigToDisk(this.config));
-  }
-
   getConfig(): AppConfig {
     return this.config;
   }
 
   /**
    * Reload config from disk. Use this when external processes (like setup scripts)
-   * may have modified the config file.
+   * may have modified the config file. Emits 'config-updated' when it changed.
    */
   async reloadFromDisk(): Promise<AppConfig> {
-    await this.initialize();
-    console.log('[ConfigManager] Reloaded config from disk');
+    const { changed } = await this.enqueueConfigWrite(() => this.initializeFromDisk(false));
+    if (changed) {
+      console.log('[ConfigManager] Reloaded config from disk');
+      this.emit('config-updated', this.config);
+    }
     return this.config;
   }
 
   /**
-   * Start watching config file for external changes (e.g., from setup scripts).
-   * Emits 'config-updated' when the file changes.
+   * Watch config.json for outside edits (by hand, a script, another agent):
+   * each settles for a moment, then reloads and emits 'config-updated'. Pane's
+   * own writes are recognised by their content and ignored.
    */
   startWatching(): void {
-    if (this.fileWatcher) return; // Already watching
-
+    if (this.fileWatcher) return;
+    const fileName = path.basename(this.configPath);
     try {
-      this.lastConfigJson = JSON.stringify(this.config);
-
-      const handleFileChange = async () => {
-        try {
-          // Small delay to let the file finish writing
-          await new Promise(resolve => setTimeout(resolve, 100));
-
-          const data = await fs.readFile(this.configPath, 'utf-8');
-
-          // Only emit if content actually changed
-          if (data !== this.lastConfigJson) {
-            this.lastConfigJson = data;
-            await this.initialize();
-            console.log('[ConfigManager] Config file changed externally, reloaded');
-            this.emit('config-updated', this.config);
-          }
-        } catch (err) {
-          console.error('[ConfigManager] Error reloading config after file change:', err);
-        }
-      };
-
-      const setupWatcher = () => {
-        if (this.fileWatcher) {
-          this.fileWatcher.close();
-        }
-
-        this.fileWatcher = watch(this.configPath, { persistent: false }, async (eventType) => {
-          // Handle both 'change' and 'rename' events
-          // 'rename' occurs when using atomic writes (tmp + mv pattern)
-          if (eventType === 'change' || eventType === 'rename') {
-            await handleFileChange();
-
-            // On rename, the watched inode may have changed, so reattach the watcher
-            if (eventType === 'rename') {
-              console.log('[ConfigManager] Config file renamed/replaced, reattaching watcher');
-              // Small delay before reattaching to let filesystem settle
-              setTimeout(() => setupWatcher(), 200);
-            }
-          }
-        });
-      };
-
-      setupWatcher();
+      // The directory, not the file: an atomic replace (tmp + rename) swaps the file's inode.
+      this.fileWatcher = watch(this.configDir, { persistent: false }, (_eventType, changed) => {
+        if (changed !== null && changed !== fileName) return;
+        this.scheduleDiskCheck(WATCH_DEBOUNCE_MS);
+      });
+      this.fileWatcher.on('error', (error) => console.error('[ConfigManager] Config file watcher failed:', error));
       console.log('[ConfigManager] Watching config file for external changes');
     } catch (err) {
       console.error('[ConfigManager] Failed to start file watcher:', err);
     }
   }
 
-  /**
-   * Stop watching config file.
-   */
   stopWatching(): void {
+    if (this.diskCheckTimer) clearTimeout(this.diskCheckTimer);
+    this.diskCheckTimer = null;
     if (this.fileWatcher) {
       this.fileWatcher.close();
       this.fileWatcher = null;
       console.log('[ConfigManager] Stopped watching config file');
+    }
+  }
+
+  /** Reloads after an outside edit, and saves settings held back while the file did not parse. */
+  private scheduleDiskCheck(delayMs: number): void {
+    if (this.diskCheckTimer) clearTimeout(this.diskCheckTimer);
+    this.diskCheckTimer = setTimeout(() => {
+      this.diskCheckTimer = null;
+      void this.checkDisk();
+    }, delayMs);
+    this.diskCheckTimer.unref?.();
+  }
+
+  private async checkDisk(): Promise<void> {
+    try {
+      if (this.pendingKeys.size > 0) {
+        await this.updateConfigWith(() => ({}));
+        return;
+      }
+      if ((await this.enqueueConfigWrite(() => this.initializeFromDisk(false))).changed) {
+        console.log('[ConfigManager] Config file changed externally, reloaded');
+        this.emit('config-updated', this.config);
+      }
+    } catch (err) {
+      console.error('[ConfigManager] Error reloading config after file change:', err);
     }
   }
 
@@ -438,58 +524,133 @@ export class ConfigManager extends EventEmitter {
     return this.updateConfigWith(() => updates);
   }
 
+  /**
+   * Applies `update` to config.json as it is on disk now, not to Pane's last
+   * copy: the file is re-read first, only the keys `update` changes are
+   * applied, and the write is retried if the file changes before it lands.
+   * Edits made outside Pane to other keys survive. If the file does not parse,
+   * it is left alone: the change is kept in memory and saved once it does.
+   */
   async updateConfigWith(update: (current: AppConfig) => Partial<AppConfig>): Promise<AppConfig> {
     return this.enqueueConfigWrite(async () => {
-      const updates = update(this.getConfig());
-      const analytics = updates.analytics !== undefined
-        ? { ...defaultAnalyticsConfig(), ...this.config.analytics, ...updates.analytics }
-        : this.config.analytics;
-      const agentContext = updates.agentContext !== undefined
-        ? { ...this.config.agentContext, ...updates.agentContext }
-        : this.config.agentContext;
-      // Notify settings arrive one field at a time from Settings and the tray menu.
-      const notify = updates.notify !== undefined ? { ...this.config.notify, ...updates.notify } : this.config.notify;
-      const next: AppConfig = {
-        ...this.config,
-        ...updates,
-        analytics,
-        agentContext,
-        notify,
-        defaultOrchestratorAgent: 'defaultOrchestratorAgent' in updates
-          ? normalizePaneChatAgent(updates.defaultOrchestratorAgent)
-          : this.config.defaultOrchestratorAgent,
-        remoteDaemon: 'remoteDaemon' in updates
-          ? normalizeRemoteDaemonConfig(updates.remoteDaemon)
-          : this.config.remoteDaemon,
-      };
-
-      if (updates.machineMarks !== undefined) next.machineMarks = decodeMachineMarks(updates.machineMarks);
-      if (updates.agentContext !== undefined) {
-        decodeBoundary(updates.agentContext, boundary.object({
-          managedAgentsMd: boundary.optional(boundary.boolean),
-          homeSkill: boundary.optional(boundary.boolean),
-          defaultsVersion: boundary.optional(boundary.number),
-        }));
+      const known = this.config;
+      let reloaded = false;
+      try {
+        for (let attempt = 0; ; attempt++) {
+          const disk = await this.readConfigFile();
+          if (disk.kind === 'ok' && (!this.hasReadConfigFile || disk.text !== this.lastConfigJson)) {
+            if (!this.tryLoadConfigText(disk.text)) return this.holdUpdate(known, update(this.config));
+            reloaded = true;
+          }
+          if (disk.kind === 'invalid') {
+            this.logInvalidConfig(disk.reason);
+            return this.holdUpdate(known, update(this.config));
+          }
+          // Held changes apply against the copy they changed, so a fixed file still holding the old value doesn't undo them.
+          const current = this.heldBase ? this.applyUpdates(this.heldBase, this.config, this.pendingUpdates(known)) : this.config;
+          const updates = update(current);
+          const next = this.applyUpdates(known, current, updates);
+          const result = await this.commitConfig(next, disk);
+          if (result === 'conflict' && attempt < MAX_COMMIT_ATTEMPTS) continue;
+          if (result === 'conflict') {
+            throw new Error(`[ConfigManager] ${this.configPath} kept changing while Pane saved; nothing was written`);
+          }
+          this.pendingKeys.clear();
+          this.heldBase = null;
+          this.config = next;
+          if ('additionalPaths' in updates) {
+            clearShellPathCache();
+            console.log('[ConfigManager] Additional paths updated, cleared PATH cache');
+          }
+          this.emit('config-updated', this.config);
+          return this.getConfig();
+        }
+      } catch (error) {
+        // The save failed, but an outside edit it loaded is already Pane's copy: say so.
+        if (reloaded) this.emit('config-updated', this.config);
+        throw error;
       }
-      next.sharedCredentials = restampSharedCredentials(next, 'now') ?? next.sharedCredentials;
-      // A value from another machine arrives with that machine's time; anything else is the person, here.
-      if (updates.notifyEnabledChangedAt === undefined) {
-        next.notifyEnabledChangedAt = restampNotifySwitch(this.config, next) ?? next.notifyEnabledChangedAt;
-      }
-      this.validateAppearanceUpdate(updates);
-      if (!this.applyKeyboardShortcutOverrides(next.keyboardShortcutOverrides, next)) {
-        delete next.keyboardShortcutOverrides;
-      }
-      await this.writeConfigToDisk(next);
-      this.config = next;
-
-      if ('additionalPaths' in updates) {
-        clearShellPathCache();
-        console.log('[ConfigManager] Additional paths updated, cleared PATH cache');
-      }
-      this.emit('config-updated', this.config);
-      return this.getConfig();
     });
+  }
+
+  /** The file does not parse: apply the change in memory only, and save it once the file is fixed. */
+  private holdUpdate(known: AppConfig, updates: Partial<AppConfig>): AppConfig {
+    // SAFETY: Object.keys of a Partial<AppConfig> are AppConfig keys.
+    const changedKeys = Object.keys(pickChanged(known, updates)) as ConfigKey[];
+    if (changedKeys.length > 0) {
+      this.heldBase ??= known;
+      for (const key of changedKeys) this.pendingKeys.add(key);
+      this.config = this.applyUpdates(known, known, updates);
+      this.emit('config-updated', this.config);
+    }
+    if (this.pendingKeys.size > 0) this.scheduleDiskCheck(INVALID_CONFIG_RETRY_MS);
+    return this.getConfig();
+  }
+
+  /** Settings held back while the file did not parse, as updates against the file now. */
+  private pendingUpdates(known: AppConfig): Partial<AppConfig> {
+    const held: Partial<AppConfig> = {};
+    for (const key of this.pendingKeys) Object.assign(held, { [key]: known[key] });
+    return held;
+  }
+
+  /**
+   * `current` (config.json as just read) with the keys in `updates` that differ
+   * from `known` (Pane's copy the caller saw) applied. Partial objects (notify,
+   * analytics, agentContext) merge field by field; the shortcut override map
+   * applies only the ids that changed from `known`, so an id another writer
+   * added survives a save of a map that predates it, and an id removed from
+   * `known` is still removed.
+   */
+  private applyUpdates(known: AppConfig, current: AppConfig, rawUpdates: Partial<AppConfig>): AppConfig {
+    const updates = pickChanged(known, rawUpdates);
+    const analytics = updates.analytics !== undefined
+      ? { ...defaultAnalyticsConfig(), ...current.analytics, ...updates.analytics }
+      : current.analytics;
+    const agentContext = updates.agentContext !== undefined
+      ? { ...current.agentContext, ...updates.agentContext }
+      : current.agentContext;
+    // Notify settings arrive one field at a time from Settings and the tray menu.
+    const notify = updates.notify !== undefined ? { ...current.notify, ...updates.notify } : current.notify;
+    const next: AppConfig = {
+      ...current,
+      ...updates,
+      analytics,
+      agentContext,
+      notify,
+      defaultOrchestratorAgent: 'defaultOrchestratorAgent' in updates
+        ? normalizePaneChatAgent(updates.defaultOrchestratorAgent)
+        : current.defaultOrchestratorAgent,
+      remoteDaemon: 'remoteDaemon' in updates
+        ? normalizeRemoteDaemonConfig(updates.remoteDaemon)
+        : current.remoteDaemon,
+    };
+    if ('keyboardShortcutOverrides' in updates) {
+      next.keyboardShortcutOverrides = mergeChangedOverrides(
+        known.keyboardShortcutOverrides,
+        current.keyboardShortcutOverrides,
+        updates.keyboardShortcutOverrides,
+      );
+    }
+
+    if (updates.machineMarks !== undefined) next.machineMarks = decodeMachineMarks(updates.machineMarks);
+    if (updates.agentContext !== undefined) {
+      decodeBoundary(updates.agentContext, boundary.object({
+        managedAgentsMd: boundary.optional(boundary.boolean),
+        homeSkill: boundary.optional(boundary.boolean),
+        defaultsVersion: boundary.optional(boundary.number),
+      }));
+    }
+    next.sharedCredentials = restampSharedCredentials(next, 'now') ?? next.sharedCredentials;
+    // A value from another machine arrives with that machine's time; anything else is the person, here.
+    if (updates.notifyEnabledChangedAt === undefined) {
+      next.notifyEnabledChangedAt = restampNotifySwitch(current, next) ?? next.notifyEnabledChangedAt;
+    }
+    this.validateAppearanceUpdate(updates);
+    if (!this.applyKeyboardShortcutOverrides(next.keyboardShortcutOverrides, next)) {
+      delete next.keyboardShortcutOverrides;
+    }
+    return next;
   }
 
   /**
@@ -613,39 +774,34 @@ export class ConfigManager extends EventEmitter {
     return this.config.analytics?.distinctId;
   }
 
-  private ensureAnalyticsConfig(): NonNullable<AppConfig['analytics']> {
-    if (!this.config.analytics) {
-      this.config.analytics = defaultAnalyticsConfig();
-    }
-    return this.config.analytics;
-  }
-
   async getOrCreateAnalyticsInstallId(): Promise<string> {
-    const analytics = this.ensureAnalyticsConfig();
-    if (!analytics.installId) {
-      analytics.installId = `install_${randomUUID()}`;
-      await this.saveConfig();
-    }
-    return analytics.installId;
+    const existing = this.config.analytics?.installId;
+    if (existing) return existing;
+    const created = `install_${randomUUID()}`;
+    const config = await this.updateConfigWith(current => (
+      current.analytics?.installId ? {} : { analytics: { ...current.analytics!, installId: created } }
+    ));
+    return config.analytics?.installId ?? created;
   }
 
   async setAnalyticsDistinctId(distinctId: string): Promise<void> {
-    const analytics = this.ensureAnalyticsConfig();
-    analytics.distinctId = distinctId;
-    await this.saveConfig();
+    await this.updateConfigWith(current => ({ analytics: { ...current.analytics!, distinctId } }));
   }
 
   async setAnalyticsIdentity(identity: AnalyticsIdentity): Promise<void> {
-    const analytics = this.ensureAnalyticsConfig();
-    analytics.distinctId = identity.distinctId;
-    analytics.identitySource = identity.identitySource;
-    analytics.installId = identity.installId ?? analytics.installId;
-    analytics.githubUsername = identity.githubUsername;
-    analytics.githubEmail = identity.githubEmail;
-    analytics.gitEmail = identity.gitEmail;
-    analytics.gitEmailHash = identity.gitEmailHash;
-    analytics.gitUserName = identity.gitUserName;
-    await this.saveConfig();
+    await this.updateConfigWith(current => ({
+      analytics: {
+        ...current.analytics!,
+        distinctId: identity.distinctId,
+        identitySource: identity.identitySource,
+        installId: identity.installId ?? current.analytics?.installId,
+        githubUsername: identity.githubUsername,
+        githubEmail: identity.githubEmail,
+        gitEmail: identity.gitEmail,
+        gitEmailHash: identity.gitEmailHash,
+        gitUserName: identity.gitUserName,
+      },
+    }));
   }
 
   /**
