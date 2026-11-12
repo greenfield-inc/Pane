@@ -197,15 +197,20 @@ export interface NotifyQueueEnvironment {
  * machine stays quiet while the picked one reads it (`readsHere`). When it can't, this machine alerts
  * as if nothing were picked, so no question goes unseen. Names follow this machine's picker.
  */
-export function cardsOnStatus(config: AppConfig, readsHere: (machineId: string) => boolean, machines: MachineState[]): NotifyCardsOnStatus {
+export function cardsOnStatus(config: AppConfig, readsHere: (machineId: string) => boolean, machines: MachineState[], now = Date.now()): NotifyCardsOnStatus {
   const picked = config.notify?.cardsOn;
   if (!picked) return { kind: 'any' };
   if (picked.id === config.machineId) return { kind: 'here' };
   const saved = machines.find(machine => machine.kind === 'remote' && machine.installId === picked.id);
   const name = saved?.label ?? picked.name;
   if (readsHere(picked.id)) return { kind: 'elsewhere', name };
-  return { kind: saved?.status === 'online' ? 'not-added' : 'not-connected', name };
+  // A machine that just came online may still be waiting to reconnect to this one, so it counts as not added only after a while.
+  const answering = saved?.status === 'online' && now - Date.parse(saved.onlineSince ?? '') >= NOT_ADDED_AFTER_MS;
+  return { kind: answering ? 'not-added' : 'not-connected', name };
 }
+
+/** Longer than a desktop's reconnect backoff to a machine that restarted (about 30 s). */
+const NOT_ADDED_AFTER_MS = 60_000;
 
 /** Who runs `--took` or `--update`: the calling tab. */
 export interface NotifyReaderCaller {

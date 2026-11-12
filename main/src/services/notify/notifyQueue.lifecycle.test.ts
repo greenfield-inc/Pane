@@ -565,9 +565,10 @@ describe('NotifyQueue with its store', () => {
     const MINI = 'a1b2-mini';
     const BOOK = { id: 'c3d4-book', name: 'qa-macbook' };
     const config = (cardsOn: typeof BOOK | null) => ({ machineId: MINI, notify: { cardsOn } });
-    const saved = (status: MachineState['status']): MachineState[] => [
+    const NOW = Date.parse('2026-11-12T20:00:00.000Z');
+    const saved = (status: MachineState['status'], onlineSince = '2026-11-12T19:50:00.000Z'): MachineState[] => [
       { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null, installId: MINI },
-      { id: 'profile-7', label: 'MacBook', kind: 'remote', status, offlineSince: null, installId: BOOK.id },
+      { id: 'profile-7', label: 'MacBook', kind: 'remote', status, offlineSince: null, installId: BOOK.id, onlineSince },
     ];
     const reading = (machineId: string) => machineId === BOOK.id;
     const nobody = () => false;
@@ -578,9 +579,10 @@ describe('NotifyQueue with its store', () => {
       ['the picked machine reads this one', config(BOOK), reading, saved('online'), { kind: 'elsewhere', name: 'MacBook' }],
       ['the picked machine answers but hasn\'t saved this one', config(BOOK), nobody, saved('online'), { kind: 'not-added', name: 'MacBook' }],
       ['the picked machine is offline', config(BOOK), nobody, saved('offline'), { kind: 'not-connected', name: 'MacBook' }],
+      ['the picked machine came online seconds ago and may still be reconnecting to this one', config(BOOK), nobody, saved('online', '2026-11-12T19:59:40.000Z'), { kind: 'not-connected', name: 'MacBook' }],
       ['the picked machine isn\'t saved here', config(BOOK), nobody, [], { kind: 'not-connected', name: 'qa-macbook' }],
     ])('%s', (_case, appConfig, readsHere, machines, expected) => {
-      expect(cardsOnStatus(appConfig, readsHere, machines)).toEqual(expected);
+      expect(cardsOnStatus(appConfig, readsHere, machines, NOW)).toEqual(expected);
     });
   });
 

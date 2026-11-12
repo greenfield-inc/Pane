@@ -123,7 +123,7 @@ function useMachines(): MachineState[] {
 function cardsOnNote(status: NotifyCardsOnStatus): string | null {
   switch (status.kind) {
     case 'elsewhere': return `Cards pop up on ${status.name}. They're still listed here.`;
-    case 'not-added': return `${status.name} hasn't added this computer, so its cards still pop up here. Add this computer on ${status.name} to move them.`;
+    case 'not-added': return `${status.name} hasn't added this computer, so this computer's cards still pop up here. Add this computer on ${status.name} to move them.`;
     case 'not-connected': return `${status.name} isn't connected, so cards pop up here for now.`;
     default: return null;
   }

@@ -440,7 +440,7 @@ test.describe('Settings → Approvals', () => {
     const note = page.getByTestId('notify-cards-on-note');
     const lines: Array<[NotifySnapshot['cardsOn'], string]> = [
       [{ kind: 'elsewhere', name: 'qa-mini' }, "Cards pop up on qa-mini. They're still listed here."],
-      [{ kind: 'not-added', name: 'qa-mini' }, "qa-mini hasn't added this computer, so its cards still pop up here. Add this computer on qa-mini to move them."],
+      [{ kind: 'not-added', name: 'qa-mini' }, "qa-mini hasn't added this computer, so this computer's cards still pop up here. Add this computer on qa-mini to move them."],
       [{ kind: 'not-connected', name: 'qa-mini' }, "qa-mini isn't connected, so cards pop up here for now."],
     ];
     for (const [cardsOn, text] of lines) {

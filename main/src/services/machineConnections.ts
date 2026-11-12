@@ -216,12 +216,14 @@ export class MachineConnections {
     const before = `${state.status}|${state.offlineSince}|${state.installId}`;
     if (hostMachineId) state.installId = hostMachineId;
     if (status === 'connected') {
+      if (state.status !== 'online') state.onlineSince = new Date().toISOString();
       state.status = 'online';
       state.offlineSince = null;
     } else if (status === 'reconnecting' || status === 'error') {
       // The time it first stopped answering, kept through every retry.
       if (state.status !== 'offline') state.offlineSince = new Date().toISOString();
       state.status = 'offline';
+      delete state.onlineSince;
     }
     if (`${state.status}|${state.offlineSince}|${state.installId}` !== before) this.emitMachines();
   }
