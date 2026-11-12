@@ -30,7 +30,7 @@ const webHandlerSchema = boundary.object({
 const proxyHandlerSchema = boundary.object({ Proxy: boundary.optional(boundary.string) });
 
 export interface PhonePreviewHostOptions {
-  workspace: Pick<PaneWorkspaceHostController, 'getTailnet' | 'getAccessPolicy' | 'getStatus' | 'onSync'>;
+  workspace: Pick<PaneWorkspaceHostController, 'getTailnet' | 'getAccessPolicy' | 'getStatus' | 'onSync' | 'mayChangeServe'>;
   /** This Pane's data directory: its hash marks the Serve handlers this instance owns. */
   paneDir: string;
   files: PreviewFiles;
@@ -150,6 +150,8 @@ export class PhonePreviewHost {
   }
 
   private reconcile(): Promise<void> {
+    // Not even leftovers: a second Pane on this data directory shares their prefix with the first.
+    if (!this.options.workspace.mayChangeServe()) return this.queue;
     const work = () => this.applyHandlers().catch(error => {
       this.lastError = error instanceof Error ? error.message : String(error);
       console.warn('[Pane phone previews] Serve handlers out of sync:', this.lastError);

@@ -21,7 +21,7 @@ function setup(workspaces: WorkspaceAccessConfig = {}) {
     },
   };
   // Tailscale is absent, so the host stays off and touches nothing on this machine.
-  const host = new PaneWorkspaceHostController(new PaneCommandRegistry(), configManager, true, async () => ({ ok: false, stdout: '', stderr: '' }));
+  const host = new PaneWorkspaceHostController(new PaneCommandRegistry(), configManager, { kind: 'allowed', onByDefault: true }, async () => ({ ok: false, stdout: '', stderr: '' }));
   const registry = new PaneCommandRegistry();
   registerWorkspaceCommands(registry, host, configManager, '2.5.0');
   return { registry, config: () => config.workspaces, host };
