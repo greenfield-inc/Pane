@@ -222,6 +222,14 @@ says, and after running the chat tab suites against it.
   with the send-now keys. At phone width it is compact (the percentage and PR
   number alone) and scrolls sideways instead of wrapping. The phone app has no
   status bar yet.
+- **Enter goes to the chat** (D-328): with a chat tab on screen and focus on
+  no control (the page, a split, a scroll surface such as the commit history),
+  Enter moves focus into its message box. Opening a Pane or Session with Enter
+  from the sidebar, or pressing Enter on a chat's tab, lands there too, even
+  while the chat is still loading. With splits, Enter stays in its own split:
+  it goes to the focused split's chat, and a chat's tab opens into that chat,
+  never into another split's. Enter in a field, terminal, button, menu, picker
+  or dialog keeps its own meaning.
 - **Queue and Send now** (D-211): a message sent while the agent works (Enter)
   waits in the queue, listed in the order it will be sent. Each queued message
   can be edited (its images are kept), removed, or sent now. **Send now**, or

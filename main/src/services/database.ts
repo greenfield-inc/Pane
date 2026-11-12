@@ -12,15 +12,19 @@ export const databaseService = new DatabaseService(dbPath);
 databaseService.initialize();
 export const startupPanelBufferMigration = databaseService.getPanelBufferMigration();
 
-// Scrollback retention sweep: runs synchronously at module load, which happens
-// before panelManager restores panels on demand. Deferring this
-// (e.g. via a setTimeout in app.whenReady) would let the in-memory panel cache
-// keep the stale scrollback for the whole first launch even after the DB is
-// trimmed. Result is captured here and logged later once Logger is initialized.
-export const startupRetentionResult: {
+// Scrollback retention sweep. The daemon host runs it first thing at startup,
+// before panelManager restores panels on demand: running it later (e.g. via a
+// setTimeout in app.whenReady) would let the in-memory panel cache keep the
+// stale scrollback for the whole first launch even after the DB is trimmed. It
+// is not run at module load, because only the Pane that owns this data
+// directory may delete from it (see daemon/instanceDuties). The result is
+// logged once Logger is initialized.
+export interface StartupRetentionSweep {
   readonly result: RetentionSweepResult | null;
   readonly error: Error | null;
-} = (() => {
+}
+
+export function runStartupRetentionSweep(): StartupRetentionSweep {
   try {
     return {
       result: new ScrollbackRetentionService(databaseService).runRetentionSweep(),
@@ -32,4 +36,4 @@ export const startupRetentionResult: {
       error: error instanceof Error ? error : new Error(String(error)),
     };
   }
-})();
+}

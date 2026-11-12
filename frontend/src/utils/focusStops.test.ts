@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cycleOrder, stepStop, stopInDirection, type FocusStop, type FocusStopKind } from './focusStops';
+import { cycleOrder, sidebarListKey, stepStop, stopInDirection, type FocusStop, type FocusStopKind } from './focusStops';
 
 function stop(id: string, kind: FocusStopKind, left: number, top: number, right: number, bottom: number, preferred = false): FocusStop<string> {
   return { id, kind, rect: { left, top, right, bottom }, preferred, ref: id };
@@ -59,5 +59,24 @@ describe('F6 order', () => {
     expect(stepStop(window, 'sidebar', -1)?.id).toBe('terminal');
     expect(stepStop(window, null, 1)?.id).toBe('sidebar');
     expect(stepStop(window, null, -1)?.id).toBe('terminal');
+  });
+});
+
+describe('sidebarListKey', () => {
+  it('reads j and k as down and up, like the arrows', () => {
+    expect(sidebarListKey('j')).toBe('ArrowDown');
+    expect(sidebarListKey('k')).toBe('ArrowUp');
+  });
+
+  it('leaves the arrows and every other key as they are', () => {
+    expect(sidebarListKey('ArrowDown')).toBe('ArrowDown');
+    expect(sidebarListKey('ArrowUp')).toBe('ArrowUp');
+    expect(sidebarListKey('Enter')).toBe('Enter');
+    expect(sidebarListKey('a')).toBe('a');
+  });
+
+  it('does not read shifted J and K as moves', () => {
+    expect(sidebarListKey('J')).toBe('J');
+    expect(sidebarListKey('K')).toBe('K');
   });
 });

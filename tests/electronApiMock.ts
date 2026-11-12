@@ -842,8 +842,30 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       opened: () => Promise.resolve(clone(autopilotSnapshot)),
       onChanged: () => unsubscribe,
     } : undefined;
+    // window.electronAPI.chatTab, served when a fixture panel is a chat tab: an idle Claude chat with no messages.
+    const chatTabApi = mockPanels.some((panel) => panel.type === 'chat') ? (() => {
+      const view = (panelId: string) => ({
+        panelId, agent: 'claude', generation: 1, status: 'idle', canAttachImages: false, controls: [], commands: [], permissions: [], questions: [], queue: [], messageCount: 0,
+        transcript: { panelId, generation: 1, revision: 0, start: 0, messages: [] },
+      });
+      const done = () => Promise.resolve();
+      return {
+        // The chat loads a moment late, as a real one does, so tests exercise the wait for it.
+        get: (panelId: string) => new Promise((resolve) => { setTimeout(() => resolve(view(panelId)), 300); }),
+        history: () => Promise.resolve([]),
+        send: () => Promise.resolve({ status: 'sent' }),
+        receipt: () => Promise.resolve(undefined),
+        unqueue: done, sendNow: done, editQueued: done, clear: done, stopTask: done, configure: done, cancel: done,
+        permission: done, answer: done, restart: done, resume: done, dismissBanner: done,
+        conversations: () => Promise.resolve([]),
+        signIn: (panelId: string) => Promise.resolve({ panelId }),
+        onEvent: () => () => undefined,
+        onState: () => () => undefined,
+      };
+    })() : undefined;
     const electronAPI = {
       autopilot: autopilotApi,
+      chatTab: chatTabApi,
       notify: notifyApi,
       paneSecrets: paneSecretsApi,
       machines: machinesApi,

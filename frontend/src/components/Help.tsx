@@ -62,7 +62,7 @@ function KeyboardShortcutsSection({ onOpenKeyboardShortcuts }: { onOpenKeyboardS
           </div>
         ))}
         <div>
-          <h4 className="text-sm font-medium text-text-tertiary mb-2">In lists, the terminal and Approvals</h4>
+          <h4 className="text-sm font-medium text-text-tertiary mb-2">In lists, chats, the terminal and Approvals</h4>
           <div className="space-y-2">
             {REFERENCE_ROWS.map((row) => (
               <div key={row.id} className="flex justify-between items-center gap-3">

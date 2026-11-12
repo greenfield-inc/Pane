@@ -334,7 +334,8 @@ Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ct
 |----------|--------|
 | `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command, and see or change its key |
 | `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Keyboard Shortcuts |
-| `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
+| `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` (or `k` `j`) move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
+| `Enter` | With a chat on screen and focus on no field or control, move into its message box |
 | `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel or sidebar in that direction |
 | `F6` / `⇧F6` | Next / previous region (sidebar, splits, right panel, terminal) |
 | `⌘K ⌘M` / `Ctrl+K Ctrl+M` | Maximize the focused split, Session tile, sidebar or right panel; again to restore |
