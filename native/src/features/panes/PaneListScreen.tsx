@@ -1,6 +1,6 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { router, useIsFocused } from 'expo-router';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,7 +11,8 @@ import type { PanePermissionRequest } from '@shared/types/permissions';
 import { useDaemon } from '@/daemon';
 import { AllMachinesHome, type AllMachinesFeed } from '@/features/allMachines/AllMachinesHome';
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
-import { answeredItems, approvalItems, askerLine, isStale, itemEntry, questionDetail, sessionKey, sessionsByPane, staleItems, waitingCounts, type ApprovalEntry } from '@/features/approvals/approvals';
+import { answeredItems, approvalItems, askerLine, isStale, isWithAgent, itemEntry, questionDetail, sessionKey, sessionsByPane, staleItems, waitingCounts, type ApprovalEntry } from '@/features/approvals/approvals';
+import { approvalRowSpoken, ApprovalRowLines } from '@/features/approvals/ApprovalRowLines';
 import { openApproval } from '@/features/approvals/ApprovalScreen';
 import { AutopilotRow } from '@/features/autopilot/AutopilotRow';
 import { useAutopilot } from '@/features/autopilot/hooks';
@@ -94,7 +95,7 @@ export function PaneListScreen() {
   const others = useOtherMachines(saved.flatMap(machine => (machine.profile && !machine.current ? [machine.profile] : [])), all && focused);
 
   const waiting = Object.values(pendingByPane(permissions.data ?? []));
-  const questions = waitingQuestions(notify.data).filter(item => !isStale(item));
+  const questions = waitingQuestions(notify.data).filter(item => !isStale(item) && !isWithAgent(item));
   const blocked = new Set([...waiting.map(request => request.sessionId), ...questions.flatMap(item => item.source.paneId ?? [])]);
   const items = buildSidebar({
     projects: projects.data ?? [],
@@ -150,8 +151,10 @@ export function PaneListScreen() {
             testID={`notify-row-${entry.item.id}`}
             name={originLine(entry.item, profile.label)}
             detail={questionDetail(entry.item)}
+            below={<ApprovalRowLines item={entry.item} testID={`notify-row-${entry.item.id}`} />}
+            spoken={approvalRowSpoken(entry.item)}
             divided={divided}
-            done={list === 'answered'}
+            done={list === 'answered' || list === 'agent'}
             onPress={() => openApproval(entry.item.id, list)}
           />
           {entry.item.state === 'waiting' ? <AgentPromptActions item={entry.item} inset={33} /> : null}
@@ -440,13 +443,24 @@ function NewButton({ bottom }: { bottom: number }) {
 }
 
 /** A permission request or Notify question waiting on this phone's owner. */
-function WaitingRow({ name, detail, divided, done = false, onPress, testID }: { name: string; detail: string; divided: boolean; done?: boolean; onPress: () => void; testID: string }) {
+function WaitingRow({ name, detail, below, spoken = [], divided, done = false, onPress, testID }: {
+  name: string;
+  detail: string;
+  /** A question's subtitle and reply status, under its title. */
+  below?: ReactNode;
+  /** What `below` says, for screen readers. */
+  spoken?: string[];
+  divided: boolean;
+  done?: boolean;
+  onPress: () => void;
+  testID: string;
+}) {
   const theme = useTheme();
   return (
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={`${name}, ${detail}`}
+      accessibilityLabel={[name, detail, ...spoken].join(', ')}
       onPress={onPress}
       style={({ pressed }) => [styles.waitingRow, pressed && { backgroundColor: theme.colors.surfacePressed }]}
     >
@@ -455,6 +469,7 @@ function WaitingRow({ name, detail, divided, done = false, onPress, testID }: { 
       <View style={styles.fill}>
         <Text variant="callout" numberOfLines={1} style={styles.bold}>{name}</Text>
         <Text variant="footnote" tone="muted" numberOfLines={2}>{detail}</Text>
+        {below}
       </View>
       <Icon ios="chevron.right" android="chevron_right" size={14} />
     </Pressable>

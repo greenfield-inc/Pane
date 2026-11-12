@@ -277,7 +277,7 @@ export function approvalColumnTabCount(column: HTMLElement): number {
 
 /**
  * The tab keys (next, previous, a number) show another of the column's tabs:
- * Questions & answers, Summary, the references, the origin chat. Focus stays
+ * Decide, Summary, the references, the origin chat. Focus stays
  * in the column; if it was in the tab that went away, it lands on the column.
  */
 export function showApprovalColumnTab(column: HTMLElement, pick: (current: number, count: number) => number): void {

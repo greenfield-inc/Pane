@@ -60,6 +60,7 @@ export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLab
 }) {
   const surface = `session:${sessionId}` as const;
   const open = useApprovalColumnStore((state) => state.open[surface]);
+  const close = useApprovalColumnStore((state) => state.close);
   const waiting = useSessionApprovals(sessionId);
   if (!open) return null;
   return (
@@ -74,6 +75,8 @@ export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLab
       inChat={inChat}
       focused={focused}
       renderOrigin={(item) => <ApprovalOrigin item={item} />}
+      // Send closes the column; the chat's status line names who reads the reply (P7).
+      onSent={() => close(surface)}
     />
   );
 }

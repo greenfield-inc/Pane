@@ -12,6 +12,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   // Autopilot's state and its documents; nothing on the host changes.
   'autopilot:snapshot',
   'autopilot:read-doc',
+  // An approval's Summary page, read or written from its card; nothing on the host changes.
+  'notify:summary-page',
   'runpane:update:progress',
   'config:get',
   'config:get-session-preferences',

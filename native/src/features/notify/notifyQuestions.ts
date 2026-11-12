@@ -1,4 +1,5 @@
 import { receiptLine } from '@shared/approvalReceipts';
+import { approvalStatus } from '@shared/approvalStatus';
 import type { NotifyAnswer, NotifyItem, NotifyRevision, NotifySharedState, NotifyUi } from '@shared/types/notify';
 
 /** The desktop card's kind labels (frontend/src/components/notify/notifyFormat.ts). */
@@ -81,29 +82,27 @@ export interface ReplyStatus {
   fix?: { as: 'answer' | 'question'; label: string };
 }
 
-/** The default status while a reader asks about a reply (`--took question` with no `--status`). */
-const GETTING_MORE_CONTEXT = 'Getting more context…';
+/**
+ * Where the person's reply stands, in the words every surface uses (`approvalStatus` in
+ * shared/approvalStatus.ts, which names the reader for every kind), with this phone's tone.
+ */
+export function replyStateLine(item: NotifyItem): { text: string; tone: ReplyTone } | null {
+  const status = approvalStatus(item);
+  return status ? { text: status.text, tone: status.tone === 'info' ? 'accent' : status.tone } : null;
+}
 
 export function replyStatus(item: NotifyItem): ReplyStatus | null {
+  const line = replyStateLine(item);
   const reply = item.reply;
-  // Updated after the person's question, and not replied to since: the quiet "ready again".
-  if (item.state === 'waiting' && item.readyAgain !== undefined && !(reply && reply.at > item.readyAgain)) {
-    return { text: `Updated · ready again · v${item.version ?? 2}`, tone: 'accent' };
-  }
-  if (!reply) return null;
+  if (!line || !reply || (item.state === 'waiting' && item.readyAgain !== undefined)) return line;
   const quote = `You wrote: “${reply.text}”${reply.picks?.some(Boolean) ? ` (picked: ${reply.picks.filter(Boolean).join(' · ')})` : ''}`;
-  const reader = reply.reader?.name ?? item.source.agent;
   switch (reply.state) {
-    case 'reading':
-      return { text: reply.reader?.kind === 'autopilot' ? 'Autopilot is reading your reply…' : 'Reading your reply…', tone: 'muted', detail: quote };
     case 'answer':
-      return { text: 'Taken as your answer', tone: 'success', detail: quote, ...(reply.fixed ? {} : { fix: { as: 'question' as const, label: 'It was a question' } }) };
+      return { ...line, detail: quote, ...(reply.fixed ? {} : { fix: { as: 'question' as const, label: 'It was a question' } }) };
     case 'question':
-      return { text: `Taken as a question: asking ${reader}`, tone: 'warning', detail: reply.status?.trim() || GETTING_MORE_CONTEXT, ...(reply.fixed ? {} : { fix: { as: 'answer' as const, label: 'It was my answer' } }) };
-    case 'sent':
-      return { text: `Sent to ${item.source.agent}`, tone: 'success', detail: quote };
-    case 'unread':
-      return { text: 'No agent can read replies right now. You can still pick an option.', tone: 'warning', detail: quote };
+      return { ...line, detail: quote, ...(reply.fixed ? {} : { fix: { as: 'answer' as const, label: 'It was my answer' } }) };
+    default:
+      return { ...line, detail: quote };
   }
 }
 
@@ -134,6 +133,11 @@ export function optionsAnswer(item: NotifyItem, picks: readonly (string | undefi
   if (text) return { picks: all, text };
   if (!all.every(Boolean)) return null;
   return item.questions ? { picks: all } : { choice: all[0] };
+}
+
+/** Several questions' first picks: each question's recommended choice, or none (J1). */
+export function initialPicks(item: NotifyItem): string[] {
+  return (item.questions ?? []).map(question => question.choices.find(choice => choice.recommended)?.label ?? '');
 }
 
 /** A typed reply, which its reader takes as an answer or a question, rather than an answer as it stands. */

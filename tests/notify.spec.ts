@@ -104,8 +104,8 @@ test.describe('Approvals in the main window', () => {
     const column = page.getByTestId('approval-column');
     await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
     await expect(column.getByTestId('approval-pager')).toHaveText('1 of 3');
-    // Questions & answers first, then Summary, each reference, and the chat where it was asked (D-224).
-    await expect(column.getByTestId('approval-tab')).toHaveText(['Questions & answers', 'Summary', 'plan.html', 'PR #812', "auth-refactor's tab"]);
+    // Decide first, then Summary, each reference, and the chat where it was asked (D-224).
+    await expect(column.getByTestId('approval-tab')).toHaveText(['Decide', 'Summary', 'plan.html', 'PR #812', "auth-refactor's tab"]);
     await column.getByRole('radio', { name: /Keep Redis/ }).click();
     await column.getByTestId('approval-send').click();
 

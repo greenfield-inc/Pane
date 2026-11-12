@@ -3987,7 +3987,7 @@ for (const keys of JOURNEY_KEYS) {
     // 5. Right: the approval column, its first tab marked.
     await page.keyboard.press(keys.right);
     await expect(column.getByTestId('approval-column')).toBeFocused();
-    await expect(columnTab).toHaveText('Questions & answers');
+    await expect(columnTab).toHaveText('Decide');
     await step('column', 'column');
     // The chat's card for the open approval: a neutral grey outline and an "Open" label, never blue (D-343).
     const cards = page.getByTestId('session-approval-card');
@@ -4014,7 +4014,7 @@ for (const keys of JOURNEY_KEYS) {
     await expect(columnTab).toHaveText('Summary');
     await step('column-next-tab', 'column');
     await page.keyboard.press(keys.prevTab);
-    await expect(columnTab).toHaveText('Questions & answers');
+    await expect(columnTab).toHaveText('Decide');
     await expect(column.getByTestId('approval-column')).toBeFocused();
     // 7. Left: back in the chat box, the draft kept. The sidebar key goes back to the same row; Esc returns.
     await page.keyboard.press(keys.left);

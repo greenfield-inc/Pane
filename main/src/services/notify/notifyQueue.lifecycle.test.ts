@@ -195,6 +195,30 @@ describe('NotifyQueue with its store', () => {
     expect(item(queue, 'in-1')?.decision).toBe('D-147');
   });
 
+  it("a relay call that ends lets go of the worker's card, which keeps waiting and still answers the worker", async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-39: run?', source: worker, at: Date.now() });
+    const controller = new AbortController();
+    void queue.ask({ relays: 'in-1', question: { ui: 'options', title: 'Q-39: run the script?', choices: [{ label: 'Run', recommended: true }, { label: 'Stop' }] }, source: orchestrator }, controller.signal);
+    controller.abort();
+    expect(item(queue, 'in-1')).toMatchObject({ state: 'waiting', title: 'Q-39: run the script?' });
+    queue.run({ type: 'answer', id: 'in-1', answer: { choice: 'Run' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(typed).toEqual([['w1', 'answer: Q-39 → Run (by you)']]);
+  });
+
+  it('a relay of a worker question asked over 15 minutes ago still waits its full round before returning', async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-39: run?', source: worker, at: Date.now() - 20 * 60_000 });
+    let result: unknown;
+    void queue.ask({ relays: 'in-1', returnAfterMs: 50_000, question: { ui: 'options', title: 'Q-39: run the script?', choices: [{ label: 'Run', recommended: true }, { label: 'Stop' }] }, source: orchestrator }).then((value) => { result = value; });
+    await vi.advanceTimersByTimeAsync(49_000);
+    expect(result).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(result).toMatchObject({ waiting: true, id: 'in-1' });
+    expect(item(queue, 'in-1')).toMatchObject({ state: 'waiting' });
+  });
+
   it('a relay of an item already ended returns unavailable and posts nothing', async () => {
     const queue = queueWith();
     const result = await queue.ask({ relays: 'nope', question: ask('Q-1: x?'), source: orchestrator });

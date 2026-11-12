@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { app, BrowserWindow, globalShortcut } from 'electron';
 import { AUTOPILOT_OWNER_PANE_PREFIX } from '../../../../shared/types/autopilot';
 import { randomUUID } from 'crypto';
@@ -37,7 +38,7 @@ import type { RunpaneInboxItem } from '../../../../shared/types/runpaneOrchestra
 import type { ApprovalStore } from '../approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../../database/jsonStoreImport';
 import type { SessionInboxEnded } from '../sessionInbox';
-import { workerReportCard } from './workerContext';
+import { workerCard } from './workerContext';
 
 const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
 const agentName = (agentType: string | undefined): string => (agentType ? AGENT_NAMES.get(agentType) : undefined) ?? 'Agent';
@@ -239,7 +240,8 @@ export class NotifyService {
       carded.add(once);
       const session = this.deps.sessionRecord?.(entry.sessionId);
       // The status file's needs_you, never its JSON: the question's why, its options and files.
-      const card = workerReportCard(entry.report?.summary, question);
+      // Tidied when the question is an old paragraph (P8); a report recorded before the check stays as sent.
+      const card = workerCard(entry.report?.summary, question, { quietly: true, summaryPath: entry.report?.summaryPath });
       // D-81: the worker's status file, which its report named, opens beside the card.
       const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
       const links = [...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)].slice(0, NOTIFY_LINKS_MAX);
@@ -247,7 +249,7 @@ export class NotifyService {
       if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };
       this.queue.addWorkerQuestion({
         id: entry.id,
-        question,
+        question: card.title,
         source,
         at,
         // The Session it was filed in, even after the worker has moved or the Session closed.
@@ -255,6 +257,9 @@ export class NotifyService {
         links: links.length ? links : undefined,
         context: card.context,
         choices: card.choices,
+        questions: card.questions,
+        asSent: card.asSent,
+        ...summaryFiles(entry.report?.summaryPath, card.summaryPage),
       });
     }
   }
@@ -757,4 +762,42 @@ function notifySettings(config: AppConfig): NotifySettings {
 
 function appearanceKey(config: AppConfig): string {
   return JSON.stringify([config.appearanceMode, config.theme, config.systemLightTheme, config.systemDarkTheme, config.highContrast]);
+}
+
+/**
+ * A worker card's Summary page and status file (P4): an .html passed as --summary-file is its
+ * Summary; any other file is its status file, whose needs_you may name a Summary page beside it.
+ */
+export interface WorkerSummaryFiles {
+  summaryPage?: string;
+  statusFile?: string;
+}
+
+export function summaryFiles(summaryPath: string | undefined, needsYouPage: string | undefined): WorkerSummaryFiles {
+  if (summaryPath && /\.html?$/iu.test(summaryPath)) return { summaryPage: summaryPath };
+  const files: WorkerSummaryFiles = {};
+  if (summaryPath) files.statusFile = summaryPath;
+  if (needsYouPage) files.summaryPage = path.isAbsolute(needsYouPage) || !summaryPath ? needsYouPage : besideStatusFile(summaryPath, needsYouPage);
+  return files;
+}
+
+/**
+ * A relative `summary` path, as a worker wrote it: from its working folder (usually the worktree,
+ * an ancestor of its status file) or from the status file's own folder. The nearest folder up from
+ * the status file that holds it wins; when none does, it reads from the status file's folder.
+ */
+function besideStatusFile(statusFile: string, page: string): string {
+  let folder = path.dirname(statusFile);
+  for (let depth = 0; depth < 6; depth += 1) {
+    const candidate = path.resolve(folder, page);
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(folder);
+    if (parent === folder) break;
+    folder = parent;
+  }
+  // Found nowhere: name it where the worker most likely meant. "tmp/x.html" beside a status file in
+  // tmp/ was written from the folder above, so the message names that path.
+  const folderName = path.basename(path.dirname(statusFile));
+  const first = page.split(/[\\/]/u)[0];
+  return path.resolve(first === folderName ? path.dirname(path.dirname(statusFile)) : path.dirname(statusFile), page);
 }

@@ -37,8 +37,8 @@ const { shared, command } = vi.hoisted(() => {
   const both: NotifyItem = {
     id: 'q-both', ui: 'options', title: 'Set up trains', state: 'waiting', createdAt: 2_500,
     source: { paneId: 'pane-1', name: 'doozy-overhaul', agent: 'Claude' },
-    questions: [{ title: 'Turn it on?', choices: [{ label: 'Yes' }, { label: 'No' }] }, { title: 'How many?', choices: [{ label: 'One train' }] }],
-    reply: { id: 'r1', text: 'Why one?', at: 2_600, state: 'question', reader: { kind: 'asker', name: 'doozy-overhaul' } },
+    questions: [{ title: 'Turn it on?', why: 'Trains cost money while on.', choices: [{ label: 'Yes' }, { label: 'No', recommended: true }] }, { title: 'How many?', choices: [{ label: 'One train' }] }],
+    reply: { id: 'r1', text: 'Why one?', at: 2_600, state: 'question', reader: { kind: 'asker', name: 'Doozy' } },
   };
   const shared: NotifySharedState = { machine: 'Work Mac', epoch: 'e1', revision: 1, enabled: true, queue: ['q-secret', 'q-trains', 'q-both'], hidden: [], items: [secret, trains, both] };
   return { shared, command: { isPending: false, isError: false, mutate: vi.fn() } };
@@ -80,7 +80,7 @@ describe('NotifySheet replies (P7)', () => {
 
   it('shows a revised approval’s What changed and "Updated · ready again", and marks a reworded choice', () => {
     const tree = elements(createElement(NotifySheet, { notifyId: 'q-trains' }));
-    expect(text(byId(tree, 'notify-reply-state')[0])).toBe('Updated · ready again · v2');
+    expect(text(byId(tree, 'notify-reply-state')[0])).toBe('Updated · ready again');
     expect(text(byId(tree, 'notify-revision-asked')[0])).toBe('You asked: “Can it be undone?”');
     expect(byId(tree, 'notify-revision-line').map(text)).toEqual(['• Added an undo step']);
     expect(tree.some(element => element.props.children === 'Reworded, was “Yes”')).toBe(true);
@@ -98,9 +98,14 @@ describe('NotifySheet replies (P7)', () => {
     expect(byId(tree, 'notify-question-0')).toHaveLength(1);
     expect(byId(tree, 'notify-question-1')).toHaveLength(1);
     expect(byId(tree, 'notify-choice-0-1')).toHaveLength(1);
-    expect(text(byId(tree, 'notify-reply-state')[0])).toBe('Taken as a question: asking doozy-overhaul');
-    expect(text(byId(tree, 'notify-reply-detail')[0])).toBe('Getting more context…');
-    // Nothing picked or typed yet: Send waits.
+    expect(text(byId(tree, 'notify-reply-state')[0])).toBe('Doozy is getting more context');
+    expect(text(byId(tree, 'notify-reply-detail')[0])).toBe('You wrote: “Why one?”');
+    // Each question's why sits under it; a question without one shows none.
+    expect(text(byId(tree, 'notify-question-why-0')[0])).toBe('Trains cost money while on.');
+    expect(byId(tree, 'notify-question-why-1')).toHaveLength(0);
+    // The first question starts on its recommended choice; the second has none, so Send waits.
+    expect(byId(tree, 'notify-choice-0-1')[0]?.props.accessibilityState).toEqual({ selected: true });
+    expect(byId(tree, 'notify-choice-0-0')[0]?.props.accessibilityState).toEqual({ selected: false });
     expect(byId(tree, 'notify-send-reply')[0]?.props.disabled).toBe(true);
   });
 });

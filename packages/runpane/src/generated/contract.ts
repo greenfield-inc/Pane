@@ -2548,7 +2548,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--context",
         "value": "<text>",
-        "description": "notify: background shown under Details."
+        "description": "notify: the card's subtitle: one or two sentences on why it matters (up to 240 characters)."
       },
       {
         "name": "--choices",
@@ -4140,7 +4140,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --ui <ui>                      options, approve, ask, or info",
         "  --title <text>                 The question or update in one line, about 80 characters",
-        "  --context <text>               Why it matters, shown under Details",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --questions <json>             options, instead of --choices: 2 to 4 of [{\"title\":\"...\",\"choices\":[...]}], one pick each",
         "  --detail <text>                approve: the command or SQL to approve",
@@ -4709,7 +4709,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --ui <ui>                      options, approve, or ask",
         "  --title <text>                 The question in one line",
-        "  --context <text>               Background shown under Details",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --links <json>                 Up to 6 related files or pages, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
@@ -6054,7 +6054,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --ui <ui>                      options, approve, ask, or info",
         "  --title <text>                 The question or update in one line, about 80 characters",
-        "  --context <text>               Why it matters, shown under Details",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --questions <json>             options, instead of --choices: 2 to 4 of [{\"title\":\"...\",\"choices\":[...]}], one pick each",
         "  --detail <text>                approve: the command or SQL to approve",
@@ -6577,7 +6577,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --ui <ui>                      options, approve, or ask",
         "  --title <text>                 The question in one line",
-        "  --context <text>               Background shown under Details",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --links <json>                 Up to 6 related files or pages, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
@@ -23047,7 +23047,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--context",
             "value": "<text>",
             "required": false,
-            "description": "Why it matters, shown under Details."
+            "description": "The card's subtitle: one or two sentences on why it matters, up to 240 characters."
           },
           {
             "name": "--choices",
@@ -23549,7 +23549,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--context",
             "value": "<text>",
             "required": false,
-            "description": "Background the person can open under Details."
+            "description": "The card's subtitle: one or two sentences on why it matters, up to 240 characters."
           },
           {
             "name": "--choices",
@@ -23623,7 +23623,7 @@ export const RUNPANE_CONTRACT = {
       "",
       "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.",
       "",
-      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question \"<question>\"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
+      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question \"<question>\"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",
@@ -23631,11 +23631,12 @@ export const RUNPANE_CONTRACT = {
     ],
     "notifyGuidance": {
       "rules": [
+        "Which card: Claude's own card (AskUserQuestion) only when you are answering the person's latest message in the chat they are typing in, the answer only steers this turn, and the question needs no context, links or Summary. Everything else is an approval card (`notify`, or `runpane report` for a worker): a worker's question in a Session, a question a Session orchestrator relays, and anything that waits, blocks other work, is recorded as a decision or approves an ask-first action. Unsure? Use an approval card. Codex and other agents without a built-in card always do.",
         "In a Session, only its orchestrator asks the person. A worker in a Session (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator or a parent status file) doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"`, and the answer reaches its tab as `answer: Q-n → <answer> (by you)`; `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)` lines are the person's word too. A Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` is set) posts each item that waits on the person once, as a background `runpane notify ... --json`, as its pane-orchestration guide says. Any other agent calls `notify`.",
         "Ask only what you can't find out yourself.",
         "Put related questions in one card.",
         "Send `info` rarely, only for what the person must know now.",
-        "Write the card as its Summary: a title of about 80 characters; context saying why it matters; each choice saying what it does, with one recommended; links to every file, page or approval it mentions.",
+        "Write the card as its Summary: a title of about 80 to 100 characters on one line; context as a subtitle of one or two sentences saying why it matters; 2 to 4 choices, each saying what it does, with exactly one recommended; links to every file, page or approval it mentions. Pane refuses a title over 160 characters or with a line break, and two recommended choices.",
         "A `reply:` line (or a `{reply, replyId}` result) is the person's typed reply: an answer or a question. If it answers, run `runpane notify --took <id|Q-n> answer`. If it asks, run `--took <id|Q-n> question`, find out, then `runpane notify --update <id|Q-n> --asked \"<their question>\" --what-changed \"<one line per change>\"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` (a reworded choice adds `\"was\"`, its old label) instead of asking again. A `correction:` line fixes how it was taken. From a `{reply, replyId}` result, pass its replyId to --took and --update.",
         "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`."
       ],

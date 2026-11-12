@@ -30,6 +30,7 @@ export const MACHINE_READ_CHANNELS = [
   'permission:getPending',
   'notify:remote-snapshot',
   'autopilot:read-doc',
+  'notify:summary-page',
   'panels:agent-statuses',
   'projects:get-all',
   'projects:list-branches',

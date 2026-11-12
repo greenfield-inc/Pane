@@ -1678,8 +1678,10 @@ def describe_report_delivery(result: Dict[str, Any]) -> List[str]:
     delivered = f" Delivered to {watchers} waiting watcher{'' if watchers == 1 else 's'}." if watchers > 0 else ""
     panel_id = result.get("panelId")
     lines = [f"Reported {describe_report(result.get('report') or {})} for panel {panel_id}.{sessions}{delivered}"]
+    # The blocked question's card check: posted anyway, but worth fixing next time.
+    warnings = [f"Warning: {warning}" for warning in result.get("warnings") or [] if isinstance(warning, str)]
     if session_ids or watchers > 0:
-        return lines
+        return lines + warnings
     stored = f"It is stored on the panel (runpane agents status --panel {panel_id})"
     if live_watchers is None:
         lines.append(f"No Session recorded this report. {stored}, and only watchers that list agent.report receive it.")
@@ -1688,7 +1690,7 @@ def describe_report_delivery(result: Dict[str, Any]) -> List[str]:
             f"No Session recorded this report and no watcher was waiting for it. {stored}, "
             "and a watch with a named cursor (runpane watch --as <name> --kinds agent.report) still receives it when it next waits."
         )
-    return lines
+    return lines + warnings
 
 
 MAX_INBOX_DETAIL_LENGTH = 300

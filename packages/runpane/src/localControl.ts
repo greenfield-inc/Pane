@@ -741,6 +741,8 @@ interface ReportResult {
   sessionIds: string[];
   /** Watches waiting when the report was journaled; absent from older daemons. */
   liveWatchers?: number;
+  /** A blocked report's card check: what its card misses; it was recorded anyway. */
+  warnings?: string[];
 }
 
 type PanelLastMessageResult =
@@ -1349,6 +1351,7 @@ const reportResultSchema: BoundarySchema<ReportResult> = boundary.object({
   report: agentReportSchema,
   sessionIds: boundary.array(boundary.string),
   liveWatchers: boundary.optional(boundary.number),
+  warnings: boundary.optional(boundary.array(boundary.string)),
 });
 /** What `runpane:panels:conversation` returns: the recorded conversation and whether Pane is sure the panel is on it. */
 interface PanelConversationResult {
@@ -3943,13 +3946,15 @@ function describeReportDelivery(result: ReportResult): string[] {
   const watchers = result.liveWatchers ?? 0;
   const delivered = watchers > 0 ? ` Delivered to ${watchers} waiting watcher${watchers === 1 ? '' : 's'}.` : '';
   const lines = [`Reported ${describeReport(result.report)} for panel ${result.panelId}.${sessions}${delivered}`];
-  if (result.sessionIds.length > 0 || watchers > 0) return lines;
+  // The blocked question's card check: posted anyway, but worth fixing next time.
+  const warnings = (result.warnings ?? []).map(warning => `Warning: ${warning}`);
+  if (result.sessionIds.length > 0 || watchers > 0) return [...lines, ...warnings];
   const stored = `It is stored on the panel (runpane agents status --panel ${result.panelId})`;
   lines.push(result.liveWatchers === undefined
     ? `No Session recorded this report. ${stored}, and only watchers that list agent.report receive it.`
     : `No Session recorded this report and no watcher was waiting for it. ${stored}, `
       + 'and a watch with a named cursor (runpane watch --as <name> --kinds agent.report) still receives it when it next waits.');
-  return lines;
+  return [...lines, ...warnings];
 }
 
 interface InboxItem {
