@@ -66,6 +66,13 @@ function parseArgs(argv) {
   if (!args.since || !args.until) {
     throw new Error('--since and --until are required, for example --since 2026-10-10 --until 2026-11-10T09:00:00Z, so a re-run returns the same rows.');
   }
+  for (const flag of ['since', 'until']) {
+    if (Number.isNaN(Date.parse(args[flag]))) throw new Error(`--${flag} ${args[flag]} is not a date. Use YYYY-MM-DD or an ISO time such as 2026-11-10T09:00:00Z.`);
+  }
+  // A date-only --until includes that whole day.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(args.until)) {
+    args.until = new Date(Date.parse(args.until) + 24 * 3600 * 1000).toISOString();
+  }
   for (const file of args.workflows) {
     if (!WORKFLOWS[file]) throw new Error(`${file} is not in scope. Use one of: ${Object.keys(WORKFLOWS).join(', ')}.`);
   }
@@ -196,8 +203,10 @@ function rowFor(file, workflowRun, jobs, prs) {
   // A dry run is unsigned when its run name says sign=false (build.yml's
   // run-name), or when it ran on a branch that dry-ran with sign=false before
   // the run name said so. Other dry runs signed, so their wall time includes it.
-  const unsigned = /\bsign=false\b/.test(workflowRun.display_title ?? '')
-    || prs.some((pr) => pr.unsignedDryRuns && pr.branches.some((branch) => workflowRun.head_branch === branch || workflowRun.head_branch.startsWith(`bench/${branch}`)));
+  const named = /\bsign=(true|false)\b/.exec(workflowRun.display_title ?? '');
+  const unsigned = named
+    ? named[1] === 'false'
+    : prs.some((pr) => pr.unsignedDryRuns && pr.branches.some((branch) => workflowRun.head_branch === branch || workflowRun.head_branch.startsWith(`bench/${branch}`)));
   if (kind === 'dry-run' && file === 'build.yml' && unsigned) {
     const macJobs = ran.filter((job) => /macos/i.test(job.name) && job.name.startsWith('build'));
     row.projected_wall_seconds = row.wall_seconds + (macJobs.length > 1 ? SIGNING_SECONDS.perArchJobs : SIGNING_SECONDS.oneMacJob);
