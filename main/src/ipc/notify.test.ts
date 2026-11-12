@@ -585,6 +585,26 @@ describe('Approvals items, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it('gives each question of a two-question needs_you context its own buttons, and lists them when the card cannot take buttons', async () => {
+    const pane = await startWithSessions();
+    const caller = { paneId: 'loose', panelId: 'loose-panel' };
+    const needsYou = { why: 'The cover sheet needs both.', questions: [
+      { q: 'Keep their session?', options: ['Keep it (recommended)', 'Sign them out'] },
+      { q: 'Whose sessions end?', why: 'Same as sign-in.', options: ['Everyone (recommended)', 'Members only'] },
+    ] };
+    void pane.registry.invoke('runpane:notify', [{ ui: 'ask', title: 'Q-5: Okta sign-out', context: JSON.stringify({ state: 'blocked', needs_you: needsYou }), caller }]);
+    void pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Q-6: Approve the cover sheet?', context: JSON.stringify(needsYou), caller }]);
+    await flush();
+    expect(pane.notify.snapshot().items).toMatchObject([
+      { ui: 'options', title: 'Q-5: Okta sign-out', context: 'The cover sheet needs both.', questions: [
+        { title: 'Keep their session?', choices: [{ label: 'Keep it', recommended: true }, { label: 'Sign them out' }] },
+        { title: 'Whose sessions end?', why: 'Same as sign-in.', choices: [{ label: 'Everyone', recommended: true }, { label: 'Members only' }] },
+      ] },
+      { ui: 'approve', title: 'Q-6: Approve the cover sheet?', context: '1. Keep their session? (Keep it (recommended) / Sign them out)\n2. Whose sessions end? (Everyone (recommended) / Members only)\nSame as sign-in.\n\nThe cover sheet needs both.' },
+    ]);
+    pane.notify.dispose();
+  });
+
   it('keeps a notify context that is prose starting with a bracket, and reads a status-JSON context on --update too', async () => {
     const pane = await startWithSessions();
     const caller = { paneId: 'loose', panelId: 'loose-panel' };

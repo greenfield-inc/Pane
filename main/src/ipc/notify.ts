@@ -775,12 +775,18 @@ function readStatusContext(request: NotifyRequest, newCard: boolean): void {
   if (!request.context) return;
   const card = statusCard(request.context, request.title ?? '');
   if (!card) return;
+  const buttons = newCard && request.ui === 'ask' && !request.suggestions?.length;
+  // Questions that can't get buttons here are written out in the context instead.
+  const context = card.questions && !buttons ? card.questionsContext : card.context;
   // An update without a line for the person clears the old context rather than keeping it.
-  if (card.context) request.context = card.context;
+  if (context) request.context = context;
   else if (newCard) delete request.context;
   else request.context = '';
   if (!newCard) return;
-  if (card.choices && request.ui === 'ask' && !request.suggestions?.length) {
+  if (buttons && card.questions) {
+    request.ui = 'options';
+    request.questions = card.questions;
+  } else if (buttons && card.choices) {
     request.ui = 'options';
     request.choices = card.choices;
   }

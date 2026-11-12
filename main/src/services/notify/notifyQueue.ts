@@ -341,6 +341,8 @@ export class NotifyQueue extends EventEmitter {
     if (again) {
       // The same tab asks the same thing (after a restart, say): it joins the card already there (J19).
       Object.assign(again.item, question);
+      // A card sent well formed this time is no longer one Pane tidied.
+      if (!question.asSent) delete again.item.asSent;
       again.restored = false;
       this.save(again);
       const result = this.wait(again, request.returnAfterMs, signal);
@@ -1646,7 +1648,8 @@ export class NotifyQueue extends EventEmitter {
       }
       signal?.addEventListener('abort', onAbort, { once: true });
       if (returnAfterMs !== undefined && returnAfterMs > 0) {
-        // Each round has its own 15 minutes: an updated version counts from when it was posted.
+        // Each round has its own 15 minutes: an updated version counts from when it was posted. A
+        // worker's question has no such limit, so each of its relay calls waits a full round.
         const remaining = (entry.item.revision?.at ?? entry.item.createdAt) + NOTIFY_RESUME_CAP_MS - Date.now();
         returnTimer = setTimeout(() => {
           const worker = entry.item.originKind === 'worker';
@@ -1664,7 +1667,7 @@ export class NotifyQueue extends EventEmitter {
           });
           // A relayed worker question keeps waiting for its worker even if the relay never resumes.
           if (!worker) entry.graceTimer = setTimeout(() => this.expire(entry.item.id), NOTIFY_RESUME_GRACE_MS);
-        }, Math.min(returnAfterMs, Math.max(remaining, 0)));
+        }, entry.item.originKind === 'worker' ? returnAfterMs : Math.min(returnAfterMs, Math.max(remaining, 0)));
       }
     });
   }

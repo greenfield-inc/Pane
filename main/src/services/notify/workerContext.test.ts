@@ -51,7 +51,7 @@ describe("a card built from a worker's status JSON", () => {
 
   it('gives each of several questions its own buttons, with the top-level why as the subtitle', () => {
     const card = statusCard(JSON.stringify({ needs_you: { why: 'Invoices ship Friday.', questions: [{ q: 'Id or number?', options: ['Id (recommended)', 'Number'] }, { q: 'Keep old PDFs?', why: 'They are linked from emails.', options: ['Yes', 'No'] }] } }), 'Two invoice questions');
-    expect(card).toEqual({
+    expect(card).toMatchObject({
       context: 'Invoices ship Friday.',
       questions: [
         { title: 'Id or number?', choices: [{ label: 'Id', recommended: true }, { label: 'Number' }] },

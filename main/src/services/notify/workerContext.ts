@@ -32,6 +32,8 @@ export interface StatusCard {
   choices?: NotifyChoice[];
   /** Several questions, each with its own buttons, when every one has options to press. */
   questions?: NotifySubQuestion[];
+  /** The context with those questions written out, for a card that can't show their buttons. */
+  questionsContext?: string;
   links?: NotifyLink[];
   /** The asker's own Summary page (`summary` in needs_you), as written: maybe relative. */
   summaryPage?: string;
@@ -160,8 +162,10 @@ function cardOf(needsYou: NeedsYou, title: string): StatusCard {
       if (why) sub.why = why;
       return sub;
     });
-    if (subQuestions.every((sub): sub is NotifySubQuestion => sub !== undefined)) card.questions = subQuestions;
-    else parts.push(listed(questions));
+    if (subQuestions.every((sub): sub is NotifySubQuestion => sub !== undefined)) {
+      card.questions = subQuestions;
+      card.questionsContext = cut([listed(questions), needsYou.why?.trim()].filter(Boolean).join('\n\n'));
+    } else parts.push(listed(questions));
   } else if (questions.length > 1) {
     // Some question has nothing to press: they are listed, and answered in words.
     parts.push(listed(questions));
