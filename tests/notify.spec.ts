@@ -422,7 +422,8 @@ test.describe('Settings → Approvals', () => {
     await expect(page.getByTestId('notify-cards-on-note')).toHaveCount(0);
 
     await picker.click();
-    await expect(page.getByRole('option')).toHaveText(['Whichever computer is in use', 'This computer (qa-macbook)', 'build-box']);
+    await expect(page.getByRole('option')).toHaveText(['Whichever computer is in use', 'This computer (qa-macbook)', 'build-box', 'old-laptop (needs a newer Pane)']);
+    await expect(page.getByRole('option', { name: 'old-laptop (needs a newer Pane)' })).toHaveAttribute('aria-disabled', 'true');
     await page.getByRole('option', { name: 'build-box' }).click();
     await expect.poll(() => configUpdates(page)).toEqual([
       { notify: { cardsOn: { id: '9a7e5c21-0000-4000-8000-0000000b0x01', name: 'build-box' } } },

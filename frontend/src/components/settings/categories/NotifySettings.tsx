@@ -142,6 +142,11 @@ function CardsOnPicker({ value, thisMachine, machines, disabled, onChange }: {
     if (machine.kind !== 'remote' || !machine.installId || options.some(option => option.id === machine.installId)) continue;
     options.push({ id: machine.installId, name: machine.label, label: machine.label });
   }
+  // A saved machine names itself only once it connects, and releases before "Show cards on" never do.
+  const unpickable = machines.filter(machine => machine.kind === 'remote' && !machine.installId).map(machine => ({
+    id: `unpickable:${machine.id}`,
+    label: `${machine.label} (${machine.status === 'online' ? 'needs a newer Pane' : 'not connected yet'})`,
+  }));
   // A machine picked elsewhere that this one hasn't saved still shows, by the name it was picked with.
   if (value && !options.some(option => option.id === value.id)) options.push({ ...value, label: value.name });
   return (
@@ -158,6 +163,7 @@ function CardsOnPicker({ value, thisMachine, machines, disabled, onChange }: {
       <SelectContent>
         <SelectItem value={ANY_COMPUTER}>Whichever computer is in use</SelectItem>
         {options.map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}
+        {unpickable.map((option) => <SelectItem key={option.id} value={option.id} disabled>{option.label}</SelectItem>)}
       </SelectContent>
     </Select>
   );
