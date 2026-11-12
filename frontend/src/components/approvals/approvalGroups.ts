@@ -2,6 +2,7 @@ import type { NotifyConnected, NotifyItem, NotifySession } from '../../../../sha
 import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
 import { decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { countsAsWaiting } from '../../stores/notifyStore';
+import { approvalHolder, type ApprovalHolder } from '../../../../shared/approvalStatus';
 
 export type ApprovalsTab = 'waiting' | 'answered';
 
@@ -54,6 +55,8 @@ export interface ApprovalGroup {
   autopilot?: boolean;
   /** A group of the By project sort. */
   project?: boolean;
+  /** Most recent's groups (P7): waiting on you, or with the agent reading your reply. */
+  holder?: ApprovalHolder;
   items: NotifyItem[];
 }
 
@@ -188,7 +191,7 @@ export function groupApprovals(items: NotifyItem[], tab: ApprovalsTab, sort: App
   const listedAt = tab === 'waiting' ? (item: NotifyItem) => item.createdAt : resolved;
   // By id on a tie, so items of the same millisecond don't swap as snapshots arrive.
   const newestFirst = [...(tab === 'waiting' ? live : answeredItems)].sort((a, b) => listedAt(b) - listedAt(a) || a.id.localeCompare(b.id));
-  const groups = sort === 'recent' ? []
+  const groups = sort === 'recent' ? (tab === 'waiting' ? byHolder(newestFirst) : [])
     : sort === 'project' ? intoGroups(newestFirst, projectGroup)
       : sort === 'sidebar' ? inSidebarOrder(intoGroups(newestFirst, sessionGroup), sidebarOrder)
         : intoGroups(newestFirst, sessionGroup);
@@ -204,6 +207,21 @@ export function groupApprovals(items: NotifyItem[], tab: ApprovalsTab, sort: App
 }
 
 /**
+ * Most recent's Waiting tab, once something is with an agent (P7, D-344): "Waiting on you" first,
+ * then "With the agent" for approvals whose reply an agent is reading or asking about. Flat (no
+ * groups) while everything waits on you.
+ */
+function byHolder(items: NotifyItem[]): ApprovalGroup[] {
+  const withAgent = items.filter(item => approvalHolder(item) === 'agent');
+  if (withAgent.length === 0) return [];
+  const onYou = items.filter(item => approvalHolder(item) !== 'agent');
+  const groups: ApprovalGroup[] = [];
+  if (onYou.length) groups.push({ key: 'holder:you', label: 'Waiting on you', holder: 'you', items: onYou });
+  groups.push({ key: 'holder:agent', label: 'With the agent', holder: 'agent', items: withAgent });
+  return groups;
+}
+
+/**
  * The ids of the items a queue lists, top to bottom: the order the pager steps through, grouped as
  * the list shows them under every sort. `withStale` adds the Stale group's items after them, in
  * their own oldest-first order, for a pager that also steps into it.
@@ -215,6 +233,7 @@ export function approvalIdsInListOrder(queue: Pick<ApprovalQueue, 'list' | 'stal
 
 /** A group header's count: how many of its items still wait on you, or on Answered how many it lists. */
 export function groupCountText(group: ApprovalGroup, tab: ApprovalsTab): string {
+  if (group.holder === 'agent') return `${group.items.length} sent`;
   return tab === 'waiting' ? `${group.items.filter(countsAsWaiting).length} waiting` : `${group.items.length} answered`;
 }
 

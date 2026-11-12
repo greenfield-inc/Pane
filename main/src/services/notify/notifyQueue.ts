@@ -973,6 +973,8 @@ export class NotifyQueue extends EventEmitter {
       delete item.questions;
     }
     if (update.links) item.links = update.links;
+    // The asker's new version replaces what Pane tidied: it's no longer "as sent".
+    if (update.title?.trim() || update.questions || update.choices) delete item.asSent;
     item.version = (item.version ?? 1) + 1;
     const by = item.reply?.reader?.name ?? askerName(item);
     item.revision = { asked: update.asked.trim(), whatChanged: update.whatChanged.split('\n').map(line => line.trim()).filter(Boolean), by, at: now };

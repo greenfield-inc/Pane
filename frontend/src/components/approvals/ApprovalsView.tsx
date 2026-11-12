@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLink, Folder, GitBranch, Inbox, MessageSquare, MessagesSquare, Navigation, ShieldAlert, WifiOff } from 'lucide-react';
+import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLink, Folder, GitBranch, Inbox, MessageSquare, MessagesSquare, Navigation, Send, ShieldAlert, WifiOff } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
@@ -18,6 +18,7 @@ import { useNow } from '../notify/useNow';
 import { SessionBeside } from '../PaneChatView';
 import { ApprovalColumn, ApprovalChip } from './ApprovalColumn';
 import { cardChip } from './approvalCard';
+import { approvalStatus } from '../../../../shared/approvalStatus';
 import { APPROVALS_SORTS, approvalIdsInListOrder, approvalRowLines, besideOf, connectedOf, groupApprovals, groupCountText, offlineRowText, readApprovalsSort, saveApprovalsSort, type ApprovalGroup, type ApprovalsSort, type ApprovalsTab, type Beside, type OfflineRow } from './approvalGroups';
 import { MachineContext } from './MachineContext';
 import { handleApprovalsEscape } from './approvalsNavigation';
@@ -62,7 +63,7 @@ function useMachineMark() {
 }
 
 function GroupHeader({ group, mark, count }: { group: ApprovalGroup; mark: ReactNode; count: string }) {
-  const Icon = group.autopilot ? Navigation : group.project ? Folder : group.session ? MessageSquare : GitBranch;
+  const Icon = group.holder === 'you' ? Inbox : group.holder === 'agent' ? Send : group.autopilot ? Navigation : group.project ? Folder : group.session ? MessageSquare : GitBranch;
   return (
     <div className={cn('flex items-center gap-2 border-b border-border-secondary bg-surface-secondary px-3 py-2 text-[12.5px] font-semibold', group.autopilot ? 'text-autopilot-on-tint' : 'text-text-primary')} data-testid="approvals-group">
       <Icon className={cn('h-3.5 w-3.5 shrink-0', group.autopilot ? 'text-autopilot' : 'text-text-tertiary')} aria-hidden="true" />
@@ -81,6 +82,8 @@ function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; 
   const done = item.state === 'answered' || item.state === 'expired' || item.state === 'info';
   const { acted, origin } = approvalRowLines(item);
   const chip = cardChip(item);
+  // Done today: how a typed reply was taken, on its own row (Q-343.3).
+  const taken = item.state === 'answered' ? approvalStatus(item) : null;
   return (
     <button
       type="button"
@@ -107,6 +110,7 @@ function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; 
       <span className="flex shrink-0 flex-col items-end gap-1">
         <span className="text-[12px] tabular-nums text-text-tertiary">{relativeAge(item.resolvedAt ?? item.createdAt, now)}</span>
         {chip && chip.tone !== 'success' && <ApprovalChip chip={chip} testId="approvals-row-chip" />}
+        {taken?.kind === 'taken' && <ApprovalChip chip={{ tone: 'success', text: 'Taken as your answer' }} testId="approvals-row-chip" />}
       </span>
     </button>
   );
@@ -399,7 +403,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
           <h1 className="text-[15px] font-semibold text-text-primary">Approvals</h1>
           <div role="tablist" aria-label="Approvals" className="inline-flex gap-0.5 rounded-[9px] bg-surface-tertiary p-[3px] text-[12.5px]">
             {tabButton('waiting', 'Waiting', waiting)}
-            {tabButton('answered', 'Answered', answered)}
+            {tabButton('answered', 'Done today', answered)}
           </div>
         </header>
         {importError && (
@@ -486,7 +490,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             itemId={selected.id}
             order={order}
             onSelect={selectApproval}
-            groupLabel={tab === 'waiting' ? 'Approvals' : 'Answered'}
+            groupLabel={tab === 'waiting' ? 'Approvals' : 'Done today'}
             inChat={undefined}
             renderOrigin={() => origin}
           />

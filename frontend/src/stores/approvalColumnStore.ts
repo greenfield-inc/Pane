@@ -23,8 +23,6 @@ interface ApprovalDraft {
 
 interface ApprovalColumnState {
   open: Partial<Record<ApprovalSurface, OpenApproval>>;
-  /** The last approval the person replied to: a quiet line on whichever approval opens next says how it was taken. */
-  lastReplied: string | null;
   /** What's typed and picked on each approval (by `<id>:<version>`), kept until its Send is accepted (F-4). */
   drafts: Record<string, ApprovalDraft>;
   setDraft(key: string, draft: ApprovalDraft | null): void;
@@ -37,12 +35,10 @@ interface ApprovalColumnState {
   setTab(surface: ApprovalSurface, itemId: string, tab: string): void;
   openNested(surface: ApprovalSurface, itemId: string, nested: string | undefined): void;
   close(surface: ApprovalSurface): void;
-  noteReplied(itemId: string | null): void;
 }
 
 export const useApprovalColumnStore = create<ApprovalColumnState>((set, get) => ({
   open: {},
-  lastReplied: null,
   drafts: {},
   setDraft: (key, draft) => set((state) => {
     const drafts = { ...state.drafts };
@@ -69,7 +65,6 @@ export const useApprovalColumnStore = create<ApprovalColumnState>((set, get) => 
     delete open[surface];
     return { open };
   }),
-  noteReplied: (itemId) => set({ lastReplied: itemId }),
 }));
 
 /** Opens an approval in a Session's column (from its count, an inline card, or a link). */

@@ -1,4 +1,5 @@
 import type { NotifyChoice, NotifyItem, NotifyLink, NotifySubQuestion, NotifyVersion } from '../../../../shared/types/notify';
+import { approvalStatus, replyReader, sentenceStart } from '../../../../shared/approvalStatus';
 
 /**
  * The approval column's logic (P3 of the approval card), kept apart from its rendering: the
@@ -9,6 +10,8 @@ import type { NotifyChoice, NotifyItem, NotifyLink, NotifySubQuestion, NotifyVer
 /** One question as the column shows it: an options approval's own choices count as one. */
 export interface CardQuestion {
   title: string;
+  /** Why this question matters, shown under it. */
+  why?: string;
   choices: CardChoice[];
   /** Choices the version before had and this one dropped: shown struck out, once. */
   removed: string[];
@@ -41,7 +44,8 @@ export function previousVersion(item: NotifyItem): NotifyVersion | undefined {
 export function markedQuestions(item: NotifyItem): CardQuestion[] {
   const current = questionsOf(item);
   const before = previousVersion(item);
-  if (!before) return current.map(question => ({ title: question.title, choices: question.choices.map(choice => ({ ...choice })), removed: [] }));
+  const withWhy = (question: NotifySubQuestion, card: Omit<CardQuestion, 'why'>): CardQuestion => (question.why ? { ...card, why: question.why } : card);
+  if (!before) return current.map(question => withWhy(question, { title: question.title, choices: question.choices.map(choice => ({ ...choice })), removed: [] }));
   const earlier = questionsOf({ ui: item.ui, title: before.title, choices: before.choices, questions: before.questions });
   return current.map((question, index) => {
     const old = earlier[index]?.choices ?? [];
@@ -59,7 +63,7 @@ export function markedQuestions(item: NotifyItem): CardQuestion[] {
     });
     const removed: string[] = [];
     for (const choice of old) if (!used.has(choice.label)) removed.push(choice.label);
-    return { title: question.title, choices, removed };
+    return withWhy(question, { title: question.title, choices, removed });
   });
 }
 
@@ -74,18 +78,18 @@ export interface ReplyLine {
 export function replyLine(item: NotifyItem): ReplyLine | null {
   const reply = item.reply;
   if (!reply) return null;
-  const reader = reply.reader?.name ?? item.source.name;
+  const status = approvalStatus(item);
   switch (reply.state) {
     case 'reading':
-      return { tone: 'muted', text: reply.reader?.kind === 'autopilot' ? 'Autopilot is reading your reply…' : 'Reading your reply…' };
+      return { tone: 'muted', text: `${status?.text ?? `${sentenceStart(replyReader(item))} is reading your reply`}…` };
     case 'answer': {
-      const line: ReplyLine = { tone: 'success', text: `Taken as your answer${reply.picks?.length ? `: ${reply.picks.map(pick => pick || '—').join(' · ')}, with your note “${reply.text}”` : `: “${reply.text}”`}` };
+      const line: ReplyLine = { tone: 'success', text: `Taken as your answer${reply.picks?.some(Boolean) ? `: ${reply.picks.map(pick => pick || '—').join(' · ')}, with your note “${reply.text}”` : `: “${reply.text}”`}` };
       // A fix is one click, once.
       if (!reply.fixed) line.fix = { as: 'question', label: 'It was a question' };
       return line;
     }
     case 'question': {
-      const line: ReplyLine = { tone: 'warning', text: `Taken as a question: asking ${reader}. ${reply.status ?? 'Getting more context…'}` };
+      const line: ReplyLine = { tone: 'warning', text: `Taken as a question: ${status?.text ?? `${sentenceStart(replyReader(item))} is getting more context`}${status?.text.includes(':') ? '' : '…'}` };
       if (!reply.fixed) line.fix = { as: 'answer', label: 'It was my answer' };
       return line;
     }
@@ -103,8 +107,9 @@ export function cardChip(item: NotifyItem): CardChip {
   if (item.state === 'answered') return { tone: 'success', text: 'Answered' };
   if (item.state !== 'waiting') return null;
   if (item.readyAgain !== undefined) return { tone: 'info', text: 'Updated · ready again' };
-  if (item.reply?.state === 'question') return { tone: 'warning', text: item.reply.status ?? 'Getting more context…' };
-  if (item.reply?.state === 'reading') return { tone: 'muted', text: 'Reading your reply…' };
+  // The reader by name, for every kind of reader (P7).
+  if (item.reply?.state === 'question') return { tone: 'warning', text: `${sentenceStart(replyReader(item))} is getting more context` };
+  if (item.reply?.state === 'reading') return { tone: 'muted', text: `${sentenceStart(replyReader(item))} is reading your reply` };
   return null;
 }
 
@@ -125,17 +130,6 @@ export function dotTone(item: NotifyItem | undefined, current: boolean): 'curren
   if (item.readyAgain !== undefined && item.state === 'waiting') return 'info';
   if (isBeingRead(item)) return 'warning';
   return 'muted';
-}
-
-/** After a send, the next approval to open: the next one along that isn't being read, else none. */
-export function nextAfterSend(order: readonly string[], sentId: string, items: ReadonlyMap<string, NotifyItem>): string | undefined {
-  const start = order.indexOf(sentId);
-  for (let step = 1; step < order.length; step += 1) {
-    const id = order[(Math.max(start, 0) + step) % order.length];
-    const item = items.get(id);
-    if (item && item.state === 'waiting' && !isBeingRead(item) && id !== sentId) return id;
-  }
-  return undefined;
 }
 
 /**
@@ -160,7 +154,7 @@ export type CardTab =
 /** `inChat`: the panel the person is already looking at; the origin tab is left out when it's that one. */
 export function cardTabs(item: NotifyItem, inChat?: string): CardTab[] {
   const tabs: CardTab[] = [
-    { kind: 'qa', key: 'qa', label: 'Questions & answers' },
+    { kind: 'qa', key: 'qa', label: 'Decide' },
     { kind: 'summary', key: 'summary', label: 'Summary' },
   ];
   (item.links ?? []).forEach((link, index) => tabs.push({ kind: 'link', key: `link:${index}:${link.label}`, label: link.label, link, index }));
@@ -185,45 +179,6 @@ export function askedBy(item: NotifyItem): string[] {
   return parts;
 }
 
-/** The Summary (D-225), written by Pane from the approval's own fields, the same way every time. */
-export interface CardSummary {
-  why?: string;
-  recommendation: Array<{ question?: string; label: string; detail?: string }>;
-  questions: NotifySubQuestion[];
-  references: Array<{ label: string; kind: 'file' | 'url' | 'approval' | 'origin'; detail: string }>;
-  history: Array<{ version: number; at: number; asked?: string; whatChanged: string[]; by?: string }>;
-}
-
-export function cardSummary(item: NotifyItem): CardSummary {
-  const questions = questionsOf(item);
-  const recommendation: CardSummary['recommendation'] = [];
-  for (const question of questions) {
-    for (const choice of question.choices) {
-      if (!choice.recommended) continue;
-      const recommended: CardSummary['recommendation'][number] = { label: choice.label };
-      if (questions.length > 1) recommended.question = question.title;
-      if (choice.detail) recommended.detail = choice.detail;
-      recommendation.push(recommended);
-    }
-  }
-  const references: CardSummary['references'] = (item.links ?? []).map(link => (
-    'path' in link ? { label: link.label, kind: 'file' as const, detail: link.path }
-      : 'url' in link ? { label: link.label, kind: 'url' as const, detail: link.url }
-        : { label: link.label, kind: 'approval' as const, detail: 'another approval' }
-  ));
-  if (originPanel(item)) references.push({ label: `${item.source.name}'s tab`, kind: 'origin', detail: 'where it was asked' });
-  const round = (version: number, at: number, revision: NotifyItem['revision']): CardSummary['history'][number] => (
-    revision ? { version, at, asked: revision.asked, whatChanged: revision.whatChanged, by: revision.by } : { version, at, whatChanged: [] }
-  );
-  const history = [
-    ...(item.versions ?? []).map(version => round(version.version, version.at, version.revision)),
-    round(item.version ?? 1, item.revision?.at ?? item.createdAt, item.revision),
-  ];
-  const summary: CardSummary = { recommendation, questions, references, history };
-  if (item.context) summary.why = item.context;
-  return summary;
-}
-
 /** Waiting items connected to a Session (its own, its workers', Autopilot's about it), oldest first. */
 export function sessionApprovals(items: readonly NotifyItem[], sessionId: string): NotifyItem[] {
   return items
@@ -241,4 +196,44 @@ export function readyCount(items: readonly NotifyItem[]): number {
 export function firstToOpen(items: readonly NotifyItem[]): NotifyItem | undefined {
   const ready = items.filter(item => item.readyAgain !== undefined).sort((a, b) => (b.readyAgain ?? 0) - (a.readyAgain ?? 0));
   return ready[0] ?? items.find(item => !isBeingRead(item)) ?? items[0];
+}
+
+/** The picks a fresh card starts with: each question's recommended option, '' where none is. */
+export function recommendedPicks(item: NotifyItem): string[] {
+  if (item.agentPrompt) return [];
+  return questionsOf(item).map(question => question.choices.find(choice => choice.recommended)?.label ?? '');
+}
+
+/**
+ * The approvals a chat's compact card pages through (P5, P6): waiting on the person, not the
+ * chat's own bridged question (AskUserQuestion or a permission prompt from that same chat, which
+ * the chat already shows as Claude's card), and not one an agent is reading a reply to, until it
+ * comes back ready again.
+ */
+export function dockApprovals(items: readonly NotifyItem[], chatPanelId?: string): NotifyItem[] {
+  return items.filter(item => !bridgedFrom(item, chatPanelId) && (!isBeingRead(item) || item.readyAgain !== undefined));
+}
+
+/** A question the chat tab itself asked (its AskUserQuestion or permission prompt), copied to Approvals. */
+export function bridgedFrom(item: NotifyItem, chatPanelId: string | undefined): boolean {
+  return chatPanelId !== undefined && item.source.panelId === chatPanelId && Boolean(item.replyIsAnswer || item.optionsOnly || item.agentPrompt);
+}
+
+/**
+ * The chat's status line after a send (P7, D-344): the Session's approval the person replied to
+ * most recently, while its reply is being read, asked about or came back ready again, or once it
+ * was taken as the answer (until the person dismisses it).
+ */
+export function latestReplied(items: readonly NotifyItem[], sessionId: string, dismissed: ReadonlySet<string>): NotifyItem | undefined {
+  return items
+    .filter(item => item.reply && !dismissed.has(item.reply.id) && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId)))
+    .filter(item => (item.state === 'waiting' && (item.reply?.state === 'reading' || item.reply?.state === 'question' || item.reply?.state === 'unread' || item.readyAgain !== undefined))
+      || (item.state === 'answered' && item.reply?.state === 'answer'))
+    .sort((a, b) => (b.readyAgain ?? b.reply?.at ?? 0) - (a.readyAgain ?? a.reply?.at ?? 0))[0];
+}
+
+/** "3 references": the card's links. */
+export function referenceCount(item: Pick<NotifyItem, 'links'>): string | undefined {
+  const count = item.links?.length ?? 0;
+  return count ? `${count} reference${count === 1 ? '' : 's'}` : undefined;
 }

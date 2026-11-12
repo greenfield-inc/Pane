@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { canSend, cardChip, cardSummary, cardTabs, dotTone, firstToOpen, markedQuestions, nextAfterSend, readyCount, replyLine, sessionApprovals } from './approvalCard';
+import { bridgedFrom, canSend, cardChip, cardTabs, dockApprovals, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, recommendedPicks, replyLine, sessionApprovals } from './approvalCard';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -42,12 +42,12 @@ describe('the approval card', () => {
   });
 
   it('says how a reply was taken, with its fix until it was used', () => {
-    expect(replyLine({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'reading' } })).toEqual({ tone: 'muted', text: 'Reading your reply…' });
+    expect(replyLine({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'reading' } })).toEqual({ tone: 'muted', text: 'doozy-overhaul is reading your reply…' });
     expect(replyLine({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'reading', reader: { kind: 'autopilot', name: 'Autopilot' } } })?.text).toBe('Autopilot is reading your reply…');
     expect(replyLine({ ...q20, state: 'answered', reply: { id: 'r', text: 'only if undoable', picks: ['Yes, turn it on', 'One train'], at: 1, state: 'answer' } })).toEqual({
       tone: 'success', text: 'Taken as your answer: Yes, turn it on · One train, with your note “only if undoable”', fix: { as: 'question', label: 'It was a question' },
     });
-    expect(replyLine({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'question', reader: { kind: 'asker', name: 'doozy-overhaul' } } })).toMatchObject({ tone: 'warning', text: 'Taken as a question: asking doozy-overhaul. Getting more context…', fix: { as: 'answer' } });
+    expect(replyLine({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'question', reader: { kind: 'asker', name: 'doozy-overhaul' } } })).toMatchObject({ tone: 'warning', text: 'Taken as a question: doozy-overhaul is getting more context…', fix: { as: 'answer' } });
     expect(replyLine({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'question', fixed: 'question' } })?.fix).toBeUndefined();
     expect(replyLine({ ...q20, reply: { id: 'r', text: 'both', at: 1, state: 'sent', reader: { kind: 'asker', name: 'Claude' } } })).toEqual({ tone: 'success', text: 'Sent to Claude' });
     expect(replyLine({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'unread' } })?.text).toMatch(/No agent can read replies right now/);
@@ -55,20 +55,32 @@ describe('the approval card', () => {
 
   it('chips and pager dots follow the state', () => {
     expect(cardChip(v2)).toEqual({ tone: 'info', text: 'Updated · ready again' });
-    expect(cardChip({ ...q20, reply: { id: 'r', text: 'x', at: 1, state: 'question' } })).toEqual({ tone: 'warning', text: 'Getting more context…' });
+    expect(cardChip({ ...q20, reply: { id: 'r', text: 'x', at: 1, state: 'question' } })).toEqual({ tone: 'warning', text: 'doozy-overhaul is getting more context' });
     expect(dotTone(v2, false)).toBe('info');
     expect(dotTone(v2, true)).toBe('current');
     expect(dotTone({ ...q20, reply: { id: 'r', text: 'x', at: 1, state: 'reading' } }, false)).toBe('warning');
   });
 
-  it('a send moves on past what is being read', () => {
-    const items = new Map<string, NotifyItem>([
-      ['a', { ...q20, id: 'a' }],
-      ['b', { ...q20, id: 'b', reply: { id: 'r', text: 'x', at: 1, state: 'reading' } }],
-      ['c', { ...q20, id: 'c' }],
-    ]);
-    expect(nextAfterSend(['a', 'b', 'c'], 'a', items)).toBe('c');
-    expect(nextAfterSend(['a', 'b'], 'a', items)).toBeUndefined();
+  it('P6: the dock pages past what is being read until it is ready again, and leaves out the chat\'s own question (P5)', () => {
+    const reading = { ...q20, id: 'b', reply: { id: 'r', text: 'x', at: 1, state: 'reading' as const } };
+    const ready = { ...reading, id: 'c', readyAgain: 5 };
+    const own = { ...q20, id: 'd', replyIsAnswer: true, source: { ...q20.source, panelId: 'chat-1' } };
+    const posted = { ...q20, id: 'e', source: { ...q20.source, panelId: 'chat-1' } };
+    expect(dockApprovals([{ ...q20, id: 'a' }, reading, ready, own, posted], 'chat-1').map(item => item.id)).toEqual(['a', 'c', 'e']);
+    expect(bridgedFrom(own, 'chat-1')).toBe(true);
+    expect(bridgedFrom(own, 'other-chat')).toBe(false);
+  });
+
+  it('P7: the status line follows the reply sent last in the Session, until it is dismissed', () => {
+    const reading = { ...q20, id: 'b', reply: { id: 'r1', text: 'x', at: 10, state: 'reading' as const } };
+    const taken = { ...q20, id: 'c', state: 'answered' as const, reply: { id: 'r2', text: 'y', at: 20, state: 'answer' as const } };
+    expect(latestReplied([reading, taken], 's1', new Set())?.id).toBe('c');
+    expect(latestReplied([reading, taken], 's1', new Set(['r2']))?.id).toBe('b');
+    expect(latestReplied([reading, taken], 'other', new Set())).toBeUndefined();
+  });
+
+  it('recommended picks start selected', () => {
+    expect(recommendedPicks(q20)).toEqual(['', 'One train']);
   });
 
   it('Send needs a pick per question, or something typed', () => {
@@ -79,19 +91,8 @@ describe('the approval card', () => {
   });
 
   it('J13: tabs are Q&A, Summary, each reference, then the origin unless you are in it', () => {
-    expect(cardTabs(q20).map(tab => tab.label)).toEqual(['Questions & answers', 'Summary', 'doozy-overhaul status', 'PR #2480', "doozy-overhaul's tab"]);
+    expect(cardTabs(q20).map(tab => tab.label)).toEqual(['Decide', 'Summary', 'doozy-overhaul status', 'PR #2480', "doozy-overhaul's tab"]);
     expect(cardTabs(q20, 'w1').map(tab => tab.kind)).toEqual(['qa', 'summary', 'link', 'link']);
-  });
-
-  it('D-225: the Summary is built from the item, with every round', () => {
-    const summary = cardSummary(v2);
-    expect(summary.why).toBe(q20.context);
-    expect(summary.recommendation).toEqual([{ question: 'One train?', label: 'All in one train' }]);
-    expect(summary.references.map(reference => reference.kind)).toEqual(['file', 'url', 'origin']);
-    expect(summary.history).toEqual([
-      { version: 1, at: 1_000, whatChanged: [] },
-      { version: 2, at: 2_000, asked: 'Can the switch be turned off again?', whatChanged: v2.revision?.whatChanged, by: 'doozy-overhaul' },
-    ]);
   });
 
   it('J15: a Session count opens its newest ready-again approval, else its first waiting one', () => {
