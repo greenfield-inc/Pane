@@ -1,5 +1,6 @@
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import { LOCAL_MACHINE_ID, type MachineState } from '../../../shared/types/machineConnections';
 import type { TailnetMachine, TailnetMachineList } from '../../../shared/types/workspaceAccess';
 
 /**
@@ -19,17 +20,45 @@ export type SessionHost =
   | { kind: 'tailnet'; machine: string }
   | { kind: 'paired'; reason: string };
 
-export function sessionHostFor(config: Pick<RemoteDaemonConfig, 'client'> | undefined): SessionHost {
-  const client = config?.client;
-  if (client?.mode !== 'remote') return { kind: 'local' };
-  const profile = client.profiles.find(candidate => candidate.id === client.activeProfileId);
-  if (!profile) return { kind: 'local' };
+function hostOfProfile(profile: RemoteDaemonConfig['client']['profiles'][number]): SessionHost {
   if (profile.tailnetMachine) return { kind: 'tailnet', machine: profile.tailnetMachine };
   return {
     kind: 'paired',
     reason: `${profile.label} is connected with a pairing code, not over Tailscale, so Pane can't tell which machine it is. `
       + 'Moving a Session works between your machines on Tailscale: switch to it from the sidebar machine menu or Settings → Remote Access → Switch to.',
   };
+}
+
+/** The host the window shows. */
+export function sessionHostFor(config: Pick<RemoteDaemonConfig, 'client'> | undefined): SessionHost {
+  const client = config?.client;
+  if (client?.mode !== 'remote') return { kind: 'local' };
+  const profile = client.profiles.find(candidate => candidate.id === client.activeProfileId);
+  return profile ? hostOfProfile(profile) : { kind: 'local' };
+}
+
+/** The host of one machine in All machines: this computer (`local`), or the saved profile with that id. */
+export function sessionHostForMachine(config: Pick<RemoteDaemonConfig, 'client'> | undefined, machineId: string): SessionHost {
+  if (machineId === LOCAL_MACHINE_ID) return { kind: 'local' };
+  const profile = config?.client.profiles.find(candidate => candidate.id === machineId);
+  if (profile) return hostOfProfile(profile);
+  return {
+    kind: 'paired',
+    reason: 'Pane no longer has this machine saved, so it can\'t ask its Session to move. Add it again in Settings → Remote Access, then try again.',
+  };
+}
+
+/**
+ * Why Move to machine… can't run for a Session on this host, or null when it can. `machine` is
+ * the Session's machine in All machines, which must be connected to take the request.
+ */
+export function moveBlockedReason(host: SessionHost, machine?: { name: string; status: MachineState['status'] | undefined }): string | null {
+  if (host.kind === 'paired') return host.reason;
+  if (machine && machine.status !== 'online') {
+    return `${machine.name} is ${machine.status === 'connecting' ? 'still connecting' : 'offline'}, so its Session's agent can't be asked to hand off. `
+      + `Use Retry on ${machine.name}, then try again once it is back.`;
+  }
+  return null;
 }
 
 export interface MoveTarget {
