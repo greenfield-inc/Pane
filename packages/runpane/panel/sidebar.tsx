@@ -1,13 +1,14 @@
 import { ArrowUpRight } from 'lucide-react';
 import { currentAgent, type Agent } from './model';
-import { AccentBar, BranchIcon, MetaLine, PrBadge, StatusDot, StatusWord, Terminal } from './primitives';
+import { AccentBar, BranchIcon, MetaLine, PrBadge, ReportLine, StatusDot, StatusWord, Terminal } from './primitives';
 import { AgentButtons, Composer, EmptyPanel, ErrorBanner, liveCount, NoticeLine } from './shared';
 import type { CardProps, PanelProps } from './types';
 
 // Pane's vertical sidebar: rows grouped under their repo, with the selected Pane in detail.
 
-function Row({ agent, selected, onSelect }: { agent: Agent; selected?: boolean; onSelect?: () => void }) {
-  const title = agent.pr?.title ?? agent.name;
+/** A row reads as its PR title once there is one, unless agents of one Pane share that PR. */
+function Row({ agent, selected, onSelect, sharesPane }: { agent: Agent; selected?: boolean; onSelect?: () => void; sharesPane?: boolean }) {
+  const title = (!sharesPane && agent.pr?.title) || agent.name;
   const body = (
     <>
       <AccentBar status={agent.status} />
@@ -35,6 +36,7 @@ export function Card({ data, failed, actions }: CardProps) {
         <StatusWord status={agent.status} />
       </div>
       <Row agent={agent} />
+      <ReportLine agent={agent} />
       <Terminal agent={agent} lines={3} header={false} />
       <AgentButtons agent={agent} actions={actions} />
       <NoticeLine agent={agent} actions={actions} />
@@ -63,6 +65,7 @@ export function Panel({ data, selected, onSelect, actions }: PanelProps) {
   const groups = new Map<string, Agent[]>();
   for (const agent of [...data.agents].reverse()) groups.set(agent.repo ?? '', [...(groups.get(agent.repo ?? '') ?? []), agent]);
   const current = currentAgent(data.agents, selected);
+  const shared = new Set(data.agents.filter((agent, index) => data.agents.findIndex((other) => other.paneId === agent.paneId) !== index).map((agent) => agent.paneId));
   return (
     <main className="panel panel-agents">
       <header className="panel-header">
@@ -80,7 +83,7 @@ export function Panel({ data, selected, onSelect, actions }: PanelProps) {
               <section key={repo}>
                 {repo && <h2 className="repo-label">{repo}</h2>}
                 {agents.map((agent) => (
-                  <Row key={agent.paneId} agent={agent} selected={agent.paneId === current?.paneId} onSelect={() => onSelect(agent.paneId)} />
+                  <Row key={agent.panelId} agent={agent} selected={agent.panelId === current?.panelId} onSelect={() => onSelect(agent.panelId)} sharesPane={shared.has(agent.paneId)} />
                 ))}
               </section>
             ))}
@@ -100,6 +103,7 @@ export function Panel({ data, selected, onSelect, actions }: PanelProps) {
                   <ArrowUpRight className="icon faint" aria-hidden="true" />
                 </button>
               )}
+              <ReportLine agent={current} />
               <Terminal agent={current} />
               <Composer agent={current} actions={actions} />
               <div className="detail-foot">

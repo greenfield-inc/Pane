@@ -11,14 +11,15 @@ Pane is a desktop app that runs coding agents side by side, each in its own git 
 1. Call `repos_list` to find the repo. Use its name or id as `repo`.
 2. Call `agents_start` with `repo`, a short kebab-case `name`, `agent` (`codex`, `claude`, or `cursor`), the task as `prompt`, and `yes: true`. Pass `yes: true` only when the user asked for the agent.
 3. Tell the user the Pane's name and its `pane://` link. Offer the Chat agents panel (`agents_panel`), which shows every agent this chat started.
+4. For more work on an agent's branch (a review, a fix, a test pass), call `agents_start` with `pane` set to that agent's Pane id instead of `repo` and `name`. The new agent opens as a tab in the same Pane and worktree.
 
 ## Check on agents
-- `agents_status` with `pane` (the Pane id from `agents_start`, `agents_panel` or `panes_list`) returns `working`, `ready`, `blocked`, `idle`, or `exited`, plus the agent's screen. Report what the screen shows; don't guess progress.
+- `agents_status` with `panel` (the panel id from `agents_start` or `agents_panel`) or `pane` returns `working`, `ready`, `blocked`, `idle`, or `exited`, plus the agent's screen and its latest `report` when it filed one. Report what the screen and report show; don't guess progress.
 - `blocked` means the agent waits on a prompt. Show the user the question and ask how to answer before sending anything. The same goes for setup, trust, and permission screens, whatever the status says.
 - `workspace_state` returns every Pane and agent at once.
 
 ## Message an agent
-- `agents_send` with `pane`, `text`, and `yes: true` types the message and submits it. Confirm it reports `delivered: true`.
+- `agents_send` with `panel` (or `pane`), `text`, and `yes: true` types the message and submits it. Confirm it reports `delivered: true`.
 - To answer a menu (arrow keys, Enter, Escape) once the user has chosen, use `panels_input` with named keys, then check with `agents_status`.
 
 ## Show agents

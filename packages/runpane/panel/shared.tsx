@@ -6,7 +6,7 @@ import type { AgentActions } from './types';
 
 /** Open in Pane, plus Open PR when the branch has one: at most two actions, per the inline-card rules. */
 export function AgentButtons({ agent, actions, primaryOpen = true }: { agent: Agent; actions: AgentActions; primaryOpen?: boolean }) {
-  const busy = actions.busy[agent.paneId];
+  const busy = actions.busy[agent.panelId];
   return (
     <div className="actions">
       <Button primary={primaryOpen} onClick={() => actions.open(agent)} disabled={busy !== undefined || agent.status === 'gone'}>
@@ -24,7 +24,7 @@ export function AgentButtons({ agent, actions, primaryOpen = true }: { agent: Ag
 }
 
 export function NoticeLine({ agent, actions }: { agent: Agent; actions: AgentActions }) {
-  const notice = actions.notices[agent.paneId];
+  const notice = actions.notices[agent.panelId];
   return <p className={`notice ${notice?.kind ?? ''}`} role="status">{notice?.text ?? ' '}</p>;
 }
 
@@ -32,7 +32,7 @@ export function NoticeLine({ agent, actions }: { agent: Agent; actions: AgentAct
 export function Composer({ agent, actions }: { agent: Agent; actions: AgentActions }) {
   const [draft, setDraft] = useState('');
   const live = agent.status !== 'gone' && agent.status !== 'exited';
-  const busy = actions.busy[agent.paneId] !== undefined;
+  const busy = actions.busy[agent.panelId] !== undefined;
   const placeholder = !live ? 'This agent has stopped' : agent.status === 'blocked' ? `Answer ${agent.name}` : `Message ${agent.name}`;
   return (
     <form
@@ -45,7 +45,7 @@ export function Composer({ agent, actions }: { agent: Agent; actions: AgentActio
     >
       <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={placeholder} aria-label={placeholder} disabled={!live || busy} />
       <Button primary submit disabled={!live || busy || draft.trim() === ''} label={`Send to ${agent.name}`}>
-        {actions.busy[agent.paneId] === 'send' ? 'Sending…' : 'Send'}
+        {actions.busy[agent.panelId] === 'send' ? 'Sending…' : 'Send'}
       </Button>
     </form>
   );

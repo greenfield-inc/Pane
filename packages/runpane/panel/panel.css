@@ -209,3 +209,10 @@ button.row:hover { background: var(--bg-2); }
 @media (prefers-reduced-motion: reduce) {
   .dot-working, .dot-blocked, .accent-working::after, .shimmer, .cursor, .skeleton-line, .skeleton-block { animation: none; }
 }
+
+/* ---------- The agent's latest runpane report: one line under its row. ---------- */
+.report { display: flex; gap: 6px; align-items: baseline; margin: 0; min-width: 0; font-size: var(--size-xs); color: var(--text-2); }
+.report-state { flex: none; font-weight: 600; }
+.report-blocked, .report-failed { color: var(--danger); }
+.report-ready, .report-done { color: var(--success); }
+.report-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

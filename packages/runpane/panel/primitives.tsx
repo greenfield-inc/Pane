@@ -54,6 +54,19 @@ export function MetaLine({ agent, showRepo = true }: { agent: Agent; showRepo?: 
   return <span className="meta">{parts.flatMap((part, index) => (index === 0 ? [part] : [<span key={`sep${index}`} className="sep">·</span>, part]))}</span>;
 }
 
+/** The agent's latest `runpane report`: its question when blocked, else its summary. One line. */
+export function ReportLine({ agent }: { agent: Agent }) {
+  const report = agent.report;
+  if (!report) return null;
+  const text = (report.state === 'blocked' && report.question) || report.summary || report.question;
+  return (
+    <p className="report" title={text}>
+      <span className={`report-state report-${report.state}`}>Reported {report.state}</span>
+      {text && <span className="report-text">{text}</span>}
+    </p>
+  );
+}
+
 /** PR state as a badge: the one place PR colors appear as fills. */
 export function PrBadge({ agent }: { agent: Agent }) {
   const pr = agent.pr;

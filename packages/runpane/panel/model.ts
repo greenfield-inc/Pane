@@ -10,6 +10,11 @@ const agentSchema = boundary.object({
   screen: boundary.array(boundary.string),
   link: boundary.string,
   repo: boundary.optional(boundary.string),
+  report: boundary.optional(boundary.object({
+    state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
+    summary: boundary.optional(boundary.string),
+    question: boundary.optional(boundary.string),
+  })),
   diff: boundary.optional(boundary.object({ adds: boundary.number, dels: boundary.number })),
   pr: boundary.optional(boundary.object({
     number: boundary.number,
@@ -96,7 +101,7 @@ export const isLive = (status: Status) => LIVE_STATUSES.has(status);
 
 /** The agent the panel shows: the user's or model's pick, else the one that needs the user, else the newest. */
 export function currentAgent(agents: Agent[], selected: string | undefined): Agent | undefined {
-  return agents.find((agent) => agent.paneId === selected)
+  return agents.find((agent) => agent.panelId === selected)
     ?? agents.find((agent) => agent.status === 'blocked')
     ?? agents.at(-1);
 }

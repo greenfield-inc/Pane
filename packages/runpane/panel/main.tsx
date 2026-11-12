@@ -23,16 +23,16 @@ function useActions(onChanged: () => void): AgentActions {
   const [notices, setNotices] = useState<Record<string, Notice | undefined>>({});
   const [busy, setBusy] = useState<Record<string, 'send' | 'open' | undefined>>({});
   const run = useCallback(async (agent: Agent, kind: 'send' | 'open', work: () => Promise<Notice>) => {
-    setBusy((current) => ({ ...current, [agent.paneId]: kind }));
-    setNotices((current) => ({ ...current, [agent.paneId]: undefined }));
+    setBusy((current) => ({ ...current, [agent.panelId]: kind }));
+    setNotices((current) => ({ ...current, [agent.panelId]: undefined }));
     let notice: Notice;
     try {
       notice = await work();
     } catch (error) {
       notice = { kind: 'error', text: error instanceof Error ? error.message : 'Pane did not answer.' };
     }
-    setNotices((current) => ({ ...current, [agent.paneId]: notice }));
-    setBusy((current) => ({ ...current, [agent.paneId]: undefined }));
+    setNotices((current) => ({ ...current, [agent.panelId]: notice }));
+    setBusy((current) => ({ ...current, [agent.panelId]: undefined }));
     return notice.kind === 'ok';
   }, []);
   return useMemo(() => ({
@@ -57,7 +57,8 @@ function useActions(onChanged: () => void): AgentActions {
 function describeAgent(agent: Agent): string {
   const pr = agent.pr ? `, PR #${agent.pr.number} ${agent.pr.state ?? 'open'}` : '';
   const last = agent.screen.at(-1);
-  return `${agent.name} (pane ${agent.paneId}${agent.repo ? `, repo ${agent.repo}` : ''}): ${STATUS_WORD[agent.status]}${pr}${last ? `. Last line: ${last}` : ''}`;
+  const report = agent.report ? `. Reported ${agent.report.state}: ${agent.report.question ?? agent.report.summary ?? ''}` : '';
+  return `${agent.name} (pane ${agent.paneId}${agent.repo ? `, repo ${agent.repo}` : ''}): ${STATUS_WORD[agent.status]}${pr}${report}${last ? `. Last line: ${last}` : ''}`;
 }
 
 function PanelView({ initial }: { initial: PanelData }) {
@@ -74,7 +75,7 @@ function PanelView({ initial }: { initial: PanelData }) {
 
   // Pin the default pick, so answering a blocked agent doesn't move the view to another one.
   useEffect(() => {
-    if (selected === undefined && data.agents.length > 0) setSelected(currentAgent(data.agents, undefined)?.paneId);
+    if (selected === undefined && data.agents.length > 0) setSelected(currentAgent(data.agents, undefined)?.panelId);
   }, [data.agents, selected]);
 
   // The model steers the panel with agents_panel_focus; each new choice selects that agent once.

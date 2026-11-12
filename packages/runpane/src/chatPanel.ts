@@ -4,13 +4,13 @@ import { STATUS_BY_KIND, type AgentStatus } from './agentTasks';
 import { boundary, decodeBoundary, type JsonObject } from './boundaryDecoder';
 import { invokeDaemon, resolvePaneDirectory } from './daemonClient';
 import { buildPaneLink } from './links';
-import { panelListResultSchema, panelScreenResultSchema, workspaceStateResultSchema } from './localControl';
+import { type AgentReport, panelListResultSchema, panelScreenResultSchema, workspaceStateResultSchema } from './localControl';
 
 /**
  * The `chatgpt` toolset: Pane's agents as native UI in ChatGPT. Agent tool results render as
  * inline Pane cards, and a panel beside the chat lists the agents that chat started. It follows
  * MCP Apps (`ui://` resource, `_meta.ui`) and OpenAI's extensions (`_meta["openai/ui"]`
- * entrypoints), written by hand because `@openai/mcp-extensions` targets SDK v1.
+ * entrypoints), written by hand: they are a few `_meta` keys.
  */
 export const CHAT_TOOLSET = 'chatgpt';
 
@@ -30,13 +30,15 @@ export const INLINE_CARD_TOOLS = new Set(['agents_start', 'agents_status', 'agen
 export const inlineCardMeta: JsonObject = { ui: { resourceUri: PANEL_URI } };
 
 /**
- * The only stored state: which Panes each chat started, as Pane ids in start order. Pane has no
- * record of the ChatGPT chat behind a Pane, so this can't be derived. Everything else on a card
- * (name, repo, agent panel, status, screen, PR, diff) is read from Pane on each refresh.
+ * The only stored state: which agents each chat started, as Pane and panel ids in start order.
+ * The panel id tells apart agents started as tabs in one Pane. Pane has no record of the ChatGPT
+ * chat behind an agent, so this can't be derived. Everything else on a card (name, repo, status,
+ * screen, report, PR, diff) is read from Pane on each refresh.
  */
-type Store = Record<string, string[]>;
+type ChatAgent = { paneId: string; panelId: string };
+type Store = Record<string, ChatAgent[]>;
 
-/** The Pane each chat's panel shows, set by agents_panel_focus. View state, so memory only. */
+/** The agent (panel id) each chat's panel shows, set by agents_panel_focus. View state, so memory only. */
 const focusByChat = new Map<string, string>();
 
 interface AgentCard {
@@ -47,15 +49,17 @@ interface AgentCard {
   screen: string[];
   link: string;
   repo?: string;
+  report?: Pick<AgentReport, 'state' | 'summary' | 'question'>;
   diff?: { adds: number; dels: number };
   pr?: { number: number; draft: boolean; title?: string; state?: string; url?: string };
 }
 
 type ToolResult = { content: { type: 'text'; text: string }[]; structuredContent?: JsonObject; isError?: boolean };
-type RunCli = (argv: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
 
 // agents_start output, possibly from a failed start that still created a Pane.
-const startedSchema = boundary.object({ paneId: boundary.optional(boundary.string) });
+const startedSchema = boundary.object({ paneId: boundary.optional(boundary.string), panelId: boundary.optional(boundary.string) });
+const chatAgentSchema = boundary.object({ paneId: boundary.string, panelId: boundary.string });
+const focusedSchema = boundary.object({ paneId: boundary.string });
 const chatMetaSchema = boundary.object({ [CHAT_META_KEY]: boundary.optional(boundary.string) });
 const paneListSchema = boundary.object({
   panes: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, repoName: boundary.optional(boundary.string) })),
@@ -115,7 +119,7 @@ export const chatPanelTools: PanelTool[] = [
     description: 'Show one agent this chat started: its card here, and the same agent selected in the Chat agents panel. Use it when the user asks about a specific agent.',
     inputSchema: {
       type: 'object',
-      properties: { pane: { type: 'string', description: 'The agent\'s Pane id or name, from agents_start or agents_panel.' } },
+      properties: { pane: { type: 'string', description: 'The agent\'s panel id, Pane id or name, from agents_start or agents_panel.' } },
       required: ['pane'],
       additionalProperties: false,
     },
@@ -174,7 +178,8 @@ export function readChatPanel(uri: string) {
       text: fs.readFileSync(path.join(__dirname, 'panel.html'), 'utf8'),
       _meta: {
         ui: { domain: 'https://runpane.com', prefersBorder: true, csp: { connectDomains: [], resourceDomains: [] } },
-        'openai/ui': { availableDisplayModes: ['inline', 'fullscreen'] },
+        // With both modes listed and no preference, ChatGPT opens fullscreen; agent cards belong inline.
+        'openai/ui': { preferredDisplayMode: 'inline', availableDisplayModes: ['inline', 'fullscreen'] },
       },
     }],
   };
@@ -185,27 +190,28 @@ export function chatIdOf(meta: JsonObject): string {
   return decodeBoundary(meta, chatMetaSchema)[CHAT_META_KEY] || NO_CHAT;
 }
 
-/** Remembers the Pane that `agents_start` started from this chat. */
+/** Remembers the agent that `agents_start` started from this chat, in a new Pane or as a tab. */
 export function recordStartedAgent(chat: string, output: JsonObject): void {
-  const { paneId } = decodeBoundary(output, startedSchema);
-  if (!paneId) return;
+  const { paneId, panelId } = decodeBoundary(output, startedSchema);
+  if (!paneId || !panelId) return;
   const store = readStore();
-  store[chat] = [...(store[chat] ?? []).filter((id) => id !== paneId), paneId].slice(-MAX_AGENTS_PER_CHAT);
+  store[chat] = [...(store[chat] ?? []).filter((agent) => agent.panelId !== panelId), { paneId, panelId }].slice(-MAX_AGENTS_PER_CHAT);
   writeStore(store);
 }
 
-export async function callChatPanelTool(name: string, input: JsonObject, chat: string, run: RunCli): Promise<ToolResult> {
+export async function callChatPanelTool(name: string, input: JsonObject, chat: string): Promise<ToolResult> {
   if (name === 'agents_panel') return panelResult(chat);
   if (name === 'agents_panel_status') return panelResult(decodeBoundary(input, statusInputSchema).chat);
   if (name === 'agents_panel_focus') return focusResult(chat, decodeBoundary(input, focusInputSchema).pane);
   if (name === 'agents_card') return cardResult(decodeBoundary(input, cardInputSchema));
   const { paneId, panelId } = decodeBoundary(input, openInputSchema);
-  const argv = ['panes', 'focus', `--pane=${paneId}`, ...(panelId ? [`--panel=${panelId}`] : []), '--source=user', '--yes', '--json'];
-  const { code, stdout, stderr } = await run(argv);
-  const text = stdout.trim() || stderr.trim();
-  return code === 0
-    ? { content: [{ type: 'text', text: 'Opened in Pane.' }], structuredContent: { ok: true, paneId } }
-    : { content: [{ type: 'text', text: text || 'Pane did not open the agent.' }], isError: true };
+  try {
+    // A click in the panel is the user's own request, like `runpane panes focus --source user`.
+    await invokeDaemon('runpane:panes:focus', [{ paneId, panelId, source: 'user' }], focusedSchema);
+    return { content: [{ type: 'text', text: 'Opened in Pane.' }], structuredContent: { ok: true, paneId } };
+  } catch (error) {
+    return { content: [{ type: 'text', text: error instanceof Error ? error.message : 'Pane did not open the agent.' }], isError: true };
+  }
 }
 
 async function panelResult(chat: string): Promise<ToolResult> {
@@ -225,18 +231,18 @@ async function focusResult(chat: string, pane: string): Promise<ToolResult> {
   // An id or exact name wins; otherwise every word the user said must appear in one agent's name.
   const words = pane.toLowerCase().split(/[\s_-]+/).filter(Boolean);
   const byWords = agents.filter((entry) => words.every((word) => entry.name.toLowerCase().split(/[\s_-]+/).includes(word)));
-  const agent = agents.find((entry) => entry.paneId === pane || entry.name === pane) ?? (byWords.length === 1 ? byWords[0] : undefined);
+  const agent = agents.find((entry) => entry.panelId === pane || entry.paneId === pane || entry.name === pane) ?? (byWords.length === 1 ? byWords[0] : undefined);
   if (!agent) {
     const names = agents.map((entry) => entry.name).join(', ') || 'none yet';
     const why = byWords.length > 1 ? `More than one agent matches ${pane}` : `This chat didn't start an agent called ${pane}`;
     return { content: [{ type: 'text', text: `${why}. Agents this chat started: ${names}.` }], isError: true };
   }
-  focusByChat.set(chat, agent.paneId);
+  focusByChat.set(chat, agent.panelId);
   return cardResultOf(agent, offline);
 }
 
-async function cardResult({ paneId, panelId }: { paneId: string; panelId?: string }): Promise<ToolResult> {
-  const { agents: [card], offline } = await readAgents([paneId], panelId);
+async function cardResult(agent: { paneId: string; panelId?: string }): Promise<ToolResult> {
+  const { agents: [card], offline } = await readAgents([agent]);
   return cardResultOf(card, offline);
 }
 
@@ -251,9 +257,10 @@ function describe(agent: AgentCard): string {
 }
 
 function toJson(card: AgentCard): JsonObject {
-  const { repo, diff, pr, ...required } = card;
+  const { repo, report, diff, pr, ...required } = card;
   const json: JsonObject = { ...required };
   if (repo) json.repo = repo;
+  if (report) json.report = { ...report };
   if (diff) json.diff = diff;
   if (pr) {
     const { title, state, url, ...rest } = pr;
@@ -267,38 +274,55 @@ function toJson(card: AgentCard): JsonObject {
 }
 
 /**
- * Each agent's card data, read from the Pane daemon in one pass per Pane data directory. `offline`
- * means no directory answered, including the default one checked when the chat has no agents yet.
+ * Each agent's card data, read from the Pane daemon. `offline` means Pane didn't answer, including
+ * when the chat has no agents yet.
  */
-async function readAgents(paneIds: string[], panelId?: string): Promise<{ agents: AgentCard[]; offline: boolean }> {
+async function readAgents(started: { paneId: string; panelId?: string }[]): Promise<{ agents: AgentCard[]; offline: boolean }> {
   const [panes, state] = await Promise.all([
     invokeDaemon('runpane:panes:list', [{}], paneListSchema).catch(() => undefined),
     invokeDaemon('runpane:workspace:state', [{}], workspaceStateResultSchema).catch(() => undefined),
   ]);
   const workspace = { panes: panes && new Map(panes.panes.map((pane) => [pane.id, pane])), entries: state?.entries ?? [] };
   const offline = !panes && !state;
-  return { agents: await Promise.all(paneIds.map((paneId) => readAgent(paneId, panelId, workspace))), offline };
+  // The first agent in a Pane goes by the Pane's name; a later tab adds its title, numbered if titles repeat.
+  const agents = await Promise.all(started.map((agent, index) => (
+    readAgent(agent, workspace, started.findIndex((other) => other.paneId === agent.paneId) !== index)
+  )));
+  const seen = new Map<string, number>();
+  for (const agent of agents) {
+    const count = (seen.get(agent.name) ?? 0) + 1;
+    seen.set(agent.name, count);
+    if (count > 1) agent.name = `${agent.name} ${count}`;
+  }
+  return { agents, offline };
 }
 
 type Workspace = { panes?: Map<string, { name: string; repoName?: string }>; entries: { kind: string; panelId?: string; paneId: string }[] };
 
-/** The agent's terminal: its CLI agent panel, else the Pane's first terminal. */
-async function agentPanelOf(paneId: string): Promise<string | undefined> {
-  const list = await invokeDaemon('runpane:panels:list', [{ paneId }], panelListResultSchema).catch(() => undefined);
-  const panels = list?.panels ?? [];
-  return (panels.find((panel) => panel.isCliPanel || panel.agentType) ?? panels.find((panel) => panel.type === 'terminal'))?.panelId;
-}
-
-async function readAgent(paneId: string, knownPanelId: string | undefined, workspace: Workspace): Promise<AgentCard> {
+async function readAgent({ paneId, panelId: knownPanelId }: { paneId: string; panelId?: string }, workspace: Workspace, laterTab: boolean): Promise<AgentCard> {
   const pane = workspace.panes?.get(paneId);
-  const card: AgentCard = { paneId, panelId: '', name: pane?.name ?? paneId, status: 'unknown', screen: [], link: buildPaneLink({ kind: 'pane', id: paneId }) };
+  const card: AgentCard = { paneId, panelId: knownPanelId ?? '', name: pane?.name ?? paneId, status: 'unknown', screen: [], link: buildPaneLink({ kind: 'pane', id: paneId }) };
   // Archived Panes drop out of the list. Without a list, a failed read is a transient unknown.
   if (workspace.panes && !pane) return { ...card, status: 'gone' };
   if (pane?.repoName) card.repo = pane.repoName;
-  const panelId = knownPanelId ?? await agentPanelOf(paneId);
+  const panels = (await invokeDaemon('runpane:panels:list', [{ paneId }], panelListResultSchema).catch(() => undefined))?.panels;
+  // The agent's terminal: the panel it started in, else the Pane's CLI agent tab, else its first terminal.
+  const panel = knownPanelId
+    ? panels?.find((candidate) => candidate.panelId === knownPanelId)
+    : panels?.find((candidate) => candidate.isCliPanel || candidate.agentType) ?? panels?.find((candidate) => candidate.type === 'terminal');
+  // A closed tab is gone, like an archived Pane.
+  if (panels && knownPanelId && !panel) return { ...card, status: 'gone' };
+  const panelId = panel?.panelId ?? knownPanelId;
   if (panelId) {
     card.panelId = panelId;
     card.link = buildPaneLink({ kind: 'pane', id: paneId, panelId });
+  }
+  if (laterTab && panel?.title) card.name = `${card.name} · ${panel.title}`;
+  if (panel?.report) {
+    const { state, summary, question } = panel.report;
+    card.report = { state };
+    if (summary) card.report.summary = summary;
+    if (question) card.report.question = question;
   }
   const entry = workspace.entries.find((candidate) => candidate.panelId === panelId);
   card.status = (entry && STATUS_BY_KIND.get(entry.kind)) ?? 'unknown';
@@ -334,7 +358,7 @@ function readStore(): Store {
   }
   try {
     const { chats } = decodeBoundary(JSON.parse(raw), storeSchema);
-    return Object.fromEntries(Object.entries(chats).map(([chat, paneIds]) => [chat, decodeBoundary(paneIds, boundary.array(boundary.string))]));
+    return Object.fromEntries(Object.entries(chats).map(([chat, agents]) => [chat, decodeBoundary(agents, boundary.array(chatAgentSchema))]));
   } catch {
     return {};
   }

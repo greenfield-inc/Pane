@@ -79,7 +79,7 @@ interface McpServerOptions {
 /** The tools a `--toolsets` / `--read-only` selection serves. `all` and `read` are built in. */
 function selectTools(tools: readonly McpTool[], options: McpServerOptions): McpTool[] {
   const wanted = new Set(options.toolsets && options.toolsets.length > 0 ? options.toolsets : DEFAULT_TOOLSETS);
-  const known = new Set(['all', 'read', CHAT_TOOLSET, ...tools.flatMap((tool) => tool.toolsets)]);
+  const known = new Set(['all', 'read', ...tools.flatMap((tool) => tool.toolsets)]);
   const unknown = [...wanted].filter((name) => !known.has(name));
   if (unknown.length > 0) {
     throw new Error(`Unknown toolset(s): ${unknown.join(', ')}. Choose from: ${[...known].sort().join(', ')}.`);
@@ -139,7 +139,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       const chat = () => chatIdOf(decodeBoundary(request.params._meta ?? {}, boundary.jsonObject));
       if (panelTools.has(request.params.name)) {
         const input = decodeBoundary(request.params.arguments ?? {}, boundary.jsonObject);
-        return callChatPanelTool(request.params.name, input, chat(), (argv) => runCli(argv, ctx.mcpReq.signal));
+        return callChatPanelTool(request.params.name, input, chat());
       }
       const tool = toolsByName.get(request.params.name);
       if (!tool) {

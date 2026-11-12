@@ -22,6 +22,6 @@ export interface CardProps {
 export interface PanelProps {
   data: PanelData;
   selected?: string;
-  onSelect: (paneId: string) => void;
+  onSelect: (panelId: string) => void;
   actions: AgentActions;
 }

@@ -1307,8 +1307,17 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
         }],
       },
       'runpane:panels:list': { ok: true, paneId: 'pane-7', panels: [
-        { id: 'panel-8', panelId: 'panel-8', paneId: 'pane-7', type: 'terminal', title: 'Claude', active: true, isCliPanel: true, agentType: 'claude' },
+        {
+          id: 'panel-8', panelId: 'panel-8', paneId: 'pane-7', type: 'terminal', title: 'Claude', active: true, isCliPanel: true, agentType: 'claude',
+          report: { state: 'blocked', question: 'Keep the old redirect for API clients?', reportedAt: '2026-11-11T00:00:00.000Z' },
+        },
+        { id: 'panel-9', panelId: 'panel-9', paneId: 'pane-7', type: 'terminal', title: 'Review', active: false, isCliPanel: true, agentType: 'codex' },
       ] },
+      'runpane:panels:create': (args) => ({
+        ok: true, paneId: args[0].paneId, panelId: 'panel-9', title: 'Review', active: true, focused: false, tool: { title: 'Codex', command: 'codex', agent: 'codex' },
+        readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 700, state: { initialized: true } },
+        initialInput: { delivered: true, submitted: true, verifiedSubmitted: true, inputBytes: 20 },
+      }),
       'runpane:workspace:state': { ok: true, epoch: 'epoch-1', generation: 4, entries: [
         { gen: 4, at: '2026-09-25T00:00:00.000Z', kind: 'agent.blocked', paneId: 'pane-7', paneName: 'fix-login', panelId: 'panel-8', source: 'agent', baseline: true },
       ] },
@@ -1332,6 +1341,11 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
     }, async (requests) => {
       await withMcpClient(async (client) => {
         const { tools } = await client.listTools();
+        assert.deepEqual(tools.map((tool) => tool.name).sort(), [
+          'agents_card', 'agents_panel', 'agents_panel_focus', 'agents_panel_open', 'agents_panel_status',
+          'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
+          'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
+        ], 'ChatGPT gets the agent tools and the panel, not the whole core toolset');
         for (const tool of tools) {
           for (const hint of ['readOnlyHint', 'destructiveHint', 'openWorldHint']) {
             assert.ok([true, false].includes(tool.annotations?.[hint]), `${tool.name} must set ${hint}`);
@@ -1365,6 +1379,7 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
         const card = {
           paneId: 'pane-7', panelId: 'panel-8', name: 'fix-login', repo: 'app', status: 'blocked',
           screen: ['Reading login.ts', 'Allow edits to login.ts? (y/n)'], link: 'pane://open?pane=pane-7&panel=panel-8',
+          report: { state: 'blocked', question: 'Keep the old redirect for API clients?' },
           diff: { adds: 41, dels: 6 },
           pr: { number: 41, draft: false, title: 'Return to the requested page after login', state: 'open', url: 'https://github.com/acme/app/pull/41' },
         };
@@ -1385,7 +1400,7 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
         const focused = await client.callTool({ name: 'agents_panel_focus', arguments: { pane: 'login fix' }, _meta: chat('chat-a') });
         assert.deepEqual(focused.structuredContent.agent, card);
         const steered = await client.callTool({ name: 'agents_panel_status', arguments: { chat: 'chat-a' } });
-        assert.equal(steered.structuredContent.focus, 'pane-7');
+        assert.equal(steered.structuredContent.focus, 'panel-8');
         const stranger = await client.callTool({ name: 'agents_panel_focus', arguments: { pane: 'fix-login' }, _meta: chat('chat-b') });
         assert.equal(stranger.isError, true);
 
@@ -1395,7 +1410,16 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
 
         const opened = await client.callTool({ name: 'agents_panel_open', arguments: { paneId: 'pane-7', panelId: 'panel-8' } });
         assert.equal(opened.isError, undefined, opened.content[0].text);
-      }, { args: ['--toolsets', 'core,chatgpt'], env: { PANE_DIR: paneDir } });
+
+        // A second agent opened as a tab in the same Pane gets its own card, named by its tab.
+        const tab = await client.callTool({ name: 'agents_start', arguments: { pane: 'pane-7', agent: 'codex', prompt: 'Review the fix', yes: true }, _meta: chat('chat-a') });
+        assert.equal(tab.isError, undefined, tab.content[0].text);
+        const both = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
+        assert.deepEqual(both.structuredContent.agents.map(({ panelId, name }) => ({ panelId, name })), [
+          { panelId: 'panel-8', name: 'fix-login' },
+          { panelId: 'panel-9', name: 'fix-login · Review' },
+        ]);
+      }, { args: ['--toolsets', 'chatgpt'], env: { PANE_DIR: paneDir } });
 
       const focus = requests.find((request) => request.channel === 'runpane:panes:focus');
       assert.deepEqual(focus.args[0], { paneId: 'pane-7', panelId: 'panel-8', source: 'user' });
@@ -1413,8 +1437,11 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
     }, async () => {
       await withMcpClient(async (client) => {
         const shown = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
-        assert.deepEqual(shown.structuredContent.agents.map(({ paneId, status }) => ({ paneId, status })), [{ paneId: 'pane-7', status: 'gone' }]);
-      }, { args: ['--toolsets', 'core,chatgpt'], env: { PANE_DIR: paneDir } });
+        assert.deepEqual(shown.structuredContent.agents.map(({ panelId, status }) => ({ panelId, status })), [
+          { panelId: 'panel-8', status: 'gone' },
+          { panelId: 'panel-9', status: 'gone' },
+        ]);
+      }, { args: ['--toolsets', 'chatgpt'], env: { PANE_DIR: paneDir } });
     });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });
