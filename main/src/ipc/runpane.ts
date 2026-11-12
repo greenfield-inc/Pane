@@ -55,6 +55,7 @@ import {
   normalizeAgentReport,
   readPanelAgentReport,
 } from '../services/agentReport';
+import { workerCard } from '../services/notify/workerContext';
 import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand, isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
 import {
@@ -1905,6 +1906,8 @@ export function registerRunpaneHandlers(
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }
       const report = normalizeAgentReport(normalized, new Date().toISOString());
+      // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).
+      const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question).warnings : [];
       if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
       else await storePanelAgentReport(panel, report);
       const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);
@@ -1917,7 +1920,7 @@ export function registerRunpaneHandlers(
         report: journalAgentReport(report),
       });
       const sessionIds = await services.orchestrationSessionManager?.recordAgentReport(panel.id, report) ?? [];
-      return { ok: true, paneId: panel.sessionId, panelId: panel.id, report, sessionIds, liveWatchers };
+      return { ok: true, paneId: panel.sessionId, panelId: panel.id, report, sessionIds, liveWatchers, ...(warnings.length ? { warnings } : {}) };
     }, result => ({ paneId: result.paneId, panelId: result.panelId, ok: result.ok }));
   });
 

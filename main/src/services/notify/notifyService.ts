@@ -37,7 +37,7 @@ import type { RunpaneInboxItem } from '../../../../shared/types/runpaneOrchestra
 import type { ApprovalStore } from '../approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../../database/jsonStoreImport';
 import type { SessionInboxEnded } from '../sessionInbox';
-import { workerReportCard } from './workerContext';
+import { workerCard } from './workerContext';
 
 const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
 const agentName = (agentType: string | undefined): string => (agentType ? AGENT_NAMES.get(agentType) : undefined) ?? 'Agent';
@@ -239,7 +239,8 @@ export class NotifyService {
       carded.add(once);
       const session = this.deps.sessionRecord?.(entry.sessionId);
       // The status file's needs_you, never its JSON: the question's why, its options and files.
-      const card = workerReportCard(entry.report?.summary, question);
+      // Tidied when the question is an old paragraph (P8); a report recorded before the check stays as sent.
+      const card = workerCard(entry.report?.summary, question, { quietly: true });
       // D-81: the worker's status file, which its report named, opens beside the card.
       const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
       const links = [...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)].slice(0, NOTIFY_LINKS_MAX);
@@ -247,7 +248,7 @@ export class NotifyService {
       if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };
       this.queue.addWorkerQuestion({
         id: entry.id,
-        question,
+        question: card.title,
         source,
         at,
         // The Session it was filed in, even after the worker has moved or the Session closed.
@@ -256,6 +257,7 @@ export class NotifyService {
         context: card.context,
         choices: card.choices,
         questions: card.questions,
+        asSent: card.asSent,
       });
     }
   }

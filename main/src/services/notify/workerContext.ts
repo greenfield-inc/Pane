@@ -1,6 +1,7 @@
 import path from 'path';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQuestion } from '../../../../shared/types/notify';
+import { admitCard, type AdmittedCard } from './cardAdmit';
 
 /** The longest context a card carries; cards clamp it to a few lines with Show more. */
 const MAX_CONTEXT = 2_000;
@@ -204,4 +205,23 @@ export function workerReportCard(summary: string | undefined, question: string):
   const text = summary?.trim();
   if (!text) return {};
   return statusCard(text, question) ?? { context: cut(text) };
+}
+
+/**
+ * A worker's question card as Pane posts it: built from its report, tidied when the question is an
+ * old paragraph, and checked. Throws the check's refusal (a PaneError); `quietly` keeps a card that
+ * fails as it was sent instead, for reports recorded before the check existed.
+ */
+export function workerCard(summary: string | undefined, question: string, options: { quietly?: boolean } = {}): StatusCard & { title: string; asSent?: AdmittedCard['asSent']; warnings: string[] } {
+  const card = workerReportCard(summary, question);
+  const fields = { title: question, context: card.context, choices: card.choices, questions: card.questions, links: card.links };
+  let admitted: AdmittedCard;
+  try {
+    admitted = admitCard(fields);
+  } catch (error) {
+    if (!options.quietly) throw error;
+    return { ...card, title: question, warnings: [] };
+  }
+  const { title, context, choices, questions, links } = admitted.card;
+  return { title, context, choices, questions, links, asSent: admitted.asSent, warnings: admitted.warnings };
 }

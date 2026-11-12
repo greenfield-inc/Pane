@@ -23,6 +23,8 @@ import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { statusCard } from '../services/notify/workerContext';
+import { admitCard } from '../services/notify/cardAdmit';
+import { checkCard } from '../services/notify/cardCheck';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
@@ -56,7 +58,7 @@ const choiceSchema = boundary.object({
   recommended: boundary.optional(boundary.boolean),
   was: boundary.optional(boundary.string),
 });
-const subQuestionSchema = boundary.object({ title: boundary.string, choices: boundary.array(choiceSchema) });
+const subQuestionSchema = boundary.object({ title: boundary.string, choices: boundary.array(choiceSchema), why: boundary.optional(boundary.string) });
 const sessionSchema = boundary.object({
   id: boundary.nonEmptyString,
   name: boundary.string,
@@ -171,6 +173,7 @@ const notifyItemSchema = boundary.object({
   choices: boundary.optional(boundary.array(choiceSchema)),
   questions: boundary.optional(boundary.array(subQuestionSchema)),
   replyIsAnswer: boundary.optional(boundary.boolean),
+  asSent: boundary.optional(boundary.object({ title: boundary.string, context: boundary.optional(boundary.string) })),
   optionsOnly: boundary.optional(boundary.boolean),
   detail: boundary.optional(boundary.string),
   detailLabel: boundary.optional(boundary.string),
@@ -423,7 +426,10 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     const teammate = teammatePaneCaller();
     // A secret card writes the owner's secret store, so a teammate cannot post one.
     if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');
-    return notify.ask(parsed, paneCommandSignal());
+    const warnings = admitNotifyCard(parsed);
+    const result = await notify.ask(parsed, paneCommandSignal());
+    // A card that wasn't shown (a worker's, sent back to its orchestrator) has nothing to warn about.
+    return warnings.length && !('unavailable' in result) ? { ...result, warnings } : result;
   });
 
   commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
@@ -644,6 +650,42 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
       });
     }),
   };
+}
+
+/**
+ * The card check every way of asking reaches (P3): a new card, a relayed one and an update are
+ * tidied when they are old paragraph cards, refused for the two clear mistakes and warned on the
+ * rest. Leaves the request as Pane posts it and returns the warnings. Info and secret cards, and
+ * calls that ask nothing (resume, --took), aren't cards to check.
+ */
+function admitNotifyCard(request: NotifyRequest): string[] {
+  if (request.resume || request.took !== undefined) return [];
+  if (request.update !== undefined) {
+    if (request.title === undefined && !request.choices && !request.questions) return [];
+    // An update changes only what it passes; the rest is the approval's, checked when it was asked.
+    const { refusal } = checkCard({ title: request.title ?? '', choices: request.choices, questions: request.questions });
+    if (refusal) throw new PaneError(refusal.code, refusal.message, refusal.next);
+    return [];
+  }
+  if (!request.ui || request.ui === 'info' || request.ui === 'secret' || request.title === undefined) return [];
+  // Only a card asked in words (or with options it hasn't got) is tidied into buttons.
+  const tidy = request.ui === 'ask' || request.ui === 'options';
+  const admitted = admitCard({ title: request.title, context: request.context, choices: request.choices, questions: request.questions, links: request.links }, { tidy });
+  if (admitted.asSent) {
+    const { card } = admitted;
+    request.ui = 'options';
+    request.title = card.title;
+    if (card.context !== undefined) request.context = card.context;
+    else delete request.context;
+    request.choices = card.choices;
+    request.questions = card.questions;
+    if (!request.choices) delete request.choices;
+    if (!request.questions) delete request.questions;
+    delete request.suggestions;
+    if (card.links) request.links = card.links;
+    request.asSent = admitted.asSent;
+  }
+  return admitted.warnings;
 }
 
 /** Checks a notify call the way the tool's schema promises, naming the field that's wrong. */

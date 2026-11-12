@@ -141,6 +141,8 @@ export interface WorkerQuestion {
   choices?: NotifyChoice[];
   /** Several questions from its status file, each with its own buttons, instead of `choices`. */
   questions?: NotifySubQuestion[];
+  /** Set when Pane tidied its question by rule: the question and context as sent. */
+  asSent?: NotifyItem['asSent'];
 }
 
 export interface NotifyQueueEnvironment {
@@ -486,6 +488,7 @@ export class NotifyQueue extends EventEmitter {
     if (Date.now() - question.at < relayAfterMs()) item.quiet = true;
     if (question.links?.length) item.links = question.links;
     if (question.context) item.context = question.context;
+    if (question.asSent) item.asSent = question.asSent;
     if (question.questions?.length) item.questions = question.questions;
     else if (question.choices?.length) item.choices = question.choices;
     item.connected = question.connected ?? connectedOf(item, this.machine());
@@ -670,6 +673,10 @@ export class NotifyQueue extends EventEmitter {
       return Promise.resolve({ unavailable: `There's no waiting worker question ${id}: it was answered or closed, or its worker moved on. Nothing was shown.`, next: 'Check runpane inbox for the answer.' });
     }
     const { title, ...improved } = question;
+    // The orchestrator's card replaces the worker's: its buttons and Show as sent, not both.
+    if (improved.questions) delete entry.item.choices;
+    if (improved.choices) delete entry.item.questions;
+    if (!improved.asSent) delete entry.item.asSent;
     Object.assign(entry.item, improved, title.trim() ? { title } : {});
     // It reads a reply when the worker's tab can't (D-258).
     if (by?.panelId) entry.item.relayedBy = { panelId: by.panelId, name: by.session ? `the ${by.session.name} orchestrator` : by.name };

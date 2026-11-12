@@ -1413,6 +1413,8 @@ export interface RunpaneReportResult {
    * a named-cursor watch that waits later still reads it. Absent from daemons older than the field.
    */
   liveWatchers?: number;
+  /** A blocked report's card check: what its card misses (a long title, no subtitle, …). It was recorded anyway. */
+  warnings?: string[];
 }
 
 export interface RunpanePanelLastMessageRequest {

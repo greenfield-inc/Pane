@@ -91,6 +91,11 @@ export interface NotifyQuestion {
    */
   replyIsAnswer?: boolean;
   /**
+   * Set by the host when it tidied an old paragraph card by rule (P8): the title and context
+   * exactly as they were sent, for Show as sent. The card reads "Tidied by Pane".
+   */
+  asSent?: { title: string; context?: string };
+  /**
    * Set by the chat tab bridge for a built-in question that takes only its own choices: typed text
    * can't answer it and nobody could read it as a reply, so it has no reply box.
    */
@@ -147,7 +152,10 @@ export interface NotifyCaller {
   agent?: string;
 }
 
-export type NotifyResult =
+/** Each notify result may carry the card check's warnings (a long title, no subtitle, …): the card was posted anyway. */
+export type NotifyResult = NotifyResultBody & { warnings?: string[] };
+
+export type NotifyResultBody =
   /** `answers`: one pick per question, when the approval asks several (`answer` joins them with " · "). */
   | { answer: string; note?: string; answers?: string[] }
   /**

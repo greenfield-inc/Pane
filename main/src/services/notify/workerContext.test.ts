@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { statusCard, workerReportCard } from './workerContext';
+import { statusCard, workerCard, workerReportCard } from './workerContext';
 
 /**
  * Q-80's report, as the Session inbox holds it: the worker sent its whole status file as the
@@ -93,5 +93,28 @@ describe("a worker card from its report summary", () => {
     expect(workerReportCard('  ', 'T')).toEqual({});
     expect(workerReportCard(undefined, 'T')).toEqual({});
     expect(workerReportCard(JSON.stringify({ state: 'blocked', checks: { passed: [] }, needs_you: null }), 'T')).toEqual({});
+  });
+});
+
+describe("a worker's card as runpane report posts it", () => {
+  const status = JSON.stringify({ needs_you: { why: 'Approving needs this.', questions: [{ q: 'Ship tonight?', options: ['Ship (recommended)', 'Wait'] }] } });
+
+  it('refuses a 200-character question and one with a line break, with a code and next step (J2)', () => {
+    expect(() => workerCard(status, 'x'.repeat(200))).toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_TITLE', next: expect.any(String) }));
+    expect(() => workerCard(status, 'Ship it?\nCI is green.')).toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_TITLE' }));
+  });
+
+  it('refuses a status-file question that recommends two options', () => {
+    const two = JSON.stringify({ needs_you: { questions: [{ q: 'Ship?', options: ['Ship (recommended)', 'Wait (recommended)'] }] } });
+    expect(() => workerCard(two, 'Ship the release?')).toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_RECOMMENDED' }));
+  });
+
+  it('warns on a 120-character question with no subtitle, and posts it', () => {
+    const card = workerCard(undefined, `${'word '.repeat(23)}ok?`);
+    expect(card.warnings).toEqual([expect.stringMatching(/^The title is/u), expect.stringMatching(/^No subtitle/u)]);
+  });
+
+  it('keeps a card recorded before the check as it was sent when asked quietly', () => {
+    expect(workerCard(status, 'x'.repeat(200), { quietly: true }).title).toBe('x'.repeat(200));
   });
 });

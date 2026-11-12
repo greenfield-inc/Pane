@@ -80,7 +80,7 @@ describe('Notify across machines, through the registered handlers', () => {
 
   it('lets another device read the queue, answer it in its own name, and be refused once it is answered', async () => {
     const host = await startPane();
-    const call = host.registry.invoke<NotifyResult>('runpane:notify', [{ ui: 'approve', title: 'Apply migration 0042?', caller: { cwd: '/repo/api' } }]);
+    const call = host.registry.invoke<NotifyResult>('runpane:notify', [{ ui: 'approve', title: 'Apply migration 0042?', context: 'It adds the invoices index; nothing is dropped.', caller: { cwd: '/repo/api' } }]);
     await flush();
     const state = await host.registry.invoke<NotifySharedState>('notify:remote-snapshot', []);
     expect(state.items).toMatchObject([{ state: 'waiting', source: { name: 'api' } }]);
@@ -602,6 +602,62 @@ describe('Approvals items, through the registered handlers', () => {
     await flush();
     const updated = pane.notify.snapshot().items.find(item => item.id === retry.id);
     expect(updated).toMatchObject({ ui: 'ask', version: 2, context: 'Exponential or fixed?\n\nThe others use exponential.' });
+    pane.notify.dispose();
+  });
+
+  it("gives a worker's two status-file questions their own buttons, with its why as the subtitle (J1)", async () => {
+    const item = blocked(Date.now());
+    const status = { state: 'blocked', needs_you: { id: 'Q-42', why: 'Option A holds; approving the cover sheet needs these two answers.', questions: [
+      { q: 'Keep their password session for other orgs?', options: ['Keep it (recommended)', 'Sign them out everywhere'] },
+      { q: 'Whose password sessions end?', why: 'Same rule as sign-in.', options: ['Everyone on the domain (recommended)', 'Only the account members'] },
+    ] } };
+    const report = { ...item.report, state: 'blocked' as const, reportedAt: item.at, question: 'Q-42: Okta sign-out: two choices before the cover sheet', summary: JSON.stringify(status) };
+    const pane = await startWithSessions(inboxOf([{ ...item, report }]));
+    const [card] = pane.notify.snapshot().items;
+    expect(card).toMatchObject({
+      ui: 'options',
+      title: 'Q-42: Okta sign-out: two choices before the cover sheet',
+      context: 'Option A holds; approving the cover sheet needs these two answers.',
+      questions: [
+        { title: 'Keep their password session for other orgs?', choices: [{ label: 'Keep it', recommended: true }, { label: 'Sign them out everywhere' }] },
+        { title: 'Whose password sessions end?', why: 'Same rule as sign-in.', choices: [{ label: 'Everyone on the domain', recommended: true }, { label: 'Only the account members' }] },
+      ],
+    });
+    expect(card.choices).toBeUndefined();
+    pane.notify.dispose();
+  });
+
+  it('refuses a 200-character title, a title with a line break and two recommended options, and warns on a long title or no subtitle (J2)', async () => {
+    const pane = await startWithSessions();
+    const caller = { paneId: 'loose', panelId: 'loose-panel' };
+    const choices = [{ label: 'Ship', detail: 'Goes out tonight.', recommended: true }, { label: 'Wait', detail: 'Ships Monday.' }];
+    const refused = async (request: Record<string, PaneCommandValue>) => pane.registry.invoke('runpane:notify', [{ ui: 'options', caller, choices, context: 'CI is green.', ...request }]).then(() => undefined, (error: unknown) => error);
+    expect(await refused({ title: 'x'.repeat(200) })).toMatchObject({ code: 'ERR_NOTIFY_TITLE', next: expect.stringContaining('--context') });
+    expect(await refused({ title: 'Ship it?\nCI is green.' })).toMatchObject({ code: 'ERR_NOTIFY_TITLE' });
+    expect(await refused({ title: 'Ship it?', choices: choices.map(choice => ({ ...choice, recommended: true })) })).toMatchObject({ code: 'ERR_NOTIFY_RECOMMENDED' });
+    expect(pane.notify.snapshot().items).toEqual([]);
+
+    const long = pane.registry.invoke<NotifyResult>('runpane:notify', [{ ui: 'options', caller, choices, title: `${'word '.repeat(23)}ok?`, returnAfterMs: 1 }]);
+    const result = await long;
+    expect(result.warnings).toEqual([expect.stringMatching(/^The title is 11\d characters/u), expect.stringMatching(/^No subtitle/u)]);
+    expect(pane.notify.snapshot().items).toHaveLength(1);
+    pane.notify.dispose();
+  });
+
+  it("tidies Q-42's paragraph into a title, two questions with buttons and links, and keeps it as sent (J3)", async () => {
+    const pane = await startWithSessions();
+    const q42 = "Q-42: Okta sign-out rework (option A holds; cover sheet ready for approval). 1) With Require SSO off, should a person Okta removes keep a password session for their other orgs? Recommended: yes, they keep it and lose the account's orgs; docs stop saying 'signs them out on every device'. 2) Should Require SSO end password sessions for everyone on the domain (same as sign-in, recommended) or only the account's members? Files: /work/okta/decisions.html#q-42, /work/okta/cover-sheet.html";
+    void pane.registry.invoke('runpane:notify', [{ ui: 'ask', title: q42, context: 'One-day check done.', caller: { paneId: 'loose', panelId: 'loose-panel' } }]);
+    await flush();
+    const [card] = pane.notify.snapshot().items;
+    expect(card).toMatchObject({
+      ui: 'options',
+      title: 'Q-42: Okta sign-out rework (option A holds; cover sheet ready for approval)',
+      context: 'One-day check done.',
+      questions: [{ choices: [{ label: 'Yes', recommended: true }, { label: 'No' }] }, { choices: [{ label: 'Everyone on the domain', recommended: true }, { label: "Only the account's members" }] }],
+      links: [{ label: 'decisions.html', path: '/work/okta/decisions.html#q-42' }, { label: 'cover-sheet.html', path: '/work/okta/cover-sheet.html' }],
+      asSent: { title: q42, context: 'One-day check done.' },
+    });
     pane.notify.dispose();
   });
 
