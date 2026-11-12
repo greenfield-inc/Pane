@@ -1,12 +1,12 @@
 import { SessionApprovalsCount } from '../approvals/ApprovalsCount';
-import { useEffect, useState } from 'react';
-import { Archive, ArrowRightLeft, Check, ChevronDown, ChevronRight, MessageSquare, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Archive, ArrowRightLeft, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
 import { AgentStatusDot, PausedGlyph } from '../ui/AgentStatusDot';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
 import { PermissionDialog } from '../PermissionDialog';
-import { SessionSwitchToChatDialog, useSessionSwitchPreview } from '../SessionSwitchToChat';
+import { SessionSwitchMenuItem, SessionSwitchToChatDialog, useSessionSwitchPreview } from '../SessionSwitchToChat';
 import { MoveSessionToHostDialog, type MoveSessionTarget } from '../MoveSessionToHostDialog';
 import { useMoveToHostBlockedReason } from '../../hooks/useMoveToHostBlockedReason';
 import type { SessionChatSwitchPreview } from '../../../../shared/types/chatTab';
@@ -85,9 +85,14 @@ function RowActionsMenu({ menu, onClose, onRename, onMove, onReviewPermission }:
   const noun = pane ? 'Pane' : 'Session';
   const act = (run: () => Promise<void>) => { onClose(); void run(); };
   const permission = pane?.permission ?? null;
-  // A Session's own machine says whether any of its terminal agent tabs can switch to chat.
-  const switchPreview = useSessionSwitchPreview({ kind: 'machine', machineId }, session?.session.id ?? null);
+  // A Session's own machine says whether any of its terminal agent tabs can switch to chat, and if not, why.
+  // The machine the app is on is this window's host, read and turned on like the Sessions sidebar does.
+  const onThisMachine = useAllMachinesStore(state => state.entries.find(entry => entry.active)?.id === machineId);
+  const switchMenu = useSessionSwitchPreview(onThisMachine ? { kind: 'here' } : { kind: 'machine', machineId }, session?.session.id ?? null, onThisMachine ? 'this machine' : menu?.machine.name || 'that machine');
   const [switching, setSwitching] = useState<{ machineId: string; sessionName: string; preview: SessionChatSwitchPreview } | null>(null);
+  // Where focus was when the menu opened, so Turn on chat tabs, which only closes it, can hand focus back.
+  const opener = useRef<HTMLElement | null>(null);
+  useEffect(() => { if (menu) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }, [menu]);
   const moveBlockedReason = useMoveToHostBlockedReason(menu ? { id: machineId, name: menu.machine.name } : undefined);
   return (<>
     <TerminalPopover visible={menu !== null} x={menu?.x ?? 0} y={menu?.y ?? 0} onClose={onClose}>
@@ -112,10 +117,8 @@ function RowActionsMenu({ menu, onClose, onRename, onMove, onReviewPermission }:
         <PopoverButton role="menuitem" onClick={() => { if (menu) onRename(menu); onClose(); }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename {noun}…</span>
         </PopoverButton>
-        {session && switchPreview && (
-          <PopoverButton role="menuitem" onClick={() => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview: switchPreview }); onClose(); }}>
-            <span className="flex items-center gap-2"><MessageSquare className="h-4 w-4" />Switch to chat…</span>
-          </PopoverButton>
+        {session && (
+          <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview }); onClose(); }} onClose={() => { opener.current?.focus(); onClose(); }} />
         )}
         {session && (
           <PopoverButton

@@ -3339,13 +3339,14 @@ test('Move to machine… sits between Rename and Archive in the Session menu, by
   await expect(row).toBeVisible({ timeout: 10_000 });
   await row.click({ button: 'right' });
   const menu = page.getByRole('menu', { name: 'Session actions for Alpha' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Move to machine…', 'Archive Session']);
+  // Chat tabs are off in this fixture, so Switch to chat says so and offers to turn them on (D-337).
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Switch to chat…Chat tabs are off on this machine', 'Turn on chat tabs', 'Move to machine…', 'Archive Session']);
   await page.keyboard.press('Escape');
 
   await row.focus();
   await page.keyboard.press('Shift+F10');
   await expect(menu.getByRole('menuitem', { name: 'Pin Session' })).toBeFocused();
-  for (let step = 0; step < 3; step++) await page.keyboard.press('ArrowDown');
+  for (let step = 0; step < 5; step++) await page.keyboard.press('ArrowDown');
   await expect(menu.getByRole('menuitem', { name: 'Move to machine…' })).toBeFocused();
   await page.screenshot({ path: 'tmp/verify/session-move-host/01-menu-keyboard.png' });
   // Closing the dialog returns focus to the row the menu was opened from, not the page.
@@ -3366,7 +3367,7 @@ test('Move to machine… sits between Rename and Archive in the Session menu, by
 
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
   await page.getByTestId('compact-orchestration-session-alpha').click({ button: 'right' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Move to machine…', 'Archive Session']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Switch to chat…Chat tabs are off on this machine', 'Turn on chat tabs', 'Move to machine…', 'Archive Session']);
   await page.screenshot({ path: 'tmp/verify/session-move-host/01b-menu-rail.png' });
 });
 
@@ -3688,6 +3689,63 @@ for (const scheme of ['light', 'dark'] as const) {
       .toEqual([{ sessionId: 'alpha', panelIds: ['orch', 'a', 'b', 'c'] }]);
   });
 }
+
+test('Switch to chat is always in the Session menu: checking, then why nothing switches, or Turn on (D-337)', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, [
+    sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
+  ], [], { initialConfig: { chatTabsEnabled: false, appearanceMode: 'system' } });
+  await page.addInitScript(() => {
+    const items = [
+      { panelId: 'orch', paneName: 'Session', title: 'Claude', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn.' } },
+      { panelId: 'a', paneName: 'auth-fix', title: 'Claude', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn.' } },
+      { panelId: 'b', paneName: 'docs', title: 'Codex', skip: { kind: 'plain-codex', reason: 'Pane isn\'t sure which conversation this tab is on.' } },
+      { panelId: 'c', paneName: 'docs', title: 'Terminal', skip: { kind: 'not-agent', reason: 'Not an agent.' } },
+    ];
+    let release: (() => void) | null = null;
+    Object.assign(window, { __releasePreview: () => release?.() });
+    Object.assign(window.electronAPI, { chatTab: {
+      // Held until the test releases it, so the menu's checking state can be seen.
+      previewSessionSwitch: (sessionId: string) => new Promise(resolve => { release = () => resolve({ sessionId, items }); }),
+    } });
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+
+  const row = page.getByTestId('orchestration-session-alpha');
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await row.click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Session actions for Alpha' });
+  const item = menu.getByTestId('session-switch-to-chat');
+  await expect(item).toHaveText('Switch to chat…Chat tabs are off on this machine');
+  await expect(item).toHaveAttribute('aria-disabled', 'true');
+  await page.screenshot({ path: testInfo.outputPath('switch-menu-chat-tabs-off.png') });
+
+  // Turn on closes the menu, so Archive never slides under the pointer; reopened, it checks the Session.
+  await menu.getByRole('menuitem', { name: 'Turn on chat tabs' }).click();
+  await expect(menu).toHaveCount(0);
+  // Focus goes back to the row, as after Escape, not to the page.
+  await expect(row).toBeFocused();
+  await row.click({ button: 'right' });
+  await expect(item).toHaveText('Switch to chat…Checking…');
+  await expect(item).toHaveAttribute('aria-busy', 'true');
+  await page.screenshot({ path: testInfo.outputPath('switch-menu-checking.png') });
+
+  // SAFETY: the init script above defines it.
+  await page.evaluate(() => (window as typeof window & { __releasePreview: () => void }).__releasePreview());
+  await expect(item).toHaveText('Switch to chat…Nothing to switch: 2 busy, 1 plain Codex');
+  await expect(item).toHaveAttribute('aria-disabled', 'true');
+  await page.screenshot({ path: testInfo.outputPath('switch-menu-nothing.png') });
+  // Playwright waits for an aria-disabled item to enable; the click must still do nothing.
+  await item.click({ force: true });
+  await expect(page.getByRole('dialog', { name: 'Switch Session to chat' })).toHaveCount(0);
+  await expect(menu).toBeVisible();
+
+  // Reopened, it checks again rather than showing the last answer.
+  await page.keyboard.press('Escape');
+  await row.click({ button: 'right' });
+  await expect(item).toHaveText('Switch to chat…Checking…');
+});
 
 /** Q-20 and one more, waiting from the Plan demo Session (the approval card, P4). */
 function sessionApprovalsSnapshot(): NotifySnapshot {

@@ -62,7 +62,7 @@ export function RemoteHostSwitcher({
     id: machine.id,
     label: <span className="font-medium">{machine.name}</span>,
     description: machine.subtitle,
-    // A disabled row is dimmed as a whole, so its mark stays solid inside it.
+    // A disabled row dims its mark and name, so the mark stays solid inside it.
     leading: <MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
     // Its letters and colour can change on this computer, whether or not it can be picked now.
     trailing: <MachineMarkEditor machine={machine} />,
