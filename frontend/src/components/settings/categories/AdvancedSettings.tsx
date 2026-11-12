@@ -213,6 +213,6 @@ function autopilotDescription(chatTabs: boolean, entitlement: { entitled: boolea
   if (entitlement && !entitlement.entitled) return `${entitlement.reason ?? 'Autopilot is not available.'} ${entitlement.next ?? ''}`.trim();
   if (!chatTabs && on && running) return 'Autopilot runs as a chat tab, and Chat tabs are off: it keeps running, but once it stops it can\'t start again until Chat tabs are back on. Turning it off stops it and keeps its Autopilot Session.';
   if (!chatTabs && on) return 'Autopilot runs as a chat tab, and Chat tabs are off: it can\'t start until Chat tabs are back on. Turning it off keeps its Autopilot Session.';
-  if (!chatTabs) return 'Autopilot runs as a chat tab: turn on Chat tabs above first.';
+  if (!chatTabs) return 'Autopilot runs as a chat tab: turn on Chat tabs in Settings › AI & Agents first.';
   return 'Add Autopilot above Sessions: one agent, on your own installed claude, that walks your Sessions from the top and puts what waits on you in front of you with its documents. It can answer and close approvals when the way is clear or you tell it to, with a receipt you can override; permission prompts stay yours. Turning it off stops it and keeps its Autopilot Session.';
 }
