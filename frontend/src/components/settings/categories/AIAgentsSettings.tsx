@@ -92,7 +92,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
         <SettingRow
           settingId="default-pane-chat-agent"
           label="Default Sessions agent"
-          description="Choose the agent used when a Session opens a new orchestration terminal."
+          description="Choose the agent a new Session starts. It opens as a chat when Chat tabs are on, and in a terminal otherwise."
           saveState={persistence.saveStates['default-pane-chat-agent']}
         >
           {/* The legacy accessible name remains stable for existing shortcuts and fixtures. */}
