@@ -117,6 +117,7 @@ import type { AnalyticsManager } from './services/analyticsManager';
 import { readWebAttribution, resolveAnalyticsIdentity } from './services/analyticsIdentity';
 import { resourceMonitorService } from './services/resourceMonitorService';
 import { applyAppDirectoryOverrideFromArgs, isPackagedOnDefaultDirectory, migrateDataDirectory } from './utils/appDirectory';
+import { analyticsEnvironment } from './utils/analyticsEnvironment';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
 import { getUpdateCapabilities } from './utils/updateCapabilities';
@@ -1208,6 +1209,7 @@ async function initializeServices() {
       identity.appVersion = currentVersion;
       identity.platform = os.platform();
       identity.electronVersion = process.versions.electron;
+      identity.environment = analyticsEnvironment(app.isPackaged);
       identity.webAttributionPresent = webDistinctId !== undefined;
       identity.isFirstLaunch = isFirstLaunch;
       identity.previousVersion = previousVersion;

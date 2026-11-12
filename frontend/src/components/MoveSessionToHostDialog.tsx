@@ -4,7 +4,9 @@ import { cn } from '../utils/cn';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { useConfigStore } from '../stores/configStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
-import { moveTargets, moveToHostPrompt, sessionHostFor, type MoveTarget, type MoveTargetList } from '../utils/moveSessionToHost';
+import { moveTargets, moveToHostPrompt, sessionHostFor, sessionHostForMachine, type MoveTarget, type MoveTargetList, type SessionHost } from '../utils/moveSessionToHost';
+import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 
@@ -16,17 +18,32 @@ const submitResultSchema = boundary.object({
 });
 
 /**
+ * Which Session moves: one on the host the window shows, or, from All machines, one on a named
+ * machine, whose record comes from that machine's list.
+ */
+export type MoveSessionTarget =
+  | { kind: 'here'; sessionId: string }
+  | { kind: 'machine'; machineId: string; session: OrchestrationSessionRecord };
+
+/** The Session's host: the named machine's, or with none, the host on screen. */
+function hostOf(machineId: string | null, config: Pick<RemoteDaemonConfig, 'client'> | undefined): SessionHost {
+  return machineId === null ? sessionHostFor(config) : sessionHostForMachine(config, machineId);
+}
+
+/**
  * Sends the prompt the way a person's message reaches the agent: `runpane panels submit` on the
  * Session's own host, which waits for the composer and queues behind a running turn.
  */
-async function submitToAgent(panelId: string, input: string): Promise<void> {
+async function submitToAgent(target: MoveSessionTarget, panelId: string, input: string): Promise<void> {
   let response: unknown;
   try {
-    response = await window.electronAPI.invoke('runpane:panels:submit', { panelId, input, source: 'user' });
+    response = target.kind === 'machine'
+      ? (await window.electronAPI.machines.run(target.machineId, { type: 'submit-to-agent', panelId, input })).data
+      : await window.electronAPI.invoke('runpane:panels:submit', { panelId, input, source: 'user' });
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     if (NOT_RUNNING.test(message)) {
-      throw new Error('The Session\'s agent is not running yet, so nothing was sent. Open the Session, wait for its agent to start, then choose Move to host… again.');
+      throw new Error('The Session\'s agent is not running yet, so nothing was sent. Open the Session, wait for its agent to start, then choose Move to machine… again.');
     }
     throw new Error(`Could not send the handoff request to the Session's agent: ${message}. Nothing was sent.`);
   }
@@ -37,28 +54,32 @@ async function submitToAgent(panelId: string, input: string): Promise<void> {
 }
 
 interface MoveSessionToHostDialogProps {
-  sessionId: string | null;
+  target: MoveSessionTarget | null;
   onClose: () => void;
   /** Called after the agent has the request, so the person can watch it hand off. */
   onMoved: (sessionId: string) => void;
 }
 
-export function MoveSessionToHostDialog({ sessionId, onClose, onMoved }: MoveSessionToHostDialogProps) {
-  const session = useOrchestrationSessionStore(state => state.sessions.find(candidate => candidate.id === sessionId));
+export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: MoveSessionToHostDialogProps) {
+  const hereId = moving?.kind === 'here' ? moving.sessionId : null;
+  const hereSession = useOrchestrationSessionStore(state => state.sessions.find(candidate => candidate.id === hereId));
+  const session = moving?.kind === 'machine' ? moving.session : hereSession;
+  const sessionId = moving?.kind === 'machine' ? moving.session.id : hereId;
+  const machineId = moving?.kind === 'machine' ? moving.machineId : null;
   const remoteDaemon = useConfigStore(state => state.config?.remoteDaemon);
   const [targets, setTargets] = useState<MoveTargetList | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isOpen = sessionId !== null;
-  const sessionHost = sessionHostFor(remoteDaemon);
+  const isOpen = moving !== null;
+  const sessionHost = hostOf(machineId, remoteDaemon);
   const hostKey = sessionHost.kind === 'tailnet' ? sessionHost.machine : sessionHost.kind;
 
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
     setTargets(null); setSelected(null); setError(null);
-    const host = sessionHostFor(useConfigStore.getState().config?.remoteDaemon);
+    const host = hostOf(machineId, useConfigStore.getState().config?.remoteDaemon);
     if (host.kind === 'paired') return;
     void (async () => {
       try {
@@ -83,23 +104,23 @@ export function MoveSessionToHostDialog({ sessionId, onClose, onMoved }: MoveSes
       }
     })();
     return () => { cancelled = true; };
-  }, [isOpen, sessionId, hostKey]);
+  }, [isOpen, sessionId, machineId, hostKey]);
 
   const close = () => { if (!busy) onClose(); };
-  const target = targets?.ok ? targets.targets.find(candidate => candidate.name === selected && candidate.available) : undefined;
+  const destination = targets?.ok ? targets.targets.find(candidate => candidate.name === selected && candidate.available) : undefined;
 
   return (
-    <Modal isOpen={isOpen} onClose={close} ariaLabel="Move Session to another host">
+    <Modal isOpen={isOpen} onClose={close} ariaLabel="Move Session to another machine">
       <form onSubmit={event => {
         event.preventDefault();
-        if (!session || !target || busy) return;
+        if (!moving || !session || !destination || busy) return;
         setBusy(true); setError(null);
-        void submitToAgent(session.panelIds[session.agent], moveToHostPrompt(session.agent, target.name))
+        void submitToAgent(moving, session.panelIds[session.agent], moveToHostPrompt(session.agent, destination.name))
           .then(() => { onClose(); onMoved(session.id); })
           .catch(failure => setError(failure instanceof Error ? failure.message : 'Could not send the handoff request.'))
           .finally(() => setBusy(false));
       }}>
-        <ModalHeader title={`Move ${session?.name ?? 'Session'} to another host`} />
+        <ModalHeader title={`Move ${session?.name ?? 'Session'} to another machine`} />
         <ModalBody>
           <p className="text-sm text-text-secondary">
             Pane asks this Session's agent to hand it off with <code>runpane handoff</code>. With the same agent, the new Session continues this Session's own conversation when you open it; otherwise it starts from the agent's note. This one stays here.
@@ -152,7 +173,7 @@ export function MoveSessionToHostDialog({ sessionId, onClose, onMoved }: MoveSes
         </ModalBody>
         <ModalFooter>
           <Button type="button" variant="secondary" disabled={busy} onClick={close}>Cancel</Button>
-          <Button type="submit" disabled={busy || !target || !session}>{busy ? 'Sending…' : 'Move Session'}</Button>
+          <Button type="submit" disabled={busy || !destination || !session}>{busy ? 'Sending…' : 'Move Session'}</Button>
         </ModalFooter>
       </form>
     </Modal>

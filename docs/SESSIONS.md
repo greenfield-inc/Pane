@@ -388,7 +388,7 @@ replace an unrelated selection.
 
 ### Move a Session to another machine
 
-Right-click a Session, or use its ⋯ button, and choose **Move to host…** to
+Right-click a Session, or use its ⋯ button, and choose **Move to machine…** to
 continue it on another machine. The dialog lists your Tailscale machines
 running Pane, except the one the Session is on, and your teammates' machines
 running Pane, shown with the owner's login after the name. A teammate's machine
@@ -397,7 +397,10 @@ Machines Pane can't reach, or that accept only their owner, are shown disabled
 with the reason. If none can be reached, it says so:
 open Pane on the other machine, or sign in to Tailscale. While you view a host
 connected with a pairing code rather than over Tailscale, the item is disabled,
-because Pane can't tell which machine that is. Choosing a machine
+because Pane can't tell which machine that is. In All machines, the same item
+is in each Session's menu and moves the Session from its own machine, without
+switching to it; it is disabled, with the reason, while that machine isn't
+connected or was paired with a code. Choosing a machine
 sends the Session's agent a prompt to hand the Session off with
 [`runpane handoff`](RUNPANE_WORKSPACES.md#hand-a-task-to-another-machine) and
 the `handoff` skill.
