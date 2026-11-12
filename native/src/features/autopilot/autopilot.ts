@@ -31,7 +31,7 @@ export function autopilotRowState(snapshot: AutopilotSnapshot): AutopilotRowStat
 /** Why Start can't run here, with the next step, or undefined when it can. */
 export function startBlocked(snapshot: AutopilotSnapshot): string | undefined {
   if (!snapshot.entitlement.entitled) return [snapshot.entitlement.reason, snapshot.entitlement.next].filter(Boolean).join(' ') || 'Autopilot is not available on this computer.';
-  if (!snapshot.chatTabsEnabled) return 'Autopilot runs as a chat tab, and chat tabs are off on this computer. Turn on Chat tabs in Settings › Advanced › Experimental there, then press Start.';
+  if (!snapshot.chatTabsEnabled) return 'Autopilot runs as a chat tab, and chat tabs are off on this computer. Turn on Chat tabs in Settings › AI & Agents there, then press Start.';
   return undefined;
 }
 

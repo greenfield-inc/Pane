@@ -398,14 +398,55 @@ test('Move to machine… is offered on a Pane\'s menu never, and on an offline m
   expect((await (await mock(page)).evaluate(api => api.getMachineRuns())).filter(run => run.command.type === 'submit-to-agent')).toEqual([]);
 });
 
-test('a Session with nothing that can switch has no Switch to chat in its menu', async ({ page }) => {
+test('a Session with nothing that can switch still shows Switch to chat, disabled with why (D-337)', async ({ page }, testInfo) => {
   await openAllMachines(page, 'light', { extra: { machineRunAnswers: { build: {
-    'preview-switch-to-chat': { sessionId: 's1', items: [{ panelId: 'p-6', paneName: 'terraform-upgrade', title: 'Terminal', skip: { kind: 'not-agent', reason: 'Not an agent.' } }] },
+    'preview-switch-to-chat': { sessionId: 's1', items: [
+      { panelId: 'p-4', paneName: 'terraform-upgrade', title: 'QA', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn.' } },
+      { panelId: 'p-5', paneName: 'terraform-upgrade', title: 'Codex 2', skip: { kind: 'plain-codex', reason: 'Pane isn\'t sure which conversation.' } },
+      { panelId: 'p-6', paneName: 'terraform-upgrade', title: 'Terminal', skip: { kind: 'not-agent', reason: 'Not an agent.' } },
+    ] },
   } } } });
   await sessionRows(page).filter({ hasText: 'Backup rotation' }).click({ button: 'right' });
-  await expect.poll(async () => (await mock(page)).evaluate(api => api.getMachineRuns().length)).toBe(1);
-  await expect(page.getByRole('menuitem', { name: 'Rename Session…' })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: 'Switch to chat…' })).toHaveCount(0);
+  const item = page.getByTestId('session-switch-to-chat');
+  await expect(item).toHaveText('Switch to chat…Nothing to switch: 1 busy, 1 plain Codex');
+  await expect(item).toHaveAttribute('aria-disabled', 'true');
+  await page.screenshot({ path: testInfo.outputPath('all-machines-switch-nothing.png') });
+  // Playwright waits for an aria-disabled item to enable; the click must still do nothing.
+  await item.click({ force: true });
+  await expect(page.getByRole('dialog', { name: 'Switch Session to chat' })).toHaveCount(0);
+  expect(await (await mock(page)).evaluate(api => api.getMachineRuns().map(run => run.command.type))).toEqual(['preview-switch-to-chat']);
+});
+
+test('a Session on a machine with chat tabs off names that machine (D-337)', async ({ page }) => {
+  await openAllMachines(page, 'light', { extra: { machineRunAnswers: { build: {
+    'preview-switch-to-chat': { sessionId: 's1', items: [
+      { panelId: 'p-1', paneName: 'terraform-upgrade', title: 'Claude', skip: { kind: 'other', reason: 'Chat tabs are turned off on this machine.' } },
+    ] },
+  } } } });
+  await sessionRows(page).filter({ hasText: 'Backup rotation' }).click({ button: 'right' });
+  await expect(page.getByTestId('session-switch-to-chat')).toHaveText('Switch to chat…Chat tabs are off on build-box');
+  // Only this window's own host can be turned on from here.
+  await expect(page.getByRole('menuitem', { name: 'Turn on chat tabs' })).toHaveCount(0);
+});
+
+test('a Session on the machine the app is on reads like the Sessions sidebar: this machine, with Turn on (D-337)', async ({ page }, testInfo) => {
+  await openAllMachines(page, 'light', { extra: { initialConfig: { appearanceMode: 'system', chatTabsEnabled: false } } });
+  await sessionRows(page).filter({ hasText: 'Spring sale launch' }).click({ button: 'right' });
+  await expect(page.getByTestId('session-switch-to-chat')).toHaveText('Switch to chat…Chat tabs are off on this machine');
+  await expect(page.getByRole('menuitem', { name: 'Turn on chat tabs' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('all-machines-this-machine-off.png') });
+  // Read here, as the Sessions sidebar does, not sent to a machine.
+  expect(await (await mock(page)).evaluate(api => api.getMachineRuns().map(run => run.command.type))).toEqual([]);
+  await page.keyboard.press('Escape');
+
+  // From the keyboard, Turn on closes the menu and hands focus back to the button that opened it.
+  const actions = page.getByRole('button', { name: 'Actions for Spring sale launch' });
+  await actions.focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('menuitem', { name: 'Turn on chat tabs' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('menuitem', { name: 'Turn on chat tabs' })).toHaveCount(0);
+  await expect(actions).toBeFocused();
 });
 
 test('allowing a permission from the row menu shows what the agent will run on that machine first', async ({ page }, testInfo) => {

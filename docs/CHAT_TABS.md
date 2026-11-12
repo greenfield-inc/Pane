@@ -8,9 +8,10 @@ back into a terminal. A terminal Claude or Codex tab can move the other way
 with **Switch to chat** (below). "Claude in Terminal" and "Codex in Terminal"
 in the + menu open terminal agent tabs, as before.
 
-Chat tabs are experimental. Turn them on in **Settings → Advanced → Chat tabs**.
-While they are off, the + menu has no chat entries and new Sessions open their
-orchestrator in a terminal. Open chat tabs keep working.
+A fresh install starts with chat tabs on. An existing install keeps the setting
+it had, so one that never turned them on stays off until you switch
+**Settings → AI & Agents → Chat tabs**. While they are off, the + menu has no chat
+entries and new Sessions open their orchestrator in a terminal. Open chat tabs keep working.
 
 ## Opening one
 
@@ -34,8 +35,10 @@ orchestrator in a terminal. Open chat tabs keep working.
 
 **Switch to chat** (right-click a terminal Claude or Codex tab, or the command
 palette) continues the terminal's conversation in a chat tab (D-129, D-184,
-D-229, D-282). It shows only with chat tabs on, asks with one plain
-confirmation, and never sends anything to your agent.
+D-229, D-282). It asks with one plain confirmation and never sends anything to
+your agent. A Claude or Codex tab's menu always shows it (D-337): with chat tabs
+off it is greyed out with **Turn on chat tabs** below it, and a chat tab shows it
+greyed out as already a chat. The command palette offers it only with chat tabs on.
 
 Right-click a Session in the sidebar (or on All machines, where it runs on the
 Session's own machine) and choose **Switch to chat…** to switch every terminal
@@ -52,8 +55,13 @@ as one tab, so a tab that fails is put back the way one tab's switch puts it
 back and the others carry on,
 and the dialog ends with a summary such as "4 switched, 1 skipped: busy". Each
 tab is checked again just before it switches; one that wasn't on the confirmed
-list (busy then, or opened since) is left as it is. The item is left out when
-nothing in the Session can switch.
+list (busy then, or opened since) is left as it is. The item is always in the
+Session menu (D-337): it shows a spinner and "Checking…" while the Session's
+machine looks, then greys out with why when nothing can switch ("Nothing to
+switch: 2 busy, 1 plain Codex", or "Chat tabs are off on build-box"). When chat
+tabs are off on this window's own host, **Turn on chat tabs** sits below it;
+it turns them on and closes the menu, and the menu checks again each time it
+opens.
 
 **Which conversation opens.** Pane learns a terminal's conversation from Claude
 Code's `SessionStart` hook, which fires on start, `/resume`, `/clear` and
