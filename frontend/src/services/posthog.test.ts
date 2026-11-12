@@ -126,6 +126,9 @@ describe('environment tags', () => {
 
   it('sends no environment tags when the main process sent none (older builds)', async () => {
     await captureAppFirstOpened({ ...ciInstall, environment: undefined });
-    expect(Object.keys(directEvents.find((e) => e.event === 'app_first_opened')?.properties ?? {})).not.toContain('automated');
+    const firstOpens = directEvents.filter((e) => e.event === 'app_first_opened');
+    expect(firstOpens).toHaveLength(1);
+    expect(firstOpens[0].properties).toMatchObject({ install_id: 'install_ci', source: 'first_launch' });
+    for (const key of Object.keys(tags)) expect(firstOpens[0].properties).not.toHaveProperty(key);
   });
 });

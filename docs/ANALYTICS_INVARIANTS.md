@@ -101,9 +101,11 @@ copy and this section in the same PR.
 
 ## Environment Tags
 
-`app_first_opened`, `app_opened`, every other renderer event and `app_heartbeat`
-say where Pane runs, so dashboards can tell people apart from automated
-installs. They tag; they never drop an event. The main process detects them once
+`app_heartbeat` and the events Pane captures itself (`capture`, direct
+captures such as `app_first_opened`, and main-process events such as
+`app_opened` forwarded through the renderer) say where Pane runs, so dashboards
+can tell people apart from automated installs. Events the PostHog SDK generates
+on its own, such as `$pageview` and `$autocapture`, don't carry them. They tag; they never drop an event. The main process detects them once
 per launch (`main/src/utils/analyticsEnvironment.ts`) and sends them on the
 analytics identity, never saving them to config:
 
