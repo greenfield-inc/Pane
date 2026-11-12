@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
-import { useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { AppState, Linking, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { usePairing } from '@/features/pairing/usePairing';
@@ -10,25 +10,35 @@ import { Button, EmptyState, Text } from '@/ui';
 
 export default function ScanScreen() {
   const theme = useTheme();
-  const [permission, requestPermission] = useCameraPermissions();
+  // Opening the scanner asks iOS or Android directly; the system dialog shows the camera purpose string.
+  const [permission, , getPermission] = useCameraPermissions({ request: true });
   // Close the scanner and any "Add host" modal under it.
   const pairing = usePairing(() => router.dismissAll());
   const lastCode = useRef<string | null>(null);
 
-  if (!permission) return <View style={[styles.fill, { backgroundColor: 'black' }]} />;
+  // Pick up a change made in Settings when the person comes back to the app.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') void getPermission();
+    });
+    return () => subscription.remove();
+  }, [getPermission]);
+
+  if (!permission || permission.status === 'undetermined') {
+    return <View style={[styles.fill, { backgroundColor: 'black' }]} />;
+  }
 
   if (!permission.granted) {
     return (
       <SafeAreaView style={[styles.fill, { backgroundColor: theme.colors.background }]}>
         <EmptyState
-          title="Camera access"
-          message="Pane needs the camera to scan the connection code on your computer's screen."
+          testID="scan-camera-off"
+          title="Camera is off"
+          message="Scanning the connection code uses the camera. You can turn on camera access for Pane in Settings, or go back and paste the connection code instead."
           action={
             <View style={styles.actions}>
-              {permission.canAskAgain
-                ? <Button title="Allow camera" onPress={() => void requestPermission()} />
-                : <Text tone="muted" style={styles.center}>Turn on camera access for Pane in Settings.</Text>}
-              <Button title="Cancel" variant="plain" onPress={() => router.back()} />
+              <Button testID="scan-open-settings" title="Open Settings" variant="secondary" onPress={() => void Linking.openSettings()} />
+              <Button testID="scan-back" title="Back" variant="plain" onPress={() => router.back()} />
             </View>
           }
         />
@@ -66,5 +76,4 @@ const styles = StyleSheet.create({
   frame: { alignSelf: 'center', width: 240, height: 240, borderRadius: 24, borderWidth: 3, borderColor: 'rgba(255,255,255,0.9)' },
   error: { color: '#ffb4ab', textAlign: 'center' },
   actions: { gap: 8 },
-  center: { textAlign: 'center' },
 });
