@@ -95,6 +95,8 @@ export class MachineConnections {
 
   list(): MachineState[] {
     const local: MachineState = { id: LOCAL_MACHINE_ID, label: 'This computer', kind: 'local', status: 'online', offlineSince: null };
+    const installId = this.deps.configManager.getConfig().machineId;
+    if (installId) local.installId = installId;
     return [local, ...[...this.machines.values()].map(machine => ({ ...machine.state }))];
   }
 
@@ -184,10 +186,11 @@ export class MachineConnections {
       retryTimer: null,
       state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null },
       client: this.createClient(profile, {
+        machineId: this.deps.configManager.getConfig().machineId,
         eventSink: { send: (channel, ...args) => { if (isCurrent() && isMachineEventChannel(channel)) this.emit({ type: 'event', machineId: id, channel, args }); } },
-        onConnectionStateChange: (status) => {
+        onConnectionStateChange: (status, _error, metadata) => {
           if (!isCurrent()) return;
-          this.updateStatus(machine, status);
+          this.updateStatus(machine, status, metadata?.hostMachineId);
           if (status === 'connected') clearRetry(machine);
           if (status === 'error' && !machine.retryTimer) {
             machine.retryTimer = setTimeout(() => {
@@ -208,9 +211,10 @@ export class MachineConnections {
     await machine.client.disconnect();
   }
 
-  private updateStatus(machine: RemoteMachine, status: RemotePaneConnectionStatus): void {
+  private updateStatus(machine: RemoteMachine, status: RemotePaneConnectionStatus, hostMachineId?: string): void {
     const { state } = machine;
-    const before = `${state.status}|${state.offlineSince}`;
+    const before = `${state.status}|${state.offlineSince}|${state.installId}`;
+    if (hostMachineId) state.installId = hostMachineId;
     if (status === 'connected') {
       state.status = 'online';
       state.offlineSince = null;
@@ -219,7 +223,7 @@ export class MachineConnections {
       if (state.status !== 'offline') state.offlineSince = new Date().toISOString();
       state.status = 'offline';
     }
-    if (`${state.status}|${state.offlineSince}` !== before) this.emitMachines();
+    if (`${state.status}|${state.offlineSince}|${state.installId}` !== before) this.emitMachines();
   }
 
   private emitMachines(): void {

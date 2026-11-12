@@ -1,10 +1,11 @@
 import { createHash } from 'crypto';
 import os from 'os';
 import type { AppConfig } from '../types/config';
+import type { NotifySettings } from '../../../shared/types/notify';
 import type { ConfigManager } from './configManager';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import {
-  isNewerNotifySwitch,
+  mergeNotifySwitch,
   mergeSharedCredentials,
   SHARED_CREDENTIAL_IDS,
   UNTIMED_CREDENTIAL,
@@ -118,33 +119,63 @@ function isApplicable(id: SharedCredentialId, credential: SharedCredential | und
   }
 }
 
+const cardsOnSchema = boundary.object({ id: boundary.nonEmptyString, name: boundary.nonEmptyString });
+
+/** A host from before "Show cards on" sends neither of its fields; an older host drops them. */
 export const sharedNotifySwitchSchema: BoundarySchema<SharedNotifySwitch> = boundary.object({
   enabled: boundary.boolean,
   changedAt: boundary.number,
+  cardsOn: boundary.optional(boundary.nullable(cardsOnSchema)),
+  cardsOnChangedAt: boundary.optional(boundary.number),
 });
 
-/** This host's Approvals switch. A missing value means on; an off saved before sharing existed has time 0. */
+/** This host's Approvals switch and "Show cards on". A missing switch means on; an off saved before sharing existed has time 0. */
 export function readNotifySwitch(config: AppConfig): SharedNotifySwitch {
-  return { enabled: config.notify?.enabled ?? true, changedAt: config.notifyEnabledChangedAt ?? 0 };
+  return {
+    enabled: config.notify?.enabled ?? true,
+    changedAt: config.notifyEnabledChangedAt ?? 0,
+    cardsOn: config.notify?.cardsOn ?? null,
+    cardsOnChangedAt: config.notifyCardsOnChangedAt ?? 0,
+  };
 }
 
-/**
- * The new time for a switch the person changed between `previous` and `next`, or null when it wasn't.
- * Always later than the time it replaces, so a change here beats a stored time from a clock running ahead.
- */
+/** A later time than `changedAt`, so a change here beats a stored time from a clock running ahead. */
+const restampAfter = (changedAt: number) => Math.max(Date.now(), changedAt + 1);
+
+/** The new time for a switch the person changed between `previous` and `next`, or null when it wasn't. */
 export function restampNotifySwitch(previous: AppConfig, next: AppConfig): number | null {
   const before = readNotifySwitch(previous);
   const after = readNotifySwitch(next);
   if (before.enabled === after.enabled || before.changedAt !== after.changedAt) return null;
-  return Math.max(Date.now(), after.changedAt + 1);
+  return restampAfter(after.changedAt);
 }
 
-/** Saves `incoming` if it beats this host's value, keeping its time. Only on/off: the other Approvals settings stay per-machine. */
+/** The new time for a "Show cards on" the person changed between `previous` and `next`, or null when it wasn't. */
+export function restampCardsOn(previous: AppConfig, next: AppConfig): number | null {
+  const before = readNotifySwitch(previous);
+  const after = readNotifySwitch(next);
+  if (before.cardsOn?.id === after.cardsOn?.id || before.cardsOnChangedAt !== after.cardsOnChangedAt) return null;
+  return restampAfter(after.cardsOnChangedAt ?? 0);
+}
+
+/** Saves each part of `incoming` that beats this host's, keeping its time. The other Approvals settings stay per-machine. */
 export async function applyNotifySwitch(configManager: ConfigManager, incoming: SharedNotifySwitch): Promise<{ notifySwitch: SharedNotifySwitch; changed: boolean }> {
   let changed = false;
   await configManager.updateConfigWith((config) => {
-    changed = isNewerNotifySwitch(incoming, readNotifySwitch(config));
-    return changed ? { notify: { enabled: incoming.enabled }, notifyEnabledChangedAt: incoming.changedAt } : {};
+    const current = readNotifySwitch(config);
+    const merged = mergeNotifySwitch(current, incoming).notifySwitch;
+    const notify: Partial<NotifySettings> = {};
+    const patch: Partial<AppConfig> = { notify };
+    if (merged.changedAt !== current.changedAt || merged.enabled !== current.enabled) {
+      notify.enabled = merged.enabled;
+      patch.notifyEnabledChangedAt = merged.changedAt;
+    }
+    if (merged.cardsOnChangedAt !== current.cardsOnChangedAt) {
+      notify.cardsOn = merged.cardsOn ?? null;
+      patch.notifyCardsOnChangedAt = merged.cardsOnChangedAt;
+    }
+    changed = Object.keys(patch).length > 1;
+    return changed ? patch : {};
   });
   return { notifySwitch: readNotifySwitch(configManager.getConfig()), changed };
 }

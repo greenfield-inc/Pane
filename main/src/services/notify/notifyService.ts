@@ -92,6 +92,8 @@ export interface NotifyServiceDependencies {
   typeIntoTab?: NotifyQueueEnvironment['typeIntoTab'];
   /** Seconds since the person last used this computer; Infinity while its screen is locked. Absent: in use. */
   idleSeconds?: () => number;
+  /** Where "Show cards on" leaves this machine (`cardsOnStatus`). Absent: whichever computer is in use. */
+  cardsOn?: NotifyQueueEnvironment['cardsOn'];
   /** Whether a tab still exists. */
   tabAlive?: (panelId: string) => boolean;
 }
@@ -150,6 +152,7 @@ export class NotifyService {
       shortcutRegistered: () => this.shortcutRegistered,
       instructionFiles: () => this.instructionFiles,
       machine: deps.machine,
+      machineId: deps.configManager.getConfig().machineId,
       secrets: deps.secrets,
       sessionOf: deps.sessionOf,
       savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.profiles ?? []).map(profile => profile.id),
@@ -157,6 +160,7 @@ export class NotifyService {
       store: deps.store,
       askerGone: (item) => this.askerGone(item),
       inUse: deps.idleSeconds ? () => (deps.idleSeconds?.() ?? 0) < IN_USE_SECONDS : undefined,
+      cardsOn: deps.cardsOn,
       typeIntoTab: deps.typeIntoTab,
       tabAlive: deps.tabAlive,
       autopilotReader: () => this.autopilotReader?.(),
@@ -194,6 +198,8 @@ export class NotifyService {
       const homeSkillChanged = homeSkill !== this.homeSkill;
       this.homeSkill = homeSkill;
       const instructionsChanged = this.applySettings(notifySettings(config));
+      // "Show cards on" moves the strip and the chime at once, not on the next poll.
+      this.queue.pollInUse();
       // The block names the `pane` skill only while it is installed.
       if (homeSkillChanged && !instructionsChanged && this.lastSettings.enabled) this.syncInstructions(true);
       // The floating windows read the palette when they load, so a new palette recreates them.

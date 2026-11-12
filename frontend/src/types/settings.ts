@@ -59,6 +59,7 @@ export type SettingsSettingId =
   | 'auto-rename-pr'
   | 'worktree-file-sync'
   | 'notify-enabled'
+  | 'notify-cards-on'
   | 'notify-show-outside'
   | 'notify-position'
   | 'notify-shortcut'
