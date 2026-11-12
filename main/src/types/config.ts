@@ -53,7 +53,7 @@ type HtmlFileOpenMode = 'preview' | 'source';
 
 export interface AppConfig {
   // Experimental: open Claude and Codex agent tabs as Chat (off by default).
-  // Experimental: chat tabs (Claude and Codex over ACP, no terminal). Off until they ship on desktop and mobile.
+  // Chat tabs (Claude and Codex over ACP, no terminal). On for a fresh install; see ConfigManager.
   chatTabsEnabled?: boolean;
   /** Experimental: Autopilot, one always-running agent above every Session (needs chat tabs). */
   autopilotEnabled?: boolean;

@@ -165,18 +165,6 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
           />
         </SettingRow>
         <SettingRow
-          settingId="chat-tabs"
-          label="Chat tabs"
-          description="Add Claude and Codex chat tabs to the + menu. They run your own installed claude or codex, signed in on this machine, with no terminal. Turning it off keeps open chat tabs."
-          saveState={persistence.saveStates['chat-tabs']}
-        >
-          <ImmediateToggle
-            label="Chat tabs"
-            value={isChatTabsEnabled(config)}
-            onSave={(value) => persistence.saveConfig('chat-tabs', { chatTabsEnabled: value })}
-          />
-        </SettingRow>
-        <SettingRow
           settingId="autopilot"
           label="Autopilot"
           description={autopilotDescription(isChatTabsEnabled(config), autopilot?.entitlement, autopilot?.enabled === true, (autopilot?.state ?? 'stopped') !== 'stopped')}

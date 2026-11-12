@@ -73,6 +73,18 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
   return (
     <SettingsPage title="AI & Agents" description="Application-wide defaults for Sessions and coding-agent integrations.">
       <SettingsSection title="Agent defaults">
+        <SettingRow
+          settingId="chat-tabs"
+          label="Chat tabs"
+          description="Open Claude and Codex as chats: the + menu offers chat tabs, and new Sessions open their agent as a chat. They run your own installed claude or codex, signed in on this machine, with no terminal. Turning it off keeps open chat tabs."
+          saveState={persistence.saveStates['chat-tabs']}
+        >
+          <ImmediateToggle
+            label="Chat tabs"
+            value={chatTabsOn}
+            onSave={(value) => persistence.saveConfig('chat-tabs', { chatTabsEnabled: value })}
+          />
+        </SettingRow>
         {(chatTabsOn || keySavedWhileOff) && <SettingRow settingId="chat-tab-keys" label="Chat tab sign-in" description={chatTabsOn ? 'Chat tabs use your own Claude Code or Codex sign-in on this machine; Pane never sees or copies it. Sign in with claude auth login or codex login in a terminal tab, or save an API key here.' : 'Chat tabs are off, and a key saved for them is still on this machine. Remove it here, or turn Chat tabs back on to change it.'} saveState={persistence.saveStates['chat-tab-keys']} details={<ChatTabKeys removeOnly={!chatTabsOn} onRemovedAll={() => setKeySavedWhileOff(false)} />}>
           {null}
         </SettingRow>}

@@ -116,7 +116,7 @@ export async function switchToChat(panelId: string, ports: SwitchToChatPorts): P
  * throw, or returns the chat it would open. Sends the agent nothing, so a preview can ask it.
  */
 export async function prepareSwitch(panelId: string, ports: SwitchToChatPorts): Promise<PreparedSwitch> {
-  if (!ports.chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine. Nothing was switched.', 'Turn on Chat tabs in Settings > Advanced > Experimental, then try again.');
+  if (!ports.chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine. Nothing was switched.', 'Turn on Chat tabs in Settings > AI & Agents, then try again.');
   const panel = ports.panel(panelId);
   if (!panel) throw new PaneError('CHAT_PANEL_MISSING', 'That tab no longer exists. Nothing was switched.', 'Open the agent tab again.');
   // SAFETY: terminal panels persist TerminalPanelState as their custom state; checked by type below.

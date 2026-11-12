@@ -84,7 +84,7 @@ export interface AppConfig {
   defaultModel?: string;
   // Default agent used by the global Pane Chat orchestrator terminal
   defaultOrchestratorAgent?: PaneChatAgent;
-  // Experimental: chat tabs (Claude and Codex over ACP, no terminal).
+  // Chat tabs (Claude and Codex over ACP, no terminal).
   chatTabsEnabled?: boolean;
   autopilotEnabled?: boolean;
   // Auto-check for updates
