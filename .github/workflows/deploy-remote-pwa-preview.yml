@@ -38,8 +38,10 @@ jobs:
           node-version: '22.23.4'
           cache: 'pnpm'
 
+      # The preview serves only the frontend build, so install only the
+      # frontend's dependencies, without the Electron install scripts.
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter 'frontend...' --ignore-scripts
 
       - name: Build remote PWA assets
         run: pnpm run build:frontend

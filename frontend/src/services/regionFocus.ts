@@ -111,7 +111,15 @@ function collectFocusStops(): FocusStop<HTMLElement>[] {
   for (const approvals of queryShown('[data-focus-region="approvals"]')) {
     stops.push(asStop(approvals, 'approvals'));
   }
-  return stops;
+  // An approval laid over a Session's right split hides it: the approval is the stop there, not the page under it (D-335).
+  const covers = stops.filter(stop => stop.kind === 'approvals');
+  return stops.filter(stop => stop.kind !== 'group' || !covers.some(cover => coversRect(cover.rect, stop.rect)));
+}
+
+function coversRect(outer: FocusStop['rect'], inner: FocusStop['rect']): boolean {
+  const slack = 2;
+  return inner.left >= outer.left - slack && inner.right <= outer.right + slack
+    && inner.top >= outer.top - slack && inner.bottom <= outer.bottom + slack;
 }
 
 function stopElementFor(element: Element): HTMLElement | null {
@@ -149,6 +157,12 @@ const FOCUS_TARGETS = [
 
 /** Moves DOM focus into a region: its terminal, its composer or field, its page, or its first control. */
 function focusInside(container: HTMLElement): boolean {
+  // A region can name where arriving focus lands (an approval column: its own pager, not its reply box).
+  const entry = Array.from(container.querySelectorAll<HTMLElement>('[data-focus-entry]')).find(isShown);
+  if (entry) {
+    entry.focus({ preventScroll: true });
+    if (document.activeElement === entry) return true;
+  }
   const scope = container.querySelector<HTMLElement>('[role="tabpanel"]:not([aria-hidden="true"])') ?? container;
   for (const selector of FOCUS_TARGETS) {
     const target = Array.from(scope.querySelectorAll<HTMLElement>(selector)).find(isShown);
@@ -243,6 +257,43 @@ export function focusActiveTabSoon(): void {
     const group = queryShown('[data-focus-region="main"] [data-panel-group-id][data-group-focused="true"]')[0];
     if (group) focusInside(group);
   }));
+}
+
+// --- A Session's approval column and the window's keys (D-336) ---
+
+/** The approval column within `scope` that holds keyboard focus, if any. */
+export function focusedApprovalColumn(scope: Element | null): HTMLElement | null {
+  const column = document.activeElement?.closest<HTMLElement>('[data-focus-region="approvals"]') ?? null;
+  return column && scope?.contains(column) ? column : null;
+}
+
+function approvalColumnTabs(column: HTMLElement): HTMLElement[] {
+  return Array.from(column.querySelectorAll<HTMLElement>('[role="tab"][data-approval-tab]')).filter(isShown);
+}
+
+export function approvalColumnTabCount(column: HTMLElement): number {
+  return approvalColumnTabs(column).length;
+}
+
+/**
+ * The tab keys (next, previous, a number) show another of the column's tabs:
+ * Questions & answers, Summary, the references, the origin chat. Focus stays
+ * in the column; if it was in the tab that went away, it lands on the column.
+ */
+export function showApprovalColumnTab(column: HTMLElement, pick: (current: number, count: number) => number): void {
+  const tabs = approvalColumnTabs(column);
+  const next = tabs[pick(tabs.findIndex(tab => tab.getAttribute('aria-selected') === 'true'), tabs.length)];
+  if (!next) return;
+  next.click();
+  requestAnimationFrame(() => {
+    if (column.isConnected && !column.contains(document.activeElement)) focusInside(column);
+  });
+}
+
+/** Esc in a Session's approval column: back to the chat it sits beside. */
+export function leaveApprovalColumn(): void {
+  releaseCursorHold?.();
+  focusMainArea();
 }
 
 // --- Maximize and minimize (P4) ---
@@ -508,6 +559,8 @@ export function handleEnterToChat(event: KeyboardEvent): void {
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
   const target = event.target instanceof HTMLElement && event.target !== document.body ? event.target : null;
   if (target && (target.closest(OWNS_ENTER) || target.closest(OVERLAY))) return;
+  // Focus in Approvals (the view, or a Session's approval column) stays there.
+  if (regionOf(target) === 'approvals') return;
   if (queryShown('[aria-modal="true"]').length > 0) return;
   const box = chatComposerOnScreen();
   if (!box) return;
