@@ -27,7 +27,8 @@ Autopilot" with your Override or Reopen.
 
 ## Turning it on
 
-Settings › Advanced › Experimental › **Autopilot**. It needs **Chat tabs** on,
+Settings › Advanced › Experimental › **Autopilot**. It needs **Chat tabs** on
+(Settings › AI & Agents),
 because its agent is a chat tab on your own installed `claude` and its
 sign-in: with Chat tabs off, the switch can't be turned on (it can still be
 turned off). Turning it on adds an **Autopilot** row to the sidebar's top

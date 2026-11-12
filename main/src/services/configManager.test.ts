@@ -47,6 +47,24 @@ describe('ConfigManager appearance persistence', () => {
     expect(relaunched.getConfig().keymapNotice).toBe('seen');
   });
 
+  it('turns chat tabs on for a fresh install, and leaves an existing config as it was (D-329)', async () => {
+    const fresh = new ConfigManager();
+    await fresh.initialize();
+    expect(fresh.getConfig().chatTabsEnabled).toBe(true);
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).chatTabsEnabled).toBe(true);
+
+    // A config saved before the key existed had chat tabs off, and stays off.
+    await fs.writeFile(configPath, JSON.stringify({ theme: 'folio' }));
+    const existing = new ConfigManager();
+    await existing.initialize();
+    expect(existing.getConfig().chatTabsEnabled).toBe(false);
+
+    await fs.writeFile(configPath, JSON.stringify({ theme: 'folio', chatTabsEnabled: true }));
+    const optedIn = new ConfigManager();
+    await optedIn.initialize();
+    expect(optedIn.getConfig().chatTabsEnabled).toBe(true);
+  });
+
   it('keeps keyboard overrides, drops an empty map, and keeps unknown ids for a downgrade', async () => {
     const manager = new ConfigManager();
     await manager.initialize();

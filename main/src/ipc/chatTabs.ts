@@ -128,7 +128,7 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     if (teammate) throw teammateSecretRefusal(teammate, 'change a chat tab key');
     const decoded = decodeBoundary(key, boundary.nullable(boundary.string));
     // Removing a key always works; saving one needs chat tabs on, like opening a tab.
-    if (decoded !== null && !chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine, so the key was not saved.', 'Turn on Chat tabs in Settings > Advanced > Experimental, then save the key.');
+    if (decoded !== null && !chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine, so the key was not saved.', 'Turn on Chat tabs in Settings > AI & Agents, then save the key.');
     chatTabSecrets.set(decodeBoundary(agent, agentSchema), decoded);
     return chatTabSecrets.status();
   });
@@ -137,7 +137,7 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
 
 /** `openedBy` is set only by runpane (`--source`), never from a renderer's request. */
 export async function createChatTab(services: AppServices, request: ChatTabCreate, openedBy?: PanelOpener): Promise<{ panelId: string }> {
-  if (!chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine. No tab was created.', 'Turn on Chat tabs in Settings > Advanced > Experimental, or open a terminal agent tab.');
+  if (!chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine. No tab was created.', 'Turn on Chat tabs in Settings > AI & Agents, or open a terminal agent tab.');
   const session = services.sessionManager.getSession(request.sessionId);
   if (!session?.worktreePath) throw new PaneError('CHAT_PANE_MISSING', 'That Pane was not found, so no chat tab was created.', 'Open the Pane first, then add the tab.');
   const launch = request.launch ?? { kind: 'agent' as const };

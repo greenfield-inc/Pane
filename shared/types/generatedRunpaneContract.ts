@@ -20045,7 +20045,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--chat",
             "required": false,
-            "description": "Open --agent claude or codex as a chat tab (ACP, no terminal) instead of a terminal tab. Needs chat tabs on in Settings > Advanced."
+            "description": "Open --agent claude or codex as a chat tab (ACP, no terminal) instead of a terminal tab. Needs chat tabs on in Settings > AI & Agents."
           },
           {
             "name": "--agent-farm",

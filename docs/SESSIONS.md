@@ -15,7 +15,7 @@ agent; a name you type or set later is kept. Each new Session opens as one Pane
 Chat and can be renamed later from the optional read-only overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
-With [chat tabs](CHAT_TABS.md) on (Settings → Advanced → Chat tabs), a new Claude
+With [chat tabs](CHAT_TABS.md) on (Settings → AI & Agents → Chat tabs), a new Claude
 or Codex Session runs its orchestrator in a chat tab instead of a terminal, from
 the plain agent or the Session's `agent-farm run <profile>` launch, and sends its
 opening prompt once. Like every chat, finished turns fold to one row. A worker

@@ -765,7 +765,7 @@ export class AutopilotManager extends EventEmitter {
 
   private requireChatTabs(action: string): void {
     if (this.ports.config.chatTabsEnabled()) return;
-    throw new PaneError('AUTOPILOT_NEEDS_CHAT_TABS', `Autopilot runs as a chat tab, and chat tabs are off. ${action} was not done.`, 'Turn on Chat tabs in Settings › Advanced › Experimental, then try again.');
+    throw new PaneError('AUTOPILOT_NEEDS_CHAT_TABS', `Autopilot runs as a chat tab, and chat tabs are off. ${action} was not done.`, 'Turn on Chat tabs in Settings › AI & Agents, then try again.');
   }
 
   private requireRun(): AutopilotRunInfo {

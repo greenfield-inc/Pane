@@ -80,7 +80,7 @@ function WalkBar({ snapshot }: { snapshot: AutopilotSnapshot }) {
 /** Before Start (D-57): opening Autopilot never starts an agent turn. */
 function StartCard({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: boolean }) {
   const blocked = !snapshot.entitlement.entitled ? `${snapshot.entitlement.reason ?? ''} ${snapshot.entitlement.next ?? ''}`.trim()
-    : !snapshot.chatTabsEnabled ? 'Autopilot runs as a chat tab: turn on Chat tabs in Settings › Advanced › Experimental.' : null;
+    : !snapshot.chatTabsEnabled ? 'Autopilot runs as a chat tab: turn on Chat tabs in Settings › AI & Agents.' : null;
   // With history in the chat (a stopped run), a slim bar, so the earlier conversation stays in view.
   if (snapshot.stack.entries.length > 0) {
     return (
