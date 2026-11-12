@@ -118,6 +118,8 @@ export class ConfigManager extends EventEmitter {
   private diskCheckTimer: ReturnType<typeof setTimeout> | null = null;
   /** Keys changed in memory while config.json did not parse; saved once it does. */
   private pendingKeys = new Set<ConfigKey>();
+  /** Pane's copy before the first change held back while config.json did not parse. */
+  private heldBase: AppConfig | null = null;
 
   constructor(defaultGitPath?: string) {
     super();
@@ -529,43 +531,56 @@ export class ConfigManager extends EventEmitter {
   async updateConfigWith(update: (current: AppConfig) => Partial<AppConfig>): Promise<AppConfig> {
     return this.enqueueConfigWrite(async () => {
       const known = this.config;
-      for (let attempt = 0; ; attempt++) {
-        const disk = await this.readConfigFile();
-        if (disk.kind === 'ok' && (!this.hasReadConfigFile || disk.text !== this.lastConfigJson)) {
-          if (!this.tryLoadConfigText(disk.text)) return this.holdUpdate(known, update(this.config));
+      let reloaded = false;
+      try {
+        for (let attempt = 0; ; attempt++) {
+          const disk = await this.readConfigFile();
+          if (disk.kind === 'ok' && (!this.hasReadConfigFile || disk.text !== this.lastConfigJson)) {
+            if (!this.tryLoadConfigText(disk.text)) return this.holdUpdate(known, update(this.config));
+            reloaded = true;
+          }
+          if (disk.kind === 'invalid') {
+            this.logInvalidConfig(disk.reason);
+            return this.holdUpdate(known, update(this.config));
+          }
+          // Held changes apply against the copy they changed, so a fixed file still holding the old value doesn't undo them.
+          const current = this.heldBase ? this.applyUpdates(this.heldBase, this.config, this.pendingUpdates(known)) : this.config;
+          const updates = update(current);
+          const next = this.applyUpdates(known, current, updates);
+          const result = await this.commitConfig(next, disk);
+          if (result === 'conflict' && attempt < MAX_COMMIT_ATTEMPTS) continue;
+          if (result === 'conflict') {
+            throw new Error(`[ConfigManager] ${this.configPath} kept changing while Pane saved; nothing was written`);
+          }
+          this.pendingKeys.clear();
+          this.heldBase = null;
+          this.config = next;
+          if ('additionalPaths' in updates) {
+            clearShellPathCache();
+            console.log('[ConfigManager] Additional paths updated, cleared PATH cache');
+          }
+          this.emit('config-updated', this.config);
+          return this.getConfig();
         }
-        if (disk.kind === 'invalid') {
-          this.logInvalidConfig(disk.reason);
-          return this.holdUpdate(known, update(this.config));
-        }
-        const current = this.config;
-        const updates = update(current);
-        const next = this.applyUpdates(known, current, { ...this.pendingUpdates(known), ...updates });
-        const result = await this.commitConfig(next, disk);
-        if (result === 'conflict' && attempt < MAX_COMMIT_ATTEMPTS) continue;
-        if (result === 'conflict') {
-          throw new Error(`[ConfigManager] ${this.configPath} kept changing while Pane saved; nothing was written`);
-        }
-        this.pendingKeys.clear();
-        this.config = next;
-        if ('additionalPaths' in updates) {
-          clearShellPathCache();
-          console.log('[ConfigManager] Additional paths updated, cleared PATH cache');
-        }
-        this.emit('config-updated', this.config);
-        return this.getConfig();
+      } catch (error) {
+        // The save failed, but an outside edit it loaded is already Pane's copy: say so.
+        if (reloaded) this.emit('config-updated', this.config);
+        throw error;
       }
     });
   }
 
   /** The file does not parse: apply the change in memory only, and save it once the file is fixed. */
   private holdUpdate(known: AppConfig, updates: Partial<AppConfig>): AppConfig {
-    const next = this.applyUpdates(known, known, updates);
     // SAFETY: Object.keys of a Partial<AppConfig> are AppConfig keys.
-    for (const key of Object.keys(pickChanged(known, updates)) as ConfigKey[]) this.pendingKeys.add(key);
-    this.config = next;
-    this.scheduleDiskCheck(INVALID_CONFIG_RETRY_MS);
-    this.emit('config-updated', this.config);
+    const changedKeys = Object.keys(pickChanged(known, updates)) as ConfigKey[];
+    if (changedKeys.length > 0) {
+      this.heldBase ??= known;
+      for (const key of changedKeys) this.pendingKeys.add(key);
+      this.config = this.applyUpdates(known, known, updates);
+      this.emit('config-updated', this.config);
+    }
+    if (this.pendingKeys.size > 0) this.scheduleDiskCheck(INVALID_CONFIG_RETRY_MS);
     return this.getConfig();
   }
 

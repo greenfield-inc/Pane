@@ -205,4 +205,37 @@ describe('ConfigManager keeps outside edits to config.json', () => {
       expect(disk).toMatchObject({ theme: 'forge', highContrast: true, keyboardShortcutOverrides: HAND_OVERRIDES });
     }, { timeout: 3000 });
   });
+
+  it('saves a change held while the file was broken even when the fixed file still has the old value', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const before = await fs.readFile(configPath, 'utf8');
+    await fs.writeFile(configPath, '{ "theme": ');
+    await manager.updateConfig({ highContrast: true });
+
+    await fs.writeFile(configPath, JSON.stringify({ ...JSON.parse(before), highContrast: false, theme: 'forge' }));
+    await manager.updateConfig({ notifyEnabledChangedAt: 1 });
+
+    expect(await onDisk(configPath)).toMatchObject({ highContrast: true, theme: 'forge' });
+    expect(manager.getConfig().highContrast).toBe(true);
+  });
+
+  it('stays quiet while the file is broken and nothing new is held', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await fs.writeFile(configPath, '{ "theme": ');
+    await manager.updateConfig({ highContrast: true });
+    const listener = vi.fn();
+    manager.on('config-updated', listener);
+    await manager.updateConfigWith(() => ({}));
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('tells listeners about an outside edit it loaded even when its own save then fails', async () => {
+    await atomicHandEdit(configPath, c => { c.theme = 'forge'; });
+    const listener = vi.fn();
+    manager.on('config-updated', listener);
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('busy'), { code: 'EBUSY' }));
+    await expect(manager.updateConfig({ highContrast: true })).rejects.toThrow('busy');
+    rename.mockRestore();
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ theme: 'forge' }));
+  });
 });
