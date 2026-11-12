@@ -331,6 +331,14 @@ describe('the Approvals switch on a host', () => {
     expect(configManager.getConfig().notifyCardsOnChangedAt).toBe(6_000);
   });
 
+  it('settles a "Show cards on" tie on the smaller id and keeps the shared time, so hosts converge', async () => {
+    const { readSwitch, applySwitch } = await switchOf({ notify: { cardsOn: { id: 'b-book', name: 'book' } }, notifyCardsOnChangedAt: 4_000 });
+
+    await applySwitch({ enabled: true, changedAt: 0, cardsOn: { id: 'a-mini', name: 'mini' }, cardsOnChangedAt: 4_000 });
+
+    expect(await readSwitch()).toMatchObject({ cardsOn: { id: 'a-mini', name: 'mini' }, cardsOnChangedAt: 4_000 });
+  });
+
   it('does not treat loading a saved value at startup as a change', async () => {
     const { readSwitch, configManager } = await switchOf({ notify: { enabled: false } });
 

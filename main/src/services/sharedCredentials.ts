@@ -170,11 +170,12 @@ export async function applyNotifySwitch(configManager: ConfigManager, incoming: 
       notify.enabled = merged.enabled;
       patch.notifyEnabledChangedAt = merged.changedAt;
     }
-    if (merged.cardsOnChangedAt !== current.cardsOnChangedAt) {
+    // A pick that wins at an equal time (the smaller id) is written too, so every host settles on it.
+    if (merged.cardsOnChangedAt !== current.cardsOnChangedAt || merged.cardsOn?.id !== current.cardsOn?.id) {
       notify.cardsOn = merged.cardsOn ?? null;
       patch.notifyCardsOnChangedAt = merged.cardsOnChangedAt;
     }
-    changed = Object.keys(patch).length > 1;
+    changed = Object.keys(notify).length > 0;
     return changed ? patch : {};
   });
   return { notifySwitch: readNotifySwitch(configManager.getConfig()), changed };

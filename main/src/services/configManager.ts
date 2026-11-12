@@ -651,10 +651,10 @@ export class ConfigManager extends EventEmitter {
     }
     next.sharedCredentials = restampSharedCredentials(next, 'now') ?? next.sharedCredentials;
     // A value from another machine arrives with that machine's time; anything else is the person, here.
-    if (updates.notifyEnabledChangedAt === undefined) {
+    if (!('notifyEnabledChangedAt' in rawUpdates)) {
       next.notifyEnabledChangedAt = restampNotifySwitch(current, next) ?? next.notifyEnabledChangedAt;
     }
-    if (updates.notifyCardsOnChangedAt === undefined) {
+    if (!('notifyCardsOnChangedAt' in rawUpdates)) {
       next.notifyCardsOnChangedAt = restampCardsOn(current, next) ?? next.notifyCardsOnChangedAt;
     }
     this.validateAppearanceUpdate(updates);
