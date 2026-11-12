@@ -36,7 +36,7 @@ describe('Switch to chat in a Session menu, always shown (D-337)', () => {
   });
 
   it('shows a spinner and Checking… while the preview loads, without opening anything', () => {
-    const html = renderToStaticMarkup(<SessionSwitchMenuItem menu={{ state: 'checking' }} onOpen={() => undefined} />);
+    const html = renderToStaticMarkup(<SessionSwitchMenuItem menu={{ state: 'checking' }} onOpen={() => undefined} onClose={() => undefined} />);
     expect(html).toContain('aria-disabled="true"');
     expect(html).toContain('aria-busy="true"');
     expect(html).toContain('animate-spin');
@@ -44,19 +44,19 @@ describe('Switch to chat in a Session menu, always shown (D-337)', () => {
   });
 
   it('offers the dialog when ready', () => {
-    const html = renderToStaticMarkup(<SessionSwitchMenuItem menu={{ state: 'ready', preview: preview(tab('a')) }} onOpen={() => undefined} />);
+    const html = renderToStaticMarkup(<SessionSwitchMenuItem menu={{ state: 'ready', preview: preview(tab('a')) }} onOpen={() => undefined} onClose={() => undefined} />);
     expect(html).toContain('aria-disabled="false"');
     expect(text(html)).toBe('Switch to chat…');
   });
 
   it('is disabled with its reason when nothing can switch', () => {
-    const html = renderToStaticMarkup(<SessionSwitchMenuItem menu={{ state: 'unavailable', reason: 'Nothing to switch: 2 busy' }} onOpen={() => undefined} />);
+    const html = renderToStaticMarkup(<SessionSwitchMenuItem menu={{ state: 'unavailable', reason: 'Nothing to switch: 2 busy' }} onOpen={() => undefined} onClose={() => undefined} />);
     expect(html).toContain('aria-disabled="true"');
     expect(text(html)).toBe('Switch to chat…Nothing to switch: 2 busy');
   });
 
   it('adds Turn on chat tabs when they are off on this window\'s host', () => {
-    const html = renderToStaticMarkup(<SessionSwitchMenuItem menu={{ state: 'unavailable', reason: 'Chat tabs are off on this machine', turnOn: true }} onOpen={() => undefined} />);
+    const html = renderToStaticMarkup(<SessionSwitchMenuItem menu={{ state: 'unavailable', reason: 'Chat tabs are off on this machine', turnOn: true }} onOpen={() => undefined} onClose={() => undefined} />);
     expect(text(html)).toBe('Switch to chat…Chat tabs are off on this machineTurn on chat tabs');
   });
 });

@@ -82,7 +82,9 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
   const act = (run: () => Promise<void>) => { onClose(); void run(); };
   const permission = pane?.permission ?? null;
   // A Session's own machine says whether any of its terminal agent tabs can switch to chat, and if not, why.
-  const switchMenu = useSessionSwitchPreview({ kind: 'machine', machineId }, session?.session.id ?? null, menu?.machine.name || 'that machine');
+  // The machine the app is on is this window's host, read and turned on like the Sessions sidebar does.
+  const onThisMachine = useAllMachinesStore(state => state.entries.find(entry => entry.active)?.id === machineId);
+  const switchMenu = useSessionSwitchPreview(onThisMachine ? { kind: 'here' } : { kind: 'machine', machineId }, session?.session.id ?? null, onThisMachine ? 'this machine' : menu?.machine.name || 'that machine');
   const [switching, setSwitching] = useState<{ machineId: string; sessionName: string; preview: SessionChatSwitchPreview } | null>(null);
   return (<>
     <TerminalPopover visible={menu !== null} x={menu?.x ?? 0} y={menu?.y ?? 0} onClose={onClose}>
@@ -108,7 +110,7 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename {noun}…</span>
         </PopoverButton>
         {session && (
-          <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview }); onClose(); }} />
+          <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview }); onClose(); }} onClose={onClose} />
         )}
         <div className="my-1 border-t border-border-primary" />
         <PopoverButton role="menuitem" variant="danger" onClick={() => act(() => runOnMachine(machineId, { type: 'archive', target: ref }, `Could not archive the ${noun}`))}>

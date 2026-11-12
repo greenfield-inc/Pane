@@ -16,7 +16,7 @@ export function switchToChatMenuItems(panel: ToolPanel, chatTabsEnabled: boolean
   if (chatTabsEnabled) return [{ ...item, onClick: onOpen }];
   return [
     { ...item, disabled: true, description: 'Chat tabs are off on this machine' },
-    // Stays open: Switch to chat is offered as soon as the setting saves.
-    { id: 'turn-on-chat-tabs', label: 'Turn on chat tabs', icon: ToggleRight, closeOnSelect: false, onClick: () => void turnOnChatTabsHere() },
+    // Closes the menu: left open, it would shrink and slide Close tab under the pointer.
+    { id: 'turn-on-chat-tabs', label: 'Turn on chat tabs', icon: ToggleRight, onClick: () => void turnOnChatTabsHere() },
   ];
 }

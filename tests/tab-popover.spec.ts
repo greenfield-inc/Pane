@@ -241,7 +241,10 @@ test('a terminal agent tab shows Switch to chat with chat tabs off, disabled, an
   await page.getByRole('menu').evaluate(menu => Promise.all(menu.getAnimations({ subtree: true }).map(animation => animation.finished)));
   await page.screenshot({ path: testInfo.outputPath('tab-switch-to-chat-off.png') });
 
+  // Turn on closes the menu, so nothing slides under the pointer; reopened, the item is enabled.
   await page.getByRole('menuitem', { name: 'Turn on chat tabs' }).click();
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Claude' }).click({ button: 'right' });
   await expect(item).toBeEnabled();
   await expect(page.getByRole('menuitem', { name: 'Turn on chat tabs' })).toHaveCount(0);
 });

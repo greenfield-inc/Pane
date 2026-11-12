@@ -29,7 +29,8 @@ export function useSessionSwitchPreview(where: SessionSwitchWhere, sessionId: st
         console.warn('[SwitchToChat] Could not read what the Session would switch:', error);
         if (current) setRead({ key, menu: { state: 'unavailable', reason: `Couldn't check this Session's tabs: ${ipcErrorMessage(error, 'no answer')}` } });
       });
-    return () => { current = false; };
+    // Forgets this read when the menu closes, so reopening it checks again rather than showing an old answer.
+    return () => { current = false; setRead(null); };
   }, [chatTabsHere, key, machineId, machineName, sessionId]);
   if (machineId === null && !chatTabsHere) return { state: 'unavailable', reason: `Chat tabs are off on ${machineName}`, turnOn: true };
   return read?.key === key ? read.menu : { state: 'checking' };
@@ -39,7 +40,7 @@ export function useSessionSwitchPreview(where: SessionSwitchWhere, sessionId: st
  * Switch to chat in a Session's menu, always shown: a spinner while its machine checks, the
  * dialog when some tab can switch, or disabled with why not (and Turn on when chat tabs are off here).
  */
-export function SessionSwitchMenuItem({ menu, onOpen }: { menu: SessionSwitchMenuState; onOpen: (preview: SessionChatSwitchPreview) => void }) {
+export function SessionSwitchMenuItem({ menu, onOpen, onClose }: { menu: SessionSwitchMenuState; onOpen: (preview: SessionChatSwitchPreview) => void; onClose: () => void }) {
   const unavailable = menu.state !== 'ready';
   const note = menu.state === 'checking' ? 'Checking…' : menu.state === 'unavailable' ? menu.reason : null;
   return (<>
@@ -61,11 +62,8 @@ export function SessionSwitchMenuItem({ menu, onOpen }: { menu: SessionSwitchMen
       {note && <span className="mt-0.5 block whitespace-normal pl-6 text-[11px] leading-tight text-text-tertiary">{note}</span>}
     </PopoverButton>
     {menu.state === 'unavailable' && menu.turnOn && (
-      // Stays open: the item then checks the Session and offers the switch. Focus moves to it, since this one goes.
-      <PopoverButton role="menuitem" onClick={event => {
-        if (event.currentTarget.previousElementSibling instanceof HTMLElement) event.currentTarget.previousElementSibling.focus();
-        void turnOnChatTabsHere();
-      }}>
+      // Closes the menu: left open, it would shrink and slide Archive under the pointer. Reopened, it checks the Session.
+      <PopoverButton role="menuitem" onClick={() => { onClose(); void turnOnChatTabsHere(); }}>
         <span className="flex items-center gap-2"><ToggleRight className="h-4 w-4" />Turn on chat tabs</span>
       </PopoverButton>
     )}

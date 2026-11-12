@@ -376,6 +376,16 @@ test('a Session on a machine with chat tabs off names that machine (D-337)', asy
   await expect(page.getByRole('menuitem', { name: 'Turn on chat tabs' })).toHaveCount(0);
 });
 
+test('a Session on the machine the app is on reads like the Sessions sidebar: this machine, with Turn on (D-337)', async ({ page }, testInfo) => {
+  await openAllMachines(page, 'light', { extra: { initialConfig: { appearanceMode: 'system', chatTabsEnabled: false } } });
+  await sessionRows(page).filter({ hasText: 'Spring sale launch' }).click({ button: 'right' });
+  await expect(page.getByTestId('session-switch-to-chat')).toHaveText('Switch to chat…Chat tabs are off on this machine');
+  await expect(page.getByRole('menuitem', { name: 'Turn on chat tabs' })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('all-machines-this-machine-off.png') });
+  // Read here, as the Sessions sidebar does, not sent to a machine.
+  expect(await (await mock(page)).evaluate(api => api.getMachineRuns().map(run => run.command.type))).toEqual([]);
+});
+
 test('allowing a permission from the row menu shows what the agent will run on that machine first', async ({ page }, testInfo) => {
   await openAllMachines(page);
   const request = { id: 'req-1', sessionId: 'a1', toolName: 'Bash', input: { command: 'rm -rf /srv/releases' }, timestamp: 1 };

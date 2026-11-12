@@ -58,7 +58,9 @@ list (busy then, or opened since) is left as it is. The item is always in the
 Session menu (D-337): it shows a spinner and "Checking…" while the Session's
 machine looks, then greys out with why when nothing can switch ("Nothing to
 switch: 2 busy, 1 plain Codex", or "Chat tabs are off on build-box"). When chat
-tabs are off on this window's own host, **Turn on chat tabs** sits below it.
+tabs are off on this window's own host, **Turn on chat tabs** sits below it;
+it turns them on and closes the menu, and the menu checks again each time it
+opens.
 
 **Which conversation opens.** Pane learns a terminal's conversation from Claude
 Code's `SessionStart` hook, which fires on start, `/resume`, `/clear` and

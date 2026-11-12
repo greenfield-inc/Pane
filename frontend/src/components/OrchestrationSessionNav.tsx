@@ -797,7 +797,7 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
           if (!menu) return;
           menu.returnFocusTo?.focus();
           setSwitching({ sessionName: menu.sessionName, preview }); onClose();
-        }} />
+        }} onClose={onClose} />
         <PopoverButton
           role="menuitem"
           // Focusable while unavailable, so arrow keys reach it and its reason is announced.

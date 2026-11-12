@@ -3721,12 +3721,12 @@ test('Switch to chat is always in the Session menu: checking, then why nothing s
   await expect(item).toHaveAttribute('aria-disabled', 'true');
   await page.screenshot({ path: testInfo.outputPath('switch-menu-chat-tabs-off.png') });
 
-  // Turn on keeps the menu open, which then checks the Session; by keyboard, focus lands on Switch to chat.
-  await menu.getByRole('menuitem', { name: 'Turn on chat tabs' }).focus();
-  await page.keyboard.press('Enter');
+  // Turn on closes the menu, so Archive never slides under the pointer; reopened, it checks the Session.
+  await menu.getByRole('menuitem', { name: 'Turn on chat tabs' }).click();
+  await expect(menu).toHaveCount(0);
+  await row.click({ button: 'right' });
   await expect(item).toHaveText('Switch to chat…Checking…');
   await expect(item).toHaveAttribute('aria-busy', 'true');
-  await expect(item).toBeFocused();
   await page.screenshot({ path: testInfo.outputPath('switch-menu-checking.png') });
 
   // SAFETY: the init script above defines it.
@@ -3738,6 +3738,11 @@ test('Switch to chat is always in the Session menu: checking, then why nothing s
   await item.click({ force: true });
   await expect(page.getByRole('dialog', { name: 'Switch Session to chat' })).toHaveCount(0);
   await expect(menu).toBeVisible();
+
+  // Reopened, it checks again rather than showing the last answer.
+  await page.keyboard.press('Escape');
+  await row.click({ button: 'right' });
+  await expect(item).toHaveText('Switch to chat…Checking…');
 });
 
 /** Q-20 and one more, waiting from the Plan demo Session (the approval card, P4). */
