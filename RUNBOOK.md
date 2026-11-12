@@ -95,6 +95,13 @@ build-windows (x64,  ──┘                        ├─ publish-npm   ┐
 Windows installers, and publishes the draft release. `publish-npm` and `publish-pypi` each need both `publish` and
 `validate-runpane-packages`.
 
+`publish-release` (`scripts/publish-github-release.sh`) fills an empty draft's
+notes from GitHub's generated notes and keeps a hand-written body. Either way it
+appends a Download section with one link per installer on that tag, through
+`runpane.com/api/download?file=…&v=<tag>&source=gh-release`, so GitHub downloads
+are counted like the website's and still land on the exact file. A body that
+already has the section (`<!-- pane-download-links -->`) is left alone.
+
 ### Verify
 
 ```bash
