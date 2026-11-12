@@ -1618,8 +1618,15 @@ export class NotifyQueue extends EventEmitter {
     return new Promise((resolve) => {
       let returnTimer: Timer | undefined;
       const onAbort = () => {
+        if (entry.waiter !== waiter) return;
+        // A worker's question doesn't belong to the call relaying it: the worker still waits for
+        // its answer in its tab, so an orchestrator's ended --relays call only lets go of it.
+        if (entry.item.originKind === 'worker') {
+          waiter.detach();
+          return;
+        }
         // Pane stopping its server ends every call; that isn't the asker leaving (J6).
-        if (entry.waiter === waiter && !this.quitting) this.expire(entry.item.id);
+        if (!this.quitting) this.expire(entry.item.id);
       };
       const waiter: Waiter = {
         resolve: (result) => {
@@ -1642,7 +1649,8 @@ export class NotifyQueue extends EventEmitter {
         // Each round has its own 15 minutes: an updated version counts from when it was posted.
         const remaining = (entry.item.revision?.at ?? entry.item.createdAt) + NOTIFY_RESUME_CAP_MS - Date.now();
         returnTimer = setTimeout(() => {
-          if (remaining <= returnAfterMs) {
+          const worker = entry.item.originKind === 'worker';
+          if (remaining <= returnAfterMs && !worker) {
             // An answer in its Undo hold reaches this call when the hold ends.
             if (entry.item.state === 'sent') return;
             this.expire(entry.item.id, unavailable('Nobody answered within 15 minutes.'));
@@ -1654,7 +1662,8 @@ export class NotifyQueue extends EventEmitter {
             id: entry.item.id,
             next: `Call \`runpane notify --resume ${entry.item.id}\` now to keep waiting for the answer.`,
           });
-          entry.graceTimer = setTimeout(() => this.expire(entry.item.id), NOTIFY_RESUME_GRACE_MS);
+          // A relayed worker question keeps waiting for its worker even if the relay never resumes.
+          if (!worker) entry.graceTimer = setTimeout(() => this.expire(entry.item.id), NOTIFY_RESUME_GRACE_MS);
         }, Math.min(returnAfterMs, Math.max(remaining, 0)));
       }
     });

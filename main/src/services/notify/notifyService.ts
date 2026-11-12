@@ -795,5 +795,9 @@ function besideStatusFile(statusFile: string, page: string): string {
     if (parent === folder) break;
     folder = parent;
   }
-  return path.resolve(path.dirname(statusFile), page);
+  // Found nowhere: name it where the worker most likely meant. "tmp/x.html" beside a status file in
+  // tmp/ was written from the folder above, so the message names that path.
+  const folderName = path.basename(path.dirname(statusFile));
+  const first = page.split(/[\\/]/u)[0];
+  return path.resolve(first === folderName ? path.dirname(path.dirname(statusFile)) : path.dirname(statusFile), page);
 }

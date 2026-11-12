@@ -195,6 +195,18 @@ describe('NotifyQueue with its store', () => {
     expect(item(queue, 'in-1')?.decision).toBe('D-147');
   });
 
+  it("a relay call that ends lets go of the worker's card, which keeps waiting and still answers the worker", async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-39: run?', source: worker, at: Date.now() });
+    const controller = new AbortController();
+    void queue.ask({ relays: 'in-1', question: { ui: 'options', title: 'Q-39: run the script?', choices: [{ label: 'Run', recommended: true }, { label: 'Stop' }] }, source: orchestrator }, controller.signal);
+    controller.abort();
+    expect(item(queue, 'in-1')).toMatchObject({ state: 'waiting', title: 'Q-39: run the script?' });
+    queue.run({ type: 'answer', id: 'in-1', answer: { choice: 'Run' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(typed).toEqual([['w1', 'answer: Q-39 → Run (by you)']]);
+  });
+
   it('a relay of an item already ended returns unavailable and posts nothing', async () => {
     const queue = queueWith();
     const result = await queue.ask({ relays: 'nope', question: ask('Q-1: x?'), source: orchestrator });

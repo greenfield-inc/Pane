@@ -59,6 +59,7 @@ describe("an approval's Summary page", () => {
     fs.mkdirSync(path.join(dir, 'tmp'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'tmp', 'summary.html'), '<p>Q-80</p>');
     expect(summaryFiles(path.join(dir, 'tmp', 'status.json'), 'tmp/summary.html').summaryPage).toBe(path.join(dir, 'tmp', 'summary.html'));
+    expect(summaryFiles('/w/tmp/status.json', 'tmp/missing.html').summaryPage).toBe('/w/tmp/missing.html');
     expect(summaryFiles(undefined, undefined)).toEqual({});
   });
 });
