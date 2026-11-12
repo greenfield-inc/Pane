@@ -8,14 +8,17 @@ export interface AnalyticsEnvironment {
   ci: boolean;
   /** Which CI set the env var; `none` outside CI, `other` for a bare `CI`. */
   ci_provider: string;
-  /** Docker, Podman or another container runtime (Linux only). */
+  /** Docker, Podman or another container runtime (Linux only). Toolbox,
+   * distrobox and devcontainers count too, so it alone doesn't mean automated. */
   container: boolean;
-  /** `native` on macOS and Windows; on Linux `x11`, `wayland`, `virtual` (Xvfb) or `none`. */
+  /** `native` on macOS and Windows; on Linux `x11`, `wayland`, `virtual` (Xvfb, not under Xpra or Chrome Remote Desktop) or `none`. */
   display: 'native' | 'x11' | 'wayland' | 'virtual' | 'none';
-  wsl: boolean;
+  /** Linux under WSL. Not `wsl`: onboarding_completed already sends that for a WSL repo path. */
+  in_wsl: boolean;
   packaged: boolean;
   /** Started with PANE_DIR, FOOZOL_DIR or --pane-dir. */
   custom_pane_dir: boolean;
-  /** CI, a container, or a virtual or missing display. */
+  /** CI, or a virtual or missing display. A container alone isn't: people
+   * run Pane in toolbox and devcontainers with their real display. */
   automated: boolean;
 }

@@ -111,12 +111,12 @@ analytics identity, never saving them to config:
 |---|---|
 | `ci` | a CI variable the runpane wrappers also check is set (the lists are kept equal by a test) |
 | `ci_provider` | `github_actions`, `gitlab`, `buildkite`, `circleci`, `azure_pipelines`, `jenkins`, `teamcity`, `codebuild`, `other` (bare `CI`), or `none` |
-| `container` | Linux only: `/.dockerenv`, `/run/.containerenv`, a `container` variable other than `flatpak`, or a Docker, Kubernetes, containerd, Podman or LXC cgroup |
-| `display` | `native` on macOS and Windows; on Linux `wayland`, `x11`, `virtual` (the X server is Xvfb) or `none` |
-| `wsl` | Linux under WSL (`WSL_DISTRO_NAME` or a Microsoft kernel) |
+| `container` | Linux only: `/.dockerenv`, `/run/.containerenv`, a `container` variable other than `flatpak`, or a Docker, Kubernetes, containerd, Podman or LXC cgroup. Toolbox, distrobox and devcontainers count too |
+| `display` | `native` on macOS and Windows; on Linux `wayland`, `x11`, `virtual` (the X server is Xvfb, except under Xpra or Chrome Remote Desktop, which people use) or `none` |
+| `in_wsl` | Linux under WSL (`WSL_DISTRO_NAME` or a Microsoft kernel). Not `wsl`: `onboarding_completed` already sends `wsl` for a WSL repository path |
 | `packaged` | a packaged build |
 | `custom_pane_dir` | started with `PANE_DIR`, `FOOZOL_DIR` or `--pane-dir` |
-| `automated` | `ci`, `container`, or a `virtual` or `none` display |
+| `automated` | `ci`, or a `virtual` or `none` display. A container alone isn't automated: people run Pane in toolbox or a devcontainer with their real display, and a CI container is caught by `ci` or its display |
 
 They carry no paths, hostnames or environment values. Older app versions send
 none of them, so treat a missing tag as unknown, not as a person. A Linux

@@ -16,7 +16,7 @@ function probe(overrides: Partial<EnvironmentProbe> & { files?: Record<string, s
   };
 }
 
-const person = { ci: false, ci_provider: 'none', container: false, wsl: false, packaged: true, custom_pane_dir: false, automated: false };
+const person = { ci: false, ci_provider: 'none', container: false, in_wsl: false, packaged: true, custom_pane_dir: false, automated: false };
 
 describe('detectAnalyticsEnvironment', () => {
   it.each(['darwin', 'win32'] as const)('tags a person on %s as not automated', (platform) => {
@@ -54,12 +54,24 @@ describe('detectAnalyticsEnvironment', () => {
   it.each([
     ['/run/.containerenv (Podman)', { env: {}, files: { '/run/.containerenv': '' } }],
     ['the container env var', { env: { container: 'podman' }, files: {} }],
+    ['toolbox (container=oci)', { env: { container: 'oci' }, files: { '/run/.containerenv': '' } }],
     ['a Docker cgroup', { env: {}, files: { '/proc/1/cgroup': '0::/docker/0123abcd\n' } }],
     ['a Kubernetes cgroup', { env: {}, files: { '/proc/1/cgroup': '12:pids:/kubepods/besteffort/pod1\n' } }],
-  ])('detects a container from %s', (_name, overrides) => {
+  ])('detects a container from %s, and a person in it with a real display is not automated', (_name, overrides) => {
     const env = { WAYLAND_DISPLAY: 'wayland-0', ...overrides.env };
     const tags = detectAnalyticsEnvironment(probe({ ...overrides, env }));
-    expect(tags).toMatchObject({ container: true, automated: true });
+    expect(tags).toMatchObject({ container: true, display: 'wayland', automated: false });
+  });
+
+  it('counts a headless container as automated through its display', () => {
+    expect(detectAnalyticsEnvironment(probe({ files: { '/.dockerenv': '' } }))).toMatchObject({ container: true, display: 'none', automated: true });
+  });
+
+  it.each([
+    ['Xpra', { env: { DISPLAY: ':100' }, files: { '/tmp/.X100-lock': '       555\n', '/proc/555/comm': 'Xvfb-for-Xpra-\n' } }],
+    ['Chrome Remote Desktop', { env: { DISPLAY: ':20', CHROME_REMOTE_DESKTOP_SESSION: '1' }, files: { '/tmp/.X20-lock': '       556\n', '/proc/556/comm': 'Xvfb\n' } }],
+  ])('treats %s, a remote desktop on Xvfb, as a person', (_name, overrides) => {
+    expect(detectAnalyticsEnvironment(probe(overrides))).toMatchObject({ display: 'x11', automated: false });
   });
 
   it('does not count Flatpak or a host cgroup as a container', () => {
@@ -80,10 +92,10 @@ describe('detectAnalyticsEnvironment', () => {
 
   it('tags WSL from its env var or kernel release, with WSLg as a person', () => {
     expect(detectAnalyticsEnvironment(probe({ env: { WSL_DISTRO_NAME: 'Ubuntu', WAYLAND_DISPLAY: 'wayland-0' } })))
-      .toEqual({ ...person, wsl: true, display: 'wayland' });
+      .toEqual({ ...person, in_wsl: true, display: 'wayland' });
     expect(detectAnalyticsEnvironment(probe({ osRelease: '6.6.87.2-microsoft-standard-WSL2', env: { WAYLAND_DISPLAY: 'wayland-0' } })))
-      .toMatchObject({ wsl: true });
-    expect(detectAnalyticsEnvironment(probe({ platform: 'win32', osRelease: '10.0.26100' }))).toMatchObject({ wsl: false });
+      .toMatchObject({ in_wsl: true });
+    expect(detectAnalyticsEnvironment(probe({ platform: 'win32', osRelease: '10.0.26100' }))).toMatchObject({ in_wsl: false });
   });
 
   it('reports a dev build and a custom data directory without counting them as automated', () => {

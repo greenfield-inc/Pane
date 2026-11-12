@@ -5,7 +5,7 @@ import type { AnalyticsEnvironment } from '../../../shared/types/analyticsEnviro
 
 const environment: AnalyticsEnvironment = {
   ci: true, ci_provider: 'github_actions', container: true, display: 'virtual',
-  wsl: false, packaged: true, custom_pane_dir: false, automated: true,
+  in_wsl: false, packaged: true, custom_pane_dir: false, automated: true,
 };
 
 const send = vi.fn<(url: string, options: RequestInit) => Promise<Response>>().mockResolvedValue(new Response());

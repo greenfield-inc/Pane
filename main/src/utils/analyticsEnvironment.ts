@@ -52,13 +52,19 @@ function detectContainer(probe: EnvironmentProbe): boolean {
   return CONTAINER_CGROUP.test(safeRead(probe, '/proc/1/cgroup') ?? '');
 }
 
-/** Xvfb is the X server xvfb-run starts; its lock file names its PID. */
+/**
+ * Xvfb is the X server xvfb-run starts; its lock file names its PID. Remote
+ * desktops a person uses also run on Xvfb: Xpra names its server
+ * `Xvfb-for-Xpra-…`, and Chrome Remote Desktop sets its session variable.
+ */
 function isVirtualX(probe: EnvironmentProbe, display: string): boolean {
+  if (probe.env.CHROME_REMOTE_DESKTOP_SESSION) return false;
   const local = display.match(/^(?:unix)?:(\d+)(?:\.\d+)?$/);
   if (!local) return false;
   const pid = safeRead(probe, `/tmp/.X${local[1]}-lock`)?.trim();
   if (!pid || !/^\d+$/.test(pid)) return false;
-  return /^Xvfb\b/.test(safeRead(probe, `/proc/${pid}/comm`) ?? '');
+  const server = safeRead(probe, `/proc/${pid}/comm`) ?? '';
+  return /^Xvfb\b/.test(server) && !server.startsWith('Xvfb-for-Xpra');
 }
 
 function detectDisplay(probe: EnvironmentProbe): AnalyticsEnvironment['display'] {
@@ -74,16 +80,16 @@ export function detectAnalyticsEnvironment(probe: EnvironmentProbe): AnalyticsEn
   const ciProvider = ci ? CI_PROVIDERS.find(([key]) => probe.env[key])?.[1] ?? 'other' : 'none';
   const container = detectContainer(probe);
   const display = detectDisplay(probe);
-  const wsl = probe.platform === 'linux' && (Boolean(probe.env.WSL_DISTRO_NAME) || /microsoft/i.test(probe.osRelease));
+  const inWsl = probe.platform === 'linux' && (Boolean(probe.env.WSL_DISTRO_NAME) || /microsoft/i.test(probe.osRelease));
   return {
     ci,
     ci_provider: ciProvider,
     container,
     display,
-    wsl,
+    in_wsl: inWsl,
     packaged: probe.isPackaged,
     custom_pane_dir: probe.customPaneDir,
-    automated: ci || container || display === 'virtual' || display === 'none',
+    automated: ci || display === 'virtual' || display === 'none',
   };
 }
 

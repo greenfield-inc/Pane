@@ -108,7 +108,7 @@ describe('$create_alias payloads', () => {
 describe('environment tags', () => {
   const tags = {
     ci: true, ci_provider: 'github_actions', container: true, display: 'virtual' as const,
-    wsl: false, packaged: true, custom_pane_dir: false, automated: true,
+    in_wsl: false, packaged: true, custom_pane_dir: false, automated: true,
   };
   const ciInstall: AnalyticsIdentity = {
     distinctId: 'install:install_ci', identitySource: 'anonymous', installId: 'install_ci',
