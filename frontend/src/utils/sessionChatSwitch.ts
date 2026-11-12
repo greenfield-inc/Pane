@@ -108,6 +108,6 @@ export async function turnOnChatTabsHere(): Promise<void> {
   try {
     await useConfigStore.getState().updateConfig({ chatTabsEnabled: true });
   } catch (error) {
-    useErrorStore.getState().showError({ title: 'Chat tabs are still off', error: `${ipcErrorMessage(error, 'The setting was not saved.')} Turn them on in Settings > Advanced > Experimental.` });
+    useErrorStore.getState().showError({ title: 'Chat tabs are still off', error: `${ipcErrorMessage(error, 'The setting was not saved.').replace(/[^.!?]$/, '$&.')} Turn them on in Settings > Advanced > Experimental.` });
   }
 }
