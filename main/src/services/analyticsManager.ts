@@ -5,6 +5,8 @@ import * as crypto from 'crypto';
 import * as os from 'os';
 import { failureDetails, FailureLimiter } from '../utils/failureTelemetry';
 import { isPackagedOnDefaultDirectory } from '../utils/appDirectory';
+import { analyticsEnvironment } from '../utils/analyticsEnvironment';
+import type { AnalyticsEnvironment } from '../../../shared/types/analyticsEnvironment';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 type AppExceptionSource = 'main-uncaught' | 'renderer-error' | 'renderer-rejection' | 'react-boundary' | 'renderer-crash' | 'renderer-oom' | 'shutdown';
@@ -24,6 +26,7 @@ export class AnalyticsManager extends EventEmitter {
     getVersion: () => app.getVersion(),
     getAppPath: () => app.getAppPath(),
     isInstalledApp: isPackagedOnDefaultDirectory,
+    getEnvironment: (): AnalyticsEnvironment => analyticsEnvironment(app.isPackaged),
   }) {
     super();
     this.configManager = configManager;
@@ -131,6 +134,7 @@ export class AnalyticsManager extends EventEmitter {
       await this.postCapture('app_heartbeat', `install:${installId}`, {
         app_version: this.runtime.getVersion(),
         platform: os.platform(),
+        ...this.runtime.getEnvironment(),
       });
     } catch {
       // Telemetry must not change app behaviour.
