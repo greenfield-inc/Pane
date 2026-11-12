@@ -86,8 +86,8 @@ opt-out, the only request Pane still sends is the install heartbeat.
 The main process sends `app_heartbeat` at launch and every 24 hours while Pane
 runs, whether analytics is on or off, so active installs stay countable
 (`startHeartbeat` in `main/src/services/analyticsManager.ts`). Its properties
-are exactly `distinct_id: install:<installId>`, `app_version`, `platform` and
-`$process_person_profile: false`. It creates an install ID if the install has
+are exactly `distinct_id: install:<installId>`, `app_version`, `platform`, the
+environment tags below and `$process_person_profile: false`. It creates an install ID if the install has
 none, and never sends `$set`, account or Git details. PostHog still shows it on
 an existing person already linked to that install ID, and derives location from
 the request IP.
@@ -98,6 +98,31 @@ Only the installed app sends it: a packaged build on the default data directory
 
 Settings › Privacy discloses the payload. Adding a property means changing that
 copy and this section in the same PR.
+
+## Environment Tags
+
+`app_heartbeat` and the events Pane captures itself (`capture`, direct
+captures such as `app_first_opened`, and main-process events such as
+`app_opened` forwarded through the renderer) say where Pane runs, so dashboards
+can tell people apart from automated installs. Events the PostHog SDK generates
+on its own, such as `$pageview` and `$autocapture`, don't carry them. They tag; they never drop an event. The main process detects them once
+per launch (`main/src/utils/analyticsEnvironment.ts`) and sends them on the
+analytics identity, never saving them to config:
+
+| Property | Values |
+|---|---|
+| `ci` | a CI variable the runpane wrappers also check is set (the lists are kept equal by a test) |
+| `ci_provider` | `github_actions`, `gitlab`, `buildkite`, `circleci`, `azure_pipelines`, `jenkins`, `teamcity`, `codebuild`, `other` (bare `CI`), or `none` |
+| `container` | Linux only: `/.dockerenv`, `/run/.containerenv`, a `container` variable other than `flatpak`, or a Docker, Kubernetes, containerd, Podman or LXC cgroup. Toolbox, distrobox and devcontainers count too |
+| `display` | `native` on macOS and Windows; on Linux `wayland`, `x11`, `virtual` (the X server is Xvfb, except under Xpra or Chrome Remote Desktop, which people use) or `none` |
+| `in_wsl` | Linux under WSL (`WSL_DISTRO_NAME` or a Microsoft kernel). Not `wsl`: `onboarding_completed` already sends `wsl` for a WSL repository path |
+| `packaged` | a packaged build |
+| `custom_pane_dir` | started with `PANE_DIR`, `FOOZOL_DIR` or `--pane-dir` |
+| `automated` | `ci`, or a `virtual` or `none` display. A container alone isn't automated: people run Pane in toolbox or a devcontainer with their real display, and a CI container is caught by `ci` or its display |
+
+They carry no paths, hostnames or environment values. Older app versions send
+none of them, so treat a missing tag as unknown, not as a person. A Linux
+headless daemon has no display, so it counts as automated.
 
 ## Config Saves Preserve Analytics Fields
 
@@ -279,6 +304,8 @@ or add coverage in:
 
 - `main/src/services/analyticsIdentity.test.ts`
 - `main/src/services/analyticsManager.test.ts` (error events and the heartbeat)
+- `main/src/utils/analyticsEnvironment.test.ts` (environment tags)
+- `frontend/src/services/posthog.test.ts` (aliases and environment tags on events)
 - `tests/analytics-consent.spec.ts`
 
 The Playwright test should verify both event order and payload shape, including

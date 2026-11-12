@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AnalyticsManager } from './analyticsManager';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import type { AnalyticsEnvironment } from '../../../shared/types/analyticsEnvironment';
+
+const environment: AnalyticsEnvironment = {
+  ci: true, ci_provider: 'github_actions', container: true, display: 'virtual',
+  in_wsl: false, packaged: true, custom_pane_dir: false, automated: true,
+};
 
 const send = vi.fn<(url: string, options: RequestInit) => Promise<Response>>().mockResolvedValue(new Response());
 
@@ -21,6 +27,7 @@ function setup(appPath = '/Applications/Pane.app/Contents/Resources/app.asar', i
     getVersion: () => '2.4.152',
     getAppPath: () => appPath,
     isInstalledApp: () => isInstalledApp,
+    getEnvironment: () => environment,
   }) };
 }
 
@@ -168,7 +175,7 @@ describe('install heartbeat', () => {
     return decodeBoundary(JSON.parse(options.body), boundary.jsonObject);
   }
 
-  it.each([true, false])('sends only the install ID, version and OS at start and every 24 hours (analytics on: %s)', async (enabled) => {
+  it.each([true, false])('sends only the install ID, version, OS and environment tags at start and every 24 hours (analytics on: %s)', async (enabled) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-19T12:00:00.000Z'));
     const { config, analytics } = setup();
@@ -184,6 +191,7 @@ describe('install heartbeat', () => {
         distinct_id: 'install:install_11111111-1111-4111-8111-111111111111',
         app_version: '2.4.152',
         platform: process.platform,
+        ...environment,
         $process_person_profile: false,
       },
       timestamp: '2026-10-19T12:00:00.000Z',
