@@ -98,6 +98,7 @@ export interface SetupPreferenceConfig {
   /** Changed key bindings by command id; null unassigns (shared/utils/keyboardBindings.ts). */
   keyboardShortcutOverrides?: Record<string, string | null>;
   kittyKeyboardEnabled?: boolean;
+  terminalCopyOnSelect?: boolean;
   htmlFileOpenMode?: 'preview' | 'source';
   enableCommitFooter?: boolean;
   gitAttributionEnabled?: boolean;

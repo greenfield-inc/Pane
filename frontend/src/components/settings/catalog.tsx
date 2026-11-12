@@ -49,10 +49,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'terminal',
     label: 'Terminal',
-    description: 'Terminal display, references, shell, and power behavior.',
+    description: 'Terminal display, selection, references, shell, and power behavior.',
     icon: Terminal,
-    settingIds: ['terminal-font-family', 'terminal-font-size', 'terminal-power-mode', 'terminal-reference-paste-mode', 'terminal-reference-line-count', 'terminal-shell'],
-    aliases: ['font', 'shell', 'scrollback', 'gpu', 'battery'],
+    settingIds: ['terminal-font-family', 'terminal-font-size', 'terminal-power-mode', 'terminal-copy-on-select', 'terminal-reference-paste-mode', 'terminal-reference-line-count', 'terminal-shell'],
+    aliases: ['font', 'shell', 'scrollback', 'gpu', 'battery', 'copy', 'select', 'selection', 'clipboard', 'popover'],
   },
   {
     id: 'ai-agents',

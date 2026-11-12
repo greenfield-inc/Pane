@@ -41,6 +41,7 @@ export type SettingsSettingId =
   | 'terminal-font-family'
   | 'terminal-font-size'
   | 'terminal-power-mode'
+  | 'terminal-copy-on-select'
   | 'terminal-reference-paste-mode'
   | 'terminal-reference-line-count'
   | 'terminal-shell'

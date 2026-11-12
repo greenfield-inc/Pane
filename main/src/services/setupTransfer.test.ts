@@ -365,3 +365,14 @@ describe('previewSetupImport', () => {
     ]);
   });
 });
+
+describe('terminal Copy on select', () => {
+  it('travels in Preferences', async () => {
+    const { file } = await exportSetup(sources({ config: { terminalCopyOnSelect: true } }), ['preferences'], NOW);
+    expect(file.sections.preferences).toEqual({ terminalCopyOnSelect: true });
+
+    const preview = await previewSetupImport(file, 'f.json', sources({}));
+    expect(preview.sections.find(section => section.id === 'preferences')?.apply)
+      .toEqual({ config: { terminalCopyOnSelect: true } });
+  });
+});

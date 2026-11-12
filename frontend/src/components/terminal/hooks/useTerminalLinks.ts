@@ -79,6 +79,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
   const [githubRemoteUrl, setGithubRemoteUrl] = useState<string | null>(null);
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
+  const copyOnSelect = useConfigStore((state) => state.config?.terminalCopyOnSelect === true) || isRemoteMode;
   const { onCopyError } = config;
   const suppressSelectionPopoverRef = useCommittedRef(config.suppressSelectionPopover);
   const mousePositionRef = useRef({ x: 0, y: 0 });
@@ -149,9 +150,9 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
   useEffect(() => {
     if (!terminal) return;
 
-    // Remote mode copies a finished mouse selection straight to this machine's
-    // clipboard instead of offering the selection popover.
-    if (isRemoteMode) {
+    // Copy on select (Settings › Terminal) copies a finished mouse selection instead of offering
+    // the selection popover. Remote mode always does, so it lands on this machine's clipboard.
+    if (copyOnSelect) {
       const element = terminal.element;
       if (!element) return;
       const doc = element.ownerDocument;
@@ -188,7 +189,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     return () => {
       disposable.dispose();
     };
-  }, [terminal, isRemoteMode, onCopyError, suppressSelectionPopoverRef]);
+  }, [terminal, copyOnSelect, onCopyError, suppressSelectionPopoverRef]);
 
   // Get panel store methods
   const addPanel = usePanelStore((state) => state.addPanel);
