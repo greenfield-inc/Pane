@@ -345,6 +345,59 @@ for (const scheme of ['light', 'dark'] as const) {
   });
 }
 
+for (const scheme of ['light', 'dark'] as const) {
+  test(`Move to machine… on a Session asks its agent on its own machine to hand it off (${scheme})`, async ({ page }, testInfo) => {
+    await openAllMachines(page, scheme);
+    await sessionRows(page).filter({ hasText: 'Backup rotation' }).click({ button: 'right' });
+    const item = page.getByRole('menuitem', { name: 'Move to machine…' });
+    await expect(item).toBeVisible();
+    await expect(item).not.toHaveAttribute('aria-disabled', 'true');
+    await page.screenshot({ path: testInfo.outputPath(`all-machines-session-move-menu-${scheme}.png`) });
+    await item.click();
+
+    // build-box runs the Session, so it is left out; this computer is a target because the Session lives elsewhere.
+    const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
+    await expect(dialog).toContainText('Move Backup rotation to another machine');
+    await expect(dialog.getByRole('radio')).toHaveCount(3);
+    await expect(dialog.getByRole('radio', { name: 'studio-mac' })).toBeEnabled();
+    await expect(dialog.getByRole('radio', { name: 'parsa-devbox' })).toBeEnabled();
+    await expect(dialog.getByRole('radio', { name: 'travel-laptop' })).toBeDisabled();
+    await expect(dialog.getByRole('radio', { name: 'build-box' })).toHaveCount(0);
+    await dialog.getByRole('radio', { name: 'parsa-devbox' }).check({ force: true });
+    await page.screenshot({ path: testInfo.outputPath(`all-machines-session-move-dialog-${scheme}.png`) });
+    await dialog.getByRole('button', { name: 'Move Session' }).click();
+    await expect(dialog).toHaveCount(0);
+
+    const runs = await (await mock(page)).evaluate(api => api.getMachineRuns());
+    expect(runs.filter(run => run.command.type === 'submit-to-agent')).toEqual([{ machineId: 'build', command: {
+      type: 'submit-to-agent',
+      panelId: 's1-c',
+      input: 'Hand this Session off to claude on parsa-devbox. Use the handoff skill: write the note from `runpane handoff --template`, '
+        + 'check it with `--dry-run`, then run `runpane handoff "claude on parsa-devbox" --note-file <note>` from this Session\'s folder. '
+        + 'Don\'t push anything. Tell me the Session it created.',
+    } }]);
+  });
+}
+
+test('Move to machine… is offered on a Pane\'s menu never, and on an offline machine\'s Session only disabled, with the reason', async ({ page }) => {
+  await openAllMachines(page, 'light', { extra: { machineConnections: { machines, reads: {
+    ...reads,
+    travel: lists([project(4, 'blog', [pane('t1', 'trip-notes', 4, '2026-10-30T07:00:00Z')])], [session('s9', 'Trip planning', [])]),
+  } } } });
+  await page.getByRole('button', { name: 'load-test-checkout on build-box' }).click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Rename Pane…' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Move to machine…' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  await sessionRows(page).filter({ hasText: 'Trip planning' }).click({ button: 'right' });
+  const item = page.getByRole('menuitem', { name: 'Move to machine…' });
+  await expect(item).toHaveAttribute('aria-disabled', 'true');
+  await expect(item).toHaveAttribute('title', 'travel-laptop is offline, so its Session\'s agent can\'t be asked to hand off. Use Retry on travel-laptop, then try again once it is back.');
+  await item.click({ force: true });
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toHaveCount(0);
+  expect((await (await mock(page)).evaluate(api => api.getMachineRuns())).filter(run => run.command.type === 'submit-to-agent')).toEqual([]);
+});
+
 test('a Session with nothing that can switch still shows Switch to chat, disabled with why (D-337)', async ({ page }, testInfo) => {
   await openAllMachines(page, 'light', { extra: { machineRunAnswers: { build: {
     'preview-switch-to-chat': { sessionId: 's1', items: [

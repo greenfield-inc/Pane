@@ -1,12 +1,14 @@
 import { SessionApprovalsCount } from '../approvals/ApprovalsCount';
 import { useEffect, useRef, useState } from 'react';
-import { Archive, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
+import { Archive, ArrowRightLeft, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
 import { AgentStatusDot, PausedGlyph } from '../ui/AgentStatusDot';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
 import { PermissionDialog } from '../PermissionDialog';
 import { SessionSwitchMenuItem, SessionSwitchToChatDialog, useSessionSwitchPreview } from '../SessionSwitchToChat';
+import { MoveSessionToHostDialog, type MoveSessionTarget } from '../MoveSessionToHostDialog';
+import { useMoveToHostBlockedReason } from '../../hooks/useMoveToHostBlockedReason';
 import type { SessionChatSwitchPreview } from '../../../../shared/types/chatTab';
 import { MachineMark, MachineRowMark, machineMarkTitle } from './MachineMark';
 import { Tooltip } from '../ui/Tooltip';
@@ -64,11 +66,13 @@ interface RowMenu {
   target: { kind: 'pane'; row: AllMachinesPane } | { kind: 'session'; row: AllMachinesSession };
 }
 
-/** Pin, rename, permission and archive for a row, run on the row's own machine without switching. */
-function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
+/** Pin, rename, permission, move and archive for a row, run on the row's own machine without switching. */
+function RowActionsMenu({ menu, onClose, onRename, onMove, onReviewPermission }: {
   menu: RowMenu | null;
   onClose: () => void;
   onRename: (menu: RowMenu) => void;
+  /** A Session's Move to machine…, which asks its agent on its own machine to hand it off. */
+  onMove: (target: MoveSessionTarget) => void;
   /** Allow opens the permission dialog, which shows what the agent will run. */
   onReviewPermission: (menu: RowMenu) => void;
 }) {
@@ -89,6 +93,7 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
   // Where focus was when the menu opened, so Turn on chat tabs, which only closes it, can hand focus back.
   const opener = useRef<HTMLElement | null>(null);
   useEffect(() => { if (menu) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }, [menu]);
+  const moveBlockedReason = useMoveToHostBlockedReason(menu ? { id: machineId, name: menu.machine.name } : undefined);
   return (<>
     <TerminalPopover visible={menu !== null} x={menu?.x ?? 0} y={menu?.y ?? 0} onClose={onClose}>
       <div role="menu" aria-label={`${noun} actions`}>
@@ -114,6 +119,22 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
         </PopoverButton>
         {session && (
           <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview }); onClose(); }} onClose={() => { opener.current?.focus(); onClose(); }} />
+        )}
+        {session && (
+          <PopoverButton
+            role="menuitem"
+            // Shown while unavailable, with its reason, as in the single-machine sidebar.
+            aria-disabled={moveBlockedReason !== null}
+            title={moveBlockedReason ?? undefined}
+            className={cn(moveBlockedReason && 'cursor-not-allowed opacity-50')}
+            onClick={() => {
+              if (moveBlockedReason) return;
+              onMove({ kind: 'machine', machineId, session: session.session });
+              onClose();
+            }}
+          >
+            <span className="flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" />Move to machine…</span>
+          </PopoverButton>
         )}
         <div className="my-1 border-t border-border-primary" />
         <PopoverButton role="menuitem" variant="danger" onClick={() => act(() => runOnMachine(machineId, { type: 'archive', target: ref }, `Could not archive the ${noun}`))}>
@@ -331,6 +352,7 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [renaming, setRenaming] = useState<RowMenu | null>(null);
   const [reviewing, setReviewing] = useState<RowMenu | null>(null);
+  const [moving, setMoving] = useState<MoveSessionTarget | null>(null);
 
   const isActivePane = (row: AllMachinesPane) => row.machine.id === activeMachineId && activeView === 'sessions' && row.pane.id === activeSessionId;
   const renderPane = (nested: boolean) => (row: AllMachinesPane) => (
@@ -446,7 +468,15 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
         </>
       )}
 
-      <RowActionsMenu menu={menu} onClose={() => setMenu(null)} onRename={setRenaming} onReviewPermission={setReviewing} />
+      <RowActionsMenu menu={menu} onClose={() => setMenu(null)} onRename={setRenaming} onMove={setMoving} onReviewPermission={setReviewing} />
+      <MoveSessionToHostDialog
+        target={moving}
+        onClose={() => setMoving(null)}
+        // Opens the Session on its machine, so the person can watch its agent hand it off.
+        onMoved={() => {
+          if (moving?.kind === 'machine') void openOnMachine(moving.machineId, { kind: 'session', id: moving.session.id, name: moving.session.name });
+        }}
+      />
       {review && (
         <PermissionDialog
           request={review.request}

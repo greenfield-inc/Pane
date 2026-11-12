@@ -16,7 +16,7 @@ build of the Remote PWA, and over-the-air updates for the phone app.
 | Remote PWA preview | `Deploy Remote PWA Preview` (`deploy-remote-pwa-preview.yml`) | push to `main` or `nightly` | Builds `frontend`, pushes an image to Google Artifact Registry, and deploys it to Cloud Run |
 | Phone app updates | `Native OTA Updates` (`native-updates.yml`) | push to `main` touching `native/`, `shared/`, `pnpm-lock.yaml` or `deploy/native-updates/`; manual on `main` | Exports the phone app's JavaScript, writes one update manifest per platform, and deploys it to the Cloud Run service `pane-native-updates`. On pull requests it builds and smoke-tests the image without deploying |
 | Native runtime check | `Native Runtime` (`native-runtime.yml`) | pull requests that touch `native/` or `pnpm-lock.yaml` | Fails when the phone app's native code changed without a `runtimeVersion` bump, and labels bumped PRs `native-change` |
-| Android build check | `Native Android Build` (`native-android.yml`) | push to `main` touching `native/` or `pnpm-lock.yaml`; pull requests whose Expo Android fingerprint changed, or that change the workflow; manual | Builds the Android dev client APK with the Firebase config. Pull requests build `arm64-v8a` only; `main` and manual runs build all four ABIs |
+| Android build check | `Native Android Build` (`native-android.yml`) | pull requests and pushes to `main` whose Expo Android fingerprint changed, or that change the workflow; weekly; manual | Builds the Android dev client APK with the Firebase config. Pull requests build `arm64-v8a` only; pushes to `main`, the weekly run and manual runs build all four ABIs, one job per ABI |
 | Website notification | `Notify website on release` (`notify-website.yml`) | manual only | Re-sends the release event to the website repo; tag releases already do this from `Build & Release` |
 | PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux, macOS and Windows, the runpane wrapper matrix, and the Playwright smoke suite |
 | React review | `React Doctor` (`react-doctor.yml`) | pull requests that touch `frontend/` | Comments on new React findings; advisory, never blocks |
@@ -63,6 +63,10 @@ worktree and run it again.
 
 ### What the tag runs
 
+macOS arm64 and x64 build, sign and notarize in separate jobs
+(`build:mac:arm64`, `build:mac:x64`) and never publish. The `publish` job merges
+their two `latest-mac.yml` files with `scripts/merge-mac-latest.js` into the
+single file a two-arch build writes, and uploads the macOS assets.
 Linux x64 and ARM64 packages build separately on native x64 and ARM64 runners.
 The packaged SQLite ELF architecture must match the target before either format
 can upload; a host x64 SQLite binary cannot ship inside an ARM64 app. Use
@@ -79,13 +83,16 @@ outside SQLite's runtime-dispatched AEGIS cipher code, since those crash older
 CPUs with SIGILL. It also fails if objdump prints no instructions for a module.
 
 ```
-build (macOS + Linux) ─┐
-                       ├─ publish-windows ─ publish-release ─ checksums ─┬─ notify-website
-build-windows (x64,  ──┘                                                ├─ publish-npm   ┐
-  arm64)                                   validate-runpane-packages ───┴─ publish-pypi  ┘
+build (macOS arm64,   ─┐
+  macOS x64, Linux)    │                        ┌─ notify-website
+                       ├─ publish ──────────────┼─ homebrew (after packaging)
+build-windows (x64,  ──┘                        ├─ publish-npm   ┐
+  arm64)                validate-runpane-packages ┴─ publish-pypi  ┘
 ```
 
-`publish-npm` and `publish-pypi` each need both `checksums` and
+`publish` merges the macOS and Windows updater files, computes
+`SHA256SUMS.txt` and `continuity.json`, uploads them with the macOS and
+Windows installers, and publishes the draft release. `publish-npm` and `publish-pypi` each need both `publish` and
 `validate-runpane-packages`.
 
 ### Verify
@@ -118,14 +125,28 @@ for example with `wingetcreate submit <folder>`.
 `scripts/render-packaging.sh` fills the templates in `packaging/` with the
 version and installer checksums. A manual `Build & Release` run with `publish`
 unchecked builds, renders and audits the cask, uploads the packaging artifact,
-and publishes nothing. `HOMEBREW_TAP_TOKEN` permits the cask push; without it,
-the Homebrew job logs a notice and skips. npm publishes with `--provenance`.
+runs `publish`'s merge and checksum steps into a `release-metadata-vX.Y.Z`
+artifact, and publishes nothing. Its artifacts are kept for one day. Uncheck
+`sign` too for a dry run that neither signs nor notarizes:
+`gh workflow run build.yml --ref <branch> -f publish=false -f sign=false -f release_tag=v0.0.0-bench`.
+A run with `publish` checked always signs, and stops at once if `sign` is
+unchecked. Manual runs are named after their choices, for example
+`Build & Release v0.0.0-bench (publish=false, sign=false)`.
+`HOMEBREW_TAP_TOKEN` permits the cask push; without it, the Homebrew job logs
+a notice and skips. npm publishes with `--provenance`.
 
 `CI result` is the check branch protection requires. It fails if another
 `Code Quality` job fails or is cancelled, except Markdown Links, which it does
 not wait for. It is the only check a merge waits
 for; how to merge a pull request or a stack is in
 [CONTRIBUTING.md](CONTRIBUTING.md#merging).
+
+`node scripts/ci-timings.mjs --since <date> --until <time>` writes
+`ci-timings.json`: the wall time (first job start to last job end, attempt 1)
+of every successful run of the CI, release and deploy workflows in that window,
+annotated with the CI speed PRs each run contains. It reads the API through
+`gh` and caches each run's jobs, so a re-run of the same window makes only the
+listing calls.
 
 ## Recovery and rollback
 
@@ -151,7 +172,8 @@ for; how to merge a pull request or a stack is in
 
 Run `Nightly / Canary Release` from the Actions tab. Choose `nightly` or
 `canary` and a branch, tag or SHA (`main` by default). The result is a GitHub
-prerelease for manual testing; stable users never receive it.
+prerelease for manual testing; stable users never receive it. Check
+`dry_run` to build every package without creating the tag or prerelease.
 
 ## Remote PWA preview
 
@@ -175,7 +197,7 @@ Names only; values live in the GitHub repository settings.
 | --- | --- | --- |
 | `GITHUB_TOKEN` | all | Provided by Actions |
 | `NPM_TOKEN`, `PYPI_API_TOKEN` | `build.yml` | Fallback only. npm and PyPI publish through trusted publishing (repository `greenfield-inc/Pane`, workflow `build.yml`, PyPI environment `pypi`). Use a token only for manual recovery, never commit `.npmrc` or `.pypirc`, and revoke the token afterwards |
-| `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | `build.yml` | macOS signing. It turns on only when all five are set; otherwise builds are unsigned |
+| `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | `build.yml` | macOS signing. It turns on only when all five are set and the `sign` input is not unchecked; otherwise builds are unsigned |
 | `SITE_REPO_DISPATCH_TOKEN` | `build.yml`, `notify-website.yml` | Sends the `pane-release` event to the website repo |
 | `TRAFFIC_TOKEN` | `traffic-snapshot.yml` | Reads repository traffic |
 | `GCP_*`, `CLOUD_RUN_*` variables | `deploy-remote-pwa-preview.yml`, `native-updates.yml` (all but `CLOUD_RUN_SERVICE`) | See [Remote PWA preview](#remote-pwa-preview) |

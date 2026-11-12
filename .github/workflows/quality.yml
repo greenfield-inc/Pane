@@ -73,6 +73,9 @@ jobs:
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
 
+    - name: Verify macOS updater metadata merge
+      run: node scripts/test-merge-mac-latest.js
+
     # The unit tests load the real electron package (main/src/utils/shellPath.ts).
     - name: Fetch Electron
       uses: ./.github/actions/fetch-electron
@@ -167,14 +170,39 @@ jobs:
           './**/*.md'
         fail: true
 
-  # Runs beside quality-checks so the smoke path does not wait on unit tests.
-  # The minimal and renderer suites load the renderer from Vite with a mocked
-  # Electron API. The chat tab journeys launch main/dist in real Electron, so
-  # better-sqlite3 is still rebuilt for Electron, in the background.
+  # The smoke suites run beside quality-checks in three jobs. The two browser
+  # shards split the minimal suite, which loads the renderer from Vite with a
+  # mocked Electron API. The Electron job runs the renderer selection races
+  # (also Vite) while better-sqlite3 rebuilds for Electron, then the journeys
+  # that launch main/dist in real Electron.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
-  functional-smoke:
-    name: Functional Smoke
+  functional-smoke-browser:
+    name: Functional Smoke (browser ${{ matrix.shard }}/2)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    - name: Install Playwright browser dependencies
+      run: pnpm exec playwright install --with-deps chromium
+
+    - name: Run maintained functional smoke tests
+      run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/2
+
+  functional-smoke-electron:
+    name: Functional Smoke (Electron)
     runs-on: ubuntu-24.04
 
     steps:
@@ -215,16 +243,13 @@ jobs:
     - name: Finish Playwright browser dependencies install
       run: scripts/ci-background.sh wait playwright
 
+    # Needs no native module, so the rebuild finishes behind it; only the
+    # Electron launches below wait for it.
     - name: Verify renderer selection races
       run: pnpm test:renderer-selection
       env:
         PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
 
-    - name: Run maintained functional smoke tests
-      run: pnpm test:ci:minimal
-
-    # The two suites above need no native module, so the rebuild finishes
-    # behind them; only the Electron launches below wait for it.
     - name: Finish native module rebuild for Electron
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait electron-rebuild
@@ -244,8 +269,9 @@ jobs:
   # change on a PR; always runs on pushes to main. Each OS is tested once at
   # the runtime floors (Node 22.23.4 / Python 3.8) and once at current (Node 24.22.1 /
   # Python 3.13) instead of the full Node x Python cross product. The Linux
-  # floor entry is pinned to ubuntu-24.04: setup-python has no Python 3.8 build
-  # for Ubuntu 26.04 (ubuntu-latest).
+  # floor entry runs on ubuntu-24.04. It was pinned there because setup-python
+  # has no Python 3.8 build for Ubuntu 26.04 (ubuntu-latest); uv now installs
+  # 3.8, so that reason no longer applies.
   runpane-wrapper-tests:
     name: Runpane Wrapper (${{ matrix.os }}, Node ${{ matrix.node-version }}, Python ${{ matrix.python-version }})
     needs: changes
@@ -271,10 +297,33 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
 
+    # Python 3.8 is not preinstalled on macOS or Windows runners, and
+    # setup-python took 31-56 s to fetch it there. uv installs its standalone
+    # CPython build in a few seconds. The test scripts read PYTHON.
     - name: Setup Python
+      if: matrix.python-version != '3.8'
       uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
+
+    - name: Setup uv for Python 3.8
+      if: matrix.python-version == '3.8'
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      with:
+        # A pinned uv, so a new uv release can't change the required jobs.
+        version: '0.13.7'
+        # Nothing here reuses uv's package cache.
+        enable-cache: false
+
+    - name: Install Python 3.8 with uv
+      if: matrix.python-version == '3.8'
+      shell: bash
+      run: |
+        uv python install 3.8
+        python="$(uv python find 3.8)"
+        "$python" --version
+        echo "PYTHON=$python" >> "$GITHUB_ENV"
+        "$python" -c "import os, sys; print(os.path.dirname(sys.executable))" >> "$GITHUB_PATH"
 
     - name: Install wrapper dependencies
       run: pnpm install --filter runpane --ignore-scripts
@@ -328,15 +377,21 @@ jobs:
 
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.
+  # Windows runs the suite in two vitest shards, each about half of it. macOS
+  # runs it whole: the org has 5 macOS runners, and a second macOS job waited
+  # longer for one than the shard saved.
   cross-os-main-tests:
-    name: Main Process Tests (${{ matrix.os }})
+    name: Main Process Tests (${{ matrix.os }}${{ matrix.shards > 1 && format(', {0}/{1}', matrix.shard, matrix.shards) || '' }})
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.main == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-2022]
+        include:
+          - { os: macos-latest, shard: 1, shards: 1 }
+          - { os: windows-2022, shard: 1, shards: 2 }
+          - { os: windows-2022, shard: 2, shards: 2 }
 
     steps:
     # The default Windows TEMP is on the runner's slow C: drive; the database
@@ -367,6 +422,7 @@ jobs:
       run: pnpm install --ignore-scripts
 
     - name: Start main process type checking
+      if: matrix.shard == 1
       shell: bash
       run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
 
@@ -379,10 +435,10 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
     - name: Finish main process type checking
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && matrix.shard == 1 }}
       shell: bash
       run: scripts/ci-background.sh wait typecheck
 
@@ -390,7 +446,7 @@ jobs:
   # cancelled ones fail it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, typecheck-lint, functional-smoke, runpane-wrapper-tests, cross-os-main-tests]
+    needs: [changes, quality-checks, typecheck-lint, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

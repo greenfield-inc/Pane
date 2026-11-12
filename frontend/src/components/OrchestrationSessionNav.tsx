@@ -389,7 +389,7 @@ export function OrchestrationSessionNav({
   }, [archivedToast, openSession, refresh, update]);
 
   const moveDialogElement = (
-    <MoveSessionToHostDialog sessionId={movingSessionId} onClose={() => setMovingSessionId(null)} onMoved={sessionId => void openSession(sessionId)} />
+    <MoveSessionToHostDialog target={movingSessionId === null ? null : { kind: 'here', sessionId: movingSessionId }} onClose={() => setMovingSessionId(null)} onMoved={sessionId => void openSession(sessionId)} />
   );
 
   const archivedToastElement = archivedToast && (
@@ -811,7 +811,7 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
             onMoveToHost();
           }}
         >
-          <span className="flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" />Move to host…</span>
+          <span className="flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" />Move to machine…</span>
         </PopoverButton>
         <PopoverButton role="menuitem" variant="danger" onClick={onArchive}>
           <span className="flex items-center gap-2">

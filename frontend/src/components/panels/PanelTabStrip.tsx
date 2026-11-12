@@ -317,6 +317,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         "flex items-center overflow-x-auto scrollbar-none min-w-0",
         !compact && "panel-tab-strip",
         dimActive && "panel-tab-strip-dimmed",
+        quietFocus && !dimActive && "panel-tab-strip-focused",
         // The strip hugs its tabs so the "+" sits right after the last one;
         // while a tab is being dragged it grows to offer the trailing drop zone.
         compact ? "max-w-full" : isTabDragging ? "flex-1" : "flex-initial max-w-full",

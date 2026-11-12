@@ -1,0 +1,11 @@
+version: 2.4.201
+files:
+  - url: Pane-2.4.201-macOS-arm64.zip
+    sha512: DcrdBxLtlbGTf7XrvN0WJTAa/8Ilp3wXqWwybtCnfd1smhDnUZvv4/HbzEWDK5UUOI9Zc3onZ104RWfrbb6LyQ==
+    size: 155911411
+  - url: Pane-2.4.201-macOS-arm64.dmg
+    sha512: NUami0fS/eJydjxpDJciuKrIXmKyP5RT40jUleIlGGf0QFgo/oILUDxTFPknEb0t5eai9qzezT2RuO9drqVTiQ==
+    size: 161569918
+path: Pane-2.4.201-macOS-arm64.zip
+sha512: DcrdBxLtlbGTf7XrvN0WJTAa/8Ilp3wXqWwybtCnfd1smhDnUZvv4/HbzEWDK5UUOI9Zc3onZ104RWfrbb6LyQ==
+releaseDate: '2026-10-26T20:40:07.745Z'

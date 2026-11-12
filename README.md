@@ -237,7 +237,7 @@ See [Workspaces setup, trust, and troubleshooting](docs/RUNPANE_WORKSPACES.md) f
 
 “Continue this on my Windows machine with Codex.” `runpane handoff` starts the agent in a new Pane on the other machine (or a new tab in your Pane on this one), using your pushed branch and a note about the task. When the sending tab runs Claude, Codex, Cursor or OpenCode and the receiver is the same agent, it carries the agent's own session: another machine gets a copy of the session's files and resumes it, and this machine resumes a fork of it. The CLI then checks that the receiver continued the conversation, and reports `continued`, `inconclusive` (with a question to ask the receiver), or `not-continued` (the receiver is kept, never replaced). With `--note-only`, a different agent, or no session to carry, a fresh agent starts with the note instead, and the output says so. The note carries the goal, decisions, verified state, and next steps either way. Live processes stay on the original machine.
 
-To move a whole Session instead, right-click it and choose **Move to host…**: its agent hands it off, and a Session with the same name, goal and agent appears on the other machine. With the same agent it resumes the Session's conversation when you open it; otherwise it starts by reading the note. See [Move a Session to another machine](docs/SESSIONS.md#move-a-session-to-another-machine).
+To move a whole Session instead, right-click it and choose **Move to machine…**: its agent hands it off, and a Session with the same name, goal and agent appears on the other machine. With the same agent it resumes the Session's conversation when you open it; otherwise it starts by reading the note. See [Move a Session to another machine](docs/SESSIONS.md#move-a-session-to-another-machine).
 
 To hand off a Pane's task, run from the repository you're handing off. On the destination, clone the same GitHub repository if needed and add that checkout to Pane. Install and sign in to the receiving agent there. Keep Pane running there. Use the npm CLI. On the destination, choose a repository outside WSL; WSL receivers are not supported.
 
@@ -336,14 +336,14 @@ Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ct
 | `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Keyboard Shortcuts |
 | `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` (or `k` `j`) move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
 | `Enter` | With a chat on screen and focus on no field or control, move into its message box |
-| `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel or sidebar in that direction |
-| `F6` / `⇧F6` | Next / previous region (sidebar, splits, right panel, terminal) |
+| `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel, approval column or sidebar in that direction; the focused split's active tab carries the accent underline |
+| `F6` / `⇧F6` | Next / previous region (sidebar, splits, approval column, right panel, terminal) |
 | `⌘K ⌘M` / `Ctrl+K Ctrl+M` | Maximize the focused split, Session tile, sidebar or right panel; again to restore |
 | `⌘⇧M` / `Ctrl+Shift+M` | Minimize the focused sidebar, right panel or terminal |
 | `⌘B` / `Ctrl+B` | Toggle sidebar |
 | `⌘⌥B` / `Ctrl+Alt+B` | Toggle right panel |
 | `` ⌃` `` / `` Ctrl+` `` | Toggle terminal |
-| `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab |
+| `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab in the focused split, or in a Session's approval column while it has focus (`Esc` there goes back to the chat) |
 | `⌃⇧Space` | Approvals, and back to exactly where you were (also `Esc`); change it in Settings → Notify |
 | `⌘⌥O` / `Ctrl+Alt+O` | Machine switcher (then `0` for All machines, `1-9` for a machine) |
 | `⌃⌘]` `⌃⌘[` / `Ctrl+Alt+Shift+]` `[` | Next / previous machine |
