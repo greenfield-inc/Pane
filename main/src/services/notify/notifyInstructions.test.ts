@@ -59,7 +59,7 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     expect(written).toContain('- A `reply:` line (or a `{reply, replyId}` result) is the person\'s typed reply: an answer or a question. If it answers, run `runpane notify --took <id|Q-n> answer`.');
     expect(written).toContain('then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"`');
     expect(written).toContain('A `correction:` line fixes how it was taken. From a `{reply, replyId}` result, pass its replyId to --took and --update.\r\n');
-    expect(written).toContain('- Write the card as its Summary: a title of about 80 characters; context saying why it matters;');
+    expect(written).toContain('- Write the card as its Summary: a title of about 80 to 100 characters on one line; context as a subtitle of one or two sentences saying why it matters;');
     expect(written.endsWith(`${END}\r\n`)).toBe(true);
     // Codex's folder had no AGENTS.md, so Pane created one holding only the block.
     expect(text(codexFile).startsWith(BEGIN)).toBe(true);

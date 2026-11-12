@@ -177,7 +177,9 @@ says, and after running the chat tab suites against it.
   plan itself.
 - **Questions** (ACP form elicitation, such as Claude's AskUserQuestion) dock
   as a form. Pane declares `elicitation.form`; without it Claude turns
-  AskUserQuestion off.
+  AskUserQuestion off. Agents use it only for a quick question in this chat;
+  anything else goes to an approval card
+  ([PANE_NOTIFY.md](PANE_NOTIFY.md#what-an-agent-can-send), "Which card").
 - The composer is the input over one row of controls: attach image, the
   permission mode chip, then one menu showing model and effort together
   ("Opus 5.5 · Medium"; a trailing "(recommended)" and an effort of "Default"

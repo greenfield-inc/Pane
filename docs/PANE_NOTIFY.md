@@ -35,10 +35,28 @@ for another approval (its id or Q-n). Older Panes ignore them.
 In Approvals, clicking a chip opens it as a tab beside the card: a file in an
 editor tab, a page in a browser tab, another approval in place, with **Back**.
 
-Pane builds each approval's **Summary** from these fields (D-225), so agents
-write them to read on their own: a title of about 80 characters, `context` as
-why it matters, each choice with what it does (`detail`) and one
-`recommended`, and links to every reference: files, PRs and other approvals.
+Pane builds each approval's **Summary** from these fields (D-225), unless the
+asker linked its own `.html` Summary page (a worker's `--summary-file`, or
+`summary` in its `needs_you`). Agents write a card to read on its own: a
+one-line title of about 80 to 100 characters, `context` of one or two sentences
+on why it matters (up to 240 characters), 2 to 4 choices each with what it does
+(`detail`) and exactly one `recommended`, and links to every reference: files,
+PRs and other approvals. Every way of asking goes through one check
+(`main/src/services/notify/cardCheck.ts`): Pane refuses a title over 160
+characters or with a line break, and two recommended options in one question,
+and returns a warning for each softer miss, which `runpane notify` and
+`runpane report` print. An old paragraph card (the whole question in its title,
+with no buttons) is first split by fixed rules into a title, options and
+links (`cardTidy.ts`); the card reads "Tidied by Pane" and **Show as sent**
+shows what the agent sent.
+
+**Which card.** Pane's approvals text (`main/src/services/approvalsRules.ts`,
+"Asking the person in Pane") is the one rule every Pane text carries: Claude's
+own card (AskUserQuestion) only for a quick question that answers the person's
+latest message in the chat they are typing in and only steers that turn;
+everything else, including any worker's question in a Session, is an approval
+card. Codex and other agents without a built-in card always use an approval.
+`main/src/services/approvalsRules.test.ts` fails when a copy drifts.
 
 When Approvals is off or Pane isn't running, the result is
 `{unavailable, next}` ("Approvals are off in Pane.") and the agent asks in its

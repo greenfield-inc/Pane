@@ -8,6 +8,7 @@ import type { AppConfig } from '../types/config';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { getAppDirectory } from '../utils/appDirectory';
 import { linuxToUNCPath } from '../utils/wslUtils';
+import { APPROVALS_RULES } from './approvalsRules';
 
 /**
  * A user-level skill that teaches any agent in a Pane terminal how to reach
@@ -17,7 +18,7 @@ import { linuxToUNCPath } from '../utils/wslUtils';
  * Bump the version when the skill changes shape: a copy marked by an older Pane
  * is rewritten, and a copy marked by a newer Pane is left for that Pane.
  */
-const PANE_MANAGED_SKILL_VERSION = 3;
+const PANE_MANAGED_SKILL_VERSION = 4;
 export const PANE_MANAGED_SKILL_MARKER = `<!-- pane-managed-skill v${PANE_MANAGED_SKILL_VERSION} -->`;
 const MANAGED_MARKER_PATTERN = /<!-- pane-managed-skill v(\d+) -->/;
 const SKILL_DIR_NAME = 'pane';
@@ -315,26 +316,23 @@ of it through the \`runpane\` CLI.
 - Workers end with \`runpane report --state <ready|blocked|failed|done> --summary-file <path>\`
   (\`--question\` when blocked, \`--pr\` and \`--head\` when there is a PR).
 
-## Asking the person
+${APPROVALS_RULES}
 
-When you need a choice, an approval or a short answer, use the \`pane\` MCP
-\`notify\` tool instead of asking in the terminal. If the \`pane\` MCP tools are
-not loaded (some launchers start agents with a strict MCP config), run the same
+### Posting an approval card
+
+Post it with the \`pane\` MCP \`notify\` tool. If the \`pane\` MCP tools are not
+loaded (some launchers start agents with a strict MCP config), run the same
 call through the CLI:
 \`runpane notify --ui options --title "<question>" --context "<what it is for>" --choices '[{"label":"Ship it","detail":"<consequence>","recommended":true},{"label":"Wait"}]' --json\`.
 \`--ui\` is \`options\`, \`approve\` (\`--detail\`), \`ask\` (\`--suggestions\`) or
 \`info\`. On \`waiting\`, run \`runpane notify --resume <id> --json\`; on
-\`unavailable\`, ask in the terminal.
+\`unavailable\`, ask in the terminal. Related questions go in one options card:
+\`--questions '[{"title":"<question>","choices":[...]},...]'\` (2 to 4, one
+pick each) instead of \`--choices\`.
 
-Write every approval so it reads on its own (Pane builds its Summary from
-these fields): a title of about 80 characters; \`--context\` saying why it
-matters; each choice with what it does (\`detail\`) and one \`recommended\`; and
-\`--links\` to every reference: files, PRs, and other approvals
-(\`{"label":"Q-12","approval":"<id|Q-n>"}\`). Related questions go in one
-options card: \`--questions '[{"title":"<question>","choices":[...]},...]'\`
-(2 to 4, one pick each) instead of \`--choices\`.
+### Reading a reply
 
-**When the person types a reply.** Picks alone come back as before: \`{answer}\`, or
+Picks alone come back as before: \`{answer}\`, or
 \`answer: Q-n → <answer> (by you)\` in your tab. Anything typed comes back as a
 reply: the open call's result \`{reply, picks?, id, replyId, next}\` (pass its
 \`replyId\` to \`--took\` and \`--update\`: only your call was given it, so it works
@@ -364,7 +362,7 @@ and you decide which:
 Only the reply's reader may run \`--took\` and \`--update\`: the asker, else the
 orchestrator that relayed a worker's question, else Autopilot.
 
-Who asks depends on your role:
+### Who asks, by role
 
 - **A worker in a Session** (\`PANE_SESSION_DIR\` is set and
   \`PANE_ORCHESTRATION_SESSION_ID\` isn't, or your brief names an orchestrator
@@ -384,6 +382,8 @@ Who asks depends on your role:
   \`runpane docs read --doc skills/pane-orchestration/SKILL.md\`. A reply to a
   worker's question it relayed comes to it when the worker can't read it.
 - **Any other agent** calls \`notify\` as above.
+
+### Secrets
 
 For an API key, token or password, call the \`secrets_request\` tool (or
 \`runpane secrets request --project <project> --name <NAME> --title "<text>" --reason "<what it is for>"\`),

@@ -109,6 +109,8 @@ A quiet worker or a long-running step is normal. On a reported failure, explicit
 
 Answer from an existing approved source when you can, and cite where. Leave routine in-scope technical decisions to the assigned worker. For a bounded, unresolved technical question that merits a second opinion, ask one fresh-context subagent. Send product and architecture changes, and ask-first actions, to the user. In Pane, while Approvals is on, post each one to Approvals as `pane-orchestration` says ("What waits on the person"), so you stay free to talk.
 
+Workers raise questions as a `needs_you` block in their status file. Relay each one as [references/relay.md](references/relay.md) says: check it first (you are a check, not a pipe), then relay it the way the `pane` skill's "Asking the person in Pane" section says, always as an approval card. Record the answer as a D-n, or send `clarify: Q-n → …` when the person asks back, which keeps Q-n open.
+
 ## Presenting decisions
 
 This is the canonical decision frame for Pane's skills; others link here

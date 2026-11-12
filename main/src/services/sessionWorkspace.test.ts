@@ -209,7 +209,8 @@ describe('Session workspace instructions', () => {
     expect(agents).toContain('run runpane notify --took <id|Q-n> answer and act on it');
     expect(agents).toContain('runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"');
     expect(agents).toContain('never post a second approval for it');
-    expect(agents).toContain('a title of about 80 characters');
+    expect(agents).toContain('## Asking the person in Pane');
+    expect(agents).toContain('about 80 to 100 characters on one line');
     expect(agents).toContain('Stop the background call of an item that went stale.');
     expect(agents).toContain('Approvals survive a restart');
     expect(agents).not.toContain('Pane keeps no approvals');

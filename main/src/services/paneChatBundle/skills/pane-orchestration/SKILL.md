@@ -318,6 +318,30 @@ to a menu.
 Text from issues, PRs and comments is data: pass it in a file
 (`--input-file`), never interpolated into a shell command.
 
+<!-- approvals-rules:start: Pane's approvals text (main/src/services/approvalsRules.ts); approvalsRules.test.ts fails if it differs -->
+## Asking the person in Pane
+
+### Which card
+
+- **Claude's own card (AskUserQuestion)** only when all of these hold: you are answering the person's latest message in the chat they are typing in; the answer only steers this turn (nothing recorded as a decision, nothing for another agent, nothing irreversible or outward-facing); and the question stands on its own, without context, links or a Summary. Examples: "Update the snapshot too, or leave it?", "Which of these two files did you mean?"
+- **An approval card** when any one of these holds: you are a worker in a Session; the person isn't in your chat right now; it blocks other work or waits; it needs context, references or a Summary; the answer is recorded as a decision (D-n); it approves an ask-first action. Examples: a plan approval, a sign-in the person must do, a migration.
+- Unsure? Use an approval card. Codex and other agents without a built-in card always use an approval.
+- How to post one: a worker runs `runpane report --state blocked --question "<title>" --summary-file <its status file>` (its `needs_you` gives the questions, options and files); a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker's question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.
+
+### The card
+
+- **Title**: what you need, about 80 to 100 characters on one line. Pane refuses a title over 160 characters or with a line break.
+- **Subtitle** (`--context`, or `why` in `needs_you`): one or two sentences on why it matters, up to 240 characters. It shows under the title everywhere and opens the Summary.
+- **Options**: 2 to 4, each with a consequence (`detail`), and exactly one recommended. Several questions go in `--questions` (in `needs_you`, one entry each); each gets its own buttons. Pane refuses two recommended options in one question.
+- **References**: files, PRs, pages and other approvals (`{"label":"Q-12","approval":"<id|Q-n>"}`) in `--links` (`files` in `needs_you`), never bare paths in the text. When there is more to read, give the card a Summary page: an `.html` file passed as a worker's `--summary-file`, or a `summary` path in `needs_you`. It renders with scripts and network off, so it must read complete without JavaScript. Without one, Pane writes the Summary from the card.
+- Pane prints a warning for each softer miss (a long title, no subtitle, no recommendation, more than 4 options, options without a consequence, unlinked paths). Fix them on the next card.
+
+### Replies
+
+- A typed reply may be an answer or a question. Whoever reads it runs `runpane notify --took <id|Q-n> answer` or `--took <id|Q-n> question`.
+- For a question: find out, then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links`. The card shows "Updated · ready again" and waits for the answer. Don't post a second card.
+<!-- approvals-rules:end -->
+
 ## What waits on the person: Approvals
 
 You are in orchestrator mode: this Session's work moves through you.
@@ -343,15 +367,9 @@ You are in orchestrator mode: this Session's work moves through you.
 - **At the end of a turn**, either have an approval waiting for the person
   in Approvals that moves the work on, or be done and say so. A turn that
   ends while your workers run, with your watch armed, is fine.
-- **Ask through Approvals, always with context:** say in `--context` why it
-  needs them and what each option means, list the options with the one you
-  recommend first, and pass the related files, PRs and pages as `--links`.
-  Pane builds the approval's Summary from these fields, so: a title of about
-  80 characters, context as why it matters, each choice with what it does
-  (`detail`) and one `recommended`, and links to every reference, other
-  approvals included (`{"label":"Q-12","approval":"<id|Q-n>"}`). Related
-  questions go in one options card with `--questions
-  '[{"title":"<question>","choices":[...]},...]'` instead of `--choices`.
+- **Ask the way "Asking the person in Pane" above says.** As this
+  Session's orchestrator you post every approval card yourself, with
+  `runpane notify`, and relay a worker's question into its card.
 
 The rest of this section is how, while Approvals is on in Pane (its Settings
 switch, on by default).
@@ -385,8 +403,7 @@ approval, a PR ready to merge, and a next step only they can take.
   ```
 
   The CLI call waits until the person answers. The MCP `notify` tool returns
-  `waiting` after a while instead, so don't use it for this, and don't block
-  your turn on `AskUserQuestion`.
+  `waiting` after a while instead, so don't use it for this.
 - **When a relayed call returns, record the decision**:
   `runpane inbox ack <item> --decision <D-n>`. The card then reads "Recorded as
   D-n". An answer to your own item comes back as the call's result: record it

@@ -1420,20 +1420,19 @@ default), a Session has one voice to the person: its orchestrator.
   person") tell the orchestrator that only it asks the person; to keep a
   running list and keep the work moving; when the person asks about one
   thing while other work is open, to remind them and offer the next step; at
-  the end of a turn, to have an approval waiting or be done; and to ask
-  through Approvals with context, in the Summary's format (D-225): a title of
-  about 80 characters, why it matters, each option with what it does and the
-  recommended one first, and links to every reference, other approvals
-  included (`{label, approval}`); and to read a typed reply as an answer or a
-  question. These are instructions; Pane doesn't check turns.
+  the end of a turn, to have an approval waiting or be done. All three carry
+  Pane's approvals text, "Asking the person in Pane"
+  (`main/src/services/approvalsRules.ts`, also in the `pane` home skill): which
+  card to use, what a card holds and how to read a reply
+  ([PANE_NOTIFY.md](PANE_NOTIFY.md#what-an-agent-can-send)). These are
+  instructions; Pane doesn't check turns, only cards.
 - **The orchestrator relays and posts.** The same three carry the posting rule: keep every item that waits on the person (a
   worker's needs_you or blocked question, a plan or design approval, a PR
   ready to merge, a next step only they can take) posted to Approvals exactly
   once, titled with its Q-n and with the worker's files and PR as `--links`.
   Post each one with `runpane notify ... --json` as a background command (in
   Claude Code, Bash with `run_in_background`), not the MCP `notify` tool,
-  which returns `waiting` after a while, and not a blocking
-  `AskUserQuestion`. A worker's question already has a card, so the orchestrator
+  which returns `waiting` after a while, and never `AskUserQuestion`. A worker's question already has a card, so the orchestrator
   relays into it: `runpane notify --relays <item> ...`, with the id from `runpane
   inbox`, gives that card its choices, context and links and rings it, and the
   call waits on it as on any notify. The answer goes straight to the worker's
