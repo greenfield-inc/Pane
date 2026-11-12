@@ -1,4 +1,3 @@
-import { readingMachines } from './readingMachines';
 import http, { type IncomingMessage, type ServerResponse } from 'http';
 import { pipeline as pipelineCallback, Readable, type Duplex, type Writable } from 'stream';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
@@ -18,6 +17,7 @@ import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type
 
 export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
+import { readingMachines } from './readingMachines';
 import {
   GLASSES_CHANNELS,
   GLASSES_EVENT_CHANNELS,
@@ -1478,7 +1478,6 @@ export class PaneRemoteHttpApiServer {
   }
 
 
-  /** The request's Tailscale login when it is this workspace's owner, else null. */
   /**
    * The Pane install a desktop's stream names (`X-Pane-Machine-Id`), counted as reading this computer's
    * cards only for the callers that may change "Show cards on": the owner, or a paired device.
@@ -1490,6 +1489,7 @@ export class PaneRemoteHttpApiServer {
     return trusted ? machineId : null;
   }
 
+  /** The request's Tailscale login when it is this workspace's owner, else null. */
   private workspaceOwnerLogin(request: IncomingMessage): string | null {
     const login = decodeOptionalBoundary(request.headers['tailscale-user-login'], boundary.string)?.trim().toLowerCase();
     const owner = this.workspace?.access()?.ownerLogin;

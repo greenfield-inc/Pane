@@ -203,9 +203,13 @@ export function cardsOnStatus(config: AppConfig, readsHere: (machineId: string) 
   if (picked.id === config.machineId) return { kind: 'here' };
   const saved = machines.find(machine => machine.kind === 'remote' && machine.installId === picked.id);
   const name = saved?.label ?? picked.name;
+  // A picked machine that slept or left the network can leave its stream half-open here for minutes; this
+  // machine's own connection to it notices within its heartbeat timeout, so that one is believed first.
+  if (saved?.status === 'offline') return { kind: 'not-connected', name };
   if (readsHere(picked.id)) return { kind: 'elsewhere', name };
   // A machine that just came online may still be waiting to reconnect to this one, so it counts as not added only after a while.
-  const answering = saved?.status === 'online' && now - Date.parse(saved.onlineSince ?? '') >= NOT_ADDED_AFTER_MS;
+  const onlineFor = saved?.status === 'online' && saved.onlineSince ? now - Date.parse(saved.onlineSince) : 0;
+  const answering = onlineFor >= NOT_ADDED_AFTER_MS;
   return { kind: answering ? 'not-added' : 'not-connected', name };
 }
 
@@ -296,7 +300,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly tabsTyping = new Set<string>();
   /** Replies whose line is being typed into their reader's tab right now: not replaceable until it's known whether it went. */
   private readonly repliesTyping = new Set<string>();
-  private lastInUse: string | undefined;
+  /** In use and "Show cards on" as last polled; a change redraws the strip and Settings. */
+  private lastAlertState: string | undefined;
 
   constructor(private readonly env: NotifyQueueEnvironment) {
     super();
@@ -1241,8 +1246,8 @@ export class NotifyQueue extends EventEmitter {
   /** The person came back to or left this computer, or "Show cards on" moved: the strip and Settings follow (D-144). */
   pollInUse(): void {
     const now = JSON.stringify([this.inUse(), this.cardsOn()]);
-    if (now === this.lastInUse) return;
-    this.lastInUse = now;
+    if (now === this.lastAlertState) return;
+    this.lastAlertState = now;
     this.changed();
   }
 

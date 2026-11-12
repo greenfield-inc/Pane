@@ -579,6 +579,7 @@ describe('NotifyQueue with its store', () => {
       ['the picked machine reads this one', config(BOOK), reading, saved('online'), { kind: 'elsewhere', name: 'MacBook' }],
       ['the picked machine answers but hasn\'t saved this one', config(BOOK), nobody, saved('online'), { kind: 'not-added', name: 'MacBook' }],
       ['the picked machine is offline', config(BOOK), nobody, saved('offline'), { kind: 'not-connected', name: 'MacBook' }],
+      ['the picked machine dropped off but its stream here is still half-open', config(BOOK), reading, saved('offline'), { kind: 'not-connected', name: 'MacBook' }],
       ['the picked machine came online seconds ago and may still be reconnecting to this one', config(BOOK), nobody, saved('online', '2026-11-12T19:59:40.000Z'), { kind: 'not-connected', name: 'MacBook' }],
       ['the picked machine isn\'t saved here', config(BOOK), nobody, [], { kind: 'not-connected', name: 'qa-macbook' }],
     ])('%s', (_case, appConfig, readsHere, machines, expected) => {

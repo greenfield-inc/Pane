@@ -482,7 +482,19 @@ Alerts interrupt you on the device you're using (D-144):
   or disconnected, or it hasn't saved this computer) rings as if nothing were
   picked, and its Settings row says why. "Reading" means the picked computer
   holds a live connection to this one, as its owner or a paired device, naming
-  itself by its install id (`machineId` in `config.json`).
+  itself by its install id (`machineId` in `config.json`; a `config.json`
+  copied to another computer carries the same id, so delete the key there).
+  A computer that has saved the picked one also checks its own connection:
+  once that drops (about 20 seconds after the picked one sleeps or leaves the
+  network), it alerts again. A computer closes its connections before it
+  sleeps. The Settings row reads one of:
+  - "Cards pop up on <name>. They're still listed here.": the picked computer
+    reads this one, so this one stays quiet.
+  - "<name> hasn't added this computer, so this computer's cards still pop up
+    here.": this computer has saved the picked one and has seen it online for
+    over a minute, but it doesn't read this one.
+  - "<name> isn't connected, so cards pop up here for now.": anything else,
+    such as off, asleep, just restarted, or not saved here.
 
 ## Other screens and your phone
 

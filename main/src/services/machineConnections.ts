@@ -19,7 +19,7 @@ import {
 const RETRY_AFTER_GIVE_UP_MS = 60_000;
 
 type RemoteClientOptions = NonNullable<ConstructorParameters<typeof RemotePaneClient>[1]>;
-export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke'>;
+export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume'>;
 export type CreateMachineClient = (profile: RemotePaneConnectionProfile, options: RemoteClientOptions) => MachineClient;
 
 export interface MachineConnectionsDeps {
@@ -91,6 +91,18 @@ export class MachineConnections {
     const machines = [...this.machines.values()];
     this.machines.clear();
     await Promise.all(machines.map(machine => this.close(machine)));
+  }
+
+  /**
+   * Closes every saved machine's stream before this computer sleeps, so the machines it reads stop
+   * counting it as reading ("Show cards on") instead of holding a half-open stream. `resume` reopens them.
+   */
+  suspend(): void {
+    for (const machine of this.machines.values()) machine.client.suspend();
+  }
+
+  resume(): void {
+    for (const machine of this.machines.values()) machine.client.resume();
   }
 
   list(): MachineState[] {
