@@ -9,10 +9,11 @@ import { boundary, decodeBoundary, type JsonValue } from '../../../shared/valida
 
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
 import { RecentWrites } from './recentWrites';
+import { readingMachines } from './readingMachines';
 import { PaneError } from '../../../shared/paneError';
 
 interface ConfigManagerStub {
-  getConfig(): { deepgramApiKey?: string; remoteDaemon?: RemoteDaemonConfig };
+  getConfig(): { deepgramApiKey?: string; remoteDaemon?: RemoteDaemonConfig; machineId?: string };
 }
 
 interface TestEventStream {
@@ -690,6 +691,22 @@ describe('PaneRemoteHttpApiServer', () => {
     await waitFor(() => server.getConnectedClients().length === 0);
   });
 
+  it('names this host on the ready event and counts a paired desktop naming itself as reading its cards while its stream is open', async () => {
+    const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), {
+      getConfig: () => ({ remoteDaemon: createEnabledRemoteConfig(), machineId: 'mini-install' }),
+    });
+    activeServers.push(server);
+    await server.start();
+
+    const stream = await openEventStream(server, 'secret-token', { 'X-Pane-Machine-Id': 'book-install' });
+    const ready = await stream.nextEvent();
+    expect(JSON.parse(ready.data.join('\n'))).toMatchObject({ machineId: 'mini-install' });
+    expect(readingMachines.has('book-install')).toBe(true);
+
+    stream.close();
+    await waitFor(() => !readingMachines.has('book-install'));
+  });
+
   it('gzips the event stream for clients that accept it and still delivers each event immediately', async () => {
     const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), createConfigManagerStub(createEnabledRemoteConfig()));
     activeServers.push(server);
@@ -1076,6 +1093,20 @@ describe('workspace identity mode', () => {
     const stream = await openEventStream(server, 'correct horse', as(owner), '/serve-secret/events');
     await expect(stream.nextEvent()).resolves.toMatchObject({ event: 'ready' });
     stream.close();
+  });
+
+  it('counts only the owner\'s desktop as reading this computer\'s cards, never a teammate naming a machine', async () => {
+    const server = await startWorkspaceServer(() => ownerOnly({ visibility: 'tailnet' }));
+    const teammateStream = await openEventStream(server, undefined, { ...as(teammate), 'X-Pane-Machine-Id': 'book-install' }, '/serve-secret/events');
+    await teammateStream.nextEvent();
+    expect(readingMachines.has('book-install')).toBe(false);
+
+    const ownerStream = await openEventStream(server, undefined, { ...as(owner), 'X-Pane-Machine-Id': 'book-install' }, '/serve-secret/events');
+    await ownerStream.nextEvent();
+    expect(readingMachines.has('book-install')).toBe(true);
+    teammateStream.close();
+    ownerStream.close();
+    await waitFor(() => !readingMachines.has('book-install'));
   });
 
   it('drops a connected client when the access it came in with no longer holds', async () => {

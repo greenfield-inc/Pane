@@ -14,7 +14,8 @@ import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { submitOnlyToAgent } from './runpane';
 import { NotifyService } from '../services/notify/notifyService';
-import { ASKING_TAB_CLOSED } from '../services/notify/notifyQueue';
+import { ASKING_TAB_CLOSED, cardsOnStatus } from '../services/notify/notifyQueue';
+import { readingMachines } from '../daemon/readingMachines';
 import { ClaudePromptBridge } from '../services/claudePrompts/claudePromptBridge';
 import { setClaudePromptBridge } from '../services/claudePrompts';
 import type { MachineConnections } from '../services/machineConnections';
@@ -305,6 +306,8 @@ function askerPaneGone(database: NotifyServices['databaseService'], item: Notify
 }
 
 export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyServices, commandRegistry: PaneCommandRegistry): NotifyService {
+  /** Every machine's state, once the machine connections start; "Show cards on" reads it from the first snapshot. */
+  let machineList: (() => MachineState[]) | null = null;
   const notify = new NotifyService({
     configManager: services.configManager,
     getMainWindow: services.getMainWindow,
@@ -407,6 +410,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       }
     },
     idleSeconds: () => (hasHeadlessDaemonLaunchArg() ? Infinity : idleSeconds()),
+    cardsOn: () => cardsOnStatus(services.configManager.getConfig(), readingMachines.has, machineList?.() ?? []),
     tabAlive: (panelId) => panelManager.getPanel(panelId) !== undefined,
   });
 
@@ -414,7 +418,10 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
 
   /** Set once the machine connections start: every saved machine's questions then show here. */
   let saved: SavedMachinesLink | null = null;
-  followMachines = (machines) => { saved = linkSavedMachines(notify, machines); };
+  followMachines = (machines) => {
+    saved = linkSavedMachines(notify, machines);
+    machineList = () => machines.list();
+  };
 
   // Open in Pane works for the machine the app is on; another machine's card would need a switch.
   const showActiveMachine = () => {

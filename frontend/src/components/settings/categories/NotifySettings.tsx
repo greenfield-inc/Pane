@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
+import type { MachineState } from '../../../../../shared/types/machineConnections';
 import {
   DEFAULT_NOTIFY_SETTINGS,
   NOTIFY_UPDATES_HIDE_AFTER_CHOICES,
+  type NotifyCardsOn,
+  type NotifyCardsOnStatus,
   type NotifyInstructionsFile,
   type NotifyPosition,
   type NotifySettings as NotifySettingValues,
@@ -99,6 +102,73 @@ function ShortcutRecorder({ accelerator, disabled, onSave }: { accelerator: stri
   );
 }
 
+/** The select's value for "Whichever computer is in use"; machine ids are UUIDs, so it can't collide. */
+const ANY_COMPUTER = 'any';
+
+/** This computer's machines, kept current; "Show cards on" lists those that told it their install id. */
+function useMachines(): MachineState[] {
+  const [machines, setMachines] = useState<MachineState[]>([]);
+  useEffect(() => {
+    let stopped = false;
+    const unsubscribe = window.electronAPI.machines.onEvent((event) => { if (event.type === 'machines') setMachines(event.machines); });
+    window.electronAPI.machines.list().then((list) => { if (!stopped) setMachines(list); }).catch((error) => {
+      console.warn('[NotifySettings] Could not list machines:', error);
+    });
+    return () => { stopped = true; unsubscribe(); };
+  }, []);
+  return machines;
+}
+
+/** Why this machine does or doesn't pop up cards, under the "Show cards on" row. */
+function cardsOnNote(status: NotifyCardsOnStatus): string | null {
+  switch (status.kind) {
+    case 'elsewhere': return `Cards pop up on ${status.name}. They're still listed here.`;
+    case 'not-added': return `${status.name} hasn't added this computer, so this computer's cards still pop up here. Add this computer on ${status.name} to move them.`;
+    case 'not-connected': return `${status.name} isn't connected, so cards pop up here for now.`;
+    default: return null;
+  }
+}
+
+function CardsOnPicker({ value, thisMachine, machines, disabled, onChange }: {
+  value: NotifyCardsOn | null;
+  thisMachine: NotifyCardsOn | null;
+  machines: MachineState[];
+  disabled: boolean;
+  onChange: (cardsOn: NotifyCardsOn | null) => void;
+}) {
+  const options: Array<NotifyCardsOn & { label: string }> = [];
+  if (thisMachine) options.push({ ...thisMachine, label: `This computer (${thisMachine.name})` });
+  for (const machine of machines) {
+    if (machine.kind !== 'remote' || !machine.installId || options.some(option => option.id === machine.installId)) continue;
+    options.push({ id: machine.installId, name: machine.label, label: machine.label });
+  }
+  // A saved machine names itself only once it connects, and releases before "Show cards on" never do.
+  const unpickable = machines.filter(machine => machine.kind === 'remote' && !machine.installId).map(machine => ({
+    id: `unpickable:${machine.id}`,
+    label: `${machine.label} (${machine.status === 'online' ? 'needs a newer Pane' : 'not connected yet'})`,
+  }));
+  // A machine picked elsewhere that this one hasn't saved still shows, by the name it was picked with.
+  if (value && !options.some(option => option.id === value.id)) options.push({ ...value, label: value.name });
+  return (
+    <Select
+      value={value?.id ?? ANY_COMPUTER}
+      disabled={disabled}
+      onValueChange={(id) => {
+        if (id === ANY_COMPUTER) { onChange(null); return; }
+        const picked = options.find(option => option.id === id);
+        if (picked) onChange({ id: picked.id, name: picked.name });
+      }}
+    >
+      <SelectTrigger aria-label="Show cards on" className="h-[30px] w-[240px]"><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ANY_COMPUTER}>Whichever computer is in use</SelectItem>
+        {options.map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}
+        {unpickable.map((option) => <SelectItem key={option.id} value={option.id} disabled>{option.label}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
+}
+
 export function NotifySettings({ persistence }: { persistence: SettingsPersistence }) {
   const config = persistence.config!;
   // The snapshot carries main's live settings, so a change from the tray shows here at once.
@@ -107,6 +177,10 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
   const shortcutRegistered = useNotifyStore((state) => state.snapshot?.shortcutRegistered ?? true);
   const showOutsideSupported = useNotifyStore((state) => state.snapshot?.showOutsideSupported ?? true);
   const instructionFiles = useNotifyStore((state) => state.snapshot?.instructionFiles ?? NO_INSTRUCTION_FILES);
+  const cardsOnStatus = useNotifyStore((state) => state.snapshot?.cardsOn);
+  const thisMachine = useNotifyStore((state) => state.snapshot?.thisMachine ?? null);
+  const machines = useMachines();
+  const cardsOnText = cardsOnStatus ? cardsOnNote(cardsOnStatus) : null;
   const off = !settings.enabled;
 
   const save = <K extends keyof NotifySettingValues>(settingId: SettingsSettingId, key: K, value: NotifySettingValues[K]) =>
@@ -124,6 +198,17 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
           saveState={persistence.saveStates['notify-enabled']}
         >
           <ImmediateToggle label="Approvals" value={settings.enabled} onSave={(enabled) => save('notify-enabled', 'enabled', enabled)} />
+        </SettingRow>
+        <SettingRow
+          settingId="notify-cards-on"
+          label="Show cards on"
+          description="Where cards pop up and chime. Applies to all your machines. Every machine still lists them."
+          saveState={persistence.saveStates['notify-cards-on']}
+          disabled={off}
+          className="pl-4"
+          details={cardsOnText && !off ? <p data-testid="notify-cards-on-note" className="-mt-2 pl-0 text-xs leading-relaxed text-text-secondary">{cardsOnText}</p> : undefined}
+        >
+          <CardsOnPicker value={settings.cardsOn} thisMachine={thisMachine} machines={machines} disabled={off} onChange={(cardsOn) => void save('notify-cards-on', 'cardsOn', cardsOn)} />
         </SettingRow>
         <SettingRow
           settingId="notify-show-outside"

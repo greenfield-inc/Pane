@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { NotifyCommand, NotifySnapshot } from '../shared/types/notify';
-import type { JsonObject } from '../shared/validation/boundaryDecoder';
+import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
+import type { MachineState } from '../shared/types/machineConnections';
 import { installElectronApiMock } from './electronApiMock';
 import { notifyFixture, secretFixture } from './fixtures/notifySnapshot';
 import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
@@ -46,8 +47,10 @@ async function boot(
   paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage },
   initialPanels: JsonObject[] = [],
   initialLayout: JsonObject | null = null,
+  machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> },
 ) {
   await installElectronApiMock(page, {
+    machineConnections,
     initialConfig,
     paneSecrets,
     initialPanels,
@@ -404,6 +407,48 @@ test.describe('Settings → Approvals', () => {
     await expect(page.getByRole('button', { name: 'Change' })).toBeDisabled();
     await expect(page.getByRole('combobox', { name: 'Updates hide after' })).toBeDisabled();
     await expect(page.getByRole('switch', { name: 'Sound' })).toBeDisabled();
+  });
+
+  test('Show cards on lists this computer and each saved machine that answered, and saves the pick for every machine', async ({ page }) => {
+    const machines: MachineState[] = [
+      { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null, installId: '6f1c2a40-0000-4000-8000-00000000mac1' },
+      { id: 'profile-box', label: 'build-box', kind: 'remote', status: 'online', offlineSince: null, installId: '9a7e5c21-0000-4000-8000-0000000b0x01' },
+      { id: 'profile-old', label: 'old-laptop', kind: 'remote', status: 'online', offlineSince: null },
+    ];
+    await boot(page, notifyFixture(), {}, undefined, [], null, { machines, reads: {} });
+    await openApprovalsSettings(page);
+    const picker = page.getByRole('combobox', { name: 'Show cards on' });
+    await expect(picker).toContainText('Whichever computer is in use');
+    await expect(page.getByTestId('notify-cards-on-note')).toHaveCount(0);
+
+    await picker.click();
+    await expect(page.getByRole('option')).toHaveText(['Whichever computer is in use', 'This computer (qa-macbook)', 'build-box', 'old-laptop (needs a newer Pane)']);
+    await expect(page.getByRole('option', { name: 'old-laptop (needs a newer Pane)' })).toHaveAttribute('aria-disabled', 'true');
+    await page.getByRole('option', { name: 'build-box' }).click();
+    await expect.poll(() => configUpdates(page)).toEqual([
+      { notify: { cardsOn: { id: '9a7e5c21-0000-4000-8000-0000000b0x01', name: 'build-box' } } },
+    ]);
+  });
+
+  test('Show cards on says why this computer still pops up cards, or doesn\'t', async ({ page }) => {
+    const pickedElsewhere = { id: 'c3d4-0000-4000-8000-000000000b00', name: 'qa-mini' };
+    const snapshot = notifyFixture();
+    snapshot.settings.cardsOn = pickedElsewhere;
+    await boot(page, snapshot);
+    await openApprovalsSettings(page);
+    // A machine picked on another computer and not saved here shows by the name it was picked with.
+    await expect(page.getByRole('combobox', { name: 'Show cards on' })).toContainText('qa-mini');
+    const note = page.getByTestId('notify-cards-on-note');
+    const lines: Array<[NotifySnapshot['cardsOn'], string]> = [
+      [{ kind: 'elsewhere', name: 'qa-mini' }, "Cards pop up on qa-mini. They're still listed here."],
+      [{ kind: 'not-added', name: 'qa-mini' }, "qa-mini hasn't added this computer, so this computer's cards still pop up here. Add this computer on qa-mini to move them."],
+      [{ kind: 'not-connected', name: 'qa-mini' }, "qa-mini isn't connected, so cards pop up here for now."],
+    ];
+    for (const [cardsOn, text] of lines) {
+      // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+      await page.evaluate((next) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(next), { ...snapshot, cardsOn });
+      await expect(note).toHaveText(text);
+    }
   });
 
   test('says when the shortcut is taken or floating cards are unavailable', async ({ page }) => {

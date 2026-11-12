@@ -67,8 +67,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Approvals',
     description: 'What agents are waiting on you for, answered from any app.',
     icon: Inbox,
-    settingIds: ['notify-enabled', 'notify-show-outside', 'notify-position', 'notify-shortcut', 'notify-updates-hide-after', 'notify-sound', 'notify-show-details'],
-    aliases: ['notify', 'approvals', 'questions', 'approve', 'answer', 'ask', 'strip', 'answer all', 'shortcut', 'updates', 'sound', 'details', 'inbox'],
+    settingIds: ['notify-enabled', 'notify-cards-on', 'notify-show-outside', 'notify-position', 'notify-shortcut', 'notify-updates-hide-after', 'notify-sound', 'notify-show-details'],
+    aliases: ['notify', 'approvals', 'questions', 'approve', 'answer', 'ask', 'strip', 'answer all', 'shortcut', 'updates', 'sound', 'details', 'inbox', 'show cards on', 'machine', 'computer'],
   },
   {
     id: 'autopilot',
