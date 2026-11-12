@@ -52,15 +52,17 @@ Appearance follows your OS — see [Appearance](docs/APPEARANCE.md).
 <sub>or download the installer directly</sub><br />
 <br />
 
-<a href="https://runpane.com/api/download?platform=mac&source=gh-readme">
-  <img src="https://img.shields.io/badge/Download_for_macOS-000?style=for-the-badge&logo=apple&logoColor=white" height="40" alt="Download for macOS">
+<a href="https://runpane.com/api/download?version=latest&amp;platform=mac&amp;arch=arm64&amp;format=dmg&amp;source=gh-readme">
+  <img src="https://img.shields.io/badge/Download_for_macOS-000?style=for-the-badge&logo=apple&logoColor=white" height="40" alt="Download for macOS (Apple Silicon)">
 </a>
-<a href="https://runpane.com/api/download?platform=windows&source=gh-readme">
-  <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" height="40" alt="Download for Windows">
+<a href="https://runpane.com/api/download?version=latest&amp;platform=windows&amp;arch=x64&amp;format=exe&amp;source=gh-readme">
+  <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" height="40" alt="Download for Windows (x64)">
 </a>
-<a href="https://runpane.com/api/download?platform=linux&source=gh-readme">
-  <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" height="40" alt="Download for Linux">
+<a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=x64&amp;format=appimage&amp;source=gh-readme">
+  <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" height="40" alt="Download for Linux (x64 AppImage)">
 </a>
+<br />
+<sub>Other builds: <a href="https://runpane.com/api/download?version=latest&amp;platform=mac&amp;arch=x64&amp;format=dmg&amp;source=gh-readme">macOS (Intel)</a> · <a href="https://runpane.com/api/download?version=latest&amp;platform=windows&amp;arch=arm64&amp;format=exe&amp;source=gh-readme">Windows (ARM64)</a> · <a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=arm64&amp;format=appimage&amp;source=gh-readme">Linux ARM64 AppImage</a> · Linux .deb (<a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=x64&amp;format=deb&amp;source=gh-readme">x64</a>, <a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=arm64&amp;format=deb&amp;source=gh-readme">ARM64</a>)</sub>
 
 <br />
 <br />
@@ -398,12 +400,12 @@ The shell installers and the other one-shot commands are at the top of this READ
 
 | Platform | File |
 |----------|------|
-| Windows (x64) | `Pane-x.x.x-Windows-x64.exe` |
-| Windows (ARM64) | `Pane-x.x.x-Windows-arm64.exe` |
-| macOS (Apple Silicon) | `Pane-x.x.x-macOS-arm64.dmg` |
-| macOS (Intel) | `Pane-x.x.x-macOS-x64.dmg` |
-| Linux (x64) | `Pane-x.x.x-linux-x86_64.AppImage` or `.deb` |
-| Linux (ARM64) | `Pane-x.x.x-linux-arm64.AppImage` or `.deb` |
+| Windows (x64) | [`Pane-x.x.x-Windows-x64.exe`](https://runpane.com/api/download?version=latest&platform=windows&arch=x64&format=exe&source=gh-readme) |
+| Windows (ARM64) | [`Pane-x.x.x-Windows-arm64.exe`](https://runpane.com/api/download?version=latest&platform=windows&arch=arm64&format=exe&source=gh-readme) |
+| macOS (Apple Silicon) | [`Pane-x.x.x-macOS-arm64.dmg`](https://runpane.com/api/download?version=latest&platform=mac&arch=arm64&format=dmg&source=gh-readme) |
+| macOS (Intel) | [`Pane-x.x.x-macOS-x64.dmg`](https://runpane.com/api/download?version=latest&platform=mac&arch=x64&format=dmg&source=gh-readme) |
+| Linux (x64) | [`Pane-x.x.x-linux-x86_64.AppImage`](https://runpane.com/api/download?version=latest&platform=linux&arch=x64&format=appimage&source=gh-readme) or [`.deb`](https://runpane.com/api/download?version=latest&platform=linux&arch=x64&format=deb&source=gh-readme) |
+| Linux (ARM64) | [`Pane-x.x.x-linux-arm64.AppImage`](https://runpane.com/api/download?version=latest&platform=linux&arch=arm64&format=appimage&source=gh-readme) or [`.deb`](https://runpane.com/api/download?version=latest&platform=linux&arch=arm64&format=deb&source=gh-readme) |
 
 ### Requirements
 
