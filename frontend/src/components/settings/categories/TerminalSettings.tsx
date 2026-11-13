@@ -122,7 +122,7 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection title="Terminal references" description="Defaults used when @ references scrollback from another terminal in the same pane.">
+      <SettingsSection title="Terminal references" description="Type @ in a terminal to paste scrollback from another terminal in the same pane.">
         <SettingRow
           settingId="terminal-references-enabled"
           label="Reference terminals with @"

@@ -371,7 +371,7 @@ describe('terminal references switch', () => {
     const { file } = await exportSetup(sources({ config: { terminalReferencesEnabled: false } }), ['preferences'], NOW);
     expect(file.sections.preferences).toEqual({ terminalReferencesEnabled: false });
 
-    const preview = await previewSetupImport(file, 'f.json', sources({}));
+    const preview = await previewSetupImport(readSetupFile(JSON.stringify(file), 'f.json'), 'f.json', sources({}));
     expect(preview.sections.find(section => section.id === 'preferences')?.apply)
       .toEqual({ config: { terminalReferencesEnabled: false } });
   });
