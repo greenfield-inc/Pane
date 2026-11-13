@@ -69,6 +69,17 @@ async function clipboardWrites(page: Page): Promise<string[]> {
   return page.evaluate(() => window.__terminalClipboardWrites ?? []);
 }
 
+/**
+ * A new terminal repaints once more shortly after it first shows (TerminalPanel's
+ * delayed activation refresh), and that repaint clears any selection. Tests that
+ * keep a selection past the popover wait for it behind its mask.
+ */
+async function waitForActivationRefresh(page: Page): Promise<void> {
+  const mask = page.getByRole('tabpanel').getByTestId('terminal-activation-mask');
+  await expect(mask).toHaveCount(1);
+  await expect(mask).toHaveCount(0);
+}
+
 async function selectFirstLine(page: Page, terminal: Locator): Promise<void> {
   const viewport = terminal.locator('.xterm-screen');
   await expect(viewport).toBeVisible();
@@ -215,6 +226,7 @@ test('keeps keyboard copy available when Pane shortcuts are disabled', async ({ 
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   const terminal = page.getByRole('tabpanel').locator('.xterm').first();
+  await waitForActivationRefresh(page);
   await selectFirstLine(page, terminal);
   await terminal.locator('.xterm-helper-textarea').focus();
   await page.keyboard.press('Control+Shift+C');
@@ -308,7 +320,7 @@ test('right-click shows the selection actions in a native menu and runs the chos
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   const terminal = page.getByRole('tabpanel').locator('.xterm').first();
-  await expect(page.getByRole('tabpanel').getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  await waitForActivationRefresh(page);
   await selectFirstLine(page, terminal);
   await expect(page.getByRole('button', { name: 'Copy', exact: true }).first()).toBeVisible();
 
@@ -347,7 +359,7 @@ test('right-click offers the browser actions for a selected URL', async ({ page 
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   const terminal = page.getByRole('tabpanel').locator('.xterm').first();
-  await expect(page.getByRole('tabpanel').getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  await waitForActivationRefresh(page);
   await selectFirstLine(page, terminal);
   await terminal.locator('.xterm-screen').click({ button: 'right', position: { x: 20, y: 8 } });
 
