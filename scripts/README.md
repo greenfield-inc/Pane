@@ -19,6 +19,8 @@ pnpm eval:agent-instructions --only rerun-is-a-tab,session-for-multipart-work --
 Options: `--base <ref>` (default `origin/main`), `--head <ref>` (default your
 working tree, uncommitted changes included), `--runs`, `--concurrency`
 (default 3), `--only <scenario ids>`, `--model`, `--out <dir>`.
+`--regrade <run root>` grades the sessions an earlier run saved (the folder it
+prints last) with the current scenarios, at no cost.
 
 Each session gets its own git repository, Pane role (`PANE_SESSION_ID`,
 `PANE_SESSION_DIR`, `PANE_ORCHESTRATION_SESSION_ID`) and `PANE_DIR` in a
