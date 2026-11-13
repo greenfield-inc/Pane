@@ -7,7 +7,7 @@ import { refreshChatAgents, type ChatAgentSource } from './chatAgentsStore';
 export type AgentRegistryClient = Pick<Window['electronAPI']['chatTab'], 'registry' | 'installAgent' | 'removeAgent'> & ChatAgentSource;
 
 /** What one registry agent's row is doing, and why its last install or removal failed. */
-export interface RegistryRowState { busy?: 'install' | 'remove'; error?: string }
+interface RegistryRowState { busy?: 'install' | 'remove'; error?: string }
 
 export interface AgentRegistryState {
   /** Undefined until the first read answers. */
