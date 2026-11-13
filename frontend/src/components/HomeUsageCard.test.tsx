@@ -132,6 +132,13 @@ describe('UsageSnapshotCard', () => {
     expect(markup).not.toContain('Reading transcript files');
   });
 
+  it('keeps the numbers and drops the scan line once reads stop working', () => {
+    const markup = text(render(report({ index: { ...index, scanning: true, filesScanned: 4, filesTotal: 9 } }), true));
+    expect(markup).toContain('48.2M');
+    expect(markup).not.toContain('Reading');
+    expect(markup).toContain('Join the leaderboard');
+  });
+
   it('says the history could not be read when the report fails', () => {
     expect(text(render(null, true))).toContain("Pane couldn't read your agent history");
   });

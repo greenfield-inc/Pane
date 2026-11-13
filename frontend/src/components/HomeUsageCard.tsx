@@ -39,14 +39,15 @@ function scanProgress(index: UsageIndexStatus | null): string {
     : 'Reading transcript files…';
 }
 
+/** `failed`: the card stopped asking after reads in a row failed, so a scan it last saw running reports nothing more. */
 function cardState(report: UsageReport | null, status: UsageIndexStatus | null, failed: boolean): CardState {
   const index = status ?? report?.index ?? null;
-  if (report && report.totals.messageCount > 0) return { kind: 'ready', report, progress: index?.scanning ? scanProgress(index) : null };
+  if (report && report.totals.messageCount > 0) return { kind: 'ready', report, progress: index?.scanning && !failed ? scanProgress(index) : null };
+  if (failed) return { kind: 'unavailable' };
   if (report && index && !passPending(index)) {
     // A pass that ended with an error leaves lastScanFinishedMs unset.
     return index.lastScanFinishedMs !== null ? { kind: 'empty' } : { kind: 'unavailable' };
   }
-  if (failed && !report) return { kind: 'unavailable' };
   return { kind: 'loading', progress: scanProgress(index) };
 }
 
@@ -75,8 +76,8 @@ function useUsageReport() {
       } catch {
         if (!live) return;
         failures += 1;
-        setFailed(true);
         if (failures < MAX_FAILED_READS) later(retry);
+        else setFailed(true);
       }
     };
     const loadReport = (): Promise<void> => run(() => API.usage.getReport(rollingUsageRange(DEFAULT_USAGE_RANGE_DAYS)), data => {
