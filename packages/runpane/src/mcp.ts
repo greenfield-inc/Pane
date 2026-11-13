@@ -27,7 +27,7 @@ const INSTRUCTIONS = [
   RUNPANE_CONTRACT.agentContext.brief.summary,
   'Each tool runs the matching `runpane` command against the running Pane app and returns its `--json` output.',
   '- 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. A new Pane creates a worktree that installs and builds, so create one only when the work\'s branch has none; add later agents with `agents_start` or `panels_create` and `pane: <id>`.',
-  '- Prefer the composite tools: `agents_start` starts an agent on a task, `agents_status` checks on it, `agents_send` sends it a follow-up. To answer a menu or prompt in an agent\'s terminal, send exact keys with `panels_input` (Down \\u001b[B, Enter \\r, Escape \\u001b; tools have no stdin), then check `agents_status`. Ask the user before answering trust or permission prompts.',
+  '- Prefer the composite tools: `agents_start` starts an agent on a task, `agents_status` checks on it, `agents_send` sends it a follow-up. To answer a menu or prompt in an agent\'s terminal, send named keys with `panels_input` `keys` (for example `down,enter`), then check `agents_status`. Ask the user before answering trust or permission prompts.',
   '- Discover before you change anything: ids come from `repos_list`, `panes_list`, `workspace_state` and `agents_start`.',
   '- Pass `yes: true` to a tool that changes state only when the user asked for that change or your Pane instructions authorize it; without it the call is refused and nothing happens.',
   '- Show the user a page, report, file or local dev server with `panels_open`, as a tab beside the agent, not the system browser.',

@@ -23409,10 +23409,8 @@
         ],
         "notes": [
           "Ask only what you can't find out yourself, and put related questions in one card. Send `info` rarely, only for what the person must know now.",
-          "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`.",
           "Write the card as its Summary: a title of about 80 to 100 characters on one line; context as a subtitle of one or two sentences saying why it matters; 2 to 4 choices, each saying what it does, with exactly one recommended; links to every file, page or approval it mentions. Pane refuses a title over 160 characters or with a line break, and two recommended choices.",
           "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",
-          "Examples of a good title and context. Needs a decision (ui approve): \"Speed up slow search: run the database change?\" with \"Search in the app takes 4 s, and an index brings it under 100 ms. It changes the live database and can't easily be undone. Approve runs it now; Deny keeps it ready for later.\", not \"Approve the migration?\" Blocked (ui options): \"The 2.5 release is stuck on a GitHub hiccup\" with \"The fixes you asked for pass everywhere except one Mac build machine, which errored. That's GitHub's machine, not our code.\" and choices \"Rerun it (about 15 min)\" and \"Ship without the Intel Mac build\", not \"Blocked\". Just so you know (ui info): \"Questions from agents now wait until you answer\" with \"The fix you asked for this morning is done and tested. Next is your review: one click to merge.\", not \"Done\" or \"PR #812 is ready\". A question for ask (ui ask): \"What should the release headline say?\" with \"You're writing the 2.5 release notes, and the headline is the first line people read. A few words is enough.\", not \"Which option?\"",
           "Results: options returns {answer: <chosen label>, note?}, with questions also answers (one label per question); approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
           "A result of {reply, picks?, id, replyId, next} means the person typed a reply instead of only picking: it may answer the question or ask one. Read it, then call `runpane notify --took <replyId> answer` to record it as the answer, or `runpane notify --took <replyId> question` and find out, then `runpane notify --update <replyId> --asked \"<their question>\" --what-changed \"<one line per change>\"` with whatever changed, instead of asking again. With no open call the reply reaches your tab as a `reply:` line; `correction:` lines fix how it was taken. --took returns {took, id, next?}. Use its replyId rather than the Q-n: only this call was given it, so it works from outside a Pane tab too.",
           "Only the reply's reader may run took and update: the asker, the orchestrator that relayed it, or Autopilot. Anyone else gets ERR_NOTIFY_NOT_READER.",
@@ -23421,8 +23419,10 @@
           "Inside a Pane terminal the question names its Pane and panel (PANE_SESSION_ID and PANE_PANEL_ID); elsewhere it names the working directory.",
           "An older Pane ignores links and shows the card without them.",
           "With relays the call waits on the worker's card as on any notify, and the answer also goes straight to the worker's tab as `answer: Q-n → <answer> (by you)`. Then record it: `runpane inbox ack <item> --decision <D-n>`.",
-          "Invalid input, such as choices with ui ask, 10 choices, or ui with took or update, fails with a message naming the field, and nothing is shown."
-        ]
+          "Invalid input, such as choices with ui ask, 10 choices, or ui with took or update, fails with a message naming the field, and nothing is shown.",
+          "Examples of a good title and context. Needs a decision (ui approve): \"Speed up slow search: run the database change?\" with \"Search takes 4 s and an index brings it under 100 ms. It changes the live database and can't easily be undone.\", not \"Approve the migration?\" Blocked (ui options): \"The 2.5 release is stuck on a GitHub hiccup\" with \"The fixes pass everywhere except one Mac build machine, which errored. That's GitHub's machine, not our code.\", not \"Blocked\". Just so you know (ui info): \"Questions from agents now wait until you answer\", not \"Done\"."
+        ],
+        "helpIncludesNotes": true
       },
       "autopilot status": {
         "name": "autopilot status",

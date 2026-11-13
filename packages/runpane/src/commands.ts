@@ -1578,5 +1578,12 @@ export function helpText(topic?: string): string {
   const topicLines = topic
     ? Object.entries(helpTopics).find(([key]) => key === topic)?.[1]
     : undefined;
-  return (topicLines ?? helpTopics.default).join('\n');
+  return [...(topicLines ?? helpTopics.default), ...helpNotes(topic)].join('\n');
+}
+
+/** The command's agent notes, for a command whose help carries them (the notify tool description's rules). */
+function helpNotes(topic?: string): string[] {
+  const command = Object.values(RUNPANE_CONTRACT.agentContext.commands).find((candidate) => candidate.name === topic);
+  if (!command || !('helpIncludesNotes' in command) || !command.helpIncludesNotes) return [];
+  return ['', 'Notes:', ...command.notes.map((note) => `  ${note}`)];
 }

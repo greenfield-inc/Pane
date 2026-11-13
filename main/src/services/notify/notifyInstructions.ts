@@ -53,7 +53,7 @@ function renderBlock(options: NotifyInstructionsOptions, fallback: string): stri
     fallback,
     '',
     '## Pane Notify',
-    "When you need the person (a choice, an approval, a short answer) and can't find out yourself, call the `pane` MCP's `notify` instead of asking in the terminal; its description says how to write the card. If that tool isn't loaded, run `runpane notify --ui options|approve|ask|info --title <text>` (`runpane agent-context --command notify` has the rest).",
+    "When you need the person (a choice, an approval, a short answer), call the `pane` MCP's `notify` instead of asking in the terminal; its description says how to write the card. If that tool isn't loaded, run `runpane notify --ui options|approve|ask|info --title <text>` (`runpane notify --help` has the rest).",
     ...rules.map(rule => `- ${rule}`),
     NOTIFY_BLOCK_END,
   ];

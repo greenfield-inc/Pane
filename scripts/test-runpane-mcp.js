@@ -12,6 +12,9 @@ const { test } = require('node:test');
 const rootDir = path.resolve(__dirname, '..');
 const runpaneDir = path.join(rootDir, 'packages', 'runpane');
 const dist = (file) => path.join(runpaneDir, 'dist', file);
+// Claude Code shows a server's instructions, and a tool description it loads up front, only up to
+// this many characters, then "… [truncated]" (CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH, default 4096).
+const CLAUDE_CODE_MCP_TEXT_LIMIT = 4096;
 const sdk = (subpath) => require(require.resolve(`@modelcontextprotocol/sdk/${subpath}`, { paths: [runpaneDir] }));
 const { Client } = sdk('client/index.js');
 const { StdioClientTransport } = sdk('client/stdio.js');
@@ -590,8 +593,10 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
   assert.equal(annotationsOf('repos_list').readOnlyHint, true);
   assert.equal(annotationsOf('panes_archive').destructiveHint, true);
   assert.equal(annotationsOf('agents_start').destructiveHint, false);
-  // How to ask, the secrets rule included, comes with the notify tool rather than every request's instructions.
-  assert.match(list.tools.find((tool) => tool.name === 'notify').description, /For an API key, token or password, call `secrets_request`/);
+  assert.ok(discover.instructions.length <= CLAUDE_CODE_MCP_TEXT_LIMIT, `instructions are ${discover.instructions.length} characters; Claude Code cuts them at ${CLAUDE_CODE_MCP_TEXT_LIMIT}`);
+  for (const tool of list.tools) {
+    assert.ok(tool.description.length <= CLAUDE_CODE_MCP_TEXT_LIMIT, `${tool.name}'s description is ${tool.description.length} characters; Claude Code cuts it at ${CLAUDE_CODE_MCP_TEXT_LIMIT}`);
+  }
 
   assert.equal(responses.get(3).error.code, -32602, 'an unknown tool is an Invalid Params protocol error');
   assert.equal(responses.get(4).result.isError, true, 'bad arguments are a tool execution error');

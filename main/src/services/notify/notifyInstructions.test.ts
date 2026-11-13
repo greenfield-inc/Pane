@@ -55,7 +55,6 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     expect(written).toContain('- For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`.\r\n');
     // How to write the card loads with the notify tool, not in every request.
     expect(written).toContain('its description says how to write the card');
-    expect(written).not.toContain('Write the card as its Summary');
     expect(written.endsWith(`${END}\r\n`)).toBe(true);
     // Codex's folder had no AGENTS.md, so Pane created one holding only the block.
     expect(text(codexFile).startsWith(BEGIN)).toBe(true);

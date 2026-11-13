@@ -84,7 +84,7 @@ describe('Pane approvals rules: one text everywhere an agent learns to ask (D-34
 
   it('gives the same which-card rule in the notify guidance and the managed AGENTS.md block', () => {
     const { notifyGuidance, managedBlock } = RUNPANE_CONTRACT.agentContext;
-    const guidance = [...notifyGuidance.rules, notifyGuidance.cardRule, notifyGuidance.results].join('\n');
+    const guidance = notifyGuidance.rules.join('\n');
     const block = managedBlock.join('\n');
     for (const [where, text] of [['notifyGuidance', guidance], ['managedBlock', block]] as const) {
       expect(text, where).toContain("Claude's own card (AskUserQuestion)");

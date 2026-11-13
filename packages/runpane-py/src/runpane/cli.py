@@ -1669,7 +1669,15 @@ def create_install_telemetry_context(parsed: ParsedArgs, target: str) -> Wrapper
 
 def help_text(topic: Optional[str]) -> str:
     help_topics = RUNPANE_CONTRACT["help"]["pip"]
-    return "\n".join(help_topics.get(topic or "default", help_topics["default"]))
+    return "\n".join([*help_topics.get(topic or "default", help_topics["default"]), *help_notes(topic)])
+
+
+def help_notes(topic: Optional[str]) -> List[str]:
+    """The command's agent notes, for a command whose help carries them (the notify tool description's rules)."""
+    command = RUNPANE_CONTRACT["agentContext"]["commands"].get(topic or "")
+    if not command or not command.get("helpIncludesNotes"):
+        return []
+    return ["", "Notes:", *("  " + note for note in command["notes"])]
 
 
 def print_help(parsed: ParsedArgs) -> int:

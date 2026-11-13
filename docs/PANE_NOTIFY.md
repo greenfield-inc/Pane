@@ -611,8 +611,9 @@ on by default. It has two parts:
 How to write a card (only what the agent can't find out itself, related
 questions in one card, `info` rarely, written for someone who has lost the
 thread, with good and bad examples) and how to read a typed reply live in the
-`notify` tool's description and `runpane agent-context --command notify`.
-Agents read them when they call `notify`, so they don't add to every request.
+`notify` command's notes. Pane prints them in the `notify` tool's description
+and in `runpane notify --help`, so agents read them when they ask, not in every
+request.
 
 Pane writes only those lines, plus a line
 break before them when the file didn't end with one; the rest of the file keeps
@@ -626,7 +627,9 @@ To remove the block, turn Approvals off in Settings → Approvals. Pane writes i
 again when you turn Approvals back on, or at the next launch with Approvals on.
 
 The `pane` MCP server's instructions say only to call `notify` instead of asking
-in the terminal and `secrets_request` for a secret; that is how Cursor learns to ask through Pane.
+in the terminal. Cursor, which gets no user-level block, learns the rest from
+the `notify` tool's description and the repository's managed `AGENTS.md` block,
+which also carries the secrets rule.
 
 ## Linking a call to its Pane
 

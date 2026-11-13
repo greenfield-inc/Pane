@@ -1399,6 +1399,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "helpIncludesNotes": {
+          "description": "`runpane <command> --help` prints the notes too, so agents that only run the CLI read what the MCP tool description says.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false
