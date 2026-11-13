@@ -9,7 +9,8 @@ import { panelApi } from '../../../services/panelApi';
 import { requestBrowserNavigation } from '../../panels/browser/browserNavigation';
 import { openFileInEditor } from '../../../services/openFileInEditor';
 import { usePanelStore } from '../../../stores/panelStore';
-import { useConfigStore } from '../../../stores/configStore';
+import { isCopyOnSelectEnabled, useConfigStore } from '../../../stores/configStore';
+import { isMac } from '../../../utils/platformUtils';
 import type { BrowserPanelState, ToolPanel } from '../../../../../shared/types/panels';
 import { copyTerminalText } from '../../../utils/terminalClipboard';
 import { useCommittedRef } from '../../../hooks/useCommittedRef';
@@ -79,7 +80,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
   const [githubRemoteUrl, setGithubRemoteUrl] = useState<string | null>(null);
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
-  const copyOnSelect = useConfigStore((state) => state.config?.terminalCopyOnSelect === true) || isRemoteMode;
+  const copyOnSelect = useConfigStore((state) => isCopyOnSelectEnabled(state.config));
   const { onCopyError } = config;
   const suppressSelectionPopoverRef = useCommittedRef(config.suppressSelectionPopover);
   const mousePositionRef = useRef({ x: 0, y: 0 });
@@ -162,10 +163,11 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
       };
       // A drag can end outside the terminal (auto-scroll, overshoot), so the
       // release is caught on the document, as xterm does to finish the selection.
-      // Left button only: a right-click selects the word under the pointer
-      // (macOS), and copying it would overwrite what the menu's Paste pastes.
+      // Left button only, and not macOS Ctrl+click (a right-click that reports
+      // button 0): a right-click selects the word under the pointer on macOS,
+      // and copying it would overwrite what the menu's Paste pastes.
       const watchRelease = (event: MouseEvent) => {
-        if (event.button !== 0) return;
+        if (event.button !== 0 || (event.ctrlKey && isMac())) return;
         doc.addEventListener('mouseup', copySelection, { once: true });
       };
       element.addEventListener('mousedown', watchRelease);

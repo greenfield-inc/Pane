@@ -16,6 +16,7 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { PreferredShell, PreferredTerminalPowerMode } from '../../../types/config';
+import { isCopyOnSelectEnabled } from '../../../stores/configStore';
 import { useHostShellSettings } from '../../../hooks/useHostShellSettings';
 
 interface TerminalSettingsProps {
@@ -135,7 +136,7 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
         >
           <ImmediateToggle
             label="Copy on select"
-            value={isRemoteMode || config.terminalCopyOnSelect === true}
+            value={isCopyOnSelectEnabled(config)}
             disabled={isRemoteMode}
             onSave={(value) => persistence.saveConfig('terminal-copy-on-select', { terminalCopyOnSelect: value })}
           />
