@@ -15,6 +15,7 @@ import { withArchiveRepositoryKey } from './archiveRepositoryLock';
 import { ArchiveProcessTracker } from './archiveProcessTracker';
 import { preserveAgentLogs } from './archiveRetention';
 import { PANE_SCRATCH_FOLDER } from '../../../shared/constants/paneFolders';
+import { PaneError, reasonOf } from '../../../shared/paneError';
 
 type CleanupStore = Pick<DatabaseService, 'getArchiveCleanupJobs' | 'saveArchiveCleanupJob' | 'getSession'>;
 type CleanupSessions = Pick<SessionManager, 'getProjectContextByProjectId' | 'runArchiveScript'>;
@@ -374,7 +375,11 @@ export class ArchiveCleanupManager {
       // An agent run with its home in the scratch folder (an isolated QA instance) leaves logs there.
       const scratch = path.join(job.source, ...PANE_SCRATCH_FOLDER.split('/'));
       // A failed move stops this cleanup step: the worktree stays, and the job retries or shows Retry cleanup.
-      await preserveAgentLogs(scratch, job.sessionId);
+      try {
+        await preserveAgentLogs(job.source, scratch, job.sessionId);
+      } catch (error) {
+        throw new PaneError('ERR_AGENT_LOGS_NOT_MOVED', `Could not move the agent logs out of ${scratch}: ${reasonOf(error)}. The worktree was not deleted.`, 'Close any program using those files, then retry the cleanup.');
+      }
       await archiveFs.mkdir(path.dirname(job.quarantine), { recursive: true });
       if (archivePathKey(await archiveFs.realpath(path.dirname(job.quarantine))) !== archivePathKey(path.dirname(job.quarantine))) {
         throw new Error('Cleanup quarantine parent is redirected');

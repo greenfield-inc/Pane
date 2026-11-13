@@ -33,7 +33,7 @@ import { RepositoryIdentities } from '../services/repositoryIdentity';
 import { comparePaneOrder } from '../../../shared/utils/paneOrder';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { markScratchArchived } from '../services/archiveRetention';
+import { clearScratchArchived, markScratchArchived } from '../services/archiveRetention';
 
 const DAEMON_SESSION_CHANNELS = [
   'sessions:get-all',
@@ -156,6 +156,8 @@ export function registerSessionHandlers(
 
   const cleanupPermanentDeleteFiles = async (dbSession: DatabaseSession) => {
     const sessionId = dbSession.id;
+    // Gone for good: its <pane-dir>/scratch folder goes at the next expiry pass.
+    await markScratchArchived(sessionId, new Date(0)).catch(error => console.warn(`[Session IPC] could not mark ${sessionId}'s scratch for deletion:`, error));
 
     try {
       await runCommandManager.stopRunCommands(sessionId);
@@ -436,7 +438,6 @@ export function registerSessionHandlers(
     gitStatusManager.clearSessionCache(sessionId);
     await runCommandManager.retireRunCommandsForArchive(sessionId);
     sessionImageCounters.delete(sessionId);
-    await markScratchArchived(sessionId);
   };
   services.archiveCleanupManager?.setTeardownHandler(teardownArchivedSession);
 
@@ -472,6 +473,9 @@ export function registerSessionHandlers(
       } catch (spotlightError) {
         console.error('[Session IPC] Failed to disable spotlight during archive:', spotlightError);
       }
+
+      // Its <pane-dir>/scratch folder's retention period starts now, on every archive route (WSL included).
+      await markScratchArchived(sessionId);
 
       // Archive the session immediately to provide fast feedback to the user
       if (services.archiveCleanupManager?.supports(dbSession)) {
@@ -1743,6 +1747,7 @@ export function registerSessionHandlers(
       if (!restored) {
         return { success: false, error: 'Session not found or already active' };
       }
+      await clearScratchArchived(sessionId);
       // Reload sessions so the frontend store updates
       const allSessions = sessionManager.getAllSessions();
       sessionManager.emit('sessions-loaded', allSessions);

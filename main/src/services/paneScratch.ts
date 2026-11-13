@@ -2,23 +2,17 @@ import fs from 'fs/promises';
 import path from 'path';
 import { PANE_SCRATCH_FOLDER } from '../../../shared/constants/paneFolders';
 import { PaneError } from '../../../shared/paneError';
-import { getAppDirectory } from '../utils/appDirectory';
 import { ownsRemovableWorktree } from '../utils/owns-removable-worktree';
 import { databaseService } from './database';
 import { folderUsage, worktreePaneFolder } from './worktreePaneFolder';
-import { expiresAt } from './archiveRetention';
+import { appScratchDirectory, appScratchRoot, expiresAt } from './archiveRetention';
 import type { RunpanePaneScratch } from '../../../shared/types/runpaneOrchestration';
-
-/** `<pane-dir>/scratch/<pane-id>/`: scratch for a Pane whose folder archive keeps (a Session, a main-repo or adopted Pane). */
-function appScratchDirectory(paneId: string): string {
-  return path.join(getAppDirectory(), 'scratch', paneId.replace(/[^A-Za-z0-9._-]/gu, '_'));
-}
 
 /**
  * The folder Pane exports as `$PANE_SCRATCH_DIR` to a Pane's tabs, created on
  * first use: `<worktree>/.pane/scratch/` when archiving the Pane deletes its
- * worktree, otherwise `<pane-dir>/scratch/<pane-id>/`, which
- * `removePaneScratch` deletes on archive. A Session's tabs pass the Session's
+ * worktree, otherwise `<pane-dir>/scratch/<pane-id>/`, which archive
+ * retention deletes after the retention period. A Session's tabs pass the Session's
  * own Pane. Undefined only when neither can be created.
  */
 export async function paneScratchDirectory(paneId: string): Promise<string | undefined> {
@@ -48,8 +42,8 @@ export async function paneScratchDirectory(paneId: string): Promise<string | und
  * date archive retention deletes it.
  */
 export async function paneScratchUsage(paneId: string, worktreePath: string | undefined, retentionDays: number, now: Date = new Date()): Promise<RunpanePaneScratch | undefined> {
-  const inWorktree = worktreePath ? await folderUsage(path.join(worktreePath, ...PANE_SCRATCH_FOLDER.split('/'))) : undefined;
+  const inWorktree = worktreePath ? await folderUsage(worktreePath, path.join(worktreePath, ...PANE_SCRATCH_FOLDER.split('/'))) : undefined;
   if (inWorktree) return inWorktree;
-  const kept = await folderUsage(appScratchDirectory(paneId));
+  const kept = await folderUsage(appScratchRoot(), appScratchDirectory(paneId));
   return kept && { ...kept, deletedAt: expiresAt(now, retentionDays).toISOString() };
 }

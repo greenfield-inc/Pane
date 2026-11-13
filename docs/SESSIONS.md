@@ -554,7 +554,7 @@ sharing of other conversations.
 
 ## One Pane per feature
 
-**1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane.**
+**Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it.** `runpane doctor` prints the full working rules.
 
 A feature here means one branch and its PR. A new Pane creates a worktree that
 checks out the repository, installs dependencies and often builds, so it is
@@ -754,10 +754,17 @@ archive never reaches it. Pane creates it when the first tab starts:
 | A worktree Pane created (archive removes the worktree) | `<worktree>/.pane/scratch/`, hidden by the repository's `.git/info/exclude` | With the worktree, on archive |
 | A Pane on the main checkout or an adopted worktree | `<pane-dir>/scratch/<pane-id>/` | 14 days after archive |
 | A Session's own tabs | `<pane-dir>/scratch/<session-pane-id>/` | 14 days after the Session is archived |
+| A WSL project, or a WSL terminal of a worktree Pane created | `<pane-dir>/scratch/<pane-id>/`, as a `/mnt/c/...` path inside WSL | 14 days after archive |
+
+Tabs on an SSH host get no `PANE_SCRATCH_DIR`: a folder on this machine means
+nothing on the remote one.
 
 Pane never deletes a main checkout or an adopted worktree. The 14 days come
 from **Settings → Worktrees & Git → Keep archived folders**; restoring before
-then keeps the folder. Scratch never blocks archive: its files are hidden from
+then keeps the folder. A permanently deleted Pane's scratch goes at the next
+expiry pass. Pane records each archive time in
+`<pane-dir>/scratch/.archived/<pane-id>`, outside the folders agents write, and
+checks again right before each delete that the Pane or Session is still archived. Scratch never blocks archive: its files are hidden from
 git, so they are neither untracked nor uncommitted. `runpane panes archive
 --dry-run` lists the folder with its size, and the date it will be deleted when
 it is kept.
@@ -765,9 +772,13 @@ it is kept.
 Before deleting a scratch or Session folder, Pane moves every agent log inside
 it (an agent run with its home there) to
 `<pane-dir>/agent-logs/<agent>/<pane-id>/`, finding them by each agent's
-`transcriptDirs` in the agents config. Usage & Limits reads
-`<pane-dir>/agent-logs/` beside `~/.claude/projects` and `~/.codex/sessions`.
-Pane never moves or deletes anything in the agents' own folders in your home.
+`transcriptDirs` in the agents config. If a move fails, nothing is deleted.
+Usage & Limits reads `<pane-dir>/agent-logs/` beside `~/.claude/projects` and
+`~/.codex/sessions`. Pane only reads, moves or deletes a folder that sits
+exactly where Pane put it: a scratch folder that is a symbolic link or a
+Windows junction, or is reached through one, is left alone (a link is only
+unlinked), so Pane never moves or deletes anything in the agents' own folders
+in your home.
 
 Write the folder's absolute path into the brief rather than
 `$PANE_SESSION_DIR`. Under `blockReadsOutsideWorkingDirectories` Claude Code

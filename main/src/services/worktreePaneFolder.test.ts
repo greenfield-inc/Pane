@@ -23,7 +23,7 @@ describe('Pane scratch folder', () => {
     fs.symlinkSync(path.join(repo, '.git'), path.join(folder!.directory, 'link'));
 
     expect(git(repo, 'status', '--porcelain', '--untracked-files=all')).toBe('');
-    const usage = await folderUsage(folder!.directory);
+    const usage = await folderUsage(repo, folder!.directory);
     expect(usage?.path).toBe(folder!.directory);
     // 1000 + 24 file bytes, plus the link itself (its target path's length).
     expect(usage?.bytes).toBe(1024 + path.join(repo, '.git').length);

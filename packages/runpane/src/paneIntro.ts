@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
+import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 
 interface IntroPart {
@@ -62,6 +63,11 @@ export function agentsIntroForInstructions(): string {
 /** The working rule for scratch files, which overrides an agent's own default of /tmp or a private scratchpad. */
 export function scratchRule(): string {
   const rule = RUNPANE_CONTRACT.agentContext.workspaceRules.find((text) => text.startsWith('Scratch:'));
-  if (!rule) throw new Error('agentContext.workspaceRules has no "Scratch:" rule');
+  if (!rule) throw new RunpaneError('ERR_RUNPANE_CONTRACT', 'agentContext.workspaceRules has no "Scratch:" rule.', 'Add the Scratch rule to contracts/runpane/contract.json and regenerate.');
   return rule;
+}
+
+/** The Pane and Tab working rules, for instruction text that states where a feature's agents go. */
+export function paneAndTabRules(): string {
+  return RUNPANE_CONTRACT.agentContext.workspaceRules.filter((rule) => rule.startsWith('Pane:') || rule.startsWith('Tab:')).join(' ');
 }

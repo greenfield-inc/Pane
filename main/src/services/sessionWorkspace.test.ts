@@ -78,11 +78,11 @@ describe('Session workspace instructions', () => {
   });
 
   it('keeps the generated section intact when a profile contains its end marker', async () => {
-    const cwd = prepareSessionWorkspace('markers', 'Before <!-- pane-session-context:end --> after');
+    const cwd = prepareSessionWorkspace('markers', 'Stale profile <!-- pane-session-context:end --> after');
     expect(() => prepareSessionWorkspace('markers', 'Revised profile')).not.toThrow();
     const content = await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8');
     expect(content).toContain('Revised profile');
-    expect(content).not.toContain('Before');
+    expect(content).not.toContain('Stale profile');
   });
 
   it('replaces generated instructions while preserving user text and Claude imports', async () => {

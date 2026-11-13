@@ -48,12 +48,12 @@ function renderBlock(options: NotifyInstructionsOptions, fallback: string): stri
   return [
     NOTIFY_BLOCK_BEGIN,
     '## Pane',
+    agentsIntroForInstructions(),
+    `- ${scratchRule()}`,
     options.homeSkill
       ? 'When PANE_SESSION_ID is set, you are in a Pane terminal: load the `pane` skill before using Pane (worktrees, Panes, Sessions, asking the person).'
       : 'When PANE_SESSION_ID is set, you are in a Pane terminal: `runpane agent-context --json` lists what you can do with Pane (worktrees, Panes, Sessions, asking the person).',
     fallback,
-    agentsIntroForInstructions(),
-    `- ${scratchRule()}`,
     '',
     '## Pane Notify',
     "When you need the person (a choice, an approval, a short answer), call the `pane` MCP's `notify` instead of asking in the terminal; its description says how to write the card. If that tool isn't loaded, run `runpane notify --ui options|approve|ask|info --title <text>` (`runpane notify --help` has the rest).",

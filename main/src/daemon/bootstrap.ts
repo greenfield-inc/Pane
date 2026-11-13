@@ -76,6 +76,7 @@ import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { startArchiveExpiry } from '../services/archiveExpiry';
+import { ARCHIVE_EXPIRY_START_DELAY_MS } from '../../../shared/constants/archiveRetention';
 
 interface PaneDaemonHostOptions {
   app: App;
@@ -562,7 +563,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   autoPauser.sync();
   // Delete archived folders past their retention, keeping their agent logs; deferred so startup stays fast.
   let stopArchiveExpiry: (() => void) | undefined;
-  const archiveExpiryTimer = setTimeout(() => { stopArchiveExpiry = startArchiveExpiry(); }, 10000);
+  const archiveExpiryTimer = setTimeout(() => { stopArchiveExpiry = startArchiveExpiry(); }, ARCHIVE_EXPIRY_START_DELAY_MS);
   archiveExpiryTimer.unref();
   listeningPortMonitor.start();
   if (mode === 'desktop') {

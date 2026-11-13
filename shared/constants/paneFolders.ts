@@ -8,3 +8,16 @@
 export const PANE_PROMPTS_FOLDER = '.pane/prompts';
 /** `$PANE_SCRATCH_DIR`: an agent's temporary files, clones, captures and downloads. */
 export const PANE_SCRATCH_FOLDER = '.pane/scratch';
+
+/** Folders Pane keeps in its data directory (`<pane-dir>`). */
+/** `<pane-dir>/scratch/<pane-id>/`: scratch for Panes whose own folder archive keeps. */
+export const PANE_DIR_SCRATCH_FOLDER = 'scratch';
+/** `<pane-dir>/scratch/.archived/<pane-id>`: when a Pane was archived, outside the folders agents write. */
+export const PANE_DIR_ARCHIVED_MARKERS_FOLDER = '.archived';
+/** `<pane-dir>/agent-logs/`: agent logs kept from folders Pane deleted. */
+export const PANE_DIR_AGENT_LOGS_FOLDER = 'agent-logs';
+
+/** A Pane id as a single folder name. */
+export function paneFolderName(paneId: string): string {
+  return paneId.replace(/[^A-Za-z0-9._-]/gu, '_');
+}

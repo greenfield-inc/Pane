@@ -816,7 +816,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "panes create",
-      "summary": "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.",
+      "summary": "Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.",
       "usage": [
         "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
         "runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
@@ -3558,7 +3558,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
         "  runpane panes create --from-json <path|-> [--yes] [--json]",
         "",
-        "Creates a Pane in a saved repository and opens a terminal-backed tool tab. 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create one only when the work's branch has no Pane yet; for existing work use `runpane panels create --pane <id>`.",
+        "Creates a Pane in a saved repository and opens a terminal-backed tool tab. Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Create one only when the work's branch has no Pane yet; for existing work use `runpane panels create --pane <id>`.",
         "",
         "A long or multi-line prompt is never typed into the shell: on bash, zsh or sh the agent launches with `\"$(cat '<prompt file>')\"` reading a private copy under `<pane-dir>/prompts/<pane-id>/`; on PowerShell, cmd, fish or WSL the prompt is pasted into the agent's composer once it is ready.",
         "",
@@ -5514,7 +5514,7 @@ export const RUNPANE_CONTRACT = {
         "  python -m runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
         "  runpane panes create --from-json <path|-> [--yes] [--json]",
         "",
-        "Creates a Pane in a saved repository and opens a terminal-backed tool tab. 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create one only when the work's branch has no Pane yet; for existing work use `runpane panels create --pane <id>`.",
+        "Creates a Pane in a saved repository and opens a terminal-backed tool tab. Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Create one only when the work's branch has no Pane yet; for existing work use `runpane panels create --pane <id>`.",
         "",
         "A long or multi-line prompt is never typed into the shell: on bash, zsh or sh the agent launches with `\"$(cat '<prompt file>')\"` reading a private copy under `<pane-dir>/prompts/<pane-id>/`; on PowerShell, cmd, fish or WSL the prompt is pasted into the agent's composer once it is ready.",
         "",
@@ -7034,7 +7034,7 @@ export const RUNPANE_CONTRACT = {
       "The wrapper must stream Pane stdout/stderr without reformatting because `pane --remote-setup` prints the one-time `pane-remote://...` connection code.",
       "`runpane update` defaults to both app and active supported CLI, with independent supervision, staging, durable status, and explicit restoration outcomes. Prerequisites, status fields/exit codes, draft handling and manual recovery are documented in [Update recovery](UPDATE_RECOVERY.md).",
       "`runpane version` prints only wrapper package metadata and does not contact, launch, or focus the Pane app or daemon.",
-      "`runpane doctor` checks platform support, release metadata reachability, download URL selection, installed Pane detection, daemon reachability, every `runpane` on `PATH` against the Pane-managed CLI, and remote-daemon hints. `--fix` updates npm installs of `runpane` older than the Pane-managed CLI to its version and never removes a file. Add `--json` for a machine-readable report that agents should run before mutating Pane state. Installed app version detection must be best-effort and must not launch, focus, or configure Pane; macOS wrappers read app bundle metadata instead of executing `Pane --version`.",
+      "`runpane doctor` opens with Pane's intro (\"For people\" and \"For agents\", the sentence about reaching the person following the Approvals setting) and the working rules (Session, Pane, Tab, Scratch), also in `--json` as `intro` and `workspaceRules`. It then checks platform support, release metadata reachability, download URL selection, installed Pane detection, daemon reachability, every `runpane` on `PATH` against the Pane-managed CLI, and remote-daemon hints. `--fix` updates npm installs of `runpane` older than the Pane-managed CLI to its version and never removes a file. Add `--json` for a machine-readable report that agents should run before mutating Pane state. Installed app version detection must be best-effort and must not launch, focus, or configure Pane; macOS wrappers read app bundle metadata instead of executing `Pane --version`.",
       "`runpane daemon repair` rewrites and restarts only the managed remote-daemon launcher/service. It never creates pairing credentials, changes tunnels, or downloads Pane; doctor only recommends it and never runs it automatically.",
       "`runpane agent-context` prints a brief, token-efficient command schema for coding agents without connecting to the Pane daemon.",
       "`runpane agent-context --command \"panes create\"` prints the detailed definition for one command. Add `--json` for machine-readable output. An unknown command exits 2 and lists the closest command names; with `--json` it prints `{ ok: false, code: \"unknown_command\", message, candidates }` on stdout.",
@@ -17563,7 +17563,7 @@ export const RUNPANE_CONTRACT = {
           "A Session is a workstream: the person or an orchestrator opens it, and every Pane it starts stays attached to it.",
           "Each feature gets one Pane, a git worktree on its own branch, and everything for that feature (the agent that builds it, its reviews, QA and fixes) runs as tabs inside it.",
           "Scratch files go in $PANE_SCRATCH_DIR inside the Pane.",
-          "When the feature is done, archiving the Pane removes the worktree, its tabs and its scratch files together.",
+          "When the feature is done, archive the Pane and Pane cleans up its worktree, tabs and scratch files.",
           "{approvals}"
         ],
         "approvals": {
@@ -17573,10 +17573,10 @@ export const RUNPANE_CONTRACT = {
       }
     },
     "workspaceRules": [
-      "Session: the default home for a workstream or any multi-step work you orchestrate. Its folder ($PANE_SESSION_DIR) holds plans, notes and reports.",
+      "Session: where a workstream lives, and the default home for orchestrated work. Its folder ($PANE_SESSION_DIR) holds plans, notes and reports.",
       "Pane: one per feature (one worktree, one branch). Before creating one, find the feature's Pane (`runpane panes list --json`, match the branch) and create one only when none exists.",
       "Tab: reviews, review reruns, QA, fixes and follow-ups for a feature go in new tabs in its Pane (`runpane panels create --pane <id>`), never a new Pane or a plain `git worktree`.",
-      "Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. Archiving the Pane deletes it with everything in it."
+      "Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. When the feature is done, archive the Pane and Pane cleans it up."
     ],
     "brief": {
       "title": "Pane agent context",
@@ -17584,10 +17584,10 @@ export const RUNPANE_CONTRACT = {
       "rules": [
         "Start with `runpane doctor --json` to understand wrapper, platform, daemon reachability, and the next safe commands before mutating Pane state.",
         "In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`.",
-        "Happy path for any user request to use Pane/RunPane: run `runpane doctor --json`, read `runpane agent-context --json`, resolve or add the saved base repo, then route by the rule 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane: if the work's branch already has a Pane (find it with `runpane panes list --repo <repo> --json` by matching the PR's head branch against `git -C <worktreePath> branch --show-current`), open a new agent tab in it with `runpane panels create --pane <id> --agent <agent> --initial-input \"<task>\" --source agent --no-focus --wait-ready --yes --json`; only when the branch has no Pane yet, create one with a complete command such as `runpane panes create --repo <repo> --name <name> --agent <agent> --prompt \"<task>\" --source agent --no-focus --wait-ready --yes --json` (the new Pane is pinned by default; add `--no-pinned` for a throwaway Pane, add `--base-branch <ref>` to branch from something other than the repository default, or use `--tool-command <command>` instead of `--agent <agent>`), then validate with `panels wait` or `panels screen`. For long-lived supervision, use `runpane watch --follow` instead of polling wait or screen.",
+        "Happy path for any user request to use Pane/RunPane: run `runpane doctor --json`, read `runpane agent-context --json`, resolve or add the saved base repo, then route by the rule Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it: if the work's branch already has a Pane (find it with `runpane panes list --repo <repo> --json` by matching the PR's head branch against `git -C <worktreePath> branch --show-current`), open a new agent tab in it with `runpane panels create --pane <id> --agent <agent> --initial-input \"<task>\" --source agent --no-focus --wait-ready --yes --json`; only when the branch has no Pane yet, create one with a complete command such as `runpane panes create --repo <repo> --name <name> --agent <agent> --prompt \"<task>\" --source agent --no-focus --wait-ready --yes --json` (the new Pane is pinned by default; add `--no-pinned` for a throwaway Pane, add `--base-branch <ref>` to branch from something other than the repository default, or use `--tool-command <command>` instead of `--agent <agent>`), then validate with `panels wait` or `panels screen`. For long-lived supervision, use `runpane watch --follow` instead of polling wait or screen.",
         "Treat Pane as the user's visible cockpit for watching/co-driving work. Do not create Panes or panels for private delegation unless the user asked for visible Pane orchestration or the result should appear in the Pane app.",
         "Register the saved base repository once with `repos add`; do not register a pre-created worktree as a separate repo unless the user explicitly asks.",
-        "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Use `panes create` only when the work's branch has no Pane yet (new work, or an existing PR with no Pane), since each new Pane creates a worktree. Every later agent for that branch opens as a new tab in its Pane with `panels create --pane <id>`, never a new Pane. Tabs share one checkout: only the implementer changes the branch or HEAD, one writer at a time; review, audit and QA tabs never run `git checkout`, `reset` or `stash`.",
+        "Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Use `panes create` only when the work's branch has no Pane yet (new work, or an existing PR with no Pane), since each new Pane creates a worktree. Every later agent for that branch opens as a new tab in its Pane with `panels create --pane <id>`, never a new Pane. Tabs share one checkout: only the implementer changes the branch or HEAD, one writer at a time; review, audit and QA tabs never run `git checkout`, `reset` or `stash`.",
         "For private background decomposition, use your normal subagent/worktree mechanism instead of Pane.",
         "Skill routing: Pane's skills live in `<PANE_DIR>/skills/pane-chat/skills/`, and the Pane Chat entry point is `<PANE_DIR>/skills/pane-chat/pane-orchestrator/SKILL.md`; read the skill that matches the request, such as `discussion`, `create-ticket`, `tdd`, `prepare-pr`, or `review`.",
         "When an agent creates Panes or panels, pass `--source agent --no-focus --wait-ready --yes --json` unless the user explicitly wants focus moved; `panes create` pins the new Pane into the UI's favorite/pin set by default, so no follow-up `panes pin` call is needed and `--no-pinned` is the opt-out for throwaway Panes.",
@@ -17745,7 +17745,7 @@ export const RUNPANE_CONTRACT = {
         },
         {
           "name": "panes create",
-          "summary": "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.",
+          "summary": "Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.",
           "arguments": [
             "--repo <selector>",
             "--name <name>",
@@ -18933,8 +18933,8 @@ export const RUNPANE_CONTRACT = {
       },
       "panes create": {
         "name": "panes create",
-        "summary": "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.",
-        "details": "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Use this only when the work's branch has no Pane yet: new work, or an existing PR with no Pane. Each new Pane creates a worktree that checks out, installs and often builds, so creating several at once can freeze the machine. First find the feature's Pane with `runpane panes list --repo <repo> --json` by matching the PR's head branch (`gh pr view <n> --json headRefName`) against `git -C <worktreePath> branch --show-current`. For review, follow-up review, fixes, QA or any other agent on work that already has a Pane, use `runpane panels create --pane <id>` to open a new agent tab in that Pane instead. Select the saved base repository, choose a built-in agent or custom terminal command, and optionally send initial input after the tool starts. Pane creates and owns a git worktree/branch for each new Pane; do not pre-create a git worktree and register it as a separate repo unless the user explicitly asks. For private background decomposition, use your normal subagent/worktree mechanism instead of Pane.",
+        "summary": "Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.",
+        "details": "Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Use this only when the work's branch has no Pane yet: new work, or an existing PR with no Pane. Each new Pane creates a worktree that checks out, installs and often builds, so creating several at once can freeze the machine. First find the feature's Pane with `runpane panes list --repo <repo> --json` by matching the PR's head branch (`gh pr view <n> --json headRefName`) against `git -C <worktreePath> branch --show-current`. For review, follow-up review, fixes, QA or any other agent on work that already has a Pane, use `runpane panels create --pane <id>` to open a new agent tab in that Pane instead. Select the saved base repository, choose a built-in agent or custom terminal command, and optionally send initial input after the tool starts. Pane creates and owns a git worktree/branch for each new Pane; do not pre-create a git worktree and register it as a separate repo unless the user explicitly asks. For private background decomposition, use your normal subagent/worktree mechanism instead of Pane.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -19125,7 +19125,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "At least one of --agent or --tool-command is required unless --from-json is used.",
-          "`panes create` is for user-visible Pane orchestration, not the agent's default private delegation mechanism. 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane: before creating one, find the feature's Pane with `runpane panes list --repo <repo> --json` by matching the PR's head branch (`gh pr view <n> --json headRefName`) against `git -C <worktreePath> branch --show-current`, and add a tab with `panels create --pane <id>` when it exists.",
+          "`panes create` is for user-visible Pane orchestration, not the agent's default private delegation mechanism. Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it: before creating one, find the feature's Pane with `runpane panes list --repo <repo> --json` by matching the PR's head branch (`gh pr view <n> --json headRefName`) against `git -C <worktreePath> branch --show-current`, and add a tab with `panels create --pane <id>` when it exists.",
           "Register the saved base repository once. Pane creates and owns the worktree/branch for each new Pane.",
           "`panes create --base <ref> --branch <name> --prompt-file <file>` replaces `git worktree add` plus `panes adopt`: Pane creates the worktree on exactly that branch name. `--branch` is checked with `git check-ref-format --branch` and fails if the branch already exists; `--worktree-name` still names the directory.",
           "Agent-created Panes should pass `--source agent --no-focus --wait-ready --yes --json` unless the user explicitly wants focus moved. `panes create` pins the new Pane by default, so a follow-up `panes pin` call is unnecessary; pass `--no-pinned` for throwaway shells or bulk imports. `--pinned` is still accepted and is now a no-op. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
@@ -20335,8 +20335,8 @@ export const RUNPANE_CONTRACT = {
       },
       "panels create": {
         "name": "panels create",
-        "summary": "Open a new agent tab (reviewer, auditor, QA, fix or helper) inside an existing Pane, sharing its worktree. 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane: use this, not panes create, for any later agent on existing work.",
-        "details": "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. This is the default way to start any later agent on work that already has a Pane, including reviewers, follow-up reviewers, auditors, fix implementers, QA and clean-context helpers. The new tab is a fresh agent that shares the Pane's worktree and branch; it does not create a new worktree. Review, audit and QA tabs never run `git checkout`, `reset` or `stash`, and a fix tab starts only after the previous writer has stopped. Use `panes create` only when the work's branch has no Pane yet. Agent/orchestrator-created panels should pass --source agent or --no-focus so the user stays in the implementation tab. The daemon initializes the terminal immediately and can wait for CLI readiness.",
+        "summary": "Open a new agent tab (reviewer, auditor, QA, fix or helper) inside an existing Pane, sharing its worktree. Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it: use this, not panes create, for any later agent on existing work.",
+        "details": "Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). This is the default way to start any later agent on work that already has a Pane, including reviewers, follow-up reviewers, auditors, fix implementers, QA and clean-context helpers. The new tab is a fresh agent that shares the Pane's worktree and branch; it does not create a new worktree. Review, audit and QA tabs never run `git checkout`, `reset` or `stash`, and a fix tab starts only after the previous writer has stopped. Use `panes create` only when the work's branch has no Pane yet. Agent/orchestrator-created panels should pass --source agent or --no-focus so the user stays in the implementation tab. The daemon initializes the terminal immediately and can wait for CLI readiness.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -21680,7 +21680,7 @@ export const RUNPANE_CONTRACT = {
       "agents start": {
         "name": "agents start",
         "summary": "Start an agent on a task and wait until it is ready: as a new tab in an existing Pane with --pane <id> (review, audit, fix, QA), or in a new Pane with --repo and --name for new work.",
-        "details": "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. For work that already has a Pane, pass --pane <id>: the agent opens as a new tab sharing that Pane's worktree and branch. Only when the work's branch has no Pane yet, pass --repo and --name to create one. It returns the pane and panel ids and a pane:// link to hand the user.",
+        "details": "Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). For work that already has a Pane, pass --pane <id>: the agent opens as a new tab sharing that Pane's worktree and branch. Only when the work's branch has no Pane yet, pass --repo and --name to create one. It returns the pane and panel ids and a pane:// link to hand the user.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -23941,7 +23941,7 @@ export const RUNPANE_CONTRACT = {
       "",
       "This repository is used with [Pane](https://runpane.com). Drive it with the CLI or the `pane` MCP server.",
       "",
-      "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.",
+      "Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.",
       "",
       "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question \"<question>\"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
       "",

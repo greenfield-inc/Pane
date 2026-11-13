@@ -2858,9 +2858,13 @@ def print_pane_archive_bulk_result(result: Dict[str, Any]) -> None:
                 print(f"    {describe_scratch(item['scratch'])}")
 
 
+# From 0.1 MB a scratch size reads in MB; below it, in KB.
+SCRATCH_SIZE_IN_MB_FROM = 104_858
+
+
 def describe_scratch(scratch: Dict[str, Any]) -> str:
     size_bytes = scratch.get("bytes") or 0
-    size = f"{-(-size_bytes // 1024)} KB" if size_bytes < 104_858 else f"{size_bytes / 1_048_576:.1f} MB"
+    size = f"{-(-size_bytes // 1024)} KB" if size_bytes < SCRATCH_SIZE_IN_MB_FROM else f"{size_bytes / 1_048_576:.1f} MB"
     if scratch.get("deletedAt"):
         return (
             f"Keeps the scratch folder {scratch.get('path')} ({size}) until "

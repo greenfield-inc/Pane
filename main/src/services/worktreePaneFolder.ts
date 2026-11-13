@@ -53,9 +53,25 @@ export async function worktreePaneFolder(
   return { root: path.normalize(top), directory };
 }
 
-/** A folder and the bytes in it, without following links, or undefined when it does not exist. */
-export async function folderUsage(directory: string): Promise<{ path: string; bytes: number } | undefined> {
-  if (!(await fs.lstat(directory).catch(() => undefined))?.isDirectory()) return undefined;
+/**
+ * Whether `folder` is a real folder exactly where it sits below `root`: no
+ * symbolic link or Windows junction anywhere between them can point it
+ * elsewhere. Pane reads, moves or deletes only confined folders.
+ */
+export async function isConfinedFolder(root: string, folder: string): Promise<boolean> {
+  const relative = path.relative(root, folder);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return false;
+  try {
+    if (!(await fs.lstat(folder)).isDirectory()) return false;
+    return await fs.realpath(folder) === path.join(await fs.realpath(root), relative);
+  } catch {
+    return false;
+  }
+}
+
+/** A confined folder (see `isConfinedFolder`) and the bytes in it, without following links; undefined otherwise. */
+export async function folderUsage(root: string, directory: string): Promise<{ path: string; bytes: number } | undefined> {
+  if (!(await isConfinedFolder(root, directory))) return undefined;
   let bytes = 0;
   const pending = [directory];
   for (let current = pending.pop(); current; current = pending.pop()) {

@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { worktreePaneFolder } from '../worktreePaneFolder';
-import { PANE_PROMPTS_FOLDER } from '../../../../shared/constants/paneFolders';
+import { PANE_PROMPTS_FOLDER, paneFolderName } from '../../../../shared/constants/paneFolders';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { RunpanePromptWarning } from '../../../../shared/types/runpaneOrchestration';
 
@@ -51,7 +51,7 @@ function promptFileName(now: Date): string {
 /** `<paneDir>/prompts/<paneId>/`, readable only by the user. */
 async function appPromptsDirectory(paneId: string): Promise<string> {
   const promptsRoot = path.join(getAppDirectory(), 'prompts');
-  const directory = path.join(promptsRoot, paneId.replace(/[^A-Za-z0-9._-]/gu, '_'));
+  const directory = path.join(promptsRoot, paneFolderName(paneId));
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
   // mkdir's mode applies only to directories it creates, and is masked by umask.
   await fs.chmod(promptsRoot, 0o700);

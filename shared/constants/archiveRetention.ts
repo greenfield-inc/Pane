@@ -4,6 +4,11 @@
  * them. The `archiveRetentionDays` setting overrides it.
  */
 export const ARCHIVE_RETENTION_DAYS = 14;
+export const DAY_MS = 24 * 60 * 60 * 1000;
+/** Expiry's first pass waits this long after the daemon host starts, so startup stays fast. */
+export const ARCHIVE_EXPIRY_START_DELAY_MS = 10_000;
+/** Expiry runs again this often. */
+export const ARCHIVE_EXPIRY_INTERVAL_MS = 6 * 60 * 60 * 1000;
 export const MIN_ARCHIVE_RETENTION_DAYS = 1;
 export const MAX_ARCHIVE_RETENTION_DAYS = 365;
 

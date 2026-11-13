@@ -16,6 +16,7 @@ import { describeWorktreeBase, recordProjectFetch, refreshWorktreeBase } from '.
 import type { RunpanePaneBase } from '../../../shared/types/runpaneOrchestration';
 import { preserveAgentLogs } from './archiveRetention';
 import { PANE_SCRATCH_FOLDER } from '../../../shared/constants/paneFolders';
+import { PaneError, reasonOf } from '../../../shared/paneError';
 
 type WorktreeAuditSource = 'session-delete' | 'project-delete' | 'create-cleanup';
 
@@ -565,8 +566,12 @@ export class WorktreeManager {
         logWorktreeAudit('remove_started', auditDetails);
         // An agent run with its home in the scratch folder (an isolated QA instance) leaves logs there.
         const scratch = path.join(pathResolver.toFileSystem(worktreePath), ...PANE_SCRATCH_FOLDER.split('/'));
-        await preserveAgentLogs(scratch, auditContext?.sessionId ?? path.basename(worktreePath))
-          .catch(error => console.warn(`[WorktreeManager] Could not keep agent logs from ${scratch}:`, error));
+        // A failed move stops the removal, so the logs are never deleted with the worktree.
+        try {
+          await preserveAgentLogs(pathResolver.toFileSystem(worktreePath), scratch, auditContext?.sessionId ?? path.basename(worktreePath));
+        } catch (error) {
+          throw new PaneError('ERR_AGENT_LOGS_NOT_MOVED', `Could not move the agent logs out of ${scratch}: ${reasonOf(error)}. The worktree was not deleted.`, 'Close any program using those files, then try again.');
+        }
         const outcome = await removeWorktreeViaTrash(worktreePath, projectPath, pathResolver, commandRunner, {
           label: auditContext?.sessionId,
         });
