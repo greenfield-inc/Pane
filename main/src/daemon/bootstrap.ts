@@ -75,6 +75,7 @@ import { NamedLockStore } from '../services/namedLockStore';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { startArchiveExpiry } from '../services/archiveExpiry';
 
 interface PaneDaemonHostOptions {
   app: App;
@@ -559,6 +560,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   sessionPrMonitor.start();
   loopManager.start();
   autoPauser.sync();
+  // Delete archived folders past their retention, keeping their agent logs; deferred so startup stays fast.
+  let stopArchiveExpiry: (() => void) | undefined;
+  const archiveExpiryTimer = setTimeout(() => { stopArchiveExpiry = startArchiveExpiry(); }, 10000);
+  archiveExpiryTimer.unref();
   listeningPortMonitor.start();
   if (mode === 'desktop') {
     versionChecker.startPeriodicCheck();
@@ -597,6 +602,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       // First, so no run starts while the services it needs are closing.
       loopManager.stop();
       autoPauser.stop();
+      clearTimeout(archiveExpiryTimer);
+      stopArchiveExpiry?.();
       await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
