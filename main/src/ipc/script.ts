@@ -228,7 +228,8 @@ export function registerScriptHandlers(
         return {
           success: false,
           error: 'No IDE command is set for this project, and there is no default for all projects. '
-            + 'Nothing was opened. Set one under Open IDE Command in Project Settings.',
+            + 'Nothing was opened. Set one under Open IDE Command in Project Settings, '
+            + 'or set a Default Open IDE Command in Settings > Worktrees & Git.',
         };
       }
 
