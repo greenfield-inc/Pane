@@ -15,6 +15,9 @@ const isHelp = args.includes('--help') || args.includes('-h') || ['agent-context
 if (args[0] === 'mcp') {
   env.EVAL_VIA = 'mcp';
   require(env.EVAL_MCP_BUNDLE).runMcpServer({ toolsets: ['core'] });
+} else if (args[0] === 'doctor') {
+  log();
+  process.stdout.write(healthyDoctor());
 } else if (isHelp) {
   log();
   const real = spawnSync(process.execPath, [env.EVAL_CLI_BUNDLE, ...args], { stdio: 'inherit', env });
@@ -28,6 +31,18 @@ if (args[0] === 'mcp') {
   }
   process.stdout.write(`${JSON.stringify(answer.body)}\n`);
   process.exit(answer.code ?? 0);
+}
+
+/**
+ * The version's own `runpane doctor` output with Pane's daemon reported as running, the way it reads
+ * on a machine where Pane is open. The pane skill tells agents to stop when doctor fails.
+ */
+function healthyDoctor() {
+  const real = spawnSync(process.execPath, [env.EVAL_CLI_BUNDLE, ...args], { encoding: 'utf8', env });
+  if (!args.includes('--json')) return real.stdout.replace(/^Pane daemon: unreachable.*$/m, 'Pane daemon: reachable');
+  const report = JSON.parse(real.stdout);
+  const { error: _error, nextCommand: _next, ...daemon } = report.daemon;
+  return `${JSON.stringify({ ...report, ok: true, daemon: { ...daemon, reachable: true } }, null, 2)}\n`;
 }
 
 /** Appends this call to the run's log; returns how many earlier answered calls had the same command. */

@@ -41,8 +41,9 @@ minimal valid example of the command's result; and passes `--help`,
 `agent-context` and `docs` to the version under test, so no card, Pane or
 secret is touched. Before the first session, every scripted answer is checked
 against the MCP tool's output schema, and a script key that names no runpane
-command fails the run. `runpane doctor` has no scripted answer, so agents that
-run it see an error in both versions. Scenarios grade only what the agent did:
+command fails the run. `runpane doctor` prints the version's own report with
+Pane's daemon shown as running, since the `pane` skill tells agents to stop
+when doctor fails. Scenarios grade only what the agent did:
 its `runpane` and `pane` MCP calls, Bash commands and written files.
 `scenarios.mjs` lists them. The run fails (exit 1) when the head passes any
 scenario fewer times than the base. Results go to

@@ -275,7 +275,7 @@ function observe(transcript, log, runDir) {
     ...[...text.matchAll(/\$\{?TMPDIR\}?|\bmktemp\b|tempfile\.|os\.tmpdir\(\)/g)].map((m) => m[0]),
   ]);
   // Other sessions' folders hold the other version's instructions.
-  const otherRuns = [...new Set(touched.flatMap((text) => [...normalize(text).matchAll(new RegExp(`${escapeRegExp(normalize(path.join(root, 'runs')))}/[^/"\\s]+/[^/"\\s]+`, 'g'))].map((m) => m[0])))]
+  const otherRuns = [...new Set(touched.flatMap((text) => [...normalize(text).matchAll(new RegExp(`${escapeRegExp(normalize(path.join(root, 'runs')))}/[\\w.-]+/[\\w.-]+`, 'g'))].map((m) => m[0])))]
     .filter((dir) => !normalize(runDir).startsWith(dir));
   const reachedOut = [...offLimits.filter((dir) => touched.some((text) => normalize(text).includes(normalize(dir)))), ...otherRuns];
   return { calls, tools, bash, writes, tempPaths, reachedOut, text: result.result ?? '', cost: result.total_cost_usd ?? 0, seconds: Math.round((result.duration_ms ?? 0) / 1000), model: init.model, error: result.is_error === true || !result.type };
