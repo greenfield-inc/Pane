@@ -49,7 +49,7 @@ async function moveDirectory(source: string, target: string): Promise<void> {
 /**
  * Move every agent log folder inside `folder` (an agent run with its home or
  * config inside it, for example an isolated QA instance) to
- * `<pane-dir>/agent-logs/<agent>/<owner-id>/<n>/`, before Pane deletes
+ * `<pane-dir>/agent-logs/<agent>/<owner-id>/<layout>/<n>/`, before Pane deletes
  * `folder`. Finds them by each agent's `transcriptDirs`. Never follows a link,
  * so the agents' own folders in the person's home are never touched.
  */
@@ -63,7 +63,8 @@ export async function preserveAgentLogs(folder: string, ownerId: string): Promis
     for (const { agent, dir } of layouts) {
       if (!(await isRealPathBelow(current, dir))) continue;
       const source = path.join(current, ...dir.split('/'));
-      const agentRoot = path.join(agentLogsDirectory(), agent, owner);
+      // `.cursor/chats` lands in `cursor/<owner>/cursor-chats/<n>`, keeping which store it came from.
+      const agentRoot = path.join(agentLogsDirectory(), agent, owner, dir.replace(/^\./u, '').replace(/[^A-Za-z0-9._-]+/gu, '-'));
       let index = 0;
       while (await fs.lstat(path.join(agentRoot, String(index))).then(() => true, () => false)) index += 1;
       await moveDirectory(source, path.join(agentRoot, String(index)));

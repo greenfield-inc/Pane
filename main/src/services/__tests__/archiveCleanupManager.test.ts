@@ -203,7 +203,7 @@ describe('durable archive cleanup', { timeout: 15000 }, () => {
     f.restart();
     await settled(f, 'completed');
     expect(existsSync(f.source)).toBe(false);
-    expect(readFileSync(path.join(f.root, 'data', 'agent-logs', 'claude', 'pane-1', '0', 'p', 's.jsonl'), 'utf8')).toBe('turn');
+    expect(readFileSync(path.join(f.root, 'data', 'agent-logs', 'claude', 'pane-1', 'claude-projects', '0', 'p', 's.jsonl'), 'utf8')).toBe('turn');
   });
 
   it('repairs registration for an already missing source and tolerates absent artifacts', async () => {

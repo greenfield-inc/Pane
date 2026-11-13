@@ -35,9 +35,9 @@ describe('archive retention', () => {
 
     expect(fs.existsSync(scratch)).toBe(false);
     expect(fs.readFileSync(path.join(realHome, '.claude', 'projects', 'p', 'real.jsonl'), 'utf8')).toBe('real');
-    expect(fs.readFileSync(path.join(paneDir, 'agent-logs', 'claude', 'pane-1', '0', 'p', 'qa.jsonl'), 'utf8')).toBe('qa');
-    expect(fs.readFileSync(path.join(paneDir, 'agent-logs', 'codex', 'pane-1', '0', '2026', '11', '13', 'rollout.jsonl'), 'utf8')).toBe('codex');
-    expect(fs.readdirSync(path.join(paneDir, 'agent-logs', 'claude', 'pane-1'))).toEqual(['0']);
+    expect(fs.readFileSync(path.join(paneDir, 'agent-logs', 'claude', 'pane-1', 'claude-projects', '0', 'p', 'qa.jsonl'), 'utf8')).toBe('qa');
+    expect(fs.readFileSync(path.join(paneDir, 'agent-logs', 'codex', 'pane-1', 'codex-sessions', '0', '2026', '11', '13', 'rollout.jsonl'), 'utf8')).toBe('codex');
+    expect(fs.readdirSync(path.join(paneDir, 'agent-logs', 'claude', 'pane-1'))).toEqual(['claude-projects']);
   });
 
   it('deletes what has been archived longer than the retention period, and keeps the rest', async () => {

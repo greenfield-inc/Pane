@@ -17553,7 +17553,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "approvals": {
           "on": "Anything that needs you, like a decision, an approval or a merge, waits for you in Approvals while everything else keeps moving.",
-          "off": "Anything that needs you, like a decision, an approval or a merge, the agent asks in its terminal while everything else keeps moving."
+          "off": "When the agent needs you for a decision, an approval or a merge, it asks in its terminal while everything else keeps moving."
         }
       },
       "agents": {

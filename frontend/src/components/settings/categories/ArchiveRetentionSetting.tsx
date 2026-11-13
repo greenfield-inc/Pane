@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { SaveState, SettingRow } from '../SettingRow';
+import { SettingRow } from '../SettingRow';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { cn } from '../../../utils/cn';
 import {
@@ -63,7 +63,6 @@ function ArchiveRetentionDaysField({ persistence, savedDays }: { persistence: Se
           )}
         />
         <span className="text-sm text-text-secondary">days</span>
-        <SaveState state={persistence.saveStates['archive-retention'] ?? { state: 'idle' }} />
       </div>
       {invalid && <p id={errorId} role="alert" className="text-xs text-status-error">{DAYS_ERROR} Nothing was saved; Pane keeps {savedDays} days.</p>}
     </div>

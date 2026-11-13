@@ -857,7 +857,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         this.buildTerminalState(record);
         await this.reconcilePersistedSessionOwner(record);
         await this.finishPromotion(record);
-        if (!Object.values(record.panelIds).some(id => this.agentStarted(id))) {
+        // An archived Session's folder may have expired; its tab recreates it once the Session is restored and opened.
+        if (record.archived !== true && !Object.values(record.panelIds).some(id => this.agentStarted(id))) {
           prepareSessionWorkspace(record.id, record.profile, record);
         }
         for (const agent of PANE_CHAT_AGENTS) {
