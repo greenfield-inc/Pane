@@ -2,6 +2,46 @@
 
 This directory contains build and maintenance scripts for the Pane application.
 
+## agent-instructions-eval/
+
+Runs real Claude Code sessions under two versions of what Pane tells agents
+(the Notify block Pane writes into `~/.claude/CLAUDE.md`, the `pane` MCP
+server's instructions and tool descriptions, and the `pane` skill) and checks
+that the newer one makes agents behave at least as well. Use it before merging
+a change to any of those texts.
+
+```bash
+git fetch origin main
+pnpm eval:agent-instructions                     # origin/main vs your working tree, 3 runs each
+pnpm eval:agent-instructions --only rerun-is-a-tab,session-for-multipart-work --runs 5
+```
+
+Options: `--base <ref>` (default `origin/main`), `--head <ref>` (default your
+working tree, uncommitted changes included), `--runs`, `--concurrency`
+(default 3), `--only <scenario ids>`, `--model`, `--out <dir>`.
+
+Each session gets its own git repository, Pane role (`PANE_SESSION_ID`,
+`PANE_SESSION_DIR`, `PANE_ORCHESTRATION_SESSION_ID`) and `PANE_DIR` in a
+temporary folder. A stub stands in for Pane on both the CLI and the MCP
+server: it logs every call, answers with the scenario's script, and passes
+`--help` and `agent-context` to the version under test, so no card, Pane or
+secret is touched. Scenarios grade only what the agent did: its `runpane` and
+`pane` MCP calls, Bash commands and written files. `scenarios.mjs` lists them.
+The run fails (exit 1) when the head passes any scenario fewer times than the
+base. Results go to `tmp/agent-instructions-eval/<time>/results.md`; the run
+folders with each transcript and call log stay in the temporary folder.
+
+Login: with `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set, each session
+gets its own HOME holding exactly what Pane installs. Otherwise it uses your
+Claude Code login with your user settings, memory, skills, hooks and MCP
+servers turned off; the Notify block is loaded as the repository's
+`CLAUDE.local.md` and the `pane` skill is left out for both versions. Sessions
+are not saved and write no auto memory.
+
+Cost: each session is one real Claude Code task, about $0.20 and 1 to 2
+minutes on the default model. The full set (15 scenarios, 2 versions, 3 runs)
+is 90 sessions: about $20 and 40 minutes at concurrency 3.
+
 ## benchmark-cold-start.mjs
 
 Launches the built app repeatedly and reports p50/p75 of wall time from spawn
