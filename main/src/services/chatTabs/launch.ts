@@ -11,14 +11,14 @@ import { getRuntimeConfigManager } from '../../core/runtime';
 import { noteContextPath } from '../noteFiles';
 import { withRunpaneBinOnPath } from '../runpaneShim';
 import { grantPaneMcp, paneMcpChatServer } from '../paneMcpEndpoint';
-import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from '../paneMcpNames';
+import { PANE_MCP_PLUGIN_DENY_SETTINGS, PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from '../paneMcpNames';
 import { isStandardCustomResume, type CustomCommandResume } from '../../../../shared/types/customCommandResume';
 import { adapterEntry, checkAgentCli } from '../agentChat/adapterSetup';
 import { hostCommand, npmShimScript } from '../agentChat/hostCommand';
 import { agentConfig, agentLabel, type AgentConfig, type AgentChatConfig } from '../../../../shared/agents';
 import { panePortFor } from '../panePort';
 import type { ChatTabLauncher, ResolvedLaunch } from './manager';
-import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { claudeSessionFolderSettings, isSessionFolderSettings } from '../agents/sessionFolderAccess';
 import type { ResolvedProjectEnv } from '../projectEnvVars';
 import { sessionGitCeiling } from '../sessionWorkspace';
@@ -135,7 +135,7 @@ export class AgentChatLauncher implements ChatTabLauncher {
     }
     if (!chat.adapter) launch.ownCli = true;
     Object.assign(launch, fullAccessLaunch(chat, state.launch));
-    const meta = sessionFolderMeta(state);
+    const meta = withPaneMcpPluginDenied(sessionFolderMeta(state), paneMcp ? chat.adapter?.sessionFolderSettingsMeta : undefined);
     if (meta) launch.meta = meta;
     return launch;
   }
@@ -281,6 +281,18 @@ function quoteToken(token: string): string { return /^[\w@%+=:,./-]+$/.test(toke
  * session/load to an adapter whose config accepts them. A Session orchestrator works in
  * its own folder, so it gets none; Windows gets none, as in terminals.
  */
+/**
+ * Adds the deny for the Claude plugin's own `pane` server to the adapter's session settings, for a
+ * chat that reaches Pane's tools over HTTP, so it sees one Pane server. `namespace` is the adapter's
+ * settings `_meta` namespace, undefined when the chat has no HTTP grant.
+ */
+function withPaneMcpPluginDenied(meta: JsonObject | undefined, namespace: string | undefined): JsonObject | undefined {
+  if (!namespace) return meta;
+  const options = decodeOptionalBoundary(meta?.[namespace], boundary.object({ options: boundary.object({ settings: boundary.jsonObject }) }));
+  const settings = options?.options.settings ?? {};
+  return { ...meta, [namespace]: { options: { settings: { ...settings, ...PANE_MCP_PLUGIN_DENY_SETTINGS } } } };
+}
+
 export function sessionFolderMeta(state: Pick<ChatPanelState, 'agent' | 'cwd' | 'sessionFolder'>, platform: NodeJS.Platform = process.platform): JsonObject | undefined {
   const namespace = agentConfig(state.agent)?.chat?.adapter?.sessionFolderSettingsMeta;
   if (!namespace || platform === 'win32' || !state.sessionFolder || path.resolve(state.sessionFolder) === path.resolve(state.cwd)) return undefined;

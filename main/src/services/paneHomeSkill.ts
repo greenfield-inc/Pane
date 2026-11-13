@@ -10,6 +10,7 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { linuxToUNCPath } from '../utils/wslUtils';
 import { APPROVALS_RULES } from './approvalsRules';
 import { agentsIntroForInstructions, scratchRule } from '../../../packages/runpane/src/paneIntro';
+import { isPanePluginEnabled } from './claudePanePlugin';
 
 /**
  * A user-level skill that teaches any agent in a Pane terminal how to reach
@@ -107,7 +108,14 @@ async function syncPaneHomeSkillNow(
   wslDistros: string[],
 ): Promise<PaneHomeSkillResult[]> {
   const enabled = isPaneHomeSkillEnabled(config);
-  const results = enabled ? await installPaneHomeSkill(dirs) : await removePaneHomeSkill(dirs);
+  // Pane's Claude plugin carries this skill, so Claude's copy steps aside while the plugin is on.
+  const claudeDir = paneHomeSkillDirs()[0];
+  const claudeSettings = path.join(path.dirname(path.dirname(claudeDir)), 'settings.json');
+  const retired = enabled && dirs.includes(claudeDir) && await isPanePluginEnabled(claudeSettings) ? claudeDir : undefined;
+  const results: PaneHomeSkillResult[] = [];
+  for (const dir of dirs) {
+    results.push(...(enabled && dir !== retired ? await installPaneHomeSkill([dir]) : await removePaneHomeSkill([dir])));
+  }
   if (process.platform !== 'win32') return results;
 
   const recorded = await readWslDistroRecord();

@@ -164,6 +164,18 @@ describe('Pane home skill', () => {
     expect((await removePaneHomeSkill(dirs)).map(result => result.outcome)).toEqual(['absent', 'absent']);
   });
 
+  it("leaves Claude's copy to the pane Claude plugin while it is on, and writes it again once it is off", async () => {
+    const claudeDir = path.join(home, '.claude');
+    vi.stubEnv('CLAUDE_CONFIG_DIR', claudeDir);
+    const plugin = (on: boolean) => fs.writeFile(path.join(claudeDir, 'settings.json'), JSON.stringify({ enabledPlugins: { 'pane@claude-plugins-official': on } }));
+    expect((await syncPaneHomeSkill({}, dirs)).map(result => result.outcome)).toEqual(['written', 'written']);
+
+    await plugin(true);
+    expect((await syncPaneHomeSkill({}, dirs)).map(result => result.outcome)).toEqual(['removed', 'unchanged']);
+    await plugin(false);
+    expect((await syncPaneHomeSkill({}, dirs)).map(result => result.outcome)).toEqual(['written', 'unchanged']);
+  });
+
   it('follows the setting: on by default, off removes', async () => {
     expect((await syncPaneHomeSkill({}, dirs)).map(result => result.outcome)).toEqual(['written', 'written']);
     expect((await syncPaneHomeSkill({ agentContext: { managedAgentsMd: false, homeSkill: false } }, dirs))

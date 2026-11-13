@@ -8,7 +8,8 @@ import { agentConfig } from '../../../shared/agents';
 import { getAppDirectory, getAppSubdirectory } from '../utils/appDirectory';
 import { tokenizeShellCommand } from './agents/agentIdentity';
 import { quoteShellWord } from './agents/shellWord';
-import { PANE_MCP_SERVER_NAME, PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
+import { PANE_MCP_SERVER_NAME, PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV, PANE_MCP_PLUGIN_DENY_SETTINGS } from './paneMcpNames';
+import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import { bundledRunpanePath } from './runpaneShim';
 import { readBody, sendError, tabListener, type TabListener } from './tabListener';
 
@@ -247,15 +248,58 @@ export function withPaneMcpConfig(panelId: string, agentType: string | undefined
   const word = quoteShellWord(`${flag}=${file}`, shellType);
   const executable = path.basename(tokens?.[0] ?? '').replace(/\.(exe|cmd)$/i, '').toLowerCase();
   if (!tokens || !word || !agent.executables.some(name => name.toLowerCase() === executable) || tokens.includes('--strict-mcp-config') || command.includes(file)) return command;
-  const content = `${JSON.stringify(MCP_CONFIG, null, 2)}\n`;
+  const settingsFlag = agent.terminal.paneMcpSettingsFlag;
+  const settingsFile = path.join(path.dirname(file), 'pane-http-settings.json');
   try {
-    mkdirSync(path.dirname(file), { recursive: true });
-    if (!existsSync(file) || readFileSync(file, 'utf8') !== content) writeFileSync(file, content);
+    writeIfChanged(file, MCP_CONFIG);
+    if (settingsFlag) writeIfChanged(settingsFile, PANE_MCP_PLUGIN_DENY_SETTINGS);
   } catch (error) {
     console.warn(`[PaneMcp] ${agent.label} keeps its stdio Pane tools: ${file} could not be written (${error instanceof Error ? error.message : String(error)}).`);
     return command;
   }
-  return `${command.slice(0, spans[0].end)} ${word}${command.slice(spans[0].end)}`;
+  const settings = settingsFlag ? denyPluginServer(command, tokens, spans, settingsFlag, settingsFile, shellType) : { command, word: undefined };
+  const added = [word, settings.word].filter(Boolean).join(' ');
+  return `${settings.command.slice(0, spans[0].end)} ${added}${settings.command.slice(spans[0].end)}`;
+}
+
+function writeIfChanged(file: string, value: object): void {
+  const content = `${JSON.stringify(value, null, 2)}\n`;
+  mkdirSync(path.dirname(file), { recursive: true });
+  if (!existsSync(file) || readFileSync(file, 'utf8') !== content) writeFileSync(file, content);
+}
+
+/**
+ * Hides the plugin's server through the settings flag. The agent keeps only the last settings it
+ * is given, so settings JSON already on the command (a Session's folder access) gets the deny
+ * merged in, in place; otherwise the returned word adds Pane's settings file. A settings file the
+ * command names stays as it is, and the plugin's server then loads beside Pane's.
+ */
+function denyPluginServer(
+  command: string,
+  tokens: string[],
+  spans: Array<{ start: number; end: number }>,
+  flag: string,
+  file: string,
+  shellType: string | undefined,
+): { command: string; word: string | undefined } {
+  const at = tokens.findIndex(token => token === flag || token.startsWith(`${flag}=`));
+  if (at === -1) return { command, word: quoteShellWord(`${flag}=${file}`, shellType) };
+  const inline = tokens[at] !== flag;
+  const valueAt = inline ? at : at + 1;
+  const value = inline ? tokens[at].slice(flag.length + 1) : tokens[valueAt];
+  let given: JsonObject | undefined;
+  try {
+    given = decodeOptionalBoundary(JSON.parse(value ?? ''), boundary.jsonObject);
+  } catch {
+    given = undefined;
+  }
+  if (!given || !spans[valueAt]) return { command, word: undefined };
+  const denied = decodeOptionalBoundary(given.deniedMcpServers, boundary.array(boundary.json)) ?? [];
+  const merged = JSON.stringify({ ...given, deniedMcpServers: [...denied, ...PANE_MCP_PLUGIN_DENY_SETTINGS.deniedMcpServers] });
+  const replacement = quoteShellWord(inline ? `${flag}=${merged}` : merged, shellType);
+  if (!replacement) return { command, word: undefined };
+  const { start, end } = spans[valueAt];
+  return { command: `${command.slice(0, start)}${replacement}${command.slice(end)}`, word: undefined };
 }
 
 /**

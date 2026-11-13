@@ -122,7 +122,8 @@ export const RUNPANE_CONTRACT = {
           "promptArgument": true,
           "configDir": ".claude",
           "reportsConversation": true,
-          "paneMcpConfigFlag": "--mcp-config"
+          "paneMcpConfigFlag": "--mcp-config",
+          "paneMcpSettingsFlag": "--settings"
         },
         "install": {
           "url": "https://code.claude.com/docs/en/setup",

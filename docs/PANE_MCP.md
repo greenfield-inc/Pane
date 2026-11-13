@@ -40,6 +40,15 @@ Claude Code and Claude chat tabs that Pane starts reach the same tools over HTTP
 - Settings apply at once. With **Register Pane tools** off, new tabs get no token, and a running tab's calls get `403` until it restarts on stdio. A toolsets change applies to the next request.
 - Serving is stateless. A call ends, and its `runpane` process stops, when the agent drops the request; a separate `notifications/cancelled` message has no request to cancel. An agent that names itself only at `initialize` is named after the tab's agent, so `notify` keeps its long wait.
 
+## Claude plugin
+
+Pane's Claude plugin (the [`claude-plugin/`](../claude-plugin/README.md) folder) gives Claude Code and Cowork the `pane` and `pane-manage-and-message-agents` skills and this server, started as `npx -y runpane@<pinned version> mcp --toolsets plugin`. The pinned runpane hands each call to the installed Pane's own CLI when that one is newer, so the tools follow the installed Pane.
+
+While the plugin is on in Claude Code's user settings (`enabledPlugins` has `pane@<marketplace>` set to `true`), Pane steps aside so Claude sees one Pane server and one copy of each skill:
+
+- On launch, Pane removes its own `pane` entry from Claude Code's user config and its own Claude copies of the two skills. After you turn the plugin off, restart Pane to bring them back. Codex and Cursor registration is unchanged.
+- Claude terminal tabs that Pane points at its HTTP server also get `--settings=<Pane data dir>/mcp/pane-http-settings.json` (the agent config's `terminal.paneMcpSettingsFlag`), which denies the plugin's server (`deniedMcpServers`, `plugin:pane:pane`). Claude keeps only the last `--settings`, so when the command already passes settings JSON (a Session's folder access) Pane merges the deny into it; a settings file you name yourself is left as it is. Chat tabs get the same deny in their session settings.
+
 ## Toolsets
 
 A server that offers dozens of tools makes models, especially smaller ones, worse at choosing the right one. So by default the server serves a lean `core` toolset, and everything else is opt-in:
