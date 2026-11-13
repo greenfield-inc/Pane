@@ -14,7 +14,11 @@ import {
   PORTS_QUIET_INTERVAL_MS,
 } from '../../../shared/types/listeningPorts';
 
-const POLL_INTERVAL_MS = 2_000;
+/**
+ * How often the gate below is checked, so how long a new server waits to be listed while agents
+ * stream. Each read costs about 55 ms of CPU on macOS, so this caps reads at about 1% of a core.
+ */
+const POLL_INTERVAL_MS = 6_000;
 /**
  * A server started by a terminal or agent is announced by output: its logs, or the agent's turn.
  * Reading the socket table costs about 55 ms of CPU on macOS, so it is read at a poll only after
@@ -64,7 +68,7 @@ export interface ListeningPortMonitor {
   refresh(): Promise<ListeningPortsSnapshot>;
   /** The list from the last read, without reading again. */
   snapshot(): ListeningPortsSnapshot;
-  /** Refreshes at the next 2 s poll after terminal or agent output, else every minute while watched, and less often when a read is slow, until `stop`. */
+  /** Refreshes at the next 6 s poll after terminal or agent output, else every minute while watched, and less often when a read is slow, until `stop`. */
   start(): void;
   stop(): void;
 }

@@ -247,7 +247,8 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
     try {
       await monitor.refresh();
       const { port } = await startListener(HTTP_SERVER);
-      await new Promise(resolve => setTimeout(resolve, 5_000));
+      // Past one 6 s poll, so a poll ran and skipped the read.
+      await new Promise(resolve => setTimeout(resolve, 8_000));
       expect(listed(port)).toBe(false);
 
       terminal.print();
@@ -265,9 +266,9 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
     try {
       await monitor.refresh();
       const { port } = await startListener(HTTP_SERVER);
-      // Polls still run every 2 s; only the clock jumps past the minute.
+      // Polls still run every 6 s; only the clock jumps past the minute. Wait past one poll.
       vi.setSystemTime(Date.now() + 2 * 60_000);
-      await new Promise(resolve => setTimeout(resolve, 5_000));
+      await new Promise(resolve => setTimeout(resolve, 8_000));
       expect(listed(port)).toBe(false);
 
       watched = true;
