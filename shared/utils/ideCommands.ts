@@ -47,14 +47,22 @@ export function isBuiltInIdeCommand(command: string): boolean {
   return BUILT_IN_IDES.some((ide) => ide.command === command.trim());
 }
 
-/** The app-wide default after saving a project's IDE command, or undefined to leave it unchanged ('' clears it). */
-export function nextDefaultIdeCommand(
-  projectCommand: string,
-  useForAllProjects: boolean,
-  currentDefault: string | null | undefined,
-): string | undefined {
+export interface ProjectIdeSharing {
+  projectCommand: string;
+  /** "Use for all projects" when the dialog opened. */
+  wasShared: boolean;
+  /** "Use for all projects" now. */
+  shared: boolean;
+  currentDefault: string | null | undefined;
+}
+
+/**
+ * The app-wide default after saving a project's IDE command, or undefined to leave it unchanged ('' clears it).
+ * Only the toggle changes the default: turning it on shares the project's command, and turning it off clears it.
+ */
+export function nextDefaultIdeCommand({ projectCommand, wasShared, shared, currentDefault }: ProjectIdeSharing): string | undefined {
   const project = present(projectCommand);
   const current = present(currentDefault);
-  if (useForAllProjects) return project && project !== current ? project : undefined;
-  return current && current === project ? '' : undefined;
+  if (shared) return project && project !== current ? project : undefined;
+  return wasShared && current ? '' : undefined;
 }

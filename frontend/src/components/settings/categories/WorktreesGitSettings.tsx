@@ -8,6 +8,7 @@ import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { WorktreeFileSyncEntry } from '../../../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../../../shared/types/worktreeFileSync';
+import { BUILT_IN_IDES } from '../../../../../shared/utils/ideCommands';
 
 interface WorktreesGitSettingsProps {
   persistence: SettingsPersistence;
@@ -19,11 +20,16 @@ export function WorktreesGitSettings({ persistence, onDirtyChange }: WorktreesGi
   const persistedEntries = config.worktreeFileSync ?? DEFAULT_WORKTREE_FILE_SYNC_ENTRIES;
   const [entries, setEntries] = useState<WorktreeFileSyncEntry[]>(persistedEntries);
   const persistedJson = JSON.stringify(persistedEntries);
-  const dirty = JSON.stringify(entries) !== persistedJson;
+  const entriesDirty = JSON.stringify(entries) !== persistedJson;
+  const persistedIdeCommand = config.defaultIdeCommand ?? '';
+  const [ideCommand, setIdeCommand] = useState(persistedIdeCommand);
+  const ideCommandDirty = ideCommand.trim() !== persistedIdeCommand.trim();
+  const dirty = entriesDirty || ideCommandDirty;
   const hasInvalidEntry = entries.some((entry) => entry.path.trim().length === 0);
 
   // SAFETY: App-owned storage writes this value through the matching typed serializer.
   useEffect(() => setEntries(JSON.parse(persistedJson) as WorktreeFileSyncEntry[]), [persistedJson]);
+  useEffect(() => setIdeCommand(persistedIdeCommand), [persistedIdeCommand]);
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
@@ -40,7 +46,11 @@ export function WorktreesGitSettings({ persistence, onDirtyChange }: WorktreesGi
     if (hasInvalidEntry || duplicatePaths.size > 0) return;
     const normalized = entries.map((entry) => ({ ...entry, path: entry.path.trim() }));
     const saved = await persistence.saveConfig('worktree-file-sync', { worktreeFileSync: normalized });
-    if (saved) onDirtyChange(false);
+    if (saved && !ideCommandDirty) onDirtyChange(false);
+  };
+
+  const applyIdeCommand = async () => {
+    await persistence.saveConfig('default-ide-command', { defaultIdeCommand: ideCommand.trim() });
   };
 
   return (
@@ -150,9 +160,33 @@ export function WorktreesGitSettings({ persistence, onDirtyChange }: WorktreesGi
                   Reset Defaults
                 </Button>
               </div>
-              <Button type="button" size="sm" disabled={!dirty || hasInvalidEntry || duplicatePaths.size > 0} onClick={apply}>
+              <Button type="button" size="sm" disabled={!entriesDirty || hasInvalidEntry || duplicatePaths.size > 0} onClick={apply}>
                 Apply
               </Button>
+            </div>
+          </div>
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Open in IDE">
+        <SettingRow
+          settingId="default-ide-command"
+          label="Default Open IDE Command"
+          description="Runs in the worktree when you open a project that has no Open IDE Command of its own. A project's own command wins. Leave empty for none."
+          saveState={persistence.saveStates['default-ide-command']}
+          align="start"
+        >
+          <div className="w-full space-y-2 sm:w-[430px]">
+            <Input
+              aria-label="Default Open IDE Command"
+              value={ideCommand}
+              onChange={(event) => setIdeCommand(event.target.value)}
+              placeholder={`e.g. ${BUILT_IN_IDES[0].command}`}
+              className="font-mono text-sm"
+              fullWidth
+            />
+            <div className="flex justify-end">
+              <Button type="button" size="sm" disabled={!ideCommandDirty} onClick={applyIdeCommand}>Apply</Button>
             </div>
           </div>
         </SettingRow>

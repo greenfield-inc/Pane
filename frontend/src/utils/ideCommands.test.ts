@@ -21,19 +21,24 @@ describe('resolveIdeCommand', () => {
 });
 
 describe('nextDefaultIdeCommand', () => {
-  it('sets the default when the project command is used for all projects', () => {
-    expect(nextDefaultIdeCommand(' idea . ', true, undefined)).toBe('idea .');
-    expect(nextDefaultIdeCommand('idea .', true, 'code .')).toBe('idea .');
+  const save = (projectCommand: string, wasShared: boolean, shared: boolean, currentDefault?: string) =>
+    nextDefaultIdeCommand({ projectCommand, wasShared, shared, currentDefault });
+
+  it('shares the project command while the toggle is on', () => {
+    expect(save(' idea . ', false, true)).toBe('idea .');
+    expect(save('idea .', false, true, 'code .')).toBe('idea .');
+    expect(save('zed .', true, true, 'idea .')).toBe('zed .');
   });
 
-  it('leaves the default alone when nothing changes it', () => {
-    expect(nextDefaultIdeCommand('idea .', true, 'idea .')).toBeUndefined();
-    expect(nextDefaultIdeCommand('', true, 'idea .')).toBeUndefined();
-    expect(nextDefaultIdeCommand('subl .', false, 'idea .')).toBeUndefined();
-    expect(nextDefaultIdeCommand('', false, 'idea .')).toBeUndefined();
+  it('leaves the default alone unless the toggle changes it', () => {
+    expect(save('idea .', true, true, 'idea .')).toBeUndefined();
+    expect(save('', true, true, 'idea .')).toBeUndefined();
+    expect(save('zed .', false, false, 'zed .')).toBeUndefined();
+    expect(save('subl .', false, false, 'idea .')).toBeUndefined();
   });
 
-  it('clears the default when its project stops using it for all projects', () => {
-    expect(nextDefaultIdeCommand('idea .', false, 'idea .')).toBe('');
+  it('clears the default when the toggle is turned off', () => {
+    expect(save('idea .', true, false, 'idea .')).toBe('');
+    expect(save('idea .', true, false, undefined)).toBeUndefined();
   });
 });

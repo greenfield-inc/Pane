@@ -1,5 +1,4 @@
 import { execFile } from 'child_process';
-import fs from 'fs/promises';
 import http from 'http';
 import os from 'os';
 import path from 'path';
@@ -272,39 +271,21 @@ async function readLsofSockets(): Promise<ListeningSocket[]> {
   return sockets;
 }
 
-/**
- * Linux: `ss` names the owner only for this user's processes; others list with no pid.
- * It gives the main thread's name, which a program may rename (Node calls it MainThread).
- */
+/** Linux: `ss` names the owner only for this user's processes; others list with no pid. */
 async function readSsSockets(): Promise<ListeningSocket[]> {
   const stdout = await run('ss', ['-Hltnp']);
-  const sockets: Promise<ListeningSocket>[] = [];
+  const sockets: ListeningSocket[] = [];
   for (const line of stdout.split('\n')) {
     const fields = line.trim().split(/\s+/u);
     if (fields.length < 4) continue;
     const owner = /users:\(\("([^"]*)",pid=(\d+)/u.exec(line);
-    const pid = owner ? Number.parseInt(owner[2], 10) : null;
-    const threadName = owner?.[1] ?? '';
-    sockets.push((pid === null ? Promise.resolve(threadName) : programName(pid, threadName))
-      .then(name => ({ port: portOf(fields[3]), pid, process: name })));
+    sockets.push({
+      port: portOf(fields[3]),
+      pid: owner ? Number.parseInt(owner[2], 10) : null,
+      process: owner?.[1] ?? '',
+    });
   }
-  return Promise.all(sockets);
-}
-
-/**
- * The thread name, unless the program renamed its thread: then the name it was started
- * by, as macOS reports it. A thread starts with its executable's name, cut to 15
- * characters. A program may also rewrite its command line, so a thread name matching
- * either the command line or the executable is kept.
- */
-async function programName(pid: number, threadName: string): Promise<string> {
-  const [executable, commandLine] = await Promise.all([
-    fs.readlink(`/proc/${pid}/exe`).then(target => path.basename(target.replace(/ \(deleted\)$/u, '')), () => ''),
-    fs.readFile(`/proc/${pid}/cmdline`, 'utf8').then(text => path.basename(text.split('\0')[0]), () => ''),
-  ]);
-  const startedAs = [commandLine, executable].filter(Boolean);
-  if (startedAs.length === 0 || startedAs.some(name => name.startsWith(threadName))) return threadName;
-  return startedAs[0];
+  return sockets;
 }
 
 /**
