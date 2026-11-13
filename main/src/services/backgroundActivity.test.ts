@@ -139,17 +139,29 @@ describe('background activity', () => {
   it('skips optional network work in Low Power Mode outside Performance, and on battery only under Battery saver', async () => {
     const pc = computer();
     pc.unplug();
-    expect(pc.activity.isConstrained()).toBe(false);
+    expect(await pc.activity.isConstrained()).toBe(false);
     pc.config.set('batterySaver');
-    expect(pc.activity.isConstrained()).toBe(true);
+    expect(await pc.activity.isConstrained()).toBe(true);
 
     pc.config.set('balanced');
     pc.state.lowPower = true;
-    pc.activity.setWindowState({ focused: false, visible: false });
-    await settle();
-    expect(pc.activity.isConstrained()).toBe(true);
+    pc.state.now = 61_000;
+    expect(await pc.activity.isConstrained()).toBe(true);
     pc.config.set('performance');
-    expect(pc.activity.isConstrained()).toBe(false);
+    expect(await pc.activity.isConstrained()).toBe(false);
+  });
+
+  it('sees Low Power Mode turn off while someone keeps looking, once the last read is a minute old', async () => {
+    const pc = computer();
+    pc.state.lowPower = true;
+    expect(await pc.activity.isConstrained()).toBe(true);
+
+    pc.state.lowPower = false;
+    pc.state.now = 30_000;
+    expect(await pc.activity.isConstrained()).toBe(true);
+    pc.state.now = 61_000;
+    expect(await pc.activity.isConstrained()).toBe(false);
+    expect(pc.state.lowPowerReads).toBe(2);
   });
 
   it('on Linux, where no lock event fires, sees the lock when asked to look again', () => {

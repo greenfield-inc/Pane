@@ -60,7 +60,7 @@ const defaultGitStatusManagerDependencies: GitStatusManagerDependencies = {
 
 export interface GitStatusManagerOptions {
   /** True while the focus fetch should wait, for example in Low Power Mode. Default: never skip. */
-  shouldSkipFocusFetch?: () => boolean;
+  shouldSkipFocusFetch?: () => boolean | Promise<boolean>;
 }
 
 /** Focusing the window or selecting a Pane fetches its base when the project's last fetch is older than this. */
@@ -307,10 +307,6 @@ export class GitStatusManager extends EventEmitter {
    */
   private async fetchBaseIfStale(sessionId: string): Promise<void> {
     try {
-      if (this.options.shouldSkipFocusFetch?.()) {
-        this.logger?.info(`[GitStatus] Focus fetch skipped-constrained for session ${sessionId}`);
-        return;
-      }
       const session = await this.sessionManager.getSession(sessionId);
       const ctx = this.sessionManager.getProjectContext(sessionId);
       if (!session?.worktreePath || !ctx || isHomeDirectory(session.worktreePath)) return;
@@ -319,6 +315,10 @@ export class GitStatusManager extends EventEmitter {
       const last = await lastFetchedAt(projectPath, ctx.commandRunner);
       if (last !== undefined && Date.now() - last < FOCUS_FETCH_MAX_AGE_MS) {
         this.logger?.info(`[GitStatus] Focus fetch skipped-fresh for ${projectPath}: last fetch ${Math.round((Date.now() - last) / 1000)}s ago`);
+        return;
+      }
+      if (await this.options.shouldSkipFocusFetch?.()) {
+        this.logger?.info(`[GitStatus] Focus fetch skipped-constrained for ${projectPath}`);
         return;
       }
       const base = await this.worktreeManager.getSessionComparisonBranch(session, ctx);

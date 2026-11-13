@@ -89,12 +89,15 @@ export class BackgroundActivity extends EventEmitter {
 
   /**
    * Whether optional network work, such as fetching on focus, should be skipped even while someone
-   * looks: Low Power Mode outside Performance, or battery under Battery saver.
+   * looks: Low Power Mode outside Performance, or battery under Battery saver. Low Power Mode is
+   * read again when the last read is over a minute old.
    */
-  isConstrained(): boolean {
+  async isConstrained(): Promise<boolean> {
     const profile = this.profile();
     if (profile === 'performance') return false;
-    return this.lowPower || (profile === 'batterySaver' && this.env.isOnBattery());
+    if (profile === 'batterySaver' && this.env.isOnBattery()) return true;
+    if (this.env.now() - this.lowPowerReadAt >= LOW_POWER_CACHE_MS) await this.refreshLowPower();
+    return this.lowPower;
   }
 
   /** The main window's focus and whether it is on screen (not minimized or fully covered). */
@@ -109,7 +112,7 @@ export class BackgroundActivity extends EventEmitter {
 
   /** Re-reads every input, for platforms that report some of them only when asked. */
   evaluate(reason: string): void {
-    if (!this.looking() && this.env.now() - this.lowPowerReadAt >= LOW_POWER_CACHE_MS) this.refreshLowPower();
+    if (!this.looking() && this.env.now() - this.lowPowerReadAt >= LOW_POWER_CACHE_MS) void this.refreshLowPower();
     const away = this.compute();
     if (away === this.away) return;
     this.away = away;
@@ -137,8 +140,8 @@ export class BackgroundActivity extends EventEmitter {
     return profile === 'batterySaver' && this.env.isOnBattery();
   }
 
-  private refreshLowPower(): void {
-    if (this.lowPowerRead) return;
+  private refreshLowPower(): Promise<void> {
+    if (this.lowPowerRead) return this.lowPowerRead;
     this.lowPowerRead = this.env.readLowPower()
       .catch(() => false)
       .then(lowPower => {
@@ -148,6 +151,7 @@ export class BackgroundActivity extends EventEmitter {
         this.lowPower = lowPower;
         this.evaluate(lowPower ? 'Low Power Mode turned on' : 'Low Power Mode turned off');
       });
+    return this.lowPowerRead;
   }
 }
 
