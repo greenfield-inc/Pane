@@ -38,9 +38,10 @@ servers turned off; the Notify block is loaded as the repository's
 `CLAUDE.local.md` and the `pane` skill is left out for both versions. Sessions
 are not saved and write no auto memory.
 
-Cost: each session is one real Claude Code task, about $0.20 and 1 to 2
-minutes on the default model. The full set (15 scenarios, 2 versions, 3 runs)
-is 90 sessions: about $20 and 40 minutes at concurrency 3.
+Cost: each session is one real Claude Code task, about $0.30 and 20 seconds
+to 2.5 minutes on the default model. The full set (15 scenarios, 2 versions,
+3 runs) is 90 sessions: about $28 and 15 minutes at concurrency 3. Use
+`--only` and `--runs` to check one change for less.
 
 ## benchmark-cold-start.mjs
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Runs real Claude Code sessions under two versions of the instructions Pane gives agents (the
 // user-level Notify block, the `pane` MCP server and its tools, the `pane` skill) and compares what
-// the agents do. See README.md for usage, cost and what each scenario checks.
+// the agents do. See scripts/README.md for usage and cost, and scenarios.mjs for what each checks.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,21 +17,30 @@ const esbuild = require(path.join(repoRoot, 'node_modules', 'esbuild'));
 
 const options = parseArgs(process.argv.slice(2));
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-agent-instructions-eval-'));
+const root = options.regrade ? path.resolve(options.regrade) : fs.mkdtempSync(path.join(os.tmpdir(), 'pane-agent-instructions-eval-'));
 const resultsDir = path.resolve(options.out ?? path.join(repoRoot, 'tmp', 'agent-instructions-eval', stamp));
 fs.mkdirSync(resultsDir, { recursive: true });
 const isolatedLogin = Boolean(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_OAUTH_TOKEN);
-
-const variants = [
-  prepareVariant('base', options.base),
-  prepareVariant('head', options.head),
-];
 const scenarios = SCENARIOS.filter((scenario) => !options.only || options.only.includes(scenario.id));
-const jobs = scenarios.flatMap((scenario) => variants.flatMap((variant) =>
-  Array.from({ length: options.runs }, (_, run) => ({ scenario, variant, run }))));
 
-console.log(`${jobs.length} sessions (${scenarios.length} scenarios x ${variants.length} variants x ${options.runs} runs), ${options.concurrency} at a time; login: ${isolatedLogin ? 'isolated HOME' : 'your Claude Code login, user settings off'}`);
-const results = await pool(jobs, options.concurrency, runJob);
+let variants;
+let results;
+if (options.regrade) {
+  // Grades the sessions an earlier run saved, with the current scenarios, at no cost.
+  ({ variants, isolated: options.isolated, runs: options.runs } = JSON.parse(fs.readFileSync(path.join(root, 'eval.json'), 'utf8')));
+  results = scenarios.flatMap((scenario) => fs.readdirSync(path.join(root, 'runs', scenario.id)).map((name) => {
+    const [label, run] = name.split('-');
+    return grade(scenario, label, Number(run), path.join(root, 'runs', scenario.id, name));
+  }));
+} else {
+  variants = [prepareVariant('base', options.base), prepareVariant('head', options.head)];
+  options.isolated = isolatedLogin;
+  fs.writeFileSync(path.join(root, 'eval.json'), JSON.stringify({ variants: variants.map(({ label, ref, commit }) => ({ label, ref, commit })), isolated: isolatedLogin, runs: options.runs }));
+  const jobs = scenarios.flatMap((scenario) => variants.flatMap((variant) =>
+    Array.from({ length: options.runs }, (_, run) => ({ scenario, variant, run }))));
+  console.log(`${jobs.length} sessions (${scenarios.length} scenarios x ${variants.length} variants x ${options.runs} runs), ${options.concurrency} at a time; login: ${isolatedLogin ? 'isolated HOME' : 'your Claude Code login, user settings off'}`);
+  results = await pool(jobs, options.concurrency, runJob);
+}
 report(results);
 
 function parseArgs(argv) {
@@ -45,7 +54,8 @@ function parseArgs(argv) {
     else if (flag === '--only') parsed.only = value.split(',');
     else if (flag === '--model') parsed.model = value;
     else if (flag === '--out') parsed.out = value;
-    else { console.error(`Unknown option ${flag}. See scripts/agent-instructions-eval/README.md.`); process.exit(2); }
+    else if (flag === '--regrade') parsed.regrade = value;
+    else { console.error(`Unknown option ${flag}. See the agent-instructions-eval section of scripts/README.md.`); process.exit(2); }
     i += 1;
   }
   return parsed;
@@ -137,12 +147,16 @@ async function runJob({ scenario, variant, run }) {
     claudeArgs.push('--setting-sources', 'project,local', '--strict-mcp-config', '--mcp-config', mcpConfig, '--disable-slash-commands');
   }
 
-  const started = Date.now();
-  const transcript = await runClaude(claudeArgs, repo, env, path.join(runDir, 'transcript.jsonl'));
-  const observed = observe(transcript, log, [repo, sessionDir, runDir]);
+  await runClaude(claudeArgs, repo, env, path.join(runDir, 'transcript.jsonl'));
+  return grade(scenario, variant.label, run, runDir);
+}
+
+/** Grades one saved session from its transcript and call log. */
+function grade(scenario, label, run, runDir) {
+  const observed = observe(fs.readFileSync(path.join(runDir, 'transcript.jsonl'), 'utf8'), path.join(runDir, 'calls.jsonl'), [runDir, root]);
   const graded = observed.error ? { pass: false, error: true, why: `session error: ${observed.text.slice(0, 120)}` } : scenario.grade(observed);
-  const outcome = { scenario: scenario.id, variant: variant.label, run, ...graded, cost: observed.cost, seconds: Math.round((Date.now() - started) / 1000), model: observed.model, runDir };
-  console.log(`${outcome.pass ? 'PASS' : 'FAIL'} ${scenario.id} ${variant.label}#${run}: ${outcome.why}`);
+  const outcome = { scenario: scenario.id, variant: label, run, ...graded, cost: observed.cost, seconds: observed.seconds, model: observed.model, runDir };
+  console.log(`${outcome.pass ? 'PASS' : 'FAIL'} ${scenario.id} ${label}#${run}: ${outcome.why}`);
   return outcome;
 }
 
@@ -175,11 +189,12 @@ function observe(transcript, log, allowedRoots) {
   const normalize = (p) => p.replace(/^\/private/, '');
   // Claude Code keeps its own background-task output under /tmp/claude-<uid>/; reading it is not the agent's scratch.
   const allowed = [...allowedRoots.map(normalize), `/tmp/claude-${process.getuid()}/`];
+  // An absolute path into system temp with a name in it; `$R/tmp/x` and an `--exclude '/tmp/'` pattern are not.
   const tempPaths = [...bash, ...writes].flatMap((text) => [
-    ...[...text.matchAll(/(?:\/private)?\/(?:tmp|var\/folders)\/[^\s'"`;|&)]*/g)].map((m) => m[0]).filter((p) => !allowed.some((root) => normalize(p).startsWith(root))),
+    ...[...text.matchAll(/(?<![\w.$}/-])(?:\/private)?\/(?:tmp|var\/folders)\/[^\s'"`;|&)}]+/g)].map((m) => m[0]).filter((p) => !allowed.some((dir) => normalize(p).startsWith(dir))),
     ...[...text.matchAll(/\$\{?TMPDIR\}?|\bmktemp\b|tempfile\.|os\.tmpdir\(\)/g)].map((m) => m[0]),
   ]);
-  return { calls, tools, bash, writes, tempPaths, text: result.result ?? '', cost: result.total_cost_usd ?? 0, model: init.model, error: result.is_error === true || !result.type };
+  return { calls, tools, bash, writes, tempPaths, text: result.result ?? '', cost: result.total_cost_usd ?? 0, seconds: Math.round((result.duration_ms ?? 0) / 1000), model: init.model, error: result.is_error === true || !result.type };
 }
 
 async function pool(items, size, worker) {
@@ -208,7 +223,7 @@ function report(outcomes) {
   const errors = outcomes.filter((o) => o.error);
   const verdict = errors.length === 0 && rows.every((row) => row.ok);
   const md = [
-    `Base ${variants[0].ref} (${variants[0].commit}) vs head ${variants[1].ref === 'WORKTREE' ? 'working tree' : variants[1].ref} (${variants[1].commit}); ${options.runs} runs each; model ${models.join(', ') || 'default'}; login ${isolatedLogin ? 'isolated HOME' : 'yours, user settings and skills off'}; reported cost $${cost.toFixed(2)}.`,
+    `Base ${variants[0].ref} (${variants[0].commit}) vs head ${variants[1].ref === 'WORKTREE' ? 'working tree' : variants[1].ref} (${variants[1].commit}); ${options.runs} runs each; model ${models.join(', ') || 'default'}; login ${options.isolated ? 'isolated HOME' : 'yours, user settings and skills off'}; session cost $${cost.toFixed(2)}.`,
     '',
     '| Scenario | Base passes | Head passes | Head ≥ base | Why runs failed |',
     '|---|---|---|---|---|',
