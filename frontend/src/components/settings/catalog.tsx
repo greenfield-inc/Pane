@@ -3,6 +3,7 @@ import {
   ArrowUpDown,
   Bell,
   Bot,
+  Boxes,
   BrainCircuit,
   Gauge,
   Inbox,
@@ -18,6 +19,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import type { SettingsCategoryId, SettingsSettingId } from '../../types/settings';
+import { CONFIGURED_AGENT_IDS, agentLabel } from '../../../../shared/agents';
 
 export interface SettingsCategoryDefinition {
   id: SettingsCategoryId;
@@ -60,7 +62,15 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     description: 'Agent defaults, context, and CLI installations.',
     icon: Bot,
     settingIds: ['chat-tabs', 'chat-tab-keys', 'default-pane-chat-agent', 'mcp-registration', 'mcp-toolsets', 'answer-prompts-from-pane', 'agent-skill', 'agent-context', 'session-import', 'session-defaults', 'claude-executable'],
-    aliases: ['claude', 'codex', 'cursor', 'chat tabs', 'chat', 'pane chat', 'permission', 'prompts', 'hooks', 'agents.md', 'mcp', 'tools', 'skill', 'import', 'migrate', 'conductor'],
+    aliases: ['chat tabs', 'chat', 'pane chat', 'permission', 'prompts', 'hooks', 'agents.md', 'mcp', 'tools', 'skill', 'import', 'migrate', 'conductor'],
+  },
+  {
+    id: 'agents',
+    label: 'Agents',
+    description: 'The agents this machine can open as chat tabs, and what each one supports.',
+    icon: Boxes,
+    settingIds: ['chat-agents'],
+    aliases: ['agents', 'acp', 'install', 'chat agents', 'capabilities', 'full access', ...CONFIGURED_AGENT_IDS.map(id => agentLabel(id).toLowerCase())],
   },
   {
     id: 'notify',

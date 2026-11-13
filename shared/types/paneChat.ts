@@ -1,22 +1,17 @@
 import type { ToolPanel } from './panels';
-import { boundary, decodeBoundary } from '../validation/boundaryDecoder';
+import { CONFIGURED_AGENT_IDS, DEFAULT_AGENT_ID, configuredAgent, configuredAgentSchema, type ConfiguredAgentId } from '../agents';
+import { decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import type { JsonValue } from '../validation/boundaryDecoder';
 
-export type PaneChatAgent = 'claude' | 'codex' | 'cursor' | 'opencode';
+/** An agent a Session or the Onboarding Session can run: any configured agent. */
+export type PaneChatAgent = ConfiguredAgentId;
 
-export const PANE_CHAT_AGENT_LABELS = {
-  claude: 'Claude',
-  codex: 'Codex',
-  cursor: 'Cursor',
-  opencode: 'OpenCode',
-} satisfies Record<PaneChatAgent, string>;
+// SAFETY: built from every configured agent id, so it has exactly the PaneChatAgent keys.
+const labels = Object.fromEntries(CONFIGURED_AGENT_IDS.map(id => [id, configuredAgent(id).label])) as Record<PaneChatAgent, string>;
+export const PANE_CHAT_AGENT_LABELS: Readonly<Record<PaneChatAgent, string>> = labels;
 
-export const DEFAULT_PANE_CHAT_AGENT: PaneChatAgent = 'claude';
+export const DEFAULT_PANE_CHAT_AGENT: PaneChatAgent = DEFAULT_AGENT_ID;
 export const PANE_CHAT_SESSION_ID = '__pane_chat_session__';
-export const PANE_CHAT_PANEL_ID = '__pane_chat_terminal__';
-export const PANE_CHAT_CODEX_PANEL_ID = '__pane_chat_terminal_codex__';
-export const PANE_CHAT_CURSOR_PANEL_ID = '__pane_chat_terminal_cursor__';
-export const PANE_CHAT_OPENCODE_PANEL_ID = '__pane_chat_terminal_opencode__';
 /**
  * How every one-time first prompt Pane gives a Session agent begins. Session
  * launches drop any saved first prompt, except an unsent one that begins with this.
@@ -31,13 +26,6 @@ export type OnboardingHandoff = 'migrate' | 'project';
 /** The default Session's name on a new data folder; existing installs keep "Pane Chat". */
 export const ONBOARDING_SESSION_NAME = 'Onboarding';
 
-const PANE_CHAT_PANEL_IDS = {
-  claude: PANE_CHAT_PANEL_ID,
-  codex: PANE_CHAT_CODEX_PANEL_ID,
-  cursor: PANE_CHAT_CURSOR_PANEL_ID,
-  opencode: PANE_CHAT_OPENCODE_PANEL_ID,
-} satisfies Record<PaneChatAgent, string>;
-
 export interface PaneChatState<TSession = unknown> {
   session: TSession;
   panel: ToolPanel;
@@ -48,13 +36,10 @@ export interface PaneChatState<TSession = unknown> {
 }
 
 export function normalizePaneChatAgent(value: JsonValue | undefined): PaneChatAgent {
-  try {
-    return decodeBoundary(value, boundary.enumeration('claude', 'codex', 'cursor', 'opencode'));
-  } catch {
-    return DEFAULT_PANE_CHAT_AGENT;
-  }
+  return decodeOptionalBoundary(value, configuredAgentSchema) ?? DEFAULT_PANE_CHAT_AGENT;
 }
 
+/** The Onboarding Session's terminal for an agent: its config's saved id, else one derived from its id. */
 export function getPaneChatPanelId(agent: PaneChatAgent): string {
-  return PANE_CHAT_PANEL_IDS[agent];
+  return configuredAgent(agent).onboardingPanelId ?? `__pane_chat_terminal_${agent}__`;
 }

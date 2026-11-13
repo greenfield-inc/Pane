@@ -8,10 +8,9 @@ import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/
 import { getAppDirectory } from '../../utils/appDirectory';
 import type { ChatTabSecrets } from './launch';
 
-interface SealedKeys { claude?: string; codex?: string }
 
 const FILE = 'chat-tab-keys.json';
-const schema = boundary.object({ claude: boundary.optional(boundary.string), codex: boundary.optional(boundary.string) });
+const schema = boundary.record(boundary.string);
 
 /**
  * Optional API keys for chat tabs (D-14), one per agent, on this machine only.
@@ -23,7 +22,7 @@ class ChatTabKeyStore implements ChatTabSecrets {
   constructor(private readonly file = () => path.join(getAppDirectory(), FILE)) {}
 
   apiKey(agent: ChatAgent): string | undefined {
-    const sealed = this.read()[agent];
+    const sealed = this.read().get(agent);
     if (!sealed || !safeStorage.isEncryptionAvailable()) return undefined;
     try { return safeStorage.decryptString(Buffer.from(sealed, 'base64')); }
     catch { return undefined; }
@@ -31,29 +30,28 @@ class ChatTabKeyStore implements ChatTabSecrets {
 
   /** Which agents have a key set; never the keys themselves. */
   status(): ChatTabKeyStatus {
-    const saved = this.read();
-    return { claude: !!saved.claude, codex: !!saved.codex };
+    return Object.fromEntries([...this.read().keys()].map(agent => [agent, true]));
   }
 
   set(agent: ChatAgent, key: string | null): void {
     const saved = this.read();
-    if (key === null || !key.trim()) delete saved[agent];
+    if (key === null || !key.trim()) saved.delete(agent);
     else {
       if (!safeStorage.isEncryptionAvailable()) {
-        throw new PaneError('CHAT_KEY_STORE_UNAVAILABLE', 'This machine has no OS secure store Pane can use, so the key was not saved.', 'Sign in with the agent\'s own login instead (claude auth login or codex login).');
+        throw new PaneError('CHAT_KEY_STORE_UNAVAILABLE', 'This machine has no OS secure store Pane can use, so the key was not saved.', 'Sign in with the agent\'s own login instead: press Sign in on its chat tab.');
       }
-      saved[agent] = safeStorage.encryptString(key.trim()).toString('base64');
+      saved.set(agent, safeStorage.encryptString(key.trim()).toString('base64'));
     }
-    if (!saved.claude && !saved.codex) { rmSync(this.file(), { force: true }); return; }
-    writeFileSync(this.file(), JSON.stringify(saved), { mode: 0o600 });
+    if (saved.size === 0) { rmSync(this.file(), { force: true }); return; }
+    writeFileSync(this.file(), JSON.stringify(Object.fromEntries(saved)), { mode: 0o600 });
   }
 
-  private read(): SealedKeys {
+  /** Sealed keys by agent id. Files from before any agent could have a key held the same map. */
+  private read(): Map<string, string> {
     const file = this.file();
-    if (!existsSync(file)) return {} satisfies SealedKeys;
-    const empty: SealedKeys = {};
-    try { return decodeOptionalBoundary(JSON.parse(readFileSync(file, 'utf8')), schema) ?? empty; }
-    catch { return empty; }
+    if (!existsSync(file)) return new Map();
+    try { return new Map(Object.entries(decodeOptionalBoundary(JSON.parse(readFileSync(file, 'utf8')), schema) ?? {})); }
+    catch { return new Map(); }
   }
 }
 

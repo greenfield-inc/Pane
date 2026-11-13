@@ -1,6 +1,6 @@
-import { boundary, decodeBoundary, type BoundarySchema } from '../validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../validation/boundaryDecoder';
 import type { AgentChatMessage, AgentChatPart, AgentChatReceipt } from './agentChat';
-import type { ChatTabConversation, ChatTabEvent, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt, ChatTabSwitchBanner, ChatTabView, ChatToolPatch } from './chatTab';
+import type { ChatAgentEntry, ChatTabConversation, ChatTabEvent, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt, ChatTabSwitchBanner, ChatTabView, ChatToolPatch } from './chatTab';
 
 const status = boundary.enumeration('pending', 'in_progress', 'completed', 'failed');
 const part: BoundarySchema<AgentChatPart> = boundary.union(
@@ -9,6 +9,7 @@ const part: BoundarySchema<AgentChatPart> = boundary.union(
     type: boundary.literal('tool'), id: boundary.string, title: boundary.string, status,
     input: boundary.optional(boundary.json), output: boundary.optional(boundary.json), content: boundary.optional(boundary.array(boundary.json)),
     kind: boundary.optional(boundary.string), locations: boundary.optional(boundary.json), terminal: boundary.optional(boundary.string),
+    approvedBy: boundary.optional(boundary.literal('pane')),
   }),
   boundary.object({ type: boundary.literal('content'), content: boundary.json }),
 );
@@ -17,7 +18,7 @@ const patch: BoundarySchema<ChatToolPatch> = boundary.object({
   title: boundary.optional(boundary.string), status: boundary.optional(status),
   input: boundary.optional(boundary.json), output: boundary.optional(boundary.json), content: boundary.optional(boundary.array(boundary.json)),
   kind: boundary.optional(boundary.string), locations: boundary.optional(boundary.json), terminal: boundary.optional(boundary.string),
-  terminalAppend: boundary.optional(boundary.string),
+  terminalAppend: boundary.optional(boundary.string), approvedBy: boundary.optional(boundary.literal('pane')),
 });
 const event: BoundarySchema<ChatTabEvent> = boundary.object({
   panelId: boundary.string, generation: boundary.number, revision: boundary.number, index: boundary.number,
@@ -44,7 +45,7 @@ const conversation: BoundarySchema<ChatTabConversation> = boundary.object({
   current: boundary.optional(boundary.literal(true)), openIn: boundary.optional(boundary.object({ panelId: boundary.string, title: boundary.string })),
 });
 const view: BoundarySchema<ChatTabView> = boundary.object({
-  panelId: boundary.string, agent: boundary.enumeration('claude', 'codex'), generation: boundary.number,
+  panelId: boundary.string, agent: boundary.string, generation: boundary.number,
   status: boundary.enumeration('starting', 'idle', 'working', 'blocked', 'stopped'),
   problem: boundary.optional(problem), notice: boundary.optional(boundary.string), canAttachImages: boundary.boolean,
   controls: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, category: boundary.optional(boundary.string), currentValue: boundary.string, options: boundary.array(boundary.object({ value: boundary.string, name: boundary.string })) })),
@@ -64,6 +65,44 @@ const receipt: BoundarySchema<AgentChatReceipt> = boundary.object({
   state: boundary.enumeration('accepted', 'completed', 'failed'), error: boundary.optional(boundary.string),
 });
 
+/**
+ * One catalog entry. Lenient on purpose, so a newer host's values never cost a client its agents
+ * (review F-4): unknown `source` reads as registry, unknown `fullAccess` as pane, and an unknown
+ * `switchFromTerminal` as not available.
+ */
+const agentEntry = boundary.object({
+  id: boundary.nonEmptyString, label: boundary.string, icon: boundary.string, iconUrl: boundary.optional(boundary.string), description: boundary.optional(boundary.string),
+  source: boundary.string, installed: boundary.boolean, version: boundary.optional(boundary.string),
+  capabilities: boundary.optional(boundary.object({ reopen: boundary.boolean, list: boundary.boolean, images: boundary.boolean })),
+  fullAccess: boundary.string,
+  switchFromTerminal: boundary.json,
+  installUrl: boundary.optional(boundary.string),
+});
+const switchSchema: BoundarySchema<ChatAgentEntry['switchFromTerminal']> = boundary.union(boundary.object({ ok: boundary.literal(true) }), boundary.object({ ok: boundary.literal(false), reason: boundary.string }));
+
+function toChatAgentEntry(raw: typeof agentEntry extends BoundarySchema<infer T> ? T : never): ChatAgentEntry {
+  const entry: ChatAgentEntry = {
+    id: raw.id, label: raw.label, icon: raw.icon, installed: raw.installed,
+    source: raw.source === 'config' ? 'config' : 'registry',
+    fullAccess: raw.fullAccess === 'agent' ? 'agent' : 'pane',
+    switchFromTerminal: decodeOptionalBoundary(raw.switchFromTerminal, switchSchema) ?? { ok: false, reason: 'This version of Pane cannot switch this agent\'s terminal to chat.' },
+  };
+  if (raw.iconUrl) entry.iconUrl = raw.iconUrl;
+  if (raw.description) entry.description = raw.description;
+  if (raw.version) entry.version = raw.version;
+  if (raw.capabilities) entry.capabilities = raw.capabilities;
+  if (raw.installUrl) entry.installUrl = raw.installUrl;
+  return entry;
+}
+
+/** The host's agent catalog; an entry this client cannot read is skipped, never the whole list. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the agent schema.
+export function decodeChatAgents(value: unknown): ChatAgentEntry[] {
+  return decodeBoundary(value, boundary.array(boundary.json)).flatMap(item => {
+    const raw = decodeOptionalBoundary(item, agentEntry);
+    return raw ? [toChatAgentEntry(raw)] : [];
+  });
+}
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the view schema.
 export function decodeChatTabView(value: unknown): ChatTabView { return decodeBoundary(value, view); }
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the event schema.

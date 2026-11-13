@@ -10,6 +10,7 @@
  * `ctrl` folded into `mod` (see keyboardChords.ts).
  */
 import { chordForPlatform, parseChord, type KeyPlatform } from '../utils/keyboardChords';
+import { CONFIGURED_AGENT_IDS, configuredAgent, type ConfiguredAgentId } from '../agents';
 
 export type ShortcutScope = 'app' | 'session' | 'session-panels' | 'usage';
 export type ShortcutCategory =
@@ -28,18 +29,22 @@ type CustomSlot = '0' | '1' | '2' | '3';
 export type PanelTabId = `panel-tab-${Digit1to9}`;
 export type SwitchSessionId = `switch-session-${Digit1to9}`;
 export type CustomCommandId = `add-tool-custom-${CustomSlot}`;
+/** Opens a configured agent's terminal tab; its default key lives in the agents config. */
+export type AgentTerminalShortcutId = `add-tool-terminal-${ConfiguredAgentId}`;
 export type ScrollSurfaceId =
   | 'scroll-focused-surface-up'
   | 'scroll-focused-surface-down'
   | 'page-focused-surface-up'
   | 'page-focused-surface-down';
 
+export function agentTerminalShortcutId(id: ConfiguredAgentId): AgentTerminalShortcutId {
+  return `add-tool-terminal-${id}`;
+}
+
 const STATIC_SHORTCUT_IDS = [
   'open-command-palette', 'toggle-sidebar', 'open-settings', 'focus-sidebar',
   'open-shortcut-settings', 'new-session', 'new-orchestration-session', 'new-project',
   'cycle-tab-prev-a', 'cycle-tab-next-d', 'add-tool-terminal', 'add-tool-explorer',
-  'add-tool-terminal-claude', 'add-tool-terminal-codex', 'add-tool-terminal-cursor',
-  'add-tool-terminal-opencode',
   'close-active-tab', 'archive-active-session', 'split-right', 'split-down',
   'focus-group-left', 'focus-group-right', 'focus-group-up', 'focus-group-down',
   'focus-next-region', 'focus-previous-region',
@@ -59,7 +64,7 @@ const STATIC_SHORTCUT_IDS = [
 ] as const;
 
 export type StaticKeyboardShortcutId = typeof STATIC_SHORTCUT_IDS[number];
-export type KeyboardShortcutId = StaticKeyboardShortcutId | PanelTabId | SwitchSessionId | CustomCommandId;
+export type KeyboardShortcutId = StaticKeyboardShortcutId | PanelTabId | SwitchSessionId | CustomCommandId | AgentTerminalShortcutId;
 export type HotkeyId = KeyboardShortcutId | `terminal-shortcut-${string}`;
 
 export interface ShortcutCatalogEntry {
@@ -139,10 +144,10 @@ const SESSION_ENTRIES: readonly ShortcutCatalogEntry[] = [
   nav({ id: 'cycle-tab-next-d', label: 'Next Tab', category: 'tabs', scope: 'app', defaultChord: 'mod+shift+]', defaultChordOther: 'mod+PageDown' }),
   entry({ id: 'add-tool-terminal', label: 'Add Terminal', category: 'tools', scope: 'session', defaultChord: 'mod+alt+1', releaseInTui: true }),
   entry({ id: 'add-tool-explorer', label: 'Show Files', category: 'tools', scope: 'session', defaultChord: 'mod+alt+2', releaseInTui: true }),
-  entry({ id: 'add-tool-terminal-claude', label: 'Add Claude Code', category: 'tools', scope: 'session', defaultChord: 'mod+alt+3', releaseInTui: true }),
-  entry({ id: 'add-tool-terminal-codex', label: 'Add Codex', category: 'tools', scope: 'session', defaultChord: 'mod+alt+4', releaseInTui: true }),
-  entry({ id: 'add-tool-terminal-cursor', label: 'Add Cursor', category: 'tools', scope: 'session', defaultChord: 'mod+alt+5', platforms: ['darwin', 'linux', 'wsl'], releaseInTui: true }),
-  entry({ id: 'add-tool-terminal-opencode', label: 'Add OpenCode', category: 'tools', scope: 'session', defaultChord: 'mod+alt+6', releaseInTui: true }),
+  ...CONFIGURED_AGENT_IDS.map(id => {
+    const { title, terminal } = configuredAgent(id);
+    return entry({ id: agentTerminalShortcutId(id), label: `Add ${title}`, category: 'tools', scope: 'session', defaultChord: terminal.hotkey, platforms: terminal.platforms, releaseInTui: true });
+  }),
   entry({ id: 'close-active-tab', label: 'Close active tab', category: 'tabs', scope: 'session', defaultChord: 'mod+w' }),
   entry({ id: 'archive-active-session', label: 'Archive Pane', category: 'session', scope: 'session', defaultChord: 'mod+shift+w' }),
   entry({ id: 'split-right', label: 'Split Right', category: 'tabs', scope: 'session', defaultChord: 'mod+\\', releaseInTui: true, forwardFromWebview: false }),

@@ -15,8 +15,9 @@ agent; a name you type or set later is kept. Each new Session opens as one Pane
 Chat and can be renamed later from the optional read-only overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
-With [chat tabs](CHAT_TABS.md) on (Settings → AI & Agents → Chat tabs), a new Claude
-or Codex Session runs its orchestrator in a chat tab instead of a terminal, from
+With [chat tabs](CHAT_TABS.md) on (Settings → AI & Agents → Chat tabs), a new
+Session runs its orchestrator in a chat tab instead of a terminal for any agent
+chat tabs run (Claude, Codex, Cursor and OpenCode), from
 the plain agent or the Session's `agent-farm run <profile>` launch, and sends its
 opening prompt once. Like every chat, finished turns fold to one row. A worker
 Pane shows up as one line with **Open** while it is asking the person, and when
@@ -24,10 +25,10 @@ it finished, failed or reported during the latest turn; the sidebar lists the re
 starts stay terminal tabs. Agent Farm's standard resume template
 (`{command} --resume {sessionId}`, which the dialog saves) doesn't stop a chat,
 since a chat reopens through ACP. Sessions that resume or promote a terminal
-conversation, run in WSL, use a truly custom resume command or a wrapper launch,
-and Cursor Sessions, keep their terminal, and the Session's overview says why. A
+conversation, run in WSL, or use a truly custom resume command or a wrapper
+launch keep their terminal, and the Session's overview says why. A
 Session keeps the kind of tab it started with.
-A Claude or Codex Session already running in a terminal can move to chat with
+A Session already running in a terminal can move to chat with
 **Switch to chat…** in the Session's right-click menu, which switches every
 terminal agent tab in it (see
 [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).

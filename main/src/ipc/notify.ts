@@ -36,6 +36,7 @@ import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore } from '../services/paneSecrets';
+import { agentLabel } from '../../../shared/agents';
 
 const MAX_CHOICES = 9;
 const MAX_TEXT = 4_000;
@@ -512,7 +513,7 @@ function startChatTabPrompts(notify: NotifyService, services: NotifyServices): v
       const pane = panel ? services.sessionManager.getSession(panel.sessionId) : undefined;
       if (!panel || panel.type !== 'chat' || !pane || pane.archived) return undefined;
       const agent = getChatTabManager().view(panelId, 0, false).agent;
-      return { paneId: pane.id, panelId, name: pane.name, agent: agent === 'claude' ? 'Claude' : 'Codex' };
+      return { paneId: pane.id, panelId, name: pane.name, agent: agentLabel(agent) };
     },
     enabled: () => configManager.getConfig().answerPromptsFromPane !== false,
     answerPermission: (panelId, requestId, optionId) => getChatTabManager().answerPermission(panelId, requestId, optionId),

@@ -26,6 +26,7 @@ import { editorPanelState, pinEditorPanel } from '../../services/openFileInEdito
 import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
 import { SwitchToChatDialog } from './SwitchToChat';
 import { switchToChatMenuItems } from './switchToChatMenu';
+import { useChatAgents } from '../../stores/chatAgentsStore';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -125,6 +126,8 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
 
   const [menuPanelId, setMenuPanelId] = useState<string | null>(null);
   const chatTabsEnabled = useConfigStore(state => isChatTabsEnabled(state.config));
+  // Read even with chat tabs off: an agent tab still offers Switch to chat, disabled, with Turn on.
+  const chatAgents = useChatAgents(window.electronAPI.chatTab);
   const [switchingPanel, setSwitchingPanel] = useState<ToolPanel | null>(null);
   const hotkeys = useHotkeyStore(s => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
@@ -390,7 +393,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         // Right-click: rename, switch to chat, pause or resume, then close past a divider. A disabled tab offers none.
         const menuItems: DropdownItem[] = isDisabled ? [] : [
           ...(!isPermanent && !isDiffPanel ? [{ id: 'rename', label: 'Rename tab…', icon: Pencil, onClick: () => startRename(panel) }] : []),
-          ...switchToChatMenuItems(panel, chatTabsEnabled, () => setSwitchingPanel(panel)),
+          ...switchToChatMenuItems(panel, chatTabsEnabled, chatAgents, () => setSwitchingPanel(panel)),
           ...(panel.type === 'terminal' ? [isPaused
             ? { id: 'resume', label: 'Resume tab', icon: FilledPlay, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, false) }
             : { id: 'pause', label: 'Pause tab', icon: Pause, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, true) }] : []),

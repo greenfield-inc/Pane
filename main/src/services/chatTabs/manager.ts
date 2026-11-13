@@ -1,16 +1,18 @@
 import { createHash } from 'crypto';
 import path from 'path';
-import type { ContentBlock, McpServer, NewSessionRequest, SessionInfo } from '@agentclientprotocol/sdk';
+import type { ContentBlock, InitializeResponse, McpServer, NewSessionRequest, SessionInfo } from '@agentclientprotocol/sdk';
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ToolPanel } from '../../../../shared/types/panels';
-import { CHAT_CONVERSATION_LIMIT, type ChatPanelState, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabView } from '../../../../shared/types/chatTab';
+import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabView } from '../../../../shared/types/chatTab';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
 import { ChatTabRuntime, chatFailure, isAuthRequired, type RuntimeExit } from './runtime';
 import { ChatTranscript } from './transcript';
 import { QueuedBodies } from './queuedBodies';
+import { agentConfig, agentLabel } from '../../../../shared/agents';
+import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
 export interface ResolvedLaunch {
@@ -20,12 +22,21 @@ export interface ResolvedLaunch {
   mcpServers?: McpServer[];
   /** Session settings to apply once, on a new conversation. */
   initialSettings?: Record<string, string>;
-  /** The session mode to select after every session/new and session/load (an Agent Farm profile's permission mode). */
+  /** The session mode to select after every session/new and session/load (full access, or an Agent Farm profile's permission mode). */
   mode?: string;
+  /** Full access through Pane: approve each request with the agent's "allow once". */
+  approveOnce?: boolean;
+  /** The agent runs as its own CLI, so it may advertise a terminal sign-in Pane can run. */
+  ownCli?: boolean;
 }
 
 /** Events a chat tab sends to every viewer. */
-type ChatTabChannel = 'chat-tab:event' | 'chat-tab:state' | 'panel:agentStatus';
+/**
+ * `chat-tab:view` carries every tab's view to clients that read the agent catalog. `chat-tab:state`
+ * is the same view for clients from before it, sent only for agents their decoder accepts
+ * (`chat.legacyClients`): one they reject would throw out of their event stream and drop the connection.
+ */
+type ChatTabChannel = 'chat-tab:event' | 'chat-tab:view' | 'chat-tab:state' | 'panel:agentStatus';
 
 export interface ChatTabLauncher {
   /** Throws a PaneError; `CHAT_NOT_SIGNED_IN`, `CHAT_AGENT_NOT_INSTALLED`, `CHAT_AGENT_OUTDATED`, `CHAT_ADAPTER_MISSING` and `CHAT_UNSUPPORTED_HOST` become their stopped states. */
@@ -57,6 +68,8 @@ export interface ChatTabManagerOptions {
   openConversations?: (panelId: string) => Map<string, { panelId: string; title: string }>;
   /** How long closing, stopping or quitting waits for a tab's agent to end. Default 5 s. */
   stopTimeoutMs?: number;
+  /** Every initialize reply, for the agent catalog's capabilities. */
+  onInitialized?: (agent: string, response: InitializeResponse) => void;
 }
 
 interface Tab {
@@ -76,6 +89,10 @@ interface Tab {
   launch?: ResolvedLaunch;
   /** /clear is replacing the agent with a fresh conversation; it has not stopped. */
   clearing?: boolean;
+  /** Full access through Pane is on: each approval is answered with allow once. */
+  approveOnce?: boolean;
+  /** The terminal sign-in the agent last advertised, kept after it stops signed out. */
+  signIn?: { args: string[]; env?: Record<string, string> };
 }
 
 const DEFAULT_VIEW_LIMIT = 200;
@@ -127,6 +144,9 @@ export class ChatTabManager {
     if (!state) return 'unknown';
     return toAgentState(this.snapshot(panelId, state, this.tab(panelId), 0));
   }
+
+  /** The terminal sign-in the tab's agent advertised, when it runs as its own CLI. */
+  terminalSignIn(panelId: string): { args: string[]; env?: Record<string, string> } | undefined { return this.tabs.get(panelId)?.signIn; }
 
   isRunning(panelId: string): boolean { return !!this.tabs.get(panelId)?.runtime?.isAlive(); }
   /** /clear is starting a fresh conversation: the agent is between processes, not stopped. */
@@ -322,10 +342,31 @@ export class ChatTabManager {
   }
 
   async configure(panelId: string, configId: string, value: string): Promise<void> {
+    if (configId === CHAT_FULL_ACCESS_CONTROL) { await this.setFullAccess(panelId, value === FULL_ACCESS_ON); return; }
     const runtime = this.liveRuntime(panelId);
     if (runtime.isRunning()) throw new PaneError('CHAT_CONFIG_BUSY', 'Settings cannot change while the agent is working. Nothing changed.', 'Wait for the turn to end, or press Stop.');
     await runtime.configure(configId, value);
     this.update(panelId, state => ({ ...state, settings: { ...state.settings, [configId]: value } }));
+    this.publish(panelId);
+  }
+
+  /**
+   * Turns full access on or off for an agent whose full access is not a session mode (D-16):
+   * Pane's allow once changes at once; an agent whose switch is a launch flag restarts on the
+   * same conversation with or without it.
+   */
+  private async setFullAccess(panelId: string, on: boolean): Promise<void> {
+    const state = this.required(panelId);
+    if (!fullAccessControlled(state)) throw new PaneError('CHAT_CONFIG_UNSUPPORTED', `${agentLabel(state.agent)} sets full access with its own permission setting. Nothing changed.`, 'Pick a permission mode in the composer instead.');
+    if (state.launch.kind !== 'agent' || (state.launch.fullAccess === true) === on) return;
+    const tab = this.tab(panelId);
+    if (tab.runtime?.isRunning() || tab.delivering) throw new PaneError('CHAT_CONFIG_BUSY', 'Full access cannot change while the agent is working. Nothing changed.', 'Wait for the turn to end, or press Stop.');
+    const launch = { ...state.launch };
+    if (on) launch.fullAccess = true; else delete launch.fullAccess;
+    this.update(panelId, current => ({ ...current, launch }));
+    console.log(`[ChatTabs] ${panelId}: full access ${on ? 'on' : 'off'}.`);
+    if (agentConfig(state.agent)?.chat?.fullAccess?.args) { await this.restart(panelId); return; }
+    tab.approveOnce = on;
     this.publish(panelId);
   }
 
@@ -454,10 +495,20 @@ export class ChatTabManager {
       onState: () => { if (tab.run === generation && !tab.loading) this.publish(panelId); },
       onOwnTurn: outcome => { if (tab.run === generation) this.ownTurn(panelId, tab, outcome); },
       onExit: exit => this.exited(panelId, generation, exit),
+      approveOnce: () => tab.approveOnce === true,
+      onApprovedOnce: request => {
+        if (tab.run !== generation) return;
+        const event = transcript.approvedByPane(request.toolCall.toolCallId, request.toolCall.title ?? 'Tool');
+        if (event && !tab.loading) this.options.send('chat-tab:event', event);
+      },
+      terminalAuth: launch.ownCli === true,
     });
     tab.runtime = runtime;
+    tab.approveOnce = launch.approveOnce === true;
     try {
-      await runtime.start();
+      const initialized = await runtime.start();
+      this.options.onInitialized?.(this.required(panelId).agent, initialized);
+      tab.signIn = launch.ownCli ? runtime.terminalSignIn() : undefined;
       if (this.required(panelId).open === 'most-recent' && !this.required(panelId).acpSessionId) {
         const listed = await this.listForSwitch(panelId, runtime);
         if (tab.run !== generation) return;
@@ -469,13 +520,16 @@ export class ChatTabManager {
       const state = this.required(panelId);
       const request: NewSessionRequest = { cwd: state.cwd, mcpServers: launch.mcpServers ?? [] };
       if (launch.meta) request._meta = launch.meta;
-      if (state.acpSessionId) {
-        tab.loading = true;
-        try { await runtime.load({ ...request, sessionId: state.acpSessionId }); } finally { tab.loading = false; }
-      } else {
-        const created = await runtime.create(request);
-        this.update(panelId, current => ({ ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings } }));
-      }
+      const open = async () => {
+        if (state.acpSessionId) {
+          tab.loading = true;
+          try { await runtime.load({ ...request, sessionId: state.acpSessionId }); } finally { tab.loading = false; }
+        } else {
+          const created = await runtime.create(request);
+          this.update(panelId, current => ({ ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings } }));
+        }
+      };
+      await open();
       if (launch.mode) await runtime.setMode(launch.mode);
       await this.applySettings(panelId, runtime);
       const interrupted = this.required(panelId).turn;
@@ -692,7 +746,7 @@ export class ChatTabManager {
     const view: ChatTabView = {
       panelId, agent: state.agent, generation: tab.generation, status: this.status(state, tab), problem: state.problem, notice: tab.notice,
       canAttachImages: tab.runtime?.supportsImages() ?? false,
-      controls: runtime?.controls() ?? [], commands: runtime?.commands() ?? [],
+      controls: runtime ? [...runtime.controls(), ...fullAccessControl(state)] : [], commands: runtime?.commands() ?? [],
       permissions, questions, queue: state.queue ?? [],
       // While history replays the window is incomplete; viewers fetch it once the tab has started.
       transcript: tab.transcript && limit > 0 && !tab.loading && !tab.starting ? tab.transcript.snapshot(limit) : undefined,
@@ -715,7 +769,8 @@ export class ChatTabManager {
     if (!state) return;
     const tab = this.tab(panelId);
     const view = this.snapshot(panelId, state, tab, 0);
-    this.options.send('chat-tab:state', view);
+    this.options.send('chat-tab:view', view);
+    if (agentConfig(view.agent)?.chat?.legacyClients) this.options.send('chat-tab:state', view);
     this.options.onView?.(view);
     const agentState = toAgentState(view);
     if (tab.published === agentState) return;
@@ -786,17 +841,33 @@ interface SwitchChoice { sessionId?: string; banner: ChatTabSwitchBanner }
 
 function safeName(panelId: string): string { return createHash('sha256').update(panelId).digest('hex').slice(0, 32); }
 
+const FULL_ACCESS_ON = 'on';
+
+/** Whether Pane owns the tab's full-access switch: an agent launch whose agent has no full-access session mode. */
+function fullAccessControlled(state: ChatPanelState): boolean {
+  return state.launch.kind === 'agent' && !state.launch.mode && !agentConfig(state.agent)?.chat?.fullAccess?.mode;
+}
+
+/** Pane's Full access setting, beside the agent's own, for an agent whose full access is not one of its modes. */
+function fullAccessControl(state: ChatPanelState): AgentChatConfigOption[] {
+  if (!fullAccessControlled(state) || state.launch.kind !== 'agent') return [];
+  return [{ id: CHAT_FULL_ACCESS_CONTROL, name: 'Full access', currentValue: state.launch.fullAccess ? FULL_ACCESS_ON : 'off', options: [{ value: FULL_ACCESS_ON, name: 'On' }, { value: 'off', name: 'Off' }] }];
+}
+
 function signedOut(agent: ChatPanelState['agent']): ChatTabProblem {
-  const name = agent === 'claude' ? 'Claude Code' : 'Codex';
-  return { code: 'signed-out', message: `${name} is not signed in on this machine.`, next: `Sign in with ${agent === 'claude' ? 'claude auth login' : 'codex login'} in a terminal tab, then press Retry.`, action: 'sign-in' };
+  const config = agentConfig(agent);
+  const command = config ? ` (\`${[config.executables[0], ...config.signIn].join(' ')}\`)` : '';
+  return { code: 'signed-out', message: `${agentLabel(agent)} is not signed in on this machine.`, next: `Press Sign in to sign in${command} in a terminal tab, then press Retry.`, action: 'sign-in' };
 }
 
 function problemFrom(error: PaneError, agent: ChatPanelState['agent']): ChatTabProblem {
   if (isAuthRequired(error)) return signedOut(agent);
-  if (error.code === 'CHAT_AGENT_NOT_INSTALLED') return { code: 'not-installed', message: error.message, next: error.next ?? 'Install it, then press Retry.', action: 'install', url: agent === 'claude' ? 'https://docs.anthropic.com/en/docs/claude-code/setup' : 'https://developers.openai.com/codex/cli' };
+  const install = agentConfig(agent)?.install.url;
+  const action = (next: string): ChatTabProblem => install ? { code: 'not-installed', message: error.message, next, action: 'install', url: install } : { code: 'not-installed', message: error.message, next };
+  if (error.code === 'CHAT_AGENT_NOT_INSTALLED') return action(error.next ?? 'Install it, then press Retry.');
   if (error.code === 'CHAT_UNSUPPORTED_HOST') return { code: 'unsupported-host', message: error.message, next: error.next ?? 'Open a terminal agent tab instead.' };
-  // #1236: the adapters ship with Pane and check the installed CLI. Too old a CLI is fixed by installing a newer one.
-  if (error.code === 'CHAT_AGENT_OUTDATED') return { code: 'not-installed', message: error.message, next: error.next ?? 'Update it, then press Retry.', action: 'install', url: agent === 'claude' ? 'https://docs.anthropic.com/en/docs/claude-code/setup' : 'https://developers.openai.com/codex/cli' };
+  // #1236: chat checks the installed CLI. Too old a CLI is fixed by installing a newer one.
+  if (error.code === 'CHAT_AGENT_OUTDATED') return action(error.next ?? 'Update it, then press Retry.');
   if (error.code === 'CHAT_ADAPTER_MISSING') return { code: 'adapter-setup', message: error.message, next: error.next ?? 'Reinstall Pane from runpane.com.' };
   return { code: 'failed', message: error.message, next: error.next ?? 'Press Restart.', action: 'restart' };
 }

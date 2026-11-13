@@ -44,6 +44,8 @@ export interface ParsedArgs {
   toolCommand?: string;
   /** `--chat`: open the agent as a chat tab. */
   chat?: boolean;
+  /** `--agent` with `--chat` naming an agent outside the terminal agents; the host decides whether it can run it. */
+  chatAgent?: string;
   /** `--agent-farm <profile>`: start an Agent Farm profile in a chat tab. */
   agentFarm?: string;
   /** `--arg key=value`, repeatable: launch arguments for --agent-farm. */
@@ -254,6 +256,7 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
+const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
 const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops', 'secrets', 'autopilot']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
@@ -394,6 +397,7 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
     }
   }
   parseFlags(args, parsed);
+  if (parsed.chatAgent !== undefined && !parsed.chat) throw invalidAgentError(parsed.chatAgent);
   if (parsed.command === 'watch' && parsed.follow && parsed.timeoutMs === 0) {
     throw new Error('--timeout-ms must be greater than 0 with --follow.');
   }
@@ -435,6 +439,10 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   }
   if (parsed.command === 'autopilot stack push') validateStackPushArgs(parsed);
   return parsed;
+}
+
+function invalidAgentError(value: string): Error {
+  return new Error(`Invalid --agent "${value}". Expected one of: ${[...AGENTS].join(', ')}. With --chat, --agent takes any agent the host can run.`);
 }
 
 /** The commands that dispatch work and accept `--wait` for its result. */
@@ -1051,10 +1059,13 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     return;
   }
   if (flag === '--agent') {
-    if (!AGENTS.has(value)) {
-      throw new Error(`Invalid --agent "${value}". Expected one of: ${[...AGENTS].join(', ')}`);
+    if (AGENTS.has(value)) {
+      parsed.agent = decodeBoundary(value, agentSchema);
+      return;
     }
-    parsed.agent = decodeBoundary(value, agentSchema);
+    // A chat tab runs any agent the host can run; parseRunpaneArgs refuses it without --chat.
+    if (!AGENT_ID_PATTERN.test(value)) throw invalidAgentError(value);
+    parsed.chatAgent = value;
     return;
   }
   if (flag === '--tool-command') {

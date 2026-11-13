@@ -1233,7 +1233,7 @@ export class PaneRemoteHttpApiServer {
             'These glasses started a Session on this computer less than 30 seconds ago, so this one was not created.', 429, `Try again in ${seconds} s.`);
         }
         // Glasses never show the orchestrator's tab, so the Session starts as the person's settings say.
-        return this.commandRegistry.invokeRemote(channel, [input, { chatTabs: true }]);
+        return this.commandRegistry.invokeRemote(channel, [input, { chatTabs: true, chatAgents: true }]);
       });
       return;
     }

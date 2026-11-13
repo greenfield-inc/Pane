@@ -1,4 +1,6 @@
 import type { AgentChatConfigOption } from './types/agentChat';
+import { CHAT_FULL_ACCESS_CONTROL } from './types/chatTab';
+import { RISKY_AGENT_MODES } from './agents';
 
 /**
  * The agent's settings, sorted into the composer's one row: the permission mode
@@ -63,11 +65,18 @@ export function modelSummary(controls: ComposerControls): string {
   return [model, effort].filter(Boolean).join(' · ') || 'Options';
 }
 
-/** Permission modes that let the agent act without asking (Claude Code's and codex-acp's ids): the phone marks them on the composer row. */
-const RISKY_MODES = new Set(['bypassPermissions', 'dontAsk', 'agent-full-access']);
-
+/** A permission mode that lets the agent act without asking (each agent's `riskyModes` in the agents config). */
 export function isRiskyMode(mode: AgentChatConfigOption | undefined): boolean {
-  return !!mode && RISKY_MODES.has(mode.currentValue);
+  return !!mode && RISKY_AGENT_MODES.has(mode.currentValue);
+}
+
+/**
+ * Pane's own Full access setting (CHAT_FULL_ACCESS_CONTROL), when it is on: the agent acts
+ * without asking because Pane answers each approval. Viewers mark it like a risky mode.
+ */
+export function paneFullAccessOn(controls: readonly AgentChatConfigOption[]): AgentChatConfigOption | undefined {
+  const control = controls.find(entry => entry.id === CHAT_FULL_ACCESS_CONTROL);
+  return control && onOffValues(control)?.on === control.currentValue ? control : undefined;
 }
 
 /** A setting whose only choices are On and Off (Claude's Fast mode, Ultracode): the phone shows it as a switch. */

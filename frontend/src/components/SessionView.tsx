@@ -62,9 +62,12 @@ import {
   mergeAllGroups,
   type DropZone,
 } from '../utils/panelLayout';
-import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, Sprout } from 'lucide-react';
+import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, Sprout, Boxes } from 'lucide-react';
 import { AgentFarmProfileDialog } from './chatTab/AgentFarmProfileDialog';
-import { getCliBrandIcon } from './ui/brandIconRegistry';
+import { agentIcon, getCliBrandIcon } from './ui/brandIconRegistry';
+import { useChatAgents } from '../stores/chatAgentsStore';
+import { menuChatAgents } from '../../../shared/chatAgentMenu';
+import { requestOpenSettings } from '../utils/openSettings';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
@@ -1282,6 +1285,8 @@ export const SessionView = memo(() => {
   }, [primaryGroupId, primaryGroupNode, activeSession, isSplitLayout, topBarPanels, applyLayout]);
 
   const chatTabs = useConfigStore((s) => isChatTabsEnabled(s.config));
+  const chatCatalog = useChatAgents(chatTabs ? window.electronAPI.chatTab : undefined);
+  const chatAgents = useMemo(() => menuChatAgents(chatCatalog), [chatCatalog]);
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
@@ -1297,14 +1302,17 @@ export const SessionView = memo(() => {
         <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Open</div>
         {[
           // Chat tabs on (D-15): agents open as chats first; their terminal versions follow.
-          ...(chatTabs && activeSession ? (['claude', 'codex'] as const).map(agent => ({
-            key: `chat-${agent}`,
-            label: agent === 'claude' ? 'Claude' : 'Codex',
-            icon: getCliBrandIcon(agent, 'h-3.5 w-3.5'),
+          ...(chatTabs && activeSession ? chatAgents.map(agent => ({
+            key: `chat-${agent.id}`,
+            label: agent.label,
+            icon: agentIcon(agent, 'h-3.5 w-3.5'),
             hotkeyId: '',
-            onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent }).catch(error => showActionError(`Could not open a ${agent === 'claude' ? 'Claude' : 'Codex'} chat`, error)); },
+            onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.label} chat`, error)); },
           })) : []),
-          ...(chatTabs && activeSession ? [{ key: 'chat-profile', label: 'Agent Farm profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) }] : []),
+          ...(chatTabs && activeSession ? [
+            { key: 'chat-profile', label: 'Agent Farm profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) },
+            { key: 'chat-more', label: 'More agents…', icon: <Boxes className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => requestOpenSettings({ category: 'agents' }) },
+          ] : []),
           { key: 'terminal', label: 'Terminal', icon: <Terminal className="h-3.5 w-3.5" />, hotkeyId: 'add-tool-terminal', onClick: () => handlePanelCreate('terminal') },
           ...agentPresets.map(preset => ({
             key: preset.id,
@@ -1341,7 +1349,7 @@ export const SessionView = memo(() => {
         />
       )}
     </div>
-  ), [activeSession, agentPresets, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen]);
+  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {

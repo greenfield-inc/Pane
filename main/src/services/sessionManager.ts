@@ -109,7 +109,7 @@ function parseTerminalResumeState(value: ToolPanelState['customState']): {
   customResume?: CustomCommandResume | null;
   wasInterrupted?: boolean;
   initialCommand?: string;
-  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode';
+  agentType?: ConfiguredAgentId;
   agentSessionId?: string;
   hasClaudeSessionId?: boolean;
 } | undefined {
@@ -148,6 +148,7 @@ import { detectGitBase } from './worktreeManager';
 import { panelManager } from './panelManager';
 import { ProjectEnvService, type ResolvedProjectEnv } from './projectEnvVars';
 import { teammatePaneCaller } from '../daemon/commandRegistry';
+import type { ConfiguredAgentId } from '../../../shared/agents';
 import type { AnalyticsManager } from './analyticsManager';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import { comparePaneOrder, type NewPanePlacement, type PaneOrderSettings } from '../../../shared/utils/paneOrder';

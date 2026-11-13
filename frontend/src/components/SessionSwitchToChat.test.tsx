@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { SessionChatSwitchItem, SessionChatSwitchSkip } from '../../../shared/types/chatTab';
+import type { ChatAgentEntry, SessionChatSwitchItem, SessionChatSwitchSkip } from '../../../shared/types/chatTab';
 import type { ToolPanel } from '../../../shared/types/panels';
 import { switchMenuState } from '../utils/sessionChatSwitch';
 import { SessionSwitchMenuItem } from './SessionSwitchToChat';
@@ -21,8 +21,8 @@ describe('Switch to chat in a Session menu, always shown (D-337)', () => {
   });
 
   it('counts what cannot switch by reason, leaving plain shells out', () => {
-    expect(switchMenuState(preview(tab('a', 'busy'), tab('b', 'plain-codex'), tab('c', 'busy'), tab('d', 'not-agent')), 'this machine'))
-      .toEqual({ state: 'unavailable', reason: 'Nothing to switch: 2 busy, 1 plain Codex' });
+    expect(switchMenuState(preview(tab('a', 'busy'), tab('b', 'no-conversation'), tab('c', 'busy'), tab('d', 'not-agent')), 'this machine'))
+      .toEqual({ state: 'unavailable', reason: 'Nothing to switch: 2 busy, 1 no saved conversation' });
   });
 
   it('says there is nothing to switch when the Session has no terminal agent tab', () => {
@@ -61,27 +61,37 @@ describe('Switch to chat in a Session menu, always shown (D-337)', () => {
   });
 });
 
-describe('Switch to chat in a tab menu, always shown for agent tabs (D-337)', () => {
-  const panel = (type: ToolPanel['type'], agentType?: 'claude' | 'codex'): ToolPanel => ({
-    id: 'p1', sessionId: 's1', type, title: 'Claude',
+describe('Switch to chat in a tab menu, always shown for agent tabs the catalog lists (D-337)', () => {
+  const entry = (id: string, switchFromTerminal: ChatAgentEntry['switchFromTerminal']): ChatAgentEntry =>
+    ({ id, label: id, icon: id, source: 'config', installed: true, fullAccess: 'agent', switchFromTerminal });
+  const agents = [entry('codex', { ok: true }), entry('cursor', { ok: false, reason: 'Cursor chats cannot open its terminal conversations.' })];
+  const panel = (type: ToolPanel['type'], agentType?: string): ToolPanel => ({
+    id: 'p1', sessionId: 's1', type, title: 'Agent',
     state: { isActive: true, customState: agentType ? { agentType } : {} },
     metadata: { createdAt: '', lastActiveAt: '', position: 0 },
   });
   const shown = (items: ReturnType<typeof switchToChatMenuItems>) => items.map(item => ({ id: item.id, disabled: item.disabled === true, description: item.description }));
 
-  it('opens the dialog for a terminal Claude or Codex tab when chat tabs are on', () => {
-    expect(shown(switchToChatMenuItems(panel('terminal', 'codex'), true, () => undefined))).toEqual([{ id: 'switch-to-chat', disabled: false, description: undefined }]);
+  it('opens the dialog for a terminal tab whose agent can switch when chat tabs are on', () => {
+    expect(shown(switchToChatMenuItems(panel('terminal', 'codex'), true, agents, () => undefined))).toEqual([{ id: 'switch-to-chat', disabled: false, description: undefined }]);
+  });
+
+  it('is disabled with the catalog\'s reason for an agent that cannot switch', () => {
+    expect(shown(switchToChatMenuItems(panel('terminal', 'cursor'), true, agents, () => undefined))).toEqual([
+      { id: 'switch-to-chat', disabled: true, description: 'Cursor chats cannot open its terminal conversations.' },
+    ]);
   });
 
   it('is disabled with Turn on when chat tabs are off', () => {
-    expect(shown(switchToChatMenuItems(panel('terminal', 'claude'), false, () => undefined))).toEqual([
+    expect(shown(switchToChatMenuItems(panel('terminal', 'codex'), false, agents, () => undefined))).toEqual([
       { id: 'switch-to-chat', disabled: true, description: 'Chat tabs are off on this machine' },
       { id: 'turn-on-chat-tabs', disabled: false, description: undefined },
     ]);
   });
 
-  it('is disabled on a chat tab, and absent from tabs that run no agent', () => {
-    expect(shown(switchToChatMenuItems(panel('chat'), true, () => undefined))).toEqual([{ id: 'switch-to-chat', disabled: true, description: 'This tab is already a chat' }]);
-    expect(switchToChatMenuItems(panel('terminal'), true, () => undefined)).toEqual([]);
+  it('is disabled on a chat tab, and absent from tabs that run no agent the catalog lists', () => {
+    expect(shown(switchToChatMenuItems(panel('chat'), true, agents, () => undefined))).toEqual([{ id: 'switch-to-chat', disabled: true, description: 'This tab is already a chat' }]);
+    expect(switchToChatMenuItems(panel('terminal'), true, agents, () => undefined)).toEqual([]);
+    expect(switchToChatMenuItems(panel('terminal', 'aider'), true, agents, () => undefined)).toEqual([]);
   });
 });

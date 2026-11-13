@@ -2,7 +2,9 @@ import type { JsonValue } from '../validation/boundaryDecoder';
 
 export type AgentChatPart =
   | { type: 'text' | 'thought'; text: string }
-  | { type: 'tool'; id: string; title: string; status: 'pending' | 'in_progress' | 'completed' | 'failed'; input?: JsonValue; output?: JsonValue; content?: JsonValue[]; kind?: string; locations?: JsonValue; terminal?: string }
+  | { type: 'tool'; id: string; title: string; status: 'pending' | 'in_progress' | 'completed' | 'failed'; input?: JsonValue; output?: JsonValue; content?: JsonValue[]; kind?: string; locations?: JsonValue; terminal?: string;
+      /** `pane`: Pane approved this step with the agent's "allow once", because the tab has full access. */
+      approvedBy?: 'pane' }
   | { type: 'content'; content: JsonValue };
 
 export interface AgentChatMessage {

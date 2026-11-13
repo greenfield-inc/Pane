@@ -302,7 +302,7 @@ function toInvocation(command: PaneCommandValue): Invocation {
         return { channel: 'sessions:create', args: [decodeBoundary(command, commandSchemas['create-pane']).request] };
       case 'create-session':
         // This desktop shows chat tabs, so the Session may start as one (D-203).
-        return { channel: 'orchestration-sessions:create', args: [decodeBoundary(command, commandSchemas['create-session']).input, { chatTabs: true }] };
+        return { channel: 'orchestration-sessions:create', args: [decodeBoundary(command, commandSchemas['create-session']).input, { chatTabs: true, chatAgents: true }] };
       case 'preview-switch-to-chat':
         return { channel: 'chat-tab:preview-session-switch', args: [decodeBoundary(command, commandSchemas['preview-switch-to-chat']).sessionId] };
       case 'switch-to-chat': {

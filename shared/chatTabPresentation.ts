@@ -22,6 +22,8 @@ export interface ChatStep {
   /** The diff shown on demand ("View diff"), never by default. */
   diff?: { path: string; oldText: string | null; newText: string };
   command?: string;
+  /** `pane`: Pane approved this step with "allow once" because the tab has full access. */
+  approvedBy?: 'pane';
   /** Command output or tool result as text, for the step's own row. */
   output?: string;
   input?: JsonValue;
@@ -139,6 +141,7 @@ function cachedStep(part: ToolPart): ChatStep {
 function toStep(part: ToolPart): ChatStep {
   const kind = stepKind(part.kind);
   const step: ChatStep = { id: part.id, kind, title: part.title, status: part.status };
+  if (part.approvedBy) step.approvedBy = part.approvedBy;
   const input = decodeOptionalBoundary(part.input, commandInput);
   const location = decodeOptionalBoundary(part.locations, locationList)?.[0]?.path;
   for (const entry of part.content ?? []) {

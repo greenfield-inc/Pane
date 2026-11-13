@@ -3134,12 +3134,17 @@ async function checkChatTabCreateParity() {
   const cases = [
     ['panels', 'create', '--pane', 'pane-1', '--chat', '--agent', 'codex', '--initial-input', 'Fix it', '--yes'],
     ['panels', 'create', '--pane', 'pane-1', '--agent-farm', 'greenfield/implementer:opus', '--arg', 'docs=grain', '--arg', 'task=a=b', '--title', 'Implementer', '--source', 'agent', '--yes'],
+    ['panels', 'create', '--pane', 'pane-1', '--agent', 'opencode', '--chat', '--yes'],
   ];
   const npm = [];
   for (const args of cases) npm.push(JSON.parse(JSON.stringify(await buildPanelCreateRequest(parseRunpaneArgs(args)))));
   assert.deepStrictEqual(npm[0], { paneId: 'pane-1', type: 'chat', chat: { agent: 'codex', initialInput: 'Fix it' } });
   assert.deepStrictEqual(npm[1], { paneId: 'pane-1', type: 'chat', chat: { profile: 'greenfield/implementer:opus', args: { docs: 'grain', task: 'a=b' }, title: 'Implementer' }, noFocus: true, source: 'agent' });
-  await assert.rejects(buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--chat', '--agent', 'cursor', '--yes'])), /--chat opens Claude or Codex/);
+  // With --chat any agent id goes to the host, which refuses one it cannot run; without --chat --agent names a terminal agent.
+  assert.deepStrictEqual(npm[2], { paneId: 'pane-1', type: 'chat', chat: { agent: 'opencode' } });
+  assert.throws(() => parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--agent', 'goose', '--yes']), /Invalid --agent "goose"/);
+  assert.throws(() => parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--chat', '--agent', 'Not An Id', '--yes']), /Invalid --agent "Not An Id"/);
+  await assert.rejects(buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--chat', '--yes'])), /--chat needs --agent <id> or --agent-farm <profile>/);
   await assert.rejects(buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--agent', 'claude', '--arg', 'a=b', '--yes'])), /--arg is a launch argument for --agent-farm/);
   const python = JSON.parse(runPythonSnippet(`
 import json
@@ -3147,7 +3152,7 @@ import runpane.local_control as local_control
 from runpane.cli import parse_args
 built = [local_control.build_panel_create_request(parse_args(args)) for args in ${JSON.stringify(cases)}]
 refused = []
-for args in (["panels", "create", "--pane", "p", "--chat", "--agent", "cursor", "--yes"], ["panels", "create", "--pane", "p", "--agent", "claude", "--arg", "a=b", "--yes"]):
+for args in (["panels", "create", "--pane", "p", "--chat", "--yes"], ["panels", "create", "--pane", "p", "--agent", "claude", "--arg", "a=b", "--yes"], ["panels", "create", "--pane", "p", "--agent", "goose", "--yes"]):
     try:
         local_control.build_panel_create_request(parse_args(args))
     except ValueError as error:
@@ -3155,8 +3160,9 @@ for args in (["panels", "create", "--pane", "p", "--chat", "--agent", "cursor", 
 print(json.dumps({"built": built, "refused": refused}))
 `));
   assert.deepStrictEqual(python.built, npm);
-  assert.match(python.refused[0], /--chat opens Claude or Codex/);
+  assert.match(python.refused[0], /--chat needs --agent <id> or --agent-farm <profile>/);
   assert.match(python.refused[1], /--arg is a launch argument for --agent-farm/);
+  assert.match(python.refused[2], /Invalid --agent goose/);
 }
 
 async function checkDeliveryParity() {
@@ -5544,15 +5550,15 @@ async function checkAgentTemplateParity() {
 
   const agents = [...RUNPANE_CONTRACT.enums.agents].sort();
   assert.deepStrictEqual(agents, ['claude', 'codex', 'cursor', 'opencode']);
+  const { agentTerminalCommand } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'agents.js'));
   for (const agent of RUNPANE_CONTRACT.enums.agents) {
-    const template = RUNPANE_CONTRACT.agentTemplates[agent];
-    assert.ok(template, `agentTemplates missing entry for ${agent}`);
-    assert.ok(template.title.trim().length > 0, `agentTemplates.${agent}.title is empty`);
-    assert.ok(template.command.trim().length > 0, `agentTemplates.${agent}.command is empty`);
-    assert.ok(template.description.trim().length > 0, `agentTemplates.${agent}.description is empty`);
+    const entry = RUNPANE_CONTRACT.agents.entries[agent];
+    assert.ok(entry, `agents.entries missing entry for ${agent}`);
+    assert.ok(entry.title.trim().length > 0, `agents.entries.${agent}.title is empty`);
+    assert.ok(entry.description.trim().length > 0, `agents.entries.${agent}.description is empty`);
   }
-  assert.strictEqual(RUNPANE_CONTRACT.agentTemplates.cursor.command, 'cursor-agent --force --trust');
-  assert.strictEqual(RUNPANE_CONTRACT.agentTemplates.opencode.command, 'opencode --auto');
+  assert.strictEqual(agentTerminalCommand('cursor'), 'cursor-agent --force --trust');
+  assert.strictEqual(agentTerminalCommand('opencode'), 'opencode --auto');
 
   const originalInvokeDaemon = daemonClient.invokeDaemon;
   const originalConsoleLog = console.log;

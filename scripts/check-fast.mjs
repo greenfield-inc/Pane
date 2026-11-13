@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // pnpm check:fast: the checks that catch most red CI runs, in a few minutes,
 // before a push. It runs the type check and lint (side by side), the offline
-// markdown link check (when lychee is installed), the renderer-test type check, and the unit tests that
+// markdown link check (when lychee is installed), the renderer-test type check (lint includes the
+// check that code hard-codes no agent fact, scripts/check-agent-names.mjs), and the unit tests that
 // the branch's changes reach, in each workspace the branch changed. It does
 // not run the Playwright journeys, the runpane wrapper suites or other OSes;
 // CI still does. Exits non-zero when any check fails.
