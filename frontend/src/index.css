@@ -742,9 +742,8 @@ body.understory {
   margin: var(--pane-terminal-screen-offset-y) 0 0 var(--pane-terminal-padding-x);
 }
 
-/* xterm draws its own cursor; the native caret of its hidden input never shows.
-   A blinking caret repaints every 500 ms and each repaint keeps the macOS
-   display link ticking for ~165 ms, 55-70 wakeups a second at idle. */
+/* xterm draws its own cursor, so the native caret of its hidden input never
+   shows and never needs to blink (services/caretRest.ts says why it costs). */
 .xterm .xterm-helper-textarea {
   caret-animation: manual;
 }
