@@ -33,6 +33,8 @@ from .installers import (
     spawn_pane_captured,
 )
 from .workspaces import read_workspace_summary
+from .daemon_client import resolve_pane_directory
+from .pane_intro import pane_intro, render_pane_intro
 from .local_control import (
     has_cadence_value_flag,
     run_agents_doctor,
@@ -471,6 +473,7 @@ def infer_failure_stage(telemetry_context: WrapperTelemetryContext) -> str:
 def run_no_args_entrypoint(telemetry_context: WrapperTelemetryContext) -> int:
     if not is_interactive_shell():
         telemetry_context["resolved_command"] = "help"
+        print(render_pane_intro(pane_intro(resolve_pane_directory())) + "\n")
         print(help_text(None))
         return 0
 
@@ -1685,6 +1688,8 @@ def print_help(parsed: ParsedArgs) -> int:
     reconfigure = getattr(sys.stdout, "reconfigure", None)
     if reconfigure:
         reconfigure(encoding="utf-8")
+    if not parsed.help_topic:
+        print(render_pane_intro(pane_intro(resolve_pane_directory(parsed.pane_dir))) + "\n")
     print(help_text(parsed.help_topic))
     if not parsed.help_topic or parsed.help_topic == "workspace":
         print("\n".join(["", *read_workspace_summary(parsed.pane_dir)["lines"]]))

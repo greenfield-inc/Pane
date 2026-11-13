@@ -1,6 +1,8 @@
 import { RUNPANE_CONTRACT } from './generated/contract';
 import type { ParsedArgs } from './commands';
 import { readWorkspaceSummary, type WorkspaceSummary } from './workspace';
+import { paneIntro, renderPaneIntro, type PaneIntro } from './paneIntro';
+import { resolvePaneDirectory } from './daemonClient';
 
 type AgentContextCommand =
   typeof RUNPANE_CONTRACT.agentContext.commands[keyof typeof RUNPANE_CONTRACT.agentContext.commands];
@@ -9,6 +11,8 @@ interface AgentContextBriefResult {
   ok: true;
   mode: 'brief';
   source: 'runpane-contract';
+  intro: PaneIntro;
+  workspaceRules: readonly string[];
   summary: string;
   rules: readonly string[];
   tools: typeof RUNPANE_CONTRACT.agentContext.brief.tools;
@@ -65,6 +69,8 @@ async function buildAgentContextResult(commandName?: string, paneDir?: string): 
     ok: true,
     mode: 'brief',
     source: 'runpane-contract',
+    intro: paneIntro(resolvePaneDirectory(paneDir)),
+    workspaceRules: RUNPANE_CONTRACT.agentContext.workspaceRules,
     summary: brief.summary,
     rules: brief.rules,
     tools: brief.tools,
@@ -165,6 +171,8 @@ function normalizeCommandName(commandName: string): string {
 function renderBrief(result: AgentContextBriefResult): string {
   const lines = [
     RUNPANE_CONTRACT.agentContext.brief.title,
+    '',
+    renderPaneIntro(result.intro, result.workspaceRules),
     '',
     result.summary,
     '',

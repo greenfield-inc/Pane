@@ -15,7 +15,8 @@ import { runNotify } from './notify';
 import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
-import { PaneDaemonClientError, routeDaemonCallsTo } from './daemonClient';
+import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo } from './daemonClient';
+import { paneIntro, renderPaneIntro } from './paneIntro';
 import { describeFailure, printFailure, RunpaneError } from './errors';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { downloadArtifact } from './download';
@@ -195,6 +196,7 @@ type CommandHandler = (parsed: ParsedArgs, telemetryContext: WrapperTelemetryCon
 
 const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'help': async (parsed, telemetryContext) => {
+    if (!parsed.helpTopic) console.log(`${renderPaneIntro(paneIntro(resolvePaneDirectory(parsed.paneDir)))}\n`);
     console.log(helpText(parsed.helpTopic));
     if (!parsed.helpTopic || parsed.helpTopic === 'workspace') {
       console.log(['', ...(await readWorkspaceSummary(parsed.paneDir)).lines].join('\n'));
@@ -524,6 +526,7 @@ function inferFailureStage(telemetryContext: WrapperTelemetryContext): WrapperTe
 async function runNoArgsEntrypoint(telemetryContext: WrapperTelemetryContext): Promise<number> {
   if (!isInteractiveShell()) {
     telemetryContext.resolvedCommand = 'help';
+    console.log(`${renderPaneIntro(paneIntro(resolvePaneDirectory()))}\n`);
     console.log(helpText());
     return 0;
   }

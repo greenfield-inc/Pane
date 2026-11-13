@@ -8719,6 +8719,8 @@
     "doctorResult": {
       "type": "object",
       "required": [
+        "intro",
+        "workspaceRules",
         "ok",
         "source",
         "wrapper",
@@ -8731,6 +8733,34 @@
         "nextCommands"
       ],
       "properties": {
+        "intro": {
+          "type": "object",
+          "required": [
+            "humans",
+            "agents",
+            "approvals"
+          ],
+          "properties": {
+            "humans": {
+              "type": "string"
+            },
+            "agents": {
+              "type": "string"
+            },
+            "approvals": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "description": "What Pane is and how to work in it: read it first. `approvals` says whether Approvals is on, which picks how each part says to reach the person."
+        },
+        "workspaceRules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Where work goes in Pane: Session, Pane, tab and scratch."
+        },
         "ok": {
           "type": "boolean"
         },
@@ -12432,6 +12462,8 @@
         "ok",
         "mode",
         "source",
+        "intro",
+        "workspaceRules",
         "summary",
         "rules",
         "tools",
@@ -12446,6 +12478,12 @@
         },
         "source": {
           "const": "runpane-contract"
+        },
+        "intro": {
+          "$ref": "#/jsonSchemas/doctorResult/properties/intro"
+        },
+        "workspaceRules": {
+          "$ref": "#/jsonSchemas/doctorResult/properties/workspaceRules"
         },
         "summary": {
           "type": "string"
@@ -17481,6 +17519,42 @@
     }
   },
   "agentContext": {
+    "intro": {
+      "humans": {
+        "title": "For people",
+        "sentences": [
+          "Open a Session for each workstream and tell its agent what you want, in plain words.",
+          "It plans the work, starts a Pane for each feature, and runs the builders, reviewers and QA as tabs inside them, so you don't have to.",
+          "{approvals}",
+          "When a feature is done, archiving its Pane cleans up its worktree and files for you."
+        ],
+        "approvals": {
+          "on": "Anything that needs you, like a decision, an approval or a merge, waits for you in Approvals while everything else keeps moving.",
+          "off": "Anything that needs you, like a decision, an approval or a merge, the agent asks in its terminal while everything else keeps moving."
+        }
+      },
+      "agents": {
+        "title": "For agents",
+        "sentences": [
+          "In Pane, work flows from a Session to Panes to tabs.",
+          "A Session is a workstream: the person or an orchestrator opens it, and every Pane it starts stays attached to it.",
+          "Each feature gets one Pane, a git worktree on its own branch, and everything for that feature (the agent that builds it, its reviews, QA and fixes) runs as tabs inside it.",
+          "Scratch files go in $PANE_SCRATCH_DIR inside the Pane.",
+          "When the feature is done, archiving the Pane removes the worktree, its tabs and its scratch files together.",
+          "{approvals}"
+        ],
+        "approvals": {
+          "on": "When you need the person, ask through Approvals (a Session worker reports blocked to its orchestrator instead).",
+          "off": "When you need the person, ask in this terminal."
+        }
+      }
+    },
+    "workspaceRules": [
+      "Session: the default home for a workstream or any multi-step work you orchestrate. Its folder ($PANE_SESSION_DIR) holds plans, notes and reports.",
+      "Pane: one per feature (one worktree, one branch). Before creating one, find the feature's Pane (`runpane panes list --json`, match the branch) and create one only when none exists.",
+      "Tab: reviews, review reruns, QA, fixes and follow-ups for a feature go in new tabs in its Pane (`runpane panels create --pane <id>`), never a new Pane or a plain `git worktree`.",
+      "Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. Archiving the Pane deletes it with everything in it."
+    ],
     "brief": {
       "title": "Pane agent context",
       "summary": "Pane runs coding agents in parallel git worktrees. A Pane is a visible workspace for one feature or PR, with its own Pane-managed git worktree and branch; a panel is a terminal tab in a Pane and shares its worktree; an agent is a CLI process running in a panel.",

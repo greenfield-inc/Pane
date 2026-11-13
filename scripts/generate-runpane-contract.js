@@ -282,6 +282,11 @@ function validateAgentContext(contract, commandNames) {
       throw new Error(`agentContext.brief.tools references unknown command "${tool.name}"`);
     }
   }
+  for (const [name, part] of Object.entries(context.intro ?? {})) {
+    if (part.sentences.filter((sentence) => sentence === '{approvals}').length !== 1) {
+      throw new Error(`agentContext.intro.${name}.sentences must contain "{approvals}" exactly once`);
+    }
+  }
 }
 
 function header(commentStart) {
