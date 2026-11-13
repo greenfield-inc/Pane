@@ -13,6 +13,14 @@ import {
 } from '../../../shared/types/listeningPorts';
 
 const POLL_INTERVAL_MS = 2_000;
+/**
+ * A server started by a terminal or agent is announced by output: its logs, or the agent's turn.
+ * Reading the socket table costs about 55 ms of CPU on macOS, so it is read at a poll only after
+ * new output, or while output came within this window (a server can bind after its last line)...
+ */
+const ACTIVE_WINDOW_MS = 10_000;
+/** ...and otherwise this often, which still finds ports opened outside Pane. */
+const QUIET_INTERVAL_MS = 60_000;
 /** A socket read slower than this share of the interval stretches the interval, so polling stays cheap. */
 const MAX_POLL_DUTY = 0.1;
 const READ_TIMEOUT_MS = 5_000;
@@ -37,6 +45,8 @@ export interface ListeningPortMonitorOptions {
   /** Root of Pane's own process tree. */
   panePid?: number;
   terminalPanes(): TerminalPane[];
+  /** When any terminal or agent last printed, in ms since the epoch. Absent: read every poll. */
+  lastOutputAt?(): number;
   onChange?(snapshot: ListeningPortsSnapshot): void;
 }
 
@@ -45,7 +55,7 @@ export interface ListeningPortMonitor {
   refresh(): Promise<ListeningPortsSnapshot>;
   /** The list from the last read, without reading again. */
   snapshot(): ListeningPortsSnapshot;
-  /** Refreshes every 2 s, or less often when a read is slow, until `stop`. */
+  /** Refreshes at the next 2 s poll after terminal or agent output, else every minute, and less often when a read is slow, until `stop`. */
   start(): void;
   stop(): void;
 }
@@ -81,9 +91,11 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
   // Only the socket read paces polling: probes wait on other programs, and
   // the process table is read only when a new owner appears.
   let socketReadMs = 0;
+  let lastReadAt = 0;
 
   const read = async (): Promise<ListeningPortsSnapshot> => {
     const readStartedAt = Date.now();
+    lastReadAt = readStartedAt;
     const allSockets = await readListeningSockets();
     socketReadMs = Date.now() - readStartedAt;
     // A remote desktop's tunnel listeners mirror another host's ports; listing them would let
@@ -146,9 +158,15 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
     return inFlight;
   };
 
+  const due = () => {
+    const now = Date.now();
+    const outputAt = options.lastOutputAt?.() ?? now;
+    return outputAt >= lastReadAt || now - outputAt < ACTIVE_WINDOW_MS || now - lastReadAt >= QUIET_INTERVAL_MS;
+  };
+
   const schedule = (delayMs: number) => {
     timer = setTimeout(() => {
-      void refresh().catch(error => {
+      void Promise.resolve().then(() => (due() ? refresh() : current)).catch(error => {
         console.warn('[ListeningPorts] refresh_failed:', error);
       }).finally(() => {
         if (running) schedule(Math.max(POLL_INTERVAL_MS, socketReadMs / MAX_POLL_DUTY));

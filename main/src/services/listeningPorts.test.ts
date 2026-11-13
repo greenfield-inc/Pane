@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import net from 'net';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createListeningPortMonitor } from './listeningPorts';
 
 const HTTP_SERVER = `require('http').createServer((_, res) => res.end('ok')).listen(0, '127.0.0.1', function () { console.log(this.address().port); });`;
@@ -213,5 +213,24 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
     await monitor.refresh();
 
     expect(seen.at(-1)).toContain(port);
+  });
+
+  it('while every terminal is quiet, finds a new port only once a terminal prints again', async () => {
+    // A terminal records when it last printed, as Pane's terminal and agent managers do.
+    const terminal = { printedAt: 0, print() { this.printedAt = Date.now(); } };
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], lastOutputAt: () => terminal.printedAt });
+    const listed = (port: number) => monitor.snapshot().ports.some(entry => entry.port === port);
+    monitor.start();
+    try {
+      await monitor.refresh();
+      const { port } = await startListener(HTTP_SERVER);
+      await new Promise(resolve => setTimeout(resolve, 5_000));
+      expect(listed(port)).toBe(false);
+
+      terminal.print();
+      await vi.waitFor(() => expect(listed(port)).toBe(true), { timeout: 10_000, interval: 200 });
+    } finally {
+      monitor.stop();
+    }
   });
 });

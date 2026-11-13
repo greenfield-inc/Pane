@@ -13,6 +13,8 @@ export function usePorts(): PortsRead & { error: unknown; refetch: () => void } 
   const key = useDaemonQueryKey('ports:list');
   const query = useInvokeQuery<ListeningPortsSnapshot | null>('ports:list', [], {
     select: decodeListeningPortsSnapshot,
+    // Opening a browser tab asks again: the computer reads its ports only once a minute while its terminals are quiet.
+    refetchOnMount: 'always',
     // An older computer has no ports:list; asking again will not change that.
     retry: (count, error) => !isOlderPane(error) && count < 2,
   });

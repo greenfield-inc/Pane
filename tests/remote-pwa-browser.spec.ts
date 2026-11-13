@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openConnectedRemotePwa } from './remotePwaMock';
+import { openConnectedRemotePwa, setRemoteHostPorts } from './remotePwaMock';
 
 // A phone browser tab frames a host dev server through the phone address the
 // host's Ports list gives it, and reads it back as the host's own address.
@@ -84,4 +84,25 @@ test('a phone browser tab goes back to its saved address when the host refuses t
   const saved = page.waitForRequest(request => request.postData()?.includes('"panels:update"') ?? false);
   await page.getByTitle('Open localhost:5173').click();
   expect((await saved).postData()).toContain('"currentUrl":"http://localhost:5173"');
+});
+
+test('a phone lists a port started while it looked away, on switching to a browser tab and on opening Ports', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route(`${PHONE_URL}/**`, route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><h1>Hello</h1>' }));
+  const port = (number: number) => ({ port: number, pid: number, process: 'node', group: 'pane-terminal' as const, kind: 'web' as const, phoneUrl: PHONE_URL });
+  await openConnectedRemotePwa(page, {
+    browserPanels: [{ title: 'Browser', url: '' }],
+    ports: { host: 'MacBook Pro', ports: [port(5173)] },
+  });
+
+  // Servers start while the phone shows another tab; the host sends no ports:changed for them.
+  setRemoteHostPorts(page, { host: 'MacBook Pro', ports: [port(5173), port(5180)] });
+  await page.getByRole('tab', { name: 'Browser' }).click();
+  await expect(page.getByTitle('Open localhost:5180')).toBeVisible();
+
+  await page.getByTitle('Open localhost:5173').click();
+  await expect(page.getByRole('textbox', { name: 'Address' })).toHaveValue('localhost:5173/');
+  setRemoteHostPorts(page, { host: 'MacBook Pro', ports: [port(5173), port(5180), port(5181)] });
+  await page.getByRole('button', { name: 'Ports' }).click();
+  await expect(page.getByTitle('Open localhost:5181')).toBeVisible();
 });

@@ -356,6 +356,14 @@ export async function openConnectedRemotePwa(
   return fixtures.host;
 }
 
+/** Changes what the host answers to `ports:list` from now on, without sending `ports:changed`. */
+export function setRemoteHostPorts(page: Page, ports: ListeningPortsSnapshot): void {
+  const host = pageHosts.get(page);
+  const fixtures = host ? hostFixtures.get(host) : undefined;
+  if (!fixtures) throw new Error('Open the host with openConnectedRemotePwa first.');
+  fixtures.ports = ports;
+}
+
 /**
  * Drops the host's event stream, the way a phone leaving wifi does, and holds it
  * down. The client's own backoff walks the status to `reconnecting` and stays
