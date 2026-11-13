@@ -104,7 +104,7 @@ export const AgentStatusDot: React.FC<AgentStatusDotProps> = ({ status, size = '
           'inline-block rounded-full transition-all',
           sizeClasses[size],
           visual.colorClass,
-          visual.animate && 'animate-pulse',
+          visual.animate && 'animate-attention-pulse',
         )}
       />
     </span>
