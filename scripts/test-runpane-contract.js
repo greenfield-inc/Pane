@@ -5195,7 +5195,7 @@ function compareAgentContextParity() {
     env: { ...pythonEnv, PYTHONIOENCODING: 'cp1252' },
     cwd: rootDir
   }).trim();
-  assert.strictEqual(pyNotifyHelp, nodeNotifyHelp);
+  assert.strictEqual(lf(pyNotifyHelp), nodeNotifyHelp);
 
   // The workspaces block reports live Tailscale and Pane state, which can change between the two runs.
   const { workspaces: nodeWorkspaces, ...nodeBrief } = JSON.parse(runNode(['agent-context', '--json']));
