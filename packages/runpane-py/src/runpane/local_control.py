@@ -2864,7 +2864,12 @@ SCRATCH_SIZE_IN_MB_FROM = 104_858
 
 def describe_scratch(scratch: Dict[str, Any]) -> str:
     size_bytes = scratch.get("bytes") or 0
-    size = f"{-(-size_bytes // 1024)} KB" if size_bytes < SCRATCH_SIZE_IN_MB_FROM else f"{size_bytes / 1_048_576:.1f} MB"
+    if size_bytes < 1024:
+        size = f"{size_bytes} bytes"
+    elif size_bytes < SCRATCH_SIZE_IN_MB_FROM:
+        size = f"{-(-size_bytes // 1024)} KB"
+    else:
+        size = f"{size_bytes / 1_048_576:.1f} MB"
     if scratch.get("deletedAt"):
         return (
             f"Keeps the scratch folder {scratch.get('path')} ({size}) until "

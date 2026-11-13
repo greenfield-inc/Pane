@@ -1025,7 +1025,8 @@ export class OrchestrationSessionManager extends EventEmitter {
     const existing = this.sessionManager.getSession(record.internalSessionId);
     if (existing) {
       const running = Object.values(record.panelIds).some(id => this.agentStarted(id));
-      const workspace = running
+      // An archived Session's folder may have expired: name it, create it only when the Session is restored and opened.
+      const workspace = running || record.archived === true
         ? sessionWorkspacePath(record.id)
         : prepareSessionWorkspace(record.id, record.profile, record);
       if (existing.worktreePath !== workspace) {

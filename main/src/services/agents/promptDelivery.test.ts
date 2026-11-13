@@ -100,7 +100,7 @@ describe('prompt delivery', () => {
       expect(first.worktreeRoot).toBe(worktree);
       expect(path.dirname(second.file)).toBe(path.dirname(first.file));
       const exclude = fs.readFileSync(path.join(worktree, '.git', 'info', 'exclude'), 'utf8');
-      expect(exclude.split('\n').filter(line => line === '/.pane/prompts/')).toHaveLength(1);
+      expect(exclude.split('\n').filter(line => line === '/.pane/prompts')).toHaveLength(1);
       expect(execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: worktree, encoding: 'utf8' })).toBe('');
       if (process.platform !== 'win32') {
         expect(fs.statSync(first.file).mode & 0o777).toBe(0o600);

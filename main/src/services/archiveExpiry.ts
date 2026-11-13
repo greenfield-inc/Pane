@@ -16,8 +16,8 @@ export function archiveRetentionDays(config: Pick<AppConfig, 'archiveRetentionDa
 
 /** One expiry pass over archived Sessions and archived Panes' scratch. */
 async function runArchiveExpiry(now: Date = new Date()): Promise<string[]> {
-  const store = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'));
-  const sessions = store.read().sessions;
+  const storeFile = path.join(getAppDirectory(), 'orchestration-sessions.json');
+  const sessions = new OrchestrationSessionStore(storeFile).read().sessions;
   return expireArchivedFolders({
     now,
     retentionDays: archiveRetentionDays(getRuntimeConfigManager().getConfig()),
@@ -25,8 +25,8 @@ async function runArchiveExpiry(now: Date = new Date()): Promise<string[]> {
       .filter(session => session.archived === true)
       // No archive time (startup sets one) or an unreadable one: never due.
       .map(session => ({ id: session.id, folder: sessionWorkspacePath(session.id), paneId: session.internalSessionId, archivedAt: new Date(session.archivedAt ?? Number.NaN) })),
-    // Read again right before each delete: a Session restored during the pass keeps its folder.
-    sessionIsArchived: sessionId => store.read().sessions.find(session => session.id === sessionId)?.archived === true,
+    // A fresh read of the file right before each delete (a store caches its first read): a Session restored during the pass keeps its folder.
+    sessionIsArchived: sessionId => new OrchestrationSessionStore(storeFile).read().sessions.find(session => session.id === sessionId)?.archived === true,
     paneIsArchivedOrGone: paneId => {
       const pane = databaseService.getSession(paneId);
       return !pane || Boolean(pane.archived);

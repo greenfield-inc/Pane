@@ -41,7 +41,8 @@ export async function worktreePaneFolder(
     });
     if (stat?.isSymbolicLink()) throw symlinkError(candidate);
   }
-  const line = `/${folder}/`;
+  // No trailing slash: the line also hides a link (or file) put in the folder's place, so it never reads as untracked work.
+  const line = `/${folder}`;
   const current = await fs.readFile(exclude, 'utf8').catch(() => '');
   if (!current.split(/\r?\n/u).includes(line)) {
     await fs.mkdir(path.dirname(exclude), { recursive: true });
