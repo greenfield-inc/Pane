@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { UsageSnapshotCard } from './HomeUsageCard';
 import type { UsageByModel, UsageIndexStatus, UsageReport, UsageTotals } from '../../../shared/types/usage';
 
-const text = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&#x27;/g, "'");
+const text = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&#x27;/g, "'").replace(/&lt;/g, '<');
 
 function totals(totalTokens: number, extra: Partial<UsageTotals> = {}): UsageTotals {
   return {
@@ -41,7 +41,8 @@ function report(overrides: Partial<UsageReport> = {}): UsageReport {
   };
 }
 
-const render = (value: UsageReport | null, failed = false) => renderToStaticMarkup(<UsageSnapshotCard report={value} failed={failed} />);
+const render = (value: UsageReport | null, failed = false, extra: { status?: UsageIndexStatus; host?: string } = {}) =>
+  renderToStaticMarkup(<UsageSnapshotCard report={value} failed={failed} {...extra} />);
 
 describe('UsageSnapshotCard', () => {
   beforeEach(() => {
@@ -73,12 +74,25 @@ describe('UsageSnapshotCard', () => {
     expect(markup).toContain('1.5Ktokens · cost n/a · 3 messages');
   });
 
-  it("charts each local day's tokens, today included", () => {
-    const today = new Date(2026, 10, 13).getTime();
+  it("charts each day bucket of Usage & Limits' rolling 30 days, today included", () => {
+    const today = Date.UTC(2026, 10, 13);
     const markup = render(report({ series: [{ ...totals(1_200_000), bucketStartMs: today }] }));
     expect(markup).toContain('<title>Nov 13: 1.2M tokens</title>');
     const chart = /<svg[^>]*aria-label="Tokens per day"[\s\S]*?<\/svg>/.exec(markup)?.[0] ?? '';
-    expect(chart.match(/<rect /g)).toHaveLength(30);
+    // 30 days back from mid-afternoon reaches into a 31st calendar day.
+    expect(chart.match(/<rect /g)).toHaveLength(31);
+  });
+
+  it('shows a model under 1% as <1%', () => {
+    const markup = text(render(report({ byModel: [model('opus-5-5', 48_000_000), model('haiku-5-5', 200_000)] })));
+    expect(markup).toContain('haiku-5-5<1%');
+  });
+
+  it('names the host when the window shows another machine', () => {
+    const markup = text(render(report(), false, { host: 'devbox' }));
+    expect(markup).toContain('Claude Code and Codex on devbox · last 30 days');
+    expect(markup).toContain('Read from files on devbox.');
+    expect(markup).not.toContain('this computer');
   });
 
   it('shows scan progress until the first pass over the transcripts finishes', () => {
@@ -103,6 +117,19 @@ describe('UsageSnapshotCard', () => {
     const markup = text(render(report({ totals: totals(0), byModel: [], byProject: [] })));
     expect(markup).toContain('No Claude Code or Codex history on this computer yet');
     expect(markup).not.toContain('Join the leaderboard');
+  });
+
+  it('takes scan progress from the latest status read', () => {
+    const before = report({ totals: totals(0), index: { ...index, lastScanFinishedMs: null, lastScanStartedMs: null } });
+    const markup = text(render(before, false, { status: { ...index, lastScanFinishedMs: null, scanning: true, filesScanned: 5, filesTotal: 9 } }));
+    expect(markup).toContain('Reading 5 of 9 transcript files…');
+  });
+
+  it('says the history could not be read when a finished pass ended with an error', () => {
+    const errored = report({ totals: totals(0), index: { ...index, lastScanFinishedMs: null, scanning: false, lastError: 'EACCES' } });
+    const markup = text(render(errored));
+    expect(markup).toContain("Pane couldn't read your agent history");
+    expect(markup).not.toContain('Reading transcript files');
   });
 
   it('says the history could not be read when the report fails', () => {

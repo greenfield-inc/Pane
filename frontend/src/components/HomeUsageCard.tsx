@@ -2,13 +2,16 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { BarChart3, Lock } from 'lucide-react';
 import { API } from '../utils/api';
 import { requestOpenSettings } from '../utils/openSettings';
-import { formatTokens, formatUsd } from './ui/charts/chartScales';
-import { presetCalendarRange, usageDateBounds } from './usage/usageDateRange';
+import { useActiveMachineStore } from '../stores/activeMachineStore';
+import { formatShare, formatTokens, formatUsd } from './ui/charts/chartScales';
+import { DAY_MS, rollingUsageRange } from './usage/usageDateRange';
 import { cn } from '../utils/cn';
-import { DEFAULT_USAGE_RANGE_DAYS, type UsageReport } from '../../../shared/types/usage';
+import { DEFAULT_USAGE_RANGE_DAYS, type UsageIndexStatus, type UsageReport } from '../../../shared/types/usage';
 
-/** How often the card asks again while the transcript index has not finished a pass. */
+/** How often the card checks the index while a pass is still running. */
 const POLL_MS = 4000;
+/** Failed reads in a row before the card stops asking until the host resyncs. */
+const MAX_FAILED_READS = 3;
 const TOP_PROJECTS = 3;
 /** Model legend rows; a longer list folds its tail into "Other". */
 const MODEL_ROWS = 3;
@@ -25,48 +28,80 @@ type CardState =
   /** progress is set while a scan is still adding to these numbers. */
   | { kind: 'ready'; report: UsageReport; progress: string | null };
 
-function scanProgress(report: UsageReport | null): string {
-  const index = report?.index;
+/** A pass is running, or the first one has not started yet (it starts 8 s after launch). */
+function passPending(index: UsageIndexStatus): boolean {
+  return index.scanning || index.lastScanStartedMs === null;
+}
+
+function scanProgress(index: UsageIndexStatus | null): string {
   return index?.scanning && index.filesTotal > 0
     ? `Reading ${index.filesScanned.toLocaleString()} of ${index.filesTotal.toLocaleString()} transcript files…`
     : 'Reading transcript files…';
 }
 
-function cardState(report: UsageReport | null, failed: boolean): CardState {
-  if (failed) return { kind: 'unavailable' };
-  if (report && report.totals.messageCount > 0) return { kind: 'ready', report, progress: report.index.scanning ? scanProgress(report) : null };
-  if (report && report.index.lastScanFinishedMs !== null) return { kind: 'empty' };
-  return { kind: 'loading', progress: scanProgress(report) };
+function cardState(report: UsageReport | null, status: UsageIndexStatus | null, failed: boolean): CardState {
+  const index = status ?? report?.index ?? null;
+  if (report && report.totals.messageCount > 0) return { kind: 'ready', report, progress: index?.scanning ? scanProgress(index) : null };
+  if (report && index && !passPending(index)) {
+    // A pass that ended with an error leaves lastScanFinishedMs unset.
+    return index.lastScanFinishedMs !== null ? { kind: 'empty' } : { kind: 'unavailable' };
+  }
+  if (failed && !report) return { kind: 'unavailable' };
+  return { kind: 'loading', progress: scanProgress(index) };
 }
 
-/** Reads the last 30 local days after Home has painted, and again while the index is still building. */
+/**
+ * Reads the report once after Home has painted. While a pass runs it checks
+ * only the index status, then reads the report once more when the pass ends,
+ * so the main process runs the full report at most twice per pass.
+ */
 function useUsageReport() {
   const [report, setReport] = useState<UsageReport | null>(null);
+  const [status, setStatus] = useState<UsageIndexStatus | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let live = true;
     let timer: number | undefined;
-    const load = async () => {
+    let failures = 0;
+    const later = (step: () => Promise<void>) => { timer = window.setTimeout(() => void step(), POLL_MS); };
+    const run = async <T,>(read: () => Promise<{ success: boolean; data?: T | null }>, apply: (data: T) => void, retry: () => Promise<void>) => {
       try {
-        const response = await API.usage.getReport(usageDateBounds(presetCalendarRange(DEFAULT_USAGE_RANGE_DAYS)));
+        const response = await read();
         if (!live) return;
-        if (!response.success || !response.data) throw new Error(response.error);
-        setReport(response.data);
+        if (!response.success || !response.data) throw new Error('usage read failed');
+        failures = 0;
         setFailed(false);
-        if (response.data.index.scanning || response.data.index.lastScanFinishedMs === null) timer = window.setTimeout(() => void load(), POLL_MS);
+        apply(response.data);
       } catch {
-        if (live) setFailed(true);
+        if (!live) return;
+        failures += 1;
+        setFailed(true);
+        if (failures < MAX_FAILED_READS) later(retry);
       }
     };
+    const loadReport = (): Promise<void> => run(() => API.usage.getReport(rollingUsageRange(DEFAULT_USAGE_RANGE_DAYS)), data => {
+      setReport(data);
+      setStatus(data.index);
+      if (passPending(data.index)) later(checkStatus);
+    }, loadReport);
+    const checkStatus = (): Promise<void> => run(() => API.usage.getStatus(), data => {
+      setStatus(data);
+      if (passPending(data)) later(checkStatus);
+      else void loadReport();
+    }, checkStatus);
+    const restart = () => { window.clearTimeout(timer); failures = 0; void loadReport(); };
     // After the first paint, so Home never waits on the usage database.
-    const frame = window.requestAnimationFrame(() => void load());
+    const frame = window.requestAnimationFrame(restart);
+    // Usage comes from the active host, so read again when it changes or reconnects.
+    const unsubscribe = window.electronAPI?.events?.onRemoteDaemonResyncRequested?.(restart);
     return () => {
       live = false;
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
+      unsubscribe?.();
     };
   }, []);
-  return { report, failed };
+  return { report, status, failed };
 }
 
 /** A fixed line box holding text, or a grey bar of the same height while loading. */
@@ -78,9 +113,12 @@ function Slot({ loading, className, barClass, children }: { loading: boolean; cl
   );
 }
 
+/** One bar per day bucket the report uses (UTC days), across the same rolling range as Usage & Limits. */
 function DailyBars({ report }: { report: UsageReport | null }) {
-  const days = usageDateBounds(presetCalendarRange(DEFAULT_USAGE_RANGE_DAYS)).dayBoundariesMs.slice(0, -1);
   if (!report) return <div className="h-12 w-full rounded bg-surface-tertiary" />;
+  const { fromMs, toMs } = rollingUsageRange(DEFAULT_USAGE_RANGE_DAYS);
+  const days: number[] = [];
+  for (let day = Math.floor(fromMs / DAY_MS) * DAY_MS; day <= toMs; day += DAY_MS) days.push(day);
   const byDay = new Map(report.series.map(bucket => [bucket.bucketStartMs, bucket.totalTokens]));
   const values = days.map(day => byDay.get(day) ?? 0);
   const max = Math.max(...values, 1);
@@ -88,7 +126,7 @@ function DailyBars({ report }: { report: UsageReport | null }) {
     <svg viewBox={`0 0 ${days.length} 1`} preserveAspectRatio="none" className="block h-12 w-full" aria-label="Tokens per day">
       {values.map((value, index) => {
         const height = value > 0 ? Math.max(value / max, 0.04) : 0;
-        const label = `${new Date(days[index]).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}: ${formatTokens(value)} tokens`;
+        const label = `${new Date(days[index]).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })}: ${formatTokens(value)} tokens`;
         return (
           <rect key={days[index]} x={index + 0.18} y={1 - height} width={0.64} height={height}
             className={cn('fill-interactive', index === days.length - 1 && 'opacity-50')}>
@@ -119,14 +157,17 @@ function ChartTile({ report }: { report: UsageReport | null }) {
 }
 
 function ProjectsTile({ report }: { report: UsageReport | null }) {
-  const projects = report?.byProject.slice(0, TOP_PROJECTS) ?? [];
+  const projects = report?.byProject ?? [];
   const top = projects[0]?.totalTokens ?? 1;
-  const rows = report ? projects : Array.from({ length: TOP_PROJECTS }, () => null);
   return (
     <div className={cn(tileClass, 'bg-surface-secondary')}>
       <div className={labelClass}>Top projects</div>
-      {rows.map((project, index) => (
-        <div key={project?.path ?? index} className="grid h-4 grid-cols-[5rem_minmax(0,1fr)_2.75rem] items-center gap-2 text-xs" title={project?.path || undefined}>
+      {Array.from({ length: TOP_PROJECTS }, (_, index) => {
+        const project = projects[index];
+        // Every slot keeps its line, so one or two projects stay where the skeleton drew them.
+        if (report && !project) return <div key={index} className="h-4" />;
+        return (
+        <div key={project?.path ?? index} className="grid h-4 grid-cols-[minmax(0,5rem)_minmax(0,1fr)_auto] items-center gap-2 text-xs" title={project?.path || undefined}>
           <Slot loading={!project} className="h-4 text-text-primary" barClass="h-2.5 w-16">{project?.label || 'No folder'}</Slot>
           <div className="h-1 rounded-full bg-surface-tertiary">
             {project && <div className="h-1 rounded-full bg-interactive" style={{ width: `${(project.totalTokens / top) * 100}%` }} />}
@@ -135,7 +176,8 @@ function ProjectsTile({ report }: { report: UsageReport | null }) {
             {project && formatTokens(project.totalTokens)}
           </Slot>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -151,13 +193,12 @@ function modelShares(report: UsageReport): Array<{ label: string; share: number 
 
 function ModelsTile({ report }: { report: UsageReport | null }) {
   const models = report ? modelShares(report) : null;
-  const percent = (share: number) => `${Math.round(share * 100)}%`;
   return (
     <div className={cn(tileClass, 'bg-surface-secondary')}>
       <div className={labelClass}>Models</div>
       {models ? (
         <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full">
-          {models.map((model, index) => <div key={model.label} className={MODEL_COLORS[index]} style={{ width: percent(model.share) }} />)}
+          {models.map((model, index) => <div key={model.label} className={MODEL_COLORS[index]} style={{ width: formatShare(model.share) }} />)}
         </div>
       ) : <div className="h-1.5 rounded-full bg-surface-tertiary" />}
       <div className="flex flex-col gap-px">
@@ -169,7 +210,7 @@ function ModelsTile({ report }: { report: UsageReport | null }) {
                 <>
                   <span className={cn('h-2 w-2 flex-none rounded-sm', MODEL_COLORS[index])} />
                   <span className="min-w-0 flex-1 truncate">{model.label}</span>
-                  <span className="tabular-nums">{percent(model.share)}</span>
+                  <span className="tabular-nums">{formatShare(model.share)}</span>
                 </>
               )}
             </div>
@@ -213,22 +254,30 @@ function EmptyTiles({ title, detail }: { title: string; detail: string }) {
  * computer, read from Usage & Limits' transcript index. Every state has the
  * same footprint, so nothing below it moves when the numbers arrive.
  */
-export function UsageSnapshotCard({ report, failed = false }: { report: UsageReport | null; failed?: boolean }) {
-  const state = cardState(report, failed);
+export function UsageSnapshotCard({ report, status = null, failed = false, host = null }: {
+  report: UsageReport | null;
+  /** The index status read since the report, while a pass runs. */
+  status?: UsageIndexStatus | null;
+  failed?: boolean;
+  /** The remote host this window shows, or null for this computer. */
+  host?: string | null;
+}) {
+  const state = cardState(report, status, failed);
+  const where = host ? `on ${host}` : 'on this computer';
   const shown = state.kind === 'ready' ? state.report : null;
   return (
     <section aria-label="Your AI usage" data-testid="home-usage-card" className="flex flex-col gap-4 rounded-2xl border border-border-secondary bg-surface-primary/70 p-6 shadow-sm">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold leading-7 text-text-primary">Your AI usage</h2>
-          <p className="mt-1 truncate text-sm leading-5 text-text-tertiary">Claude Code and Codex on this computer · last {DEFAULT_USAGE_RANGE_DAYS} days</p>
+          <p className="mt-1 truncate text-sm leading-5 text-text-tertiary">Claude Code and Codex {where} · last {DEFAULT_USAGE_RANGE_DAYS} days</p>
         </div>
         <button type="button" className={cn(linkClass, 'text-[13px] leading-5')} onClick={() => requestOpenSettings({ category: 'usage' })}>
           Open Usage &amp; Limits →
         </button>
       </div>
-      <div className={cn('grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3', state.kind === 'loading' && 'animate-pulse')}>
-        {state.kind === 'empty' && <EmptyTiles title="No Claude Code or Codex history on this computer yet" detail="Start an agent and each day's tokens chart here." />}
+      <div className={cn('grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]', state.kind === 'loading' && 'animate-pulse')}>
+        {state.kind === 'empty' && <EmptyTiles title={`No Claude Code or Codex history ${where} yet`} detail="Start an agent and each day's tokens chart here." />}
         {state.kind === 'unavailable' && <EmptyTiles title="Pane couldn't read your agent history" detail="Open Usage & Limits to read it again." />}
         {(state.kind === 'loading' || state.kind === 'ready') && (
           <>
@@ -241,7 +290,7 @@ export function UsageSnapshotCard({ report, failed = false }: { report: UsageRep
       <div className="flex h-5 items-center justify-between gap-4 text-xs text-text-tertiary">
         <span className="flex min-w-0 items-center gap-1.5">
           <Lock className="h-3 w-3 flex-none" aria-hidden="true" />
-          <span className="truncate">Read from files on this computer. Nothing leaves it unless you join the leaderboard.</span>
+          <span className="truncate">Read from files {where}. Nothing leaves it unless you join the leaderboard.</span>
         </span>
         {(state.kind === 'loading' || state.kind === 'ready') && state.progress && <span className="whitespace-nowrap tabular-nums">{state.progress}</span>}
         {state.kind === 'ready' && !state.progress && (
@@ -256,6 +305,7 @@ export function UsageSnapshotCard({ report, failed = false }: { report: UsageRep
 
 /** The card wired to the usage index. */
 export function HomeUsageCard() {
-  const { report, failed } = useUsageReport();
-  return <UsageSnapshotCard report={report} failed={failed} />;
+  const { report, status, failed } = useUsageReport();
+  const machine = useActiveMachineStore(state => state.machine);
+  return <UsageSnapshotCard report={report} status={status} failed={failed} host={machine && !machine.local ? machine.name : null} />;
 }

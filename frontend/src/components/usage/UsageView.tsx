@@ -13,7 +13,7 @@ import { LeaderboardTab } from './LeaderboardTab';
 import { settingDomId } from '../settings/catalog';
 import { PaneUsageSummary } from './PaneUsageSummary';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
-import { presetCalendarRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
+import { presetCalendarRange, rollingUsageRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
   type UsageByPane,
@@ -22,7 +22,6 @@ import {
   type UsageReport,
 } from '../../../../shared/types/usage';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 /** Poll while a scan is running so the progress line stays honest. */
 const SCAN_POLL_MS = 4000;
 
@@ -175,9 +174,8 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
     if (mode === 'refresh') setRefreshing(true);
     else setLoading(true);
     try {
-      const toMs = Date.now();
       const response = await API.usage.getReport({
-        ...(customRange ? usageDateBounds(customRange) : { fromMs: toMs - rangeDays * DAY_MS, toMs }),
+        ...(customRange ? usageDateBounds(customRange) : rollingUsageRange(rangeDays)),
         providers: provider === 'all' ? undefined : [provider],
       });
       if (id !== requestId.current) return;
