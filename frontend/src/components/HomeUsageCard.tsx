@@ -22,17 +22,21 @@ type CardState =
   | { kind: 'loading'; progress: string }
   | { kind: 'empty' }
   | { kind: 'unavailable' }
-  | { kind: 'ready'; report: UsageReport };
+  /** progress is set while a scan is still adding to these numbers. */
+  | { kind: 'ready'; report: UsageReport; progress: string | null };
+
+function scanProgress(report: UsageReport | null): string {
+  const index = report?.index;
+  return index?.scanning && index.filesTotal > 0
+    ? `Reading ${index.filesScanned.toLocaleString()} of ${index.filesTotal.toLocaleString()} transcript files…`
+    : 'Reading transcript files…';
+}
 
 function cardState(report: UsageReport | null, failed: boolean): CardState {
   if (failed) return { kind: 'unavailable' };
-  if (report && report.totals.messageCount > 0) return { kind: 'ready', report };
+  if (report && report.totals.messageCount > 0) return { kind: 'ready', report, progress: report.index.scanning ? scanProgress(report) : null };
   if (report && report.index.lastScanFinishedMs !== null) return { kind: 'empty' };
-  const index = report?.index;
-  const progress = index?.scanning && index.filesTotal > 0
-    ? `Reading ${index.filesScanned.toLocaleString()} of ${index.filesTotal.toLocaleString()} transcript files…`
-    : 'Reading transcript files…';
-  return { kind: 'loading', progress };
+  return { kind: 'loading', progress: scanProgress(report) };
 }
 
 /** Reads the last 30 local days after Home has painted, and again while the index is still building. */
@@ -239,8 +243,8 @@ export function UsageSnapshotCard({ report, failed = false }: { report: UsageRep
           <Lock className="h-3 w-3 flex-none" aria-hidden="true" />
           <span className="truncate">Read from files on this computer. Nothing leaves it unless you join the leaderboard.</span>
         </span>
-        {state.kind === 'loading' && <span className="whitespace-nowrap tabular-nums">{state.progress}</span>}
-        {state.kind === 'ready' && (
+        {(state.kind === 'loading' || state.kind === 'ready') && state.progress && <span className="whitespace-nowrap tabular-nums">{state.progress}</span>}
+        {state.kind === 'ready' && !state.progress && (
           <button type="button" className={linkClass} onClick={() => requestOpenSettings({ category: 'usage', setting: 'usage-leaderboard' })}>
             Join the leaderboard
           </button>

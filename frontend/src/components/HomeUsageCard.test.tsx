@@ -92,6 +92,13 @@ describe('UsageSnapshotCard', () => {
     expect(text(render(null))).toContain('Reading transcript files…');
   });
 
+  it('keeps showing scan progress while a scan is still adding to the numbers', () => {
+    const markup = text(render(report({ index: { ...index, lastScanFinishedMs: null, scanning: true, filesScanned: 40, filesTotal: 90 } })));
+    expect(markup).toContain('48.2M');
+    expect(markup).toContain('Reading 40 of 90 transcript files…');
+    expect(markup).not.toContain('Join the leaderboard');
+  });
+
   it('says there is no history once a finished pass found none', () => {
     const markup = text(render(report({ totals: totals(0), byModel: [], byProject: [] })));
     expect(markup).toContain('No Claude Code or Codex history on this computer yet');
