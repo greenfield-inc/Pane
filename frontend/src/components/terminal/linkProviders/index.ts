@@ -6,6 +6,7 @@ import type { IDisposable } from '@xterm/xterm';
 import type { LinkProviderConfig } from './types';
 import { createFileLinkProvider } from './fileLinkProvider';
 import { createGitLinkProvider } from './gitLinkProvider';
+import { createCustomLinkProvider } from './customLinkProvider';
 
 /**
  * Registers all link providers for the terminal.
@@ -15,6 +16,10 @@ export function registerAllLinkProviders(config: LinkProviderConfig): IDisposabl
   const disposables: IDisposable[] = [
     config.terminal.registerLinkProvider(createFileLinkProvider(config)),
   ];
+
+  if (config.customLinks?.some(link => link.enabled)) {
+    disposables.push(config.terminal.registerLinkProvider(createCustomLinkProvider(config)));
+  }
 
   // Only register git provider if GitHub remote is configured
   if (config.githubRemoteUrl) {

@@ -440,6 +440,11 @@ describe('WorktreeManager.initializeProject', () => {
     return { repo, runner };
   }
 
+  // Windows briefly keeps files locked after git exits.
+  async function removeRepo(repo: string): Promise<void> {
+    await rm(repo, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 5 : 0, retryDelay: 100 });
+  }
+
   it("keeps Pane's worktree folder out of the main checkout's git status", async () => {
     const { repo, runner } = await initRepo();
     try {
@@ -449,7 +454,7 @@ describe('WorktreeManager.initializeProject', () => {
       const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
       expect(stdout).toBe('');
     } finally {
-      await rm(repo, { recursive: true, force: true });
+      await removeRepo(repo);
     }
   });
 
@@ -464,7 +469,7 @@ describe('WorktreeManager.initializeProject', () => {
       const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
       expect(stdout).toBe('?? trees1/\n');
     } finally {
-      await rm(repo, { recursive: true, force: true });
+      await removeRepo(repo);
     }
   });
 
@@ -479,7 +484,7 @@ describe('WorktreeManager.initializeProject', () => {
       const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
       expect(stdout).toBe('?? trees/\n');
     } finally {
-      await rm(repo, { recursive: true, force: true });
+      await removeRepo(repo);
     }
   });
 
@@ -491,7 +496,7 @@ describe('WorktreeManager.initializeProject', () => {
       const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
       expect(stdout).toBe('');
     } finally {
-      await rm(repo, { recursive: true, force: true });
+      await removeRepo(repo);
     }
   });
 });

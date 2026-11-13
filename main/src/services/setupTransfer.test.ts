@@ -60,6 +60,7 @@ describe('exportSetup', () => {
       defaultPermissionMode: 'ignore',
       customCommands: [{ name: 'serve', command: '/Users/ana/bin/serve --port 3000' }],
       terminalShortcuts: [{ id: 'gs', label: 'Status', key: 'g', text: 'git status', enabled: true }],
+      customLinks: [{ id: 'jira', label: 'Jira', pattern: '\\bPROJ-\\d+\\b', urlTemplate: 'https://example.atlassian.net/browse/$0', enabled: true }],
       worktreeFileSync: [
         { id: 'env', path: '.env*', enabled: true, recursive: true },
         { id: 'abs', path: '/Users/ana/secrets', enabled: true, recursive: false },
@@ -91,6 +92,7 @@ describe('exportSetup', () => {
         runScripts: [{ name: 'acme-web', remote: 'github.com/acme/acme-web', run_script: 'pnpm dev' }],
         skills: { homeSkill: false, registerMcp: true, mcpToolsets: ['core', 'git'] },
         terminalShortcuts: [{ id: 'gs', label: 'Status', key: 'g', text: 'git status', enabled: true }],
+        customLinks: [{ id: 'jira', label: 'Jira', pattern: '\\bPROJ-\\d+\\b', urlTemplate: 'https://example.atlassian.net/browse/$0', enabled: true }],
         worktreeFileSync: [{ id: 'env', path: '.env*', enabled: true, recursive: true }],
         appearance: { appearanceMode: 'fixed', theme: 'dark', uiScale: 1.1 },
         preferences: { keyboardShortcutsEnabled: false, sessionCreationPreferences: { sessionCount: 2 }, auto_rename_sessions_to_pr: 'false' },
@@ -270,6 +272,39 @@ describe('previewSetupImport', () => {
       { id: 'status', label: 'Status', key: 's', text: 'git status -sb', enabled: true },
       { id: 'deploy', label: 'Deploy', key: 'g', text: 'pnpm deploy', enabled: false },
     ]);
+  });
+
+  it('carries custom links to another computer, merged by id, leaving out one with a token in its URL', async () => {
+    const { file, leftOut } = await exportSetup(sources({
+      config: {
+        customLinks: [
+          { id: 'jira', label: 'Jira', pattern: '\\bPROJ-\\d+\\b', urlTemplate: 'https://example.atlassian.net/browse/$0', enabled: true },
+          { id: 'build', label: 'Build', pattern: 'build #(\\d+)', urlTemplate: 'https://ci.example.com/b/$1?token=abc123', enabled: true },
+          { id: 'pr', label: 'PR', pattern: '#(\\d+)', urlTemplate: 'https://github.com/acme/app/pull/$1', enabled: false },
+        ],
+      },
+    }), ['customLinks'], NOW);
+    expect(leftOut).toEqual([{ section: 'customLinks', name: 'Build' }]);
+
+    const preview = await previewSetupImport(readSetupFile(JSON.stringify(file), 'f.json'), 'f.json', sources({
+      config: {
+        customLinks: [
+          { id: 'jira', label: 'Jira', pattern: '\\bPROJ-\\d+\\b', urlTemplate: 'https://example.atlassian.net/browse/$0', enabled: true },
+          { id: 'pr', label: 'PR', pattern: '#(\\d+)', urlTemplate: 'https://github.com/acme/app/pull/$1', enabled: true },
+          { id: 'mine', label: 'Mine', pattern: 'T-\\d+', urlTemplate: 'https://tracker.example.com/$0', enabled: true },
+        ],
+      },
+    }));
+
+    const [section] = preview.sections;
+    expect(section).toMatchObject({ id: 'customLinks', changes: 1, added: 0, replaced: 1 });
+    expect(section?.items).toEqual([{
+      kind: 'replaces',
+      name: 'PR',
+      text: '#(\\d+) → https://github.com/acme/app/pull/$1, off',
+      was: '#(\\d+) → https://github.com/acme/app/pull/$1, on',
+    }]);
+    expect(section?.apply.config?.customLinks?.map(link => [link.id, link.enabled])).toEqual([['jira', true], ['pr', false], ['mine', true]]);
   });
 
   it('merges worktree file sync by path and keeps the local id', async () => {

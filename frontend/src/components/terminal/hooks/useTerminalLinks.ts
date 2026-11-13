@@ -79,6 +79,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
   const [githubRemoteUrl, setGithubRemoteUrl] = useState<string | null>(null);
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
+  const customLinks = useConfigStore((state) => state.config?.customLinks);
   const { onCopyError } = config;
   const suppressSelectionPopoverRef = useCommittedRef(config.suppressSelectionPopover);
   const mousePositionRef = useRef({ x: 0, y: 0 });
@@ -121,6 +122,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
     const providerConfig: LinkProviderConfig = {
       terminal,
+      customLinks,
       workingDirectory: pathContext?.workingDirectory ?? config.workingDirectory,
       homeDirectory: pathContext?.homeDirectory ?? undefined,
       githubRemoteUrl: githubRemoteUrl ?? undefined,
@@ -143,7 +145,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     return () => {
       disposables.forEach((d) => d.dispose());
     };
-  }, [terminal, config.workingDirectory, githubRemoteUrl, pathContext]);
+  }, [terminal, config.workingDirectory, customLinks, githubRemoteUrl, pathContext]);
 
   // Listen for selection changes
   useEffect(() => {
