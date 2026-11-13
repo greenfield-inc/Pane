@@ -438,7 +438,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         const paneName = sessionManager.getSession(sessionId)?.name ?? '';
         return pids.map(pid => ({ pid, sessionId, paneName }));
       })),
-    lastTerminalOutputAt: () => terminalPanelManager.latestOutputAt(),
+    lastTerminalOutputAt: () => Math.max(...[terminalPanelManager, ...CliToolRegistry.getInstance().getAllManagers()].map(manager => manager.latestOutputAt())),
     onChange: snapshot => {
       latestPorts = snapshot;
       publishPorts();
