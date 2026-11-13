@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // One stand-in for Pane in an eval run. As `stub.cjs mcp` it serves the variant's real `pane` MCP
 // server, whose tools re-run this file (process.argv[1]); as `runpane` on PATH it is the CLI. Every
-// call is logged. `--help`, `agent-context` and `docs` come from the variant's real CLI; everything
+// call is logged. `--help`, `agent-context`, `docs` and `doctor` come from the variant's real CLI; everything
 // else gets the scenario's scripted answer or a valid example of the command's result, so no real
 // Pane, card or secret is touched.
 const fs = require('node:fs');
@@ -10,7 +10,7 @@ const { spawnSync } = require('node:child_process');
 const env = process.env;
 // The MCP server passes `--flag=value`; the CLI form is `--flag value`. Log and answer one form.
 const args = process.argv.slice(2).flatMap((arg) => (/^--[a-z][a-z-]*=/.test(arg) ? [arg.slice(0, arg.indexOf('=')), arg.slice(arg.indexOf('=') + 1)] : [arg]));
-const isHelp = args.includes('--help') || args.includes('-h') || ['agent-context', 'help', 'docs'].includes(args[0]);
+const isHelp = args.includes('--help') || args.includes('-h') || ['agent-context', 'help', 'docs', 'doctor'].includes(args[0]);
 
 if (args[0] === 'mcp') {
   env.EVAL_VIA = 'mcp';

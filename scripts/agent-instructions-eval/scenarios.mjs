@@ -220,7 +220,7 @@ export const SCENARIOS = [
   },
   {
     id: 'scratch-stays-in-worktree',
-    title: 'Scratch copies, captures and reports go in the worktree (a gitignored tmp/) or the Session folder, never system temp',
+    title: 'Scratch copies, captures and reports go in $PANE_SCRATCH_DIR, never system temp',
     role: 'pane',
     setup({ repo }) {
       pkg(repo, { scripts: { build: 'node build.js' } });
@@ -232,6 +232,7 @@ export const SCENARIOS = [
     grade: (run) => verdict([
       [run.tempPaths.length === 0, `used system temp: ${run.tempPaths.slice(0, 3).join(', ')}`],
       [run.writes.length > 0 || bashMatches(run, />|cp\s|tee\s/), 'wrote nothing'],
+      [run.scratchUse, 'never used $PANE_SCRATCH_DIR'],
     ]),
   },
   {
@@ -282,6 +283,84 @@ export const SCENARIOS = [
     grade: (run) => verdict([
       [cards(run).length <= 2, `posted ${cards(run).length} cards`],
       [/ledger-core/.test(run.text) && /@acme\/ledger/.test(run.text) && /\?/.test(run.text), 'final message does not ask the person to choose between the two names'],
+    ]),
+  },
+  // Harder variants of the Pane-primitives scenarios: the prompt names no primitive and no id.
+  {
+    id: 'review-rerun-bare',
+    title: 'A bare "rerun the review" inside a feature\'s Pane opens a tab in that Pane',
+    role: 'pane',
+    setup: ({ repo }) => { pkg(repo); git(repo, 'checkout', '-q', '-b', 'csv-export'); },
+    prompt: () => 'Rerun the review on this and leave it going.',
+    script: ({ repo }) => ({ 'panes list': { ok: true, panes: [{ id: 'p-feature', paneId: 'p-feature', name: 'csv-export', status: 'idle', worktreePath: repo, repoId: 1, panelCount: 1, pinned: true, agentStatus: 'idle', ownership: 'pane' }] } }),
+    grade: (run) => verdict([
+      // panels create defaults to the caller's Pane ($PANE_SESSION_ID); agents start without --pane makes a new one.
+      [run.calls.some(({ argv }) => (argv[0] === 'panels' && argv[1] === 'create' && (!argv.includes('--pane') || argv.includes('p-feature')))
+        || (argv[0] === 'agents' && argv[1] === 'start' && argv.includes('p-feature'))), 'did not open a tab in this Pane'],
+      [!has(run, 'panes', 'create'), 'created a new Pane'],
+      [!bashMatches(run, /git\s+worktree\s+add|git\s+clone/), 'made a git worktree or clone by hand'],
+    ]),
+  },
+  {
+    id: 'qa-fresh-copy',
+    title: 'QA asked as "spin up a fresh copy" runs in this Pane, with the copy in $PANE_SCRATCH_DIR',
+    role: 'pane',
+    setup: ({ repo }) => { pkg(repo, { scripts: { start: 'node server.js' } }); write(path.join(repo, 'server.js'), "console.log('ledger on :4100');\n"); },
+    prompt: () => 'Spin up a fresh copy of the app and QA the start-up on it. Keep whatever you capture for me.',
+    script: () => ({}),
+    grade: (run) => verdict([
+      [!has(run, 'panes', 'create'), 'created a new Pane'],
+      [!bashMatches(run, /git\s+worktree\s+add/), 'made a git worktree by hand'],
+      [run.tempPaths.length === 0, `used system temp: ${run.tempPaths.slice(0, 3).join(', ')}`],
+      [run.scratchUse, 'never used $PANE_SCRATCH_DIR'],
+    ]),
+  },
+  {
+    id: 'research-clone',
+    title: 'Research that needs a clone puts it in $PANE_SCRATCH_DIR, unprompted',
+    role: 'pane',
+    setup({ repo, runDir }) {
+      pkg(repo);
+      const upstream = path.join(runDir, 'upstream');
+      fs.mkdirSync(upstream, { recursive: true });
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: upstream });
+      write(path.join(upstream, 'pad.js'), 'module.exports = (s, n, c = " ") => String(s).padStart(n, c);\n');
+      git(upstream, 'add', '-A');
+      git(upstream, '-c', 'user.email=eval@example.com', '-c', 'user.name=eval', 'commit', '-qm', 'pad');
+      return { upstream };
+    },
+    prompt: ({ upstream }) => `Find out how the padding library at ${upstream} pads strings: clone it, read the code, and write me a short note with what you found.`,
+    script: () => ({}),
+    grade: (run) => verdict([
+      [bashMatches(run, /git\s+clone/), 'never cloned'],
+      [run.tempPaths.length === 0, `used system temp: ${run.tempPaths.slice(0, 3).join(', ')}`],
+      [bashMatches(run, /git\s+clone\s+\S+\s+\S*(PANE_SCRATCH_DIR|\.pane\/scratch)/), 'did not clone into $PANE_SCRATCH_DIR'],
+    ]),
+  },
+  {
+    id: 'multipart-no-pane-mention',
+    title: 'A multi-part ask that never mentions Pane, without the pane skill, still starts a Session',
+    role: 'pane',
+    noSkill: true,
+    setup: ({ repo }) => pkg(repo),
+    prompt: () => 'We need dark mode: new colour tokens, every component updated to use them, and fresh screenshots for the docs. Get it going with a few agents.',
+    script: () => ({}),
+    grade: (run) => verdict([
+      [has(run, 'sessions', 'create'), 'never created a Session'],
+    ]),
+  },
+  {
+    id: 'doctor-only',
+    title: 'An agent that read only runpane doctor states where a review rerun and a research clone go',
+    role: 'pane',
+    noSkill: true,
+    setup: ({ repo }) => pkg(repo),
+    prompt: () => 'Run `runpane doctor`. Then, without doing anything else, answer in two short lines: where would you run a rerun of this feature\'s review, and where would you put a repository you clone for research?',
+    script: () => ({}),
+    grade: (run) => verdict([
+      [has(run, 'doctor'), 'never ran runpane doctor'],
+      [/\btab\b|panels create/i.test(run.text), 'did not say the rerun is a tab in this Pane'],
+      [/PANE_SCRATCH_DIR|\.pane\/scratch/.test(run.text), 'did not name $PANE_SCRATCH_DIR for the clone'],
     ]),
   },
 ];

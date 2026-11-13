@@ -115,7 +115,9 @@ function prepareVariant(label, ref) {
   fs.writeFileSync(path.join(dir, 'examples.json'), JSON.stringify(examples(tools)));
   checkScripts(tools, label, new Set(JSON.parse(fs.readFileSync(path.join(source, 'contracts/runpane/contract.json'), 'utf8')).commands.map((command) => command.name)));
   const commit = ref === 'WORKTREE' ? `${execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim()}+worktree` : execFileSync('git', ['rev-parse', '--short', ref], { cwd: repoRoot, encoding: 'utf8' }).trim();
-  return { label, ref, commit, dir, source };
+  // A Pane that exports PANE_SCRATCH_DIR to its tabs (paneScratch.ts) gets it in the eval too, as a real tab would.
+  const scratch = fs.existsSync(path.join(source, 'main/src/services/paneScratch.ts'));
+  return { label, ref, commit, dir, source, scratch };
 }
 
 function validator(schema) {
@@ -200,6 +202,8 @@ async function runSession(scenario, variant, runDir) {
 
   // The session's own HOME holds exactly what Pane installs: the Notify block, the pane skill and the MCP server.
   execFileSync(process.execPath, [path.join(variant.dir, 'render.cjs'), home]);
+  // A scenario can start the agent without the pane skill, to test what the always-loaded text does alone.
+  if (scenario.noSkill) fs.rmSync(path.join(home, '.claude', 'skills', 'pane'), { recursive: true, force: true });
   fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, bypassPermissionsModeAccepted: true, mcpServers, projects: { [repo]: { hasTrustDialogAccepted: true } } }));
   if (login === 'your keychain login') {
     fs.mkdirSync(path.join(home, 'Library'), { recursive: true });
@@ -219,6 +223,12 @@ async function runSession(scenario, variant, runDir) {
   };
   for (const name of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']) {
     if (process.env[name]) env[name] = process.env[name];
+  }
+  if (variant.scratch && env.PANE_SESSION_ID) {
+    // As Pane does for a worktree it owns: <worktree>/.pane/scratch, hidden by info/exclude.
+    env.PANE_SCRATCH_DIR = path.join(repo, '.pane', 'scratch');
+    fs.mkdirSync(env.PANE_SCRATCH_DIR, { recursive: true });
+    fs.appendFileSync(path.join(repo, '.git', 'info', 'exclude'), '/.pane/scratch/\n');
   }
   const claudeArgs = ['-p', scenario.prompt({ repo, sessionDir, runDir, ...extra }), '--output-format', 'stream-json', '--verbose',
     '--dangerously-skip-permissions', '--no-session-persistence', '--strict-mcp-config', '--mcp-config', mcpConfig];
@@ -278,7 +288,8 @@ function observe(transcript, log, runDir) {
   const otherRuns = [...new Set(touched.flatMap((text) => [...normalize(text).matchAll(new RegExp(`${escapeRegExp(normalize(path.join(root, 'runs')))}/[\\w.-]+/[\\w.-]+`, 'g'))].map((m) => m[0])))]
     .filter((dir) => !normalize(runDir).startsWith(dir));
   const reachedOut = [...offLimits.filter((dir) => touched.some((text) => normalize(text).includes(normalize(dir)))), ...otherRuns];
-  return { calls, tools, bash, writes, tempPaths, reachedOut, text: result.result ?? '', cost: result.total_cost_usd ?? 0, seconds: Math.round((result.duration_ms ?? 0) / 1000), model: init.model, error: result.is_error === true || !result.type };
+  const scratchUse = [...bash, ...writes].some((text) => /PANE_SCRATCH_DIR|\.pane\/scratch/.test(text));
+  return { calls, tools, bash, writes, tempPaths, reachedOut, scratchUse, text: result.result ?? '', cost: result.total_cost_usd ?? 0, seconds: Math.round((result.duration_ms ?? 0) / 1000), model: init.model, error: result.is_error === true || !result.type };
 }
 
 function escapeRegExp(text) {
