@@ -3,6 +3,7 @@ import type { CustomCommandResume } from './customCommandResume';
 import type { DiffScope } from './gitDiff';
 import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import type { BoundaryCursor, BoundarySchema } from '../validation/boundaryDecoder';
+import type { ConfiguredAgentId } from '../agents';
 
 /**
  * Panel and session types for Pane.
@@ -147,7 +148,7 @@ export interface TerminalPanelState {
   updateResumeHold?: string;         // Update operation that stopped the panel; released by explicit resume, or when the panel starts after that update ended.
   updateResumeId?: string;           // Exact identity required by automatic update restoration.
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
-  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode'; // CLI agent type for panel-local resume behavior
+  agentType?: ConfiguredAgentId; // CLI agent type for panel-local resume behavior
   /** How Pane learned `agentType`: declared with the launch, from the launch command, the foreground process, or the screen. */
   agentDetection?: TerminalAgentDetection;
   /** The command the panel was launched (or staged) with, as the user gave it. */

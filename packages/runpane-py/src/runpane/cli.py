@@ -113,6 +113,7 @@ TARGETS = set(RUNPANE_CONTRACT["enums"]["installTargets"])
 FORMATS = set(RUNPANE_CONTRACT["enums"]["artifactFormats"])
 CHANNELS = set(RUNPANE_CONTRACT["enums"]["channels"])
 AGENTS = set(RUNPANE_CONTRACT["enums"]["agents"])
+AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
@@ -583,6 +584,10 @@ def take_leading_pane_dir(args: List[str]) -> List[str]:
     return taken
 
 
+def invalid_agent_error(value: str) -> ValueError:
+    return ValueError(f"Invalid --agent {value}. Expected one of: {', '.join(sorted(AGENTS))}. With --chat, --agent takes any agent the host can run.")
+
+
 def parse_args(argv: List[str]) -> ParsedArgs:
     args = list(argv)
     leading_pane_dir_args = take_leading_pane_dir(args)
@@ -625,6 +630,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
 
     args[:0] = leading_pane_dir_args
     parse_flags(args, parsed)
+    if parsed.agent is not None and parsed.agent not in AGENTS and not parsed.chat:
+        raise invalid_agent_error(parsed.agent)
     if parsed.command == "panes archive":
         validate_panes_archive_args(parsed)
     if parsed.command == "watch" and parsed.follow and parsed.timeout_ms == 0:
@@ -1144,8 +1151,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         parsed.base_branch = value
         return
     if flag == "--agent":
-        if value not in AGENTS:
-            raise ValueError(f"Invalid --agent {value}. Expected one of: {', '.join(sorted(AGENTS))}")
+        # A chat tab runs any agent the host can run; parse_args refuses it without --chat.
+        if value not in AGENTS and not AGENT_ID_PATTERN.match(value):
+            raise invalid_agent_error(value)
         parsed.agent = value
         return
     if flag == "--tool-command":

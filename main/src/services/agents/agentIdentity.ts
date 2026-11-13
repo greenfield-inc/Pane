@@ -1,21 +1,18 @@
 import { TerminalPanelState } from '../../../../shared/types/panels';
 import type { PaneCommandValue } from '../../daemon/commandRegistry';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { CONFIGURED_AGENT_IDS, configuredAgent } from '../../../../shared/agents';
 
 export type CliAgentType = NonNullable<TerminalPanelState['agentType']>;
 
-export const CLI_AGENT_TYPES: readonly CliAgentType[] = ['claude', 'codex', 'cursor', 'opencode'];
+export const CLI_AGENT_TYPES: readonly CliAgentType[] = CONFIGURED_AGENT_IDS;
 
 interface AgentExecutableLookup {
   readonly [executable: string]: CliAgentType;
 }
 
-const AGENT_EXECUTABLES: AgentExecutableLookup = {
-  'cursor-agent': 'cursor',
-  claude: 'claude',
-  codex: 'codex',
-  opencode: 'opencode',
-};
+/** Each configured agent's executables (shared/agents.ts), for command, process and path detection. */
+const AGENT_EXECUTABLES: AgentExecutableLookup = Object.fromEntries(CONFIGURED_AGENT_IDS.flatMap(id => configuredAgent(id).executables.map(executable => [executable, id])));
 
 const OPTIONLESS_COMMAND_WRAPPERS = new Set(['command', 'exec', 'nohup']);
 const COMMAND_STRING_SHELLS = new Set(['bash', 'dash', 'fish', 'ksh', 'sh', 'zsh']);

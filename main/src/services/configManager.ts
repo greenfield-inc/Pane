@@ -15,7 +15,7 @@ import { isDeepStrictEqual } from 'util';
 import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { getAppDirectory } from '../utils/appDirectory';
 import { clearShellPathCache } from '../utils/shellPath';
-import { restampNotifySwitch, restampSharedCredentials } from './sharedCredentials';
+import { restampCardsOn, restampNotifySwitch, restampSharedCredentials } from './sharedCredentials';
 import {
   boundary,
   decodeBoundary,
@@ -126,6 +126,7 @@ export class ConfigManager extends EventEmitter {
     this.configDir = getAppDirectory();
     this.configPath = path.join(this.configDir, 'config.json');
     this.config = {
+      machineId: randomUUID(),
       gitRepoPath: defaultGitPath || '',
       usePtyHost: process.platform === 'win32',
       verbose: false,
@@ -374,12 +375,19 @@ export class ConfigManager extends EventEmitter {
       this.config.notifyEnabledChangedAt = switchRestamped;
       shouldPersistMigration = true;
     }
+    const cardsOnRestamped = lastRead ? restampCardsOn(lastRead, this.config) : null;
+    if (cardsOnRestamped !== null) {
+      this.config.notifyCardsOnChangedAt = cardsOnRestamped;
+      shouldPersistMigration = true;
+    }
+    // A config from before install ids keeps the id this run created (the defaults' or the last read's).
+    if (!loadedConfig.machineId) shouldPersistMigration = true;
     if (!this.applyKeyboardShortcutOverrides(loadedConfig.keyboardShortcutOverrides)) {
       delete this.config.keyboardShortcutOverrides;
     }
     this.hasReadConfigFile = true;
     this.lastConfigJson = data;
-    return { persist: shouldPersistMigration, emit: restamped !== null || switchRestamped !== null };
+    return { persist: shouldPersistMigration, emit: restamped !== null || switchRestamped !== null || cardsOnRestamped !== null };
   }
 
   private async readConfigFile(): Promise<DiskRead> {
@@ -643,8 +651,11 @@ export class ConfigManager extends EventEmitter {
     }
     next.sharedCredentials = restampSharedCredentials(next, 'now') ?? next.sharedCredentials;
     // A value from another machine arrives with that machine's time; anything else is the person, here.
-    if (updates.notifyEnabledChangedAt === undefined) {
+    if (!('notifyEnabledChangedAt' in rawUpdates)) {
       next.notifyEnabledChangedAt = restampNotifySwitch(current, next) ?? next.notifyEnabledChangedAt;
+    }
+    if (!('notifyCardsOnChangedAt' in rawUpdates)) {
+      next.notifyCardsOnChangedAt = restampCardsOn(current, next) ?? next.notifyCardsOnChangedAt;
     }
     this.validateAppearanceUpdate(updates);
     if (!this.applyKeyboardShortcutOverrides(next.keyboardShortcutOverrides, next)) {

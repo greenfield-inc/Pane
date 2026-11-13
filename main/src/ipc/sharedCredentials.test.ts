@@ -213,16 +213,16 @@ describe('the Approvals switch on a host', () => {
   it('reads as on, at time zero, when this host has never stored it', async () => {
     const { readSwitch } = await switchOf();
 
-    expect(await readSwitch()).toEqual({ enabled: true, changedAt: 0 });
+    expect(await readSwitch()).toMatchObject({ enabled: true, changedAt: 0 });
   });
 
   it('reads an off stored before the switch was shared as off, at time zero, so any timed value replaces it', async () => {
     const { readSwitch, applySwitch } = await switchOf({ notify: { enabled: false } });
 
-    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 0 });
+    expect(await readSwitch()).toMatchObject({ enabled: false, changedAt: 0 });
 
     await applySwitch({ enabled: true, changedAt: 1 });
-    expect(await readSwitch()).toEqual({ enabled: true, changedAt: 1 });
+    expect(await readSwitch()).toMatchObject({ enabled: true, changedAt: 1 });
   });
 
   it('refuses a caller that is not a paired client', async () => {
@@ -254,7 +254,7 @@ describe('the Approvals switch on a host', () => {
 
     await configManager.updateConfig({ notify: { enabled: true } });
 
-    expect(await readSwitch()).toEqual({ enabled: true, changedAt: future + 1 });
+    expect(await readSwitch()).toMatchObject({ enabled: true, changedAt: future + 1 });
   });
 
   it('takes a newer value with that host\'s time, turns off through config-updated, and keeps per-machine settings', async () => {
@@ -265,7 +265,7 @@ describe('the Approvals switch on a host', () => {
 
     await applySwitch({ enabled: false, changedAt: 5_000 });
 
-    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 5_000 });
+    expect(await readSwitch()).toMatchObject({ enabled: false, changedAt: 5_000 });
     expect(updates.at(-1)?.notify).toEqual({ enabled: false, position: 'top-right', sound: false });
   });
 
@@ -274,7 +274,7 @@ describe('the Approvals switch on a host', () => {
 
     await applySwitch({ enabled: true, changedAt: 4_000 });
 
-    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 5_000 });
+    expect(await readSwitch()).toMatchObject({ enabled: false, changedAt: 5_000 });
     expect(configManager.getConfig().notify?.enabled).toBe(false);
   });
 
@@ -283,7 +283,7 @@ describe('the Approvals switch on a host', () => {
 
     await applySwitch({ enabled: false, changedAt: 0 });
 
-    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 0 });
+    expect(await readSwitch()).toMatchObject({ enabled: false, changedAt: 0 });
   });
 
   it('refuses a malformed value and changes nothing', async () => {
@@ -291,7 +291,7 @@ describe('the Approvals switch on a host', () => {
 
     await expect(registry.invokeRemote('notify:switch:apply', [{ enabled: 'off', changedAt: 5 }, paired])).rejects.toThrow();
 
-    expect(await readSwitch()).toEqual({ enabled: true, changedAt: 0 });
+    expect(await readSwitch()).toMatchObject({ enabled: true, changedAt: 0 });
   });
 
   it('counts a hand edit of config.json as changed now, so an older copy cannot undo it', async () => {
@@ -308,11 +308,42 @@ describe('the Approvals switch on a host', () => {
     expect(current.changedAt).toBeGreaterThan(5_001);
   });
 
+  it('stamps a "Show cards on" picked here, and keeps it when a host from before it sends a newer switch', async () => {
+    const { configManager, readSwitch, applySwitch } = await switchOf();
+    const before = Date.now();
+    const book = { id: 'c3d4-book', name: 'qa-macbook' };
+
+    await configManager.updateConfig({ notify: { cardsOn: book } });
+    const picked = await readSwitch();
+    expect(picked).toMatchObject({ enabled: true, changedAt: 0, cardsOn: book });
+    expect(picked.cardsOnChangedAt).toBeGreaterThanOrEqual(before);
+
+    await applySwitch({ enabled: false, changedAt: before + 60_000 });
+    expect(await readSwitch()).toEqual({ enabled: false, changedAt: before + 60_000, cardsOn: book, cardsOnChangedAt: picked.cardsOnChangedAt });
+  });
+
+  it('takes a newer "Show cards on" with that host\'s time and leaves the switch alone', async () => {
+    const { configManager, readSwitch, applySwitch } = await switchOf({ notify: { enabled: false }, notifyEnabledChangedAt: 5_000 });
+
+    await applySwitch({ enabled: true, changedAt: 4_000, cardsOn: { id: 'a1b2-mini', name: 'mini' }, cardsOnChangedAt: 6_000 });
+
+    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 5_000, cardsOn: { id: 'a1b2-mini', name: 'mini' }, cardsOnChangedAt: 6_000 });
+    expect(configManager.getConfig().notifyCardsOnChangedAt).toBe(6_000);
+  });
+
+  it('settles a "Show cards on" tie on the smaller id and keeps the shared time, so hosts converge', async () => {
+    const { readSwitch, applySwitch } = await switchOf({ notify: { cardsOn: { id: 'b-book', name: 'book' } }, notifyCardsOnChangedAt: 4_000 });
+
+    await applySwitch({ enabled: true, changedAt: 0, cardsOn: { id: 'a-mini', name: 'mini' }, cardsOnChangedAt: 4_000 });
+
+    expect(await readSwitch()).toMatchObject({ cardsOn: { id: 'a-mini', name: 'mini' }, cardsOnChangedAt: 4_000 });
+  });
+
   it('does not treat loading a saved value at startup as a change', async () => {
     const { readSwitch, configManager } = await switchOf({ notify: { enabled: false } });
 
     await configManager.reloadFromDisk();
 
-    expect(await readSwitch()).toEqual({ enabled: false, changedAt: 0 });
+    expect(await readSwitch()).toMatchObject({ enabled: false, changedAt: 0 });
   });
 });

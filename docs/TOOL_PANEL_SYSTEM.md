@@ -64,7 +64,8 @@ The tool panel system supports 10 panel types (`ToolPanelType` in `shared/types/
 1. **Terminal** (`terminal`): PTY shells, several per pane. Agent CLIs such as
    Claude Code, Codex and Cursor Agent run in terminal panels
    (`TerminalPanelState.agentType` records which one).
-   **Chat** (`chat`): Claude or Codex over ACP, with no terminal; its state is
+   **Chat** (`chat`): any agent whose config has a `chat` section, over ACP,
+   with no terminal; its state is
    `ChatPanelState` (`shared/types/chatTab.ts`) and only the host's chat runtime
    writes it. See [CHAT_TABS.md](CHAT_TABS.md).
 2. **Diff** (`diff`): git diff viewer. Singleton, permanent, worktrees only.

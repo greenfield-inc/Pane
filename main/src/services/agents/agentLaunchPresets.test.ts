@@ -7,13 +7,14 @@ import {
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 
 describe('AGENT_LAUNCH_PRESETS', () => {
-  it('mirrors the RunPane contract agent templates exactly', () => {
+  it('builds each terminal launch command from the agents config: executable, full-access flags, then args', () => {
     expect(AGENT_LAUNCH_PRESETS.map(p => p.id).sort()).toEqual([...RUNPANE_CONTRACT.enums.agents].sort());
-    for (const preset of AGENT_LAUNCH_PRESETS) {
-      const template = RUNPANE_CONTRACT.agentTemplates[preset.id];
-      expect(preset.title, `${preset.id} title`).toBe(template.title);
-      expect(preset.command, `${preset.id} command`).toBe(template.command);
-    }
+    expect(Object.fromEntries(AGENT_LAUNCH_PRESETS.map(p => [p.id, p.command]))).toEqual({
+      claude: 'claude --dangerously-skip-permissions',
+      codex: 'codex --yolo',
+      cursor: 'cursor-agent --force --trust',
+      opencode: 'opencode --auto',
+    });
   });
 
   it('assigns unique, contiguous hotkey slots starting at mod+alt+3', () => {

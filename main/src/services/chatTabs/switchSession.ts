@@ -31,8 +31,7 @@ async function check(panel: ToolPanel, paneName: string, ports: SessionSwitchPor
     // A Session switch opens only conversations Pane is sure of: the folder's most recent one is a
     // guess for one tab at a time, with its banner and Pick another, and two tabs in one folder could swap.
     if (!prepared.conversation.sure) {
-      const kind: SessionChatSwitchSkip = prepared.chatState.agent === 'codex' ? 'plain-codex' : 'no-conversation';
-      return { item: { ...item, skip: { kind, reason: `Pane isn't sure which conversation this tab is on (${prepared.conversation.why}). Switch it from its tab's menu to pick one` } } };
+      return { item: { ...item, skip: { kind: 'no-conversation', reason: `Pane isn't sure which conversation this tab is on (${prepared.conversation.why}). Switch it from its tab's menu to pick one` } } };
     }
     return { item, prepared };
   } catch (error) {

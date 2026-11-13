@@ -19,7 +19,7 @@ import {
 const RETRY_AFTER_GIVE_UP_MS = 60_000;
 
 type RemoteClientOptions = NonNullable<ConstructorParameters<typeof RemotePaneClient>[1]>;
-export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke'>;
+export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume'>;
 export type CreateMachineClient = (profile: RemotePaneConnectionProfile, options: RemoteClientOptions) => MachineClient;
 
 export interface MachineConnectionsDeps {
@@ -93,8 +93,22 @@ export class MachineConnections {
     await Promise.all(machines.map(machine => this.close(machine)));
   }
 
+  /**
+   * Closes every saved machine's stream before this computer sleeps, so the machines it reads stop
+   * counting it as reading ("Show cards on") instead of holding a half-open stream. `resume` reopens them.
+   */
+  suspend(): void {
+    for (const machine of this.machines.values()) machine.client.suspend();
+  }
+
+  resume(): void {
+    for (const machine of this.machines.values()) machine.client.resume();
+  }
+
   list(): MachineState[] {
     const local: MachineState = { id: LOCAL_MACHINE_ID, label: 'This computer', kind: 'local', status: 'online', offlineSince: null };
+    const installId = this.deps.configManager.getConfig().machineId;
+    if (installId) local.installId = installId;
     return [local, ...[...this.machines.values()].map(machine => ({ ...machine.state }))];
   }
 
@@ -184,10 +198,11 @@ export class MachineConnections {
       retryTimer: null,
       state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null },
       client: this.createClient(profile, {
+        machineId: this.deps.configManager.getConfig().machineId,
         eventSink: { send: (channel, ...args) => { if (isCurrent() && isMachineEventChannel(channel)) this.emit({ type: 'event', machineId: id, channel, args }); } },
-        onConnectionStateChange: (status) => {
+        onConnectionStateChange: (status, _error, metadata) => {
           if (!isCurrent()) return;
-          this.updateStatus(machine, status);
+          this.updateStatus(machine, status, metadata?.hostMachineId);
           if (status === 'connected') clearRetry(machine);
           if (status === 'error' && !machine.retryTimer) {
             machine.retryTimer = setTimeout(() => {
@@ -208,18 +223,21 @@ export class MachineConnections {
     await machine.client.disconnect();
   }
 
-  private updateStatus(machine: RemoteMachine, status: RemotePaneConnectionStatus): void {
+  private updateStatus(machine: RemoteMachine, status: RemotePaneConnectionStatus, hostMachineId?: string): void {
     const { state } = machine;
-    const before = `${state.status}|${state.offlineSince}`;
+    const before = `${state.status}|${state.offlineSince}|${state.installId}`;
+    if (hostMachineId) state.installId = hostMachineId;
     if (status === 'connected') {
+      if (state.status !== 'online') state.onlineSince = new Date().toISOString();
       state.status = 'online';
       state.offlineSince = null;
     } else if (status === 'reconnecting' || status === 'error') {
       // The time it first stopped answering, kept through every retry.
       if (state.status !== 'offline') state.offlineSince = new Date().toISOString();
       state.status = 'offline';
+      delete state.onlineSince;
     }
-    if (`${state.status}|${state.offlineSince}` !== before) this.emitMachines();
+    if (`${state.status}|${state.offlineSince}|${state.installId}` !== before) this.emitMachines();
   }
 
   private emitMachines(): void {
@@ -284,7 +302,7 @@ function toInvocation(command: PaneCommandValue): Invocation {
         return { channel: 'sessions:create', args: [decodeBoundary(command, commandSchemas['create-pane']).request] };
       case 'create-session':
         // This desktop shows chat tabs, so the Session may start as one (D-203).
-        return { channel: 'orchestration-sessions:create', args: [decodeBoundary(command, commandSchemas['create-session']).input, { chatTabs: true }] };
+        return { channel: 'orchestration-sessions:create', args: [decodeBoundary(command, commandSchemas['create-session']).input, { chatTabs: true, chatAgents: true }] };
       case 'preview-switch-to-chat':
         return { channel: 'chat-tab:preview-session-switch', args: [decodeBoundary(command, commandSchemas['preview-switch-to-chat']).sessionId] };
       case 'switch-to-chat': {

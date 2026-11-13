@@ -8,6 +8,7 @@ import type { ToolPanel } from '../../../../shared/types/panels';
 import { AGENT_FARM_RESUME } from '../../../../shared/types/customCommandResume';
 import { withSessionFolderAccess } from '../agents/sessionFolderAccess';
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
+import { agentTerminalCommand } from '../../../../shared/agents';
 
 describe('which terminal launches a chat tab can run', () => {
   it('runs the plain agent, keeping its skip-approvals flag as the session mode', () => {
@@ -50,7 +51,8 @@ describe('which Sessions can run as a chat', () => {
     expect(reason({ agent: 'claude', launchCommand: 'claude', runtime: 'wsl' })).toContain('WSL');
     expect(reason({ agent: 'claude', launchCommand: 'claude', resume: 'abc' })).toContain('terminal conversation');
     expect(reason({ agent: 'claude', launchCommand: 'claude', promoted: true })).toContain('terminal conversation');
-    expect(reason({ agent: 'cursor' })).toContain('Claude and Codex');
+    expect(reason({ agent: 'aider' })).toContain("don't run aider");
+    expect(sessionChatLaunch({ agent: 'cursor', launchCommand: 'cursor-agent --force --trust' })).toEqual({ launch: { kind: 'agent', fullAccess: true } });
   });
 });
 
@@ -75,7 +77,7 @@ describe('the chat launch for a terminal agent tab being switched to chat', () =
 
 describe('Session folder access in a switched Session Pane chat (D-161)', () => {
   const folder = '/Users/me/.pane/sessions/s-1';
-  const sessionPaneCommand = withSessionFolderAccess({ title: 'Claude Code', command: RUNPANE_CONTRACT.agentTemplates.claude.command, agent: 'claude' }, folder, 'darwin').command;
+  const sessionPaneCommand = withSessionFolderAccess({ title: 'Claude Code', command: agentTerminalCommand('claude'), agent: 'claude' }, folder, 'darwin').command;
 
   it.skipIf(process.platform === 'win32')('switches the launch Pane gives Claude in a Session\'s Pane, dropping only its own Session folder settings', () => {
     expect(sessionPaneCommand).toContain('--settings');

@@ -4,6 +4,7 @@ import type {
   NotifyActor,
   NotifyAgentAction,
   NotifyAnswer,
+  NotifyCardsOnStatus,
   NotifyChoice,
   NotifySubQuestion,
   NotifyClosed,
@@ -25,6 +26,8 @@ import type {
   NotifyVersion,
 } from '../../../../shared/types/notify';
 import { NOTIFY_VERSIONS_MAX } from '../../../../shared/types/notify';
+import type { MachineState } from '../../../../shared/types/machineConnections';
+import type { AppConfig } from '../../types/config';
 import { PaneError } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { leadingQn } from '../../../../shared/autopilotDecision';
@@ -155,6 +158,8 @@ export interface NotifyQueueEnvironment {
   instructionFiles: () => NotifyInstructionsFile[];
   /** This machine's name, as connected screens and phones show it. */
   machine?: string;
+  /** This machine's install id (`AppConfig.machineId`), which "Show cards on" names it by. */
+  machineId?: string;
   /** Where a secret card's answer goes. The value is passed here and nowhere else. */
   secrets?: {
     exists(project: string, name: string): boolean;
@@ -172,6 +177,8 @@ export interface NotifyQueueEnvironment {
   askerGone?: (item: NotifyItem) => string | undefined;
   /** The person used this computer in the last 2 minutes, with its screen unlocked (D-144). Absent: yes. */
   inUse?: () => boolean;
+  /** Where "Show cards on" leaves this machine. Absent: whichever computer is in use. */
+  cardsOn?: () => NotifyCardsOnStatus;
   /** A worker's question closed because its asker is gone: its inbox item goes with it. */
   workerQuestionGone?: (inboxId: string) => void;
   /**
@@ -184,6 +191,30 @@ export interface NotifyQueueEnvironment {
   /** Autopilot's chat tab, while Autopilot is on; it reads replies no one else can (D-258). */
   autopilotReader?: () => { panelId: string } | undefined;
 }
+
+/**
+ * Where "Show cards on" leaves this machine (D-6 to D-8): the picked machine alerts, and every other
+ * machine stays quiet while the picked one reads it (`readsHere`). When it can't, this machine alerts
+ * as if nothing were picked, so no question goes unseen. Names follow this machine's picker.
+ */
+export function cardsOnStatus(config: AppConfig, readsHere: (machineId: string) => boolean, machines: MachineState[], now = Date.now()): NotifyCardsOnStatus {
+  const picked = config.notify?.cardsOn;
+  if (!picked) return { kind: 'any' };
+  if (picked.id === config.machineId) return { kind: 'here' };
+  const saved = machines.find(machine => machine.kind === 'remote' && machine.installId === picked.id);
+  const name = saved?.label ?? picked.name;
+  // A picked machine that slept or left the network can leave its stream half-open here for minutes; this
+  // machine's own connection to it notices within its heartbeat timeout, so that one is believed first.
+  if (saved?.status === 'offline') return { kind: 'not-connected', name };
+  if (readsHere(picked.id)) return { kind: 'elsewhere', name };
+  // A machine that just came online may still be waiting to reconnect to this one, so it counts as not added only after a while.
+  const onlineFor = saved?.status === 'online' && saved.onlineSince ? now - Date.parse(saved.onlineSince) : 0;
+  const answering = onlineFor >= NOT_ADDED_AFTER_MS;
+  return { kind: answering ? 'not-added' : 'not-connected', name };
+}
+
+/** Longer than a desktop's reconnect backoff to a machine that restarted (about 30 s). */
+const NOT_ADDED_AFTER_MS = 60_000;
 
 /** Who runs `--took` or `--update`: the calling tab. */
 export interface NotifyReaderCaller {
@@ -269,7 +300,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly tabsTyping = new Set<string>();
   /** Replies whose line is being typed into their reader's tab right now: not replaceable until it's known whether it went. */
   private readonly repliesTyping = new Set<string>();
-  private lastInUse: boolean | undefined;
+  /** In use and "Show cards on" as last polled; a change redraws the strip and Settings. */
+  private lastAlertState: string | undefined;
 
   constructor(private readonly env: NotifyQueueEnvironment) {
     super();
@@ -1211,11 +1243,11 @@ export class NotifyQueue extends EventEmitter {
     }
   }
 
-  /** The person just came back to, or left, this computer: the strip follows (D-144). */
+  /** The person came back to or left this computer, or "Show cards on" moved: the strip and Settings follow (D-144). */
   pollInUse(): void {
-    const now = this.inUse();
-    if (now === this.lastInUse) return;
-    this.lastInUse = now;
+    const now = JSON.stringify([this.inUse(), this.cardsOn()]);
+    if (now === this.lastAlertState) return;
+    this.lastAlertState = now;
     this.changed();
   }
 
@@ -1231,9 +1263,18 @@ export class NotifyQueue extends EventEmitter {
     return this.env.inUse?.() ?? true;
   }
 
+  private cardsOn(): NotifyCardsOnStatus {
+    return this.env.cardsOn?.() ?? { kind: 'any' };
+  }
+
+  /** Cards pop up and chime here while it's in use, unless "Show cards on" picked a machine that reads this one (D-6, D-7). */
+  private alertsHere(): boolean {
+    return this.inUse() && this.cardsOn().kind !== 'elsewhere';
+  }
+
   private chime(): void {
     const settings = this.env.settings();
-    if (settings.enabled && settings.sound && !this.isPaused() && this.inUse()) this.emit('chime');
+    if (settings.enabled && settings.sound && !this.isPaused() && this.alertsHere()) this.emit('chime');
   }
 
   /** What no surface should raise, whatever it's asked: quiet and stale items, and what's hidden. */
@@ -1584,6 +1625,8 @@ export class NotifyQueue extends EventEmitter {
       instructionFiles: this.env.instructionFiles(),
       firstRun: strip?.kind === 'question' && (this.hintItemId === undefined || this.hintItemId === strip.itemId),
       importError: this.importError,
+      cardsOn: this.cardsOn(),
+      thisMachine: this.env.machineId ? { id: this.env.machineId, name: this.machine() } : null,
     };
   }
 
@@ -1964,7 +2007,7 @@ export class NotifyQueue extends EventEmitter {
 
   private canShowStrip(): boolean {
     const settings = this.env.settings();
-    if (!settings.enabled || this.isPaused() || this.roundOpen || !this.inUse()) return false;
+    if (!settings.enabled || this.isPaused() || this.roundOpen || !this.alertsHere()) return false;
     return this.paneFocused || (settings.showOutsidePane && this.env.showOutsideSupported);
   }
 

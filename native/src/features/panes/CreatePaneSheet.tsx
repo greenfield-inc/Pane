@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Switch, TextInput, View } from 'react-native';
 
+import { DEFAULT_AGENT_ID } from '@shared/agents';
 import { AGENT_LAUNCH_PRESETS, type AgentLaunchPresetId } from '@shared/constants/agentLaunchPresets';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { RunpanePaneCreateRequest, RunpanePaneCreateResult } from '@shared/types/runpaneOrchestration';
@@ -46,7 +47,7 @@ export function CreatePaneForm({ machine, projectId, onCreated }: {
   // A snapshot: the desktop opening another repository does not move the sheet while someone edits it.
   const [chosenProjectId, setChosenProjectId] = useState(() => projectId ?? defaultProject(projects.data ?? [])?.id);
   const [choosingProject, setChoosingProject] = useState(false);
-  const [agent, setAgent] = useState<AgentLaunchPresetId>('claude');
+  const [agent, setAgent] = useState<AgentLaunchPresetId>(DEFAULT_AGENT_ID);
   const [chosenBranch, setChosenBranch] = useState<string>();
   const [branchOpen, setBranchOpen] = useState(false);
   const [branchQuery, setBranchQuery] = useState('');

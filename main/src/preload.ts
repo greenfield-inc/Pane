@@ -504,16 +504,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     dismissBanner: (panelId: string) => invokeIpc('chat-tab:dismiss-banner', panelId),
     signIn: (panelId: string) => invokeIpc('chat-tab:sign-in', panelId),
     keys: () => invokeIpc('chat-tab:keys'),
-    setKey: (agent: 'claude' | 'codex', key: string | null) => invokeIpc('chat-tab:set-key', agent, key),
+    setKey: (agent: string, key: string | null) => invokeIpc('chat-tab:set-key', agent, key),
+    agents: () => invokeIpc('chat-tab:agents'),
+    registry: (refresh?: boolean) => invokeIpc('chat-tab:registry', refresh ?? false),
+    installAgent: (id: string, options?: { allowUnverified?: boolean }) => invokeIpc('chat-tab:install-agent', id, options ?? {}),
+    removeAgent: (id: string) => invokeIpc('chat-tab:remove-agent', id),
     onEvent: (callback: (event: ChatTabEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, event: ChatTabEvent) => callback(event);
       ipcRenderer.on('chat-tab:event', listener);
       return () => ipcRenderer.removeListener('chat-tab:event', listener);
     },
     onState: (callback: (view: ChatTabView) => void) => {
+      // chat-tab:view carries every agent's view; a host from before it (remote mode) sends only
+      // chat-tab:state. A view seen on both is harmless: the viewer keeps the newest.
       const listener = (_event: Electron.IpcRendererEvent, view: ChatTabView) => callback(view);
+      ipcRenderer.on('chat-tab:view', listener);
       ipcRenderer.on('chat-tab:state', listener);
-      return () => ipcRenderer.removeListener('chat-tab:state', listener);
+      return () => {
+        ipcRenderer.removeListener('chat-tab:view', listener);
+        ipcRenderer.removeListener('chat-tab:state', listener);
+      };
     },
   },
   paneChat: {
@@ -530,8 +540,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runtimes: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:runtimes'),
     list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list'),
     select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector),
-    create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input, { chatTabs: true }),
-    get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector, { chatTabs: true }),
+    create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input, { chatTabs: true, chatAgents: true }),
+    get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector, { chatTabs: true, chatAgents: true }),
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:update', selector, input),
     reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }),
     setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
@@ -1269,7 +1279,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   panels: {
     createPanel: (sessionId: string, type: string, name: string, config?: JsonObject): Promise<IPCResponse> =>
       invokeIpc('panels:create', { sessionId, type, title: name, initialState: config }),
-    getSessionPanels: (sessionId: string): Promise<IPCResponse> => invokeIpc('panels:list', sessionId, { chatTabs: true }),
+    getSessionPanels: (sessionId: string): Promise<IPCResponse> => invokeIpc('panels:list', sessionId, { chatTabs: true, chatAgents: true }),
     deletePanel: (panelId: string): Promise<IPCResponse> => invokeIpc('panels:delete', panelId),
     renamePanel: (panelId: string, name: string): Promise<IPCResponse> => invokeIpc('panels:update', panelId, { title: name }),
     setActivePanel: (sessionId: string, panelId: string): Promise<IPCResponse> => invokeIpc('panels:set-active', sessionId, panelId),

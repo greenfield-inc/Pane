@@ -22,12 +22,14 @@ import { CLEAR_COMMAND, isClearCommand, isResumeCommand, matchingCommands, withP
 import { ChatQueue } from './ChatQueue';
 import { ChatSwitchBanner } from './ChatSwitchBanner';
 import { ConversationPicker } from './ConversationPicker';
-import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
+import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, riskySetting, usePhoneWidth } from './ChatComposerControls';
 import { ChatStatusBar, type ChatStatusPullRequest } from './ChatStatusBar';
 import { sendNowKeys } from './chatKeys';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
 import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
 import { ChatCopyButton } from './ChatCopyButton';
+import { useChatAgents } from '../../stores/chatAgentsStore';
+import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
@@ -130,8 +132,6 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
   return record;
 }
 
-const AGENT_NAMES = { claude: 'Claude', codex: 'Codex' } as const;
-
 /** Where a fresh conversation started after /clear: "Cleared · 2:04 PM". */
 function ClearedDivider({ at }: { at: string }) {
   const time = messageTime(at);
@@ -182,6 +182,7 @@ const NO_RENDERING: ChatRendering = {};
 
 export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
+  const catalog = useChatAgents(client);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
   const [busy, setBusy] = useState(false);
@@ -225,7 +226,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const dragDepth = useRef(0);
   const stopped = view?.status === 'stopped';
   const disabled = !connected || stopped || !view;
-  const agentName = view ? AGENT_NAMES[view.agent] : 'the agent';
+  const agentName = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
   const commands = matchingCommands(snapshot.draft, clearable ? withPaneCommands(view?.commands ?? []) : view?.commands ?? []);
   /** Cmd/Ctrl+Enter: the message being sent goes ahead of the queue and interrupts the turn (D-211, D-222 item 7). */
   const sendNowNext = useRef(false);
@@ -529,9 +530,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           <div ref={actionsRef} className="chat-composer-actions" data-layout={phone ? 'phone' : 'desktop'} data-working={working || undefined}>
             {attachments && <ComposerPrimitive.AddAttachment aria-label={saveFile ? 'Attach files' : 'Attach image'} title={saveFile ? 'Attach photos or files' : 'Attach image'} className="chat-icon"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
             {/* Model and mode stay on the composer row (D-267). */}
-            {phone
-              ? <ChatRiskyModeMarker mode={composerRow.mode} />
-              : composerRow.mode && <ChatModeChip control={composerRow.mode} disabled={settingsLocked} configure={configure} />}
+            {phone || !composerRow.mode
+              ? <ChatRiskyModeMarker setting={riskySetting(composerRow)} />
+              : <ChatModeChip control={composerRow.mode} risky={!!riskySetting(composerRow)} disabled={settingsLocked} configure={configure} />}
             <div className="chat-composer-end">
               {phone
                 ? <ChatPhoneModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />

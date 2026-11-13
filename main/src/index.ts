@@ -20,7 +20,7 @@ const launchRemoteSetup = hasRemoteSetupLaunchArg();
 
 // Fix GTK 2/3 and GTK 4 conflict on Linux (Electron 36 issue)
 // This MUST be done before importing electron
-import { app, protocol } from 'electron';
+import { app, powerMonitor, protocol } from 'electron';
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'pane-media',
@@ -1186,6 +1186,9 @@ async function initializeServices() {
     invokeLocal: (channel, args) => commandRegistry.invoke(channel, args),
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
+  const machines = machineConnections;
+  powerMonitor.on('suspend', () => machines.suspend());
+  powerMonitor.on('resume', () => machines.resume());
   // The Notify inbox, badge and tray count cover every saved machine, in any mode.
   followSavedMachines(machineConnections);
 

@@ -432,7 +432,7 @@ runpane doctor [--json] [--pane-dir <path>] [--pane-path <path>] [--format <form
 runpane doctor --fix [--json] [--pane-dir <path>]
 runpane doctor --report [--title <text>] --body-file <path|-> [--yes] [--json]
 runpane daemon repair [--pane-dir <path>] [--pane-path <path>] [--yes] [--json]
-runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json] [--pane-dir <path>]
+runpane agents doctor --agent <codex|claude|cursor|opencode> [--repo <selector>] [--json] [--pane-dir <path>]
 runpane agent-context [--json]
 runpane agent-context --command <command> [--json]
 runpane mcp [--toolsets <name,...>] [--read-only]
@@ -458,11 +458,11 @@ runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- 
 runpane handoff --template
 runpane handoff "<destination>" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]
 runpane watch [--follow|--until-event] [--session <id|name>|--pane <id>] [--json] [overrides]
-runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]
-runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]
+runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]
+runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]
 runpane panes create --from-json <path|-> [--yes] [--json] [--pane-dir <path>]
-runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor> [--resume <id>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]
-runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]
+runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|opencode> [--resume <id>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]
+runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]
 runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json] [--pane-dir <path>]
 runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json] [--pane-dir <path>]
 runpane panes pin --pane <pane-id> --yes [--dry-run] [--json] [--pane-dir <path>]
@@ -471,8 +471,8 @@ runpane panes pause --pane <pane-id> --yes [--json] [--pane-dir <path>]
 runpane panes resume --pane <pane-id> --yes [--json] [--pane-dir <path>]
 runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json] [--pane-dir <path>]
 runpane panes focus --pane <pane-id> [--panel <panel-id>] --source user|agent --yes [--json] [--pane-dir <path>]
-runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]
-runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor>] [--title <title>] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]
+runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode> [--source user|agent] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]
+runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|opencode>] [--title <title>] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]
 runpane panels open [--pane <pane-id>] (--url <url>|--file <path>) [--title <title>] [--split|--tab] [--focus|--no-focus] [--source user|agent] --yes [--json]
 runpane panels close --panel <panel-id> [--dry-run] [--force] [--source user|agent] --yes [--json] [--pane-dir <path>]
 runpane panels list --pane <pane-id> [--json] [--pane-dir <path>]
@@ -510,7 +510,7 @@ runpane links create --session <session-id> [--json]
 runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]
 runpane docs search --query <text> [--limit <count>] [--json]
 runpane docs read --doc <path> [--json]
-runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]
+runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]
 runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]
 runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> [--as-file-pointer] [--no-expect-report] --yes [--json] [--pane-dir <path>]
 runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]
@@ -661,7 +661,7 @@ These flags are consumed by local daemon-control commands:
 --base-branch <ref> (aliases: --base)
 --folder <name>
 --resume <agent-session-id>
---agent <codex|claude|cursor>
+--agent <codex|claude|cursor|opencode>
 --tool-command <command>
 --title <title>
 --url <url>

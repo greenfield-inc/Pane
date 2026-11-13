@@ -10,9 +10,9 @@ const report = boundary.object({
   reportedAt: boundary.string,
 });
 const schema: BoundarySchema<ChatPanelState> = boundary.object({
-  agent: boundary.enumeration('claude', 'codex'),
+  agent: boundary.nonEmptyString,
   launch: boundary.union(
-    boundary.object({ kind: boundary.literal('agent'), mode: boundary.optional(boundary.string) }),
+    boundary.object({ kind: boundary.literal('agent'), mode: boundary.optional(boundary.string), fullAccess: boundary.optional(boundary.literal(true)) }),
     boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)) }),
   ),
   cwd: boundary.string,

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ToolPanel } from '../../../../shared/types/panels';
-import { isAgentTerminal } from '../../utils/agentTerminal';
+import { terminalChatSwitch } from '../../utils/agentTerminal';
+import { useChatAgents } from '../../stores/chatAgentsStore';
 import { isChatTabsEnabled, useConfigStore } from '../../stores/configStore';
 import { useHotkey } from '../../hooks/useHotkey';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -10,9 +11,11 @@ import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui/Modal';
 import { SwitchToChatBody } from './SwitchToChatDialog';
 import { switchFailure, type SwitchFailure } from './switchToChatCopy';
 
-/** Whether Switch to chat is offered for this tab: chat tabs are on and it is a terminal Claude or Codex tab. */
+/** Whether Switch to chat is offered for this tab: chat tabs are on and the host's catalog says its agent can switch. */
 function useCanSwitchToChat(panel: ToolPanel | undefined): boolean {
-  return useConfigStore(state => isChatTabsEnabled(state.config)) && isAgentTerminal(panel);
+  const chatTabs = useConfigStore(state => isChatTabsEnabled(state.config));
+  const agents = useChatAgents(chatTabs ? window.electronAPI.chatTab : undefined);
+  return chatTabs && terminalChatSwitch(panel, agents)?.ok === true;
 }
 
 /**

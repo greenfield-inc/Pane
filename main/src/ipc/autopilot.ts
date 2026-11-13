@@ -17,12 +17,12 @@ import { getPaneEventSink } from '../core/runtime';
 import { parseRewriteQuestion } from './notify';
 import { listTailnetMachines } from './workspaceAccess';
 import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
 import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { AutopilotDocument, AutopilotSnapshot, AutopilotStackPushRequest } from '../../../shared/types/autopilot';
+import { DEFAULT_AGENT_ID, agentTerminalCommand } from '../../../shared/agents';
 
 const stackCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('step'), direction: boundary.union(boundary.literal(1), boundary.literal(-1)) }),
@@ -136,7 +136,7 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
       list: () => sessionsList,
       subscribe: (listener) => { sessionListeners.add(listener); return () => sessionListeners.delete(listener); },
     },
-    launch: () => chatLaunchFromCommand(RUNPANE_CONTRACT.agentTemplates.claude.command, 'claude') ?? { kind: 'agent' },
+    launch: () => chatLaunchFromCommand(agentTerminalCommand(DEFAULT_AGENT_ID), DEFAULT_AGENT_ID) ?? { kind: 'agent' },
     skillPath: path.join(services.skillCacheManager?.paneChatSkillsRoot ?? path.join(getAppDirectory(), 'skills', 'pane-chat', 'skills'), 'pane-autopilot', 'SKILL.md'),
   });
   manager.on('changed', (snapshot: AutopilotSnapshot) => getPaneEventSink().send('autopilot:changed', snapshot));
