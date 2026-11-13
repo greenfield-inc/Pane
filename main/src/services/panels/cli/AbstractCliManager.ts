@@ -357,15 +357,15 @@ export abstract class AbstractCliManager extends EventEmitter {
     return Array.from(this.processes.keys());
   }
 
-  /**
-   * Returns a map of sessionId → array of PTY PIDs for that session.
-   * Used by resource monitoring to discover which CLI processes belong to which session.
-   */
   /** When any of this manager's PTYs last printed, in ms since the epoch; 0 when none has. */
   latestOutputAt(): number {
     return this.lastOutputAt;
   }
 
+  /**
+   * Returns a map of sessionId → array of PTY PIDs for that session.
+   * Used by resource monitoring to discover which CLI processes belong to which session.
+   */
   getSessionPids(): Map<string, number[]> {
     const result = new Map<string, number[]>();
     for (const [, cliProcess] of this.processes) {
