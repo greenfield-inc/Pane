@@ -117,8 +117,10 @@ export function getChatTabManager(): ChatTabManager {
       getChatAgentCatalog().record(agent, response);
       // A registry agent that started no longer needs versions no tab runs (D-15). Every running
       // tab's folder stays: its process loads files from it. A cleanup error never stops the tab.
-      if (!getAgentRegistry().installedRecord(agent)) return;
-      try { getAgentRegistry().removeVersionsExcept(agent, getChatTabManager().launchedVersions(agent)); }
+      try {
+        if (!getAgentRegistry().installedRecord(agent)) return;
+        getAgentRegistry().removeVersionsExcept(agent, getChatTabManager().launchedVersions(agent));
+      }
       catch (error) { console.warn(`[AgentRegistry] Could not remove ${agent}'s older versions: ${error instanceof Error ? error.message : String(error)}`); }
     },
   });

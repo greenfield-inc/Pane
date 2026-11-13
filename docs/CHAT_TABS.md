@@ -68,9 +68,10 @@ installed.
 
 Below Pane's own agents, **Settings → Agents** lists the
 [ACP Registry](https://agentclientprotocol.com) (its URL is the agents
-config's `registryUrl`). Pane reads the index when the page opens and
-otherwise at most once an hour, and keeps the last copy in
-`agent-registry/registry.json` in Pane's data folder.
+config's `registryUrl`). Pane reads the index at most once an hour, when the
+page opens or an installed agent launches; **Refresh** on the page reads it now.
+It keeps the last copy in `agent-registry/registry.json` in Pane's data folder.
+With no copy and no connection, installed agents still show, with Remove.
 
 - **Listed**: agents published as a download for this computer or as an npm
   package. Agents published only for `uvx` are left out (Pane ships no Python

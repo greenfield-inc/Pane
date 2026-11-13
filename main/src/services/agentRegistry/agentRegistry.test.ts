@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -27,14 +27,14 @@ function archive(name: string, version: string) {
 }
 
 /** A stand-in npm: `install --prefix <dir> ... <spec>` writes the package with a bin script. */
-function fakeNpm(dir: string): string {
+function fakeNpm(dir: string, binKey = 'helper'): string {
   const npm = path.join(dir, 'npm');
   writeFileSync(npm, `#!/bin/sh
 prefix=""; spec=""
 while [ $# -gt 0 ]; do case "$1" in --prefix) prefix="$2"; shift;; -*) ;; *) spec="$1";; esac; shift; done
 name="\${spec%@*}"
 mkdir -p "$prefix/node_modules/$name/bin" "$prefix/node_modules/.bin"
-echo '{"name":"'"$name"'","bin":{"helper":"bin/helper.js","helper-alias":"bin/helper.js"}}' > "$prefix/node_modules/$name/package.json"
+echo '{"name":"'"$name"'","bin":{"${binKey}":"bin/helper.js","helper-alias":"bin/helper.js"}}' > "$prefix/node_modules/$name/package.json"
 printf '#!/bin/sh\necho helper\n' > "$prefix/node_modules/$name/bin/helper.js"
 chmod +x "$prefix/node_modules/$name/bin/helper.js"
 ln -s "../$name/bin/helper.js" "$prefix/node_modules/.bin/helper"
@@ -180,5 +180,67 @@ describe.skipIf(process.platform === 'win32')('keeping the registry inside its o
     expect((await later.list()).agents).toEqual([expect.objectContaining({ id: 'goose', installedVersion: '1.0.0', listed: false })]);
     later.remove('goose');
     expect((await later.list()).agents).toEqual([]);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('refusing unsafe registry entries (follow-up review)', () => {
+  it('lists only npm specs pinned to an exact version and versions that are safe folder names', async () => {
+    const npx = (pkg: string, version: string, id: string) => ({ id, name: id, version, distribution: { npx: { package: pkg } } });
+    const files = new Map<string, Buffer | string>([[`${URL_BASE}registry.json`, index([
+      npx('pinned@1.2.3', '1.0.0', 'pinned'),
+      npx('prerelease@1.2.3-rc.1', '1.0.0', 'prerelease'),
+      // npm reads these as a dist-tag, a dist-tag and a file, not a pinned version.
+      npx('four@1.2.3.4', '1.0.0', 'four'),
+      npx('underscore@1.2.3_next', '1.0.0', 'underscore'),
+      npx('tarball@1.2.3.tgz', '1.0.0', 'tarball'),
+      // Windows renames a trailing dot and refuses device names.
+      npx('dot@1.0.0', '1.0.', 'dot'),
+      npx('device@1.0.0', 'con', 'device'),
+    ])]]);
+    expect((await registry(files).list()).agents.map(agent => agent.id)).toEqual(['pinned', 'prerelease']);
+  });
+
+  it('keeps one folder for versions that differ only in case', async () => {
+    const root = scratch();
+    const goose = archive('goose', '1.0.0');
+    const files = new Map<string, Buffer | string>([[`${URL_BASE}registry.json`, index([binaryEntry('goose', '1.0.0-RC', 'https://dl.test/goose.tar.gz', goose.sha256)])], ['https://dl.test/goose.tar.gz', goose.bytes]]);
+    await registry(files, root).install('goose');
+    files.set(`${URL_BASE}registry.json`, index([binaryEntry('goose', '1.0.0-rc', 'https://dl.test/goose.tar.gz', goose.sha256)]));
+    const later = registry(files, root, {}, [], () => Date.now() + 2 * 60 * 60 * 1000);
+    await later.resolve('goose');
+    expect(readdirSync(path.join(root, 'agents', 'goose'))).toEqual(['1.0.0-rc']);
+  });
+
+  it('refuses a download whose command is a link', async () => {
+    const dir = scratch();
+    mkdirSync(path.join(dir, 'pkg', 'bin'), { recursive: true });
+    writeFileSync(path.join(dir, 'outside'), '#!/bin/sh\necho outside\n', { mode: 0o600 });
+    symlinkSync(path.join(dir, 'outside'), path.join(dir, 'pkg', 'bin', 'linked'));
+    execFileSync('tar', ['-czf', path.join(dir, 'a.tar.gz'), '-C', path.join(dir, 'pkg'), 'bin']);
+    const bytes = readFileSync(path.join(dir, 'a.tar.gz'));
+    const files = new Map<string, Buffer | string>([[`${URL_BASE}registry.json`, index([binaryEntry('linked', '1.0.0', 'https://dl.test/l.tar.gz', createHash('sha256').update(bytes).digest('hex'))])], ['https://dl.test/l.tar.gz', bytes]]);
+    await expect(registry(files).install('linked')).rejects.toMatchObject({ code: 'AGENT_REGISTRY_UNSAFE_PATH' });
+    expect(statSync(path.join(dir, 'outside')).mode & 0o777).toBe(0o600);
+  });
+
+  it('keeps installed agents without marking them unlisted when no index can be read', async () => {
+    const root = scratch();
+    const goose = archive('goose', '1.0.0');
+    const files = new Map<string, Buffer | string>([[`${URL_BASE}registry.json`, index([binaryEntry('goose', '1.0.0', 'https://dl.test/goose.tar.gz', goose.sha256)])], ['https://dl.test/goose.tar.gz', goose.bytes]]);
+    await registry(files, root).install('goose');
+    rmSync(path.join(root, 'registry.json'));
+    const offline = registry(new Map(), root);
+    const list = await offline.list();
+    expect(list.error).toBeDefined();
+    expect(list.agents).toEqual([expect.objectContaining({ id: 'goose', installedVersion: '1.0.0' })]);
+    expect(list.agents[0]).not.toHaveProperty('listed');
+  });
+
+  it('starts an npm agent whose bin key holds a path through its .bin link, never the path', async () => {
+    const tools = scratch();
+    const entry = { id: 'pathy', name: 'Pathy', version: '1.0.0', distribution: { npx: { package: 'pathy@1.0.0' } } };
+    const agents = registry(new Map([[`${URL_BASE}registry.json`, index([entry])]]), scratch(), { npm: fakeNpm(tools, '../../../../bin/helper'), node: '/usr/bin/env-node' });
+    await agents.install('pathy');
+    expect((await agents.resolve('pathy'))?.executable).toMatch(/node_modules[/\\]\.bin[/\\]helper$/);
   });
 });

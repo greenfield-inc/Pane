@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, chmodSync } from 'fs';
+import { createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, chmodSync } from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -12,7 +12,7 @@ import { hostCommand } from '../agentChat/hostCommand';
 
 const execFileAsync = promisify(execFile);
 
-/** The registry's bot publishes new versions hourly; Pane reads it at most that often unless Settings > Agents opens. */
+/** The registry's bot publishes new versions hourly; Pane reads it at most that often, unless Refresh in Settings > Agents asks now. */
 const REFRESH_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30_000;
 const INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
@@ -21,10 +21,15 @@ const INSTALL_RECORD = 'pane-install.json';
 
 /** A registry id, as the registry's schema requires: one safe folder name. */
 const ID = /^[a-z][a-z0-9-]*$/;
-/** A version used as a folder name: one path segment, never `.` or `..` (review F-1). */
-const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_-]*$/;
+/**
+ * A version used as a folder name: one path segment, never `.` or `..` (review F-1), with no
+ * trailing dot and no Windows device name, which Windows would rename or refuse. Folders are named
+ * by the lowercased version, so versions differing only in case share one on any file system.
+ */
+const VERSION = /^(?!(?:con|prn|aux|nul|com\d|lpt\d)(?:\.|$))[0-9A-Za-z][0-9A-Za-z.+_-]*(?<!\.)$/i;
+const versionFolder = (version: string) => version.toLowerCase();
 /** An npm spec pinned to an exact version (`name@1.2.3`, `@scope/name@1.2.3`), so npm's integrity check applies. */
-const PINNED_PACKAGE = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*@\d+\.\d+\.\d+[\w.+-]*$/i;
+const PINNED_PACKAGE = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 const target = boundary.object({ archive: boundary.refine(boundary.string, url => url.startsWith('https://'), 'expected an https download'), cmd: boundary.string, sha256: boundary.optional(boundary.string), args: boundary.optional(boundary.array(boundary.string)), env: boundary.optional(boundary.record(boundary.string)) });
 const packageRun = boundary.object({ package: boundary.refine(boundary.string, spec => PINNED_PACKAGE.test(spec), 'expected a package pinned to an exact version'), args: boundary.optional(boundary.array(boundary.string)), env: boundary.optional(boundary.record(boundary.string)) });
@@ -94,10 +99,12 @@ export class AgentRegistry {
     });
     // An installed agent the list no longer offers (delisted, no download for this computer, or now
     // covered by a built-in agent) still runs, so it stays here with Remove (review F-5).
+    // With no index at all, Pane can't tell whether they are still listed, so it doesn't say so.
     const listed = new Set(agents.map(agent => agent.id));
     for (const record of installed.values()) {
       if (listed.has(record.id)) continue;
-      const agent: RegistryAgent = { id: record.id, name: record.name, version: record.version, iconUrl: record.iconUrl, kind: record.kind, verified: record.verified, installedVersion: record.version, listed: false };
+      const agent: RegistryAgent = { id: record.id, name: record.name, version: record.version, iconUrl: record.iconUrl, kind: record.kind, verified: record.verified, installedVersion: record.version };
+      if (this.index) agent.listed = false;
       if (record.description) agent.description = record.description;
       agents.push(agent);
     }
@@ -160,6 +167,8 @@ export class AgentRegistry {
         console.log(`[AgentRegistry] ${id} moved to ${record.version}, the registry's current version.`);
       }
     } catch (error) {
+      // Re-read: another tab's update may have removed the version read above while this one waited.
+      record = this.versions(id).at(-1) ?? record;
       console.warn(`[AgentRegistry] ${id} stays at ${record.version}: ${reasonOf(error)}`);
     }
     // An npm agent starts through npm's own bin link, which runs Node.js (or the native program a postinstall put there).
@@ -175,7 +184,7 @@ export class AgentRegistry {
    */
   removeVersionsExcept(id: string, keep: ReadonlySet<string>): void {
     for (const record of this.versions(id)) {
-      if (keep.has(record.version)) continue;
+      if ([...keep].some(version => versionFolder(version) === versionFolder(record.version))) continue;
       try { rmSync(this.folder(id, record.version), { recursive: true, force: true }); }
       catch (error) { console.warn(`[AgentRegistry] ${id} ${record.version} is not needed but could not be removed yet: ${reasonOf(error)}`); }
     }
@@ -191,13 +200,13 @@ export class AgentRegistry {
       if (!VERSION.test(version)) return [];
       const file = path.join(folder, version, INSTALL_RECORD);
       // A record whose version is not its own folder's name is not trusted.
-      try { const record = decodeOptionalBoundary(JSON.parse(readFileSync(file, 'utf8')), recordSchema); return record && record.id === id && record.version === version ? [{ record, at: statSync(file).mtimeMs }] : []; }
+      try { const record = decodeOptionalBoundary(JSON.parse(readFileSync(file, 'utf8')), recordSchema); return record && record.id === id && versionFolder(record.version) === version ? [{ record, at: statSync(file).mtimeMs }] : []; }
       catch { return []; }
     }).sort((a, b) => a.at - b.at).map(entry => entry.record);
   }
 
   private installedVersion(id: string, version: string): InstallRecord | undefined {
-    return this.versions(id).find(record => record.version === version);
+    return this.versions(id).find(record => versionFolder(record.version) === versionFolder(version));
   }
 
   private async installVersion(entry: RegistryEntry, how: NonNullable<ReturnType<AgentRegistry['distribution']>>): Promise<InstallRecord> {
@@ -250,6 +259,8 @@ export class AgentRegistry {
     rmSync(download, { force: true });
     const command = path.resolve(folder, binary.cmd);
     if (!command.startsWith(folder + path.sep) || !existsSync(command)) throw new Error(`the download has no ${binary.cmd}`);
+    // A link could point the command (and the chmod below) outside the folder (review S-10).
+    if (lstatSync(command).isSymbolicLink()) throw new PaneError('AGENT_REGISTRY_UNSAFE_PATH', `${entry.name}'s download makes ${binary.cmd} a link, which Pane does not run. Nothing was installed.`, 'Report it to the ACP Registry; Pane installs only a plain program file.');
     if (process.platform !== 'win32') chmodSync(command, 0o755);
     return command;
   }
@@ -293,7 +304,11 @@ export class AgentRegistry {
     const commands = Object.keys(named);
     const command = only ? base : base in named ? base : new Set(Object.values(named)).size === 1 ? commands[0] : undefined;
     if (!command) throw new Error(`${spec} names no program to run`);
-    const link = path.join(folder, 'node_modules', '.bin', this.platform() === 'win32' ? `${command}.cmd` : command);
+    // npm names the link by the key's base name; a key with a path never leaves .bin (review S-20).
+    const binName = path.basename(command);
+    const binFolder = path.join(folder, 'node_modules', '.bin');
+    const link = path.join(binFolder, this.platform() === 'win32' ? `${binName}.cmd` : binName);
+    if (path.dirname(link) !== binFolder) throw new Error(`${spec} names an unusable command`);
     if (!existsSync(link)) throw new Error(`npm made no ${command} command for ${spec}`);
     return link;
   }
@@ -330,7 +345,7 @@ export class AgentRegistry {
   private folder(id: string, version?: string): string {
     const agents = path.join(this.options.root, 'agents');
     if (!ID.test(id) || (version !== undefined && !VERSION.test(version))) throw new PaneError('AGENT_REGISTRY_UNSAFE_PATH', `"${id}${version ? ` ${version}` : ''}" is not a registry agent and version Pane can store. Nothing was changed.`, 'Report it to the ACP Registry; Pane skips such entries.');
-    const folder = version === undefined ? path.join(agents, id) : path.join(agents, id, version);
+    const folder = version === undefined ? path.join(agents, id) : path.join(agents, id, versionFolder(version));
     const relative = path.relative(agents, folder);
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new PaneError('AGENT_REGISTRY_UNSAFE_PATH', `The folder for ${id} would be outside Pane's agent folder. Nothing was changed.`, 'Report it to the ACP Registry; Pane skips such entries.');
     return folder;

@@ -157,6 +157,11 @@ export class ChatTabManager {
   isRunning(panelId: string): boolean { return !!this.tabs.get(panelId)?.runtime?.isAlive(); }
   /** /clear is starting a fresh conversation: the agent is between processes, not stopped. */
   isClearing(panelId: string): boolean { return this.tabs.get(panelId)?.clearing === true; }
+  /** Tabs of `agent` that run it or are starting it: removing its files would break them. */
+  inUse(agent: string): number {
+    return [...this.tabs.entries()].filter(([panelId, tab]) => (tab.runtime?.isAlive() || tab.starting) && this.options.store.state(panelId)?.agent === agent).length;
+  }
+
   /** The installed versions running tabs of `agent` launched from: their folders must stay. */
   launchedVersions(agent: string): Set<string> {
     return new Set([...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() && tab.launch?.agentVersion && this.options.store.state(panelId)?.agent === agent ? [tab.launch.agentVersion] : []));

@@ -142,8 +142,8 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     if (teammate) throw teammateSecretRefusal(teammate, 'remove an agent');
     const agent = decodeBoundary(id, agentSchema);
     // Removing deletes the files a running agent loads (review S-9).
-    const running = manager.runningPanelIds().filter(panel => manager.view(panel, 0, false).agent === agent);
-    if (running.length) throw new PaneError('AGENT_REGISTRY_IN_USE', `${chatAgentName(agent)} is running in ${running.length === 1 ? 'a chat tab' : `${running.length} chat tabs`}, so it was not removed.`, 'Close its chat tabs, then remove it.');
+    const running = manager.inUse(agent);
+    if (running) throw new PaneError('AGENT_REGISTRY_IN_USE', `${chatAgentName(agent)} is running or starting in ${running === 1 ? 'a chat tab' : `${running} chat tabs`}, so it was not removed.`, 'Close its chat tabs, then remove it.');
     getAgentRegistry().remove(agent);
     return getAgentRegistry().list();
   });

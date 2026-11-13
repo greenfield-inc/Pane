@@ -91,7 +91,7 @@ function installedStatus(agent: RegistryAgent, installed: string): string {
  * the registry no longer lists offers Remove only.
  */
 export function RegistryAgentList({ state, catalog, canInstall, onInstall, onRemove }: {
-  state: Pick<AgentRegistryState, 'list' | 'rows'>;
+  state: Pick<AgentRegistryState, 'list' | 'rows' | 'reading'>;
   catalog: readonly ChatAgentEntry[] | undefined;
   /** False while chat tabs are off: the list shows without Install. */
   canInstall: boolean;
@@ -124,11 +124,11 @@ export function RegistryAgentList({ state, catalog, canInstall, onInstall, onRem
               {installedVersion
                 ? <>
                   <span className="text-text-tertiary">{installedStatus(agent, installedVersion)}</span>
-                  <RowAction label="Remove" busyLabel="Removing" busy={row.busy === 'remove'} disabled={row.busy !== undefined} onClick={() => onRemove(agent)} />
+                  <RowAction label="Remove" busyLabel="Removing" busy={row.busy === 'remove'} disabled={row.busy !== undefined || state.reading === true} onClick={() => onRemove(agent)} />
                 </>
                 : <>
                   <span className="text-text-tertiary">{agent.needs ? `Needs ${agent.needs}` : `Version ${agent.version}`}</span>
-                  {canInstall && <RowAction label="Install" busyLabel="Installing" busy={row.busy === 'install'} disabled={row.busy !== undefined || agent.needs !== undefined} onClick={() => onInstall(agent)} />}
+                  {canInstall && <RowAction label="Install" busyLabel="Installing" busy={row.busy === 'install'} disabled={row.busy !== undefined || state.reading === true || agent.needs !== undefined} onClick={() => onInstall(agent)} />}
                 </>}
             </span>
           </SettingRow>
@@ -158,7 +158,8 @@ function RegistrySection({ chatTabsOn }: { chatTabsOn: boolean }) {
     />
     <div className="flex items-center justify-between gap-3 pt-2">
       <p className="text-xs text-text-tertiary">Installed agents move to the registry's new version on their next launch.</p>
-      <RowAction label="Refresh" busyLabel="Refreshing" busy={state.reading === true} disabled={state.reading === true} onClick={() => void refreshAgentRegistry(client, true)} />
+      {/* One change at a time: a Refresh and an Install or Remove never overlap, so neither result is dropped. */}
+      <RowAction label="Refresh" busyLabel="Refreshing" busy={state.reading === true} disabled={state.reading === true || Object.values(state.rows).some(row => row.busy !== undefined)} onClick={() => void refreshAgentRegistry(client, true)} />
     </div>
     <ConfirmDialog
       isOpen={pending !== undefined}
