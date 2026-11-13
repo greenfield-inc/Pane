@@ -26,8 +26,8 @@ afterEach(() => {
   }
 });
 
-async function startListener(source: string, stdin: 'ignore' | 'pipe' = 'ignore', executable = process.execPath): Promise<{ child: ChildProcess; port: number }> {
-  const child = spawn(executable, ['-e', source], { stdio: [stdin, 'pipe', 'inherit'] });
+async function startListener(source: string, stdin: 'ignore' | 'pipe' = 'ignore', executable = process.execPath, argv0?: string): Promise<{ child: ChildProcess; port: number }> {
+  const child = spawn(executable, ['-e', source], { stdio: [stdin, 'pipe', 'inherit'], argv0 });
   children.push(child);
   const port = await new Promise<number>((resolve, reject) => {
     child.once('error', reject);
@@ -156,6 +156,29 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
 
     const listed = (await monitor.refresh()).ports.find(entry => entry.port === port);
     expect(listed).toMatchObject({ port, group: 'other', kind: 'tcp', process: 'node' });
+  });
+
+  // Node 24 and later rename their main thread MainThread; writing /proc/self/comm does the same on any Node.
+  it.runIf(process.platform === 'linux')('on Linux, lists a server whose thread was renamed under the program it started as', async () => {
+    const { port } = await startListener(`require('fs').writeFileSync('/proc/self/comm', 'MainThread'); ${HTTP_SERVER}`);
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [] });
+
+    expect((await monitor.refresh()).ports.find(entry => entry.port === port)?.process).toBe('node');
+  });
+
+  it.runIf(process.platform === 'linux')('on Linux, lists a server that set a title containing / under its thread name', async () => {
+    // pm2's shape. Linux cuts a thread name to 15 characters.
+    const { port } = await startListener(`process.title = 'node /app/server.js'; ${HTTP_SERVER}`);
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [] });
+
+    expect((await monitor.refresh()).ports.find(entry => entry.port === port)?.process).toBe('node /app/serve');
+  });
+
+  it.runIf(process.platform === 'linux')('on Linux, cuts a long program name to 64 characters', async () => {
+    const { port } = await startListener(`require('fs').writeFileSync('/proc/self/comm', 'MainThread'); ${HTTP_SERVER}`, 'ignore', process.execPath, 'a'.repeat(1_000));
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [] });
+
+    expect((await monitor.refresh()).ports.find(entry => entry.port === port)?.process).toBe('a'.repeat(64));
   });
 
   it('lists a one-shot listener like nc as tcp without connecting to it', async () => {
