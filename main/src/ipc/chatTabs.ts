@@ -121,7 +121,7 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     // Sign-in always happens in the agent's own flow on this machine; Pane never sees the login.
     // A wrapped launch runs exactly this command, without the agent-session flags Pane adds to terminals.
     const command = signInCommand(state.agent, manager.terminalSignIn(panelId(id)));
-    const terminal = await panelManager.createPanel({ sessionId: panel.sessionId, type: 'terminal', title: `Sign in to ${agentLabel(state.agent)}`, initialState: { initialCommand: command, launchCommand: command, launchMode: 'wrapped', preserveLaunchCommand: true }, announceActivation: true });
+    const terminal = await panelManager.createPanel({ sessionId: panel.sessionId, type: 'terminal', title: `Sign in to ${chatAgentName(state.agent)}`, initialState: { initialCommand: command, launchCommand: command, launchMode: 'wrapped', preserveLaunchCommand: true }, announceActivation: true });
     return { panelId: terminal.id };
   });
   registry.register('chat-tab:keys', () => chatTabSecrets.status());
@@ -153,6 +153,11 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     return chatTabSecrets.status();
   });
   for (const operation of CHAT_TAB_CHANNELS) registry.bindChannel(ipcMain, `chat-tab:${operation}`);
+}
+
+/** An agent's name as the catalog has it: an installed registry agent's own name, not its id. */
+function chatAgentName(agent: ChatAgent): string {
+  return getChatAgentCatalog().entries().find(entry => entry.id === agent)?.label ?? agentLabel(agent);
 }
 
 /**
@@ -199,7 +204,7 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   }
   const state: ChatPanelState = { agent, launch, cwd: session.worktreePath, status: 'starting' };
   if (request.initialInput) state.initialInput = request.initialInput;
-  const title = request.title ?? (launch.kind === 'profile' ? launch.profile.split('/').pop() ?? agentLabel(agent) : agentLabel(agent));
+  const title = request.title ?? (launch.kind === 'profile' ? launch.profile.split('/').pop() ?? chatAgentName(agent) : chatAgentName(agent));
   const create: CreatePanelRequest = { sessionId: request.sessionId, type: 'chat', title, initialState: { customState: state }, activate: request.activate, announceActivation: request.activate !== false };
   if (openedBy) create.metadata = { openedBy };
   const panel = await panelManager.createPanel(create);

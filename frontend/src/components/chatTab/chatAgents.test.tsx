@@ -54,7 +54,7 @@ describe('an agent Pane has no entry for', () => {
   });
 
   it('shows its catalog image when no brand icon matches, else the generic chat icon', () => {
-    expect(renderToStaticMarkup(agentIcon({ icon: 'goose', iconUrl: 'https://example.test/goose.svg' }))).toContain('src="https://example.test/goose.svg"');
+    expect(renderToStaticMarkup(agentIcon({ icon: 'goose', iconUrl: 'https://example.test/goose.svg' }))).toContain('url(&quot;https://example.test/goose.svg&quot;)');
     expect(renderToStaticMarkup(agentIdIcon('some-acp-agent'))).toContain('lucide-message-square');
     // A key that only contains a brand's name is not that brand.
     expect(renderToStaticMarkup(agentIcon({ icon: 'not-claude' }))).toContain('lucide-message-square');

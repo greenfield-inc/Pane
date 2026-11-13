@@ -83,7 +83,7 @@ otherwise at most once an hour, and keeps the last copy in
   **Needs Node.js**. A failed install shows its error on that agent's row only.
 - **Updates**: an installed agent moves to the registry's newest version on its
   next launch, with no prompt, and the older version's folder is removed once the
-  new one starts. When the registry cannot be read or the update fails, the
+  new one starts and no other tab still runs the old one. When the registry cannot be read or the update fails, the
   installed version runs.
 - Installed agents join the + menu after Pane's own agents, marked
   **Full access by Pane** (Pane answers each approval with allow once when full

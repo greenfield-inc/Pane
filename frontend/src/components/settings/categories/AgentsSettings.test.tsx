@@ -47,7 +47,7 @@ describe('Settings › Agents: the ACP Registry', () => {
     expect(text(html)).toContain('AlphaAn agent on npm.Needs Node.jsInstallRuns on Node.js');
     expect(text(html)).toContain('BetaVersion 0.9.0InstallNo checksum');
     expect(text(html)).toContain('GammaVersion 2.5.0, 3.0.0 on next launchRemove');
-    expect(html).toContain('src="https://example.test/gamma.svg"');
+    expect(html).toContain('url(&quot;https://example.test/gamma.svg&quot;)');
     // Install waits for Node.js.
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>(?:(?!<\/button>).)*Install<\/span><\/button>/);
   });

@@ -12,7 +12,7 @@ import { decodeChatPanelState } from './state';
 import { databaseService } from '../database';
 import type { TerminalPanelState, ToolPanel } from '../../../../shared/types/panels';
 import type { ChatTabNotifyBridge } from './notifyBridge';
-import { agentConfig } from '../../../../shared/agents';
+import { agentConfig, agentLabel } from '../../../../shared/agents';
 import { ChatAgentCatalog } from './agentCatalog';
 import { isOnPath } from '../../utils/onPath';
 import { getAgentRegistry, registryCatalogEntries } from '../agentRegistry';
@@ -112,6 +112,7 @@ export function getChatTabManager(): ChatTabManager {
     onView: view => notifyBridge?.observe(view),
     onClosed: panelId => notifyBridge?.forget(panelId),
     openConversations,
+    agentName: agent => getChatAgentCatalog().entries().find(entry => entry.id === agent)?.label ?? agentLabel(agent),
     onInitialized: (agent, response) => {
       getChatAgentCatalog().record(agent, response);
       // A registry agent that started on its newest version no longer needs the older ones (D-15),
