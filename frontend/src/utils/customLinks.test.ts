@@ -39,6 +39,11 @@ describe('findCustomLinks', () => {
     ])).toEqual([]);
   });
 
+  it('skips a match whose group splits an emoji, which a URL cannot carry', () => {
+    expect(findCustomLinks('AB\u{1F600} AB1', [link('AB(\\S)', 'https://example.com/$1')]).map(match => match.url))
+      .toEqual(['https://example.com/1']);
+  });
+
   it('ignores empty matches instead of looping on them', () => {
     expect(findCustomLinks('a PROJ-1', [link('(?=a)|PROJ-\\d', 'https://example.com/$0')]).map(match => match.text))
       .toEqual(['PROJ-1']);

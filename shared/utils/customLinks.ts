@@ -33,6 +33,19 @@ export function customLinkProblem(link: Pick<CustomLink, 'pattern' | 'urlTemplat
   return customLinkPatternProblem(link.pattern) ?? customLinkUrlProblem(link.urlTemplate);
 }
 
+/**
+ * The template with `$0`–`$9` filled in, or undefined when a group can't be URL-encoded (half
+ * of an emoji) or the result isn't a web address.
+ */
+function fillTemplate(urlTemplate: string, groups: RegExpExecArray): string | undefined {
+  try {
+    const url = urlTemplate.trim().replace(TEMPLATE_GROUP, (_, index: string) => encodeURIComponent(groups[Number(index)] ?? ''));
+    return WEB_URL.test(url) ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The links in one line of text. Where two links overlap, the one listed first wins. */
 export function findCustomLinks(text: string, links: readonly CustomLink[]): CustomLinkMatch[] {
   const found: CustomLinkMatch[] = [];
@@ -49,10 +62,10 @@ export function findCustomLinks(text: string, links: readonly CustomLink[]): Cus
       if (found.some(other => start < other.end && other.start < end)) {
         continue;
       }
-      const groups = match;
-      const url = link.urlTemplate.trim()
-        .replace(TEMPLATE_GROUP, (_, index: string) => encodeURIComponent(groups[Number(index)] ?? ''));
-      found.push({ end, start, text: match[0], url });
+      const url = fillTemplate(link.urlTemplate, match);
+      if (url !== undefined) {
+        found.push({ end, start, text: match[0], url });
+      }
     }
   }
   return found.sort((a, b) => a.start - b.start);
