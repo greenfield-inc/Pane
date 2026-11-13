@@ -63,12 +63,15 @@ export function AgentList({ agents }: { agents: readonly ChatAgentEntry[] }) {
   </div>;
 }
 
-function registryLabels(agent: RegistryAgent): string[] {
-  if (agent.kind === 'npx') return ['Runs on Node.js'];
-  return agent.verified ? [] : ['No checksum'];
+/** What a registry row says about its agent: whether the registry still lists it, what Pane learned starting it, and how it runs. */
+function registryLabels(agent: RegistryAgent, entry: ChatAgentEntry | undefined): string[] {
+  const learned = agent.installedVersion && entry ? agentLabels(entry) : [];
+  if (agent.listed === false) return ['No longer listed', ...learned];
+  if (agent.kind === 'npx') return [...learned, 'Runs on Node.js'];
+  return agent.verified ? learned : [...learned, 'No checksum'];
 }
 
-/** Install or Remove; its spinner takes the label's place in the same box, so the row never moves. */
+/** Install, Remove or Refresh; its spinner takes the label's place in the same box, so the row never moves. */
 function RowAction({ label, busyLabel, busy, disabled, onClick }: { label: string; busyLabel: string; busy: boolean; disabled: boolean; onClick: () => void }) {
   return <Button type="button" size="sm" variant="secondary" className="w-20" disabled={disabled} aria-busy={busy} onClick={onClick}>
     <span className="flex h-5 items-center justify-center">
@@ -77,9 +80,21 @@ function RowAction({ label, busyLabel, busy, disabled, onClick }: { label: strin
   </Button>;
 }
 
-/** One row per agent the ACP Registry offers this computer, with Install, or its installed version and Remove. */
-export function RegistryAgentList({ state, onInstall, onRemove }: {
+function installedStatus(agent: RegistryAgent, installed: string): string {
+  if (agent.listed === false || installed === agent.version) return `Version ${installed}`;
+  return `Version ${installed}, ${agent.version} on next launch`;
+}
+
+/**
+ * One row per agent the ACP Registry offers this computer, with Install, or its installed version
+ * and Remove. Installed agents show what the host's catalog learned about them; an installed agent
+ * the registry no longer lists offers Remove only.
+ */
+export function RegistryAgentList({ state, catalog, canInstall, onInstall, onRemove }: {
   state: Pick<AgentRegistryState, 'list' | 'rows'>;
+  catalog: readonly ChatAgentEntry[] | undefined;
+  /** False while chat tabs are off: the list shows without Install. */
+  canInstall: boolean;
   onInstall: (agent: RegistryAgent) => void;
   onRemove: (agent: RegistryAgent) => void;
 }) {
@@ -89,48 +104,62 @@ export function RegistryAgentList({ state, onInstall, onRemove }: {
     {list.error && <p role="status" className="mt-3 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-text-primary">
       This list may be out of date. {list.error}
     </p>}
-    <div className="divide-y divide-border-secondary">
+    <div role="list" aria-label="ACP Registry agents" className="divide-y divide-border-secondary">
       {list.agents.map(agent => {
         const row = rows[agent.id] ?? {};
-        const labels = registryLabels(agent);
-        return <SettingRow
-          key={agent.id}
-          label={agent.name}
-          description={agent.description}
-          leading={<span className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center text-text-secondary">{agentIcon(agent, 'h-4 w-4')}</span>}
-          details={(labels.length > 0 || row.error) && <div className="space-y-2">
-            {labels.length > 0 && <LabelList name={agent.name} labels={labels} />}
-            {row.error && <p role="alert" className="pl-6 text-xs text-status-error">{row.error}</p>}
-          </div>}
-        >
-          <span className="flex items-center gap-3 text-xs">
-            {agent.installedVersion
-              ? <>
-                <span className="text-text-tertiary">
-                  Version {agent.installedVersion}{agent.installedVersion !== agent.version && `, ${agent.version} on next launch`}
-                </span>
-                <RowAction label="Remove" busyLabel="Removing" busy={row.busy === 'remove'} disabled={row.busy !== undefined} onClick={() => onRemove(agent)} />
-              </>
-              : <>
-                <span className="text-text-tertiary">{agent.needs ? `Needs ${agent.needs}` : `Version ${agent.version}`}</span>
-                <RowAction label="Install" busyLabel="Installing" busy={row.busy === 'install'} disabled={row.busy !== undefined || agent.needs !== undefined} onClick={() => onInstall(agent)} />
-              </>}
-          </span>
-        </SettingRow>;
+        const labels = registryLabels(agent, catalog?.find(entry => entry.id === agent.id));
+        const { installedVersion } = agent;
+        return <div key={agent.id} role="listitem" aria-label={agent.name}>
+          <SettingRow
+            label={agent.name}
+            description={agent.description}
+            disabled={!canInstall && !installedVersion}
+            leading={<span className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center text-text-secondary">{agentIcon(agent, 'h-4 w-4')}</span>}
+            details={(labels.length > 0 || row.error) && <div className="space-y-2">
+              {labels.length > 0 && <LabelList name={agent.name} labels={labels} />}
+              {row.error && <p role="alert" className="pl-6 text-xs text-status-error">{row.error}</p>}
+            </div>}
+          >
+            <span className="flex items-center gap-3 text-xs">
+              {installedVersion
+                ? <>
+                  <span className="text-text-tertiary">{installedStatus(agent, installedVersion)}</span>
+                  <RowAction label="Remove" busyLabel="Removing" busy={row.busy === 'remove'} disabled={row.busy !== undefined} onClick={() => onRemove(agent)} />
+                </>
+                : <>
+                  <span className="text-text-tertiary">{agent.needs ? `Needs ${agent.needs}` : `Version ${agent.version}`}</span>
+                  {canInstall && <RowAction label="Install" busyLabel="Installing" busy={row.busy === 'install'} disabled={row.busy !== undefined || agent.needs !== undefined} onClick={() => onInstall(agent)} />}
+                </>}
+            </span>
+          </SettingRow>
+        </div>;
       })}
     </div>
   </>;
 }
 
 /** Settings › Agents: the ACP Registry's agents, installed here with one click. */
-function RegistrySection() {
+function RegistrySection({ chatTabsOn }: { chatTabsOn: boolean }) {
   const client = window.electronAPI.chatTab;
   const state = useAgentRegistryStore();
+  const catalog = useChatAgentsStore(store => store.entries);
   useEffect(() => { void refreshAgentRegistry(window.electronAPI.chatTab); }, []);
   const pending = state.confirmUnverified;
-  return <SettingsSection title="More agents from the ACP Registry">
-    <RegistryAgentList state={state} onInstall={agent => void installRegistryAgent(client, agent)} onRemove={agent => void removeRegistryAgent(client, agent)} />
-    <p className="pt-2 text-xs text-text-tertiary">Installed agents move to the registry's new version on their next launch.</p>
+  return <SettingsSection
+    title="More agents from the ACP Registry"
+    description={chatTabsOn ? undefined : 'Chat tabs are off. Turn them on in AI & Agents to install these agents.'}
+  >
+    <RegistryAgentList
+      state={state}
+      catalog={catalog}
+      canInstall={chatTabsOn}
+      onInstall={agent => void installRegistryAgent(client, agent)}
+      onRemove={agent => void removeRegistryAgent(client, agent)}
+    />
+    <div className="flex items-center justify-between gap-3 pt-2">
+      <p className="text-xs text-text-tertiary">Installed agents move to the registry's new version on their next launch.</p>
+      <RowAction label="Refresh" busyLabel="Refreshing" busy={state.reading === true} disabled={state.reading === true} onClick={() => void refreshAgentRegistry(client, true)} />
+    </div>
     <ConfirmDialog
       isOpen={pending !== undefined}
       onClose={cancelUnverifiedInstall}
@@ -156,7 +185,7 @@ export function AgentsSettings() {
         {error && <p role="alert" className="py-2 text-sm text-status-error">{error}</p>}
         {agents ? <AgentList agents={agents} /> : !error && <p role="status" className="py-4 text-sm text-text-tertiary">Loading agents…</p>}
       </SettingsSection>
-      <RegistrySection />
+      <RegistrySection chatTabsOn={chatTabsOn} />
     </SettingsPage>
   );
 }

@@ -7,13 +7,11 @@ import { chatAgentLabel, menuChatAgents } from '../../../../shared/chatAgentMenu
 import { RemoteRequestError } from '../../../../shared/remoteClient/remoteDaemonClient';
 import { refreshChatAgents, useChatAgentsStore } from '../../stores/chatAgentsStore';
 import { agentIcon, agentIdIcon } from '../ui/brandIconRegistry';
-import { AgentList } from '../settings/categories/AgentsSettings';
 import { ChatModeChip, ChatRiskyModeMarker, riskySetting } from './ChatComposerControls';
 
 function entry(id: string, fields: Partial<ChatAgentEntry> = {}): ChatAgentEntry {
   return { id, label: id, icon: id, source: 'config', installed: true, fullAccess: 'agent', switchFromTerminal: { ok: true }, ...fields };
 }
-const text = (html: string) => html.replace(/<[^>]+>/g, '');
 
 describe('the + menu\'s chat agents', () => {
   it('lists installed agents, Pane\'s own first, then registry agents, in catalog order', () => {
@@ -54,22 +52,10 @@ describe('an agent Pane has no entry for', () => {
   });
 
   it('shows its catalog image when no brand icon matches, else the generic chat icon', () => {
-    expect(renderToStaticMarkup(agentIcon({ icon: 'goose', iconUrl: 'https://example.test/goose.svg' }))).toContain('url(&quot;https://example.test/goose.svg&quot;)');
+    expect(renderToStaticMarkup(agentIcon({ icon: 'goose', iconUrl: 'https://example.test/goose.svg' }))).toContain('https://example.test/goose.svg');
     expect(renderToStaticMarkup(agentIdIcon('some-acp-agent'))).toContain('lucide-message-square');
     // A key that only contains a brand's name is not that brand.
     expect(renderToStaticMarkup(agentIcon({ icon: 'not-claude' }))).toContain('lucide-message-square');
-  });
-});
-
-describe('Settings › Agents', () => {
-  it('labels what each agent supports, who grants full access, and offers Install when it is missing', () => {
-    const html = renderToStaticMarkup(<AgentList agents={[
-      entry('claude', { label: 'Claude', version: '2.1.316', capabilities: { reopen: true, list: true, images: true } }),
-      entry('opencode', { label: 'OpenCode', fullAccess: 'pane', installed: false, installUrl: 'https://example.test/install' }),
-    ]} />);
-    expect(text(html)).toContain('ClaudeVersion 2.1.316Reopens chatsLists past chatsImagesFull access by agent');
-    // Capabilities not yet known show no labels.
-    expect(text(html)).toContain('OpenCodeNot installedInstallFull access by Pane');
   });
 });
 

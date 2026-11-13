@@ -13,6 +13,8 @@ export interface AgentRegistryState {
   /** Undefined until the first read answers. */
   list?: RegistryAgentList;
   rows: Record<string, RegistryRowState>;
+  /** A read of the registry is in flight. */
+  reading?: boolean;
   /** The binary with no checksum waiting for the person to allow it. */
   confirmUnverified?: RegistryAgent;
 }
@@ -22,21 +24,33 @@ export const useAgentRegistryStore = create<AgentRegistryState>(() => ({ rows: {
 const setRow = (id: string, row: RegistryRowState) =>
   useAgentRegistryStore.setState(state => ({ rows: { ...state.rows, [id]: row } }));
 
-/** Reads the registry; a failed read keeps the last list and says why. */
-export async function refreshAgentRegistry(client: AgentRegistryClient): Promise<void> {
+// A read started before a newer read, install or removal answers with an older list; it is dropped.
+let generation = 0;
+
+/**
+ * Reads the registry: the host's copy, which it fetches again after an hour, or a fresh fetch with
+ * `refresh`. A failed read keeps the last list and says why.
+ */
+export async function refreshAgentRegistry(client: AgentRegistryClient, refresh = false): Promise<void> {
+  const mine = ++generation;
+  useAgentRegistryStore.setState({ reading: true });
+  let next: (state: AgentRegistryState) => Partial<AgentRegistryState>;
   try {
-    useAgentRegistryStore.setState({ list: await client.registry(true) });
+    const list = await client.registry(refresh);
+    next = () => ({ list });
   } catch (cause) {
     const error = ipcErrorMessage(cause, 'Pane could not read the ACP Registry.');
-    useAgentRegistryStore.setState(state => ({ list: { agents: state.list?.agents ?? [], error } }));
+    next = state => ({ list: { agents: state.list?.agents ?? [], error } });
   }
+  if (mine === generation) useAgentRegistryStore.setState(state => ({ ...next(state), reading: false }));
 }
 
 async function change(client: AgentRegistryClient, agent: RegistryAgent, busy: 'install' | 'remove', run: () => Promise<RegistryAgentList>): Promise<void> {
   setRow(agent.id, { busy });
   try {
     const list = await run();
-    useAgentRegistryStore.setState({ list });
+    generation++;
+    useAgentRegistryStore.setState({ list, reading: false });
     setRow(agent.id, {});
     // The + menu lists installed registry agents from the catalog.
     void refreshChatAgents(client);
