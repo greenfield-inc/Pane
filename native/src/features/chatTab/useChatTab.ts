@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 
-import type { RemoteDaemonClient } from '@shared/remoteClient';
+import { RemoteRequestError, type RemoteDaemonClient } from '@shared/remoteClient';
+import { olderHostAgents } from '@shared/chatAgentMenu';
 import { ChatTabViewerRegistry, type ChatTabViewer } from '@shared/chatTabViewer';
 import type { ChatAgentEntry, ChatTabClient } from '@shared/types/chatTab';
 
@@ -42,9 +43,29 @@ export function useChatTab(panelId: string) {
   return { chat, viewer, snapshot, connected: connection.status === 'connected' };
 }
 
-/** The agents the host can open as chats (chat-tab:agents); undefined while loading or when the host is too old to have a catalog. */
-export function useChatAgents(): ChatAgentEntry[] | undefined {
+/** How long the phone reuses the host's agent catalog; the new-tab sheet reads it again on every open. */
+const CHAT_AGENTS_STALE_MS = 5 * 60_000;
+
+/**
+ * The agents the host can open as chats (chat-tab:agents); undefined until read once. A host from
+ * before the catalog does not know the channel and runs the older-host agents. On any other error
+ * the last list stays. `fresh` reads the catalog again on mount, so a newly installed agent shows at once.
+ */
+export function useChatAgents(fresh = false): ChatAgentEntry[] | undefined {
   const { client } = useDaemon();
   const queryKey = useDaemonQueryKey('chat-tab:agents');
-  return useQuery({ queryKey, queryFn: () => clientFor(client).agents(), staleTime: 5 * 60_000, retry: false }).data;
+  return useQuery({
+    queryKey,
+    queryFn: async () => {
+      try {
+        return await clientFor(client).agents();
+      } catch (error) {
+        if (error instanceof RemoteRequestError && error.code === 'ERR_UNKNOWN_CHANNEL') return olderHostAgents();
+        throw error;
+      }
+    },
+    staleTime: CHAT_AGENTS_STALE_MS,
+    refetchOnMount: fresh ? 'always' : true,
+    retry: false,
+  }).data;
 }

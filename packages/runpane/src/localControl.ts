@@ -1377,7 +1377,7 @@ const panelLastMessageResultSchema: BoundarySchema<PanelLastMessageResult> = bou
     ok: boundary.literal(true),
     panelId: boundary.string,
     paneId: boundary.string,
-    agentType: boundary.enumeration('claude', 'codex'),
+    agentType: boundary.string,
     text: boundary.string,
     length: boundary.number,
     limit: boundary.number,

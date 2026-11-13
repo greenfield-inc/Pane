@@ -572,6 +572,11 @@
           "description": "Offered on the first-run screen.",
           "type": "boolean"
         },
+        "onboardingPanelId": {
+          "description": "The saved panel id of this agent's Onboarding Session terminal, for an agent whose id predates the derived form. Others use __pane_chat_terminal_<id>__.",
+          "type": "string",
+          "minLength": 1
+        },
         "chat": {
           "$ref": "#/$defs/agentChat"
         }

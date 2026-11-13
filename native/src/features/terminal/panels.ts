@@ -1,4 +1,4 @@
-import { agentConfig, agentLabel, configuredChatAgentIds, configuredAgent } from '@shared/agents';
+import { menuChatAgents } from '@shared/chatAgentMenu';
 import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
 import type { ChatAgentEntry } from '@shared/types/chatTab';
 import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSession';
@@ -98,21 +98,11 @@ export interface NewPanelOption {
   chatProfile?: true;
 }
 
-/**
- * The agents offered as chats: the host's installed ones from its catalog, first-class first.
- * Without a catalog (still loading, or an older host) the configured agents older hosts run.
- */
-function chatAgents(catalog: readonly ChatAgentEntry[] | undefined): Array<{ id: string; label: string; icon?: string }> {
-  if (!catalog) return configuredChatAgentIds().filter(id => configuredAgent(id).chat?.legacyClients).map(id => ({ id, label: agentLabel(id), icon: agentConfig(id)?.icon }));
-  const installed = catalog.filter(agent => agent.installed);
-  return [...installed.filter(agent => agent.source === 'config'), ...installed.filter(agent => agent.source !== 'config')];
-}
-
 /** The web app's Add tool menu: the chat agents, a shell, the agent presets, then the host's custom commands. */
 export function newPanelOptions(customCommands: readonly RemotePwaCustomCommand[], chatTabs = false, catalog?: readonly ChatAgentEntry[]): NewPanelOption[] {
   // With chat tabs on (D-15), agents open as chats first; their terminal versions follow.
   const chats: NewPanelOption[] = chatTabs ? [
-    ...chatAgents(catalog).map(agent => ({ id: `chat-${agent.id}`, title: agent.label, description: `Chat with ${agent.label} on the computer`, iconKey: agent.icon, chat: agent.id })),
+    ...menuChatAgents(catalog).map(agent => ({ id: `chat-${agent.id}`, title: agent.label, description: `Chat with ${agent.label} on the computer`, iconKey: agent.icon, chat: agent.id })),
     { id: 'chat-profile', title: 'Agent Farm profile…', description: 'Chat with an Agent Farm profile on the computer', chatProfile: true },
   ] : [];
   return [

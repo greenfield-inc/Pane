@@ -33,6 +33,7 @@ export interface AgentConfig {
   install: { url: string; command: string };
   signIn: readonly string[];
   onboarding?: boolean;
+  onboardingPanelId?: string;
   chat?: AgentChatConfig;
 }
 
@@ -61,12 +62,6 @@ export function configuredAgent(id: ConfiguredAgentId): AgentConfig {
 export function agentTerminalCommand(id: ConfiguredAgentId): string {
   const agent = configuredAgent(id);
   return [agent.executables[0], ...agent.terminal.fullAccessArgs, ...agent.terminal.args].join(' ');
-}
-
-/** The configured agent whose CLI `executable` is, by its basename without a Windows extension. */
-export function agentForExecutable(executable: string): ConfiguredAgentId | undefined {
-  const name = executable.split(/[\\/]/).pop()?.replace(/\.(exe|cmd|bat)$/i, '');
-  return CONFIGURED_AGENT_IDS.find(id => configuredAgent(id).executables.includes(name ?? ''));
 }
 
 /** First-class chat agents: those whose config says how chat starts. */

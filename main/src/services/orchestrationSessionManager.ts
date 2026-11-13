@@ -64,7 +64,6 @@ import {
   PANE_ONE_TIME_PROMPT_OPENING,
   type PaneChatAgent,
 } from '../../../shared/types/paneChat';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';

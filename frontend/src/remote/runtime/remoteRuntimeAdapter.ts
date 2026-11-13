@@ -1,5 +1,5 @@
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import type { ChatTabClient, ChatTabCreate } from '../../../../shared/types/chatTab';
+import type { ChatTabClient, ChatTabCreate, ChatTabView } from '../../../../shared/types/chatTab';
 import { decodeChatAgents, decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
 import type {
   OrchestrationSessionCreateInput,
@@ -156,7 +156,18 @@ export class RemoteRuntimeAdapter {
     signIn: panelId => this.invoke('chat-tab:sign-in', [panelId]),
     agents: async () => decodeChatAgents(await this.invoke('chat-tab:agents')),
     onEvent: callback => this.onEvent(event => { if (event.channel === 'chat-tab:event') callback(decodeChatTabEvent(event.args[0])); }),
-    onState: callback => this.onEvent(event => { if (event.channel === 'chat-tab:state') callback(decodeChatTabView(event.args[0])); }),
+    // chat-tab:view carries every agent's view; chat-tab:state is kept for older clients' decoders.
+    onState: callback => this.onEvent(event => {
+      if (event.channel !== 'chat-tab:view') return;
+      let view: ChatTabView;
+      try {
+        view = decodeChatTabView(event.args[0]);
+      } catch (error) {
+        console.warn(`[ChatTabs] Ignored a chat view this app could not read: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      callback(view);
+    }),
     onReconnect: callback => this.onStatus(state => { if (state.status === 'connected') callback(); }),
   };
 

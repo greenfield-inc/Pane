@@ -90,11 +90,13 @@ What derives from the entry with no further code:
   A Session orchestrator for it opens as a chat tab when chat tabs are on.
 - The Settings search alias (its label).
 
-Code never names an agent id as a string literal. `scripts/check-agent-names.mjs`
-(part of `pnpm check:fast`) fails on one outside the files listed, each with
-its reason, in `scripts/agent-names-allowlist.json`. The per-agent code below
-lives in files already on that list; a new file that must name the agent needs
-its own entry.
+Code never hard-codes an agent fact: an id, executable, session mode or
+minimum version as a string literal, or an env var name the config lists.
+`scripts/check-agent-names.mjs` (part of `pnpm lint`, so CI runs it) fails on
+one outside `scripts/agent-names-allowlist.json`, which lists each exempt file
+with its reason and the number of such literals it may hold. The count may only
+fall. The per-agent code below lives in files already on that list; a new
+literal there means raising its count, which review sees.
 
 ## 2. Terminal launch and resume
 

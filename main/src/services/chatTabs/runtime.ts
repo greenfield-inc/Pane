@@ -9,6 +9,9 @@ import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { AgentProcess, type AgentCommand } from './agentProcess';
 
+/** The agent's terminal sign-in: arguments for its own command, and variables to set. */
+export interface TerminalSignIn { args: string[]; env?: Record<string, string> }
+
 export interface PendingPermission { id: string; request: RequestPermissionRequest }
 export interface PendingQuestion { id: string; request: CreateElicitationRequest }
 export interface RuntimeExit { expected: boolean; message: string; stderr: string }
@@ -34,6 +37,7 @@ export interface ChatTabRuntimeOptions {
 
 /** ACP's JSON-RPC code for "authentication required". */
 const AUTH_REQUIRED = RequestError.authRequired().code;
+const terminalSignIn = boundary.object({ args: boundary.optional(boundary.array(boundary.string)), env: boundary.optional(boundary.record(boundary.string)) });
 const rpcError = boundary.object({ code: boundary.number, message: boundary.optional(boundary.string) });
 
 /**
@@ -208,9 +212,15 @@ export class ChatTabRuntime {
   get initialized(): InitializeResponse | undefined { return this.initialization; }
 
   /** The agent's terminal sign-in (ACP terminal auth method): arguments for its own command. */
-  terminalSignIn(): { args: string[]; env?: Record<string, string> } | undefined {
+  terminalSignIn(): TerminalSignIn | undefined {
     for (const method of this.initialization?.authMethods ?? []) {
-      if ('type' in method && method.type === 'terminal') return method.env ? { args: method.args ?? [], env: method.env } : { args: method.args ?? [] };
+      // Checked here: an agent's reply is untrusted, and a malformed one falls back to the config's sign-in.
+      if (!('type' in method) || method.type !== 'terminal') continue;
+      const decoded = decodeOptionalBoundary(method, terminalSignIn);
+      if (!decoded) return undefined;
+      const signIn: TerminalSignIn = { args: decoded.args ?? [] };
+      if (decoded.env) signIn.env = decoded.env;
+      return signIn;
     }
     return undefined;
   }

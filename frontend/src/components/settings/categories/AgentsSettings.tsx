@@ -57,12 +57,14 @@ export function AgentList({ agents }: { agents: readonly ChatAgentEntry[] }) {
 export function AgentsSettings() {
   const chatTabsOn = useConfigStore(state => isChatTabsEnabled(state.config));
   const agents = useChatAgentsStore(state => state.entries);
+  const error = useChatAgentsStore(state => state.error);
   // Read again on every visit: an agent installed since the last read shows at once.
   useEffect(() => { void refreshChatAgents(window.electronAPI.chatTab); }, []);
   return (
     <SettingsPage title="Agents" description="The agents this machine can open as chat tabs. Pane learns what an agent supports the first time it starts a chat with it.">
       <SettingsSection title="Chat agents" description={chatTabsOn ? undefined : 'Chat tabs are off. Turn them on in AI & Agents to open these agents as chats.'}>
-        {agents ? <AgentList agents={agents} /> : <p role="status" className="py-4 text-sm text-text-tertiary">Loading agents…</p>}
+        {error && <p role="alert" className="py-2 text-sm text-status-error">{error}</p>}
+        {agents ? <AgentList agents={agents} /> : !error && <p role="status" className="py-4 text-sm text-text-tertiary">Loading agents…</p>}
       </SettingsSection>
     </SettingsPage>
   );

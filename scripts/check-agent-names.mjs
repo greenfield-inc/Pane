@@ -1,9 +1,13 @@
 #!/usr/bin/env node
-// Fails when source code names an agent as a string literal ('claude', "codex",
-// `cursor`). Agent facts live in contracts/runpane/contract.json `agents`, read
-// through shared/agents.ts. Files in scripts/agent-names-allowlist.json are
-// exempt, each with a reason; an exempt file with no agent literal left fails
-// too, so the list only shrinks.
+// Fails when source code hard-codes an agent fact: an agent id, executable,
+// session mode or minimum version as a string literal ('claude', "cursor-agent",
+// 'bypassPermissions', '2.1.316'), or an agent's env var name anywhere
+// (env.CODEX_PATH, 'ANTHROPIC_API_KEY'). Agent facts live in
+// contracts/runpane/contract.json `agents`, read through shared/agents.ts.
+// Files in scripts/agent-names-allowlist.json are exempt up to the number of
+// such literals they hold today, each with a reason. A file must hold exactly
+// that number: more fails, and fewer fails until the count is lowered, so the
+// list only shrinks. Runs in `pnpm lint` (CI) and `pnpm check:fast`.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +22,17 @@ const ALLOWLIST_PATH = 'scripts/agent-names-allowlist.json';
 
 const contract = JSON.parse(fs.readFileSync(path.join(root, 'contracts/runpane/contract.json'), 'utf8'));
 const ids = Object.keys(contract.agents.entries);
-const literal = new RegExp(`(['"\`])(${ids.join('|')})\\1`, 'gu');
+const agents = Object.values(contract.agents.entries);
+const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+// Facts matched as a whole quoted literal.
+const quoted = [...new Set([
+  ...ids,
+  ...agents.flatMap((agent) => agent.executables),
+  ...agents.flatMap((agent) => [agent.chat?.fullAccess?.mode, ...(agent.chat?.riskyModes ?? []), agent.chat?.minimumVersion]),
+].filter(Boolean))];
+// Env var names, matched as words anywhere (a property access or a string).
+const envNames = [...new Set(agents.flatMap((agent) => [agent.chat?.adapter?.executableEnv, ...(agent.chat?.apiKeyEnv ?? [])]).filter(Boolean))];
+const literal = new RegExp(`(['"\`])(?:${quoted.map(escape).join('|')})\\1|\\b(?:${envNames.map(escape).join('|')})\\b`, 'gu');
 const allowlist = JSON.parse(fs.readFileSync(path.join(root, ALLOWLIST_PATH), 'utf8'));
 
 function* walk(dir) {
@@ -49,12 +63,16 @@ function findLiterals(file) {
 
 const offenders = [];
 const stale = [];
+const lowered = [];
 const seen = new Set();
 for (const file of ROOTS.flatMap((dir) => [...walk(dir)])) {
   const hits = findLiterals(file);
   if (file in allowlist) {
     seen.add(file);
+    const allowed = allowlist[file].count;
     if (hits.length === 0) stale.push(file);
+    else if (hits.length > allowed) offenders.push(...hits.map((hit) => `  ${file}:${hit.line} ${hit.text} (allowlisted for ${allowed}, now ${hits.length})`));
+    else if (hits.length < allowed) lowered.push(`  ${file}: ${hits.length} (allowlist says ${allowed})`);
   } else if (hits.length > 0) {
     offenders.push(...hits.map((hit) => `  ${file}:${hit.line} ${hit.text}`));
   }
@@ -70,5 +88,9 @@ if (stale.length > 0) {
   console.error(`${ALLOWLIST_PATH} lists files with no agent literal left (or that no longer exist):\n${stale.map((file) => `  ${file}`).join('\n')}\n`
     + 'Next: remove them from the allowlist so it only shrinks.');
 }
-if (offenders.length > 0 || stale.length > 0) process.exit(1);
-console.log(`No agent names in code (${ids.length} agent ids, ${Object.keys(allowlist).length} allowlisted files).`);
+if (lowered.length > 0) {
+  console.error(`These allowlisted files now hold fewer agent literals than ${ALLOWLIST_PATH} allows:\n${lowered.join('\n')}\n`
+    + 'Next: lower each file\'s count to the number shown, so no new literal can take the freed place.');
+}
+if (offenders.length > 0 || stale.length > 0 || lowered.length > 0) process.exit(1);
+console.log(`No agent facts hard-coded (${quoted.length + envNames.length} facts from ${ids.length} agents; ${Object.keys(allowlist).length} allowlisted files).`);

@@ -46,7 +46,7 @@ function harness(store = new MemoryStore(), env: NodeJS.ProcessEnv = {}, directo
   const manager = new ChatTabManager({ store, launcher, send: (channel, payload) => sent.push({ channel, payload }), spoolDirectory: path.join(directory, 'spool'), ...options });
   cleanup.push(() => manager.stopAll());
   // SAFETY: the manager sends a ChatTabView on chat-tab:state and a ChatTabEvent on chat-tab:event.
-  const states = () => sent.filter(entry => entry.channel === 'chat-tab:state').map(entry => entry.payload as ChatTabView);
+  const states = () => sent.filter(entry => entry.channel === 'chat-tab:view').map(entry => entry.payload as ChatTabView);
   // SAFETY: as above, chat-tab:event payloads are ChatTabEvents.
   const events = () => sent.filter(entry => entry.channel === 'chat-tab:event').map(entry => entry.payload as ChatTabEvent);
   return { manager, store, directory, sent, states, events, launcher };
@@ -214,6 +214,18 @@ describe('chat tab manager', () => {
     await manager.ensure('p1');
     expect(manager.view('p1').controls.map(control => control.id)).not.toContain(CHAT_FULL_ACCESS_CONTROL);
     await expect(manager.configure('p1', CHAT_FULL_ACCESS_CONTROL, 'on')).rejects.toMatchObject({ code: 'CHAT_CONFIG_UNSUPPORTED' });
+  });
+
+  it('sends older clients the views of only the agents their decoder accepts (review F-1)', async () => {
+    const { manager, store, directory, sent } = harness();
+    store.add('claude-tab', newTab(directory));
+    store.add('opencode-tab', { agent: 'opencode', launch: { kind: 'agent' }, cwd: directory, status: 'starting' });
+    await manager.ensure('claude-tab');
+    await manager.ensure('opencode-tab');
+    // SAFETY: chat-tab:view and chat-tab:state carry ChatTabViews.
+    const panels = (channel: string) => new Set(sent.filter(entry => entry.channel === channel).map(entry => (entry.payload as ChatTabView).panelId));
+    expect(panels('chat-tab:view')).toEqual(new Set(['claude-tab', 'opencode-tab']));
+    expect(panels('chat-tab:state')).toEqual(new Set(['claude-tab']));
   });
 
   it('explains a signed-out agent and does not retry by itself', async () => {

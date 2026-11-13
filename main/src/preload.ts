@@ -513,8 +513,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     onState: (callback: (view: ChatTabView) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, view: ChatTabView) => callback(view);
-      ipcRenderer.on('chat-tab:state', listener);
-      return () => ipcRenderer.removeListener('chat-tab:state', listener);
+      ipcRenderer.on('chat-tab:view', listener);
+      return () => ipcRenderer.removeListener('chat-tab:view', listener);
     },
   },
   paneChat: {

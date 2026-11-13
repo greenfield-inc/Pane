@@ -3,7 +3,7 @@ import { LegendList } from '@legendapp/list/react-native';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Keyboard, StyleSheet, View } from 'react-native';
 
-import { agentLabel } from '@shared/agents';
+import { chatAgentLabel } from '@shared/chatAgentMenu';
 import { arrangeComposerControls, choiceName, isRiskyMode, paneFullAccessOn, triggerLabels } from '@shared/chatComposerControls';
 import { chatTurns, waitingToolIds, type ChatWorkerLine } from '@shared/chatTabPresentation';
 import { rejectOption } from '@shared/chatTabPermissions';
@@ -74,7 +74,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
     onViewDiff, onOpenWorker,
     renderBlock: (language, content) => blocks?.[language]?.(content),
   }), [onViewDiff, onOpenWorker, blocks]);
-  const agent = view ? catalog?.find(entry => entry.id === view.agent)?.label ?? agentLabel(view.agent) : 'the agent';
+  const agent = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
   const disabled = !connected || !view || view.status === 'stopped';
   const commands = matchingCommands(snapshot.draft, view?.commands ?? []);
   const pending = !!snapshot.pendingDelivery;

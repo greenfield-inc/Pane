@@ -1,6 +1,6 @@
 import type { RemoteDaemonClient } from '@shared/remoteClient';
 import type { AgentChatReceipt } from '@shared/types/agentChat';
-import type { ChatTabClient } from '@shared/types/chatTab';
+import type { ChatTabClient, ChatTabView } from '@shared/types/chatTab';
 import { decodeChatAgents, decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '@shared/types/chatTabDecoders';
 
 import { invokeChannel } from '@/daemon/invoke';
@@ -38,8 +38,18 @@ export function chatTabClient(client: RemoteDaemonClient): ChatTabClient {
     onEvent: callback => client.onEvent(event => {
       if (event.type === 'daemon-event' && event.payload.channel === 'chat-tab:event') callback(decodeChatTabEvent(event.payload.args[0]));
     }),
+    // chat-tab:view carries every agent's view; chat-tab:state is kept for older phones' decoders,
+    // and is all a host from before chat-tab:view sends. A view seen twice is harmless: the viewer keeps the newest.
     onState: callback => client.onEvent(event => {
-      if (event.type === 'daemon-event' && event.payload.channel === 'chat-tab:state') callback(decodeChatTabView(event.payload.args[0]));
+      if (event.type !== 'daemon-event' || (event.payload.channel !== 'chat-tab:view' && event.payload.channel !== 'chat-tab:state')) return;
+      let view: ChatTabView;
+      try {
+        view = decodeChatTabView(event.payload.args[0]);
+      } catch (error) {
+        console.warn(`[ChatTabs] Ignored a chat view this app could not read: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      callback(view);
     }),
     // A reconnect (including a return from the background) reloads the newest window, then applies new events.
     onReconnect: callback => client.onStatus(state => { if (state.status === 'connected') callback(); }),

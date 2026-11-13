@@ -6,7 +6,7 @@ import { pausedMarkOf, type ToolPanel } from '../../../../shared/types/panels';
 import { AGENT_LAUNCH_PRESETS } from '../../../../shared/constants/agentLaunchPresets';
 import { agentIcon, getCliBrandIcon } from '../../components/ui/brandIconRegistry';
 import type { ChatAgentEntry } from '../../../../shared/types/chatTab';
-import { menuChatAgents } from '../../stores/chatAgentsStore';
+import { menuChatAgents } from '../../../../shared/chatAgentMenu';
 import { getPanelIcon } from '../../components/panels/panelIcon';
 import { PanelTabStatusDot } from '../../components/panels/PanelTabStatusDot';
 import { PausedGlyph } from '../../components/ui/AgentStatusDot';

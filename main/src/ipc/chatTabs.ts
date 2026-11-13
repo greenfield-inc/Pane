@@ -167,9 +167,12 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   }
   if (!agent) throw new PaneError('CHAT_AGENT_REQUIRED', 'No agent was named for the chat tab, so none was created.', `Choose an agent (${configuredChatAgentIds().join(', ')}), or name an Agent Farm profile.`);
   // Refused here, before a tab exists, naming the agents this host can open as chats.
-  if (launch.kind === 'agent') {
-    const runnable = getChatAgentCatalog().entries().map(entry => entry.id);
-    if (!runnable.includes(agent)) throw new PaneError('CHAT_AGENT_UNKNOWN', `This computer cannot open "${agent}" as a chat tab. No tab was created.`, `Pick one of the agents it can run: ${runnable.join(', ')}.`);
+  if (launch.kind === 'agent' && !agentConfig(agent)?.chat) {
+    throw new PaneError('CHAT_AGENT_UNKNOWN', `This computer cannot open "${agent}" as a chat tab. No tab was created.`, `Pick one of the agents it can run: ${configuredChatAgentIds().join(', ')}.`);
+  }
+  // A profile runs through Pane's bundled adapter for the agent it names (review F-7).
+  if (launch.kind === 'profile' && request.agent && !agentConfig(request.agent)?.chat?.adapter) {
+    throw new PaneError('CHAT_PROFILE_UNSUPPORTED', `Agent Farm profiles run through Pane's bundled adapters, and ${agentLabel(request.agent)} has none. No tab was created.`, 'Leave out --agent so the profile picks its own agent, or open a plain chat tab.');
   }
   const state: ChatPanelState = { agent, launch, cwd: session.worktreePath, status: 'starting' };
   if (request.initialInput) state.initialInput = request.initialInput;

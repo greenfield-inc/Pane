@@ -17,7 +17,6 @@ import { getPaneEventSink } from '../core/runtime';
 import { parseRewriteQuestion } from './notify';
 import { listTailnetMachines } from './workspaceAccess';
 import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
 import type { PaneDaemonCaller } from '../../../shared/types/daemon';

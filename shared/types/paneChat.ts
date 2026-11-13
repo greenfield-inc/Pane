@@ -12,7 +12,6 @@ export const PANE_CHAT_AGENT_LABELS: Readonly<Record<PaneChatAgent, string>> = l
 
 export const DEFAULT_PANE_CHAT_AGENT: PaneChatAgent = DEFAULT_AGENT_ID;
 export const PANE_CHAT_SESSION_ID = '__pane_chat_session__';
-export const PANE_CHAT_PANEL_ID = '__pane_chat_terminal__';
 /**
  * How every one-time first prompt Pane gives a Session agent begins. Session
  * launches drop any saved first prompt, except an unsent one that begins with this.
@@ -40,7 +39,7 @@ export function normalizePaneChatAgent(value: JsonValue | undefined): PaneChatAg
   return decodeOptionalBoundary(value, configuredAgentSchema) ?? DEFAULT_PANE_CHAT_AGENT;
 }
 
-/** The Onboarding Session's terminal for an agent: the default agent keeps the first id it ever had. */
+/** The Onboarding Session's terminal for an agent: its config's saved id, else one derived from its id. */
 export function getPaneChatPanelId(agent: PaneChatAgent): string {
-  return agent === DEFAULT_PANE_CHAT_AGENT ? PANE_CHAT_PANEL_ID : `__pane_chat_terminal_${agent}__`;
+  return configuredAgent(agent).onboardingPanelId ?? `__pane_chat_terminal_${agent}__`;
 }

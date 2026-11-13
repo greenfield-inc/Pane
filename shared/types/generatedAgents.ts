@@ -29,6 +29,7 @@ export const AGENTS_CONFIG = {
         "login"
       ],
       "onboarding": true,
+      "onboardingPanelId": "__pane_chat_terminal__",
       "chat": {
         "adapter": {
           "package": "@agentclientprotocol/claude-agent-acp",
@@ -80,8 +81,7 @@ export const AGENTS_CONFIG = {
       "chat": {
         "adapter": {
           "package": "@agentclientprotocol/codex-acp",
-          "executableEnv": "CODEX_PATH",
-          "npmShimScript": "@openai/codex/bin/codex.js"
+          "executableEnv": "CODEX_PATH"
         },
         "minimumVersion": "0.165.0",
         "apiKeyEnv": [

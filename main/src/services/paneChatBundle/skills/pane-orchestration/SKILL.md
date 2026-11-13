@@ -121,8 +121,8 @@ runpane panels create --pane <feature pane id> --title <role> \
 ### Chat-tab workers
 
 Workers stay terminal tabs by default. Where the host has chat tabs on, a worker
-can run as a chat tab instead (Claude or Codex over ACP, no terminal):
-`runpane panels create --pane <id> --chat --agent <claude|codex>`, or
+can run as a chat tab instead (any agent the host's agent catalog lists, over ACP, no terminal):
+`runpane panels create --pane <id> --chat --agent <id>`, or
 `--agent-farm <profile>:<variant> --arg key=value …` for an Agent Farm profile,
 with `--initial-input` (no `--as-file-pointer`) as its first prompt. `submit`,
 `wait`, `screen`, `output`, `last-message`, `report` and `resume` work the same;

@@ -14,7 +14,7 @@ import type { TerminalPanelState, ToolPanel } from '../../../../shared/types/pan
 import type { ChatTabNotifyBridge } from './notifyBridge';
 import { agentConfig } from '../../../../shared/agents';
 import { ChatAgentCatalog } from './agentCatalog';
-import { findExecutableInPath } from '../../utils/shellPath';
+import { isOnPath } from '../../utils/onPath';
 
 /** Chat tab state lives in the panel's custom state; only the host writes it. */
 const store: ChatTabStore = {
@@ -57,8 +57,8 @@ let catalog: ChatAgentCatalog | undefined;
 /** The agents this host can open as chat tabs (chat-tab:agents), with what each supports. */
 export function getChatAgentCatalog(): ChatAgentCatalog {
   // With the scripted test agent (development and end-to-end tests only), it stands in for every agent.
-  const scripted = process.env.PANE_CHAT_TEST_AGENT && !app.isPackaged ? process.env.PANE_CHAT_TEST_AGENT : undefined;
-  catalog ??= new ChatAgentCatalog({ file: path.join(getAppDirectory(), 'chat-agent-capabilities.json'), findExecutable: scripted ? () => scripted : findExecutableInPath });
+  const scripted = !!process.env.PANE_CHAT_TEST_AGENT && !app.isPackaged;
+  catalog ??= new ChatAgentCatalog({ file: path.join(getAppDirectory(), 'chat-agent-capabilities.json'), onPath: scripted ? async () => true : isOnPath });
   return catalog;
 }
 let context: ChatLaunchContext = { unsupportedHost: () => undefined, projectEnv: async () => ({ env: {}, warnings: [] }) };

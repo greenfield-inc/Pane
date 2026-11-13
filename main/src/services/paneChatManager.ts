@@ -16,7 +16,6 @@ import {
   type PaneChatAgent,
   type PaneChatState,
 } from '../../../shared/types/paneChat';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { paneChatFirstPrompt, paneIsEmpty } from './paneChatMigrateOffer';
 import { agentTerminalCommand, configuredAgent, isConfiguredAgent } from '../../../shared/agents';

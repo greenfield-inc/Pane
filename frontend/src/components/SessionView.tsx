@@ -65,7 +65,8 @@ import {
 import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, Sprout, Boxes } from 'lucide-react';
 import { AgentFarmProfileDialog } from './chatTab/AgentFarmProfileDialog';
 import { agentIcon, getCliBrandIcon } from './ui/brandIconRegistry';
-import { menuChatAgents, useChatAgents } from '../stores/chatAgentsStore';
+import { useChatAgents } from '../stores/chatAgentsStore';
+import { menuChatAgents } from '../../../shared/chatAgentMenu';
 import { requestOpenSettings } from '../utils/openSettings';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';

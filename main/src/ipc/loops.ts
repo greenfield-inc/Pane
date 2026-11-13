@@ -6,7 +6,6 @@ import { previewLoopSchedule } from '../services/loops/loopSchedule';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { LOOP_AGENTS, LOOP_NEW_SESSION, loopInputSchema, loopSlug, type LoopAgent } from '../../../shared/types/loop';
 import { ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX } from '../../../shared/types/orchestrationSession';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type { RunpanePaneCreateRequest } from '../../../shared/types/runpaneOrchestration';
 import { PaneError } from '../../../shared/paneError';
 import { isPlainAgentCommand, tokenizeShellCommand } from '../services/agents/agentIdentity';

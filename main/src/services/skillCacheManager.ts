@@ -2,7 +2,6 @@ import { agentTerminalCommand, type ConfiguredAgentId } from '../../../shared/ag
 import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { getAppDirectory } from '../utils/appDirectory';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../types/config';

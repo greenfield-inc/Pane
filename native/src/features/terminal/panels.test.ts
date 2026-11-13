@@ -141,8 +141,8 @@ describe('newPanelOptions', () => {
     expect(options.find(option => option.id === 'chat-profile')).toMatchObject({ title: 'Agent Farm profile…', chatProfile: true });
   });
 
-  it('offers Claude and Codex chats when the host sends no catalog', () => {
-    expect(newPanelOptions([], true).slice(0, 4).map(option => option.title)).toEqual(['Claude', 'Codex', 'Agent Farm profile…', 'Terminal']);
+  it('offers no agent chats until the host\'s catalog is read', () => {
+    expect(newPanelOptions([], true).slice(0, 2).map(option => option.title)).toEqual(['Agent Farm profile…', 'Terminal']);
   });
 
   it('offers no chats while chat tabs are off', () => {

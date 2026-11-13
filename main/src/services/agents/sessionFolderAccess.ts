@@ -1,6 +1,5 @@
-import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 import type { RunpaneResolvedTool } from '../../../../shared/types/runpaneOrchestration';
-import { agentTerminalCommand } from '../../../../shared/agents';
+import { agentConfig, agentTerminalCommand } from '../../../../shared/agents';
 
 /**
  * Claude Code settings that make a Session folder readable but not editable.
@@ -40,7 +39,8 @@ export function withSessionFolderAccess(
   folder: string,
   platform: NodeJS.Platform = process.platform,
 ): RunpaneResolvedTool {
-  if (platform === 'win32' || tool.agent !== 'claude' || tool.launchMode || tool.command !== agentTerminalCommand('claude')) {
+  // Only an agent whose config accepts Session folder settings, on its plain built-in launch.
+  if (platform === 'win32' || !tool.agent || !agentConfig(tool.agent)?.chat?.adapter?.sessionFolderSettingsMeta || tool.launchMode || tool.command !== agentTerminalCommand(tool.agent)) {
     return tool;
   }
   const quoted = `'${JSON.stringify(claudeSessionFolderSettings(folder)).replace(/'/gu, `'\\''`)}'`;

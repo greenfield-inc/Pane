@@ -31,7 +31,12 @@ export interface ResolvedLaunch {
 }
 
 /** Events a chat tab sends to every viewer. */
-type ChatTabChannel = 'chat-tab:event' | 'chat-tab:state' | 'panel:agentStatus';
+/**
+ * `chat-tab:view` carries every tab's view to clients that read the agent catalog. `chat-tab:state`
+ * is the same view for clients from before it, sent only for agents their decoder accepts
+ * (`chat.legacyClients`): one they reject would throw out of their event stream and drop the connection.
+ */
+type ChatTabChannel = 'chat-tab:event' | 'chat-tab:view' | 'chat-tab:state' | 'panel:agentStatus';
 
 export interface ChatTabLauncher {
   /** Throws a PaneError; `CHAT_NOT_SIGNED_IN`, `CHAT_AGENT_NOT_INSTALLED`, `CHAT_AGENT_OUTDATED`, `CHAT_ADAPTER_MISSING` and `CHAT_UNSUPPORTED_HOST` become their stopped states. */
@@ -764,7 +769,8 @@ export class ChatTabManager {
     if (!state) return;
     const tab = this.tab(panelId);
     const view = this.snapshot(panelId, state, tab, 0);
-    this.options.send('chat-tab:state', view);
+    this.options.send('chat-tab:view', view);
+    if (agentConfig(view.agent)?.chat?.legacyClients) this.options.send('chat-tab:state', view);
     this.options.onView?.(view);
     const agentState = toAgentState(view);
     if (tab.published === agentState) return;

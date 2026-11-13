@@ -33,7 +33,8 @@ export default function NewPanelSheet() {
   const theme = useTheme();
   const { colors } = theme;
   const affordances = useAffordances();
-  const catalog = useChatAgents();
+  // Read on every open, so an agent installed since the last read shows at once.
+  const catalog = useChatAgents(true);
   const create = useInvokeMutation<[ReturnType<typeof createPanelRequest>], ToolPanel>('panels:create', {
     invalidates: ['panels:list'],
   });

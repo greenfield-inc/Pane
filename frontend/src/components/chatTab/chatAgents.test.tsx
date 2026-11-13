@@ -3,7 +3,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import type { ChatAgentEntry } from '../../../../shared/types/chatTab';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
-import { chatAgentLabel, menuChatAgents, refreshChatAgents, useChatAgentsStore } from '../../stores/chatAgentsStore';
+import { chatAgentLabel, menuChatAgents } from '../../../../shared/chatAgentMenu';
+import { RemoteRequestError } from '../../../../shared/remoteClient/remoteDaemonClient';
+import { refreshChatAgents, useChatAgentsStore } from '../../stores/chatAgentsStore';
 import { agentIcon, agentIdIcon } from '../ui/brandIconRegistry';
 import { AgentList } from '../settings/categories/AgentsSettings';
 import { ChatModeChip, ChatRiskyModeMarker, riskySetting } from './ChatComposerControls';
@@ -25,13 +27,23 @@ describe('the + menu\'s chat agents', () => {
     expect(menuChatAgents(catalog).map(agent => agent.label)).toEqual(['Claude', 'OpenCode', 'Gemini CLI']);
   });
 
-  it('offers the agents older hosts run when the host has no catalog', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    await refreshChatAgents({ agents: () => Promise.reject(new Error('No handler registered for chat-tab:agents')) });
+  it('offers the agents older hosts run when the host does not know the catalog channel', async () => {
+    await refreshChatAgents({ agents: () => Promise.reject(new RemoteRequestError('No Pane daemon command registered for channel "chat-tab:agents".', 404, 'ERR_UNKNOWN_CHANNEL')) });
+    expect(useChatAgentsStore.getState().entries?.map(agent => agent.id)).toEqual(['claude', 'codex']);
+    useChatAgentsStore.setState({ entries: undefined });
+    // The same answer from a remote host, through the desktop's IPC bridge.
+    await refreshChatAgents({ agents: () => Promise.reject(new Error('Error invoking remote method \'daemon:invoke\': Error [ERR_UNKNOWN_CHANNEL]: No Pane daemon command registered for channel "chat-tab:agents".')) });
     expect(useChatAgentsStore.getState().entries?.map(agent => agent.id)).toEqual(['claude', 'codex']);
   });
 
-  afterEach(() => { vi.restoreAllMocks(); useChatAgentsStore.setState({ entries: undefined }); });
+  it('keeps the last list and reports why when a read fails for another reason', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await refreshChatAgents({ agents: async () => [entry('opencode', { label: 'OpenCode' })] });
+    await refreshChatAgents({ agents: () => Promise.reject(new Error('Error invoking remote method \'daemon:invoke\': Error: The host is not connected.')) });
+    expect(useChatAgentsStore.getState()).toEqual({ entries: [entry('opencode', { label: 'OpenCode' })], error: 'Could not read the agents on this machine: The host is not connected.' });
+  });
+
+  afterEach(() => { vi.restoreAllMocks(); useChatAgentsStore.setState({ entries: undefined, error: undefined }); });
 });
 
 describe('an agent Pane has no entry for', () => {

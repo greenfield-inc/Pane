@@ -9,8 +9,8 @@ import type { ImportSession } from '../../../shared/types/sessionImport';
 import { TOOL_NAMES } from './sessionImport/sessionImportCopy';
 import { cn } from '../utils/cn';
 
-/** Placeholders while Pane looks for the CLIs: three rows, the usual count, so the list keeps its height. */
-const LOADING_ROWS: FirstRunAgent[] = CONFIGURED_AGENT_IDS.slice(0, 3).map(id => ({ id, found: false }));
+/** Placeholders while Pane looks for the CLIs: one row per agent the first-run screen offers, so the list keeps its height. */
+const LOADING_ROWS: FirstRunAgent[] = CONFIGURED_AGENT_IDS.filter(id => configuredAgent(id).onboarding).map(id => ({ id, found: false }));
 
 /** The Yes button and the scanning indicator share this box, so the footer never shifts. */
 const ANSWER_BOX = 'h-9 w-24';
