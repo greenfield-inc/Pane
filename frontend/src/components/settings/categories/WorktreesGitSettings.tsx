@@ -186,7 +186,7 @@ export function WorktreesGitSettings({ persistence, onDirtyChange }: WorktreesGi
               fullWidth
             />
             <div className="flex justify-end">
-              <Button type="button" size="sm" disabled={!ideCommandDirty} onClick={applyIdeCommand}>Apply</Button>
+              <Button type="button" size="sm" aria-label="Apply Default Open IDE Command" disabled={!ideCommandDirty} onClick={applyIdeCommand}>Apply</Button>
             </div>
           </div>
         </SettingRow>
