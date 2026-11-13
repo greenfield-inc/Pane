@@ -1,6 +1,7 @@
 import type { PaneSecretMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
+import type { CustomLink } from '../../../shared/types/customLinks';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
 import type { MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
@@ -83,6 +84,8 @@ export interface AppConfig {
   defaultModel?: string;
   // Default agent used by the global Pane Chat orchestrator terminal
   defaultOrchestratorAgent?: PaneChatAgent;
+  // Open IDE command for every project without its own, e.g. `idea .`
+  defaultIdeCommand?: string;
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
@@ -198,6 +201,8 @@ export interface AppConfig {
   };
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
+  // Terminal text matching a pattern opens a link, e.g. issue keys opening the issue tracker
+  customLinks?: CustomLink[];
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
@@ -211,6 +216,10 @@ export interface AppConfig {
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
+  // Whether selecting terminal text copies it at once instead of offering the selection popover (off when absent)
+  terminalCopyOnSelect?: boolean;
+  // Whether typing @ in a terminal opens the picker for another terminal's scrollback (on when absent)
+  terminalReferencesEnabled?: boolean;
   // Worktree file sync — files/dirs to copy from main repo into new worktrees
   worktreeFileSync?: WorktreeFileSyncEntry[];
   // Preferred shell for Windows terminals
@@ -243,6 +252,7 @@ export interface UpdateConfigRequest {
   defaultPermissionMode?: 'approve' | 'ignore';
   defaultModel?: string;
   defaultOrchestratorAgent?: PaneChatAgent;
+  defaultIdeCommand?: string;
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
@@ -304,6 +314,8 @@ export interface UpdateConfigRequest {
   analytics?: AppConfig['analytics'];
   // User-defined custom commands for the Add Tool picker
   customCommands?: CustomCommand[];
+  // Terminal text matching a pattern opens a link, e.g. issue keys opening the issue tracker
+  customLinks?: CustomLink[];
   // Terminal shortcuts — hotkey-triggered clipboard paste snippets
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
@@ -317,6 +329,8 @@ export interface UpdateConfigRequest {
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
+  terminalCopyOnSelect?: boolean;
+  terminalReferencesEnabled?: boolean;
   // Worktree file sync — files/dirs to copy from main repo into new worktrees
   worktreeFileSync?: WorktreeFileSyncEntry[];
   // Preferred shell for Windows terminals

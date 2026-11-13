@@ -9,7 +9,8 @@ import { panelApi } from '../../../services/panelApi';
 import { requestBrowserNavigation } from '../../panels/browser/browserNavigation';
 import { openFileInEditor } from '../../../services/openFileInEditor';
 import { usePanelStore } from '../../../stores/panelStore';
-import { useConfigStore } from '../../../stores/configStore';
+import { isCopyOnSelectEnabled, useConfigStore } from '../../../stores/configStore';
+import { isMac } from '../../../utils/platformUtils';
 import type { BrowserPanelState, ToolPanel } from '../../../../../shared/types/panels';
 import { copyTerminalText } from '../../../utils/terminalClipboard';
 import { useCommittedRef } from '../../../hooks/useCommittedRef';
@@ -79,6 +80,8 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
   const [githubRemoteUrl, setGithubRemoteUrl] = useState<string | null>(null);
   const isRemoteMode = useConfigStore((state) => state.config?.remoteDaemon?.client.mode === 'remote');
+  const copyOnSelect = useConfigStore((state) => isCopyOnSelectEnabled(state.config));
+  const customLinks = useConfigStore((state) => state.config?.customLinks);
   const { onCopyError } = config;
   const suppressSelectionPopoverRef = useCommittedRef(config.suppressSelectionPopover);
   const mousePositionRef = useRef({ x: 0, y: 0 });
@@ -121,6 +124,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
 
     const providerConfig: LinkProviderConfig = {
       terminal,
+      customLinks,
       workingDirectory: pathContext?.workingDirectory ?? config.workingDirectory,
       homeDirectory: pathContext?.homeDirectory ?? undefined,
       githubRemoteUrl: githubRemoteUrl ?? undefined,
@@ -143,15 +147,15 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     return () => {
       disposables.forEach((d) => d.dispose());
     };
-  }, [terminal, config.workingDirectory, githubRemoteUrl, pathContext]);
+  }, [terminal, config.workingDirectory, customLinks, githubRemoteUrl, pathContext]);
 
   // Listen for selection changes
   useEffect(() => {
     if (!terminal) return;
 
-    // Remote mode copies a finished mouse selection straight to this machine's
-    // clipboard instead of offering the selection popover.
-    if (isRemoteMode) {
+    // Copy on select (Settings › Terminal) copies a finished mouse selection instead of offering
+    // the selection popover. Remote mode always does, so it lands on this machine's clipboard.
+    if (copyOnSelect) {
       const element = terminal.element;
       if (!element) return;
       const doc = element.ownerDocument;
@@ -161,7 +165,11 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
       };
       // A drag can end outside the terminal (auto-scroll, overshoot), so the
       // release is caught on the document, as xterm does to finish the selection.
-      const watchRelease = () => {
+      // Left button only, and not macOS Ctrl+click (a right-click that reports
+      // button 0): a right-click selects the word under the pointer on macOS,
+      // and copying it would overwrite what the menu's Paste pastes.
+      const watchRelease = (event: MouseEvent) => {
+        if (event.button !== 0 || (event.ctrlKey && isMac())) return;
         doc.addEventListener('mouseup', copySelection, { once: true });
       };
       element.addEventListener('mousedown', watchRelease);
@@ -188,7 +196,7 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
     return () => {
       disposable.dispose();
     };
-  }, [terminal, isRemoteMode, onCopyError, suppressSelectionPopoverRef]);
+  }, [terminal, copyOnSelect, onCopyError, suppressSelectionPopoverRef]);
 
   // Get panel store methods
   const addPanel = usePanelStore((state) => state.addPanel);

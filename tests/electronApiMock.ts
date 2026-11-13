@@ -114,6 +114,8 @@ export type ElectronApiMockOptions = {
   holdSshOpens?: boolean;
   feedbackOutcome?: 'success' | 'failure';
   openExternalOutcome?: 'success' | 'failure';
+  /** What the native right-click menu (app:show-context-menu) answers: the chosen item's id, or null for dismissed. */
+  contextMenuChoice?: string | null;
   /** Overrides this machine's workspace status (remote-daemon:get-workspace-access). */
   workspaceAccess?: Partial<WorkspaceAccessSummary>;
   glasses?: GlassesAccessState;
@@ -704,6 +706,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       if (channel === 'terminal:set-preferred-shell') {
         configState.preferredShell = String(args[0]);
         return Promise.resolve(undefined);
+      }
+      if (channel === 'app:show-context-menu') {
+        return Promise.resolve(mockOptions.contextMenuChoice ?? null);
       }
       if (channel === 'ports:list') {
         return Promise.resolve({ host: 'mock-host', ports: [] });

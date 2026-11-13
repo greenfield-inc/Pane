@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
-import { AlertTriangle, ArrowLeftRight, ChevronDown, ChevronUp, Code2, GitBranch, Settings, TerminalSquare } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, ChevronDown, ChevronUp, Code2, GitBranch, Settings } from 'lucide-react';
 import { useSession } from '../contexts/SessionContext';
+import { ideMenuItems } from '../utils/ideMenuItems';
 import { useNavigationStore } from '../stores/navigationStore';
 import { Button } from './ui/Button';
 import { Dropdown, DropdownMenuItem } from './ui/Dropdown';
@@ -75,17 +76,8 @@ export function HorizontalDetailPanel({
   const remoteIdeTooltip = 'Open in IDE is only available in local mode. Switch this client back to the local runtime to use your desktop IDE.';
   const ideItems = useMemo(() => {
     if (!sessionContext?.onOpenIDEWithCommand) return [];
-    const handler = sessionContext.onOpenIDEWithCommand;
-    const configured = sessionContext.configuredIDECommand?.trim();
-    const isCustom = configured && !['code .', 'cursor .'].includes(configured);
-    return [
-      ...(isCustom
-        ? [{ id: 'configured', label: configured, description: 'Project default', icon: TerminalSquare, onClick: () => handler() }]
-        : []),
-      { id: 'vscode', label: 'VS Code', description: 'code .', icon: Code2, onClick: () => handler('vscode') },
-      { id: 'cursor', label: 'Cursor', description: 'cursor .', icon: Code2, onClick: () => handler('cursor') },
-    ];
-  }, [sessionContext?.configuredIDECommand, sessionContext?.onOpenIDEWithCommand]);
+    return ideMenuItems(sessionContext.configuredIDE, sessionContext.onOpenIDEWithCommand);
+  }, [sessionContext?.configuredIDE, sessionContext?.onOpenIDEWithCommand]);
 
   if (!sessionContext) return null;
 

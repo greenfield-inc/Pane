@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions, type WebContents } from 'electron';
+import type { ContextMenuEntry } from '../../../shared/types/contextMenu';
 
 export const APP_MENU_ACTION_CHANNEL = 'app:menu-action';
 export type AppMenuAction = 'open-about' | 'open-settings';
@@ -115,10 +116,20 @@ export function installApplicationMenu(options: {
 
 const MAX_LOOK_UP_LABEL = 24;
 
+/** macOS's dictionary item, named after the selection it looks up. */
+function lookUpLabel(selection: string): string {
+  const shown = selection.length > MAX_LOOK_UP_LABEL ? `${selection.slice(0, MAX_LOOK_UP_LABEL)}…` : selection;
+  return `Look Up “${shown}”`;
+}
+// The close callback is not ordered against the chosen item's click on every
+// platform, so a dismissal is only reported after the click has had its turn.
+const CONTEXT_MENU_DISMISS_GRACE_MS = 100;
+
 /**
  * Right-click on editable fields and selected text opens the native edit menu.
- * Pane's own menus (sidebar rows, file tree) call preventDefault on the DOM
- * event, so Chromium never raises this event for them.
+ * Pane's own menus (sidebar rows, file tree, terminals through
+ * showContextMenu) call preventDefault on the DOM event, so Chromium never
+ * raises this event for them.
  */
 export function attachEditContextMenu(contents: WebContents): void {
   contents.on('context-menu', (_event, params) => {
@@ -140,9 +151,8 @@ export function attachEditContextMenu(contents: WebContents): void {
       );
     }
     if (selection && process.platform === 'darwin') {
-      const label = selection.length > MAX_LOOK_UP_LABEL ? `${selection.slice(0, MAX_LOOK_UP_LABEL)}…` : selection;
       items.push(
-        { label: `Look Up “${label}”`, click: () => contents.showDefinitionForSelection() },
+        { label: lookUpLabel(selection), click: () => contents.showDefinitionForSelection() },
         { type: 'separator' },
       );
     }
@@ -160,5 +170,46 @@ export function attachEditContextMenu(contents: WebContents): void {
     // A webview's menu opens over the window that hosts it.
     const window = BrowserWindow.fromWebContents(contents.hostWebContents ?? contents) ?? undefined;
     Menu.buildFromTemplate(items).popup({ window });
+  });
+}
+
+/**
+ * Shows a renderer-described menu natively and resolves with the chosen item's
+ * id, or null when it is dismissed. The renderer must have prevented the DOM
+ * contextmenu event, or Chromium raises attachEditContextMenu's menu as well.
+ *
+ * Use it where a surface replaces the native edit menu or needs a native
+ * action (paste, look up): today, the terminal's right-click menu. Pane's own
+ * row and toolbar menus stay HTML (ui/Dropdown, ContextMenuContext).
+ */
+export function showContextMenu(contents: WebContents, entries: ContextMenuEntry[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    const template = entries.map((entry): MenuItemConstructorOptions => {
+      if (entry.type === 'separator') return { type: 'separator' };
+      if (entry.type === 'look-up') {
+        return {
+          label: lookUpLabel(entry.text),
+          click: () => {
+            contents.showDefinitionForSelection();
+            resolve(entry.id);
+          },
+        };
+      }
+      return {
+        label: entry.label,
+        enabled: entry.enabled,
+        accelerator: entry.accelerator,
+        registerAccelerator: false,
+        click: () => {
+          if (entry.type === 'paste') contents.paste();
+          resolve(entry.id);
+        },
+      };
+    });
+    const window = BrowserWindow.fromWebContents(contents) ?? undefined;
+    Menu.buildFromTemplate(template).popup({
+      window,
+      callback: () => setTimeout(() => resolve(null), CONTEXT_MENU_DISMISS_GRACE_MS),
+    });
   });
 }

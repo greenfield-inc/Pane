@@ -168,7 +168,7 @@ During downtime, preflight may fail before reaching the lock. Use `--status`
 
 Only a panel recorded as actively working, with an exact conversation ID and a
 supported resume command, is eligible to reopen. Built-in launch resolution
-covers Claude, Codex, Cursor and native OpenCode. OpenCode requires a recorded
+covers Claude, Codex, Cursor, native OpenCode and Pi. OpenCode requires a recorded
 valid `ses_…` selector and an eligible direct launch command; incompatible Session
 wrappers or custom-resume settings are refused. Custom commands use their
 effective resume profile: an explicit template containing `{sessionId}`, or the

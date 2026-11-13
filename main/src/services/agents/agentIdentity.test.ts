@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CLI_AGENT_TYPES,
   isCliAgentType,
+  isPlainAgentCommand,
   isShellProcessName,
   isVersionedExecutableName,
   resolveAgentTypeFromCommand,
@@ -12,7 +13,7 @@ import {
 type CommandClassificationCase = {
   name: string;
   command: string | undefined;
-  expected: 'claude' | 'codex' | 'cursor' | 'opencode' | undefined;
+  expected: 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi' | undefined;
   platformHint?: NodeJS.Platform;
 };
 
@@ -22,6 +23,10 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
   { name: 'direct Cursor command', command: 'cursor-agent --force --trust', expected: 'cursor' },
   { name: 'direct OpenCode command', command: 'opencode --auto', expected: 'opencode' },
   { name: 'quoted OpenCode command', command: "'opencode' --auto", expected: 'opencode' },
+  { name: 'direct Pi command', command: 'pi', expected: 'pi' },
+  { name: 'Pi command with flags', command: 'pi --thinking high', expected: 'pi' },
+  { name: 'Pi by absolute path', command: '/opt/homebrew/bin/pi', expected: 'pi' },
+  { name: 'Pi after an environment assignment', command: 'PI_OFFLINE=1 pi', expected: 'pi' },
   {
     name: 'path-qualified OpenCode command',
     command: '/usr/local/bin/opencode --auto',
@@ -139,6 +144,8 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
   { name: 'Claude executable substring', command: 'claude-code-something', expected: undefined },
   { name: 'Cursor executable substring', command: 'mycursor-agent', expected: undefined },
   { name: 'OpenCode executable substring', command: 'my-opencode-wrapper', expected: undefined },
+  { name: 'Pi executable substring', command: 'pip install -e .', expected: undefined },
+  { name: 'Pi as an ssh user', command: 'ssh pi@raspberrypi.local', expected: undefined },
   { name: 'agent name in an argument', command: 'echo cursor-agent', expected: undefined },
   { name: 'shell option without command mode', command: 'bash --norc cursor-agent', expected: undefined },
   { name: 'unterminated single quote', command: "'cursor-agent", expected: undefined },
@@ -155,7 +162,7 @@ const COMMAND_CLASSIFICATION_CASES: CommandClassificationCase[] = [
 
 describe('CLI_AGENT_TYPES', () => {
   it('lists the supported agents', () => {
-    expect([...CLI_AGENT_TYPES].sort()).toEqual(['claude', 'codex', 'cursor', 'opencode']);
+    expect([...CLI_AGENT_TYPES].sort()).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
   });
 });
 
@@ -165,6 +172,7 @@ describe('isCliAgentType', () => {
     expect(isCliAgentType('codex')).toBe(true);
     expect(isCliAgentType('cursor')).toBe(true);
     expect(isCliAgentType('opencode')).toBe(true);
+    expect(isCliAgentType('pi')).toBe(true);
     expect(isCliAgentType('aider')).toBe(false);
     expect(isCliAgentType(undefined)).toBe(false);
     expect(isCliAgentType(null)).toBe(false);
@@ -185,6 +193,8 @@ describe('foreground process identity', () => {
     ['cursor-agent', 'cursor'],
     ['opencode', 'opencode'],
     ['/usr/local/bin/opencode', 'opencode'],
+    ['pi', 'pi'],
+    ['pip', undefined],
     ['/usr/local/bin/codex', 'codex'],
     ['codex.exe', 'codex'],
     ['node', undefined],
@@ -214,5 +224,16 @@ describe('foreground process identity', () => {
     expect(resolveAgentTypeFromExecutablePath('/opt/homebrew/Caskroom/codex/0.157.1/bin/codex')).toBe('codex');
     expect(resolveAgentTypeFromExecutablePath('/Users/me/tools/versions/2.1.283')).toBeUndefined();
     expect(resolveAgentTypeFromExecutablePath(undefined)).toBeUndefined();
+  });
+});
+
+describe('isPlainAgentCommand', () => {
+  // Pane answers Claude's trust prompt for a Session's own folder only for a plain command.
+  it.each([`claude 'fix #123 today'`, 'claude --model opus'])('treats %s as plain', (command) => {
+    expect(isPlainAgentCommand(command, 'claude')).toBe(true);
+  });
+
+  it.each(['claude && echo done', 'claude "$(cat rules.md)"', 'claude > log.txt'])('treats %s as more than one program run', (command) => {
+    expect(isPlainAgentCommand(command, 'claude')).toBe(false);
   });
 });

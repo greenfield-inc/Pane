@@ -31,6 +31,7 @@ import {
   type SetupSkills,
   type SetupTerminalShortcut,
 } from '../../../shared/types/setupTransfer';
+import { customLinkSchema, type CustomLink } from '../../../shared/types/customLinks';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 
 /** A saved repository as the setup file sees it. */
@@ -70,7 +71,7 @@ const APPEARANCE_KEYS = [
 
 const PREFERENCE_CONFIG_KEYS = [
   'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'keyboardShortcutOverrides',
-  'kittyKeyboardEnabled',
+  'kittyKeyboardEnabled', 'terminalCopyOnSelect', 'terminalReferencesEnabled',
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
   'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'terminalPowerMode',
   'resumePausedOnOpen', 'autoPauseEnabled', 'autoPauseAfterHours',
@@ -90,6 +91,7 @@ const SECTION_LABELS = {
   runScripts: 'Run scripts',
   skills: 'Skills & MCP',
   terminalShortcuts: 'Terminal shortcuts',
+  customLinks: 'Custom links',
   worktreeFileSync: 'Worktree file sync',
   appearance: 'Appearance',
   preferences: 'Preferences',
@@ -116,6 +118,8 @@ const FIELD_LABELS = {
   commandPaletteShortcutEnabled: 'Command Palette shortcut',
   keyboardShortcutOverrides: 'Changed key bindings',
   kittyKeyboardEnabled: 'Kitty keyboard',
+  terminalCopyOnSelect: 'Copy on select',
+  terminalReferencesEnabled: 'Terminal references',
   htmlFileOpenMode: 'HTML files open as',
   enableCommitFooter: 'Commit footer',
   gitAttributionEnabled: 'Git attribution',
@@ -300,6 +304,16 @@ function exportTerminalShortcuts(config: AppConfig, home: string, leftOut: Setup
   });
 }
 
+function exportCustomLinks(config: AppConfig, leftOut: SetupLeftOutItem[]): CustomLink[] {
+  return (config.customLinks ?? []).flatMap((link) => {
+    if (looksSecret(link.urlTemplate)) {
+      leftOut.push({ section: 'customLinks', name: link.label });
+      return [];
+    }
+    return [{ id: link.id, label: link.label, pattern: link.pattern, urlTemplate: link.urlTemplate, enabled: link.enabled }];
+  });
+}
+
 function isRelativePath(value: string): boolean {
   return !/^(?:[\\/~]|[A-Za-z]:)/.test(value.trim());
 }
@@ -337,6 +351,7 @@ export async function exportSetup(
   if (included.has('runScripts')) built.runScripts = await exportRunScripts(sources, leftOut);
   if (included.has('skills')) built.skills = exportSkills(config);
   if (included.has('terminalShortcuts')) built.terminalShortcuts = exportTerminalShortcuts(config, home, leftOut);
+  if (included.has('customLinks')) built.customLinks = exportCustomLinks(config, leftOut);
   if (included.has('worktreeFileSync')) {
     built.worktreeFileSync = (config.worktreeFileSync ?? []).filter(entry => isRelativePath(entry.path)).map(entry => ({ ...entry }));
   }
@@ -429,6 +444,7 @@ const sectionSchemas = {
     text: boundary.string,
     enabled: boundary.boolean,
   })),
+  customLinks: boundary.array(customLinkSchema),
   worktreeFileSync: boundary.array(boundary.object({
     id: boundary.nonEmptyString,
     path: boundary.refine(boundary.nonEmptyString, isRelativePath, 'expected a path relative to the repository'),
@@ -452,6 +468,8 @@ const sectionSchemas = {
     commandPaletteShortcutEnabled: booleanField,
     keyboardShortcutOverrides: boundary.optional(boundary.record(keyboardOverrideValue)),
     kittyKeyboardEnabled: booleanField,
+    terminalCopyOnSelect: booleanField,
+    terminalReferencesEnabled: booleanField,
     htmlFileOpenMode: boundary.optional(boundary.enumeration('preview', 'source')),
     enableCommitFooter: booleanField,
     gitAttributionEnabled: booleanField,
@@ -788,6 +806,18 @@ export async function previewSetupImport(file: SetupFile, fileName: string, sour
       },
     );
     if (section.changes > 0) section.apply = { config: { terminalShortcuts: merged } };
+    sections.push(section);
+  }
+
+  if (incoming.customLinks) {
+    const { section, merged } = previewList(
+      'customLinks',
+      config.customLinks ?? [],
+      incoming.customLinks,
+      link => link.id,
+      link => ({ name: link.label, text: `${link.pattern} → ${link.urlTemplate}, ${link.enabled ? 'on' : 'off'}` }),
+    );
+    if (section.changes > 0) section.apply = { config: { customLinks: merged } };
     sections.push(section);
   }
 

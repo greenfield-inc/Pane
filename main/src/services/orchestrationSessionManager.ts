@@ -1212,8 +1212,10 @@ export class OrchestrationSessionManager extends EventEmitter {
     const resolvedAgent = record.agent === 'opencode' || effectiveAgent === 'opencode'
       ? resolveSessionAgent(record.agent, initialCommand, record.customResume)
       : launchAgent(command, record.customResume);
+    // A command that starts with the agent's executable and chains nothing lets the terminal add its own
+    // resume or session flags; anything else runs as given.
     const nativeCommand = resolvedAgent === 'opencode'
-      || /^(?:claude|codex|cursor-agent)(?:\s|$)/.test(command) && !/[;&|\n]/.test(command);
+      || (resolvedAgent !== undefined && configuredAgent(resolvedAgent).executables.includes(command.split(/\s/)[0]) && !/[;&|\n]/.test(command));
     // A resumed conversation is created with its id, so even a tab repaired at startup resumes it.
     const resumed: TerminalPanelState = {};
     if (record.resume) resumed.agentSessionId = record.resume;

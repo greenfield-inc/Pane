@@ -29,7 +29,7 @@ const handlers = new Map<PropertyKey, Set<(event: RuntimeEvent) => void>>();
 const pending: Array<{ kind: string; id: string; runtime: string; resolve: (value: TransportReply) => void }> = [];
 const wait = (kind: string, id: string) => new Promise<TransportReply>(resolve => pending.push({ kind, id, runtime, resolve }));
 const panes: Session[] = ['a', 'b'].map(id => ({ id, name: `Pane ${id.toUpperCase()}`, projectId: 1, status: 'stopped', worktreePath: `/test/${id}`, prompt: '', output: [], jsonMessages: [], createdAt: '2026-01-01', lastActivity: '2026-01-01' }));
-const records: OrchestrationSessionRecord[] = ['a', 'b'].map(id => ({ id, name: `Session ${id.toUpperCase()}`, internalSessionId: `internal-${id}`, agent: 'codex', panelIds: { claude: `claude-${id}`, codex: `codex-${id}`, cursor: `cursor-${id}`, opencode: `opencode-${id}` }, goal: `Goal ${id}`, context: `Context ${id}`, decisions: [], nextAction: '', evidence: [], outputs: [], associations: [{ paneId: id, panelIds: [], attachedAt: '2026-01-01' }], blockers: [], activity: [], revision: 1, createdAt: '2026-01-01', updatedAt: '2026-01-01' }));
+const records: OrchestrationSessionRecord[] = ['a', 'b'].map(id => ({ id, name: `Session ${id.toUpperCase()}`, internalSessionId: `internal-${id}`, agent: 'codex', panelIds: { claude: `claude-${id}`, codex: `codex-${id}`, cursor: `cursor-${id}`, opencode: `opencode-${id}`, pi: `pi-${id}` }, goal: `Goal ${id}`, context: `Context ${id}`, decisions: [], nextAction: '', evidence: [], outputs: [], associations: [{ paneId: id, panelIds: [], attachedAt: '2026-01-01' }], blockers: [], activity: [], revision: 1, createdAt: '2026-01-01', updatedAt: '2026-01-01' }));
 const transportCalls: Array<{ method: string; payload?: unknown; data?: unknown }> = [];
 // sessionStorage is mock service storage, not application persistence. It survives
 // page reload in this test's fresh browser context, never touching a user profile.
@@ -62,7 +62,7 @@ const api = {
       transportCalls.push({ method: 'orchestrationSessions.create', payload: input });
       return Promise.resolve({ success: false, error: 'OpenCode Session launch was refused' });
     }
-    records.push({ ...records[0], id: 'created', internalSessionId: 'internal-created', name: input.name, agent: input.agent ?? 'claude', panelIds: { claude: 'claude-created', codex: 'codex-created', cursor: 'cursor-created', opencode: 'opencode-created' }, associations: [] });
+    records.push({ ...records[0], id: 'created', internalSessionId: 'internal-created', name: input.name, agent: input.agent ?? 'claude', panelIds: { claude: 'claude-created', codex: 'codex-created', cursor: 'cursor-created', opencode: 'opencode-created', pi: 'pi-created' }, associations: [] });
     const data = sessionView('created');
     transportCalls.push({ method: 'orchestrationSessions.create', payload: input, data });
     return Promise.resolve({ success: true, data });

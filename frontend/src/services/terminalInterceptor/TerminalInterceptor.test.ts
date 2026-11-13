@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TerminalInterceptor } from './TerminalInterceptor';
 import { createAtTerminalHandler } from './handlers/atTerminalHandler';
 
-function setup() {
+function setup(enabled = true) {
   const onFlush = vi.fn();
   const onCopy = vi.fn(async () => {});
   const interceptor = new TerminalInterceptor({ onStateChange: vi.fn(), onFlush });
@@ -10,6 +10,7 @@ function setup() {
     sessionId: 'session',
     currentPanelId: 'current',
     hasOtherTerminals: () => true,
+    isEnabled: () => enabled,
     getTerminals: async () => [
       { panelId: 'one', title: 'First', preview: [] },
       { panelId: 'two', title: 'Second', preview: [] },
@@ -91,6 +92,12 @@ describe('TerminalInterceptor keyboard protocols', () => {
     expect(interceptor.handleInput('\x1b[8;14;8;1;0;1_').consumed).toBe(true);
     expect(interceptor.getState().active).toBe(false);
     expect(onFlush).not.toHaveBeenCalled();
+  });
+
+  it('passes @ through when terminal references are turned off', () => {
+    const { interceptor } = setup(false);
+    expect(interceptor.handleInput('@')).toEqual({ consumed: false });
+    expect(interceptor.getState().active).toBe(false);
   });
 
   it('does not activate @ for Alt+@ or a key release', () => {

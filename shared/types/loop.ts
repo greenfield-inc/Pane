@@ -13,6 +13,11 @@ import type { BoundarySchema } from '../validation/boundaryDecoder';
 export const LOOP_AGENTS = ['claude', 'codex', 'cursor'] as const;
 export type LoopAgent = typeof LOOP_AGENTS[number];
 
+/** Whether loops can run this agent's Sessions. */
+export function isLoopAgent(agent: string): agent is LoopAgent {
+  return LOOP_AGENTS.some(loopAgent => loopAgent === agent);
+}
+
 /** Saving a Session loop with this target creates a new Session named after the loop. */
 export const LOOP_NEW_SESSION = 'new';
 

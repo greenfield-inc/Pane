@@ -7,21 +7,13 @@
     "reason": "Deferred terminal resume: custom command resume modes per agent.",
     "count": 6
   },
-  "frontend/src/components/DetailPanel.tsx": {
-    "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
-    "count": 2
-  },
-  "frontend/src/components/HorizontalDetailPanel.tsx": {
-    "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
-    "count": 2
-  },
   "frontend/src/components/ProjectSettings.tsx": {
     "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
     "count": 1
   },
   "frontend/src/components/loops/LoopDrawer.tsx": {
     "reason": "Loops' own agent list; Loops are outside this plan's scope.",
-    "count": 7
+    "count": 6
   },
   "frontend/src/components/loops/loopRunView.ts": {
     "reason": "Loops' own agent list; Loops are outside this plan's scope.",
@@ -73,7 +65,7 @@
   },
   "main/src/ipc/loops.ts": {
     "reason": "Loops' own agent list; Loops are outside this plan's scope.",
-    "count": 4
+    "count": 1
   },
   "main/src/ipc/missionControl.ts": {
     "reason": "Mission Control reads Claude and Codex transcripts (vendor file formats).",
@@ -85,11 +77,11 @@
   },
   "main/src/ipc/runpane.ts": {
     "reason": "Deferred terminal composer delivery, readiness and resume per agent.",
-    "count": 73
+    "count": 53
   },
   "main/src/ipc/runpaneComposerEvidence.ts": {
     "reason": "Deferred terminal composer delivery evidence per agent.",
-    "count": 1
+    "count": 2
   },
   "main/src/ipc/session.ts": {
     "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
@@ -97,7 +89,7 @@
   },
   "main/src/services/agentStatus/manifests.ts": {
     "reason": "Deferred terminal status detection manifests, one per agent.",
-    "count": 4
+    "count": 5
   },
   "main/src/services/agentTranscript/index.ts": {
     "reason": "Vendor file format: reads this agent's own files, which Pane does not own.",
@@ -121,7 +113,7 @@
   },
   "main/src/services/agents/opencodeLaunch.ts": {
     "reason": "Deferred terminal launch and resume for one agent.",
-    "count": 2
+    "count": 3
   },
   "main/src/services/claudePrompts/claudePromptQuestion.ts": {
     "reason": "Deferred terminal status: wording for Claude Code's own terminal permission prompts.",
@@ -138,10 +130,6 @@
   "main/src/services/orchestrationSessionManager.ts": {
     "reason": "Deferred terminal launch and resume rules for Session orchestrators (OpenCode direct commands, promoted Claude/Codex conversations).",
     "count": 17
-  },
-  "main/src/services/orchestrationSessionStore.ts": {
-    "reason": "Deferred terminal launch and resume rules for Session orchestrators (OpenCode direct commands, promoted Claude/Codex conversations).",
-    "count": 2
   },
   "main/src/services/paneChatBundle/skills/session-trace/scripts/build-trace.mjs": {
     "reason": "Vendor file format: a bundled skill script that reads agent session logs.",
@@ -213,7 +201,7 @@
   },
   "main/src/services/sessionManager.ts": {
     "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
-    "count": 11
+    "count": 7
   },
   "main/src/services/setupTransfer.ts": {
     "reason": "Persisted record shape: the setup export format names agents.",
@@ -297,15 +285,11 @@
   },
   "packages/runpane/src/localControl.ts": {
     "reason": "Wire decoders matching the host's terminal agent shapes and Loops (published runpane).",
-    "count": 19
+    "count": 10
   },
   "packages/runpane/src/nativeSession.ts": {
     "reason": "Vendor file format: carries each agent's own session store in a handoff.",
     "count": 27
-  },
-  "packages/runpane/src/sessionPayload.ts": {
-    "reason": "Wire decoders matching the host's terminal agent shapes and Loops (published runpane).",
-    "count": 4
   },
   "shared/types/agentChat.ts": {
     "reason": "Persisted record shape: the legacy agent conversation record.",
@@ -343,8 +327,8 @@
     "reason": "Vendor file formats: usage parsed from each agent's own transcripts.",
     "count": 2
   },
-  "shared/types/worktreeFileSync.ts": {
-    "reason": "Vendor config folders copied into new worktrees (.claude, .codex, .cursor).",
-    "count": 3
+  "shared/utils/ideCommands.ts": {
+    "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
+    "count": 1
   }
 }

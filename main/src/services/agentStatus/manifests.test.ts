@@ -6,6 +6,7 @@ import {
   CURSOR_MANIFEST,
   GENERIC_MANIFEST,
   OPENCODE_MANIFEST,
+  PI_MANIFEST,
   getManifestForAgent,
 } from './manifests';
 import { CLAUDE_API_ENOTFOUND_SCREEN, CLAUDE_API_RETRYING_SCREEN, CLAUDE_API_SLEEP_SCREEN } from './__fixtures__/claudeApiErrorScreens';
@@ -18,6 +19,7 @@ describe('getManifestForAgent', () => {
     expect(getManifestForAgent('codex')).toBe(CODEX_MANIFEST);
     expect(getManifestForAgent('cursor')).toBe(CURSOR_MANIFEST);
     expect(getManifestForAgent('opencode')).toBe(OPENCODE_MANIFEST);
+    expect(getManifestForAgent('pi')).toBe(PI_MANIFEST);
     expect(getManifestForAgent('aider')).toBe(GENERIC_MANIFEST);
     expect(getManifestForAgent(undefined)).toBe(GENERIC_MANIFEST);
     expect(getManifestForAgent(null)).toBe(GENERIC_MANIFEST);
@@ -769,5 +771,141 @@ describe('CLAUDE_MANIFEST API errors seen in Claude Code 2.1.302', () => {
         expect(detectAgentState(CLAUDE_MANIFEST, screen(s, title))).toMatchObject({ state: 'idle', matchedRuleId: 'live_prompt_box' });
       }
     }
+  });
+});
+
+// Screens distilled from pi 1.5.0 PTY captures (120x40 and 40x24); only the working folder is renamed.
+describe('PI_MANIFEST', () => {
+  const rule = (width = 120) => '─'.repeat(width);
+  const footer = (stats = '0.0%/128k (auto)', width = 120) => [
+    '/home/dev/repo (main)',
+    `${stats}${' '.repeat(Math.max(1, width - stats.length - 10))}mock-model`,
+  ];
+  const header = [
+    ' ▀▀█  v1.5.0',
+    ' █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more',
+    ' Press ctrl+o to show full startup help and loaded resources.',
+    '',
+  ];
+  const piScreen = (topRule: string, composer: string[], stats?: string, transcript: string[] = []) =>
+    [...header, ...transcript, '', '', topRule, ...(composer.length ? composer : ['']), rule(), ...footer(stats)].join('\n');
+
+  it('leaves the blank alternate-screen frame idle for monitor startup grace', () => {
+    const r = detectAgentState(PI_MANIFEST, screen(''));
+    expect(r).toMatchObject({ state: 'idle', visibleIdle: false, matchedRuleId: null });
+  });
+
+  it('classifies the empty startup composer as idle', () => {
+    const r = detectAgentState(PI_MANIFEST, screen(piScreen(rule(), []), 'π - repo'));
+    expect(r).toMatchObject({ state: 'idle', visibleIdle: true, matchedRuleId: 'idle_composer' });
+  });
+
+  it('stays idle with a typed draft, a multi-line draft, a paste marker, or no model configured', () => {
+    for (const composer of [['please go slow'], ['raw first', 'raw second'], ['[paste #1 +12 lines]']]) {
+      expect(detectAgentState(PI_MANIFEST, screen(piScreen(rule(), composer, '↑20 ↓10 0.0%/128k (auto)'))).matchedRuleId).toBe('idle_composer');
+    }
+    const noModel = piScreen(rule(), [], '0.0%/0 (auto)', [' Warning: No models available. Use /login to log into a provider via OAuth or API key. See:']);
+    expect(detectAgentState(PI_MANIFEST, screen(noModel)).matchedRuleId).toBe('idle_composer');
+  });
+
+  it.each([
+    ['streaming', '── ⠦ Working ' + '─'.repeat(107)],
+    ['a tool call', '── ⠋ Working ' + '─'.repeat(107)],
+    ['a provider retry', '── ⠋ Retrying (1/3) in 2s... (escape to cancel) ' + '─'.repeat(72)],
+    ['compaction', '── ⠙ Auto-compacting... (escape to cancel) ' + '─'.repeat(77)],
+    ['an extension message', '── ⠸ Reticulating splines ' + '─'.repeat(94)],
+    ['an overflowing draft', '── ⠼ Working ────────────────── ↑ 3 more ' + '─'.repeat(80)],
+    ['a 40-column composer', '── ⠋ Retrying (1/3) in 2s... (escape ───'],
+  ])('classifies the spinner in the composer rule during %s as working', (_name, topRule) => {
+    const r = detectAgentState(PI_MANIFEST, screen(piScreen(topRule, [], '↑30 ↓15 1.1%/128k (auto)')));
+    expect(r).toMatchObject({ state: 'working', visibleWorking: true, matchedRuleId: 'status_in_composer' });
+  });
+
+  it('classifies the status row of tuiMode regular as working', () => {
+    const regular = [...header, ' please go slow', '', ' ⠋ Working (escape to interrupt)', rule(), '', rule(), ...footer()].join('\n');
+    expect(detectAgentState(PI_MANIFEST, screen(regular)).matchedRuleId).toBe('status_in_composer');
+  });
+
+  it('does not read a finished tool row or a quoted spinner in the transcript as working', () => {
+    const transcript = [' $ sleep 4; echo tool-ran', '', ' tool-ran', '', ' Took 4.0s', '', ' pong: ⠋ Working is what pi shows'];
+    expect(detectAgentState(PI_MANIFEST, screen(piScreen(rule(), [], undefined, transcript))).matchedRuleId).toBe('idle_composer');
+  });
+
+  // Pi builds the key hint from the person's keybindings, so the rule must not depend on it.
+  it.each([
+    ' ↑↓ navigate  enter select  escape/ctrl+c cancel',
+    ' j/k navigate  space select  q cancel',
+    '',
+  ])('blocks on the project trust prompt shown before the composer, with hint %j', (hint) => {
+    const trust = [
+      "Warning: No project session found with id '7a000000-0000-4000-8000-000000000002'; creating a new session with that id.",
+      rule(),
+      '',
+      ' Trust project folder?',
+      ' /home/dev/repo-trust',
+      '',
+      ' This allows pi to load .pi settings and resources, install missing project packages, and execute project extensions.',
+      '',
+      ' → Trust',
+      '   Trust parent folder (/home/dev)',
+      '   Trust (this session only)',
+      '   Do not trust',
+      '   Do not trust (this session only)',
+      '',
+      hint,
+      '',
+      rule(),
+    ].join('\n');
+    const r = detectAgentState(PI_MANIFEST, screen(trust));
+    expect(r).toMatchObject({ state: 'blocked', visibleBlocker: true, matchedRuleId: 'project_trust_prompt' });
+  });
+
+  // Pi's dialogs replace the input box between two border rows and keep any below-editor
+  // widgets and the footer (two rows, three when an extension sets a status) under them.
+  const dialog = (body: string[], below: string[] = []) => [
+    ...header,
+    ' earlier answer from the model',
+    '',
+    rule(),
+    '',
+    ...body,
+    '',
+    rule(),
+    ...below,
+    ...footer('↑30 ↓15 1.1%/128k (auto)'),
+  ].join('\n');
+  const hint = ' ↑↓ navigate  enter select  escape/ctrl+c cancel';
+  const selector = (title: string, options: string[], keys = hint) =>
+    [` ${title}`, '', ...options.map((option, index) => (index === 0 ? ` → ${option}` : `   ${option}`)), '', keys];
+  const statusLine = 'deploy-guard: watching';
+
+  it.each([
+    ['an in-session trust menu', dialog(selector('Trust project folder?', ['Trust', 'Trust parent folder', 'Do not trust']))],
+    ['an extension confirm', dialog(selector('Allow deploy?', ['Yes', 'No']))],
+    ['a selector with a reworded hint', dialog(selector('Pick a model', ['mock-1', 'mock-2'], ' j/k navigate  space select  q cancel'))],
+    // Reported in review: a below-editor widget and an extension status line push the border up.
+    ['a confirm above a widget and a status line', dialog(selector('Allow deploy?', ['Yes', 'No']), [' ▸ deploy queue: 1 waiting', statusLine])],
+    ['a confirm above many widget lines', dialog(selector('Allow deploy?', ['Yes', 'No']), Array.from({ length: 10 }, (_, index) => ` widget line ${index}`))],
+    ['an extension input dialog', dialog([' Type the repo name to delete it', '', ' > ', '', ' enter submit  escape/ctrl+c cancel'])],
+  ])('blocks on %s', (_label, text) => {
+    const r = detectAgentState(PI_MANIFEST, screen(text));
+    expect(r).toMatchObject({ state: 'blocked', visibleBlocker: true, matchedRuleId: 'live_dialog' });
+    expect(r.visibleIdle).not.toBe(true);
+  });
+
+  it('reads arrows in the transcript above the input box as idle', () => {
+    const transcript = [' Plan:', ' → read the file', ' → explain it', '', ' → done', ''];
+    expect(detectAgentState(PI_MANIFEST, screen(piScreen(rule(), [], undefined, transcript)))).toMatchObject({ state: 'idle', visibleIdle: true });
+  });
+
+  it('holds when an arrow row sits between two border rows anywhere on screen', () => {
+    // Indistinguishable from a dialog frame, so it fails safe.
+    const transcript = [rule(), ' → step one', ''];
+    expect(detectAgentState(PI_MANIFEST, screen(piScreen(rule(), [], undefined, transcript))).state).toBe('blocked');
+  });
+
+  it('does not block on a trust prompt answered earlier in the transcript', () => {
+    const answered = piScreen(rule(), [], undefined, [' Trust project folder?', ' → Trust', '   Do not trust', ' ↑↓ navigate  enter select  escape/ctrl+c cancel']);
+    expect(detectAgentState(PI_MANIFEST, screen(answered)).state).not.toBe('blocked');
   });
 });

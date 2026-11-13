@@ -55,6 +55,13 @@ describe.each([
       const route = request.url?.split('?')[0];
       const isInvoke = request.method === 'POST' && route === '/invoke';
       const handler = (async () => {
+        // Port discovery (listeningPorts.ts) probes every local port this way, including this fixture's
+        // whenever it runs alongside, in another test file or in a running Pane.
+        if (request.method === 'HEAD' && route === '/') {
+          response.statusCode = 404;
+          response.end();
+          return;
+        }
         if (request.method === 'GET' && route === '/health') {
           response.end(JSON.stringify({ ok: true }));
           return;

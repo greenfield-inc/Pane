@@ -10,6 +10,7 @@ import {
   GitBranch,
   Keyboard,
   KeyRound,
+  Link,
   Link2,
   Monitor,
   Navigation,
@@ -51,10 +52,18 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'terminal',
     label: 'Terminal',
-    description: 'Terminal display, references, shell, and power behavior.',
+    description: 'Terminal display, selection, references, shell, and power behavior.',
     icon: Terminal,
-    settingIds: ['terminal-font-family', 'terminal-font-size', 'terminal-power-mode', 'terminal-reference-paste-mode', 'terminal-reference-line-count', 'terminal-shell'],
-    aliases: ['font', 'shell', 'scrollback', 'gpu', 'battery'],
+    settingIds: ['terminal-font-family', 'terminal-font-size', 'terminal-power-mode', 'terminal-copy-on-select', 'terminal-references-enabled', 'terminal-reference-paste-mode', 'terminal-reference-line-count', 'terminal-shell'],
+    aliases: ['font', 'shell', 'scrollback', 'gpu', 'battery', 'copy', 'select', 'selection', 'clipboard', 'popover', '@', 'mention', 'picker'],
+  },
+  {
+    id: 'links',
+    label: 'Links',
+    description: 'Your own clickable links in terminal output, such as issue keys.',
+    icon: Link,
+    settingIds: ['custom-links'],
+    aliases: ['link', 'url', 'regex', 'pattern', 'issue', 'ticket', 'jira', 'linear', 'tracker', 'clickable'],
   },
   {
     id: 'ai-agents',
@@ -99,10 +108,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'worktrees-git',
     label: 'Worktrees & Git',
-    description: 'Defaults for commits, pull requests, and new worktrees.',
+    description: 'Defaults for commits, pull requests, new worktrees, and opening them in your IDE.',
     icon: GitBranch,
-    settingIds: ['commit-footer', 'git-attribution', 'auto-rename-pr', 'worktree-file-sync'],
-    aliases: ['git', 'worktree', 'commit', 'pull request', 'pr', 'attribution', 'committer', 'author'],
+    settingIds: ['commit-footer', 'git-attribution', 'auto-rename-pr', 'worktree-file-sync', 'default-ide-command'],
+    aliases: ['git', 'worktree', 'commit', 'pull request', 'pr', 'attribution', 'committer', 'author', 'ide', 'editor', 'open in ide'],
   },
   {
     id: 'notifications',

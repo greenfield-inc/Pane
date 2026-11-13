@@ -468,9 +468,13 @@
         "icon",
         "executables",
         "terminal",
-        "install",
-        "signIn"
+        "install"
       ],
+      "dependentRequired": {
+        "chat": [
+          "signIn"
+        ]
+      },
       "additionalProperties": false,
       "properties": {
         "title": {
@@ -532,6 +536,54 @@
               "description": "Pane's SessionStart hook reports the terminal's live conversation, so Switch to chat can be sure which one it is on.",
               "type": "boolean"
             },
+            "promptArgument": {
+              "description": "The CLI takes the starting message as a command argument. Without it, Pane types the message into the agent's input box once the status manifest shows that box idle.",
+              "type": "boolean"
+            },
+            "configDir": {
+              "description": "The CLI's project config folder, copied into new worktrees by default.",
+              "type": "string",
+              "minLength": 1
+            },
+            "session": {
+              "description": "How the CLI opens a saved conversation from the command line.",
+              "type": "object",
+              "required": [
+                "flag",
+                "minimumVersion",
+                "idPattern"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "flag": {
+                  "description": "The flag that opens a conversation by id.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minimumVersion": {
+                  "description": "Oldest CLI version with the flag; the agents doctor checks the CLI's --help for the flag.",
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d+\\.\\d+$"
+                },
+                "idPattern": {
+                  "description": "Regular expression a conversation id must match.",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "paneChoosesId": {
+                  "description": "The flag also creates the conversation when none has the id, so Pane picks the id and every launch runs the same command.",
+                  "type": "boolean"
+                },
+                "selectors": {
+                  "description": "Flags with which a command picks its own conversation; Pane then runs that command unchanged.",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            },
             "platforms": {
               "type": "array",
               "items": {
@@ -560,7 +612,7 @@
           }
         },
         "signIn": {
-          "description": "Arguments to the agent's CLI that sign it in, run in a terminal tab when the agent advertises no terminal sign-in of its own.",
+          "description": "Arguments to the agent's CLI that sign it in, run in a terminal tab when a chat agent advertises no terminal sign-in of its own. Required with chat.",
           "type": "array",
           "minItems": 1,
           "items": {

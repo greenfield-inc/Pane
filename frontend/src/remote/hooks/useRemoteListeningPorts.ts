@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 
-/** The host's listening ports with their phone addresses, kept current by `ports:changed`. Null until the first read. */
-export function useRemoteListeningPorts(adapter: RemoteRuntimeAdapter | null): ListeningPortsSnapshot | null {
+/**
+ * The host's listening ports with their phone addresses, kept current by `ports:changed`. Null until the first read.
+ * `refresh` asks the host to read them now; the host reads them only every minute while its terminals are quiet.
+ */
+export function useRemoteListeningPorts(adapter: RemoteRuntimeAdapter | null) {
   // Kept with the host it came from, so switching hosts never shows the previous host's ports.
   const [read, setRead] = useState<{ adapter: RemoteRuntimeAdapter; snapshot: ListeningPortsSnapshot } | null>(null);
+  const loadRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!adapter) return;
@@ -19,6 +23,7 @@ export function useRemoteListeningPorts(adapter: RemoteRuntimeAdapter | null): L
         (error: Error) => console.error('[Ports] Failed to list host ports:', error),
       );
     };
+    loadRef.current = load;
     load();
     const unsubscribeEvents = adapter.onEvent(event => {
       if (event.channel !== 'ports:changed' || !event.args[0]) return;
@@ -31,10 +36,12 @@ export function useRemoteListeningPorts(adapter: RemoteRuntimeAdapter | null): L
     const unsubscribeStatus = adapter.onStatus(state => { if (state.status === 'connected') load(); });
     return () => {
       cancelled = true;
+      loadRef.current = () => {};
       unsubscribeEvents();
       unsubscribeStatus();
     };
   }, [adapter]);
 
-  return read?.adapter === adapter ? read.snapshot : null;
+  const refresh = useCallback(() => loadRef.current(), []);
+  return { snapshot: read?.adapter === adapter ? read.snapshot : null, refresh };
 }

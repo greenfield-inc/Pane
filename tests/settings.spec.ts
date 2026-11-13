@@ -174,10 +174,11 @@ test.describe('Settings', () => {
 
     await page.getByRole('button', { name: 'AI & Agents', exact: true }).click();
     const agentChoices = page.getByRole('radiogroup', { name: 'Default Pane Chat agent' });
-    await expect(agentChoices.getByRole('radio')).toHaveCount(3);
+    await expect(agentChoices.getByRole('radio')).toHaveCount(4);
     await expect(agentChoices.getByRole('radio', { name: 'Claude', exact: true })).toBeVisible();
     await expect(agentChoices.getByRole('radio', { name: 'Codex', exact: true })).toBeVisible();
     await expect(agentChoices.getByRole('radio', { name: 'OpenCode', exact: true })).toBeVisible();
+    await expect(agentChoices.getByRole('radio', { name: 'Pi', exact: true })).toBeVisible();
     await expect(agentChoices.getByRole('radio', { name: 'Cursor' })).toHaveCount(0);
   });
 
@@ -187,6 +188,7 @@ test.describe('Settings', () => {
       'General',
       'Appearance',
       'Terminal',
+      'Links',
       'AI & Agents',
       'Worktrees & Git',
       'Notifications',
@@ -475,6 +477,31 @@ test.describe('Settings', () => {
     ]));
   });
 
+  test('applies a custom terminal link after trying it on sample text', async ({ page }) => {
+    await bootSettings(page);
+    await page.getByRole('button', { name: 'Links', exact: true }).click();
+    await page.getByRole('button', { name: 'Add Link' }).click();
+    await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Jira');
+    await page.getByRole('textbox', { name: 'Pattern', exact: true }).fill('\\bPROJ-\\d+\\b');
+    await page.getByRole('textbox', { name: 'Link', exact: true }).fill('https://example.atlassian.net/browse/$0');
+    await page.getByRole('textbox', { name: 'Try it', exact: true }).fill('Fixes PROJ-12');
+    await expect(page.getByRole('list', { name: 'Links found' }))
+      .toHaveText('PROJ-12 → https://example.atlassian.net/browse/PROJ-12');
+    await page.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const updates = await page.evaluate(() => (
+      window as typeof window & { __paneTestElectronMock: SettingsMock }
+    ).__paneTestElectronMock.getConfigUpdates());
+    expect(updates.at(-1)?.customLinks).toEqual([expect.objectContaining({
+      enabled: true,
+      label: 'Jira',
+      pattern: '\\bPROJ-\\d+\\b',
+      urlTemplate: 'https://example.atlassian.net/browse/$0',
+    })]);
+  });
+
   test('guards category navigation when a staged form is dirty', async ({ page }) => {
     await bootSettings(page);
 
@@ -610,7 +637,7 @@ test.describe('Settings', () => {
     await expect(content.getByText(/Saved pane-setup-2026-10-26\.json\. Left out deploy-prod because it looks like it contains a token\./)).toBeVisible();
     await expect(content.getByRole('button', { name: 'Show in Finder' })).toBeVisible();
     expect((await mock()).exports).toEqual([
-      ['agentPresets', 'customCommands', 'runScripts', 'skills', 'worktreeFileSync', 'appearance', 'preferences'],
+      ['agentPresets', 'customCommands', 'runScripts', 'skills', 'customLinks', 'worktreeFileSync', 'appearance', 'preferences'],
     ]);
 
     await content.getByRole('button', { name: 'Import…' }).click();

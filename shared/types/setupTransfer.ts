@@ -4,6 +4,7 @@ import type { VoiceTranscriptionMode } from './voiceTranscription';
 import type { WorktreeFileSyncEntry } from './worktreeFileSync';
 import type { AppearanceMode, Theme } from './appearance';
 import type { SessionRetention } from './orchestrationSession';
+import type { CustomLink } from './customLinks';
 
 /**
  * A Pane setup file (`pane-setup-YYYY-MM-DD.json`): an allowlisted copy of one
@@ -20,6 +21,7 @@ export const SETUP_SECTION_IDS = [
   'runScripts',
   'skills',
   'terminalShortcuts',
+  'customLinks',
   'worktreeFileSync',
   'appearance',
   'preferences',
@@ -98,6 +100,8 @@ export interface SetupPreferenceConfig {
   /** Changed key bindings by command id; null unassigns (shared/utils/keyboardBindings.ts). */
   keyboardShortcutOverrides?: Record<string, string | null>;
   kittyKeyboardEnabled?: boolean;
+  terminalCopyOnSelect?: boolean;
+  terminalReferencesEnabled?: boolean;
   htmlFileOpenMode?: 'preview' | 'source';
   enableCommitFooter?: boolean;
   gitAttributionEnabled?: boolean;
@@ -134,6 +138,7 @@ export interface SetupSections {
   runScripts?: SetupRunScripts[];
   skills?: SetupSkills;
   terminalShortcuts?: SetupTerminalShortcut[];
+  customLinks?: CustomLink[];
   worktreeFileSync?: WorktreeFileSyncEntry[];
   appearance?: SetupAppearance;
   preferences?: SetupPreferences;
@@ -209,6 +214,7 @@ export interface SetupApplyPayload {
     sessionCreationPreferences?: SetupSessionCreationPreferences & { baseBranch?: string };
     customCommands?: SetupCustomCommand[];
     terminalShortcuts?: SetupTerminalShortcut[];
+    customLinks?: CustomLink[];
     worktreeFileSync?: WorktreeFileSyncEntry[];
     agentContext?: SetupSkills;
   };

@@ -83,7 +83,7 @@ export function parseDestination(text: string, machines: readonly TailnetMachine
     if (found.length > 1) throw new Error(`"${text}" names two ${label}: ${found.join(' and ')}. Name one.`);
   }
   const agent = overrides.agent ?? agents[0];
-  if (!agent) throw new Error(`Name the agent: claude, codex, or cursor. For example: runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md`);
+  if (!agent) throw new Error(`Name the agent: ${RUNPANE_CONTRACT.enums.agents.join(', ')}. For example: runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md`);
 
   let machine: string | null = null;
   if (overrides.machine) {
@@ -100,8 +100,10 @@ export function parseDestination(text: string, machines: readonly TailnetMachine
   const effort = overrides.effort ?? efforts[0];
   if (model !== undefined && !/^[A-Za-z0-9._:/-]+$/.test(model)) throw new Error('Invalid model identifier. Use letters, numbers, dots, underscores, colons, slashes, or hyphens.');
   if (effort !== undefined && !EFFORTS.has(effort)) throw new Error(`Invalid effort. Use ${[...EFFORTS].join(', ')}.`);
-  if (agent === 'cursor' && effort !== undefined) throw new Error('Cursor effort is not supported. Omit --effort and effort text; nothing was committed or sent.');
-  if (agent === 'opencode' && effort !== undefined) throw new Error('OpenCode effort is not supported. Omit --effort and effort text; nothing was committed or sent.');
+  // Only Claude and Codex take an effort flag (agentCommand).
+  if (effort !== undefined && agent !== 'claude' && agent !== 'codex') {
+    throw new Error(`${RUNPANE_CONTRACT.agents.entries[agent].label} effort is not supported. Omit --effort and effort text; nothing was committed or sent.`);
+  }
   if (model) destination.model = model;
   if (effort) destination.effort = effort;
   if (wsl) destination.wsl = true;

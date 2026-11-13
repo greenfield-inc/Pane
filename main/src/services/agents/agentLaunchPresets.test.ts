@@ -14,12 +14,12 @@ describe('AGENT_LAUNCH_PRESETS', () => {
       codex: 'codex --yolo',
       cursor: 'cursor-agent --force --trust',
       opencode: 'opencode --auto',
+      pi: 'pi',
     });
   });
 
-  it('assigns unique, contiguous hotkey slots starting at mod+alt+3', () => {
-    const slots = AGENT_LAUNCH_PRESETS.map(p => Number(p.hotkey.replace('mod+alt+', '')));
-    expect(slots).toEqual(slots.map((_, i) => 3 + i));
+  it('gives each preset its own hotkey and hotkey id', () => {
+    expect(new Set(AGENT_LAUNCH_PRESETS.map(p => p.hotkey)).size).toBe(AGENT_LAUNCH_PRESETS.length);
     expect(new Set(AGENT_LAUNCH_PRESETS.map(p => p.hotkeyId)).size).toBe(AGENT_LAUNCH_PRESETS.length);
     expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'opencode')).toMatchObject({
       hotkeyId: 'add-tool-terminal-opencode',
@@ -28,12 +28,12 @@ describe('AGENT_LAUNCH_PRESETS', () => {
   });
 
   it('supports cursor on POSIX hosts and WSL repos, but not native Windows', () => {
-    expect(agentPresetsForPlatform('win32').map(p => p.id)).toEqual(['claude', 'codex', 'opencode']);
-    expect(agentPresetsForPlatform('darwin').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
-    expect(agentPresetsForPlatform('linux').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
-    expect(agentPresetsForPlatform('windows').map(p => p.id)).toEqual(['claude', 'codex', 'opencode']);
-    expect(agentPresetsForPlatform('macos').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
-    expect(agentPresetsForPlatform('wsl').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode']);
+    expect(agentPresetsForPlatform('win32').map(p => p.id)).toEqual(['claude', 'codex', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('darwin').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('linux').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('windows').map(p => p.id)).toEqual(['claude', 'codex', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('macos').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
+    expect(agentPresetsForPlatform('wsl').map(p => p.id)).toEqual(['claude', 'codex', 'cursor', 'opencode', 'pi']);
     expect(isAgentSupportedOnPlatform('cursor', 'windows')).toBe(false);
     expect(isAgentSupportedOnPlatform('cursor', 'wsl')).toBe(true);
     expect(isAgentSupportedOnPlatform('opencode', 'darwin')).toBe(true);
@@ -41,5 +41,7 @@ describe('AGENT_LAUNCH_PRESETS', () => {
     expect(isAgentSupportedOnPlatform('opencode', 'wsl')).toBe(true);
     expect(isAgentSupportedOnPlatform('opencode', 'windows')).toBe(true);
     expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'opencode')?.platforms).toBeUndefined();
+    expect(isAgentSupportedOnPlatform('pi', 'windows')).toBe(true);
+    expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'pi')?.platforms).toBeUndefined();
   });
 });

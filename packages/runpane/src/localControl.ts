@@ -55,8 +55,6 @@ interface OrchestrationActivity {
   panelId?: string;
 }
 
-type OrchestrationAgent = 'claude' | 'codex' | 'cursor' | 'opencode';
-
 interface OrchestrationSessionRecord {
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
@@ -66,10 +64,10 @@ interface OrchestrationSessionRecord {
   isPinned?: boolean;
   /** Set while the Session's chat and every Pane in it are paused. */
   paused?: PausedMark;
-  agent: OrchestrationAgent;
+  agent: RunpaneAgent;
   internalSessionId: string;
-  /** Pane versions before OpenCode Sessions send no `opencode` panel id. */
-  panelIds: Record<Exclude<OrchestrationAgent, 'opencode'>, string> & { opencode?: string };
+  /** Each agent's Session panel id, keyed by agent id; older Pane versions send fewer agents. */
+  panelIds: JsonObject;
   goal: string;
   context: string;
   decisions: string[];
@@ -1184,7 +1182,6 @@ interface PaneAdoptRequestInput extends Omit<PaneAdoptRequest, 'panes'> {
 }
 
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const orchestrationAgentSchema = boundary.enumeration('claude', 'codex', 'cursor', 'opencode');
 const repoSummarySchema: BoundarySchema<RepoSummary> = boundary.object({
   id: boundary.number,
   name: boundary.string,
@@ -1517,14 +1514,9 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
   paused: boundary.optional(pausedMarkSchema),
-  agent: orchestrationAgentSchema,
+  agent: agentSchema,
   internalSessionId: boundary.nonEmptyString,
-  panelIds: boundary.object({
-    claude: boundary.nonEmptyString,
-    codex: boundary.nonEmptyString,
-    cursor: boundary.nonEmptyString,
-    opencode: boundary.optional(boundary.nonEmptyString),
-  }),
+  panelIds: boundary.jsonObject,
   launchCommand: boundary.optional(boundary.string),
   profile: boundary.optional(boundary.string),
   goal: boundary.string,

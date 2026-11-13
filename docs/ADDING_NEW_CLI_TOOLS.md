@@ -42,8 +42,11 @@ same ids. The schema is `$defs/agent` and `$defs/agentChat` in
 | `terminal.hotkey` | Default key for "Add <title>"; it must conflict with no other key |
 | `terminal.platforms` | Platforms the agent runs on, when not all |
 | `terminal.reportsConversation` | Pane's `SessionStart` hook reports the terminal's live conversation (Claude only) |
+| `terminal.promptArgument` | The CLI takes the starting message as a command argument. Without it, Pane types the message once the status manifest shows the agent's idle input box (below) |
+| `terminal.configDir` | The CLI's project config folder (`.claude`), copied into new worktrees by default |
+| `terminal.session` | How the CLI opens a saved conversation: `flag`, `minimumVersion` (the doctor checks `--help` for the flag), `idPattern`, `selectors` (flags with which a command picks its own conversation) and `paneChoosesId` (the flag also creates the conversation, so Pane picks the id) |
 | `install` | Install page `url` and install `command`, shown when the CLI is missing or too old |
-| `signIn` | Arguments to the CLI that sign it in, run in a terminal tab when the agent advertises no terminal sign-in of its own |
+| `signIn` | Arguments to the CLI that sign it in, run in a terminal tab when a chat agent advertises no terminal sign-in of its own; required with `chat` |
 | `onboarding` | Offered on the first-run screen |
 | `chat` | Present when chat tabs run the agent (below) |
 
@@ -84,7 +87,12 @@ What derives from the entry with no further code:
 - Pane Chat and Sessions: `PaneChatAgent`, its labels
   (`PANE_CHAT_AGENT_LABELS`), panel ids and validators in
   `shared/types/paneChat.ts`.
-- `runpane --agent <id>` and the agent doctor's launch command.
+- `runpane --agent <id>`, the agent doctor's launch command and its `--help` check for `terminal.session.flag`.
+- How the starting message is delivered (`terminal.promptArgument`), and the
+  default worktree file sync row (`terminal.configDir`).
+- For `terminal.session.paneChoosesId`: the launch and every relaunch add the
+  flag with a Pane-chosen id (`agents/chosenSessionLaunch.ts`), the resume
+  dialog, `--resume` checks and the update reopen read the same fields.
 - Chat tabs, for an entry with `chat`: launch, version check, API key, sign-in,
   full access, the host's agent catalog, Settings → Agents and Switch to chat.
   A Session orchestrator for it opens as a chat tab when chat tabs are on.
@@ -118,6 +126,34 @@ earlier allocator (`ses_` + 32 lowercase hex) are dropped. Its idle composer gat
 once-only stdin prompt delivery; wrapped commands remain opaque. RunPane doctor
 checks the installed executable's session capability before reporting support.
 
+Pi takes a caller-chosen id, so its entry sets `terminal.session.paneChoosesId`:
+`pi --session-id <id>` opens the working folder's session with that id and
+creates it when there is none. Pane allocates a UUID for a direct `pi` launch,
+saves it as the panel's `agentSessionId` and runs the same command on every
+relaunch. A command that picks its own session (a `selectors` flag or its own
+`--session-id`), runs a subcommand (`pi auth login`), has a `--` or runs pi
+through a wrapper or shell syntax runs unchanged, and `--resume` is refused for
+it. Pi has no `promptArgument`: as an argument, pi reads a leading `@` as a
+file to attach and sends a slash command to the model as text.
+
+A held starting message waits for positive evidence of the agent's own input
+box: its manifest's `visibleIdle` rule, or the composer signature in
+`agentScreenSignature.ts` (Claude, Codex). An idle status alone is not enough,
+because a screen no rule recognizes also reads idle, and Enter there could
+answer a prompt such as pi's project-trust question, whose first option is
+Trust. After 30 seconds without the input box, Pane records on the panel that
+it is holding the message and keeps holding it. `--wait-ready` waits for the
+same input box. For an agent without `promptArgument`, `panels submit` (and so
+`agents send` and Notify's owed answers) types only when the manifest
+recognizes the input box, idle (`visibleIdle`) or mid-turn (`visibleWorking`),
+and nothing blocks it. So a typed-message agent needs a `visibleIdle` rule, and
+blocked rules for every prompt or dialog that can replace its input box. Pi
+keeps its footer and widgets below a dialog, so pi's `live_dialog` scans the
+whole visible screen for a dialog frame: a border row, then the highlighted
+option (`→ `) or the key hint ending in `cancel`, then a border row. Such a
+frame anywhere reads blocked, which holds rather than guesses. Loops and handoff session
+carrying do not offer pi yet.
+
 `main/src/services/agents/agentResume.ts` → `resolveResumeId` maps the agent to the
 resume id shown in the resume dialog. `sessionManager.resumeInterruptedSessions` and
 the `index.ts` graceful-shutdown path are agent-generic once the classifier knows the
@@ -135,7 +171,8 @@ fixtures came from.
 
 `main/src/ipc/runpane.ts`:
 
-- `shouldUseArgumentDelivery`: how the initial prompt reaches the CLI.
+- `shouldUseArgumentDelivery`: argument delivery for an agent with
+  `terminal.promptArgument` (Codex keeps slash commands typed).
 - `runAgentDoctor`: add fallback binary paths (`AGENT_FALLBACK_BIN_PATHS`) when the
   install dir is typically off the GUI PATH.
 
@@ -147,9 +184,9 @@ it under the entry's `icon` key in `CLI_BRAND_ICONS`
 the phone's `BRAND_ICONS` (`native/src/app/pane/[paneId]/new-panel.tsx`).
 Without them the agent gets the generic icon.
 
-If the CLI reads a config directory (like `.cursor/`), add it to
-`DEFAULT_WORKTREE_FILE_SYNC_ENTRIES` in `shared/types/worktreeFileSync.ts` so it is
-copied into new worktrees.
+If the CLI reads a project config folder (like `.cursor/`), set
+`terminal.configDir`; `DEFAULT_WORKTREE_FILE_SYNC_ENTRIES` in
+`shared/types/worktreeFileSync.ts` copies it into new worktrees.
 
 ## 6. Sessions in a terminal
 
@@ -198,7 +235,8 @@ Pane decides a terminal panel's agent in this order, and records the source in
 2. **`command`**: the launch command's executable word, through
    `resolveAgentTypeFromCommand` in `main/src/services/agents/agentIdentity.ts`.
 3. **`process`**: the PTY's foreground process name, which node-pty reports as
-   `pty.process`. The names `claude`, `codex`, `cursor-agent` and `opencode` map to agents.
+   `pty.process`. Each entry's `executables` map to its agent. Pi sets its
+   process title to `pi`, so an npm-installed pi is found here too.
    Claude Code's native installer runs `~/.local/share/claude/versions/<version>`,
    so it reports a bare version such as `2.1.283`. Pane resolves that name to an
    executable path with `ps` (or `/proc/<pid>/exe` on Linux) before trusting it.

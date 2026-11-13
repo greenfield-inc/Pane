@@ -1,3 +1,5 @@
+import { CONFIGURED_AGENT_IDS, configuredAgent } from '../agents';
+
 export interface WorktreeFileSyncEntry {
   id: string;
   path: string;
@@ -9,9 +11,11 @@ export interface WorktreeFileSyncEntry {
 // last so credentials and config land before slow recursive copies.
 export const DEFAULT_WORKTREE_FILE_SYNC_ENTRIES: WorktreeFileSyncEntry[] = [
   { id: 'env', path: '.env*', enabled: true, recursive: true },
-  { id: 'claude', path: '.claude', enabled: true, recursive: false },
-  { id: 'codex', path: '.codex', enabled: true, recursive: false },
-  { id: 'cursor', path: '.cursor', enabled: true, recursive: false },
+  // Each configured agent's project config folder (`terminal.configDir` in the agents config).
+  ...CONFIGURED_AGENT_IDS.flatMap((id): WorktreeFileSyncEntry[] => {
+    const path = configuredAgent(id).terminal.configDir;
+    return path ? [{ id, path, enabled: true, recursive: false }] : [];
+  }),
   { id: 'continue', path: '.continue', enabled: true, recursive: false },
   { id: 'windsurf', path: '.windsurf', enabled: true, recursive: false },
   { id: 'amazonq', path: '.amazonq', enabled: true, recursive: false },

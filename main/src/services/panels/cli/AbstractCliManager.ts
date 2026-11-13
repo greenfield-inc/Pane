@@ -102,6 +102,7 @@ interface CliOutputEvent {
 export abstract class AbstractCliManager extends EventEmitter {
   protected processes: Map<string, CliProcess> = new Map(); // Keyed by panelId
   protected availabilityCache: AvailabilityCache | null = null;
+  private lastOutputAt = 0;
   protected readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
   protected readonly execAsync = promisify(exec);
 
@@ -354,6 +355,11 @@ export abstract class AbstractCliManager extends EventEmitter {
    */
   getAllProcesses(): string[] {
     return Array.from(this.processes.keys());
+  }
+
+  /** When any of this manager's PTYs last printed, in ms since the epoch; 0 when none has. */
+  latestOutputAt(): number {
+    return this.lastOutputAt;
   }
 
   /**
@@ -1011,6 +1017,7 @@ export abstract class AbstractCliManager extends EventEmitter {
 
     ptyProcess.onData((data: string) => {
       hasReceivedOutput = true;
+      this.lastOutputAt = Date.now();
       const combined = lastOutput + data;
       lastOutput = combined.length > LAST_OUTPUT_TAIL_BYTES
         ? combined.slice(-LAST_OUTPUT_TAIL_BYTES)

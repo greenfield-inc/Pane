@@ -56,7 +56,7 @@ interface LivePreviewPromptProps {
  * Mount it keyed by Pane so a failure stays with the Pane it happened in.
  */
 export function LivePreviewPrompt({ paneId, projectId, panels }: LivePreviewPromptProps) {
-  const ports = useListeningPorts();
+  const { snapshot: ports } = useListeningPorts();
   const remote = useRemoteRuntimeState();
   // The prompt's memory lives outside React; answering it re-renders through this.
   const [, rerender] = useReducer((count: number) => count + 1, 0);

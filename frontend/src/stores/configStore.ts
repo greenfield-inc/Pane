@@ -40,6 +40,11 @@ export function isNotesEnabled(config: AppConfig | null): boolean {
   return config?.notesEnabled === true;
 }
 
+/** Copy on select (Settings > Terminal); always on in remote mode, so text lands on this computer's clipboard. */
+export function isCopyOnSelectEnabled(config: AppConfig | null): boolean {
+  return config?.terminalCopyOnSelect === true || config?.remoteDaemon?.client.mode === 'remote';
+}
+
 /** What a click on an .html file in Explorer opens; the browser preview unless the user chose source. */
 export function htmlFileOpenModeOf(config: AppConfig | null): HtmlFileOpenMode {
   return config?.htmlFileOpenMode === 'source' ? 'source' : 'preview';

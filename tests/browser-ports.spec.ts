@@ -54,6 +54,18 @@ test('a late list reply does not replace a newer port change', async ({ page }) 
   await expect(page.getByText('5173')).toHaveCount(0);
 });
 
+test('opening the Ports menu lists a port that started after the tab opened', async ({ page }) => {
+  await openBrowserPanel(page, 'http://localhost:5173');
+  await answerConnectionState(page, 'local');
+  await answerPortsList(page, snapshot(5173));
+  const trigger = page.getByRole('button', { name: /Ports/ });
+  await expect(trigger).toContainText('1');
+
+  await trigger.click();
+  await answerPortsList(page, snapshot(5173, 5175));
+  await expect(page.getByTitle('Open localhost:5175')).toBeVisible();
+});
+
 test('the Ports menu works from the keyboard', async ({ page }) => {
   await openBrowserPanel(page, 'http://localhost:5173');
   await answerConnectionState(page, 'local');

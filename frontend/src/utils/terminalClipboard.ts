@@ -12,6 +12,21 @@ export function isTerminalCopyShortcut(event: TerminalCopyShortcutEvent, isMac: 
   return event.ctrlKey && event.shiftKey && !event.metaKey;
 }
 
+/** The key isTerminalCopyShortcut accepts, as an Electron accelerator for menu labels. */
+export function terminalCopyAccelerator(isMac: boolean): string {
+  return isMac ? 'Cmd+C' : 'Ctrl+Shift+C';
+}
+
+/**
+ * The terminal's paste key as an Electron accelerator, or undefined when there
+ * is none: off macOS, TerminalPanel turns Ctrl+V into a paste only while Pane
+ * keyboard shortcuts are on; otherwise the shell receives a literal Ctrl+V.
+ */
+export function terminalPasteAccelerator(isMac: boolean, keyboardShortcutsEnabled: boolean): string | undefined {
+  if (isMac) return 'Cmd+V';
+  return keyboardShortcutsEnabled ? 'Ctrl+V' : undefined;
+}
+
 export async function copyTerminalText(text: string): Promise<boolean> {
   if (!text) return false;
   if (!navigator.clipboard?.writeText) {

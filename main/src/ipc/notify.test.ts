@@ -392,6 +392,7 @@ describe('Notify across machines, through the registered handlers', () => {
 describe('Approvals items, through the registered handlers', () => {
   beforeEach(() => vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1'));
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
@@ -516,9 +517,12 @@ describe('Approvals items, through the registered handlers', () => {
 
   it("shows a worker's blocked question at once, answerable and quiet, until its orchestrator acknowledges it", async () => {
     vi.stubEnv('PANE_APPROVALS_RELAY_AFTER_MS', '60');
+    // The clock holds still while the Pane starts, so slow config I/O can't spend the question's grace.
+    vi.useFakeTimers({ toFake: ['Date'] });
     const inbox = inboxOf([blocked(Date.now())]);
     const pane = await startWithSessions(inbox);
     const [card] = pane.notify.snapshot().items;
+    vi.useRealTimers();
     expect(card).toMatchObject({
       id: 'in-1',
       ui: 'ask',

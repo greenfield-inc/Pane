@@ -197,7 +197,7 @@ function buildOrchestrationSession(name: string, index: number): OrchestrationSe
     isPinned: false,
     agent: 'claude',
     internalSessionId: `${id}terminal__`,
-    panelIds: { claude: `${id}claude`, codex: `${id}codex`, cursor: `${id}cursor`, opencode: `${id}opencode` },
+    panelIds: { claude: `${id}claude`, codex: `${id}codex`, cursor: `${id}cursor`, opencode: `${id}opencode`, pi: `${id}pi` },
     goal: '',
     context: '',
     decisions: [],
@@ -354,6 +354,14 @@ export async function openConnectedRemotePwa(
   await page.getByRole('tablist', { name: 'Remote tool panels' }).waitFor();
   await page.getByRole('status').filter({ hasText: /^Connected to/ }).waitFor();
   return fixtures.host;
+}
+
+/** Changes what the host answers to `ports:list` from now on, without sending `ports:changed`. */
+export function setRemoteHostPorts(page: Page, ports: ListeningPortsSnapshot): void {
+  const host = pageHosts.get(page);
+  const fixtures = host ? hostFixtures.get(host) : undefined;
+  if (!fixtures) throw new Error('Open the host with openConnectedRemotePwa first.');
+  fixtures.ports = ports;
 }
 
 /**

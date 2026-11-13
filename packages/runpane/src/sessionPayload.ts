@@ -1,5 +1,6 @@
 import { boundary, BoundaryDecodeIssues, decodeBoundaryAll } from './boundaryDecoder';
 import { RunpaneError } from './errors';
+import { RUNPANE_CONTRACT } from './generated/contract';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
 
 /**
@@ -36,7 +37,7 @@ const reportSchema = boundary.object({
   reportedAt: isoDateSchema,
   provenance: boundary.nonEmptyString,
 });
-const agentSchema = boundary.enumeration('codex', 'claude', 'cursor', 'opencode');
+const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
 
 const sessionCreatePayloadSchema = boundary.object({
   runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
