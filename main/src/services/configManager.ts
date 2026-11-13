@@ -5,7 +5,7 @@ import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../shared/types/appearance';
 import { DEFAULT_AUTO_PAUSE_HOURS } from '../../../shared/types/autoPause';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
-import type { CustomLink } from '../../../shared/types/customLinks';
+import { customLinkSchema, type CustomLink } from '../../../shared/types/customLinks';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../shared/types/worktreeFileSync';
 import fs from 'fs/promises';
@@ -57,14 +57,6 @@ const machineMarksSchema = boundary.record(boundary.object({
   letters: boundary.optional(boundary.string),
   color: boundary.optional(boundary.enumeration(...MACHINE_COLOR_NAMES)),
 }));
-
-const customLinkSchema = boundary.object({
-  enabled: boundary.boolean,
-  id: boundary.nonEmptyString,
-  label: boundary.string,
-  pattern: boundary.string,
-  urlTemplate: boundary.string,
-});
 
 /** customLinks as Settings › Links can show them: hand-edited entries missing a field are dropped and logged. */
 function decodeCustomLinks(saved: CustomLink[]): CustomLink[] {

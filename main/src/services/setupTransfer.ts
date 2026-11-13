@@ -31,7 +31,7 @@ import {
   type SetupSkills,
   type SetupTerminalShortcut,
 } from '../../../shared/types/setupTransfer';
-import type { CustomLink } from '../../../shared/types/customLinks';
+import { customLinkSchema, type CustomLink } from '../../../shared/types/customLinks';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 
 /** A saved repository as the setup file sees it. */
@@ -443,13 +443,7 @@ const sectionSchemas = {
     text: boundary.string,
     enabled: boundary.boolean,
   })),
-  customLinks: boundary.array(boundary.object({
-    id: boundary.nonEmptyString,
-    label: boundary.string,
-    pattern: boundary.string,
-    urlTemplate: boundary.string,
-    enabled: boundary.boolean,
-  })),
+  customLinks: boundary.array(customLinkSchema),
   worktreeFileSync: boundary.array(boundary.object({
     id: boundary.nonEmptyString,
     path: boundary.refine(boundary.nonEmptyString, isRelativePath, 'expected a path relative to the repository'),
