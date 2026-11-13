@@ -1,7 +1,8 @@
 import { memo, useContext, useMemo, useState, type ComponentProps } from 'react';
 import { ChatBlocksContext } from './chatRendering';
 import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Terminal, Wrench, XCircle } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import { markdownBlocks } from './markdownBlocks';
 import remarkGfm from 'remark-gfm';
 import { describeChatContent } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
@@ -38,7 +39,7 @@ function blockLanguage(node: HastNode | undefined): string | undefined {
 
 const Markdown = memo(({ text }: { text: string }) => {
   const { blocks } = useContext(ChatBlocksContext);
-  const components = useMemo(() => ({
+  const components = useMemo<Components>(() => ({
     a: ({ children, ...props }: ComponentProps<'a'>) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a>,
     pre: ({ node, children, ...props }: ComponentProps<'pre'> & { node?: HastNode }) => {
       const language = blockLanguage(node);
@@ -46,9 +47,15 @@ const Markdown = memo(({ text }: { text: string }) => {
       return render ? <>{render(hastText(node).replace(/\n$/, ''))}</> : <CodeBlock {...props}>{children}</CodeBlock>;
     },
   }), [blocks]);
-  return <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown></div>;
+  // Each block parses on its own, so a streaming reply re-parses only the block being written.
+  const parts = markdownBlocks(text);
+  return <div className="chat-markdown">{parts.map((block, index) => <MarkdownBlock key={index} text={block} components={components} />)}</div>;
 });
 Markdown.displayName = 'Markdown';
+
+const MarkdownBlock = memo(({ text, components }: { text: string; components: Components }) =>
+  <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>);
+MarkdownBlock.displayName = 'MarkdownBlock';
 
 const VERBS = { explore: ['Exploring', 'Explored'], edit: ['Edit', 'Edited'], run: ['Run', 'Ran'], think: ['Thinking', 'Thought'], other: ['Using', 'Used'] } satisfies Record<ChatStep['kind'], [string, string]>;
 const ICONS = { explore: Eye, edit: Pencil, run: Terminal, think: Brain, other: Wrench };
