@@ -1446,7 +1446,7 @@ export class PaneRemoteHttpApiServer {
         this.getRemoteVisibilityViewerPrefix(client.remoteClientId, client.remoteClientTokenHash, client.remoteRuntimeId),
         REMOTE_VISIBILITY_VIEWER_STALE_MS,
       );
-      this.publishConnectedClients();
+      // The published list changes only on connect and disconnect; nothing reads its lastSeenAt.
     } catch {
       this.dropEventClient(clientConnectionId);
     }
