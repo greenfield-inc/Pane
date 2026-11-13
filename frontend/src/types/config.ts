@@ -202,6 +202,8 @@ export interface AppConfig {
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
+  // Whether selecting terminal text copies it at once instead of offering the selection popover (off when absent)
+  terminalCopyOnSelect?: boolean;
   // Whether typing @ in a terminal opens the picker for another terminal's scrollback (on when absent)
   terminalReferencesEnabled?: boolean;
   // Worktree file sync — files/dirs to copy from main repo into new worktrees
@@ -286,6 +288,7 @@ export interface UpdateConfigRequest {
   keymapNotice?: 'pending' | 'seen';
   commandPaletteShortcutEnabled?: boolean;
   kittyKeyboardEnabled?: boolean;
+  terminalCopyOnSelect?: boolean;
   terminalReferencesEnabled?: boolean;
   worktreeFileSync?: WorktreeFileSyncEntry[];
   preferredShell?: PreferredShell;
