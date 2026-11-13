@@ -162,7 +162,10 @@ export function useTerminalLinks(terminal: Terminal | null, config: UseTerminalL
       };
       // A drag can end outside the terminal (auto-scroll, overshoot), so the
       // release is caught on the document, as xterm does to finish the selection.
-      const watchRelease = () => {
+      // Left button only: a right-click selects the word under the pointer
+      // (macOS), and copying it would overwrite what the menu's Paste pastes.
+      const watchRelease = (event: MouseEvent) => {
+        if (event.button !== 0) return;
         doc.addEventListener('mouseup', copySelection, { once: true });
       };
       element.addEventListener('mousedown', watchRelease);
