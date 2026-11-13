@@ -33,9 +33,11 @@ function fakeNpm(dir: string): string {
 prefix=""; spec=""
 while [ $# -gt 0 ]; do case "$1" in --prefix) prefix="$2"; shift;; -*) ;; *) spec="$1";; esac; shift; done
 name="\${spec%@*}"
-mkdir -p "$prefix/node_modules/$name/bin"
-echo '{"name":"'"$name"'","bin":{"helper":"bin/helper.js"}}' > "$prefix/node_modules/$name/package.json"
-echo 'console.log("helper")' > "$prefix/node_modules/$name/bin/helper.js"
+mkdir -p "$prefix/node_modules/$name/bin" "$prefix/node_modules/.bin"
+echo '{"name":"'"$name"'","bin":{"helper":"bin/helper.js","helper-alias":"bin/helper.js"}}' > "$prefix/node_modules/$name/package.json"
+printf '#!/bin/sh\necho helper\n' > "$prefix/node_modules/$name/bin/helper.js"
+chmod +x "$prefix/node_modules/$name/bin/helper.js"
+ln -s "../$name/bin/helper.js" "$prefix/node_modules/.bin/helper"
 `, { mode: 0o755 });
   return npm;
 }
@@ -56,7 +58,7 @@ const TAR = execFileSync('sh', ['-c', 'command -v tar']).toString().trim();
 
 function registry(files: Map<string, Buffer | string>, root = scratch(), tools: Record<string, string> = {}, hidden: string[] = [], now?: () => number) {
   const lookup = (name: string) => tools[name] ?? (name === 'tar' ? TAR : null);
-  return new AgentRegistry({ root, url: `${URL_BASE}registry.json`, hidden: () => new Set(hidden), findExecutable: lookup, fetch: serve(files), now });
+  return new AgentRegistry({ root, url: `${URL_BASE}registry.json`, hidden: () => new Set(hidden), findExecutable: lookup, onPath: async name => lookup(name) !== null, fetch: serve(files), now });
 }
 
 function index(agents: object[]): string { return JSON.stringify({ version: '1.0.0', agents, extensions: [] }); }
@@ -101,22 +103,24 @@ describe.skipIf(process.platform === 'win32')('installing agents from the ACP Re
   it('installs an npm agent with the person\'s npm and runs it with their Node.js, and says when npm is missing', async () => {
     const tools = scratch();
     const entry = { id: 'gemini', name: 'Gemini CLI', version: '0.9.0', distribution: { npx: { package: '@google/gemini-cli@0.9.0', args: ['--experimental-acp'] } } };
+    // Two commands for one script count as one program, started through npm's own bin link (review F-7).
     const files = new Map<string, Buffer | string>([[`${URL_BASE}registry.json`, index([entry])]]);
     expect((await registry(files).list()).agents[0]).toMatchObject({ kind: 'npx', needs: 'Node.js' });
     const agents = registry(files, scratch(), { npm: fakeNpm(tools), node: '/usr/bin/env-node' });
     await agents.install('gemini');
     const run = await agents.resolve('gemini');
-    expect(run?.executable).toBe('/usr/bin/env-node');
-    expect(run?.args[0]).toMatch(/node_modules[/\\]@google[/\\]gemini-cli[/\\]bin[/\\]helper\.js$/);
-    expect(run?.args.slice(1)).toEqual(['--experimental-acp']);
+    expect(run?.executable).toMatch(/node_modules[/\\]\.bin[/\\]helper$/);
+    expect(run?.args).toEqual(['--experimental-acp']);
+    expect(execFileSync(run!.executable).toString().trim()).toBe('helper');
   });
 
   it('lists neither uvx-only agents nor ones a configured agent covers, and skips a malformed entry', async () => {
     const files = new Map<string, Buffer | string>([[`${URL_BASE}registry.json`, index([
       { id: 'pyagent', name: 'Py', version: '1.0.0', distribution: { uvx: { package: 'pyagent' } } },
-      { id: 'covered', name: 'Covered', version: '1.0.0', distribution: { npx: { package: 'covered' } } },
+      { id: 'covered', name: 'Covered', version: '1.0.0', distribution: { npx: { package: 'covered@1.0.0' } } },
       { id: 'Bad Id', name: 'Broken', version: '1.0.0', distribution: {} },
-      { id: 'kept', name: 'Kept', version: '1.0.0', distribution: { npx: { package: 'kept' } } },
+      { id: 'floating', name: 'Floating', version: '1.0.0', distribution: { npx: { package: 'floating@latest' } } },
+      { id: 'kept', name: 'Kept', version: '1.0.0', distribution: { npx: { package: 'kept@1.0.0' } } },
     ])]]);
     expect((await registry(files, scratch(), {}, ['covered']).list()).agents.map(agent => agent.id)).toEqual(['kept']);
   });
@@ -132,8 +136,49 @@ describe.skipIf(process.platform === 'win32')('installing agents from the ACP Re
     const later = registry(files, root, {}, [], () => Date.now() + 2 * 60 * 60 * 1000);
     const run = await later.resolve('goose');
     expect(execFileSync(run!.executable).toString().trim()).toBe('1.1.0');
-    later.removeOlderVersions('goose', '1.1.0');
+    later.removeVersionsExcept('goose', new Set(['1.1.0']));
     expect(existsSync(path.join(root, 'agents', 'goose', '1.0.0'))).toBe(false);
     expect(existsSync(path.join(root, 'agents', 'goose', '1.1.0'))).toBe(true);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('keeping the registry inside its own folders (review F-1, F-3, F-5)', () => {
+  it('skips an entry whose version would leave the agent folder, and deletes nothing outside it', async () => {
+    const root = scratch();
+    const goose = archive('goose', '1.0.0');
+    const files = new Map<string, Buffer | string>([[`${URL_BASE}registry.json`, index([binaryEntry('goose', '1.0.0', 'https://dl.test/goose.tar.gz', goose.sha256)])], ['https://dl.test/goose.tar.gz', goose.bytes]]);
+    await registry(files, root).install('goose');
+    writeFileSync(path.join(root, 'sessions.db'), 'precious');
+    files.set(`${URL_BASE}registry.json`, index([binaryEntry('goose', '../../..', 'https://dl.test/goose.tar.gz', goose.sha256)]));
+    const later = registry(files, root, {}, [], () => Date.now() + 2 * 60 * 60 * 1000);
+    const run = await later.resolve('goose');
+    expect(execFileSync(run!.executable).toString().trim()).toBe('1.0.0');
+    expect(readFileSync(path.join(root, 'sessions.db'), 'utf8')).toBe('precious');
+  });
+
+  it('keeps every version a running tab launched from', async () => {
+    const root = scratch();
+    const v1 = archive('goose', '1.0.0');
+    const v2 = archive('goose', '2.0.0');
+    const files = new Map<string, Buffer | string>([[`${URL_BASE}registry.json`, index([binaryEntry('goose', '1.0.0', 'https://dl.test/1.tar.gz', v1.sha256)])], ['https://dl.test/1.tar.gz', v1.bytes], ['https://dl.test/2.tar.gz', v2.bytes]]);
+    await registry(files, root).install('goose');
+    files.set(`${URL_BASE}registry.json`, index([binaryEntry('goose', '2.0.0', 'https://dl.test/2.tar.gz', v2.sha256)]));
+    const later = registry(files, root, {}, [], () => Date.now() + 2 * 60 * 60 * 1000);
+    await later.resolve('goose');
+    later.removeVersionsExcept('goose', new Set(['1.0.0', '2.0.0']));
+    expect(existsSync(path.join(root, 'agents', 'goose', '1.0.0'))).toBe(true);
+    expect(existsSync(path.join(root, 'agents', 'goose', '2.0.0'))).toBe(true);
+  });
+
+  it('keeps an installed agent the registry stopped listing, so it can still be removed', async () => {
+    const root = scratch();
+    const goose = archive('goose', '1.0.0');
+    const files = new Map<string, Buffer | string>([[`${URL_BASE}registry.json`, index([binaryEntry('goose', '1.0.0', 'https://dl.test/goose.tar.gz', goose.sha256)])], ['https://dl.test/goose.tar.gz', goose.bytes]]);
+    await registry(files, root).install('goose');
+    files.set(`${URL_BASE}registry.json`, index([]));
+    const later = registry(files, root, {}, [], () => Date.now() + 2 * 60 * 60 * 1000);
+    expect((await later.list()).agents).toEqual([expect.objectContaining({ id: 'goose', installedVersion: '1.0.0', listed: false })]);
+    later.remove('goose');
+    expect((await later.list()).agents).toEqual([]);
   });
 });

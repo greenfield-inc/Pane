@@ -28,6 +28,8 @@ export interface ResolvedLaunch {
   approveOnce?: boolean;
   /** The agent runs as its own CLI, so it may advertise a terminal sign-in Pane can run. */
   ownCli?: boolean;
+  /** The installed version this launch runs, for an agent Pane installed (ACP Registry). */
+  agentVersion?: string;
 }
 
 /** Events a chat tab sends to every viewer. */
@@ -155,6 +157,11 @@ export class ChatTabManager {
   isRunning(panelId: string): boolean { return !!this.tabs.get(panelId)?.runtime?.isAlive(); }
   /** /clear is starting a fresh conversation: the agent is between processes, not stopped. */
   isClearing(panelId: string): boolean { return this.tabs.get(panelId)?.clearing === true; }
+  /** The installed versions running tabs of `agent` launched from: their folders must stay. */
+  launchedVersions(agent: string): Set<string> {
+    return new Set([...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() && tab.launch?.agentVersion && this.options.store.state(panelId)?.agent === agent ? [tab.launch.agentVersion] : []));
+  }
+
   runningPanelIds(): string[] { return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() ? [panelId] : []); }
   processId(panelId: string): number | undefined { return this.tabs.get(panelId)?.runtime?.pid; }
   /** Adapter process IDs of a Pane's running chat tabs, for archive cleanup. */

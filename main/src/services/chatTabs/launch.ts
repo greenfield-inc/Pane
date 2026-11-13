@@ -76,7 +76,7 @@ export function chatTabEnv(panel: ToolPanel, state: ChatPanelState, projectEnv: 
 }
 
 /** An agent installed from the ACP Registry: how it starts (P5). Undefined for any other id. */
-export interface RegistryAgentLauncher { resolve(agentId: ChatAgent, env: ChatAgentEnv): Promise<{ executable: string; args: string[]; env?: ChatAgentEnv } | undefined> }
+export interface RegistryAgentLauncher { resolve(agentId: ChatAgent, env: ChatAgentEnv): Promise<{ executable: string; args: string[]; env?: ChatAgentEnv; version: string } | undefined> }
 
 /**
  * Runs an agent's chat from its config entry: the person's own installed CLI, either as an
@@ -129,7 +129,7 @@ export class AgentChatLauncher implements ChatTabLauncher {
     const installed = await this.options.registry?.resolve(state.agent, env);
     if (!installed) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', `${agentLabel(state.agent)} is not installed on this machine.`, 'Install it in Settings > Agents, then press Retry.');
     const command = hostCommand(installed.executable, installed.args);
-    const launch: ResolvedLaunch = { command: { executable: command.executable, args: command.args, cwd: state.cwd, env: { ...env, ...installed.env }, windowsVerbatimArguments: command.windowsVerbatimArguments }, ownCli: true };
+    const launch: ResolvedLaunch = { command: { executable: command.executable, args: command.args, cwd: state.cwd, env: { ...env, ...installed.env }, windowsVerbatimArguments: command.windowsVerbatimArguments }, ownCli: true, agentVersion: installed.version };
     Object.assign(launch, fullAccessLaunch(undefined, state.launch));
     return launch;
   }

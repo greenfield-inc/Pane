@@ -78,7 +78,8 @@ otherwise at most once an hour, and keeps the last copy in
 - **Install** puts the registry's current version in
   `agent-registry/agents/<id>/<version>/`. A download is checked against the
   sha256 the registry publishes and refused when it differs. A download with no
-  checksum installs only after you confirm you trust it. An npm package installs
+  checksum installs only after you confirm you trust it; later versions of that
+  agent then install without asking again. An npm package installs
   with your own `npm` and runs with your own Node.js; without them the row says
   **Needs Node.js**. A failed install shows its error on that agent's row only.
 - **Updates**: an installed agent moves to the registry's newest version on its
@@ -88,7 +89,9 @@ otherwise at most once an hour, and keeps the last copy in
 - Installed agents join the + menu after Pane's own agents, marked
   **Full access by Pane** (Pane answers each approval with allow once when full
   access is on). They have no terminal tab, so they have no Switch to chat.
-  **Remove** deletes every version.
+  **Remove** deletes every version; it is refused while a chat tab runs the
+  agent. An installed agent the registry stops offering stays in the list,
+  marked **No longer listed**, so it can still be removed.
 - Installing or removing an agent is refused for a teammate's Pane: it runs code
   on the owner's machine.
 

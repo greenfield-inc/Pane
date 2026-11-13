@@ -3,6 +3,7 @@ import { AGENT_REGISTRY_URL, CONFIGURED_AGENT_IDS, agentConfig, configuredAgent 
 import type { ChatAgentEntry } from '../../../../shared/types/chatTab';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { findExecutableInPath } from '../../utils/shellPath';
+import { isOnPath } from '../../utils/onPath';
 import { AgentRegistry } from './agentRegistry';
 
 let registry: AgentRegistry | undefined;
@@ -12,7 +13,7 @@ const covered = new Set(CONFIGURED_AGENT_IDS.flatMap(id => configuredAgent(id).c
 
 /** This host's ACP Registry agents, under Pane's app directory. */
 export function getAgentRegistry(): AgentRegistry {
-  registry ??= new AgentRegistry({ root: path.join(getAppDirectory(), 'agent-registry'), url: AGENT_REGISTRY_URL, hidden: () => covered, findExecutable: findExecutableInPath });
+  registry ??= new AgentRegistry({ root: path.join(getAppDirectory(), 'agent-registry'), url: AGENT_REGISTRY_URL, hidden: () => covered, findExecutable: findExecutableInPath, onPath: isOnPath });
   return registry;
 }
 

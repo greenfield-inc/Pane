@@ -14,6 +14,8 @@ export interface RegistryAgent {
   installedVersion?: string;
   /** What this computer is missing to run it, such as Node.js. */
   needs?: string;
+  /** `false`: installed here, but the registry no longer offers it to this computer; it can only be removed. */
+  listed?: false;
 }
 
 /** Settings > Agents' registry list, and why it may be out of date. */

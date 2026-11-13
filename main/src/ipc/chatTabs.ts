@@ -8,6 +8,8 @@ import type { CreatePanelRequest, PanelOpener, ToolPanel } from '../../../shared
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
 import { getRuntimeConfigManager } from '../core/runtime';
+import { ShellDetector } from '../utils/shellDetector';
+import { nativeCommand } from '../services/agentChat/hostCommand';
 import { panelManager } from '../services/panelManager';
 import { configureChatTabs, getChatAgentCatalog, getChatTabManager } from '../services/chatTabs';
 import { chatAgentName, getAgentRegistry } from '../services/agentRegistry';
@@ -138,7 +140,11 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   registry.register('chat-tab:remove-agent', (id: string) => {
     const teammate = teammatePaneCaller();
     if (teammate) throw teammateSecretRefusal(teammate, 'remove an agent');
-    getAgentRegistry().remove(decodeBoundary(id, agentSchema));
+    const agent = decodeBoundary(id, agentSchema);
+    // Removing deletes the files a running agent loads (review S-9).
+    const running = manager.runningPanelIds().filter(panel => manager.view(panel, 0, false).agent === agent);
+    if (running.length) throw new PaneError('AGENT_REGISTRY_IN_USE', `${chatAgentName(agent)} is running in ${running.length === 1 ? 'a chat tab' : `${running.length} chat tabs`}, so it was not removed.`, 'Close its chat tabs, then remove it.');
+    getAgentRegistry().remove(agent);
     return getAgentRegistry().list();
   });
   registry.register('chat-tab:set-key', (agent: string, key: PaneCommandValue) => {
@@ -164,10 +170,12 @@ function signInCommand(agent: ChatAgent, advertised: { args: string[] } | undefi
   const config = agentConfig(agent);
   const plain = (words: readonly string[]) => words.every(word => /^[\w@%+=:,./-]+$/.test(word));
   if (!config) {
-    // A registry agent signs in through the terminal sign-in it advertised, run with its installed command.
+    // A registry agent signs in through the terminal sign-in it advertised, run with its installed
+    // command, quoted for the shell the terminal opens (paths may hold spaces or backslashes).
     const installed = getAgentRegistry().installedRecord(agent);
-    if (installed && advertised && plain(advertised.args) && plain([installed.command])) {
-      return [...(installed.kind === 'npx' ? ['node'] : []), installed.command, ...advertised.args].join(' ');
+    if (installed && advertised) {
+      const shell = ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell?.()).path;
+      return nativeCommand(installed.command, advertised.args, shell);
     }
   }
   if (!config) throw new PaneError('CHAT_SIGN_IN_UNKNOWN', `Pane does not know how to sign ${agentLabel(agent)} in.`, 'Sign in with the agent\'s own instructions in a terminal tab, then press Retry.');

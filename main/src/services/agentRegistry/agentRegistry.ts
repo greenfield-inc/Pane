@@ -19,12 +19,19 @@ const INSTALL_TIMEOUT_MS = 10 * 60 * 1000;
 /** Written last in a version folder: a folder without it is an install that did not finish. */
 const INSTALL_RECORD = 'pane-install.json';
 
-const target = boundary.object({ archive: boundary.string, cmd: boundary.string, sha256: boundary.optional(boundary.string), args: boundary.optional(boundary.array(boundary.string)), env: boundary.optional(boundary.record(boundary.string)) });
-const packageRun = boundary.object({ package: boundary.string, args: boundary.optional(boundary.array(boundary.string)), env: boundary.optional(boundary.record(boundary.string)) });
+/** A registry id, as the registry's schema requires: one safe folder name. */
+const ID = /^[a-z][a-z0-9-]*$/;
+/** A version used as a folder name: one path segment, never `.` or `..` (review F-1). */
+const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_-]*$/;
+/** An npm spec pinned to an exact version (`name@1.2.3`, `@scope/name@1.2.3`), so npm's integrity check applies. */
+const PINNED_PACKAGE = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*@\d+\.\d+\.\d+[\w.+-]*$/i;
+
+const target = boundary.object({ archive: boundary.refine(boundary.string, url => url.startsWith('https://'), 'expected an https download'), cmd: boundary.string, sha256: boundary.optional(boundary.string), args: boundary.optional(boundary.array(boundary.string)), env: boundary.optional(boundary.record(boundary.string)) });
+const packageRun = boundary.object({ package: boundary.refine(boundary.string, spec => PINNED_PACKAGE.test(spec), 'expected a package pinned to an exact version'), args: boundary.optional(boundary.array(boundary.string)), env: boundary.optional(boundary.record(boundary.string)) });
 const entrySchema = boundary.object({
-  id: boundary.refine(boundary.string, id => /^[a-z][a-z0-9-]*$/.test(id), 'expected a registry id'),
-  name: boundary.string, version: boundary.string, description: boundary.optional(boundary.string), icon: boundary.optional(boundary.string),
-  distribution: boundary.object({ binary: boundary.optional(boundary.record(target)), npx: boundary.optional(packageRun), uvx: boundary.optional(packageRun) }),
+  id: boundary.refine(boundary.string, id => ID.test(id), 'expected a registry id'),
+  name: boundary.string, version: boundary.refine(boundary.string, version => VERSION.test(version), 'expected a version that is one folder name'), description: boundary.optional(boundary.string), icon: boundary.optional(boundary.string),
+  distribution: boundary.object({ binary: boundary.optional(boundary.record(target)), npx: boundary.optional(packageRun), uvx: boundary.optional(boundary.json) }),
 });
 type RegistryEntry = typeof entrySchema extends BoundarySchema<infer T> ? T : never;
 /** Entries that do not decode are skipped, so one malformed agent never hides the rest. */
@@ -37,6 +44,9 @@ const recordSchema: BoundarySchema<InstallRecord> = boundary.object({
   kind: boundary.enumeration('binary', 'npx'), command: boundary.string, args: boundary.array(boundary.string), env: boundary.optional(boundary.record(boundary.string)), verified: boundary.boolean,
 });
 
+/** How to start an installed registry agent, and which version that is. */
+export interface ResolvedRegistryAgent { executable: string; args: string[]; env?: Record<string, string>; version: string }
+
 export interface AgentRegistryOptions {
   /** Where installed agents and the cached index live (one folder per agent, one per version). */
   root: string;
@@ -44,8 +54,10 @@ export interface AgentRegistryOptions {
   url: string;
   /** Registry ids a configured agent already covers; they are never listed. */
   hidden: () => ReadonlySet<string>;
-  /** A program on the person's PATH (npm, node, tar, unzip), or null. */
+  /** A program on the person's PATH (npm, node, tar, unzip), or null. Used when installing or starting an agent. */
   findExecutable: (name: string) => string | null;
+  /** Whether a program is on PATH, without blocking the main process; used to list agents. */
+  onPath: (name: string) => Promise<boolean>;
   fetch?: typeof fetch;
   platform?: NodeJS.Platform;
   arch?: string;
@@ -69,6 +81,7 @@ export class AgentRegistry {
     try { await this.load(refresh); }
     catch (cause) { error = reasonOf(cause); }
     const installed = new Map(this.installed().map(record => [record.id, record]));
+    const hasNpm = await this.options.onPath('npm');
     const agents = (this.index?.agents ?? []).flatMap(entry => {
       const how = this.distribution(entry);
       if (!how || this.options.hidden().has(entry.id)) return [];
@@ -76,9 +89,18 @@ export class AgentRegistry {
       if (entry.description) agent.description = entry.description;
       const record = installed.get(entry.id);
       if (record) agent.installedVersion = record.version;
-      if (how.kind === 'npx' && !this.options.findExecutable('npm')) agent.needs = 'Node.js';
+      if (how.kind === 'npx' && !hasNpm) agent.needs = 'Node.js';
       return [agent];
     });
+    // An installed agent the list no longer offers (delisted, no download for this computer, or now
+    // covered by a built-in agent) still runs, so it stays here with Remove (review F-5).
+    const listed = new Set(agents.map(agent => agent.id));
+    for (const record of installed.values()) {
+      if (listed.has(record.id)) continue;
+      const agent: RegistryAgent = { id: record.id, name: record.name, version: record.version, iconUrl: record.iconUrl, kind: record.kind, verified: record.verified, installedVersion: record.version, listed: false };
+      if (record.description) agent.description = record.description;
+      agents.push(agent);
+    }
     return error ? { agents, error } : { agents };
   }
 
@@ -108,14 +130,14 @@ export class AgentRegistry {
   /** Removes every installed version of `id`. */
   remove(id: string): void {
     this.assertId(id);
-    rmSync(path.join(this.options.root, 'agents', id), { recursive: true, force: true });
+    rmSync(this.folder(id), { recursive: true, force: true });
   }
 
   /** Every installed agent, at its newest finished version. Read from disk each time. */
   installed(): InstallRecord[] {
     const agents = path.join(this.options.root, 'agents');
     if (!existsSync(agents)) return [];
-    return readdirSync(agents).flatMap(id => {
+    return readdirSync(agents).filter(id => ID.test(id)).flatMap(id => {
       const records = this.versions(id);
       return records.length ? [records[records.length - 1]] : [];
     });
@@ -126,8 +148,8 @@ export class AgentRegistry {
    * one is older (D-15). When the index cannot be read or the update fails, the installed
    * version runs. Undefined when the agent is not installed.
    */
-  async resolve(id: string): Promise<{ executable: string; args: string[]; env?: Record<string, string> } | undefined> {
-    if (!/^[a-z][a-z0-9-]*$/.test(id)) return undefined;
+  async resolve(id: string): Promise<ResolvedRegistryAgent | undefined> {
+    if (!ID.test(id)) return undefined;
     let record = this.versions(id).at(-1);
     if (!record) return undefined;
     try {
@@ -140,29 +162,36 @@ export class AgentRegistry {
     } catch (error) {
       console.warn(`[AgentRegistry] ${id} stays at ${record.version}: ${reasonOf(error)}`);
     }
-    const env = record.env;
-    if (record.kind === 'npx') {
-      const node = this.options.findExecutable('node');
-      if (!node) throw new PaneError('AGENT_REGISTRY_NEEDS_NODE', `${record.name} runs on Node.js, which is not on this computer's PATH.`, 'Install Node.js, then press Retry.');
-      return env ? { executable: node, args: [record.command, ...record.args], env } : { executable: node, args: [record.command, ...record.args] };
-    }
-    return env ? { executable: record.command, args: record.args, env } : { executable: record.command, args: record.args };
+    // An npm agent starts through npm's own bin link, which runs Node.js (or the native program a postinstall put there).
+    if (record.kind === 'npx' && !this.options.findExecutable('node')) throw new PaneError('AGENT_REGISTRY_NEEDS_NODE', `${record.name} runs on Node.js, which is not on this computer's PATH.`, 'Install Node.js, then press Retry.');
+    const resolved: ResolvedRegistryAgent = { executable: record.command, args: record.args, version: record.version };
+    if (record.env) resolved.env = record.env;
+    return resolved;
   }
 
-  /** After a version started, the older ones are not needed. */
-  removeOlderVersions(id: string, running: string): void {
-    for (const record of this.versions(id)) if (record.version !== running) rmSync(path.join(this.options.root, 'agents', id, record.version), { recursive: true, force: true });
+  /**
+   * Removes the versions of `id` no tab runs from: after a launch moved to a newer version, the older
+   * ones are not needed. A folder that can't be removed now (a file still in use) is left for next time.
+   */
+  removeVersionsExcept(id: string, keep: ReadonlySet<string>): void {
+    for (const record of this.versions(id)) {
+      if (keep.has(record.version)) continue;
+      try { rmSync(this.folder(id, record.version), { recursive: true, force: true }); }
+      catch (error) { console.warn(`[AgentRegistry] ${id} ${record.version} is not needed but could not be removed yet: ${reasonOf(error)}`); }
+    }
   }
 
   /** The installed version `id` launches with, for the catalog. */
   installedRecord(id: string): InstallRecord | undefined { return this.versions(id).at(-1); }
 
   private versions(id: string): InstallRecord[] {
-    const folder = path.join(this.options.root, 'agents', id);
-    if (!/^[a-z][a-z0-9-]*$/.test(id) || !existsSync(folder)) return [];
+    if (!ID.test(id) || !existsSync(this.folder(id))) return [];
+    const folder = this.folder(id);
     return readdirSync(folder).flatMap(version => {
+      if (!VERSION.test(version)) return [];
       const file = path.join(folder, version, INSTALL_RECORD);
-      try { const record = decodeOptionalBoundary(JSON.parse(readFileSync(file, 'utf8')), recordSchema); return record ? [{ record, at: statSync(file).mtimeMs }] : []; }
+      // A record whose version is not its own folder's name is not trusted.
+      try { const record = decodeOptionalBoundary(JSON.parse(readFileSync(file, 'utf8')), recordSchema); return record && record.id === id && record.version === version ? [{ record, at: statSync(file).mtimeMs }] : []; }
       catch { return []; }
     }).sort((a, b) => a.at - b.at).map(entry => entry.record);
   }
@@ -172,7 +201,7 @@ export class AgentRegistry {
   }
 
   private async installVersion(entry: RegistryEntry, how: NonNullable<ReturnType<AgentRegistry['distribution']>>): Promise<InstallRecord> {
-    const folder = path.join(this.options.root, 'agents', entry.id, entry.version);
+    const folder = this.folder(entry.id, entry.version);
     rmSync(folder, { recursive: true, force: true });
     mkdirSync(folder, { recursive: true });
     try {
@@ -184,6 +213,7 @@ export class AgentRegistry {
         env = how.target.env;
       } else if (how.kind === 'npx' && how.run) {
         const script = await this.installPackage(entry, how.run.package, folder);
+      // `script` is npm's bin link for the package, which npm made executable.
         record = { id: entry.id, name: entry.name, version: entry.version, iconUrl: this.iconUrl(entry), kind: 'npx', command: script, args: how.run.args ?? [], verified: true };
         env = how.run.env;
       } else throw new PaneError('AGENT_REGISTRY_UNSUPPORTED', `${entry.name} has no download Pane can run on this computer.`, 'Pick another agent.');
@@ -246,22 +276,26 @@ export class AgentRegistry {
     return tar;
   }
 
-  /** Installs an npm package with the person's own npm into the version folder. Returns the script its bin runs. */
+  /** Installs an npm package with the person's own npm into the version folder. Returns npm's bin link that starts it. */
   private async installPackage(entry: RegistryEntry, spec: string, folder: string): Promise<string> {
     const npm = this.options.findExecutable('npm');
     if (!npm) throw new PaneError('AGENT_REGISTRY_NEEDS_NODE', `${entry.name} is an npm package, and npm is not on this computer's PATH.`, 'Install Node.js (it includes npm), then install the agent again.');
-    const command = hostCommand(npm, ['install', '--prefix', folder, '--no-audit', '--no-fund', spec]);
-    await execFileAsync(command.executable, command.args, { timeout: INSTALL_TIMEOUT_MS, windowsVerbatimArguments: command.windowsVerbatimArguments, maxBuffer: 16 * 1024 * 1024 });
+    const npmInstall = hostCommand(npm, ['install', '--prefix', folder, '--no-audit', '--no-fund', spec]);
+    await execFileAsync(npmInstall.executable, npmInstall.args, { timeout: INSTALL_TIMEOUT_MS, windowsVerbatimArguments: npmInstall.windowsVerbatimArguments, maxBuffer: 16 * 1024 * 1024 });
     const name = spec.startsWith('@') ? `@${spec.slice(1).split('@')[0]}` : spec.split('@')[0];
     const root = path.join(folder, 'node_modules', ...name.split('/'));
     const { bin: declared } = decodeBoundary(JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')), boundary.object({ bin: boundary.optional(boundary.json) }));
     // package.json `bin` is one script, or scripts by command name.
     const only = decodeOptionalBoundary(declared, boundary.string);
     const named = decodeOptionalBoundary(declared, boundary.record(boundary.string)) ?? {};
-    const scripts = Object.values(named);
-    const bin = only ?? named[name.split('/').pop() ?? ''] ?? (scripts.length === 1 ? scripts[0] : undefined);
-    if (!bin) throw new Error(`${spec} names no program to run`);
-    return path.join(root, bin);
+    const base = name.split('/').pop() ?? name;
+    // Several commands for one script count as one program (review F-7).
+    const commands = Object.keys(named);
+    const command = only ? base : base in named ? base : new Set(Object.values(named)).size === 1 ? commands[0] : undefined;
+    if (!command) throw new Error(`${spec} names no program to run`);
+    const link = path.join(folder, 'node_modules', '.bin', this.platform() === 'win32' ? `${command}.cmd` : command);
+    if (!existsSync(link)) throw new Error(`npm made no ${command} command for ${spec}`);
+    return link;
   }
 
   private distribution(entry: RegistryEntry): { kind: 'binary'; target?: RegistryEntry['distribution']['binary'] extends Record<string, infer T> | undefined ? T : never; run?: undefined } | { kind: 'npx'; run: NonNullable<RegistryEntry['distribution']['npx']>; target?: undefined } | undefined {
@@ -292,8 +326,18 @@ export class AgentRegistry {
     return entry;
   }
 
+  /** `<root>/agents/<id>[/<version>]`, checked to stay inside that folder (review F-1). */
+  private folder(id: string, version?: string): string {
+    const agents = path.join(this.options.root, 'agents');
+    if (!ID.test(id) || (version !== undefined && !VERSION.test(version))) throw new PaneError('AGENT_REGISTRY_UNSAFE_PATH', `"${id}${version ? ` ${version}` : ''}" is not a registry agent and version Pane can store. Nothing was changed.`, 'Report it to the ACP Registry; Pane skips such entries.');
+    const folder = version === undefined ? path.join(agents, id) : path.join(agents, id, version);
+    const relative = path.relative(agents, folder);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new PaneError('AGENT_REGISTRY_UNSAFE_PATH', `The folder for ${id} would be outside Pane's agent folder. Nothing was changed.`, 'Report it to the ACP Registry; Pane skips such entries.');
+    return folder;
+  }
+
   private assertId(id: string): void {
-    if (!/^[a-z][a-z0-9-]*$/.test(id)) throw new PaneError('AGENT_REGISTRY_UNKNOWN', `"${id}" is not an agent id.`, 'Open Settings > Agents to see the installed agents.');
+    if (!ID.test(id)) throw new PaneError('AGENT_REGISTRY_UNKNOWN', `"${id}" is not an agent id.`, 'Open Settings > Agents to see the installed agents.');
   }
 
   /** Reads the index from the cache, or from the registry when the cache is older than an hour (or `refresh`). */
@@ -311,13 +355,13 @@ export class AgentRegistry {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       text = await response.text();
     } catch (error) {
-      if (this.index) throw new PaneError('AGENT_REGISTRY_UNREACHABLE', `Pane could not read the ACP Registry: ${reasonOf(error)}.`, 'Check the internet connection, then open Settings > Agents again.');
       throw new PaneError('AGENT_REGISTRY_UNREACHABLE', `Pane could not read the ACP Registry: ${reasonOf(error)}.`, 'Check the internet connection, then open Settings > Agents again.');
     }
     const agents = this.decode(JSON.parse(text));
     mkdirSync(this.options.root, { recursive: true });
-    writeFileSync(`${cache}.tmp`, text);
-    renameSync(`${cache}.tmp`, cache);
+    const temporary = `${cache}.${process.pid}.${now}.tmp`;
+    writeFileSync(temporary, text);
+    renameSync(temporary, cache);
     this.index = { agents, fetchedAt: now };
   }
 
