@@ -112,9 +112,12 @@ when Pane quits has no saved id yet and starts fresh. Loops run Claude, Codex or
 Cursor, so the Loop editor doesn't offer OpenCode Sessions.
 
 Each Session owns a stable folder at `<PANE_DIR>/sessions/<session-id>/` for
-notes, plans, attachments, generated instructions, and artifacts. Renaming,
-reopening, and archiving retain this folder. These folders are not Git
-worktrees or security sandboxes and do not expire with OS temporary files.
+notes, plans, attachments, generated instructions, and artifacts. Renaming
+and reopening keep this folder. Archiving keeps it for 14 days (**Settings →
+Worktrees & Git → Keep archived folders**), then Pane deletes it, first moving
+any agent logs inside it to `<pane-dir>/agent-logs/` (see
+[The scratch folder](#the-scratch-folder)); restoring the Session before then
+keeps it. These folders are not Git worktrees or security sandboxes.
 Project implementation belongs in an appropriate Pane/worktree.
 
 ## Windows and WSL runtimes
@@ -737,6 +740,33 @@ write it; the orchestrator is its only writer. What each built-in template gets:
 
 The flag is fixed when the tab is created: a tab opened before its Pane was
 associated has no `PANE_SESSION_DIR` until a new tab is created.
+
+### The scratch folder
+
+Every tab Pane starts gets `PANE_SCRATCH_DIR`, a folder for the agent's
+temporary files, clones, captures, downloads, logs and test instances (an
+isolated `PANE_DIR` and `HOME` for QA), so nothing lands in `/tmp` where
+archive never reaches it. Pane creates it when the first tab starts:
+
+| Pane | `PANE_SCRATCH_DIR` | Deleted |
+| --- | --- | --- |
+| A worktree Pane created (archive removes the worktree) | `<worktree>/.pane/scratch/`, hidden by the repository's `.git/info/exclude` | With the worktree, on archive |
+| A Pane on the main checkout or an adopted worktree | `<pane-dir>/scratch/<pane-id>/` | 14 days after archive |
+| A Session's own tabs | `<pane-dir>/scratch/<session-pane-id>/` | 14 days after the Session is archived |
+
+Pane never deletes a main checkout or an adopted worktree. The 14 days come
+from **Settings → Worktrees & Git → Keep archived folders**; restoring before
+then keeps the folder. Scratch never blocks archive: its files are hidden from
+git, so they are neither untracked nor uncommitted. `runpane panes archive
+--dry-run` lists the folder with its size, and the date it will be deleted when
+it is kept.
+
+Before deleting a scratch or Session folder, Pane moves every agent log inside
+it (an agent run with its home there) to
+`<pane-dir>/agent-logs/<agent>/<pane-id>/`, finding them by each agent's
+`transcriptDirs` in the agents config. Usage & Limits reads
+`<pane-dir>/agent-logs/` beside `~/.claude/projects` and `~/.codex/sessions`.
+Pane never moves or deletes anything in the agents' own folders in your home.
 
 Write the folder's absolute path into the brief rather than
 `$PANE_SESSION_DIR`. Under `blockReadsOutsideWorkingDirectories` Claude Code

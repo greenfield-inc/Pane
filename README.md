@@ -454,6 +454,12 @@ moved to a private quarantine before files are removed in small batches. Busy
 operations retry up to three times; cross-volume renames, locked worktrees,
 and identity mismatches preserve the remaining files and show a failure.
 Cleanup also waits for known terminal and run-command processes to exit.
+
+Agents put scratch files in `$PANE_SCRATCH_DIR`, which archive deletes with the
+Pane; on the main checkout or an adopted worktree it is kept 14 days first.
+Archived Session folders are also kept 14 days. Agent logs inside either are
+moved to `<pane-dir>/agent-logs/` for Usage & Limits. See
+[The scratch folder](docs/SESSIONS.md#the-scratch-folder).
 If termination fails, the job retains their identities across restart and
 **Retry cleanup** retries termination before removing files.
 WSL worktrees retain the existing Git cleanup route without restart recovery.
