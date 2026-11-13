@@ -16,6 +16,7 @@ const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
 const versionedPackageFiles = [
   'package.json',
   'packages/runpane/package.json',
+  'packages/runpane/server.json',
   'packages/runpane-py/pyproject.toml',
   'packages/runpane-py/src/runpane/__init__.py',
 ];

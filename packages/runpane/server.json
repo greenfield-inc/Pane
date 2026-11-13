@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.greenfield-inc/runpane",
+  "title": "Pane",
+  "description": "Start, check on and message coding agents in Pane, the desktop app for parallel git worktrees.",
+  "websiteUrl": "https://runpane.com",
+  "repository": {
+    "url": "https://github.com/greenfield-inc/Pane",
+    "source": "github",
+    "subfolder": "packages/runpane"
+  },
+  "version": "2.4.220",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "runpane",
+      "version": "2.4.220",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}
