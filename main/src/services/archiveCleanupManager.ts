@@ -262,8 +262,13 @@ export class ArchiveCleanupManager {
       });
       this.inFlight.add(execution);
     }
-    if ([...this.jobs.values()].some(job => job.status === 'queued')) {
-      this.timer = setTimeout(() => this.schedule(), 100);
+    // A finished teardown or run calls schedule() itself; only a retry backoff needs a timer.
+    const now = Date.now();
+    const retryAt = Math.min(...[...this.jobs.values()]
+      .filter(job => job.status === 'queued' && job.nextAttempt > now)
+      .map(job => job.nextAttempt));
+    if (retryAt !== Infinity) {
+      this.timer = setTimeout(() => this.schedule(), retryAt - now);
       this.timer.unref();
     }
   }
