@@ -12,7 +12,7 @@ import { FieldWithTooltip } from './ui/FieldWithTooltip';
 import { Card } from './ui/Card';
 import { Toggle } from './ui/Toggle';
 import { useConfigStore } from '../stores/configStore';
-import { nextDefaultIdeCommand } from '../../../shared/utils/ideCommands';
+import { BUILT_IN_IDES, nextDefaultIdeCommand } from '../../../shared/utils/ideCommands';
 import { ProjectEnvVarsSection } from './ProjectEnvVarsSection';
 import { projectEnvInputsFrom, projectEnvRowProblem, projectEnvRowsFrom, secretProjectFor, type ProjectEnvRow } from './projectEnvRows';
 
@@ -403,7 +403,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
               <Input
                 value={openIdeCommand}
                 onChange={(e) => setOpenIdeCommand(e.target.value)}
-                placeholder={defaultIdeCommand ?? 'code .'}
+                placeholder={defaultIdeCommand ?? BUILT_IN_IDES[0].command}
                 className="font-mono text-sm"
               />
               {defaultIdeCommand && !openIdeCommand.trim() && (
