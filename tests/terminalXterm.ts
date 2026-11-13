@@ -25,7 +25,7 @@ export interface TerminalThemeSnapshot {
 
 interface XtermOptionsLike {
   buffer: { active: XtermBufferLike };
-  options: { theme?: TerminalThemeSnapshot };
+  options: { theme?: TerminalThemeSnapshot; fontSize?: number };
 }
 
 interface XtermLike extends XtermOptionsLike {
