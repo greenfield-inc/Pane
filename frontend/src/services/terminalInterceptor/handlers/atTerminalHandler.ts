@@ -12,6 +12,8 @@ interface AtTerminalHandlerOptions {
   currentPanelId: string;
   getTerminals: () => Promise<TerminalSuggestion[]>;
   hasOtherTerminals: () => boolean; // fast sync check
+  /** Settings › Terminal › Terminal references can turn @ off */
+  isEnabled: () => boolean;
   onCopy: (panelId: string, lines: number, mode: 'raw' | 'embed') => Promise<void>;
   onStateChange: () => void; // notify interceptor to re-render
   /** Force-cancel the interceptor from async code (flushes buffer to PTY) */
@@ -48,7 +50,7 @@ function filterTerminals(
 export function createAtTerminalHandler(
   options: AtTerminalHandlerOptions,
 ): InterceptHandler {
-  const { getTerminals, hasOtherTerminals, onCopy, onStateChange, onForceCancel, getPreference, setPreference } = options;
+  const { getTerminals, hasOtherTerminals, isEnabled, onCopy, onStateChange, onForceCancel, getPreference, setPreference } = options;
 
   let state: AtTerminalHandlerState = createDefaultState();
   let filteredTerminals: TerminalSuggestion[] = [];
@@ -74,7 +76,7 @@ export function createAtTerminalHandler(
 
   return {
     onActivate(): boolean {
-      if (!hasOtherTerminals()) {
+      if (!isEnabled() || !hasOtherTerminals()) {
         return false;
       }
 

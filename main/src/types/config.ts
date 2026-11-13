@@ -211,6 +211,8 @@ export interface AppConfig {
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
+  // Whether typing @ in a terminal opens the picker for another terminal's scrollback (on when absent)
+  terminalReferencesEnabled?: boolean;
   // Worktree file sync — files/dirs to copy from main repo into new worktrees
   worktreeFileSync?: WorktreeFileSyncEntry[];
   // Preferred shell for Windows terminals
@@ -317,6 +319,7 @@ export interface UpdateConfigRequest {
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
+  terminalReferencesEnabled?: boolean;
   // Worktree file sync — files/dirs to copy from main repo into new worktrees
   worktreeFileSync?: WorktreeFileSyncEntry[];
   // Preferred shell for Windows terminals

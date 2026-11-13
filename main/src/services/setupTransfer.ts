@@ -70,7 +70,7 @@ const APPEARANCE_KEYS = [
 
 const PREFERENCE_CONFIG_KEYS = [
   'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'keyboardShortcutOverrides',
-  'kittyKeyboardEnabled',
+  'kittyKeyboardEnabled', 'terminalReferencesEnabled',
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
   'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'terminalPowerMode',
   'resumePausedOnOpen', 'autoPauseEnabled', 'autoPauseAfterHours',
@@ -116,6 +116,7 @@ const FIELD_LABELS = {
   commandPaletteShortcutEnabled: 'Command Palette shortcut',
   keyboardShortcutOverrides: 'Changed key bindings',
   kittyKeyboardEnabled: 'Kitty keyboard',
+  terminalReferencesEnabled: 'Terminal references',
   htmlFileOpenMode: 'HTML files open as',
   enableCommitFooter: 'Commit footer',
   gitAttributionEnabled: 'Git attribution',
@@ -452,6 +453,7 @@ const sectionSchemas = {
     commandPaletteShortcutEnabled: booleanField,
     keyboardShortcutOverrides: boundary.optional(boundary.record(keyboardOverrideValue)),
     kittyKeyboardEnabled: booleanField,
+    terminalReferencesEnabled: booleanField,
     htmlFileOpenMode: boundary.optional(boundary.enumeration('preview', 'source')),
     enableCommitFooter: booleanField,
     gitAttributionEnabled: booleanField,
