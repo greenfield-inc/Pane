@@ -415,7 +415,8 @@ function App() {
     await captureAppFirstOpened(identity);
   }, []);
 
-  // Apply the default-on experiment only when no explicit legacy choice exists.
+  // Apply the default-on experiment only when no explicit choice exists. A stored
+  // analytics.enabled=false is a choice: the fresh-install default is true.
   useEffect(() => {
     if (!appConfig || hasCheckedAnalyticsDefault || analyticsCheckStarted.current) return;
     analyticsCheckStarted.current = true;
@@ -435,7 +436,9 @@ function App() {
         const hasLegacyChoice = legacyConsentResult === 'true';
         const hasAppliedDefault = defaultAppliedResult === 'true';
 
-        if (!hasLegacyChoice && !hasAppliedDefault) {
+        if (!hasLegacyChoice && !hasAppliedDefault && appConfig.analytics?.enabled === false) {
+          await API.preferences.set('analytics_default_applied', 'true');
+        } else if (!hasLegacyChoice && !hasAppliedDefault) {
           const identity = await resolveAnalyticsIdentity();
           // A config change during the identity lookup restarts this effect;
           // only the latest run captures and aliases.
@@ -458,11 +461,6 @@ function App() {
           await captureFirstOpenOnce(identity);
           flushPendingEvents();
           await API.preferences.set('analytics_default_applied', 'true');
-          if (appConfig.analytics?.enabled !== true) {
-            await useConfigStore.getState().updateConfig({
-              analytics: { ...appConfig.analytics, enabled: true },
-            });
-          }
         }
       } catch (error) {
         console.error('[App] Error applying analytics default:', error);

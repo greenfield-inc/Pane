@@ -175,11 +175,10 @@ describe('install heartbeat', () => {
     return decodeBoundary(JSON.parse(options.body), boundary.jsonObject);
   }
 
-  it.each([true, false])('sends only the install ID, version, OS and environment tags at start and every 24 hours (analytics on: %s)', async (enabled) => {
+  it('sends only the install ID, version, OS and environment tags at start and every 24 hours', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-19T12:00:00.000Z'));
-    const { config, analytics } = setup();
-    config.isAnalyticsEnabled.mockReturnValue(enabled);
+    const { analytics } = setup();
     analytics.startHeartbeat();
     await vi.advanceTimersByTimeAsync(0);
     expect(send).toHaveBeenCalledTimes(1);
@@ -227,6 +226,25 @@ describe('install heartbeat', () => {
     await vi.advanceTimersByTimeAsync(2 * DAY);
     expect(send).not.toHaveBeenCalled();
     expect(config.getOrCreateAnalyticsInstallId).not.toHaveBeenCalled();
+  });
+
+  it('follows the analytics toggle at each beat', async () => {
+    vi.useFakeTimers();
+    const { config, analytics } = setup();
+    config.isAnalyticsEnabled.mockReturnValue(false);
+    analytics.startHeartbeat();
+    await vi.advanceTimersByTimeAsync(DAY);
+    expect(send).not.toHaveBeenCalled();
+    expect(config.getOrCreateAnalyticsInstallId).not.toHaveBeenCalled();
+
+    config.isAnalyticsEnabled.mockReturnValue(true);
+    await vi.advanceTimersByTimeAsync(DAY);
+    expect(send).toHaveBeenCalledTimes(1);
+
+    config.isAnalyticsEnabled.mockReturnValue(false);
+    await vi.advanceTimersByTimeAsync(DAY);
+    expect(send).toHaveBeenCalledTimes(1);
+    analytics.stopHeartbeat();
   });
 
   it('cancels a request that hangs past 1.5 seconds', async () => {

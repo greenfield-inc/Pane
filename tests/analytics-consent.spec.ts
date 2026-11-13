@@ -127,7 +127,7 @@ test('bundled analytics preserves identity and opt-out without remote code, conf
     analyticsIdentity: identity,
     initialConfig: {
       analytics: {
-        enabled: false,
+        enabled: true,
         posthogApiKey: 'phc_test',
         posthogHost: POSTHOG_HOST,
         installId: identity.installId,
@@ -202,7 +202,10 @@ test('bundled analytics preserves identity and opt-out without remote code, conf
   expect(remoteScripts).toEqual([]);
 });
 
-test('an explicit existing opt-out stays disabled and receives no default-on events', async ({ page }) => {
+for (const [name, analyticsConsentShown] of [
+  ['under the legacy dialog', true],
+  ['in config before the default-on check ran', false],
+] as const) test(`an explicit opt-out made ${name} stays disabled and receives no default-on events`, async ({ page }) => {
   const identity = {
     distinctId: 'install:install_existing_opt_out_e2e',
     installId: 'install_existing_opt_out_e2e',
@@ -229,7 +232,8 @@ test('an explicit existing opt-out stays disabled and receives no default-on eve
   });
 
   await installElectronApiMock(page, {
-    analyticsConsentShown: true,
+    analyticsConsentShown,
+    initialPreferences: { analytics_default_applied: 'false' },
     analyticsIdentity: identity,
     initialConfig: {
       analytics: {

@@ -112,8 +112,8 @@ export class AnalyticsManager extends EventEmitter {
   }
 
   /**
-   * Counts active installs, so it ignores the analytics toggle. The payload is
-   * exactly what the Privacy copy discloses; see docs/ANALYTICS_INVARIANTS.md.
+   * Counts active installs while analytics is on; each beat checks the toggle.
+   * The payload is exactly what the Privacy copy discloses; see docs/ANALYTICS_INVARIANTS.md.
    */
   startHeartbeat(): void {
     if (this.heartbeatTimer || !this.runtime.isInstalledApp()) return;
@@ -130,6 +130,7 @@ export class AnalyticsManager extends EventEmitter {
 
   private async sendHeartbeat(): Promise<void> {
     try {
+      if (!this.isEnabled()) return;
       const installId = await this.configManager.getOrCreateAnalyticsInstallId();
       await this.postCapture('app_heartbeat', `install:${installId}`, {
         app_version: this.runtime.getVersion(),
