@@ -100,26 +100,189 @@ export const RUNPANE_CONTRACT = {
       "opencode"
     ]
   },
-  "agentTemplates": {
-    "codex": {
-      "title": "Codex",
-      "command": "codex --yolo",
-      "description": "Open a Codex terminal tab and allow the initial input to drive the agent."
-    },
-    "claude": {
-      "title": "Claude Code",
-      "command": "claude --dangerously-skip-permissions",
-      "description": "Open a Claude Code terminal tab and allow the initial input to drive the agent."
-    },
-    "cursor": {
-      "title": "Cursor",
-      "command": "cursor-agent --force --trust",
-      "description": "Open a Cursor Agent terminal tab and allow the initial input to drive the agent."
-    },
-    "opencode": {
-      "title": "OpenCode",
-      "command": "opencode --auto",
-      "description": "Open an OpenCode terminal tab and allow the initial input to drive the agent."
+  "agents": {
+    "default": "claude",
+    "registryUrl": "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json",
+    "entries": {
+      "claude": {
+        "title": "Claude Code",
+        "label": "Claude",
+        "icon": "claude",
+        "description": "Open a Claude Code terminal tab and allow the initial input to drive the agent.",
+        "executables": [
+          "claude"
+        ],
+        "terminal": {
+          "args": [],
+          "fullAccessArgs": [
+            "--dangerously-skip-permissions"
+          ],
+          "hotkey": "mod+alt+3",
+          "reportsConversation": true
+        },
+        "install": {
+          "url": "https://code.claude.com/docs/en/setup",
+          "command": "npm install -g @anthropic-ai/claude-code@latest"
+        },
+        "signIn": [
+          "auth",
+          "login"
+        ],
+        "onboarding": true,
+        "chat": {
+          "adapter": {
+            "package": "@agentclientprotocol/claude-agent-acp",
+            "executableEnv": "CLAUDE_CODE_EXECUTABLE",
+            "npmShimScript": "@anthropic-ai/claude-code/cli.js",
+            "sessionFolderSettingsMeta": "claudeCode"
+          },
+          "minimumVersion": "2.1.316",
+          "apiKeyEnv": [
+            "ANTHROPIC_API_KEY"
+          ],
+          "fullAccess": {
+            "mode": "bypassPermissions"
+          },
+          "legacyClients": true,
+          "riskyModes": [
+            "bypassPermissions",
+            "dontAsk"
+          ],
+          "terminalConversationsLoad": true,
+          "registryIds": [
+            "claude-acp"
+          ]
+        }
+      },
+      "codex": {
+        "title": "Codex",
+        "label": "Codex",
+        "icon": "codex",
+        "description": "Open a Codex terminal tab and allow the initial input to drive the agent.",
+        "executables": [
+          "codex"
+        ],
+        "terminal": {
+          "args": [],
+          "fullAccessArgs": [
+            "--yolo"
+          ],
+          "hotkey": "mod+alt+4"
+        },
+        "install": {
+          "url": "https://developers.openai.com/codex/cli",
+          "command": "npm install -g @openai/codex@latest"
+        },
+        "signIn": [
+          "login"
+        ],
+        "onboarding": true,
+        "chat": {
+          "adapter": {
+            "package": "@agentclientprotocol/codex-acp",
+            "executableEnv": "CODEX_PATH",
+            "npmShimScript": "@openai/codex/bin/codex.js"
+          },
+          "minimumVersion": "0.165.0",
+          "apiKeyEnv": [
+            "OPENAI_API_KEY",
+            "CODEX_API_KEY"
+          ],
+          "fullAccess": {
+            "mode": "agent-full-access"
+          },
+          "legacyClients": true,
+          "riskyModes": [
+            "agent-full-access"
+          ],
+          "terminalConversationsLoad": true,
+          "registryIds": [
+            "codex-acp"
+          ]
+        }
+      },
+      "cursor": {
+        "title": "Cursor",
+        "label": "Cursor",
+        "icon": "cursor",
+        "description": "Open a Cursor Agent terminal tab and allow the initial input to drive the agent.",
+        "executables": [
+          "cursor-agent"
+        ],
+        "terminal": {
+          "args": [
+            "--trust"
+          ],
+          "fullAccessArgs": [
+            "--force"
+          ],
+          "hotkey": "mod+alt+5",
+          "platforms": [
+            "darwin",
+            "linux",
+            "wsl"
+          ]
+        },
+        "install": {
+          "url": "https://cursor.com/docs/cli/installation",
+          "command": "curl https://cursor.com/install -fsS | bash"
+        },
+        "signIn": [
+          "login"
+        ],
+        "onboarding": true,
+        "chat": {
+          "args": [
+            "acp"
+          ],
+          "minimumVersion": "2026.10.22",
+          "apiKeyEnv": [
+            "CURSOR_API_KEY"
+          ],
+          "fullAccess": {
+            "args": true
+          },
+          "terminalConversationsLoad": false,
+          "registryIds": [
+            "cursor"
+          ]
+        }
+      },
+      "opencode": {
+        "title": "OpenCode",
+        "label": "OpenCode",
+        "icon": "opencode",
+        "description": "Open an OpenCode terminal tab and allow the initial input to drive the agent.",
+        "executables": [
+          "opencode"
+        ],
+        "terminal": {
+          "args": [],
+          "fullAccessArgs": [
+            "--auto"
+          ],
+          "hotkey": "mod+alt+6"
+        },
+        "install": {
+          "url": "https://opencode.ai/docs",
+          "command": "npm install -g opencode-ai@latest"
+        },
+        "signIn": [
+          "auth",
+          "login"
+        ],
+        "chat": {
+          "args": [
+            "acp"
+          ],
+          "minimumVersion": "1.18.14",
+          "terminalConversationsLoad": true,
+          "registryIds": [
+            "opencode",
+            "opencode-v2"
+          ]
+        }
+      }
     }
   },
   "terminalKeys": {
@@ -2800,7 +2963,7 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--chat",
-        "description": "Open the agent as a chat tab (Claude or Codex over ACP, no terminal) instead of a terminal tab."
+        "description": "Open --agent as a chat tab (over ACP, no terminal) instead of a terminal tab; the host lists the agents it can run."
       },
       {
         "name": "--next",
@@ -3635,11 +3798,13 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
         "  runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor>] [--title <title>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
+        "  runpane panels create --pane <pane-id> --chat --agent <id> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
         "",
         "Options:",
         "  --pane <pane-id>              Existing Pane session to add the panel to.",
         "  --agent <codex|claude|cursor> Built-in agent command template, or with --tool-command the agent it runs.",
         "  --tool-command <command>      Custom terminal command to launch.",
+        "  --chat                        Open --agent as a chat tab instead of a terminal; the host lists the agents it can run.",
         "  --title <title>               Panel title override.",
         "  --initial-input, --prompt     Initial input to send after the tool starts.",
         "  --initial-input-file <path|-> Read initial input from a file or stdin.",
@@ -5581,11 +5746,13 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
         "  python -m runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor>] [--title <title>] [--no-focus] [--wait-ready] --yes [--json]",
+        "  python -m runpane panels create --pane <pane-id> --chat --agent <id> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
         "",
         "Options:",
         "  --pane <pane-id>              Existing Pane session to add the panel to.",
         "  --agent <codex|claude|cursor> Built-in agent command template, or with --tool-command the agent it runs.",
         "  --tool-command <command>      Custom terminal command to launch.",
+        "  --chat                        Open --agent as a chat tab instead of a terminal; the host lists the agents it can run.",
         "  --title <title>               Panel title override.",
         "  --initial-input, --prompt     Initial input to send after the tool starts.",
         "  --initial-input-file <path|-> Read initial input from a file or stdin.",
@@ -10170,10 +10337,8 @@ export const RUNPANE_CONTRACT = {
                             "type": "boolean"
                           },
                           "agentType": {
-                            "enum": [
-                              "codex",
-                              "claude"
-                            ]
+                            "type": "string",
+                            "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
                           },
                           "lastActivity": {
                             "type": "string"
@@ -12409,10 +12574,8 @@ export const RUNPANE_CONTRACT = {
               "type": "boolean"
             },
             "agentType": {
-              "enum": [
-                "codex",
-                "claude"
-              ]
+              "type": "string",
+              "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
             },
             "lastActivity": {
               "type": "string"
@@ -12705,10 +12868,8 @@ export const RUNPANE_CONTRACT = {
               "type": "boolean"
             },
             "agentType": {
-              "enum": [
-                "codex",
-                "claude"
-              ]
+              "type": "string",
+              "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
             },
             "lastActivity": {
               "type": "string"
@@ -12966,10 +13127,8 @@ export const RUNPANE_CONTRACT = {
                   "type": "boolean"
                 },
                 "agentType": {
-                  "enum": [
-                    "codex",
-                    "claude"
-                  ]
+                  "type": "string",
+                  "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
                 },
                 "lastActivity": {
                   "type": "string"
@@ -13186,10 +13345,8 @@ export const RUNPANE_CONTRACT = {
                         "type": "boolean"
                       },
                       "agentType": {
-                        "enum": [
-                          "codex",
-                          "claude"
-                        ]
+                        "type": "string",
+                        "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
                       },
                       "lastActivity": {
                         "type": "string"
@@ -13266,10 +13423,8 @@ export const RUNPANE_CONTRACT = {
               "type": "string"
             },
             "agentType": {
-              "enum": [
-                "claude",
-                "codex"
-              ]
+              "type": "string",
+              "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
             },
             "text": {
               "type": "string"
@@ -13625,10 +13780,8 @@ export const RUNPANE_CONTRACT = {
                   "type": "boolean"
                 },
                 "agentType": {
-                  "enum": [
-                    "codex",
-                    "claude"
-                  ]
+                  "type": "string",
+                  "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
                 },
                 "lastActivity": {
                   "type": "string"
@@ -20045,7 +20198,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--chat",
             "required": false,
-            "description": "Open --agent claude or codex as a chat tab (ACP, no terminal) instead of a terminal tab. Needs chat tabs on in Settings > AI & Agents."
+            "description": "Open --agent as a chat tab (ACP, no terminal) instead of a terminal tab. --agent then takes any agent id; if the host cannot run it, the error lists the agents it can. Needs chat tabs on in Settings > AI & Agents."
           },
           {
             "name": "--agent-farm",
