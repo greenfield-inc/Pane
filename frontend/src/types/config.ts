@@ -100,6 +100,8 @@ export interface AppConfig {
   // Under the master toggle: on AC power (default on) and on battery (default off)
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
+  // When Pane pauses its own background checks (ports, usage) while nobody is looking (default balanced)
+  backgroundActivity?: 'performance' | 'balanced' | 'batterySaver';
   // Pause: selecting a paused Pane or Session chat resumes it (default off)
   resumePausedOnOpen?: boolean;
   // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)
@@ -244,6 +246,7 @@ export interface UpdateConfigRequest {
   keepAwakeWhileSessionsActive?: boolean;
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
+  backgroundActivity?: AppConfig['backgroundActivity'];
   resumePausedOnOpen?: boolean;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;

@@ -581,6 +581,10 @@ function App() {
     document.documentElement.classList.toggle('window-blurred', !windowFocused);
   }, [windowVisible, windowFocused]);
 
+  useEffect(() => {
+    window.electronAPI.window?.reportVisibility?.(windowVisible);
+  }, [windowVisible]);
+
   // Check if onboarding should be shown after analytics defaults are resolved.
   useEffect(() => {
     if (hasCheckedOnboarding || onboardingCheckStarted.current || !hasCheckedAnalyticsDefault) return;

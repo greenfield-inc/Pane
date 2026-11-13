@@ -1408,6 +1408,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   window: {
     consumeUncleanShutdown: async (): Promise<boolean> => decodeBoundary(await invokeIpc('app:consume-unclean-shutdown'), boundary.boolean),
     isFocused: async (): Promise<boolean> => decodeBoundary(await invokeIpc('window:is-focused'), boundary.boolean),
+    reportVisibility: (visible: boolean): void => {
+      ipcRenderer.send('window:visibility-changed', visible);
+    },
     openPaneLink: async (link: string): Promise<void> => {
       await invokeIpc('window:open-pane-link', link);
     },

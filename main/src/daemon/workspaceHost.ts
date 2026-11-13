@@ -183,7 +183,7 @@ export class PaneWorkspaceHostController {
     private readonly configManager: WorkspaceConfigProvider,
     private readonly serveAccess: WorkspaceServeAccess,
     private readonly run: RemoteSetupCommandRunner = runRemoteSetupCommand,
-    private readonly isForwardedPort?: (port: number) => boolean,
+    private readonly isForwardedPort?: (port: number) => boolean | Promise<boolean>,
     private readonly paneVersion?: string,
     private readonly inBootWindow: () => boolean = paneInBootWindow,
   ) {

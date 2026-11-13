@@ -165,6 +165,7 @@ export class ConfigManager extends EventEmitter {
       keepAwakeWhileSessionsActive: true,
       keepAwakeWhilePluggedIn: false,
       keepAwakeOnBattery: false,
+      backgroundActivity: 'balanced',
       resumePausedOnOpen: false,
       autoPauseEnabled: true,
       autoPauseAfterHours: DEFAULT_AUTO_PAUSE_HOURS,

@@ -7,10 +7,12 @@ import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { VersionInfo } from '../../../types/session';
 import { API } from '../../../utils/api';
-import type { HtmlFileOpenMode } from '../../../types/config';
+import type { AppConfig, HtmlFileOpenMode } from '../../../types/config';
 import { htmlFileOpenModeOf } from '../../../stores/configStore';
 import { KeepAwakeSetting } from './KeepAwakeSetting';
 import { PauseSettings } from './PauseSettings';
+
+type BackgroundActivityProfile = NonNullable<AppConfig['backgroundActivity']>;
 
 interface GeneralSettingsProps {
   persistence: SettingsPersistence;
@@ -111,8 +113,32 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection title="Power" description="System sleep behavior while sessions are active.">
+      <SettingsSection title="Power" description="System sleep while sessions are active, and Pane's own background checks.">
         <KeepAwakeSetting persistence={persistence} />
+        <SettingRow
+          settingId="background-activity"
+          label="Background checks"
+          description="Pane pauses its own checks for open ports and usage while nobody is looking. Agents, terminals and approvals always keep running."
+          saveState={persistence.saveStates['background-activity']}
+          details={(
+            <p className="max-w-2xl text-xs leading-relaxed text-text-tertiary">
+              Performance: never pause. Balanced: pause while the screen is locked or in Low Power Mode. Battery saver:
+              also pause on battery. Opening Pane or the Pane phone app catches up at once.
+            </p>
+          )}
+        >
+          <SegmentedControl<BackgroundActivityProfile>
+            label="Background checks"
+            columns={3}
+            value={config.backgroundActivity ?? 'balanced'}
+            options={[
+              { id: 'performance', label: 'Performance' },
+              { id: 'balanced', label: 'Balanced' },
+              { id: 'batterySaver', label: 'Battery saver' },
+            ]}
+            onChange={(value) => void persistence.saveConfig('background-activity', { backgroundActivity: value })}
+          />
+        </SettingRow>
       </SettingsSection>
 
       <SettingsSection title="Pause" description="Paused Panes stop their processes and keep their conversations until you resume them.">

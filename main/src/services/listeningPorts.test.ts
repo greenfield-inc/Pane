@@ -282,6 +282,25 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
     }
   });
 
+  it('reads nothing while paused, though terminals keep printing, and lists a server started meanwhile as soon as it resumes', async () => {
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], lastOutputAt: () => Date.now() });
+    const listed = (port: number) => monitor.snapshot().ports.some(entry => entry.port === port);
+    monitor.setPaused(true);
+    monitor.start();
+    try {
+      const { port } = await startListener(HTTP_SERVER);
+      // Past one 6 s poll, which would have read had it not been paused.
+      await new Promise(resolve => setTimeout(resolve, 8_000));
+      expect(listed(port)).toBe(false);
+
+      monitor.setPaused(false);
+      // One read at once, not at the next 6 s poll.
+      await vi.waitFor(() => expect(listed(port)).toBe(true), { timeout: 4_000, interval: 100 });
+    } finally {
+      monitor.stop();
+    }
+  });
+
   it('while every terminal is quiet, finds a port opened elsewhere a minute after the last read only while watched', async () => {
     let watched = false;
     const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], lastOutputAt: () => 0, watched: () => watched });

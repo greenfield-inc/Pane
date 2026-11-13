@@ -18,6 +18,7 @@ import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type
 export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
 import { readingMachines } from './readingMachines';
+import { remoteEventStreams } from './remoteEventStreams';
 import {
   GLASSES_CHANNELS,
   GLASSES_EVENT_CHANNELS,
@@ -243,7 +244,7 @@ interface PaneRemoteHttpApiServerOptions {
   /** Serve workspaces on loopback behind Tailscale Serve, trusting the Tailscale logins `access` allows. */
   workspace?: WorkspaceIdentityOptions;
   /** Whether a port is in the host's forwarded list; port streams reach only those. Without it, none. */
-  isForwardedPort?(port: number): boolean;
+  isForwardedPort?(port: number): boolean | Promise<boolean>;
   /** Where the voice proxy reaches Deepgram's streaming API; Deepgram's own by default. */
   deepgramListenEndpoint?: string;
   /** Sent to signed-in clients on the ready event. */
@@ -302,7 +303,7 @@ export class PaneRemoteHttpApiServer {
   private readonly heartbeatIntervalMs: number;
   private readonly analyticsSink?: RemotePaneAnalyticsSink;
   private readonly workspace?: WorkspaceIdentityOptions;
-  private readonly isForwardedPort: (port: number) => boolean;
+  private readonly isForwardedPort: (port: number) => boolean | Promise<boolean>;
   private readonly deepgramListenEndpoint: string;
   private readonly glassesAdmissions = new WeakMap<IncomingMessage, GlassesAdmission>();
   private stopWatchingGlassesRevokes: (() => void) | null = null;
@@ -526,7 +527,7 @@ export class PaneRemoteHttpApiServer {
     }
     const portMatch = PORT_STREAM_PATH.exec(url.pathname);
     if (portMatch) {
-      this.handlePortStreamUpgrade(request, socket, head, Number(portMatch[1]), url);
+      void this.handlePortStreamUpgrade(request, socket, head, Number(portMatch[1]), url).catch(() => socket.destroy());
       return;
     }
     if (url.pathname !== VOICE_DEEPGRAM_STREAM_PATH) {
@@ -563,13 +564,15 @@ export class PaneRemoteHttpApiServer {
    * Connects an authenticated client to a host loopback port in the forwarded list and copies raw
    * bytes both ways, one WebSocket per TCP connection the client accepted.
    */
-  private handlePortStreamUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, port: number, url: URL): void {
+  private async handlePortStreamUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, port: number, url: URL): Promise<void> {
     const auth = this.authenticateRequest(request, url.searchParams.get('access_token'));
     if (!auth.ok) {
       writeRawHttpError(socket, auth.statusCode, auth.error.message, auth.error.code);
       return;
     }
-    if (!this.isForwardedPort(port)) {
+    const forwarded = await this.isForwardedPort(port);
+    if (socket.destroyed) return;
+    if (!forwarded) {
       writeRawHttpError(socket, 403, `Port ${port} is not forwarded from this host`, 'ERR_PORT_NOT_FORWARDED');
       return;
     }
@@ -1016,6 +1019,7 @@ export class PaneRemoteHttpApiServer {
     };
     this.eventClients.set(clientConnectionId, connectedClient);
     if (connectedClient.readerMachineId) readingMachines.add(connectedClient.readerMachineId);
+    remoteEventStreams.add();
     if (connectedClient.remoteRuntimeId && connectedClient.deviceLabel) {
       // A phone answers from an alert button with no stream open; it keeps the name it gave here.
       this.deviceLabelsByRuntime.set(connectedClient.remoteRuntimeId, connectedClient.deviceLabel);
@@ -1418,6 +1422,7 @@ export class PaneRemoteHttpApiServer {
     );
     this.eventClients.delete(clientConnectionId);
     if (client.readerMachineId) readingMachines.remove(client.readerMachineId);
+    remoteEventStreams.remove();
     if (!client.stream.writableEnded) {
       client.stream.end();
     }

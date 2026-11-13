@@ -891,6 +891,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return Promise.resolve(detected);
         },
         isFocused: () => Promise.resolve(mockOptions.initialWindowFocused !== false),
+        reportVisibility: () => {},
       },
       getPlatform: () => Promise.resolve(mockOptions.platform ?? 'linux'),
       windowControlsOverlayEnabled: mockOptions.windowControlsOverlayEnabled === true,

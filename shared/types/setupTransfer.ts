@@ -109,6 +109,7 @@ export interface SetupPreferenceConfig {
   keepAwakeWhileSessionsActive?: boolean;
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
+  backgroundActivity?: 'performance' | 'balanced' | 'batterySaver';
   resumePausedOnOpen?: boolean;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;

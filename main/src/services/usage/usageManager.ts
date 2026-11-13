@@ -1,4 +1,5 @@
 import { existsSync } from 'fs';
+import { createPausableInterval, type PausableInterval } from '../../utils/pausableInterval';
 import { stat } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -66,15 +67,16 @@ export class UsageManager {
     roots?: () => TranscriptRoot[];
     repository?: UsageRepository;
     scanFile?: typeof scanJsonlFile;
-    createPriceProvider?: () => Pick<OpenRouterPriceProvider, 'start' | 'stop'>;
+    createPriceProvider?: () => Pick<OpenRouterPriceProvider, 'start' | 'stop' | 'setPaused'>;
   } = {}) {}
 
   // Resolved on first use, not in the constructor: this module is imported at
   // load time and the database handle is only guaranteed after initialisation.
   private repositoryRef: UsageRepository | null = null;
   private aggregatorRef: UsageAggregator | null = null;
-  private priceProvider: Pick<OpenRouterPriceProvider, 'start' | 'stop'> | null = null;
-  private pollingTimer: NodeJS.Timeout | undefined;
+  private priceProvider: Pick<OpenRouterPriceProvider, 'start' | 'stop' | 'setPaused'> | null = null;
+  private polling: PausableInterval | undefined;
+  private paused = false;
   private started = false;
   private generation = 0;
   private scanQueue: Promise<void> = Promise.resolve();
@@ -109,6 +111,7 @@ export class UsageManager {
 
     this.priceProvider = this.dependencies.createPriceProvider?.() ?? new OpenRouterPriceProvider(getAppDirectory());
     this.priceProvider.start();
+    this.priceProvider.setPaused(this.paused);
 
     try {
       this.repository.pruneOlderThan(Date.now() - USAGE_RETENTION_DAYS * DAY_MS);
@@ -117,18 +120,23 @@ export class UsageManager {
     }
 
     void this.requestScan();
-    this.pollingTimer = setInterval(() => {
-      void this.requestScan();
-    }, USAGE_POLL_INTERVAL_MS);
-    this.pollingTimer.unref();
+    this.polling = createPausableInterval(() => void this.requestScan(), USAGE_POLL_INTERVAL_MS);
+    this.polling.setPaused(this.paused);
+  }
+
+  /** While paused (nobody is looking), scheduled scans and price refreshes wait; one runs on resume if any was due. */
+  setPaused(paused: boolean): void {
+    this.paused = paused;
+    this.polling?.setPaused(paused);
+    this.priceProvider?.setPaused(paused);
   }
 
   stop(): void {
     this.started = false;
     this.priceProvider?.stop();
     this.priceProvider = null;
-    if (this.pollingTimer) clearInterval(this.pollingTimer);
-    this.pollingTimer = undefined;
+    this.polling?.stop();
+    this.polling = undefined;
     this.generation += 1;
     this.pendingScan = null;
     this.status = { ...this.status, scanning: false };
