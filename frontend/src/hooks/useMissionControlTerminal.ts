@@ -26,6 +26,7 @@ import { subscribeToTerminalOutput } from '../services/terminalOutputBus';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { createTerminalOutputAcknowledger } from '../utils/terminalRestore';
+import { useCaretResting } from '../services/caretRest';
 
 /**
  * Read-only xterm for a Mission Control tile.
@@ -256,6 +257,8 @@ export function useMissionControlTerminal({
   // rather than by rebuilding a tile mid-stream.
   const fontFamilyRef = useCommittedRef(fontFamily);
   const highContrastRef = useCommittedRef(highContrast);
+  const caretResting = useCaretResting();
+  const caretRestingRef = useCommittedRef(caretResting);
   const kittyKeyboardRef = useCommittedRef(kittyKeyboardEnabled);
   // Read inside the terminal's own overflow check, which outlives any single
   // render and must not rebuild the terminal when the budget changes.
@@ -386,7 +389,7 @@ export function useMissionControlTerminal({
       // No `convertEol`: a tile replays and then follows the same byte stream
       // the real panel does, and rewriting bare LFs as CRLF shifts every line a
       // TUI paints without one.
-      cursorBlink: startsInteractive,
+      cursorBlink: startsInteractive && !caretRestingRef.current,
       disableStdin: !startsInteractive,
       scrollOnUserInput: true,
       // Sized correctly up front — never resized once content exists.
@@ -672,10 +675,14 @@ export function useMissionControlTerminal({
     const terminal = terminalRef.current;
     if (!terminal) return;
     terminal.options.disableStdin = !interactive;
-    terminal.options.cursorBlink = interactive;
     syncHelperTextareaFocusability(containerRef.current, interactive);
     if (interactive) terminal.focus();
   }, [interactive]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (terminal) terminal.options.cursorBlink = interactive && !caretResting;
+  }, [interactive, caretResting]);
 
   /**
    * Hand the keyboard to this terminal.

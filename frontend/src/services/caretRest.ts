@@ -1,39 +1,52 @@
+import { useSyncExternalStore } from 'react';
+
 /**
- * The text caret blinks while someone is typing and holds steady once they stop.
+ * Carets and text cursors blink while someone is typing and hold steady once
+ * they stop.
  *
- * Chromium repaints a blinking caret every 500 ms, and on macOS each repaint
- * keeps the display link ticking for ~165 ms: 55-70 wakeups a second
- * while a focused field sits idle. A steady caret costs nothing. Linux GTK stops
- * the blink after a similar idle timeout.
+ * Every blink repaints, and on macOS each repaint keeps the display link
+ * ticking for ~165 ms: 55-70 wakeups a second while a focused field sits idle.
+ * A steady cursor costs nothing. Linux GTK stops its blink after a similar idle
+ * timeout.
+ *
+ * Native carets follow `html.caret-resting` in index.css. Cursors an editor
+ * draws itself (Monaco, xterm) read `useCaretResting()`.
  */
 const CARET_BLINK_IDLE_MS = 10_000;
 
-/** Set on the root element while the caret holds steady; index.css reads it. */
 const CARET_RESTING_CLASS = 'caret-resting';
 
 const ACTIVITY_EVENTS = ['keydown', 'input', 'pointerdown', 'focusin'] as const;
 
-interface CaretRestTarget {
-  addEventListener: EventTarget['addEventListener'];
-}
+let resting = false;
+const listeners = new Set<() => void>();
 
-interface CaretRestRoot {
-  classList: Pick<DOMTokenList, 'add' | 'remove' | 'contains'>;
+function setResting(next: boolean): void {
+  if (next === resting) return;
+  resting = next;
+  document.documentElement.classList.toggle(CARET_RESTING_CLASS, next);
+  for (const listener of listeners) listener();
 }
 
 /** Watches for typing, clicks and focus for the life of the window. */
-export function startCaretRest(
-  events: CaretRestTarget = window,
-  root: CaretRestRoot = document.documentElement,
-): void {
+export function startCaretRest(): void {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const rest = () => root.classList.add(CARET_RESTING_CLASS);
   const wake = () => {
-    if (root.classList.contains(CARET_RESTING_CLASS)) root.classList.remove(CARET_RESTING_CLASS);
+    setResting(false);
     clearTimeout(timer);
-    timer = setTimeout(rest, CARET_BLINK_IDLE_MS);
+    timer = setTimeout(() => setResting(true), CARET_BLINK_IDLE_MS);
   };
 
-  for (const type of ACTIVITY_EVENTS) events.addEventListener(type, wake, { capture: true, passive: true });
+  for (const type of ACTIVITY_EVENTS) window.addEventListener(type, wake, { capture: true, passive: true });
   wake();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/** True while cursors should hold steady instead of blinking. */
+export function useCaretResting(): boolean {
+  return useSyncExternalStore(subscribe, () => resting);
 }
