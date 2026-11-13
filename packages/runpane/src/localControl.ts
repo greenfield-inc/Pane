@@ -66,8 +66,8 @@ interface OrchestrationSessionRecord {
   paused?: PausedMark;
   agent: RunpaneAgent;
   internalSessionId: string;
-  /** Pane versions before OpenCode Sessions send no `opencode` panel id. */
-  panelIds: { claude: string; codex: string; cursor: string; opencode?: string };
+  /** Each agent's Session panel id, keyed by agent id; older Pane versions send fewer agents. */
+  panelIds: JsonObject;
   goal: string;
   context: string;
   decisions: string[];
@@ -1516,12 +1516,7 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
   paused: boundary.optional(pausedMarkSchema),
   agent: agentSchema,
   internalSessionId: boundary.nonEmptyString,
-  panelIds: boundary.object({
-    claude: boundary.nonEmptyString,
-    codex: boundary.nonEmptyString,
-    cursor: boundary.nonEmptyString,
-    opencode: boundary.optional(boundary.nonEmptyString),
-  }),
+  panelIds: boundary.jsonObject,
   launchCommand: boundary.optional(boundary.string),
   profile: boundary.optional(boundary.string),
   goal: boundary.string,
