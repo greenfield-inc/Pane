@@ -15,6 +15,7 @@ import type { ChatTabNotifyBridge } from './notifyBridge';
 import { agentConfig } from '../../../../shared/agents';
 import { ChatAgentCatalog } from './agentCatalog';
 import { isOnPath } from '../../utils/onPath';
+import { getAgentRegistry, registryCatalogEntries } from '../agentRegistry';
 
 /** Chat tab state lives in the panel's custom state; only the host writes it. */
 const store: ChatTabStore = {
@@ -58,7 +59,7 @@ let catalog: ChatAgentCatalog | undefined;
 export function getChatAgentCatalog(): ChatAgentCatalog {
   // With the scripted test agent (development and end-to-end tests only), it stands in for every agent.
   const scripted = !!process.env.PANE_CHAT_TEST_AGENT && !app.isPackaged;
-  catalog ??= new ChatAgentCatalog({ file: path.join(getAppDirectory(), 'chat-agent-capabilities.json'), onPath: scripted ? async () => true : isOnPath });
+  catalog ??= new ChatAgentCatalog({ file: path.join(getAppDirectory(), 'chat-agent-capabilities.json'), onPath: scripted ? async () => true : isOnPath, registryAgents: registryCatalogEntries });
   return catalog;
 }
 let context: ChatLaunchContext = { unsupportedHost: () => undefined, projectEnv: async () => ({ env: {}, warnings: [] }) };
@@ -96,6 +97,7 @@ export function getChatTabManager(): ChatTabManager {
     store,
     launcher: scriptedAgentLauncher() ?? new AgentChatLauncher({
       secrets: chatTabSecrets,
+      registry: { resolve: agent => getAgentRegistry().resolve(agent) },
       context: { unsupportedHost: panel => context.unsupportedHost(panel), projectEnv: panel => context.projectEnv(panel) },
       profiles: { resolve: (panel, state, env) => {
         if (!profiles) throw new PaneError('CHAT_PROFILE_UNSUPPORTED', 'This Pane cannot start Agent Farm profiles in chat tabs yet.', 'Start the profile in a terminal tab.');
@@ -110,7 +112,14 @@ export function getChatTabManager(): ChatTabManager {
     onView: view => notifyBridge?.observe(view),
     onClosed: panelId => notifyBridge?.forget(panelId),
     openConversations,
-    onInitialized: (agent, response) => getChatAgentCatalog().record(agent, response),
+    onInitialized: (agent, response) => {
+      getChatAgentCatalog().record(agent, response);
+      // A registry agent that started on its newest version no longer needs the older ones (D-15),
+      // unless another tab still runs one of them: its process loads files from that folder.
+      const installed = getAgentRegistry().installedRecord(agent);
+      const others = getChatTabManager().runningPanelIds().filter(panelId => store.state(panelId)?.agent === agent).length > 1;
+      if (installed && !others) getAgentRegistry().removeOlderVersions(agent, installed.version);
+    },
   });
   return manager;
 }

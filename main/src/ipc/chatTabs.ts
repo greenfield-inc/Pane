@@ -10,6 +10,7 @@ import { PaneError } from '../../../shared/paneError';
 import { getRuntimeConfigManager } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { configureChatTabs, getChatAgentCatalog, getChatTabManager } from '../services/chatTabs';
+import { getAgentRegistry } from '../services/agentRegistry';
 import { chatTabSecrets } from '../services/chatTabs/secrets';
 import { AgentFarmProfiles, printedCli } from '../services/chatTabs/agentFarm';
 import { chatTabEnv } from '../services/chatTabs/launch';
@@ -58,7 +59,7 @@ const agentFarmProfiles = new AgentFarmProfiles({
   checkCli: (agent, context) => checkAgentCli(agent, printedCli(agent, context.env, findExecutableInPath), context),
 });
 
-const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key', 'agents'] as const;
+const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key', 'agents', 'registry', 'install-agent', 'remove-agent'] as const;
 
 function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
 
@@ -125,6 +126,21 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   });
   registry.register('chat-tab:keys', () => chatTabSecrets.status());
   registry.register('chat-tab:agents', () => getChatAgentCatalog().entries());
+  // Settings > Agents: the ACP Registry's agents (D-15). Installing runs third-party code on this machine, so only its owner can.
+  registry.register('chat-tab:registry', (refresh?: PaneCommandValue) => getAgentRegistry().list(decodeBoundary(refresh ?? false, boundary.boolean)));
+  registry.register('chat-tab:install-agent', async (id: string, options?: PaneCommandValue) => {
+    const teammate = teammatePaneCaller();
+    if (teammate) throw teammateSecretRefusal(teammate, 'install an agent');
+    const { allowUnverified } = decodeBoundary(options ?? {}, boundary.object({ allowUnverified: boundary.optional(boundary.boolean) }));
+    await getAgentRegistry().install(decodeBoundary(id, agentSchema), { allowUnverified: allowUnverified === true });
+    return getAgentRegistry().list();
+  });
+  registry.register('chat-tab:remove-agent', (id: string) => {
+    const teammate = teammatePaneCaller();
+    if (teammate) throw teammateSecretRefusal(teammate, 'remove an agent');
+    getAgentRegistry().remove(decodeBoundary(id, agentSchema));
+    return getAgentRegistry().list();
+  });
   registry.register('chat-tab:set-key', (agent: string, key: PaneCommandValue) => {
     const teammate = teammatePaneCaller();
     if (teammate) throw teammateSecretRefusal(teammate, 'change a chat tab key');
@@ -146,8 +162,15 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
  */
 function signInCommand(agent: ChatAgent, advertised: { args: string[] } | undefined): string {
   const config = agentConfig(agent);
-  if (!config) throw new PaneError('CHAT_SIGN_IN_UNKNOWN', `Pane does not know how to sign ${agentLabel(agent)} in.`, 'Sign in with the agent\'s own instructions in a terminal tab, then press Retry.');
   const plain = (words: readonly string[]) => words.every(word => /^[\w@%+=:,./-]+$/.test(word));
+  if (!config) {
+    // A registry agent signs in through the terminal sign-in it advertised, run with its installed command.
+    const installed = getAgentRegistry().installedRecord(agent);
+    if (installed && advertised && plain(advertised.args) && plain([installed.command])) {
+      return [...(installed.kind === 'npx' ? ['node'] : []), installed.command, ...advertised.args].join(' ');
+    }
+  }
+  if (!config) throw new PaneError('CHAT_SIGN_IN_UNKNOWN', `Pane does not know how to sign ${agentLabel(agent)} in.`, 'Sign in with the agent\'s own instructions in a terminal tab, then press Retry.');
   const args = advertised && plain(advertised.args) ? advertised.args : config.signIn;
   return [config.executables[0], ...args].join(' ');
 }
