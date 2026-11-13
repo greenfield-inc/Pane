@@ -207,19 +207,6 @@ export class ChatTabRuntime {
   /** The agent's reply to initialize: its capabilities, sign-in methods and name. */
   get initialized(): InitializeResponse | undefined { return this.initialization; }
 
-  /**
-   * Signs in through the agent's own sign-in methods that need no terminal (ACP `authenticate`,
-   * for example a login the agent's CLI already holds). Returns whether one succeeded.
-   */
-  async authenticate(): Promise<boolean> {
-    for (const method of this.initialization?.authMethods ?? []) {
-      if ('type' in method && method.type === 'terminal') continue;
-      try { await this.bounded(this.agent().request(methods.agent.authenticate, { methodId: method.id })); return true; }
-      catch (error) { console.warn(`[ChatTabs] Sign-in method ${method.id} did not sign the agent in: ${reasonOf(error)}`); }
-    }
-    return false;
-  }
-
   /** The agent's terminal sign-in (ACP terminal auth method): arguments for its own command. */
   terminalSignIn(): { args: string[]; env?: Record<string, string> } | undefined {
     for (const method of this.initialization?.authMethods ?? []) {

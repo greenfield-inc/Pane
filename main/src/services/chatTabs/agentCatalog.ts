@@ -63,7 +63,6 @@ export class ChatAgentCatalog {
         switchFromTerminal: refusal ? { ok: false, reason: refusal } : { ok: true },
         installUrl: agent.install.url,
       };
-      if (agent.description) entry.description = agent.description;
       const known = cache[id];
       if (known) {
         entry.capabilities = { reopen: known.reopen, list: known.list, images: known.images };

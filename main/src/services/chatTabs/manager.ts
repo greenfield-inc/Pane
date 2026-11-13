@@ -524,12 +524,7 @@ export class ChatTabManager {
           this.update(panelId, current => ({ ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings } }));
         }
       };
-      // An agent that is signed out may sign in by itself from a login its CLI holds (ACP authenticate).
-      try { await open(); }
-      catch (error) {
-        if (!isAuthRequired(chatFailure(error)) || !await runtime.authenticate()) throw error;
-        await open();
-      }
+      await open();
       if (launch.mode) await runtime.setMode(launch.mode);
       await this.applySettings(panelId, runtime);
       const interrupted = this.required(panelId).turn;

@@ -187,9 +187,7 @@ for Codex). An agent with `chat.args` runs as its own CLI with those arguments
 agent CLI, never reads, stores or relays an agent's login, and never copies one
 between machines.
 
-- **Not signed in**: Pane first tries the agent's own ACP `authenticate`
-  methods that need no terminal, such as a login its CLI already holds. If the
-  agent is still signed out, the tab stops and says so, with **Sign in in
+- **Not signed in**: the tab stops and says so, with **Sign in in
   Terminal**, which opens a terminal tab on that machine running the agent's
   advertised terminal sign-in (an agent running as its own CLI), or its
   executable with the config's `signIn` arguments (`claude auth login`,
@@ -239,8 +237,9 @@ how each agent gets it:
   without the flag, on the same conversation.
 - **Neither** (OpenCode): the same **Full access** setting. While it is on,
   Pane answers each approval request with the agent's allow-once option, never
-  allow-always, and marks the step "Approved by Pane". Switching it takes
-  effect at once.
+  allow-always, and marks the step "Approved by Pane" (the mark lasts while
+  the tab runs; a reopened conversation's history comes from the agent and has
+  none). Switching it takes effect at once.
 
 Full access can't change during a turn. While Pane's Full access is on, the
 composer marks it in amber like a mode that never asks.
