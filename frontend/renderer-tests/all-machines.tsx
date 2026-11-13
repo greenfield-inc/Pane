@@ -35,7 +35,7 @@ import '../src/index.css';
 //   new                open the New dialog, which can create a Session on R and then switch there
 type HostKey = 'local' | 'R';
 const query = new URLSearchParams(location.search);
-const record = (id: string): OrchestrationSessionRecord => ({ id, name: id.toUpperCase(), internalSessionId: `internal-${id}`, agent: 'codex', panelIds: { claude: `claude-${id}`, codex: `codex-${id}`, cursor: `cursor-${id}`, opencode: `opencode-${id}` }, goal: '', context: '', decisions: [], nextAction: '', evidence: [], outputs: [], associations: [], blockers: [], activity: [], revision: 1, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
+const record = (id: string): OrchestrationSessionRecord => ({ id, name: id.toUpperCase(), internalSessionId: `internal-${id}`, agent: 'codex', panelIds: { claude: `claude-${id}`, codex: `codex-${id}`, cursor: `cursor-${id}`, opencode: `opencode-${id}`, pi: `pi-${id}` }, goal: '', context: '', decisions: [], nextAction: '', evidence: [], outputs: [], associations: [], blockers: [], activity: [], revision: 1, createdAt: '2026-01-01', updatedAt: '2026-01-01' });
 const hostSessions = new Map<HostKey, OrchestrationSessionRecord[]>([
   ['local', ['x', 'y'].map(record)],
   ['R', ['b', 'c', 'd'].map(record)],

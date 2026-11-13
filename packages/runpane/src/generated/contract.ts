@@ -295,7 +295,7 @@ export const RUNPANE_CONTRACT = {
         "terminal": {
           "args": [],
           "fullAccessArgs": [],
-          "hotkey": "mod+alt+7"
+          "hotkey": "mod+alt+p"
         },
         "install": {
           "url": "https://pi.dev",
