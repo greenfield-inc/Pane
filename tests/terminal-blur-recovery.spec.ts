@@ -137,6 +137,7 @@ async function bootFixture(
   alternateScreen = false,
   systemAppearance = false,
   platform: 'darwin' | 'win32' = 'darwin',
+  extraPanels: Array<ReturnType<typeof terminalPanel>> = [],
 ): Promise<BootFixtureResult> {
   if (systemAppearance) await page.emulateMedia({ colorScheme: 'light' });
   await page.clock.install();
@@ -155,8 +156,9 @@ async function bootFixture(
     initialConfig,
     initialProjects: [project],
     initialSessions: [session, otherSession],
-    initialPanels: [dockPanel, primaryPanel, secondaryPanel, otherDockPanel, otherPanel],
+    initialPanels: [dockPanel, primaryPanel, secondaryPanel, ...extraPanels, otherDockPanel, otherPanel],
     initialTerminalStates: {
+      ...Object.fromEntries(extraPanels.map((extra) => [extra.id, { scrollbackBuffer: initialScrollback(extra.id, 10) }])),
       [primaryPanel.id]: { scrollbackBuffer: initialScrollback('primary'), isAlternateScreen: alternateScreen },
       [secondaryPanel.id]: { scrollbackBuffer: initialScrollback('secondary', 10) },
       [otherPanel.id]: { scrollbackBuffer: initialScrollback('other', 10) },
@@ -211,6 +213,19 @@ async function maskAppearances(page: Page, panel?: Locator): Promise<MaskAppeara
     const appearances = window.__maskAppearances ?? [];
     return expectedOwnerId ? appearances.filter(({ ownerId }) => ownerId === expectedOwnerId) : appearances;
   }, ownerId);
+}
+
+// Several cells each way at the default font (a 16 px cell is about 10 x 20 px),
+// so the terminal's cols and rows both change.
+const VIEWPORT_SHRINK_PX = { width: 120, height: 80 };
+
+async function shrinkViewport(page: Page): Promise<void> {
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('Playwright viewport is unset; this test resizes it.');
+  await page.setViewportSize({
+    width: viewport.width - VIEWPORT_SHRINK_PX.width,
+    height: viewport.height - VIEWPORT_SHRINK_PX.height,
+  });
 }
 
 async function pauseClock(page: Page): Promise<void> {
@@ -323,7 +338,11 @@ test('battery saver retains delayed detach and full recovery', async ({ page }) 
 });
 
 test('panel hide and show at an unchanged size shows the hot activation without a mask', async ({ page }) => {
-  const { panel } = await bootFixture(page);
+  const { panel, webglLoaded } = await bootFixture(page);
+  const webglLoads = async () => (await lifecycleLogs(page)).filter((line) => (
+    line.includes(`WebGL renderer loaded for panel ${primaryPanel.id}`)
+  )).length;
+  const loadsBefore = await webglLoads();
   const before = await readSnapshot(panel);
   await page.getByRole('tab', { name: secondaryPanel.title, exact: true }).click();
   const secondary = page.getByRole('tabpanel', { name: secondaryPanel.title });
@@ -337,9 +356,55 @@ test('panel hide and show at an unchanged size shows the hot activation without 
   expect(await maskAppearances(page, panel)).toEqual([]);
   expect(await readSnapshot(panel)).toEqual(before);
   // The hidden panel kept its WebGL renderer, so showing it attached no new one.
-  expect((await lifecycleLogs(page)).some((line) => (
-    line.includes(`WebGL renderer detached for panel ${primaryPanel.id} reason=panel-hidden`)
-  ))).toBe(false);
+  if (webglLoaded) expect(await webglLoads()).toBe(loadsBefore);
+});
+
+test('a font change while hidden masks the next hot activation', async ({ page }) => {
+  const { panel } = await bootFixture(page);
+  const fontSize = await xtermEvaluate(panel, (terminal) => terminal.options.fontSize ?? 0);
+  const largerFontSize = fontSize * 2;
+  // Role queries skip hidden tab panels, so keep this one's element id to reach it hidden.
+  const hiddenPanel = page.locator(`[id="${await panel.getAttribute('id')}"]`);
+  await page.getByRole('tab', { name: secondaryPanel.title, exact: true }).click();
+  await expect(page.getByRole('tabpanel', { name: secondaryPanel.title })).toBeVisible();
+  await page.evaluate((size) => window.electronAPI.config.update({ terminalFontSize: size }), largerFontSize);
+  await expect.poll(() => xtermEvaluate(hiddenPanel, (terminal) => terminal.options.fontSize)).toBe(largerFontSize);
+  await resetMaskAppearances(page);
+  await page.getByRole('tab', { name: primaryPanel.title, exact: true }).click();
+  await expect.poll(() => lifecycleLogs(page).then((logs) => logs.some((line) => (
+    line.includes(`Activation depth for panel ${primaryPanel.id}: hot`)
+  )))).toBe(true);
+  expect(await maskAppearances(page, panel)).not.toEqual([]);
+});
+
+test('hidden tabs release their kept WebGL renderers oldest first before the browser limit', async ({ page }) => {
+  // Chromium keeps at most 16 live WebGL contexts per renderer process.
+  const chromiumMaxWebglContexts = 16;
+  const extraPanels = Array.from({ length: chromiumMaxWebglContexts - 2 }, (_, index) => (
+    terminalPanel(`blur-extra-${index}`, session.id, `Extra ${index}`, 3 + index, false)
+  ));
+  const { panel, webglLoaded } = await bootFixture(page, 'performance', false, false, 'darwin', extraPanels);
+  test.skip(!webglLoaded, 'WebGL renderer not attached; there is no renderer to keep in this browser');
+  // Each tab's first activation is a full refresh; its delayed backstop logs
+  // after the tab became eligible to keep its renderer while hidden.
+  for (const next of [secondaryPanel, ...extraPanels]) {
+    await page.getByRole('tab', { name: next.title, exact: true }).click();
+    await expect.poll(() => lifecycleLogs(page).then((logs) => logs.some((line) => (
+      line.includes(`Delayed activation refresh for panel ${next.id}`)
+    )))).toBe(true);
+  }
+  const released = (panelId: string) => lifecycleLogs(page).then((logs) => logs.some((line) => (
+    line.includes(`WebGL renderer detached for panel ${panelId} reason=hidden-renderer-cap`)
+  )));
+  expect(await released(primaryPanel.id)).toBe(true);
+  expect(await released(extraPanels[extraPanels.length - 2].id)).toBe(false);
+  // The released tab attaches a new context when shown, so it stays masked.
+  await resetMaskAppearances(page);
+  await page.getByRole('tab', { name: primaryPanel.title, exact: true }).click();
+  await expect.poll(() => lifecycleLogs(page).then((logs) => logs.some((line) => (
+    line.includes(`Activation depth for panel ${primaryPanel.id}: hot`)
+  )))).toBe(true);
+  expect(await maskAppearances(page, panel)).not.toEqual([]);
 });
 
 test('panel hide and show after a resize retains the masked hot activation', async ({ page }) => {
@@ -348,9 +413,7 @@ test('panel hide and show after a resize retains the masked hot activation', asy
   const secondary = page.getByRole('tabpanel', { name: secondaryPanel.title });
   await expect(secondary).toBeVisible();
   await expect(secondary.getByTestId('terminal-activation-mask')).toHaveCount(0);
-  const viewport = page.viewportSize();
-  if (!viewport) throw new Error('Playwright viewport is unset; this test resizes it.');
-  await page.setViewportSize({ width: viewport.width - 120, height: viewport.height - 80 });
+  await shrinkViewport(page);
   await resetMaskAppearances(page);
   await page.getByRole('tab', { name: primaryPanel.title, exact: true }).click();
   await expect.poll(() => lifecycleLogs(page).then((logs) => logs.some((line) => (
@@ -363,9 +426,7 @@ test('a resize while visible does not mask the next hot activation', async ({ pa
   const { panel } = await bootFixture(page);
   const resizesOf = () => mockEvaluate(page, (mock) => mock.getInvokeCalls('terminal:resize').length);
   const resizesBefore = await resizesOf();
-  const viewport = page.viewportSize();
-  if (!viewport) throw new Error('Playwright viewport is unset; this test resizes it.');
-  await page.setViewportSize({ width: viewport.width - 120, height: viewport.height - 80 });
+  await shrinkViewport(page);
   await expect.poll(resizesOf).toBeGreaterThan(resizesBefore);
   await page.getByRole('tab', { name: secondaryPanel.title, exact: true }).click();
   await expect(page.getByRole('tabpanel', { name: secondaryPanel.title })).toBeVisible();
@@ -402,9 +463,7 @@ for (const alternateScreen of [false, true]) {
     await expect(page.getByRole('tabpanel', { name: secondaryPanel.title }).getByTestId('terminal-activation-mask')).toHaveCount(0);
     // Resize while hidden: an unchanged-size hot activation is unmasked, and
     // this test covers the masked one.
-    const viewport = page.viewportSize();
-    if (!viewport) throw new Error('Playwright viewport is unset; this test resizes it.');
-    await page.setViewportSize({ width: viewport.width - 120, height: viewport.height - 80 });
+    await shrinkViewport(page);
     await pauseClock(page);
     const stateCallsBefore = await mockEvaluate(page, mock => mock.getInvokeCalls('terminal:getState').length);
     await page.evaluate(panelId => {

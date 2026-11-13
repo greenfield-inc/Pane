@@ -127,6 +127,25 @@ const TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS = 200;
 const TERMINAL_VISIBILITY_REFRESH_MS = 60_000;
 const SNAPSHOT_MIN_INTERVAL_MS = 10_000;
 const MIN_VIABLE_RECT_PX = 100; // below this the container is hidden or mid-layout (Allotment minSize is 120)
+// Chromium keeps at most this many live WebGL contexts per renderer process
+// (Blink's kMaxGLActiveContexts) and drops the oldest past it.
+const CHROMIUM_MAX_ACTIVE_WEBGL_CONTEXTS = 16;
+// Hidden tabs keep at most half, leaving the rest for visible terminals (splits,
+// the dock terminal) and any other WebGL canvas.
+const MAX_KEPT_HIDDEN_WEBGL_RENDERERS = CHROMIUM_MAX_ACTIVE_WEBGL_CONTEXTS / 2;
+// Panel id → release callback for each hidden terminal keeping its WebGL
+// renderer, in the order they were hidden (oldest first).
+const keptHiddenWebglRenderers = new Map<string, () => void>();
+
+function keepHiddenWebglRenderer(panelId: string, release: () => void): void {
+  keptHiddenWebglRenderers.delete(panelId);
+  keptHiddenWebglRenderers.set(panelId, release);
+  for (const [oldestId, releaseOldest] of keptHiddenWebglRenderers) {
+    if (keptHiddenWebglRenderers.size <= MAX_KEPT_HIDDEN_WEBGL_RENDERERS) break;
+    keptHiddenWebglRenderers.delete(oldestId);
+    releaseOldest();
+  }
+}
 
 /** Focus is in this terminal's find bar (FindBar marks itself with data-find-bar). */
 function findBarHasFocus(panelId: string): boolean {
@@ -196,9 +215,9 @@ function waitForNextPaint(): Promise<void> {
  * run the full masked reset+replay from
  * `terminal:getState` (`handleRefreshTerminal`). A narrowly eligible same-
  * session hot activation may instead preserve the continuously updated mounted
- * xterm and perform fit/reconcile/refresh: masked when the container size changed
- * since the last fit, unmasked when it did not (the fit is then a no-op, so
- * there is no refit to hide). This is intentionally gated:
+ * xterm and perform fit/reconcile/refresh: masked when fitting would change the
+ * grid (container or cell size changed while hidden), unmasked when it would not
+ * (there is then no refit to hide). This is intentionally gated:
  * two shipped attempts to broadly lighten activation — a fit+repaint activation
  * (v2.4.11) and keep-alive WebGL contexts with an atlas clear (v2.4.14) —
  * produced ghosted rows and garbage-glyph atlas corruption (xterm terminals
@@ -210,7 +229,9 @@ function waitForNextPaint(): Promise<void> {
  *
  * WEBGL: one context per visible terminal, plus one per hidden hot-eligible
  * terminal in performance mode, which keeps its renderer so re-showing it needs
- * no new context (whose first frame flashed blank). Other panel hides detach
+ * no new context (whose first frame flashed blank). At most
+ * MAX_KEPT_HIDDEN_WEBGL_RENDERERS are kept; past that the oldest hidden one is
+ * released and its next activation stays masked. Other panel hides detach
  * immediately. A context the browser reclaims takes the existing context-loss
  * DOM fallback. Performance mode keeps it attached through app blur; battery saver
  * detaches it after WEBGL_APP_BLUR_DETACH_DELAY_MS and takes its existing full
@@ -321,6 +342,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   // A fresh mount starts false so it cannot skip its initial reset/replay.
   const hotActivationEligibleRef = useRef(false);
   const hotActivationPendingRef = useRef(false);
+  // The WebGL renderer kept while hidden was released for the cap, so the next
+  // activation attaches a new context and must stay masked.
+  const keptWebglReleasedRef = useRef(false);
   const [webglAllowed, setWebglAllowed] = useState(panelVisible);
   const blurDetachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -405,14 +429,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     return () => clearTimeout(timeout);
   }, [overlayActive, initAttempt]);
   const [overlayVisible, setOverlayVisible] = useState(true);
-  // Container size at this xterm's last completed fit (any refit, visible or
-  // activation), for unmasked hot activation.
-  const lastReconciledSizeRef = useRef<{ width: number; height: number } | null>(null);
-  const rememberReconciledSize = useCallback(() => {
-    const container = terminalRef.current;
-    if (!container || container.clientWidth < MIN_VIABLE_RECT_PX) return;
-    lastReconciledSizeRef.current = { width: container.clientWidth, height: container.clientHeight };
-  }, []);
   useEffect(() => {
     if (overlayActive) {
       setOverlayVisible(true);
@@ -586,8 +602,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     return () => clearInterval(refreshTimer);
   }, [effectiveVisible, panel.id, isInitialized]);
 
-  // WebGL policy: panel hides detach immediately. App blur keeps WebGL attached
-  // in performance mode; battery saver detaches after the delay because its
+  // WebGL policy: a hide that will take a hot activation keeps WebGL (up to
+  // MAX_KEPT_HIDDEN_WEBGL_RENDERERS); other hides detach immediately. App blur
+  // keeps WebGL attached in performance mode; battery saver detaches after the delay because its
   // gated output already requires full recovery on refocus.
   useEffect(() => {
     if (blurDetachTimerRef.current) {
@@ -596,8 +613,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     }
 
     if (!panelVisible) {
-      // Capture eligibility before detaching WebGL. The xterm remains mounted and
-      // performance mode continues delivering output while this panel is hidden.
+      // Capture eligibility before deciding whether to keep WebGL. The xterm
+      // remains mounted and performance mode continues delivering output while
+      // this panel is hidden.
       hotActivationPendingRef.current = hotActivationEligibleRef.current && !useBatterySaverTerminalVisibility;
       if (!hotActivationPendingRef.current) {
         needsFullActivationRefreshRef.current = true;
@@ -605,12 +623,20 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       // A hot-eligible panel keeps its WebGL renderer while hidden: xterm pauses
       // rendering for a display:none terminal, and showing it again then needs no
       // new context, whose first frame would otherwise flash blank (#1290).
-      if (hotActivationPendingRef.current) return;
+      if (hotActivationPendingRef.current) {
+        keepHiddenWebglRenderer(panel.id, () => {
+          keptWebglReleasedRef.current = true;
+          disposeWebglRenderer('hidden-renderer-cap');
+        });
+        return;
+      }
+      keptHiddenWebglRenderers.delete(panel.id);
       setWebglAllowed(false);
       disposeWebglRenderer('panel-hidden');
       return;
     }
 
+    keptHiddenWebglRenderers.delete(panel.id);
     if (windowFocused) {
       setWebglAllowed(true);
       return;
@@ -634,7 +660,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         blurDetachTimerRef.current = null;
       }
     };
-  }, [panelVisible, windowFocused, useBatterySaverTerminalVisibility, disposeWebglRenderer]);
+  }, [panelVisible, windowFocused, useBatterySaverTerminalVisibility, disposeWebglRenderer, panel.id]);
+
+  useEffect(() => () => {
+    keptHiddenWebglRenderers.delete(panel.id);
+  }, [panel.id]);
 
   useEffect(() => {
     if (!isInitialized || !xtermRef.current) return;
@@ -724,7 +754,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     ) {
       return;
     }
-    rememberReconciledSize();
 
     // A dims change invalidates the renderer's cached rows; repaint the whole
     // grid so WebGL never shows cells from the previous geometry.
@@ -744,7 +773,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       dimensions.rows,
       { force },
     );
-  }, [panel.id, rememberReconciledSize]);
+  }, [panel.id]);
 
   // The terminal instance lives for the lifetime of a panel. Event handlers installed
   // during initialization read changing session/config values through this ref so those
@@ -1409,8 +1438,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             // Force WebGL renderer to redraw after buffer content changes.
             // Without this, macOS WebGL canvas shows stale/stuttered content until
             // a resize event (minimize/fullscreen) forces invalidation.
-            // Same hidden-container guard as the mount fit: WebGL isn't attached
-            // while hidden, and a 0-width fit would mangle the grid.
+            // Same hidden-container guard as the mount fit: a 0-width fit would
+            // mangle the grid.
             if ((terminalRef.current?.getBoundingClientRect().width ?? 0) >= MIN_VIABLE_RECT_PX) {
               fitAddon.fit();
             }
@@ -1970,9 +1999,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   // Shared activation refresh for both power modes: fires on tab activation and
   // window refocus (activationVisible = panelVisible && windowFocused). Initial,
   // remounted, output-gated, and recovery activations stay on full reset+replay.
-  // A same-session activation can use masked fit/reconcile/refresh only when this
-  // exact mounted xterm previously completed the full path and output remained
-  // ungated. Performance-mode refocus of any duration stays a silent repaint.
+  // A same-session activation can use fit/reconcile/refresh (masked only when
+  // the fit would change the grid) only when this exact mounted xterm
+  // previously completed the full path and output remained ungated.
+  // Performance-mode refocus of any duration stays a silent repaint.
   // Declared after WebGL policy effects so the delayed backstop covers attach races.
   useLayoutEffect(() => {
     if (!isInitialized || !fitAddonRef.current || !xtermRef.current) return;
@@ -1995,17 +2025,17 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       && hotActivationPendingRef.current
       && hotActivationEligibleRef.current;
     hotActivationPendingRef.current = false;
+    const keptWebglReleased = keptWebglReleasedRef.current;
+    keptWebglReleasedRef.current = false;
     const fullRefresh = !hotActivation && (useBatterySaverTerminalVisibility || needsFullActivationRefreshRef.current);
 
     // Full activations stay behind the opaque mask. A hot activation does too
-    // unless its container is the size this xterm was last fitted at: then the
-    // fit is a no-op, there is no refit to hide, and the live buffer shows as is.
-    const container = terminalRef.current;
-    const lastSize = lastReconciledSizeRef.current;
-    const unchangedSize = !!container && !!lastSize
-      && container.clientWidth === lastSize.width
-      && container.clientHeight === lastSize.height;
-    const masked = fullRefresh || (hotActivation && !unchangedSize);
+    // unless fitting now would keep the current grid (same container and cell
+    // size) and its kept WebGL renderer survived: then there is no refit or new
+    // context to hide, and the live buffer shows as is.
+    const proposed = hotActivation ? fitAddonRef.current?.proposeDimensions() : undefined;
+    const fitIsNoOp = !!proposed && proposed.cols === xtermRef.current?.cols && proposed.rows === xtermRef.current?.rows;
+    const masked = fullRefresh || (hotActivation && (!fitIsNoOp || keptWebglReleased));
     const releaseMask = masked ? refreshMask.acquire() : () => {};
 
     let lastWidth = 0;
