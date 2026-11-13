@@ -134,7 +134,13 @@ Preview components never enter the editable auto-save path, even on errors.
 - Worktrees go in `<repo>/worktrees/` unless the project sets another folder
   (`worktreeManager.ts`). A worktree on a remote-tracking base fetches that
   branch first (`worktreeBaseRefresh.ts`: capped at about 10 s, shared by
-  concurrent creates, never fails the create). `worktreePoolManager.ts` keeps
+  concurrent creates, never fails the create). Focusing the window or
+  selecting a Pane fetches that Pane's remote-tracking base the same way when
+  nothing has fetched into the project for 5 minutes; the newest non-empty
+  `FETCH_HEAD` seeds that time at startup. Every fetch (focus, Fetch button,
+  dashboard, branch list, new worktree, or an agent's `git fetch` in the
+  active Pane) updates ahead/behind for the project's Panes and the "fetched"
+  time under Fetch (`gitStatusManager.ts`). `worktreePoolManager.ts` keeps
   empty reserve worktrees on `_reserve/<hex>` branches so new panes open fast;
   a reserve is only claimed while its base ref still points at its commit.
 - Archive cleanup intents live in SQLite's `archive_cleanup_jobs`, atomically

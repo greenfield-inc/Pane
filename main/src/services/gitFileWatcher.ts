@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { watch as chokidarWatch, type FSWatcher } from 'chokidar';
 import path from 'path';
 import type { Stats } from 'fs';
+import { stat } from 'fs/promises';
 // node:fs recursive watcher — aliased so it doesn't collide with chokidar's
 // imported `watch`/`FSWatcher`. Used for the darwin/win32 native path.
 import { watch as fsWatch, type FSWatcher as NodeFsWatcher, type WatchEventType } from 'node:fs';
@@ -741,9 +742,12 @@ export class GitFileWatcher extends EventEmitter {
           ? commonDirRaw
           : path.resolve(watchPath, commonDirRaw)
         : undefined;
+      const fetchHead = path.join(gitDir, 'FETCH_HEAD');
       const targets = new Set<string>([
         path.join(gitDir, 'index'),
         path.join(gitDir, 'HEAD'),
+        // This worktree's own `git fetch` (refs/remotes changes are not watched)
+        fetchHead,
         // small dir + single file; chokidar handle cost is trivial here
         ...(commonDir
           ? [path.join(commonDir, 'packed-refs'), path.join(commonDir, 'refs', 'heads')]
@@ -755,7 +759,14 @@ export class GitFileWatcher extends EventEmitter {
         followSymlinks: false,
         usePolling: false,
       });
-      gitWatcher.on('all', () => {
+      gitWatcher.on('all', (_event, changedPath) => {
+        if (path.resolve(changedPath) === path.resolve(fetchHead)) {
+          // A failed fetch leaves FETCH_HEAD empty.
+          void stat(fetchHead).then(info => {
+            if (info.size > 0 && this.watchedSessions.has(sessionId)) this.emit('fetched', sessionId);
+          }, () => undefined);
+          return;
+        }
         // intentional: bypass any ignore checks, always trigger on
         // git index/HEAD/refs changes
         this.handleFileChange(sessionId, '.git/index', 'change');

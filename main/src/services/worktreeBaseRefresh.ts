@@ -1,3 +1,5 @@
+import { readdir, stat } from 'fs/promises';
+import path from 'path';
 import type { CommandRunner } from '../utils/commandRunner';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { RunpaneBaseRefreshStatus, RunpanePaneBase } from '../../../shared/types/runpaneOrchestration';
@@ -27,6 +29,10 @@ interface FetchRecord {
 const inFlightFetches = new Map<string, Promise<FetchRecord>>();
 const lastFetches = new Map<string, FetchRecord>();
 const lastFetchAll = new Map<string, number>();
+/** When anything last fetched into each project, from any path, seeded from FETCH_HEAD files. */
+const lastAnyFetch = new Map<string, number>();
+const seededProjects = new Map<string, Promise<void>>();
+const fetchListeners = new Set<(projectPath: string) => void>();
 
 // Pane runs git without a terminal; these make a credential problem fail fast
 // instead of waiting for input until the cap.
@@ -43,6 +49,57 @@ const fetchErrorSchema = boundary.object({
 /** Records a successful `git fetch --all` so creates right after it don't fetch again. */
 export function recordProjectFetch(projectPath: string): void {
   lastFetchAll.set(projectPath, Date.now());
+  recordFetch(projectPath);
+}
+
+/**
+ * Records that something fetched into the project (one branch, one remote, or an
+ * agent's own `git fetch`) and tells every `onFetch` listener. Creates don't reuse
+ * it: only `recordProjectFetch` and a fetch of the same base count for them.
+ */
+export function recordFetch(projectPath: string, at = Date.now()): void {
+  lastAnyFetch.set(projectPath, Math.max(lastAnyFetch.get(projectPath) ?? 0, at));
+  for (const listener of fetchListeners) listener(projectPath);
+}
+
+/** Calls `listener` after every recorded fetch. Returns a function that stops it. */
+export function onFetch(listener: (projectPath: string) => void): () => void {
+  fetchListeners.add(listener);
+  return () => fetchListeners.delete(listener);
+}
+
+/**
+ * When anything last fetched into the project, or undefined if unknown. The first
+ * read seeds it from the newest non-empty FETCH_HEAD in the repository's git dir and
+ * its worktrees' git dirs (a failed fetch leaves FETCH_HEAD empty), so it survives restarts.
+ */
+export async function lastFetchedAt(projectPath: string, commandRunner: CommandRunner): Promise<number | undefined> {
+  let seeding = seededProjects.get(projectPath);
+  if (!seeding) {
+    seeding = seedFromFetchHead(projectPath, commandRunner);
+    seededProjects.set(projectPath, seeding);
+  }
+  await seeding;
+  return lastAnyFetch.get(projectPath);
+}
+
+async function seedFromFetchHead(projectPath: string, commandRunner: CommandRunner): Promise<void> {
+  let commonDir: string;
+  try {
+    const { stdout } = await commandRunner.execFile('git', ['rev-parse', '--git-common-dir'], projectPath, { silent: true, timeout: 10_000 });
+    commonDir = path.resolve(projectPath, stdout.trim());
+  } catch {
+    return;
+  }
+  const worktreesDir = path.join(commonDir, 'worktrees');
+  const worktreeNames = await readdir(worktreesDir).catch(() => []);
+  const candidates = [commonDir, ...worktreeNames.map(name => path.join(worktreesDir, name))];
+  const times = await Promise.all(candidates.map(async dir => {
+    const info = await stat(path.join(dir, 'FETCH_HEAD')).catch(() => null);
+    return info && info.size > 0 ? info.mtimeMs : 0;
+  }));
+  const newest = Math.max(0, ...times);
+  if (newest > 0) lastAnyFetch.set(projectPath, Math.max(lastAnyFetch.get(projectPath) ?? 0, newest));
 }
 
 /**
@@ -79,6 +136,7 @@ export async function refreshWorktreeBase(
     pending = fetchBranch(projectPath, target.remote, target.branch, commandRunner).then(record => {
       lastFetches.set(key, record);
       inFlightFetches.delete(key);
+      if (record.reason === undefined) recordFetch(projectPath, record.at);
       return record;
     });
     inFlightFetches.set(key, pending);
@@ -145,7 +203,7 @@ async function fetchBranch(
   const fetch = (async (): Promise<string | undefined> => {
     try {
       await commandRunner.execFile(
-        'git', ['fetch', '--no-tags', '--quiet', '--', remote, `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`],
+        'git', ['fetch', '--no-tags', '--no-auto-gc', '--quiet', '--', remote, `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`],
         projectPath,
         { timeout: BASE_REFRESH_TIMEOUT_MS, env: NON_INTERACTIVE_GIT_ENV },
       );

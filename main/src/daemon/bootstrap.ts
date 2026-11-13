@@ -22,6 +22,7 @@ import { CliToolRegistry } from '../services/cliToolRegistry';
 import type { AbstractCliManager } from '../services/panels/cli/AbstractCliManager';
 import { GitDiffManager } from '../services/gitDiffManager';
 import { GitStatusManager } from '../services/gitStatusManager';
+import { onFetch } from '../services/worktreeBaseRefresh';
 import { ExecutionTracker } from '../services/executionTracker';
 import { WorktreeNameGenerator } from '../services/worktreeNameGenerator';
 import { RunCommandManager } from '../services/runCommandManager';
@@ -247,6 +248,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   });
   const gitDiffManager = new GitDiffManager(logger, analyticsManager);
   const gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, logger, databaseService);
+  // Every fetch into a project (focus, Fetch button, dashboard, branch list, new worktree, an agent's own) updates its Panes' ahead/behind.
+  onFetch(projectPath => void gitStatusManager.refreshProjectAfterFetch(projectPath));
   const executionTracker = new ExecutionTracker(sessionManager, gitDiffManager);
   const worktreeNameGenerator = new WorktreeNameGenerator(configManager);
   const runCommandManager = new RunCommandManager(databaseService);

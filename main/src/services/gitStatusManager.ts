@@ -11,6 +11,7 @@ import { GitStatusLogger } from './gitStatusLogger';
 import { GitFileWatcher } from './gitFileWatcher';
 import { fastCheckWorkingDirectory, fastGetAheadBehind, fastGetDiffStats } from './gitPlumbingCommands';
 import { escapeShellArg } from '../utils/shellEscape';
+import { lastFetchedAt, recordFetch, refreshWorktreeBase } from './worktreeBaseRefresh';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const githubPrListSchema = boundary.array(boundary.object({
@@ -57,6 +58,14 @@ const defaultGitStatusManagerDependencies: GitStatusManagerDependencies = {
   fastGetDiffStats,
 };
 
+export interface GitStatusManagerOptions {
+  /** True while the focus fetch should wait, for example in Low Power Mode. Default: never skip. */
+  shouldSkipFocusFetch?: () => boolean;
+}
+
+/** Focusing the window or selecting a Pane fetches its base when the project's last fetch is older than this. */
+const FOCUS_FETCH_MAX_AGE_MS = 5 * 60_000;
+
 export class GitStatusManager extends EventEmitter {
   private cache: GitStatusCache = {};
   // Smart visibility-aware polling for active sessions only
@@ -101,6 +110,9 @@ export class GitStatusManager extends EventEmitter {
   private activePrEnrichmentOperations = 0;
   private prEnrichmentTimers: Map<string, NodeJS.Timeout> = new Map();
 
+  // One ahead/behind pass per project at a time; a fetch during a pass runs it once more.
+  private fetchPasses = new Map<string, { rerun: boolean; done: Promise<void> }>();
+
   constructor(
     private sessionManager: SessionManager,
     private worktreeManager: WorktreeManager,
@@ -108,6 +120,7 @@ export class GitStatusManager extends EventEmitter {
     private logger?: Logger,
     private databaseService?: DatabaseService,
     private readonly dependencies: GitStatusManagerDependencies = defaultGitStatusManagerDependencies,
+    private readonly options: GitStatusManagerOptions = {},
   ) {
     super();
     // Increase max listeners to prevent warnings when many components listen to git status events
@@ -123,6 +136,11 @@ export class GitStatusManager extends EventEmitter {
       this.refreshSessionGitStatus(sessionId, false).catch(error => {
         this.logger?.error(`[GitStatus] Failed to refresh after file change for session ${sessionId}:`, error);
       });
+    });
+    // An agent's own `git fetch` in the watched worktree.
+    this.fileWatcher.on('fetched', (sessionId: string) => {
+      const projectPath = this.sessionManager.getProjectForSession(sessionId)?.path;
+      if (projectPath) recordFetch(projectPath);
     });
 
     this.hydratePersistentCache();
@@ -180,6 +198,7 @@ export class GitStatusManager extends EventEmitter {
         this.refreshSessionGitStatus(sessionId, false).catch(error => {
           console.warn(`[GitStatus] Failed to refresh active session ${sessionId}:`, error);
         });
+        void this.fetchBaseIfStale(sessionId);
       }
       
       // Stop watching the previous active session if it exists
@@ -272,11 +291,99 @@ export class GitStatusManager extends EventEmitter {
   private async refreshActiveSessionAfterFocus(sessionId: string): Promise<void> {
     try {
       await this.startWatchingSession(sessionId);
+      void this.fetchBaseIfStale(sessionId);
       await this.invalidatePrMissCacheForSession(sessionId);
       await this.refreshSessionGitStatus(sessionId, false);
     } catch (error) {
       console.warn(`[GitStatus] Failed to refresh active session on focus:`, error);
     }
+  }
+
+  /**
+   * Fetches the Pane's base branch when nothing has fetched into its project for
+   * FOCUS_FETCH_MAX_AGE_MS. Only remote-tracking bases are fetched; failures stay in
+   * the log and the next focus tries again. A fetch updates the project's Panes
+   * through the `onFetch` listener.
+   */
+  private async fetchBaseIfStale(sessionId: string): Promise<void> {
+    try {
+      if (this.options.shouldSkipFocusFetch?.()) {
+        this.logger?.info(`[GitStatus] Focus fetch skipped-constrained for session ${sessionId}`);
+        return;
+      }
+      const session = await this.sessionManager.getSession(sessionId);
+      const ctx = this.sessionManager.getProjectContext(sessionId);
+      if (!session?.worktreePath || !ctx || isHomeDirectory(session.worktreePath)) return;
+      const projectPath = ctx.project.path;
+
+      const last = await lastFetchedAt(projectPath, ctx.commandRunner);
+      if (last !== undefined && Date.now() - last < FOCUS_FETCH_MAX_AGE_MS) {
+        this.logger?.info(`[GitStatus] Focus fetch skipped-fresh for ${projectPath}: last fetch ${Math.round((Date.now() - last) / 1000)}s ago`);
+        return;
+      }
+      const base = await this.worktreeManager.getSessionComparisonBranch(session, ctx);
+      const outcome = await refreshWorktreeBase(projectPath, base, ctx.commandRunner);
+      const decision = outcome.status === 'recent' ? 'skipped-fresh' : outcome.status;
+      const detail = outcome.status === 'skipped' ? `${base} is not a remote-tracking branch` : (outcome.reason ?? base);
+      this.logger?.info(`[GitStatus] Focus fetch ${decision} for ${projectPath}: ${detail}`);
+    } catch (error) {
+      this.logger?.warn(`[GitStatus] Focus fetch failed for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * After a fetch into the project, reads ahead/behind for each of its Panes that has
+   * a cached status and fully refreshes only those whose counts moved, without a
+   * loading state. Every Pane's `lastFetchedAt` is brought up to date.
+   */
+  refreshProjectAfterFetch(projectPath: string): Promise<void> {
+    const running = this.fetchPasses.get(projectPath);
+    if (running) {
+      running.rerun = true;
+      return running.done;
+    }
+    const pass = { rerun: false, done: Promise.resolve() };
+    pass.done = (async () => {
+      try {
+        do {
+          pass.rerun = false;
+          await this.updateAheadBehindAfterFetch(projectPath);
+        } while (pass.rerun);
+      } finally {
+        this.fetchPasses.delete(projectPath);
+      }
+    })();
+    this.fetchPasses.set(projectPath, pass);
+    return pass.done;
+  }
+
+  private async updateAheadBehindAfterFetch(projectPath: string): Promise<void> {
+    const sessions = await this.sessionManager.getAllSessions();
+    const projectSessions = sessions.filter(session =>
+      !session.archived && session.status !== 'error' && session.worktreePath && this.cache[session.id]
+      && this.sessionManager.getProjectForSession(session.id)?.path === projectPath,
+    );
+    await Promise.all(projectSessions.map(session => this.executeWithLimit(async () => {
+      const ctx = this.sessionManager.getProjectContext(session.id);
+      const worktreePath = session.worktreePath;
+      if (!ctx || !worktreePath || isHomeDirectory(worktreePath)) return;
+      try {
+        const fetchedAt = await lastFetchedAt(projectPath, ctx.commandRunner);
+        const lastFetched = fetchedAt === undefined ? undefined : new Date(fetchedAt).toISOString();
+        const base = await this.worktreeManager.getSessionComparisonBranch(session, ctx);
+        const { ahead, behind } = await this.dependencies.fastGetAheadBehind(worktreePath, base, ctx.commandRunner.wslContext);
+        const cached = this.cache[session.id]?.status;
+        if (!cached) return;
+        if ((cached.ahead ?? 0) !== ahead || (cached.behind ?? 0) !== behind) {
+          const status = await this.fetchGitStatus(session.id);
+          if (status) this.updateCache(session.id, status);
+        } else if (cached.lastFetchedAt !== lastFetched) {
+          this.updateCache(session.id, { ...cached, lastFetchedAt: lastFetched });
+        }
+      } catch (error) {
+        this.logger?.warn(`[GitStatus] Could not update session ${session.id} after a fetch: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    })));
   }
 
   /**
@@ -989,6 +1096,7 @@ export class GitStatusManager extends EventEmitter {
 
       // Get ahead/behind status using fast plumbing command
       const comparisonBranch = await this.worktreeManager.getSessionComparisonBranch(session, ctx);
+      const fetchedAt = await lastFetchedAt(ctx.project.path, ctx.commandRunner);
       const { ahead, behind } = await this.dependencies.fastGetAheadBehind(session.worktreePath, comparisonBranch, ctx.commandRunner.wslContext);
 
       // Get total additions/deletions for all commits in the branch (compared to comparison branch)
@@ -1069,7 +1177,8 @@ export class GitStatusManager extends EventEmitter {
         commitDeletions: totalCommitDeletions > 0 ? totalCommitDeletions : undefined,
         commitFilesChanged: totalCommitFilesChanged > 0 ? totalCommitFilesChanged : undefined,
         // Total commits in branch
-        totalCommits: totalCommits > 0 ? totalCommits : undefined
+        totalCommits: totalCommits > 0 ? totalCommits : undefined,
+        lastFetchedAt: fetchedAt === undefined ? undefined : new Date(fetchedAt).toISOString(),
       };
       
       if (abortController.signal.aborted) return null;
