@@ -283,6 +283,11 @@ export function RemotePwaApp() {
   );
   const selectedPanel = selectedPanels.find(panel => panel.id === selectedPanelId) ?? firstSupportedPanel(selectedPanels);
   const { snapshot: listeningPorts, refresh: refreshListeningPorts } = useRemoteListeningPorts(adapter);
+  // A browser tab coming on screen shows the host's ports (a new tab lists them), so read them now.
+  const browserPanelShown = selectedPanel?.type === 'browser' ? selectedPanel.id : null;
+  useEffect(() => {
+    if (browserPanelShown) refreshListeningPorts();
+  }, [browserPanelShown, refreshListeningPorts]);
 
   useEffect(() => {
     if (!selectedPanel || selectedPanel.type !== 'terminal') return;

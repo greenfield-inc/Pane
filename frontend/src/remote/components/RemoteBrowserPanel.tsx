@@ -11,7 +11,7 @@ import { isNativeMobile, openNativeExternalUrl } from '../runtime/nativeMobile';
 interface RemoteBrowserPanelProps {
   panel: ToolPanel;
   ports: ListeningPortsSnapshot | null;
-  /** Asks the host to read its ports now, for a ports list coming on screen. */
+  /** Asks the host to read its ports now, as the Ports menu opens. */
   onRefreshPorts: () => void;
   /** Saves the host-relative URL every client shows for this panel. */
   onNavigate(url: string): void;
@@ -61,12 +61,6 @@ export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, o
     const timer = window.setTimeout(() => setCopied(false), 1500);
     return () => window.clearTimeout(timer);
   }, [copied]);
-
-  // A ports list is on screen: the Ports menu, or a new tab's list.
-  const portsListShown = portsOpen || !url;
-  useEffect(() => {
-    if (portsListShown) onRefreshPorts();
-  }, [portsListShown, onRefreshPorts]);
 
   useEffect(() => {
     if (!portsOpen) return;
@@ -152,7 +146,10 @@ export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, o
             aria-label="Ports"
             aria-expanded={portsOpen}
             title="Ports"
-            onClick={() => setPortsOpen(open => !open)}
+            onClick={() => {
+              if (!portsOpen) onRefreshPorts();
+              setPortsOpen(!portsOpen);
+            }}
           >
             <List className="h-4 w-4" />
           </button>
