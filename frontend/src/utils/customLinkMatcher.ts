@@ -22,56 +22,66 @@ interface CustomLinkMatchResponse {
   matches: CustomLinkMatch[];
 }
 
-interface PendingMatch {
+interface QueuedMatch {
   request: CustomLinkMatchRequest;
   resolve: (result: CustomLinkMatchResult) => void;
-  timer: ReturnType<typeof setTimeout>;
+  signal?: AbortSignal;
 }
+
+const NO_LINKS: CustomLinkMatchResult = { matches: [], timedOut: false };
 
 let worker: Worker | null = null;
 let nextId = 0;
-/** In the order sent; the worker answers in the same order, so the first one is the line it is working on. */
-const pending = new Map<number, PendingMatch>();
+/** The line the worker is matching now; only it has a timer running. */
+let running: (QueuedMatch & { timer: ReturnType<typeof setTimeout> }) | null = null;
+const queue: QueuedMatch[] = [];
 
-function settle(id: number, result: CustomLinkMatchResult): void {
-  const entry = pending.get(id);
-  if (!entry) return;
-  clearTimeout(entry.timer);
-  pending.delete(id);
-  entry.resolve(result);
+function finishRunning(result: CustomLinkMatchResult): void {
+  if (!running) return;
+  clearTimeout(running.timer);
+  const { resolve } = running;
+  running = null;
+  resolve(result);
+  sendNext();
 }
 
-function send(request: CustomLinkMatchRequest, resolve: PendingMatch['resolve']): void {
+/** Sends the next line nobody gave up on, starting its timer only now that the worker is free. */
+function sendNext(): void {
+  if (running) return;
+  let next = queue.shift();
+  while (next?.signal?.aborted) {
+    next.resolve(NO_LINKS);
+    next = queue.shift();
+  }
+  if (!next) return;
   if (!worker) {
     worker = new MatcherWorker();
     worker.addEventListener('message', (event: MessageEvent<CustomLinkMatchResponse>) => {
-      settle(event.data.id, { matches: event.data.matches, timedOut: false });
+      if (event.data.id === running?.request.id) finishRunning({ matches: event.data.matches, timedOut: false });
     });
   }
-  pending.set(request.id, { request, resolve, timer: setTimeout(() => stopStuckLine(request.id), CUSTOM_LINK_MATCH_TIMEOUT_MS) });
-  worker.postMessage(request);
+  running = { ...next, timer: setTimeout(stopRunning, CUSTOM_LINK_MATCH_TIMEOUT_MS) };
+  worker.postMessage(next.request);
 }
 
-/** Stops the worker stuck on `id`'s line, which gets no links, and sends the lines queued behind it to a fresh worker. */
-function stopStuckLine(id: number): void {
+/** Stops the worker stuck on the running line, which gets no links; the next line goes to a fresh worker. */
+function stopRunning(): void {
   worker?.terminate();
   worker = null;
-  settle(id, { matches: [], timedOut: true });
-  const queued = [...pending.values()];
-  pending.clear();
-  for (const { request, resolve, timer } of queued) {
-    clearTimeout(timer);
-    send(request, resolve);
-  }
+  finishRunning({ matches: [], timedOut: true });
 }
 
 /**
  * The custom links in one line of text, matched in a worker so a pattern that backtracks
- * forever stops after CUSTOM_LINK_MATCH_TIMEOUT_MS instead of freezing the window.
+ * forever stops after CUSTOM_LINK_MATCH_TIMEOUT_MS instead of freezing the window. Lines are
+ * matched one at a time; aborting `signal` drops a line that is still waiting its turn.
  */
-export function matchCustomLinks(text: string, links: readonly CustomLink[]): Promise<CustomLinkMatchResult> {
+export function matchCustomLinks(text: string, links: readonly CustomLink[], signal?: AbortSignal): Promise<CustomLinkMatchResult> {
   if (!text || !links.some((link) => link.enabled)) {
-    return Promise.resolve({ matches: [], timedOut: false });
+    return Promise.resolve(NO_LINKS);
   }
-  return new Promise((resolve) => send({ id: nextId++, text, links }, resolve));
+  return new Promise((resolve) => {
+    queue.push({ request: { id: nextId++, text, links }, resolve, signal });
+    sendNext();
+  });
 }

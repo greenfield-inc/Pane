@@ -38,14 +38,14 @@ export function LinksSettings({ persistence, onDirtyChange }: LinksSettingsProps
   const invalid = links.some((link) => !link.label.trim() || customLinkProblem(link) !== undefined);
 
   useEffect(() => {
-    let current = true;
+    const request = new AbortController();
     const timer = setTimeout(() => {
-      void matchCustomLinks(sample, links).then((result) => {
-        if (current) setTried(result);
+      void matchCustomLinks(sample, links, request.signal).then((result) => {
+        if (!request.signal.aborted) setTried(result);
       });
     }, TRY_IT_DEBOUNCE_MS);
     return () => {
-      current = false;
+      request.abort();
       clearTimeout(timer);
     };
   }, [sample, links]);

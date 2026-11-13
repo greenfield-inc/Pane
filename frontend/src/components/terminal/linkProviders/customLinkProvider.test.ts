@@ -47,3 +47,21 @@ it('links a matching issue key and opens it on Ctrl+Click only', async () => {
   links[0].hover?.({} as MouseEvent, links[0].text);
   expect(onShowTooltip.mock.calls[0].slice(1)).toEqual(['https://example.atlassian.net/browse/PROJ-42', 'Ctrl+Click to open']);
 });
+
+it('answers only the newest row when the pointer moves on before matching finishes', async () => {
+  vi.stubGlobal('navigator', { platform: 'Linux' });
+  vi.stubGlobal('Worker', FakeWorker);
+  const rows = ['left PROJ-1', 'here PROJ-2'];
+  // SAFETY: The provider reads only this public terminal buffer surface.
+  const terminal = { buffer: { active: { getLine: (index: number) => rows[index] === undefined ? undefined : { translateToString: () => rows[index] } } } } as Terminal;
+  const provider = createCustomLinkProvider({
+    terminal, workingDirectory: '/repo', customLinks: [{ enabled: true, id: 'jira', label: 'Jira', pattern: 'PROJ-\\d+', urlTemplate: 'https://example.atlassian.net/browse/$0' }],
+    onOpenUrl: vi.fn(), onShowTooltip: vi.fn(), onHideTooltip: vi.fn(), onShowFilePopover: vi.fn(),
+  });
+  const leftRow = vi.fn();
+  provider.provideLinks(1, leftRow);
+  const links = await new Promise<ILink[]>((resolve) => provider.provideLinks(2, result => resolve(result ?? [])));
+
+  expect(links.map(link => link.text)).toEqual(['PROJ-2']);
+  expect(leftRow).not.toHaveBeenCalled();
+});
