@@ -9,6 +9,9 @@ export interface SyncBlockClearFilterState {
   filterInAltScreen: boolean;
 }
 
+/** Ends a DEC 2026 synchronized-output block: the frame before it is complete. */
+export const SYNC_END = '\x1b[?2026l';
+
 /**
  * Strips \x1b[2J (clear-screen) sequences that appear inside DEC Mode 2026
  * synchronized-output blocks while the NORMAL buffer is active. Claude Code
@@ -29,7 +32,6 @@ export interface SyncBlockClearFilterState {
  */
 export function filterSyncBlockClears(terminal: SyncBlockClearFilterState, data: string): string {
   const SYNC_START = '\x1b[?2026h';
-  const SYNC_END   = '\x1b[?2026l';
   const ALT_ENTER  = '\x1b[?1049h';
   const ALT_LEAVE  = '\x1b[?1049l';
   const CLEAR      = '\x1b[2J';

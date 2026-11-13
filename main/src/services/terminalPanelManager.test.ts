@@ -494,6 +494,16 @@ describe('TerminalPanelManager hidden output delivery', () => {
     disposeFlowControlRecord(terminal.flowControl);
   });
 
+  it('sends a visible panel\'s synchronized frame as soon as it is complete', () => {
+    const { terminal, emit, rendered } = outputHarness(true);
+    emit('\x1b]0;✳ Claude Code\x07');
+    emit('\x1b[?2026h\x1b[Hfirst ');
+    expect(rendered()).toHaveLength(1);
+    emit('word\x1b[?2026l');
+    expect(rendered()).toEqual(['\x1b]0;✳ Claude Code\x07', '\x1b[?2026h\x1b[Hfirst word\x1b[?2026l']);
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
   it('keeps a hidden panel on its slow cadence, off the renderer', () => {
     const { manager, terminal, emit, rendered, daemon } = outputHarness(false);
     emit('background');

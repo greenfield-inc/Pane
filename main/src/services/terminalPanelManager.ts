@@ -13,7 +13,7 @@ import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeS
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
-import { filterSyncBlockClears } from './syncBlockClearFilter';
+import { filterSyncBlockClears, SYNC_END } from './syncBlockClearFilter';
 import { ToolPanel, TerminalPanelState, pausedMarkOf, type TerminalConversationReport, type TerminalPausedMark } from '../../../shared/types/panels';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
 import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
@@ -2340,6 +2340,10 @@ export class TerminalPanelManager extends EventEmitter {
       const sizeThreshold = terminal.isVisible ? OUTPUT_BATCH_SIZE : OUTPUT_BATCH_SIZE_HIDDEN;
       if (terminal.outputBuffer.length >= sizeThreshold) {
         // Buffer is large enough — flush immediately
+        this.flushOutputBuffer(terminal);
+      } else if (terminal.isVisible && !terminal.inSyncBlock && filtered.includes(SYNC_END)) {
+        // The chunk closed a synchronized-output frame, which xterm paints
+        // whole, so batching it longer cannot reduce flicker, only delay it.
         this.flushOutputBuffer(terminal);
       } else if (!terminal.outputFlushTimer) {
         // Hidden panels keep their slower cadence. Visible panels briefly use
