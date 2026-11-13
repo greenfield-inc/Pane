@@ -10,6 +10,7 @@ import { DonutChart } from '../ui/charts/DonutChart';
 import { formatTokens, formatUsd } from '../ui/charts/chartScales';
 import { LimitBar, LimitStatusBanners, CreditsLine } from './ProviderLimits';
 import { LeaderboardTab } from './LeaderboardTab';
+import { settingDomId } from '../settings/catalog';
 import { PaneUsageSummary } from './PaneUsageSummary';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
 import { presetCalendarRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
@@ -144,11 +145,11 @@ function PaneUsageRow({ pane }: { pane: UsageByPane }) {
  * - **Provider**: rate limits, credits, blocked state — reported by Codex in
  *   every token_count event. Anthropic does not expose plan limits locally.
  */
-type UsageTab = 'usage' | 'leaderboard';
+export type UsageTab = 'usage' | 'leaderboard';
 
-export function UsageView() {
+export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
   const contentRef = useRef<HTMLDivElement>(null);
-  const [activeTab, setActiveTab] = useState<UsageTab>('usage');
+  const [activeTab, setActiveTab] = useState<UsageTab>(initialTab);
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -438,6 +439,7 @@ export function UsageView() {
           <button
             type="button"
             role="tab"
+            id={settingDomId('usage-leaderboard')}
             aria-selected={activeTab === 'leaderboard'}
             onClick={() => setActiveTab('leaderboard')}
             className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${

@@ -108,7 +108,8 @@ export type SettingsSettingId =
   | 'chat-tabs'
   | 'autopilot'
   | 'autopilot-instructions'
-  | 'notes';
+  | 'notes'
+  | 'usage-leaderboard';
 
 export interface SettingsTarget {
   category: SettingsCategoryId;

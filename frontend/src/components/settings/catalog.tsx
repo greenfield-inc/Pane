@@ -102,7 +102,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Usage & Limits',
     description: 'Agent token usage, costs, and subscription limits.',
     icon: Gauge,
-    settingIds: [],
+    settingIds: ['usage-leaderboard'],
     aliases: ['codex', 'usage', 'limits', 'quota', 'plan', 'rate limit'],
   },
   {
