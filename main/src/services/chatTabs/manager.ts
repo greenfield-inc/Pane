@@ -10,6 +10,7 @@ import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
 import { ChatTabRuntime, chatFailure, isAuthRequired, type RuntimeExit } from './runtime';
 import { ChatTranscript, type TurnMarker } from './transcript';
+import type { PauseOutcome } from '../terminalPanelManager';
 import { QueuedBodies } from './queuedBodies';
 import { agentConfig, agentLabel } from '../../../../shared/agents';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
@@ -78,11 +79,6 @@ export interface ChatTabManagerOptions {
   onPauseChanged?: (change: { panelIds: string[]; paneIds: string[]; paused: boolean }) => void;
 }
 
-/** What a pause did: the tabs it stopped, and why any were left running. */
-export interface ChatTabPauseOutcome {
-  paused: string[];
-  failed: Array<{ panelId: string; error: string }>;
-}
 
 interface Tab {
   /** The public generation: viewers drop any state older than the newest they saw, so it only grows. */
@@ -211,8 +207,8 @@ export class ChatTabManager {
    * and reported, so a pause never cuts off a turn, an approval, a question or a queued message.
    * The conversation stays in the agent's own store; opening the tab or sending to it resumes it.
    */
-  async pause(panelIds: readonly string[], mark: TerminalPausedMark): Promise<ChatTabPauseOutcome> {
-    const outcome: ChatTabPauseOutcome = { paused: [], failed: [] };
+  async pause(panelIds: readonly string[], mark: TerminalPausedMark): Promise<PauseOutcome> {
+    const outcome: PauseOutcome = { paused: [], failed: [] };
     for (const panelId of panelIds) {
       const state = this.options.store.state(panelId);
       if (!state) continue;
