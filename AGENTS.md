@@ -18,8 +18,11 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   `PANE_DIR=~/.pane_test pnpm dev` (not `electron-dev`: its watcher overwrites
   the bundled preload). Build the local CLI with `pnpm --filter runpane build`.
 - Before a push: `pnpm check:fast` (type check, lint, offline links when
-  lychee is installed, renderer test types, and the unit tests your changes
-  reach), plus any other tests your change touches.
+  lychee is installed, renderer test types, no agent names in code, and the
+  unit tests your changes reach), plus any other tests your change touches.
+  Agent facts live in `contracts/runpane/contract.json` `agents`; read them
+  through `shared/agents.ts`, never as `'claude'` literals.
+  `scripts/agent-names-allowlist.json` lists the files still exempt.
 - Tests: `pnpm --filter frontend test`. Main: `npm rebuild
   better-sqlite3-multiple-ciphers` first (setup builds it for Electron), then
   `pnpm --filter main exec vitest run` (plain `pnpm --filter main test` is watch

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // pnpm check:fast: the checks that catch most red CI runs, in a few minutes,
 // before a push. It runs the type check and lint (side by side), the offline
-// markdown link check (when lychee is installed), the renderer-test type check, and the unit tests that
+// markdown link check (when lychee is installed), the renderer-test type check, the check that code
+// names no agent (scripts/check-agent-names.mjs), and the unit tests that
 // the branch's changes reach, in each workspace the branch changed. It does
 // not run the Playwright journeys, the runpane wrapper suites or other OSes;
 // CI still does. Exits non-zero when any check fails.
@@ -70,6 +71,8 @@ if (spawnSync('lychee', ['--version'], { stdio: 'ignore', shell: process.platfor
 results.push(report(await run('renderer test types', 'pnpm', [
   '--filter', 'frontend', 'exec', 'tsc', '--noEmit', '-p', '../tests/renderer/tsconfig.json',
 ])));
+
+results.push(report(await run('agent names in code', process.execPath, ['scripts/check-agent-names.mjs'])));
 
 for (const workspace of workspaces) {
   const result = report(await run(`${workspace} unit tests (changed since ${base.slice(0, 12)})`, 'pnpm', [

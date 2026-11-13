@@ -290,7 +290,8 @@ happened, why, what changed, and what to do next.
    and the tests pass. `pnpm check:fast` runs, in a few minutes, the checks
    behind most red CI runs: the type check and lint, the offline markdown link
    check (when [lychee](https://lychee.cli.rs) is installed), the renderer-test
-   type check, and the unit tests your branch's changes reach in each workspace
+   type check, the check that code names no agent as a string literal
+   (`scripts/check-agent-names.mjs`), and the unit tests your branch's changes reach in each workspace
    it changed. Run it before you push; it does not replace CI.
 3. If you added or updated dependencies, run `pnpm run generate-notices` and
    commit the updated `NOTICES` file.
