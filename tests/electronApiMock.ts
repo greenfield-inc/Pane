@@ -1005,7 +1005,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
       }),
       usage: namespace({
-        getReport: () => success(clone(mockOptions.initialUsageReport ?? {
+        getReport: (...args: unknown[]) => { trackCall('usage:get-report', args); return success(clone(mockOptions.initialUsageReport ?? {
           totals: {
             inputTokens: 0,
             outputTokens: 0,
@@ -1051,8 +1051,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             lastError: null,
           },
           pricingAsOf: '2026-08-10',
-        })),
-        getStatus: () => success({
+        })); },
+        getStatus: () => { trackCall('usage:get-status', []); return success(clone(mockOptions.initialUsageReport?.index ?? {
           lastScanStartedMs: null,
           lastScanFinishedMs: null,
           filesTracked: 0,
@@ -1062,7 +1062,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           filesScanned: 0,
           filesTotal: 0,
           lastError: null,
-        }),
+        })); },
         rescan: () => success({
           lastScanStartedMs: null,
           lastScanFinishedMs: null,
