@@ -26,6 +26,7 @@ const DOCS_URI_PREFIX = 'runpane-docs:';
 const INSTRUCTIONS = [
   RUNPANE_CONTRACT.agentContext.brief.summary,
   'Each tool runs the matching `runpane` command against the running Pane app and returns its `--json` output.',
+  '- A Session (`sessions_create`) holds a workstream: several features or agents orchestrated together. It is the default home for multi-part work.',
   '- 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. A new Pane creates a worktree that installs and builds, so create one only when the work\'s branch has none; add later agents with `agents_start` or `panels_create` and `pane: <id>`.',
   '- Prefer the composite tools: `agents_start` starts an agent on a task, `agents_status` checks on it, `agents_send` sends it a follow-up. To answer a menu or prompt in an agent\'s terminal, send named keys with `panels_input` `keys` (for example `down,enter`), then check `agents_status`. Ask the user before answering trust or permission prompts.',
   '- Discover before you change anything: ids come from `repos_list`, `panes_list`, `workspace_state` and `agents_start`.',
