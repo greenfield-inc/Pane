@@ -45,6 +45,7 @@ import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
+import { onOpenFirstRunRequest } from './utils/openFirstRun';
 import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { useRegionNavigation } from './hooks/useRegionNavigation';
 import { KeySequenceHint } from './components/KeySequenceHint';
@@ -103,6 +104,8 @@ function App() {
   const [currentPermissionRequest, setCurrentPermissionRequest] = useState<PanePermissionRequest | null>(null);
   const [hasResolvedStartupDialogs, setHasResolvedStartupDialogs] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  /** The first-run screen was reopened from Home's "Start a Session". */
+  const [onboardingFromHome, setOnboardingFromHome] = useState(false);
   const [isSupportPaneOpen, setIsSupportPaneOpen] = useState(false);
   const [hasCheckedOnboarding, setHasCheckedOnboarding] = useState(false);
   const [completedOnboardingThisSession, setCompletedOnboardingThisSession] = useState(false);
@@ -208,6 +211,10 @@ function App() {
   }, []);
   // Menus deep in the window, such as the + menu's More agents…, open Settings here.
   useEffect(() => onOpenSettingsRequest(openSettings), [openSettings]);
+  useEffect(() => onOpenFirstRunRequest(() => {
+    setOnboardingFromHome(true);
+    setIsOnboardingOpen(true);
+  }), []);
   useEffect(() => window.electronAPI?.notify?.onNavigate((target) => {
     if (target === 'settings') {
       openSettings({ category: 'notify' });
@@ -1027,9 +1034,11 @@ function App() {
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}
+          fromHome={onboardingFromHome}
           onClose={() => {
             setCompletedOnboardingThisSession(true);
             setIsOnboardingOpen(false);
+            setOnboardingFromHome(false);
             window.dispatchEvent(new Event('project-changed'));
           }}
         />

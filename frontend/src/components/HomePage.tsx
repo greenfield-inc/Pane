@@ -21,6 +21,7 @@ import { capture } from '../services/posthog';
 import { DISCORD_INVITE_URL, DiscordIcon } from './DiscordIcon';
 import { HomeUsageCard } from './HomeUsageCard';
 import { requestOpenNewDialog } from '../utils/openNewDialog';
+import { requestOpenFirstRun } from '../utils/openFirstRun';
 
 const HIDE_DISCORD_PREFERENCE = 'hide_discord';
 
@@ -475,7 +476,15 @@ export function HomePage() {
 
           {recentSessions.length === 0 && isFirstRun && (
             <p className="text-center text-sm text-text-tertiary">
-              New here? Start a Session: it sets up Pane for you and brings in your projects and work from any agent.
+              New here?{' '}
+              <button
+                type="button"
+                onClick={requestOpenFirstRun}
+                className="rounded-sm text-interactive hover:text-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+              >
+                Start a Session
+              </button>
+              : it sets up Pane for you and brings in your projects and work from any agent.
             </p>
           )}
         </div>

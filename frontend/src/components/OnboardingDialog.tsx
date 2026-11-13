@@ -10,7 +10,7 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { formatTimeAgo } from '../utils/timestampUtils';
 import { cn } from '../utils/cn';
 import type { FirstRunAgent, FoundRepo, HostRepos, WslRepos } from '../../../shared/types/onboarding';
-import { ONBOARDING_HANDOFF_PREFERENCE, type OnboardingHandoff, type PaneChatAgent } from '../../../shared/types/paneChat';
+import { FIRST_RUN_MIGRATE_SESSION_OPENING, ONBOARDING_HANDOFF_PREFERENCE, firstRunMigratePrompt, type OnboardingHandoff, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
 import type { ImportSession } from '../../../shared/types/sessionImport';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
@@ -35,7 +35,15 @@ interface EnvironmentInfo {
 interface OnboardingDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * Reopened from Home's "Start a Session". The Onboarding Session already got its
+   * one-time first prompt, so a Yes starts a new Session with the migrate prompt instead.
+   */
+  fromHome?: boolean;
 }
+
+/** The Session a Yes starts when the first-run screen was reopened from Home. */
+const MIGRATE_SESSION_NAME = 'Bring in your work';
 
 interface SupportPaneDialogProps {
   isOpen: boolean;
@@ -319,13 +327,14 @@ async function openOnboardingSession(navigateToPaneChat: () => void): Promise<vo
  * default distro exists) and adds the ones they check as projects. Every way
  * out lands in the Onboarding Session.
  */
-export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogProps) {
+export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: OnboardingDialogProps) {
   const paneLogo = usePaneLogo();
   const navigateToPaneChat = useNavigationStore(s => s.navigateToPaneChat);
   const [env, setEnv] = useState<EnvironmentInfo | null>(null);
   const [step, setStep] = useState<FirstRunStep>('agent');
   const [agents, setAgents] = useState<FirstRunAgent[] | null>(null);
   const [isPicking, setIsPicking] = useState(false);
+  const [pickedAgent, setPickedAgent] = useState<PaneChatAgent | null>(null);
   // null while the scan runs.
   const [bringIn, setBringIn] = useState<ImportSession[] | null>(null);
   const [isHandingOff, setIsHandingOff] = useState(false);
@@ -415,6 +424,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
    * try again. Returns whether it handed off.
    */
   const handOff = async (handoff: OnboardingHandoff): Promise<boolean> => {
+    if (fromHome && handoff === 'migrate') return startMigrateSession();
     try {
       await setPreference(ONBOARDING_HANDOFF_PREFERENCE, handoff);
     } catch (cause) {
@@ -424,6 +434,31 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
     closedRef.current = true;
     await markOnboardingComplete();
     await openOnboardingSession(navigateToPaneChat);
+    return true;
+  };
+
+  /**
+   * A Yes from Home: a new Session whose one-time opening prompt is the migrate
+   * prompt the Onboarding Session gets on a first launch. Returns whether it started.
+   */
+  const startMigrateSession = async (): Promise<boolean> => {
+    try {
+      // The built-in launch with no custom resume, so the agent always receives the opening prompt.
+      await useOrchestrationSessionStore.getState().create({
+        name: MIGRATE_SESSION_NAME,
+        agent: pickedAgent ?? undefined,
+        launchCommand: '',
+        customResume: null,
+        openingPrompt: firstRunMigratePrompt(FIRST_RUN_MIGRATE_SESSION_OPENING, '`migrate-to-pane`'),
+      });
+    } catch (cause) {
+      setError(`Pane couldn't start the Session that brings your work in (${reasonText(cause instanceof Error ? cause.message : undefined, 'it was not created')}). Try again.`);
+      return false;
+    }
+    closedRef.current = true;
+    await markOnboardingComplete();
+    void useSessionStore.getState().setActiveSession(null);
+    navigateToPaneChat();
     return true;
   };
 
@@ -456,6 +491,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
       return;
     }
     capture('onboarding_agent_picked', { agent });
+    setPickedAgent(agent);
     setIsPicking(false);
     setStep('sessions');
     const found = await (scanRef.current ?? Promise.resolve([]));

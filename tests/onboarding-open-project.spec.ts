@@ -3,6 +3,7 @@ import { gunzipSync } from 'node:zlib';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import type { FirstRunAgent, FoundRepo, HostRepos, WslRepos } from '../shared/types/onboarding';
 import type { ImportSession, SessionImportScan } from '../shared/types/sessionImport';
+import type { OrchestrationSessionCreateInput } from '../shared/types/orchestrationSession';
 import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 
 // The renderer's Content-Security-Policy only lets analytics reach the default host.
@@ -48,6 +49,8 @@ interface FinderSetup {
   gitInstalled?: boolean;
   /** Stop at step 1 instead of skipping to "Open your project". */
   atFirstStep?: boolean;
+  /** The first-run screen was finished before; Home shows instead of it. */
+  done?: boolean;
   /** The first save of the first-run answer fails. */
   failHandoffOnce?: boolean;
   host?: HostRepos;
@@ -80,7 +83,7 @@ async function preferences(page: Page): Promise<Record<string, string>> {
 async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronApiMockOptions = {}) {
   await installElectronApiMock(page, {
     ...options,
-    initialPreferences: { onboarding_repo_setup: 'false', ...options.initialPreferences },
+    initialPreferences: { onboarding_repo_setup: finder.done ? 'true' : 'false', ...options.initialPreferences },
   });
   await page.addInitScript((setup: FinderSetup) => {
     const later = <Value>(value: Value, delayMs = 0) => new Promise<Value>(resolve => setTimeout(() => resolve(value), delayMs));
@@ -126,6 +129,7 @@ async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronAp
     }
   }, finder);
   await page.goto('/');
+  if (finder.done) return page.getByRole('heading', { name: 'Get Started', exact: true });
   if (finder.atFirstStep) {
     const first = page.getByRole('dialog', { name: 'Which agent do you use?' });
     await expect(first).toBeVisible();
@@ -451,4 +455,29 @@ test('opening found repos records onboarding_completed once with its entry, sour
     wsl: false,
     repo_count: 2,
   });
+});
+
+test("Home's \"Start a Session\" reopens the first-run screen, and Yes asks for a new Session with the migrate prompt", async ({ page }) => {
+  await expect(await openFirstRun(page, { done: true, scan: FOUND_SESSIONS }, { initialProjects: [] })).toBeVisible();
+  await page.evaluate(() => {
+    const requests: OrchestrationSessionCreateInput[] = [];
+    Object.defineProperty(window, '__createdSessions', { configurable: true, value: requests });
+    Object.assign(window.electronAPI, {
+      orchestrationSessions: {
+        setAgent: async () => ({ success: true }),
+        create: async (input: OrchestrationSessionCreateInput) => { requests.push(input); return { success: false, error: 'disk full' }; },
+      },
+    });
+  });
+  await page.getByRole('button', { name: 'Start a Session', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Which agent do you use?' }).getByRole('button', { name: 'Codex' }).click();
+  const offer = page.getByRole('dialog', { name: 'Bring your 4 sessions into Pane?' });
+  await offer.getByRole('button', { name: 'Yes' }).click();
+  await expect(offer.getByText("Pane couldn't start the Session that brings your work in (disk full). Try again.")).toBeVisible();
+  // SAFETY: the evaluate above installed __createdSessions.
+  const [request] = await page.evaluate(() => (window as Window & { __createdSessions: Array<{ name: string; agent: string; openingPrompt: string }> }).__createdSessions);
+  expect(request).toMatchObject({ name: 'Bring in your work', agent: 'codex' });
+  expect(request.openingPrompt).toMatch(/^Pane sent this once, when this Session started: on Pane's first-run screen the person said Yes/);
+  expect(request.openingPrompt).toContain('Follow the Migrate to Pane skill (`migrate-to-pane`) now, on its first-run path');
+  expect(await preferences(page)).not.toHaveProperty('onboarding_handoff');
 });
