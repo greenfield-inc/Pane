@@ -430,6 +430,12 @@ body.understory {
   scrollbar-width: none;
 }
 
+/* A horizontal strip with a hidden scrollbar: its trailing edge fades, so an item cut by the
+   edge reads as "more to scroll". */
+.scroll-fade-x {
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--space-4)), transparent);
+}
+
 .scrollbar-thumb-border-secondary {
   scrollbar-color: transparent transparent;
 }

@@ -65,7 +65,7 @@ function WalkBar({ snapshot }: { snapshot: AutopilotSnapshot }) {
         <span className={cn('h-2 w-2 rounded-full', sentinelOn ? 'bg-autopilot' : snapshot.state === 'running' ? 'bg-status-success' : snapshot.state === 'paused' ? 'bg-status-warning' : 'bg-status-neutral')} />
       </span>
       <span className={cn('min-w-0 truncate font-medium', sentinelOn ? 'text-autopilot-on-tint' : 'text-text-primary')} data-testid="autopilot-walk-status">{status}</span>
-      <div className="scrollbar-thin flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+      <div className="scrollbar-thin scroll-fade-x flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
         {sessions.map((session) => (
           <span key={session.id} data-testid="autopilot-walk-session" title={session.name}
             className={cn('inline-flex min-w-16 max-w-[50%] items-center gap-1 rounded-full px-2 py-px', session.id === snapshot.walk.sessionId ? 'bg-autopilot-subtle text-autopilot-on-tint' : 'bg-surface-tertiary text-text-secondary')}>
@@ -186,7 +186,7 @@ function RunMenu({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: 
         <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-[290px] rounded-xl bg-surface-primary p-1.5 shadow-card ring-1 ring-border-secondary">
+        <div role="menu" className="absolute right-0 top-full z-dropdown mt-1 w-[290px] rounded-xl bg-surface-primary p-1.5 shadow-card ring-1 ring-border-secondary">
           {folder && (
             <button type="button" role="menuitem" className={item} title={folder} data-testid="autopilot-folder"
               onClick={() => { setOpen(false); void window.electronAPI.openExternal(`file://${folder}`); }}>
@@ -214,10 +214,13 @@ function RunMenu({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: 
   );
 }
 
-/** Fits at any width: the controls the person uses most stay; the rest are in the menu. */
+/**
+ * Fits at any width: the controls the person uses most stay; the rest are in the menu. It never
+ * clips its overflow, so the ⋯ menu can hang below it.
+ */
 function Header({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: boolean }) {
   return (
-    <header className="flex h-[50px] shrink-0 items-center gap-2.5 overflow-hidden border-b border-border-primary px-4">
+    <header className="flex h-[50px] shrink-0 items-center gap-2.5 border-b border-border-primary px-4">
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-autopilot-subtle"><Navigation className="h-4 w-4 text-autopilot" aria-hidden="true" /></span>
       <h1 className="shrink-0 text-[15px] font-semibold text-text-primary">Autopilot</h1>
       <span className="hidden shrink-0 rounded px-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-autopilot-on-tint ring-1 ring-autopilot-border min-[1440px]:inline">Experimental</span>
