@@ -28,9 +28,10 @@ function Row({ agent, selected, onSelect, sharesPane }: { agent: Agent; selected
 export function Card({ data, failed, actions }: CardProps) {
   if (!data) return <div className="card card-agent"><CardSkeleton failed={failed} /></div>;
   const { agent } = data;
+  const problem = data.error ?? failed;
   return (
     <article className="card card-agent">
-      {data.error && <ErrorBanner text={data.error} />}
+      {problem && <ErrorBanner text={problem} />}
       <div className="card-agent-head">
         <span className="repo-label">{agent.repo ?? ''}</span>
         <StatusWord status={agent.status} />

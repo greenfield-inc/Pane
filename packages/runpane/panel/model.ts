@@ -10,6 +10,7 @@ const agentSchema = boundary.object({
   screen: boundary.array(boundary.string),
   link: boundary.string,
   repo: boundary.optional(boundary.string),
+  chat: boundary.optional(boundary.boolean),
   report: boundary.optional(boundary.object({
     state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
     summary: boundary.optional(boundary.string),
@@ -66,7 +67,8 @@ export function viewOf(result: ToolResult): View | undefined {
   const card = decodeOr(data, cardDataSchema);
   if (card) return { kind: 'card', data: card };
   const ref = decodeOr(data, agentRefSchema) ?? decodeOr(errorJson(result), agentRefSchema);
-  if (ref) return { kind: 'cardRef', ref, failed: result.isError ? textOf(result) : undefined };
+  // What the call did stays on the card after it loads the agent: a refused or unconfirmed send, say.
+  if (ref) return { kind: 'cardRef', ref, failed: result.isError ? sendFailure(result) : undefined };
   // A failed agent tool with no agent to show, such as Pane not running.
   if (result.isError) return { kind: 'error', text: textOf(result) || 'Pane did not answer.' };
   return undefined;

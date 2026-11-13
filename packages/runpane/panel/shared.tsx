@@ -28,12 +28,17 @@ export function NoticeLine({ agent, actions }: { agent: Agent; actions: AgentAct
   return <p className={`notice ${notice?.kind ?? ''}`} role="status">{notice?.text ?? ' '}</p>;
 }
 
-/** A message box for one agent. Sending is a human click; the agent gets the text as typed. */
+/**
+ * A message box for one agent. Sending is a human click; the agent gets the text as typed.
+ * A prompt on the agent's screen (blocked) is answered in Pane, never from here.
+ */
 export function Composer({ agent, actions }: { agent: Agent; actions: AgentActions }) {
   const [draft, setDraft] = useState('');
-  const live = agent.status !== 'gone' && agent.status !== 'exited';
+  const canSend = agent.status !== 'gone' && agent.status !== 'exited' && agent.status !== 'blocked';
   const busy = actions.busy[agent.panelId] !== undefined;
-  const placeholder = !live ? 'This agent has stopped' : agent.status === 'blocked' ? `Answer ${agent.name}` : `Message ${agent.name}`;
+  const placeholder = agent.status === 'blocked'
+    ? 'Answer its prompt in Pane'
+    : !canSend ? 'This agent has stopped' : agent.report?.state === 'blocked' ? `Answer ${agent.name}` : `Message ${agent.name}`;
   return (
     <form
       className="composer"
@@ -43,8 +48,8 @@ export function Composer({ agent, actions }: { agent: Agent; actions: AgentActio
         if (text) void actions.send(agent, text).then((sent) => { if (sent) setDraft(''); });
       }}
     >
-      <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={placeholder} aria-label={placeholder} disabled={!live || busy} />
-      <Button primary submit disabled={!live || busy || draft.trim() === ''} label={`Send to ${agent.name}`}>
+      <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={placeholder} aria-label={placeholder} disabled={!canSend || busy} />
+      <Button primary submit disabled={!canSend || busy || draft.trim() === ''} label={`Send to ${agent.name}`}>
         {actions.busy[agent.panelId] === 'send' ? 'Sending…' : 'Send'}
       </Button>
     </form>

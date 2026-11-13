@@ -1,4 +1,4 @@
-import { GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, SquareTerminal } from 'lucide-react';
+import { GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, MessageSquare, SquareTerminal } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { STATUS_WORD, type Agent, type Status } from './model';
 
@@ -75,15 +75,15 @@ export function PrBadge({ agent }: { agent: Agent }) {
   return <span className={`badge badge-${state}`}>{state}</span>;
 }
 
-/** The agent's last lines, in Pane's terminal block. A cursor blinks while it works. */
+/** The agent's last lines, in Pane's terminal block (a chat tab's conversation for one). A cursor blinks while it works. */
 export function Terminal({ agent, lines, header = true }: { agent: Agent; lines?: number; header?: boolean }) {
   const shown = lines === undefined ? agent.screen : agent.screen.slice(-lines);
   return (
     <div className={`terminal terminal-${agent.status}`}>
       {header && (
         <div className="terminal-header">
-          <SquareTerminal className="icon" aria-hidden="true" />
-          <span>terminal</span>
+          {agent.chat ? <MessageSquare className="icon" aria-hidden="true" /> : <SquareTerminal className="icon" aria-hidden="true" />}
+          <span>{agent.chat ? 'chat' : 'terminal'}</span>
         </div>
       )}
       <pre className="terminal-body">

@@ -1312,12 +1312,15 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
           report: { state: 'blocked', question: 'Keep the old redirect for API clients?', reportedAt: '2026-11-11T00:00:00.000Z' },
         },
         { id: 'panel-9', panelId: 'panel-9', paneId: 'pane-7', type: 'terminal', title: 'Review', active: false, isCliPanel: true, agentType: 'codex' },
+        { id: 'panel-10', panelId: 'panel-10', paneId: 'pane-7', type: 'chat', title: 'Claude', active: false, agentType: 'claude' },
       ] },
-      'runpane:panels:create': (args) => ({
-        ok: true, paneId: args[0].paneId, panelId: 'panel-9', title: 'Review', active: true, focused: false, tool: { title: 'Codex', command: 'codex', agent: 'codex' },
-        readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 700, state: { initialized: true } },
-        initialInput: { delivered: true, submitted: true, verifiedSubmitted: true, inputBytes: 20 },
-      }),
+      'runpane:panels:create': (args) => (args[0].type === 'chat'
+        ? { ok: true, paneId: args[0].paneId, panelId: 'panel-10', title: 'Claude', active: false, focused: false, tool: { title: 'Claude', command: 'claude', agent: 'claude' } }
+        : {
+          ok: true, paneId: args[0].paneId, panelId: 'panel-9', title: 'Review', active: true, focused: false, tool: { title: 'Codex', command: 'codex', agent: 'codex' },
+          readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 700, state: { initialized: true } },
+          initialInput: { delivered: true, submitted: true, verifiedSubmitted: true, inputBytes: 20 },
+        }),
       'runpane:workspace:state': { ok: true, epoch: 'epoch-1', generation: 4, entries: [
         { gen: 4, at: '2026-09-25T00:00:00.000Z', kind: 'agent.blocked', paneId: 'pane-7', paneName: 'fix-login', panelId: 'panel-8', source: 'agent', baseline: true },
       ] },
@@ -1343,9 +1346,13 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
         const { tools } = await client.listTools();
         assert.deepEqual(tools.map((tool) => tool.name).sort(), [
           'agents_card', 'agents_panel', 'agents_panel_focus', 'agents_panel_open', 'agents_panel_status',
-          'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
-          'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
-        ], 'ChatGPT gets the agent tools and the panel, not the whole core toolset');
+          'agents_send', 'agents_start', 'agents_status', 'autopilot_stack', 'autopilot_status', 'autopilot_waiting', 'docs_read', 'docs_search', 'doctor',
+          'inbox', 'links_create', 'panels_create', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list',
+          'sessions_list', 'sessions_overview', 'workspace_state',
+        ], 'ChatGPT gets the agent tools, reads of what waits on the person, and the panel; no raw keys, no answering');
+        const named = [...client.getInstructions().matchAll(/`([a-z]+_[a-z_]+)`/g)].map(([, name]) => name);
+        assert.ok(named.length > 5);
+        assert.deepEqual(named.filter((name) => !tools.some((tool) => tool.name === name)), [], 'the instructions name only tools ChatGPT has');
         for (const tool of tools) {
           for (const hint of ['readOnlyHint', 'destructiveHint', 'openWorldHint']) {
             assert.ok([true, false].includes(tool.annotations?.[hint]), `${tool.name} must set ${hint}`);
@@ -1391,8 +1398,16 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
         const refreshed = await client.callTool({ name: 'agents_panel_status', arguments: { chat: shown.structuredContent.chat } });
         assert.equal(refreshed.structuredContent.agents[0].status, 'blocked');
 
+        // ChatGPT never answers a prompt on an agent's screen: typing into it would.
+        for (const target of [{ panel: 'panel-8' }, { pane: 'pane-7' }]) {
+          const refused = await client.callTool({ name: 'agents_send', arguments: { ...target, text: 'y', yes: true } });
+          assert.equal(refused.isError, true);
+          assert.match(refused.content[0].text, /showing a prompt.*nothing was sent/);
+          assert.deepEqual([refused.structuredContent.panelId, refused.structuredContent.delivered], ['panel-8', false]);
+        }
+
         // The panel's Send reads `delivered` from the JSON, even when the hint names a tool in another toolset.
-        const unconfirmed = await client.callTool({ name: 'agents_send', arguments: { panel: 'panel-8', text: 'y', yes: true } });
+        const unconfirmed = await client.callTool({ name: 'agents_send', arguments: { panel: 'panel-9', text: 'Also check the logout path', yes: true } });
         assert.equal(unconfirmed.isError, true);
         assert.equal(JSON.parse(unconfirmed.content[0].text).delivered, false);
 
@@ -1419,10 +1434,17 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
           { panelId: 'panel-8', name: 'fix-login' },
           { panelId: 'panel-9', name: 'fix-login · Review' },
         ]);
+
+        // A chat tab the chat opens joins its agents too.
+        const chatTab = await client.callTool({ name: 'panels_create', arguments: { pane: 'pane-7', agent: 'claude', chat: true, yes: true }, _meta: chat('chat-a') });
+        assert.equal(chatTab.isError, undefined, chatTab.content[0].text);
+        const three = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
+        assert.deepEqual(three.structuredContent.agents.map(({ panelId, name, chat }) => ({ panelId, name, chat })).at(-1), { panelId: 'panel-10', name: 'fix-login · Claude', chat: true });
       }, { args: ['--toolsets', 'chatgpt'], env: { PANE_DIR: paneDir } });
 
       const focus = requests.find((request) => request.channel === 'runpane:panes:focus');
       assert.deepEqual(focus.args[0], { paneId: 'pane-7', panelId: 'panel-8', source: 'user' });
+      assert.deepEqual(requests.filter((request) => request.channel === 'runpane:panels:submit').map((request) => request.args[0].panelId), ['panel-9']);
     });
 
     // A restarted server still knows which agents the chat started, and shows an archived one as gone.
@@ -1440,6 +1462,7 @@ test('the chatgpt toolset adds a panel of the agents each chat started, with liv
         assert.deepEqual(shown.structuredContent.agents.map(({ panelId, status }) => ({ panelId, status })), [
           { panelId: 'panel-8', status: 'gone' },
           { panelId: 'panel-9', status: 'gone' },
+          { panelId: 'panel-10', status: 'gone' },
         ]);
       }, { args: ['--toolsets', 'chatgpt'], env: { PANE_DIR: paneDir } });
     });

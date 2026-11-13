@@ -26,8 +26,31 @@ const PANE_OFFLINE = 'Pane isn\'t running. Open the Pane app on this computer.';
 const ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.33" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3.5" width="14" height="13" rx="2"/><path d="M10 3.5v13M10 10h7"/></svg>';
 
 /** Core tools whose results render as an inline Pane card when the panel toolset is on. */
-export const INLINE_CARD_TOOLS = new Set(['agents_start', 'agents_status', 'agents_send']);
+export const INLINE_CARD_TOOLS = new Set(['agents_start', 'agents_status', 'agents_send', 'panels_create']);
 export const inlineCardMeta: JsonObject = { ui: { resourceUri: PANEL_URI } };
+/** Tools whose agent joins the chat's list: a new Pane or tab, terminal or chat. */
+export const STARTS_AGENT = new Set(['agents_start', 'panels_create']);
+
+/** The server instructions ChatGPT gets: the tools it has, and what it leaves to the person in Pane. */
+export const CHATGPT_INSTRUCTIONS = [
+  'Pane runs coding agents on this computer, each in a Pane: 1 feature = 1 worktree = 1 branch = 1 Pane. Later agents on the same work (review, fixes, QA) are tabs in that Pane.',
+  '- `agents_start` starts an agent on a task: in a new Pane for new work, or as a tab with `pane: <id>`. `panels_create` with `chat: true` opens Claude or Codex as a chat tab instead of a terminal. `agents_status` checks on an agent and `agents_send` sends it a message. Their results show as Pane cards, and `agents_panel` lists every agent this chat started.',
+  '- What waits on the person: `autopilot_waiting` lists every approval and question waiting in Pane, on every machine (it needs Autopilot on; `autopilot_status` says whether it is). `inbox` lists a Session\'s reports and blocked agents; find Sessions with `sessions_list` and see one with `sessions_overview`.',
+  '- Approvals are read-only here. The person answers them in Pane or on their phone. Never answer a permission or trust prompt: `agents_send` refuses while an agent shows a prompt, so tell the person to open it in Pane.',
+  '- Discover before you change anything: repos from `repos_list`, Panes from `panes_list` or `workspace_state`.',
+  '- Tools with a `yes` input change state. Pass `yes: true` only when the person asked for that change in this chat. `panes_archive` refuses when work would be lost; show the person what it flagged, and pass `force` only after they agree. `panes_restore` undoes an archive.',
+  '- `links_create` returns a pane:// link that opens a Pane, tab or Session in Pane.',
+  '- Before guessing how Pane works, call `docs_search`, then `docs_read` on a path it returns.',
+].join('\n');
+
+/** ChatGPT's limits on tools whose contract text is written for agents that have every tool. */
+export const CHATGPT_TOOL_NOTES = new Map([
+  ['agents_send', 'In ChatGPT: sends a message only. It refuses while the agent shows a prompt or menu (status blocked), such as a permission or trust prompt; the person answers that in Pane.'],
+  ['panels_create', 'In ChatGPT: use it to open a chat tab (`chat: true` with `agent` claude or codex) or an Agent Farm profile. For a terminal agent, use `agents_start` with `pane`. The new tab joins this chat\'s agents.'],
+  ['autopilot_waiting', 'In ChatGPT: read-only. Answering, closing and rewriting items are Autopilot\'s own commands; the person answers in Pane or on their phone.'],
+  ['inbox', 'In ChatGPT: read-only. Pass `session`; clearing items is the Session orchestrator\'s job.'],
+  ['panes_archive', 'In ChatGPT: pass `force` only after the person agrees to lose what the safety check flagged.'],
+]);
 
 /**
  * The only stored state: which agents each chat started, as Pane and panel ids in start order.
@@ -49,6 +72,8 @@ interface AgentCard {
   screen: string[];
   link: string;
   repo?: string;
+  /** A chat tab (ACP, no terminal): its screen is the conversation. */
+  chat?: boolean;
   report?: Pick<AgentReport, 'state' | 'summary' | 'question'>;
   diff?: { adds: number; dels: number };
   pr?: { number: number; draft: boolean; title?: string; state?: string; url?: string };
@@ -214,6 +239,29 @@ export async function callChatPanelTool(name: string, input: JsonObject, chat: s
   }
 }
 
+const sendTargetSchema = boundary.object({ pane: boundary.optional(boundary.string), panel: boundary.optional(boundary.string) });
+
+/**
+ * ChatGPT never answers a permission, trust or question prompt. Pane types a message into a
+ * prompt that has no composer as keys, which answers it, so agents_send is refused while its
+ * target shows one. When Pane can't be read, the send goes ahead and fails there.
+ */
+export async function refusePromptAnswer(input: JsonObject): Promise<ToolResult | undefined> {
+  const { pane, panel } = decodeBoundary(input, sendTargetSchema);
+  const [state, list] = await Promise.all([
+    invokeDaemon('runpane:workspace:state', [{}], workspaceStateResultSchema).catch(() => undefined),
+    !panel && pane ? invokeDaemon('runpane:panels:list', [{ paneId: pane }], panelListResultSchema).catch(() => undefined) : undefined,
+  ]);
+  // The same tab agents_send picks: the panel given, else the Pane's agent tab, else its first tab.
+  const panelId = panel ?? (list?.panels.find((candidate) => candidate.isCliPanel || candidate.agentType) ?? list?.panels[0])?.panelId;
+  const entry = state?.entries.find((candidate) => candidate.panelId === panelId);
+  if (!panelId || entry?.kind !== 'agent.blocked') return undefined;
+  const text = 'The agent is showing a prompt in its terminal, such as a permission or trust prompt, so nothing was sent: '
+    + 'a message would answer it. Open the agent in Pane and answer it there, then send the message again.';
+  // agents_send's own result shape, so its output schema holds.
+  return { content: [{ type: 'text', text }], structuredContent: { ok: false, paneId: entry.paneId, panelId, delivered: false, blocked: text }, isError: true };
+}
+
 async function panelResult(chat: string): Promise<ToolResult> {
   const { agents, offline } = await readAgents(readStore()[chat] ?? []);
   const summary = agents.length === 0
@@ -318,6 +366,7 @@ async function readAgent({ paneId, panelId: knownPanelId }: { paneId: string; pa
     card.link = buildPaneLink({ kind: 'pane', id: paneId, panelId });
   }
   if (laterTab && panel?.title) card.name = `${card.name} · ${panel.title}`;
+  if (panel?.type === 'chat') card.chat = true;
   if (panel?.report) {
     const { state, summary, question } = panel.report;
     card.report = { state };

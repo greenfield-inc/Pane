@@ -764,7 +764,8 @@ export const RUNPANE_CONTRACT = {
       "additive": true,
       "toolsets": [
         "core",
-        "panels"
+        "panels",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "panelCreateRequest",
@@ -859,8 +860,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "toolsets": [
         "core",
-        "panels",
-        "chatgpt"
+        "panels"
       ],
       "jsonSchemas": [
         "panelInputRequest",
@@ -1525,7 +1525,10 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "inboxListResult"
       ],
-      "localControl": true
+      "localControl": true,
+      "toolsets": [
+        "chatgpt"
+      ]
     },
     {
       "name": "inbox ack",
@@ -1548,7 +1551,8 @@ export const RUNPANE_CONTRACT = {
         "runpane autopilot status [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "autopilot"
+        "autopilot",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "autopilotStatusResult"
@@ -1562,7 +1566,8 @@ export const RUNPANE_CONTRACT = {
         "runpane autopilot waiting [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "autopilot"
+        "autopilot",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "autopilotWaitingResult"
@@ -1576,7 +1581,8 @@ export const RUNPANE_CONTRACT = {
         "runpane autopilot stack [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "autopilot"
+        "autopilot",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "autopilotStackResult"
@@ -1655,7 +1661,8 @@ export const RUNPANE_CONTRACT = {
         "runpane sessions list [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "sessions"
+        "sessions",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "sessionListResult"
@@ -1766,7 +1773,8 @@ export const RUNPANE_CONTRACT = {
         "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "sessions"
+        "sessions",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "sessionOverviewResult"

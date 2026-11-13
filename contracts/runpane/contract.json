@@ -762,7 +762,8 @@
       "additive": true,
       "toolsets": [
         "core",
-        "panels"
+        "panels",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "panelCreateRequest",
@@ -857,8 +858,7 @@
       "mutates": true,
       "toolsets": [
         "core",
-        "panels",
-        "chatgpt"
+        "panels"
       ],
       "jsonSchemas": [
         "panelInputRequest",
@@ -1523,7 +1523,10 @@
       "jsonSchemas": [
         "inboxListResult"
       ],
-      "localControl": true
+      "localControl": true,
+      "toolsets": [
+        "chatgpt"
+      ]
     },
     {
       "name": "inbox ack",
@@ -1546,7 +1549,8 @@
         "runpane autopilot status [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "autopilot"
+        "autopilot",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "autopilotStatusResult"
@@ -1560,7 +1564,8 @@
         "runpane autopilot waiting [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "autopilot"
+        "autopilot",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "autopilotWaitingResult"
@@ -1574,7 +1579,8 @@
         "runpane autopilot stack [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "autopilot"
+        "autopilot",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "autopilotStackResult"
@@ -1653,7 +1659,8 @@
         "runpane sessions list [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "sessions"
+        "sessions",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "sessionListResult"
@@ -1764,7 +1771,8 @@
         "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "sessions"
+        "sessions",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "sessionOverviewResult"

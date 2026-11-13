@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
-import { callChatPanelTool, CHAT_TOOLSET, chatIdOf, chatPanelResource, chatPanelTools, INLINE_CARD_TOOLS, inlineCardMeta, readChatPanel, recordStartedAgent } from './chatPanel';
+import { callChatPanelTool, CHAT_TOOLSET, CHATGPT_INSTRUCTIONS, CHATGPT_TOOL_NOTES, chatIdOf, chatPanelResource, chatPanelTools, INLINE_CARD_TOOLS, inlineCardMeta, readChatPanel, recordStartedAgent, refusePromptAnswer, STARTS_AGENT } from './chatPanel';
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
@@ -114,7 +114,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       ...tools.map((tool) => ({
         name: tool.name,
         title: tool.title,
-        description: rewrite(tool.description),
+        description: [rewrite(tool.description), chatPanel ? CHATGPT_TOOL_NOTES.get(tool.name) : undefined].filter(Boolean).join('\n'),
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
         annotations: tool.annotations,
@@ -130,7 +130,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       { name: 'pane', title: 'Pane', version: getWrapperVersion() },
       {
         capabilities: { tools: {}, resources: {} },
-        instructions: INSTRUCTIONS,
+        instructions: chatPanel ? CHATGPT_INSTRUCTIONS : INSTRUCTIONS,
         cacheHints: { 'tools/list': LIST_CACHE, 'resources/list': LIST_CACHE },
       },
     );
@@ -154,6 +154,10 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       } catch (error) {
         return errorResult(`Invalid arguments for ${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
+      if (chatPanel && tool.name === 'agents_send') {
+        const refused = await refusePromptAnswer(input);
+        if (refused) return refused;
+      }
       const clientName = decodeBoundary(ctx.mcpReq.envelope, clientInfoEnvelope)?.['io.modelcontextprotocol/clientInfo']?.name
         ?? server.getClientVersion()?.name ?? '';
       const progressToken = ctx.mcpReq._meta?.progressToken;
@@ -163,9 +167,9 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
         ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress } }).catch(() => {});
       }, PROGRESS_INTERVAL_MS);
       const result = await callTool(tool, input, ctx.mcpReq.signal, rewrite, notifyEnv(clientName)).finally(() => clearInterval(ticker));
-      // A start that created a Pane but could not confirm the prompt still started an agent.
+      // A start that created a Pane or tab but could not confirm the prompt still started an agent.
       const started = result.structuredContent ?? parseJsonObject(result.content[0]?.text ?? '');
-      if (chatPanel && tool.name === 'agents_start' && started) recordStartedAgent(chat(), started);
+      if (chatPanel && STARTS_AGENT.has(tool.name) && started) recordStartedAgent(chat(), started);
       return result;
     });
     server.setRequestHandler('resources/list', () => ({
