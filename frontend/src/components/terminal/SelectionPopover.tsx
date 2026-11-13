@@ -151,7 +151,8 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         if (!terminal) return;
         terminal.selectAll();
         // A selection copies itself when Copy on select is on, however it was made.
-        if (copyOnSelect) await copy(terminal.getSelection());
+        // Select All spans the empty rows below the prompt; leave them out.
+        if (copyOnSelect) await copy(terminal.getSelection().trimEnd());
         return;
       case 'add-to-notes':
         addToNotes(selection);

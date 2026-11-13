@@ -239,8 +239,7 @@ test('with Copy on select on, right-click leaves the clipboard alone and the men
 
   // The right button's release must not copy again; only the menu's Select All does.
   await page.mouse.click(box.x + 20, box.y + 8, { button: 'right' });
-  await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1', expect.stringContaining('selection-1')]);
-  expect((await clipboardWrites(page)).length).toBe(2);
+  await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1', 'selection-1']);
 });
 
 test('keeps keyboard copy available when Pane shortcuts are disabled', async ({ page }) => {
