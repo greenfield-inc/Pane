@@ -18,6 +18,7 @@ export const SETUP_SECTION_LABELS = {
   runScripts: 'Run scripts',
   skills: 'Skills & MCP',
   terminalShortcuts: 'Terminal shortcuts',
+  customLinks: 'Custom links',
   worktreeFileSync: 'Worktree file sync',
   appearance: 'Appearance',
   preferences: 'Preferences',

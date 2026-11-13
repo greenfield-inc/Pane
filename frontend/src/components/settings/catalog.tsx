@@ -10,6 +10,7 @@ import {
   GitBranch,
   Keyboard,
   KeyRound,
+  Link,
   Link2,
   Monitor,
   Navigation,
@@ -57,6 +58,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     aliases: ['font', 'shell', 'scrollback', 'gpu', 'battery', 'copy', 'select', 'selection', 'clipboard', 'popover', '@', 'mention', 'picker'],
   },
   {
+    id: 'links',
+    label: 'Links',
+    description: 'Your own clickable links in terminal output, such as issue keys.',
+    icon: Link,
+    settingIds: ['custom-links'],
+    aliases: ['link', 'url', 'regex', 'pattern', 'issue', 'ticket', 'jira', 'linear', 'tracker', 'clickable'],
+  },
+  {
     id: 'ai-agents',
     label: 'AI & Agents',
     description: 'Agent defaults, context, and CLI installations.',
@@ -99,10 +108,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'worktrees-git',
     label: 'Worktrees & Git',
-    description: 'Defaults for commits, pull requests, and new worktrees.',
+    description: 'Defaults for commits, pull requests, new worktrees, and opening them in your IDE.',
     icon: GitBranch,
-    settingIds: ['commit-footer', 'git-attribution', 'auto-rename-pr', 'worktree-file-sync'],
-    aliases: ['git', 'worktree', 'commit', 'pull request', 'pr', 'attribution', 'committer', 'author'],
+    settingIds: ['commit-footer', 'git-attribution', 'auto-rename-pr', 'worktree-file-sync', 'default-ide-command'],
+    aliases: ['git', 'worktree', 'commit', 'pull request', 'pr', 'attribution', 'committer', 'author', 'ide', 'editor', 'open in ide'],
   },
   {
     id: 'notifications',

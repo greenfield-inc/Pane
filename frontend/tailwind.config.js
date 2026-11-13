@@ -196,6 +196,9 @@ const config = {
         'modal': 'var(--modal-padding)',
         'view-header': 'var(--view-header-height)',
       },
+      width: {
+        'settings-control': 'var(--settings-control-width)',
+      },
       maxWidth: {
         '1/2': '50%',
       },

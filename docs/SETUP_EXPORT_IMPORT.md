@@ -5,7 +5,7 @@ your Pane setup to a file and loads it on another computer.
 
 ## Export
 
-The page lists eight sections, each with what it would save. Click a row to
+The page lists nine sections, each with what it would save. Click a row to
 leave that section out, then click **Export…** and pick where to save
 `pane-setup-YYYY-MM-DD.json`. When it is saved, **Show in Finder** (**Show in
 folder** on Windows and Linux) opens its folder.
@@ -17,6 +17,7 @@ folder** on Windows and Linux) opens its folder.
 | Run scripts | Each saved repository's Build Script, Run Commands and Archive Script, keyed by its `origin` remote |
 | Skills & MCP | Whether Pane's skill is installed and its MCP server registered, and the MCP toolsets |
 | Terminal shortcuts | Every terminal shortcut |
+| Custom links | Every custom link: label, pattern, URL template and on/off state |
 | Worktree file sync | Every file sync entry with a relative path |
 | Appearance | Appearance mode, themes, high contrast, UI scale, terminal font and size |
 | Preferences | The current value of each behavior toggle from General, Terminal, Notifications, Shortcuts, Worktrees & Git and Advanced, the keys you changed in Keyboard Shortcuts (importing them replaces your changed keys), new-Pane defaults (without the base branch), and the sidebar and `@terminal` choices |
@@ -28,13 +29,14 @@ is never written. That includes every API key and token Pane stores (Anthropic,
 OpenAI, fal, OpenRouter, Deepgram, APNs), shared credentials, Remote Pane and
 Workspaces settings, analytics settings and identity, leaderboard, the Claude
 executable path, extra PATH entries, the preferred shell, start on login,
-Publish Pane instructions to AGENTS.md, developer and verbose modes, and each
-repository's path, worktree folder, Open IDE Command and Project System
-Prompt. Notes, Loops and Sessions are not part of the setup.
+Publish Pane instructions to AGENTS.md, developer and verbose modes, the
+Default Open IDE Command, and each repository's path, worktree folder,
+Open IDE Command and Project System Prompt. Notes, Loops and Sessions are not
+part of the setup.
 
 Free text can still hold a secret someone typed into it. As a second check,
 Pane leaves out any command, resume template, script, Session profile or
-shortcut text that looks like it holds one:
+shortcut text or custom link URL template that looks like it holds one:
 
 - a key assignment such as `API_TOKEN=abc` or `password: x` (a variable
   reference such as `API_TOKEN=$API_TOKEN` is kept);
@@ -44,7 +46,7 @@ shortcut text that looks like it holds one:
 - credentials in a URL (`postgres://user:pass@host`) or a secret in its query;
 - a well-known key prefix (`sk-`, `ghp_`, `github_pat_`, `xox`, `AKIA`).
 
-The smallest unit is left out: one command, one shortcut, one script of one
+The smallest unit is left out: one command, one shortcut, one custom link, one script of one
 repository, or one setting. The card names each one and counts it on its row.
 This check is best effort, so read the file before you share it.
 
@@ -68,6 +70,7 @@ Import adds and replaces. It never deletes:
 | Single settings | The file's value replaces this computer's when they differ |
 | Custom commands | Matched by name. A new name is added; the same name with a different command replaces it; commands only on this computer stay |
 | Terminal shortcuts | Matched by id, same rules. A shortcut whose key another shortcut here already uses comes in turned off, marked "key in use" |
+| Custom links | Matched by id, same rules. A link whose pattern or URL template has a problem still comes in, and the Links page shows the problem |
 | Worktree file sync | Matched by path, same rules |
 | Run scripts | See below |
 

@@ -47,6 +47,17 @@ describe('ConfigManager appearance persistence', () => {
     expect(relaunched.getConfig().keymapNotice).toBe('seen');
   });
 
+  it('drops hand-edited custom links that Settings › Links could not show', async () => {
+    const jira = { enabled: true, id: 'jira', label: 'Jira', pattern: 'PROJ-\\d+', urlTemplate: 'https://example.atlassian.net/browse/$0' };
+    await fs.writeFile(configPath, JSON.stringify({ customLinks: [jira, { id: 'half', pattern: 'X-\\d+' }] }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().customLinks).toEqual([jira]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('customLinks: ignored 1 malformed entries'));
+    warn.mockRestore();
+  });
+
   it('turns chat tabs on for a fresh install, and leaves an existing config as it was (D-329)', async () => {
     const fresh = new ConfigManager();
     await fresh.initialize();

@@ -7,14 +7,6 @@
     "reason": "Deferred terminal resume: custom command resume modes per agent.",
     "count": 6
   },
-  "frontend/src/components/DetailPanel.tsx": {
-    "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
-    "count": 2
-  },
-  "frontend/src/components/HorizontalDetailPanel.tsx": {
-    "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
-    "count": 2
-  },
   "frontend/src/components/ProjectSettings.tsx": {
     "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
     "count": 1
@@ -346,5 +338,9 @@
   "shared/types/worktreeFileSync.ts": {
     "reason": "Vendor config folders copied into new worktrees (.claude, .codex, .cursor).",
     "count": 3
+  },
+  "shared/utils/ideCommands.ts": {
+    "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
+    "count": 1
   }
 }
