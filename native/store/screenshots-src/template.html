@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  One App Store screenshot. render.mjs sets the viewport to the device's
+  exact pixel size and calls window.renderShot(shot, device).
+  Colors, fonts, map and rain come from runpane-website:
+  src/app/globals.css (--color-*, --font-*), src/app/hero-matrix.tsx (rain),
+  src/app/world-map.tsx (map), public/icon-512.png (logo).
+-->
+<style>
+  @font-face { font-family: "Sora"; src: url("fonts/Sora-latin.woff2") format("woff2"); font-weight: 100 800; }
+  @font-face { font-family: "Geist Mono"; src: url("fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; }
+
+  :root {
+    --color-bg: #0a0a0a;
+    --color-fg: #fafafa;
+    --color-muted: #e0e0e4;
+    --color-border: #27272a;
+    --color-accent: #22c55e;
+    --font-mono: "Geist Mono", monospace;
+    --font-sans: "Sora", ui-sans-serif, system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: var(--color-bg); overflow: hidden; }
+  body { color: var(--color-fg); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+
+  .canvas { position: relative; width: 100vw; height: 100vh; overflow: hidden; background: var(--color-bg); }
+
+  .map {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    background: url("assets/world-map.svg") center / contain no-repeat;
+    opacity: 0.2;
+    -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent 95%);
+  }
+  .rain { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  .copy { position: absolute; left: 0; right: 0; text-align: center; }
+  .brand { display: inline-flex; align-items: center; justify-content: center; gap: .32em; font-weight: 600; letter-spacing: -0.02em; }
+  .brand img { border-radius: 22%; }
+  .eyebrow {
+    font-family: var(--font-mono); font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.14em; color: var(--color-accent);
+  }
+  .eyebrow::before { content: "→ "; color: rgba(250, 250, 250, 0.35); }
+  h1 { font-weight: 600; letter-spacing: -0.025em; line-height: 1.08; color: var(--color-fg); text-wrap: balance; margin: 0 auto; }
+  .sub { font-family: var(--font-mono); font-weight: 500; color: rgba(224, 224, 228, 0.62); line-height: 1.45; text-wrap: balance; margin: 0 auto; }
+
+  .device {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    background: #050505;
+    box-shadow:
+      0 0 0 3px #2c2c2e,
+      0 0 0 6px #4a4a4c,
+      0 0 0 8px #1a1a1b,
+      0 40px 120px rgba(0, 0, 0, 0.7),
+      0 0 160px rgba(34, 197, 94, 0.10);
+  }
+  .screen { position: absolute; overflow: hidden; background: #000; }
+  .screen img { display: block; width: 100%; height: auto; }
+  .island { position: absolute; left: 50%; transform: translateX(-50%); background: #000; border-radius: 999px; }
+</style>
+</head>
+<body>
+<div class="canvas" id="canvas">
+  <div class="map" id="map"></div>
+  <canvas class="rain" id="rain"></canvas>
+  <div class="copy" id="copy">
+    <div class="brand" id="brand"><img src="assets/pane-icon.png" alt=""><span>Pane</span></div>
+    <div class="eyebrow" id="eyebrow"></div>
+    <h1 id="headline"></h1>
+    <p class="sub" id="sub"></p>
+  </div>
+  <div class="device" id="device">
+    <div class="screen" id="screen"><img id="capture" alt=""></div>
+    <div class="island" id="island"></div>
+  </div>
+</div>
+<script>
+// Layout per device, in output pixels. The phone bleeds off the bottom edge.
+const LAYOUTS = {
+  iphone: {
+    width: 1320, height: 2868,
+    copyTop: 170, brand: 58, eyebrow: 34, eyebrowGap: 70, headline: 116, headlineWidth: 1120, sub: 40, subGap: 40, subWidth: 1060,
+    deviceTop: 930, screenWidth: 1040, bezel: 26, screenRadius: 140,
+    island: { width: 290, height: 84, top: 26 },
+    map: { top: 60, width: 1500 },
+  },
+};
+
+// Deterministic PRNG so every render of a shot draws the same rain.
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Static frame of the landing page's margin rain (hero-matrix.tsx): the same
+// characters, words and green, in columns down both edges.
+function drawRain(canvas, layout, seed) {
+  const RAIN_CHARS = ["|", "/", "-", "\\", ":", ";", ".", "'", "`", ",", "^", "~"];
+  const WORDS = ["PANE", "RUN", "SHIP", "CODE", "FAST", "FORK", "PUSH", "DIFF"];
+  const scale = layout.width / 440;
+  const size = Math.round(14 * scale * 0.62);
+  const colWidth = Math.round(16 * scale * 0.62);
+  canvas.width = layout.width; canvas.height = layout.height;
+  const ctx = canvas.getContext("2d");
+  ctx.font = `${size}px "Geist Mono", monospace`;
+  ctx.textAlign = "center";
+  const rand = mulberry32(seed);
+  const margin = Math.round(layout.width * 0.12);
+  for (const side of ["left", "right"]) {
+    const cols = Math.floor(margin / colWidth);
+    for (let c = 0; c < cols; c++) {
+      const x = side === "left" ? c * colWidth + colWidth / 2 : layout.width - (c * colWidth + colWidth / 2);
+      // Fade the rain toward the center so it never touches the copy.
+      const edgeFade = 1 - c / cols;
+      let y = -rand() * layout.height * 0.3;
+      while (y < layout.height) {
+        const length = 4 + Math.floor(rand() * 12);
+        const opacity = (0.06 + rand() * 0.14) * edgeFade;
+        for (let i = 0; i < length; i++) {
+          const head = i === length - 1;
+          const alpha = head ? Math.min(0.4, opacity + 0.08) : Math.min(0.3, opacity * (i / length));
+          ctx.fillStyle = `rgba(34, 197, 94, ${alpha})`;
+          ctx.fillText(RAIN_CHARS[Math.floor(rand() * RAIN_CHARS.length)], x, y + i * size * 1.15);
+        }
+        y += length * size * 1.15 + rand() * layout.height * 0.35;
+      }
+    }
+    const word = WORDS[Math.floor(rand() * WORDS.length)];
+    ctx.fillStyle = "rgba(34, 197, 94, 0.22)";
+    const wx = side === "left" ? margin * 0.45 : layout.width - margin * 0.45;
+    const wy = layout.height * (0.55 + rand() * 0.3);
+    [...word].forEach((ch, i) => ctx.fillText(ch, wx, wy + i * size * 1.15));
+  }
+}
+
+window.renderShot = async function (shot, device, index) {
+  const L = LAYOUTS[device];
+  const $ = (id) => document.getElementById(id);
+
+  const copy = $("copy");
+  copy.style.top = `${L.copyTop}px`;
+  const brand = $("brand");
+  brand.style.fontSize = `${L.brand}px`;
+  brand.querySelector("img").style.width = brand.querySelector("img").style.height = `${Math.round(L.brand * 1.1)}px`;
+  brand.style.marginBottom = `${L.eyebrowGap}px`;
+  const eyebrow = $("eyebrow");
+  eyebrow.textContent = shot.eyebrow;
+  eyebrow.style.fontSize = `${L.eyebrow}px`;
+  eyebrow.style.marginBottom = `${Math.round(L.eyebrow * 0.9)}px`;
+  const h1 = $("headline");
+  h1.innerHTML = shot.headline;
+  h1.style.fontSize = `${L.headline}px`;
+  h1.style.maxWidth = `${L.headlineWidth}px`;
+  const sub = $("sub");
+  sub.textContent = shot.subhead || "";
+  sub.style.fontSize = `${L.sub}px`;
+  sub.style.marginTop = `${L.subGap}px`;
+  sub.style.maxWidth = `${L.subWidth}px`;
+
+  const map = $("map");
+  map.style.top = `${L.map.top}px`;
+  map.style.width = `${L.map.width}px`;
+  map.style.height = `${Math.round(L.map.width * 458.627 / 784.077)}px`;
+
+  // "flip": the phone bleeds off the top and the copy sits at the bottom,
+  // for screens whose key control is at the bottom.
+  if (shot.flip) {
+    copy.style.top = "auto";
+    copy.style.bottom = `${L.copyTop}px`;
+    brand.style.display = "none";
+  }
+
+  const img = $("capture");
+  img.src = `captures/${device}/${shot.capture}`;
+  await img.decode();
+  const screenHeight = Math.round(L.screenWidth * img.naturalHeight / img.naturalWidth);
+  const deviceEl = $("device");
+  deviceEl.style.top = shot.flip
+    ? `${L.height - L.deviceTop - (screenHeight + L.bezel * 2) + L.copyTop}px`
+    : `${L.deviceTop}px`;
+  deviceEl.style.width = `${L.screenWidth + L.bezel * 2}px`;
+  deviceEl.style.height = `${screenHeight + L.bezel * 2}px`;
+  deviceEl.style.borderRadius = `${L.screenRadius + L.bezel}px`;
+  const screen = $("screen");
+  Object.assign(screen.style, {
+    left: `${L.bezel}px`, top: `${L.bezel}px`, width: `${L.screenWidth}px`, height: `${screenHeight}px`,
+    borderRadius: `${L.screenRadius}px`,
+  });
+  Object.assign($("island").style, {
+    width: `${L.island.width}px`, height: `${L.island.height}px`, top: `${L.bezel + L.island.top}px`,
+  });
+
+  // Wait for the map background and logo too, or a fast screenshot can miss them.
+  const mapImage = new Image();
+  mapImage.src = "assets/world-map.svg";
+  await Promise.all([document.fonts.ready, mapImage.decode(), brand.querySelector("img").decode()]);
+  drawRain($("rain"), L, 7919 * (index + 1));
+};
+</script>
+</body>
+</html>

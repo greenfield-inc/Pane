@@ -1,0 +1,1 @@
+First release. Pair with Pane on your computer by scanning a code, get a push when an agent needs you, and answer from a live terminal on your phone. You can dictate prompts by voice.

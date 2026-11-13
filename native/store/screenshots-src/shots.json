@@ -1,0 +1,45 @@
+[
+  {
+    "id": "01-terminal",
+    "eyebrow": "live terminal",
+    "headline": "Your agents,<br>in your pocket",
+    "subhead": "Watch any coding agent's terminal live. Type or dictate a reply.",
+    "capture": "01-terminal.png"
+  },
+  {
+    "id": "02-push",
+    "eyebrow": "notifications",
+    "headline": "Know the moment an agent needs you",
+    "subhead": "A push when an agent is blocked or done.",
+    "capture": "02-push.png"
+  },
+  {
+    "id": "03-approve",
+    "eyebrow": "approvals",
+    "headline": "Answer and unblock in one tap",
+    "subhead": "Allow or deny a command from anywhere.",
+    "capture": "03-approve.png",
+    "flip": true
+  },
+  {
+    "id": "04-panes",
+    "eyebrow": "every pane",
+    "headline": "All your panes, one tap away",
+    "subhead": "Light or dark, it follows your phone.",
+    "capture": "04-panes.png"
+  },
+  {
+    "id": "05-new-pane",
+    "eyebrow": "new pane",
+    "headline": "Start a new agent from anywhere",
+    "subhead": "Pane makes the worktree and branch for you.",
+    "capture": "05-new-pane.png"
+  },
+  {
+    "id": "06-pair",
+    "eyebrow": "pairing",
+    "headline": "Pairs in seconds",
+    "subhead": "Scan a code from Pane on your computer. No account, no cloud relay.",
+    "capture": "06-pair.png"
+  }
+]
