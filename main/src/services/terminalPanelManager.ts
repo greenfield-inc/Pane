@@ -2351,6 +2351,7 @@ export class TerminalPanelManager extends EventEmitter {
         // A visible panel's interval counts from its last send, so the first
         // chunk after a quiet interval (a typing echo, an agent's first word)
         // goes out at once and the rest of the burst is batched behind it.
+        // Half a synchronized frame waits: its end is sent at once above.
         const interval = terminal.isVisible
           ? (Date.now() < (terminal.interactiveOutputUntil ?? 0)
             ? OUTPUT_BATCH_INTERVAL_INTERACTIVE : OUTPUT_BATCH_INTERVAL)
@@ -2358,7 +2359,7 @@ export class TerminalPanelManager extends EventEmitter {
         const sinceFlush = terminal.isVisible
           ? performance.now() - (terminal.lastOutputFlushAt ?? -Infinity) : 0;
         const wait = interval - sinceFlush;
-        if (wait <= 0) {
+        if (wait <= 0 && !terminal.inSyncBlock) {
           this.flushOutputBuffer(terminal);
         } else {
           terminal.outputFlushTimer = setTimeout(() => {

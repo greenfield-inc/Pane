@@ -496,11 +496,16 @@ describe('TerminalPanelManager hidden output delivery', () => {
 
   it('sends a visible panel\'s synchronized frame as soon as it is complete', () => {
     const { terminal, emit, rendered } = outputHarness(true);
-    emit('\x1b]0;✳ Claude Code\x07');
+    emit('\x1b[?2026h\x1b[Hspinner');
+    expect(rendered()).toEqual([]);
+    emit('\x1b[?2026l\x1b]0;✳ Claude Code\x07');
     emit('\x1b[?2026h\x1b[Hfirst ');
     expect(rendered()).toHaveLength(1);
     emit('word\x1b[?2026l');
-    expect(rendered()).toEqual(['\x1b]0;✳ Claude Code\x07', '\x1b[?2026h\x1b[Hfirst word\x1b[?2026l']);
+    expect(rendered()).toEqual([
+      '\x1b[?2026h\x1b[Hspinner\x1b[?2026l\x1b]0;✳ Claude Code\x07',
+      '\x1b[?2026h\x1b[Hfirst word\x1b[?2026l',
+    ]);
     disposeFlowControlRecord(terminal.flowControl);
   });
 
