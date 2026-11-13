@@ -20,10 +20,12 @@ import {
  */
 const POLL_INTERVAL_MS = 6_000;
 /**
- * A server started by a terminal or agent is announced by output: its logs, or the agent's turn.
- * Reading the socket table costs about 55 ms of CPU on macOS, so it is read at a poll only after
- * new output, or while output came within this window (a server can bind after its last line), and
- * otherwise once a minute (PORTS_QUIET_INTERVAL_MS) while `watched`.
+ * A server started by a terminal or agent is announced by output: its logs, the agent's turn, or
+ * its terminal exiting. Reading the socket table costs about 55 ms of CPU on macOS, so it is read
+ * at a poll only after new output, or while output came within this window, since a server can
+ * bind after its last line. Reads continue one poll past it, so the last one comes at least this
+ * long after the output. A server that binds later is listed at the next output or when a list
+ * asks; with no output, ports are read once a minute (PORTS_QUIET_INTERVAL_MS) only while `watched`.
  */
 const ACTIVE_WINDOW_MS = 10_000;
 /** A socket read slower than this share of the interval stretches the interval, so polling stays cheap. */
@@ -68,7 +70,7 @@ export interface ListeningPortMonitor {
   refresh(): Promise<ListeningPortsSnapshot>;
   /** The list from the last read, without reading again. */
   snapshot(): ListeningPortsSnapshot;
-  /** Refreshes at the next 6 s poll after terminal or agent output, else every minute while watched, and less often when a read is slow, until `stop`. */
+  /** Refreshes at 6 s polls while terminals or agents print and just after, else every minute while watched, and less often when a read is slow, until `stop`. */
   start(): void;
   stop(): void;
 }
@@ -174,7 +176,7 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
   const due = () => {
     const now = Date.now();
     const outputAt = options.lastOutputAt?.() ?? now;
-    if (outputAt >= lastReadAt || now - outputAt < ACTIVE_WINDOW_MS) return true;
+    if (outputAt >= lastReadAt || now - outputAt < ACTIVE_WINDOW_MS + POLL_INTERVAL_MS) return true;
     return now - lastReadAt >= PORTS_QUIET_INTERVAL_MS && (options.watched?.() ?? true);
   };
 

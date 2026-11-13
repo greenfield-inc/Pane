@@ -258,6 +258,30 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
     }
   });
 
+  it('finds a server that binds just after the output window closes, with nobody watching, then stops reading', async () => {
+    // A terminal printed its last line a moment before the first read.
+    const printedAt = Date.now() - 1_000;
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], lastOutputAt: () => printedAt, watched: () => false });
+    const listed = (port: number) => monitor.snapshot().ports.some(entry => entry.port === port);
+    monitor.start();
+    try {
+      await monitor.refresh();
+      // Binds just after the 10 s window: one more poll still reads.
+      const early = await startListener(HTTP_SERVER);
+      vi.setSystemTime(printedAt + 11_000);
+      await vi.waitFor(() => expect(listed(early.port)).toBe(true), { timeout: 10_000, interval: 200 });
+
+      // Later, nothing reads until output or someone watching.
+      const idle = await startListener(HTTP_SERVER);
+      vi.setSystemTime(printedAt + 5 * 60_000);
+      await new Promise(resolve => setTimeout(resolve, 8_000));
+      expect(listed(idle.port)).toBe(false);
+    } finally {
+      monitor.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it('while every terminal is quiet, finds a port opened elsewhere a minute after the last read only while watched', async () => {
     let watched = false;
     const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], lastOutputAt: () => 0, watched: () => watched });
