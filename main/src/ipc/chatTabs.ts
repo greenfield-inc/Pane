@@ -10,7 +10,7 @@ import { PaneError } from '../../../shared/paneError';
 import { getRuntimeConfigManager } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { configureChatTabs, getChatAgentCatalog, getChatTabManager } from '../services/chatTabs';
-import { getAgentRegistry } from '../services/agentRegistry';
+import { chatAgentName, getAgentRegistry } from '../services/agentRegistry';
 import { chatTabSecrets } from '../services/chatTabs/secrets';
 import { AgentFarmProfiles, printedCli } from '../services/chatTabs/agentFarm';
 import { chatTabEnv } from '../services/chatTabs/launch';
@@ -155,11 +155,6 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
   for (const operation of CHAT_TAB_CHANNELS) registry.bindChannel(ipcMain, `chat-tab:${operation}`);
 }
 
-/** An agent's name as the catalog has it: an installed registry agent's own name, not its id. */
-function chatAgentName(agent: ChatAgent): string {
-  return getChatAgentCatalog().entries().find(entry => entry.id === agent)?.label ?? agentLabel(agent);
-}
-
 /**
  * The terminal command that signs an agent in: its advertised terminal sign-in (ACP terminal
  * auth method) when it runs as its own CLI, otherwise its config's `signIn` arguments. The
@@ -195,8 +190,9 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   }
   if (!agent) throw new PaneError('CHAT_AGENT_REQUIRED', 'No agent was named for the chat tab, so none was created.', `Choose an agent (${configuredChatAgentIds().join(', ')}), or name an Agent Farm profile.`);
   // Refused here, before a tab exists, naming the agents this host can open as chats.
-  if (launch.kind === 'agent' && !agentConfig(agent)?.chat) {
-    throw new PaneError('CHAT_AGENT_UNKNOWN', `This computer cannot open "${agent}" as a chat tab. No tab was created.`, `Pick one of the agents it can run: ${configuredChatAgentIds().join(', ')}.`);
+  if (launch.kind === 'agent' && !agentConfig(agent)?.chat && !getAgentRegistry().installedRecord(agent)) {
+    const runnable = [...configuredChatAgentIds(), ...getAgentRegistry().installed().map(record => record.id)];
+    throw new PaneError('CHAT_AGENT_UNKNOWN', `This computer cannot open "${agent}" as a chat tab. No tab was created.`, `Pick one of the agents it can run: ${runnable.join(', ')}.`);
   }
   // A profile runs through Pane's bundled adapter for the agent it names (review F-7).
   if (launch.kind === 'profile' && request.agent && !agentConfig(request.agent)?.chat?.adapter) {

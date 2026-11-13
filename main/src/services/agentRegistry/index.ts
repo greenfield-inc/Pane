@@ -1,5 +1,5 @@
 import path from 'path';
-import { AGENT_REGISTRY_URL, CONFIGURED_AGENT_IDS, configuredAgent } from '../../../../shared/agents';
+import { AGENT_REGISTRY_URL, CONFIGURED_AGENT_IDS, agentConfig, configuredAgent } from '../../../../shared/agents';
 import type { ChatAgentEntry } from '../../../../shared/types/chatTab';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { findExecutableInPath } from '../../utils/shellPath';
@@ -26,4 +26,9 @@ export function registryCatalogEntries(): ChatAgentEntry[] {
     if (record.description) entry.description = record.description;
     return entry;
   });
+}
+
+/** An agent's name: its config label, an installed registry agent's own name, or its id. */
+export function chatAgentName(agent: string): string {
+  return agentConfig(agent)?.label ?? getAgentRegistry().installedRecord(agent)?.name ?? agent;
 }
