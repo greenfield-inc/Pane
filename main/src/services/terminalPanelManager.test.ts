@@ -448,8 +448,8 @@ describe('TerminalPanelManager hidden output delivery', () => {
     vi.useRealTimers();
   });
 
-  it.each([true, false])('bounds interactive output scheduling with visibility=%s', (visible) => {
-    vi.useFakeTimers();
+  function outputHarness(visible: boolean) {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
     const send = vi.fn();
     const daemonSend = vi.fn();
     setPaneRuntime({
@@ -465,25 +465,44 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
     manager.terminals.set(terminal.panelId, terminal);
     manager.setupTerminalHandlers(terminal);
-    const sink = visible ? send : daemonSend;
-    const outputs = () => sink.mock.calls.filter(call => call[0] === 'terminal:output');
-    emit('before input');
-    vi.advanceTimersByTime(4);
-    manager.writeToTerminal(terminal.panelId, 'x');
-    expect(outputs()).toHaveLength(visible ? 1 : 0);
-    emit('after input');
-    vi.advanceTimersByTime(7);
-    expect(outputs()).toHaveLength(visible ? 1 : 0);
+    const sent = (sink: ReturnType<typeof vi.fn>) => sink.mock.calls
+      .flatMap(([channel, payload]) => channel === 'terminal:output' ? [payload.output] : []);
+    return { manager, terminal, emit: (data: string) => emit(data), rendered: () => sent(send), daemon: () => sent(daemonSend) };
+  }
+
+  it('sends a visible panel\'s first output at once and batches what follows', () => {
+    const { manager, terminal, emit, rendered } = outputHarness(true);
+    emit('first word');
+    expect(rendered()).toEqual(['first word']);
+    emit('rest of the redraw');
+    vi.advanceTimersByTime(31);
+    expect(rendered()).toHaveLength(1);
     vi.advanceTimersByTime(1);
-    expect(outputs()).toHaveLength(visible ? 2 : 0);
+    expect(rendered()).toEqual(['first word', 'rest of the redraw']);
+
     vi.advanceTimersByTime(250);
-    expect(outputs()).toHaveLength(visible ? 2 : 1);
-    emit('bulk output');
-    vi.advanceTimersByTime(8);
-    expect(outputs()).toHaveLength(visible ? 2 : 1);
-    vi.advanceTimersByTime(visible ? 24 : 242);
-    expect(outputs()).toHaveLength(visible ? 3 : 2);
-    if (!visible) expect(send).not.toHaveBeenCalledWith('terminal:output', expect.anything());
+    emit('streaming');
+    emit('pending');
+    expect(rendered()).toEqual(['first word', 'rest of the redraw', 'streaming']);
+    manager.writeToTerminal(terminal.panelId, 'x');
+    expect(rendered().at(-1)).toBe('pending');
+    emit('echo');
+    vi.advanceTimersByTime(7);
+    expect(rendered()).toHaveLength(4);
+    vi.advanceTimersByTime(1);
+    expect(rendered().at(-1)).toBe('echo');
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('keeps a hidden panel on its slow cadence, off the renderer', () => {
+    const { manager, terminal, emit, rendered, daemon } = outputHarness(false);
+    emit('background');
+    manager.writeToTerminal(terminal.panelId, 'x');
+    vi.advanceTimersByTime(249);
+    expect(daemon()).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(daemon()).toEqual(['background']);
+    expect(rendered()).toEqual([]);
     disposeFlowControlRecord(terminal.flowControl);
   });
 

@@ -334,6 +334,8 @@ interface TerminalProcess {
   /** Basename of the shell Pane spawned, to tell its prompt from a program running in it. */
   shellProcessName?: string;
   interactiveOutputUntil?: number;
+  /** `performance.now()` of the last batch sent to the renderer; a visible panel's batch interval counts from it. */
+  lastOutputFlushAt?: number;
   /** Foreground-process and screen evidence gathered while `agentType` is unresolved. */
   agentProbe?: AgentProbe;
   /** The agent showed its own working signal since it last went idle. */
@@ -1325,6 +1327,7 @@ export class TerminalPanelManager extends EventEmitter {
 
     // Send batched output to the renderer and daemon subscribers. This is the
     // only byte path for every PTY, ptyHost or not.
+    terminal.lastOutputFlushAt = performance.now();
     this.sendRendererEvent('terminal:output', {
       sessionId: terminal.sessionId,
       panelId: terminal.panelId,
@@ -2341,13 +2344,23 @@ export class TerminalPanelManager extends EventEmitter {
       } else if (!terminal.outputFlushTimer) {
         // Hidden panels keep their slower cadence. Visible panels briefly use
         // a tighter window after input, then return to bulk-output batching.
+        // A visible panel's interval counts from its last send, so the first
+        // chunk after a quiet interval (a typing echo, an agent's first word)
+        // goes out at once and the rest of the burst is batched behind it.
         const interval = terminal.isVisible
           ? (Date.now() < (terminal.interactiveOutputUntil ?? 0)
             ? OUTPUT_BATCH_INTERVAL_INTERACTIVE : OUTPUT_BATCH_INTERVAL)
           : OUTPUT_BATCH_INTERVAL_HIDDEN;
-        terminal.outputFlushTimer = setTimeout(() => {
+        const sinceFlush = terminal.isVisible
+          ? performance.now() - (terminal.lastOutputFlushAt ?? -Infinity) : 0;
+        const wait = interval - sinceFlush;
+        if (wait <= 0) {
           this.flushOutputBuffer(terminal);
-        }, interval);
+        } else {
+          terminal.outputFlushTimer = setTimeout(() => {
+            this.flushOutputBuffer(terminal);
+          }, wait);
+        }
       }
     });
     
