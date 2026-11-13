@@ -430,6 +430,15 @@ body.understory {
   scrollbar-width: none;
 }
 
+/* Autopilot's chat header (AutopilotView.tsx): its text labels show only when the header itself
+   has room for them; below that the icons stand alone. 32rem is the widest the header's content
+   gets with every label on (Running, with Pause). */
+.autopilot-header { container: autopilot-header / inline-size; }
+.autopilot-header-label { display: none; }
+@container autopilot-header (min-width: 32rem) {
+  .autopilot-header-label { display: inline; }
+}
+
 /* A horizontal strip with a hidden scrollbar: its trailing edge fades, so an item cut by the
    edge reads as "more to scroll". */
 .scroll-fade-x {

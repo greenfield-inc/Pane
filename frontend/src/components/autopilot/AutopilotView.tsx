@@ -65,7 +65,8 @@ function WalkBar({ snapshot }: { snapshot: AutopilotSnapshot }) {
         <span className={cn('h-2 w-2 rounded-full', sentinelOn ? 'bg-autopilot' : snapshot.state === 'running' ? 'bg-status-success' : snapshot.state === 'paused' ? 'bg-status-warning' : 'bg-status-neutral')} />
       </span>
       <span className={cn('min-w-0 truncate font-medium', sentinelOn ? 'text-autopilot-on-tint' : 'text-text-primary')} data-testid="autopilot-walk-status">{status}</span>
-      <div className="scrollbar-thin scroll-fade-x flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
+      {/* With chips to show, they get at least half the bar, so a long status truncates instead of hiding them. */}
+      <div className={cn('scrollbar-thin scroll-fade-x flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto', sessions.length > 0 && 'basis-1/2')}>
         {sessions.map((session) => (
           <span key={session.id} data-testid="autopilot-walk-session" title={session.name}
             className={cn('inline-flex min-w-16 max-w-1/2 items-center gap-1 rounded-full px-2 py-px', session.id === snapshot.walk.sessionId ? 'bg-autopilot-subtle text-autopilot-on-tint' : 'bg-surface-tertiary text-text-secondary')}>
@@ -155,7 +156,7 @@ function SentinelToggle({ snapshot, pending }: { snapshot: AutopilotSnapshot; pe
       className={cn('inline-flex h-8 shrink-0 items-center gap-2 rounded-full border px-2.5 text-[12.5px] font-medium disabled:opacity-50',
         snapshot.sentinel ? 'border-autopilot-border bg-autopilot-subtle text-autopilot-on-tint' : 'border-border-secondary text-text-secondary hover:bg-surface-hover')}>
       <Shield className="h-3.5 w-3.5" aria-hidden="true" />
-      <span className="hidden min-[1440px]:inline">Sentinel</span>
+      <span className="autopilot-header-label">Sentinel</span>
       {/* Fixed-size track: the knob moves, nothing around it does. */}
       <span className={cn('relative h-4 w-7 shrink-0 rounded-full transition-colors', snapshot.sentinel ? 'bg-autopilot' : 'bg-surface-tertiary')} aria-hidden="true">
         <span className={cn('absolute left-0 top-0.5 h-3 w-3 rounded-full bg-surface-primary shadow transition-transform', snapshot.sentinel ? 'translate-x-3.5' : 'translate-x-0.5')} />
@@ -215,27 +216,28 @@ function RunMenu({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: 
 }
 
 /**
- * Fits at any width: the controls the person uses most stay; the rest are in the menu. It never
+ * Fits at any width: the controls the person uses most stay; the rest are in the menu. Labels
+ * follow the header's own width, not the window's, since the person can narrow the chat. It never
  * clips its overflow, so the ⋯ menu can hang below it.
  */
 function Header({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: boolean }) {
   return (
-    <header className="flex h-view-header shrink-0 items-center gap-2.5 border-b border-border-primary px-4">
+    <header className="autopilot-header flex h-view-header shrink-0 items-center gap-2.5 border-b border-border-primary px-4">
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-autopilot-subtle"><Navigation className="h-4 w-4 text-autopilot" aria-hidden="true" /></span>
       <h1 className="shrink-0 text-[15px] font-semibold text-text-primary">Autopilot</h1>
-      <span className="hidden shrink-0 rounded px-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-autopilot-on-tint ring-1 ring-autopilot-border min-[1440px]:inline">Experimental</span>
+      <span className="autopilot-header-label shrink-0 rounded px-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-autopilot-on-tint ring-1 ring-autopilot-border">Experimental</span>
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <SentinelToggle snapshot={snapshot} pending={pending} />
         {snapshot.state === 'running' && (
           <button type="button" disabled={pending} onClick={() => void runAutopilot('pause')} data-testid="autopilot-pause" aria-label="Pause" title="Pause: bring nothing new until Go on"
             className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border-secondary px-2 text-[12.5px] text-text-secondary hover:bg-surface-hover disabled:opacity-50">
-            <Pause className="h-3.5 w-3.5" aria-hidden="true" /><span className="hidden min-[1440px]:inline">Pause</span>
+            <Pause className="h-3.5 w-3.5" aria-hidden="true" /><span className="autopilot-header-label">Pause</span>
           </button>
         )}
         {snapshot.state === 'paused' && (
           <button type="button" disabled={pending} onClick={() => void runAutopilot('goOn')} data-testid="autopilot-go-on" aria-label="Go on" title="Go on"
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-interactive px-2 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50">
-            <Play className="h-3.5 w-3.5" aria-hidden="true" /><span className="hidden min-[1440px]:inline">Go on</span>
+            <Play className="h-3.5 w-3.5" aria-hidden="true" /><span className="autopilot-header-label">Go on</span>
           </button>
         )}
         <RunMenu snapshot={snapshot} pending={pending} />
