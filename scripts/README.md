@@ -2,6 +2,59 @@
 
 This directory contains build and maintenance scripts for the Pane application.
 
+## agent-instructions-eval/
+
+Runs real Claude Code sessions under two versions of what Pane tells agents
+(the Notify block Pane writes into `~/.claude/CLAUDE.md`, the `pane` MCP
+server's instructions and tool descriptions, and the `pane` skill) and checks
+that the newer one makes agents behave at least as well. Use it before merging
+a change to any of those texts.
+
+```bash
+git fetch origin main
+pnpm eval:agent-instructions                     # origin/main vs your working tree, 5 runs each
+pnpm eval:agent-instructions --only rerun-is-a-tab,session-for-multipart-work --runs 3
+```
+
+Options: `--base <ref>` (default `origin/main`), `--head <ref>` (default your
+working tree, uncommitted changes included), `--runs` (default 5),
+`--concurrency` (default 3), `--only <scenario ids>`, `--model`, `--out <dir>`.
+`--regrade <run root>` grades the sessions an earlier run saved (the folder it
+prints last) with the current scenarios, at no cost.
+
+Each session gets its own HOME holding what Pane installs for that version
+(the Notify block, the `pane` skill, the MCP server), its own `PANE_DIR` with
+that version's Pane Chat skills (which `runpane docs` reads), its own git
+repository and Pane role (`PANE_SESSION_ID`, `PANE_SESSION_DIR`,
+`PANE_ORCHESTRATION_SESSION_ID`), all in a temporary folder. The repository's
+managed `AGENTS.md` block is not written.
+It logs in with `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` when set, and
+otherwise, on macOS, through your existing Claude Code login in the keychain.
+A session whose tool calls name an absolute path in your real `~/.claude`,
+`~/.pane` or keychain folder, the versions' bundles, or another session's
+folder is void and runs again, up to 3 attempts; the report gives the void
+rate. Relative paths that climb out of the run folder are not detected.
+
+A stub stands in for Pane on both the CLI and the MCP server. It logs every
+call; answers with the scenario's script or, for anything unscripted, a
+minimal valid example of the command's result; and passes `--help`,
+`agent-context` and `docs` to the version under test, so no card, Pane or
+secret is touched. Before the first session, every scripted answer is checked
+against the MCP tool's output schema, and a script key that names no runpane
+command fails the run. `runpane doctor` prints the version's own report with
+Pane's daemon shown as running, since the `pane` skill tells agents to stop
+when doctor fails. Scenarios grade only what the agent did:
+its `runpane` and `pane` MCP calls, Bash commands and written files.
+`scenarios.mjs` lists them. The run fails (exit 1) when the head passes any
+scenario fewer times than the base. Results go to
+`tmp/agent-instructions-eval/<time>/results.md`; the run folders with each
+transcript and call log stay in the temporary folder.
+
+Cost: each session is one real Claude Code task, about $0.25 to $0.45 and 20
+seconds to 2.5 minutes. The full set (15 scenarios, 2 versions, 5 runs) is 150
+sessions: about $50 and 25 minutes at concurrency 3. Use `--only` and `--runs`
+to check one change for less.
+
 ## benchmark-cold-start.mjs
 
 Launches the built app repeatedly and reports p50/p75 of wall time from spawn

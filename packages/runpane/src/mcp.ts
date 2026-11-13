@@ -21,41 +21,20 @@ const DEFAULT_TOOLSETS = ['core'];
 const SERVER_V8_FLAGS = '--optimize-for-size';
 const DOCS_URI_PREFIX = 'runpane-docs:';
 
+// Every request an agent makes carries these, so they hold only what it needs before it picks a
+// tool; each tool's description, read when the agent loads it, says the rest.
 const INSTRUCTIONS = [
   RUNPANE_CONTRACT.agentContext.brief.summary,
-  'Each tool runs the matching `runpane` command against the running Pane app and returns the same JSON as `runpane <command> --json`.',
-  'How the tools fit together:',
-  '- 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. A new Pane creates a worktree that installs and builds, so create one only when the work\'s branch has no Pane yet. For any later agent on existing work, call `panels_create` with `pane: <id>` (or `agents_start` with `pane: <id>`), never a new Pane.',
-  '- For the common jobs, prefer the composite tools: `agents_start` starts an agent on a task (in a new Pane for new work, or as a tab in an existing Pane with `pane: <id>`) and returns its pane and panel ids and a pane:// link; `agents_status` checks on it; `agents_send` sends it a follow-up message.',
-  '- `agents_send` types text, queues with Tab while Codex is working, and submits with Enter when ready. To answer a menu or prompt in an agent\'s terminal, send exact keys with `panels_input` (Down arrow \\u001b[B, Enter \\r, Escape \\u001b) and check the screen with `agents_status` afterwards. Ask the user before answering trust or permission prompts.',
-  '- Discover before you change anything. Repo selectors come from `repos_list` (or `active`); pane ids come from `panes_list`, `workspace_state`, or `agents_start`; panel ids from `agents_start` or `panels_list`.',
-  '- Tools with a `yes` input change state. Pass `yes: true` only when the user asked for that change, or your Pane instructions authorize it without asking (for example a Session orchestrator keeping its Session tidy); without it the call is refused and nothing happens.',
-  '- `panes_archive` removes a Pane\'s worktree; `panes_restore` undoes it. `panes_adopt` makes a Pane for a git worktree that already exists, without changing it; `panes_rename` renames a Pane. `links_create` returns a pane:// link the user can click to see any Pane, panel, repo, or Session.',
-  '- To show the user a page, plan, report, file, or local dev server, open it as a tab beside the agent with `panels_open` instead of the system browser.',
-  '- A Session groups the Panes of one larger piece of work: `sessions_create` makes one, `sessions_associate` adds a Pane to it, and `sessions_pin` pins it in the sidebar.',
-  '- To run work on another machine in the user\'s tailnet, find it with `workspace_list`, then `workspace_exec` runs a command in its shell (its own `runpane` is first on PATH, so `runpane agents start ...` there starts an agent in that machine\'s Pane). `workspace_write` stages a file there (a prompt file, say) and `workspace_read` reads one back; both take any path form.',
-  '- `loops_create` schedules an agent or command to run on a cron schedule; `loops_list` shows each loop\'s next run and recent runs.',
-  '- Before guessing how Pane works, call `docs_search`, then `docs_read` on a path it returns. The same docs are available as `runpane-docs:` resources.',
-  '- Tools have no stdin: send exact terminal bytes (newlines, Ctrl-C as \\u0003) as text instead of a file.',
-  '- When you need the person (a choice, an approval, a short answer), call `notify` instead of asking in the terminal.',
-  '',
-  notifyGuidance(),
+  'Each tool runs the matching `runpane` command against the running Pane app and returns its `--json` output.',
+  '- A Session (`sessions_create`) holds a workstream: several features or agents orchestrated together. It is the default home for multi-part work.',
+  '- 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. A new Pane creates a worktree that installs and builds, so create one only when the work\'s branch has none; add later agents with `agents_start` or `panels_create` and `pane: <id>`.',
+  '- Prefer the composite tools: `agents_start` starts an agent on a task, `agents_status` checks on it, `agents_send` sends it a follow-up. To answer a menu or prompt in an agent\'s terminal, send named keys with `panels_input` `keys` (for example `down,enter`), then check `agents_status`. Ask the user before answering trust or permission prompts.',
+  '- Discover before you change anything: ids come from `repos_list`, `panes_list`, `workspace_state` and `agents_start`.',
+  '- Pass `yes: true` to a tool that changes state only when the user asked for that change or your Pane instructions authorize it; without it the call is refused and nothing happens.',
+  '- Show the user a page, report, file or local dev server with `panels_open`, as a tab beside the agent, not the system browser.',
+  '- Before guessing how Pane works, call `docs_search`, then `docs_read`.',
+  '- When you need the person (a choice, an approval, a short answer), call `notify` instead of asking in the terminal; its description says how to write the card.',
 ].join('\n');
-
-/** When and how to write a notify card; Pane writes the same rules into the agents' user-level instruction files. */
-function notifyGuidance(): string {
-  const { rules, cardRule, results, examples } = RUNPANE_CONTRACT.agentContext.notifyGuidance;
-  const card = ({ title, context, choices }: { title: string; context: string; choices?: readonly string[] }) =>
-    `title "${title}" / context "${context}"${choices ? ` / choices ${choices.map((choice) => `"${choice}"`).join(', ')}` : ''}`;
-  return [
-    'Writing a notify card:',
-    ...rules.map((rule) => `- ${rule}`),
-    `- ${results}`,
-    cardRule,
-    ...examples.map(({ name, ui, bad, good }) =>
-      `${name} (ui ${ui}). ${bad.map((example) => `Bad: ${card(example)}`).join(' ')} Good: ${card(good)}`),
-  ].join('\n');
-}
 
 // The lists only change with a new runpane version, which restarts this server.
 const LIST_CACHE = { ttlMs: 3_600_000, cacheScope: 'public' } as const;

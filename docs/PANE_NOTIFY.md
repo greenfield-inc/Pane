@@ -602,15 +602,18 @@ on by default. It has two parts:
   default data folder's, so a dev build with its own `PANE_DIR` never points
   your agents at its copy.
 - **Pane Notify:** call the `pane` MCP's `notify`, or `runpane notify` when
-  that tool isn't loaded (for example under Agent Farm's strict MCP mode).
-  It says who asks (in a Session, a worker reports blocked instead of calling
-  `notify` and gets the answer in its tab, and the orchestrator posts in the
-  background; any other agent calls `notify`), when to ask (only what the
-  agent can't find out itself, related questions in one card, `info` rarely)
-  and how to write a card for someone who has lost the thread: what the work
-  is for, what just happened, and what is needed. It also says how to read a
-  typed reply: `--took` it as an answer or a question, and answer a question
-  with `--update`, never a second approval.
+  that tool isn't loaded (for example under Agent Farm's strict MCP mode). It
+  says which card to use (Claude's own card only for a quick question in the
+  chat the person is typing in), who asks (in a Session, a worker reports
+  blocked instead of calling `notify` and gets the answer in its tab), and to
+  ask for a secret with `secrets_request`.
+
+How to write a card (only what the agent can't find out itself, related
+questions in one card, `info` rarely, written for someone who has lost the
+thread, with good and bad examples) and how to read a typed reply live in the
+`notify` command's notes. Pane prints them in the `notify` tool's description
+and in `runpane notify --help`, so agents read them when they ask, not in every
+request.
 
 Pane writes only those lines, plus a line
 break before them when the file didn't end with one; the rest of the file keeps
@@ -623,8 +626,10 @@ file's state.
 To remove the block, turn Approvals off in Settings → Approvals. Pane writes it
 again when you turn Approvals back on, or at the next launch with Approvals on.
 
-The `pane` MCP server's instructions carry the same rules, plus good and bad
-example cards; that is how Cursor learns them.
+The `pane` MCP server's instructions say only to call `notify` instead of asking
+in the terminal. Cursor, which gets no user-level block, learns the rest from
+the `notify` tool's description and the repository's managed `AGENTS.md` block,
+which also carries the secrets rule.
 
 ## Linking a call to its Pane
 

@@ -2,6 +2,15 @@ import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './bou
 import { RUNPANE_CONTRACT } from './generated/contract';
 
 /**
+ * Claude Code cuts a server's instructions, and a tool description it loads up front (tool search
+ * off), after this many characters. @public scripts/test-runpane-mcp.js checks served text against it.
+ */
+export const CLAUDE_CODE_MCP_TEXT_LIMIT = 4096;
+
+/** Claude Code cuts a tool description it loads through tool search (its default) after this many characters. @public */
+export const CLAUDE_CODE_TOOL_SEARCH_DESCRIPTION_LIMIT = 16384;
+
+/**
  * The slice of the runpane contract that MCP tools are generated from. Every
  * command with result `jsonSchemas` becomes a tool; its inputs are the union of
  * the flags in its `usage` lines and its `agentContext` arguments, plus
@@ -202,12 +211,7 @@ function buildTool(
     words,
     confirmsInServer,
     toolsets: command.toolsets ?? [],
-    description: [
-      command.summary,
-      context?.details,
-      ...(context?.notes ?? []),
-      `Returns the JSON of \`runpane ${command.name} --json\`.`,
-    ].filter(Boolean).join('\n'),
+    description: describe(command.name, command.summary, context?.details, context?.notes ?? []),
     parameters,
     inputSchema,
     outputSchema: buildOutputSchema(command.jsonSchemas ?? [], schemas),
@@ -220,6 +224,19 @@ function buildTool(
       openWorldHint: command.openWorld === true,
     },
   };
+}
+
+/**
+ * The tool description: summary, details and notes. When it runs past what Claude Code shows with tool
+ * search off, a pointer to the full reference goes before the notes, so a cut keeps the pointer and every
+ * other reader keeps the notes. The pointer is plain text, so it names the shell command in every toolset.
+ */
+function describe(name: string, summary: string, details: string | undefined, notes: readonly string[]): string {
+  const returns = `Returns the JSON of \`runpane ${name} --json\`.`;
+  const full = [summary, details, ...notes, returns].filter(Boolean).join('\n');
+  if (full.length <= CLAUDE_CODE_MCP_TEXT_LIMIT) return full;
+  const pointer = `Notes follow. If they end in "[truncated]" or you cannot see them, read them before your first call: run runpane agent-context --command "${name}" in a shell.`;
+  return [summary, details, pointer, ...notes, returns].filter(Boolean).join('\n');
 }
 
 /**

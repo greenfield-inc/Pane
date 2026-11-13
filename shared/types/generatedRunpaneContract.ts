@@ -17463,7 +17463,7 @@ export const RUNPANE_CONTRACT = {
   "agentContext": {
     "brief": {
       "title": "Pane agent context",
-      "summary": "Pane lets a developer manage saved base repositories, user-visible Panes (Pane sessions) for feature/PR work, and terminal-backed panel tabs. A Pane is a visible workspace that normally maps to one Pane-managed git worktree and branch; a panel is a terminal tab inside one Pane and shares that Pane's worktree; an agent is a CLI process running inside a panel.",
+      "summary": "Pane runs coding agents in parallel git worktrees. A Pane is a visible workspace for one feature or PR, with its own Pane-managed git worktree and branch; a panel is a terminal tab in a Pane and shares its worktree; an agent is a CLI process running in a panel.",
       "rules": [
         "Start with `runpane doctor --json` to understand wrapper, platform, daemon reachability, and the next safe commands before mutating Pane state.",
         "In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`.",
@@ -23418,7 +23418,9 @@ export const RUNPANE_CONTRACT = {
           "notifyResult"
         ],
         "notes": [
-          "Write the card the way the pane MCP server's instructions say: in plain words, what the work is for, what just happened, and what you need.",
+          "Ask only what you can't find out yourself, and put related questions in one card. Send `info` rarely, only for what the person must know now.",
+          "Write the card as its Summary: a title of about 80 to 100 characters on one line; context as a subtitle of one or two sentences saying why it matters; 2 to 4 choices, each saying what it does, with exactly one recommended; links to every file, page or approval it mentions. Pane refuses a title over 160 characters or with a line break, and two recommended choices.",
+          "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",
           "Results: options returns {answer: <chosen label>, note?}, with questions also answers (one label per question); approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
           "A result of {reply, picks?, id, replyId, next} means the person typed a reply instead of only picking: it may answer the question or ask one. Read it, then call `runpane notify --took <replyId> answer` to record it as the answer, or `runpane notify --took <replyId> question` and find out, then `runpane notify --update <replyId> --asked \"<their question>\" --what-changed \"<one line per change>\"` with whatever changed, instead of asking again. With no open call the reply reaches your tab as a `reply:` line; `correction:` lines fix how it was taken. --took returns {took, id, next?}. Use its replyId rather than the Q-n: only this call was given it, so it works from outside a Pane tab too.",
           "Only the reply's reader may run took and update: the asker, the orchestrator that relayed it, or Autopilot. Anyone else gets ERR_NOTIFY_NOT_READER.",
@@ -23427,8 +23429,10 @@ export const RUNPANE_CONTRACT = {
           "Inside a Pane terminal the question names its Pane and panel (PANE_SESSION_ID and PANE_PANEL_ID); elsewhere it names the working directory.",
           "An older Pane ignores links and shows the card without them.",
           "With relays the call waits on the worker's card as on any notify, and the answer also goes straight to the worker's tab as `answer: Q-n → <answer> (by you)`. Then record it: `runpane inbox ack <item> --decision <D-n>`.",
-          "Invalid input, such as choices with ui ask, 10 choices, or ui with took or update, fails with a message naming the field, and nothing is shown."
-        ]
+          "Invalid input, such as choices with ui ask, 10 choices, or ui with took or update, fails with a message naming the field, and nothing is shown.",
+          "Examples of a good title and context. Needs a decision (ui approve): \"Speed up slow search: run the database change?\" with \"Search takes 4 s and an index brings it under 100 ms. It changes the live database and can't easily be undone.\", not \"Approve the migration?\" Blocked (ui options): \"The 2.5 release is stuck on a GitHub hiccup\" with \"The fixes pass everywhere except one Mac build machine, which errored. That's GitHub's machine, not our code.\", not \"Blocked\". Just so you know (ui info): \"Questions from agents now wait until you answer\", not \"Done\"."
+        ],
+        "helpIncludesNotes": true
       },
       "autopilot status": {
         "name": "autopilot status",
@@ -23830,82 +23834,9 @@ export const RUNPANE_CONTRACT = {
     ],
     "notifyGuidance": {
       "rules": [
-        "Which card: Claude's own card (AskUserQuestion) only when you are answering the person's latest message in the chat they are typing in, the answer only steers this turn, and the question needs no context, links or Summary. Everything else is an approval card (`notify`, or `runpane report` for a worker): a worker's question in a Session, a question a Session orchestrator relays, and anything that waits, blocks other work, is recorded as a decision or approves an ask-first action. Unsure? Use an approval card. Codex and other agents without a built-in card always do.",
-        "In a Session, only its orchestrator asks the person. A worker in a Session (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator or a parent status file) doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"`, and the answer reaches its tab as `answer: Q-n → <answer> (by you)`; `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)` lines are the person's word too. A Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` is set) posts each item that waits on the person once, as a background `runpane notify ... --json`, as its pane-orchestration guide says. Any other agent calls `notify`.",
-        "Ask only what you can't find out yourself.",
-        "Put related questions in one card.",
-        "Send `info` rarely, only for what the person must know now.",
-        "Write the card as its Summary: a title of about 80 to 100 characters on one line; context as a subtitle of one or two sentences saying why it matters; 2 to 4 choices, each saying what it does, with exactly one recommended; links to every file, page or approval it mentions. Pane refuses a title over 160 characters or with a line break, and two recommended choices.",
-        "A `reply:` line (or a `{reply, replyId}` result) is the person's typed reply: an answer or a question. If it answers, run `runpane notify --took <id|Q-n> answer`. If it asks, run `--took <id|Q-n> question`, find out, then `runpane notify --update <id|Q-n> --asked \"<their question>\" --what-changed \"<one line per change>\"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` (a reworded choice adds `\"was\"`, its old label) instead of asking again. A `correction:` line fixes how it was taken. From a `{reply, replyId}` result, pass its replyId to --took and --update.",
+        "Claude's own card (AskUserQuestion) only for a quick question about the person's latest message, in the chat they are typing in, that steers only this turn. Anything else (it waits, blocks other work, is recorded as a decision or approves an ask-first action) is an approval card (`notify`). Unsure? Use an approval card. Codex and other agents always do.",
+        "In a Session, only its orchestrator asks the person. A worker (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator or a parent status file) doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"`. `answer:`, `closed:` and `correction:` lines ending `(by you)` in its tab are the person's word.",
         "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`."
-      ],
-      "cardRule": "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",
-      "results": "`waiting` means call `notify` again with `resume`. `unavailable` means ask in the terminal; for a secret, ask the person to save it in Pane under Settings > Secrets.",
-      "examples": [
-        {
-          "name": "Needs a decision",
-          "ui": "approve",
-          "bad": [
-            {
-              "title": "Approve the migration?",
-              "context": "Ready to run 0042_add_index on prod. Proceed?"
-            }
-          ],
-          "good": {
-            "title": "Speed up slow search: run the database change?",
-            "context": "Search in the app takes 4 s, and an index brings it under 100 ms. It changes the live database and can't easily be undone. Approve runs it now; Deny keeps it ready for later."
-          }
-        },
-        {
-          "name": "Blocked",
-          "ui": "options",
-          "bad": [
-            {
-              "title": "Blocked",
-              "context": "CI failing on macos-intel, hdiutil resource busy."
-            }
-          ],
-          "good": {
-            "title": "The 2.5 release is stuck on a GitHub hiccup",
-            "context": "The fixes you asked for pass everywhere except one Mac build machine, which errored. That's GitHub's machine, not our code.",
-            "choices": [
-              "Rerun it (about 15 min)",
-              "Ship without the Intel Mac build"
-            ]
-          }
-        },
-        {
-          "name": "Just so you know",
-          "ui": "info",
-          "bad": [
-            {
-              "title": "Done",
-              "context": "Completed refactor of src/notify/queue.ts (head 06d310a)."
-            },
-            {
-              "title": "PR #812 is ready",
-              "context": "Tests pass."
-            }
-          ],
-          "good": {
-            "title": "Questions from agents now wait until you answer",
-            "context": "The fix you asked for this morning is done and tested. Next is your review: one click to merge."
-          }
-        },
-        {
-          "name": "A question for ask",
-          "ui": "ask",
-          "bad": [
-            {
-              "title": "Which option?",
-              "context": "1, 2 or 3?"
-            }
-          ],
-          "good": {
-            "title": "What should the release headline say?",
-            "context": "You're writing the 2.5 release notes, and the headline is the first line people read. A few words is enough."
-          }
-        }
       ]
     }
   }

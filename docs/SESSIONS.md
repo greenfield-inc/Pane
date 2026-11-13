@@ -1380,8 +1380,8 @@ default), a Session has one voice to the person: its orchestrator.
 - **Workers don't call `notify`.** Approvals come from the orchestrator, not
   from the agents in the Session's Panes. A worker in a Session's Pane gets
   `PANE_SESSION_DIR` and no `PANE_ORCHESTRATION_SESSION_ID`; Pane's
-  instructions (the user-level Notify block, the MCP server instructions and
-  the `pane` home skill) tell such a worker to report blocked with
+  instructions (the user-level Notify block and the `pane` home skill) tell
+  such a worker to report blocked with
   `runpane report --state blocked --question "<question>"` instead. A
   worker's `notify` call isn't shown to the person; it returns `unavailable`
   with a `next` that says to report blocked.
