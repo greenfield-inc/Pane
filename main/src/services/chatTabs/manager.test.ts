@@ -725,8 +725,15 @@ describe('chat tab manager', () => {
     await manager.pause(['p1'], MARK);
     expect([...manager.messages('p1')].map(message => message.role)).toEqual(['user', 'assistant', 'assistant', 'assistant']);
     expect(manager.history('p1', 4, 100)).toHaveLength(4);
-    expect(manager.lastMessage('p1', 'assistant', message => message.parts.some(part => part.type === 'text'))?.parts).toEqual([{ type: 'text', text: 'You said: hello' }]);
+    const lastReply = () => manager.lastMessage('p1', 'assistant', message => message.parts.some(part => part.type === 'text'))?.parts;
+    expect(lastReply()).toEqual([{ type: 'text', text: 'You said: hello' }]);
     expect(manager.isRunning('p1')).toBe(false);
+    // Opening it resumes it; while the agent replays its history, readers still get the conversation.
+    manager.view('p1');
+    expect(lastReply()).toEqual([{ type: 'text', text: 'You said: hello' }]);
+    expect([...manager.messages('p1')]).toHaveLength(4);
+    await manager.ensure('p1');
+    expect(lastReply()).toEqual([{ type: 'text', text: 'You said: hello' }]);
   });
 
   it('opens a tab paused before Pane restarted with its conversation and controls, reading idle while it resumes', async () => {

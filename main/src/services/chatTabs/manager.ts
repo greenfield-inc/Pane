@@ -153,7 +153,7 @@ export class ChatTabManager {
   history(panelId: string, before: number, limit: number): AgentChatMessage[] {
     this.required(panelId);
     const tab = this.tab(panelId);
-    if (tab.transcript) return tab.transcript.history(before, Math.min(500, limit));
+    if (tab.transcript && replayed(tab)) return tab.transcript.history(before, Math.min(500, limit));
     const held = tab.held;
     if (!held) return [];
     const end = Math.min(before, held.start + held.messages.length) - held.start;
@@ -164,12 +164,14 @@ export class ChatTabManager {
   messages(panelId: string): Iterable<AgentChatMessage> {
     this.required(panelId);
     const tab = this.tab(panelId);
-    return tab.transcript?.all() ?? tab.held?.messages ?? [];
+    if (tab.transcript && replayed(tab)) return tab.transcript.all();
+    return tab.held?.messages ?? tab.transcript?.all() ?? [];
   }
 
   lastMessage(panelId: string, role: AgentChatMessage['role'] = 'assistant', accept: (message: AgentChatMessage) => boolean = () => true): AgentChatMessage | undefined {
     const tab = this.tab(panelId);
-    if (tab.transcript) return tab.transcript.last(role, accept);
+    if (tab.transcript && replayed(tab)) return tab.transcript.last(role, accept);
+    if (!tab.held) return tab.transcript?.last(role, accept);
     const found = [...(tab.held?.messages ?? [])].reverse().find(message => message.role === role && accept(message));
     return found && structuredClone(found);
   }
@@ -899,7 +901,7 @@ export class ChatTabManager {
     if (runtime) tab.shown = { controls: [...runtime.controls(), ...fullAccessControl(state)], commands: runtime.commands(), canAttachImages: runtime.supportsImages() };
     // A stopped tab offers nothing; a starting or paused one keeps showing what its agent last offered.
     const shown = state.status === 'stopped' ? undefined : tab.shown;
-    const ready = tab.transcript && !tab.loading && !tab.starting;
+    const ready = tab.transcript && replayed(tab);
     const permissions = runtime ? runtime.permissions().map(permission => ({
       id: permission.id, generation: tab.generation,
       title: permission.request.toolCall.title ?? 'Approval needed',
@@ -988,6 +990,9 @@ function forgetConversation(tab: Tab): void {
   tab.transcript = undefined;
   tab.held = undefined;
 }
+
+/** The transcript holds the whole conversation: no start is replaying it. Until then readers get the held window. */
+function replayed(tab: Tab): boolean { return !tab.loading && !tab.starting; }
 
 /** A held window small enough to save: the newest messages that fit in 2 MiB. */
 function boundedWindow(held: ChatTabTranscript): ChatTabTranscript {
