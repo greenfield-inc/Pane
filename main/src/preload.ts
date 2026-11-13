@@ -512,9 +512,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('chat-tab:event', listener);
     },
     onState: (callback: (view: ChatTabView) => void) => {
+      // chat-tab:view carries every agent's view; a host from before it (remote mode) sends only
+      // chat-tab:state. A view seen on both is harmless: the viewer keeps the newest.
       const listener = (_event: Electron.IpcRendererEvent, view: ChatTabView) => callback(view);
       ipcRenderer.on('chat-tab:view', listener);
-      return () => ipcRenderer.removeListener('chat-tab:view', listener);
+      ipcRenderer.on('chat-tab:state', listener);
+      return () => {
+        ipcRenderer.removeListener('chat-tab:view', listener);
+        ipcRenderer.removeListener('chat-tab:state', listener);
+      };
     },
   },
   paneChat: {
