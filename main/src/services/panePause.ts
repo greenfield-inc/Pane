@@ -10,7 +10,7 @@ export function terminalPanelIdsOf(paneIds: readonly string[]): string[] {
   return paneIds.flatMap(paneId => panelManager.getPanelsForSession(paneId).filter(panel => panel.type === 'terminal').map(panel => panel.id));
 }
 
-/** The chat tabs of a Pane. Pause doesn't stop them yet (D-187), so a pause has to say so. */
+/** The chat tabs of a Pane. Pause doesn't stop them (D-187; auto-pause does, after `chatIdleReleaseMinutes`), so a pause has to say so. */
 export function chatPanelIdsOf(paneIds: readonly string[]): string[] {
   return paneIds.flatMap(paneId => panelManager.getPanelsForSession(paneId).filter(panel => panel.type === 'chat').map(panel => panel.id));
 }
@@ -19,7 +19,7 @@ export function chatPanelIdsOf(paneIds: readonly string[]): string[] {
 export function chatTabsNotPausedNote(count: number): string {
   if (count === 0) return '';
   const tabs = count === 1 ? '1 chat tab was' : `${count} chat tabs were`;
-  return ` ${tabs} not paused: chat tabs can't pause yet, so their agents keep running. To stop one, press Stop in the tab or close it.`;
+  return ` ${tabs} not paused: Pause leaves chat tabs alone, so their agents keep running. To stop one, press Stop in the tab or close it.`;
 }
 
 /**

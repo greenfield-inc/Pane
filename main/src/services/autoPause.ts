@@ -114,7 +114,7 @@ export class AutoPauser {
   }
 
   /** Stops the agents of chat tabs idle for the chat threshold. Returns the tabs it paused. */
-  async pauseIdleChats(chatMinutes: number | undefined, now: number): Promise<string[]> {
+  private async pauseIdleChats(chatMinutes: number | undefined, now: number): Promise<string[]> {
     const minutes = chatMinutes !== undefined && isValidChatReleaseMinutes(chatMinutes) ? chatMinutes : DEFAULT_CHAT_RELEASE_MINUTES;
     const threshold = this.deps.testThresholdMs ?? minutes * MINUTE_MS;
     const idle: string[] = [];

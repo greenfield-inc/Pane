@@ -45,7 +45,7 @@ export function PauseSettings({ persistence }: { persistence: SettingsPersistenc
       <SettingRow
         settingId="auto-pause"
         label={AUTO_PAUSE_LABEL}
-        description="Stops the agents and scripts of a Pane nobody has used for this long, and the agent of a chat tab idle for its shorter time. Panes and chats waiting on you are skipped, and so is the Pane on screen. Resume brings them back in the same conversations; a chat tab resumes when you open it or send it a message."
+        description="Stops the agents and scripts of a Pane nobody has used for this long, and the agent of a chat tab idle for its shorter time. Panes and chats waiting on you are skipped, and so is the Pane on screen. Resume brings a Pane back in the same conversations; a chat tab resumes when you open it or send it a message. Wakeups and scheduled jobs a chat agent keeps only in memory end with it."
         saveState={persistence.saveStates['auto-pause']}
         align="start"
         details={(
@@ -61,6 +61,7 @@ export function PauseSettings({ persistence }: { persistence: SettingsPersistenc
               max={MAX_AUTO_PAUSE_HOURS}
               parse={parseAutoPauseHours}
               error={`Enter whole hours from ${MIN_AUTO_PAUSE_HOURS} to ${MAX_AUTO_PAUSE_HOURS}.`}
+              unitWord="hours"
               saveKey="auto-pause-hours"
               onSave={value => persistence.saveConfig('auto-pause-hours', { autoPauseAfterHours: value })}
             />
@@ -75,6 +76,7 @@ export function PauseSettings({ persistence }: { persistence: SettingsPersistenc
               max={MAX_CHAT_RELEASE_MINUTES}
               parse={parseChatReleaseMinutes}
               error={`Enter whole minutes from ${MIN_CHAT_RELEASE_MINUTES} to ${MAX_CHAT_RELEASE_MINUTES}.`}
+              unitWord="minutes"
               saveKey="chat-idle-release-minutes"
               onSave={value => persistence.saveConfig('chat-idle-release-minutes', { chatIdleReleaseMinutes: value })}
             />
@@ -101,11 +103,13 @@ interface ThresholdFieldProps {
   max: number;
   parse: (text: string) => number | null;
   error: string;
+  /** The unit after a kept value: "hours", "minutes". */
+  unitWord: string;
   saveKey: SettingsSettingId;
   onSave: (value: number) => void;
 }
 
-function ThresholdField({ persistence, saved, disabled, label, unit, min, max, parse, error, saveKey, onSave }: ThresholdFieldProps) {
+function ThresholdField({ persistence, saved, disabled, label, unit, min, max, parse, error, unitWord, saveKey, onSave }: ThresholdFieldProps) {
   const [text, setText] = useState(String(saved));
   const inputId = useId();
   const errorId = `${inputId}-error`;
@@ -143,7 +147,7 @@ function ThresholdField({ persistence, saved, disabled, label, unit, min, max, p
         <span className="text-sm text-text-secondary">{unit}</span>
         <SaveState state={persistence.saveStates[saveKey] ?? { state: 'idle' }} />
       </div>
-      {invalid && <p id={errorId} role="alert" className="text-xs text-status-error">{error} Nothing was saved; Pane keeps {saved}.</p>}
+      {invalid && <p id={errorId} role="alert" className="text-xs text-status-error">{error} Nothing was saved; Pane keeps {saved} {unitWord}.</p>}
     </div>
   );
 }

@@ -110,8 +110,6 @@ export function getChatTabManager(): ChatTabManager {
     // The same agent-status stream terminal agent tabs feed: Session live activity,
     // update holds and keep-awake follow chat tabs too.
     onStatus: event => terminalPanelManager.emit('agent-status', event),
-    // The same pause stream terminal tabs feed: Pane and Session paused state, Notify cards.
-    onPauseChanged: change => terminalPanelManager.emit('pause-changed', change),
     onView: view => notifyBridge?.observe(view),
     onClosed: panelId => { notifyBridge?.forget(panelId); forgetTab(panelId); },
     openConversations,

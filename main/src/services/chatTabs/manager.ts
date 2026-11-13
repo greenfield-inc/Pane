@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { ContentBlock, InitializeResponse, McpServer, NewSessionRequest, SessionInfo } from '@agentclientprotocol/sdk';
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
@@ -13,6 +14,7 @@ import { ChatTranscript, type TurnMarker } from './transcript';
 import type { PauseOutcome } from '../terminalPanelManager';
 import { QueuedBodies } from './queuedBodies';
 import { agentConfig, agentLabel } from '../../../../shared/agents';
+import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
@@ -75,10 +77,7 @@ export interface ChatTabManagerOptions {
   agentName?: (agent: string) => string;
   /** Every initialize reply, for the agent catalog's capabilities. */
   onInitialized?: (agent: string, response: InitializeResponse) => void;
-  /** Pause marked these tabs (`paused`), or a start cleared their marks. */
-  onPauseChanged?: (change: { panelIds: string[]; paneIds: string[]; paused: boolean }) => void;
 }
-
 
 interface Tab {
   /** The public generation: viewers drop any state older than the newest they saw, so it only grows. */
@@ -103,8 +102,12 @@ interface Tab {
   signIn?: { args: string[]; env?: Record<string, string> };
   /** The composer's controls as the running agent last offered them, shown (locked) while it restarts. */
   shown?: Pick<ChatTabView, 'controls' | 'commands' | 'canAttachImages'>;
-  /** The newest window of the conversation, shown while a restart replays its history. */
+  /** The newest window of the conversation, shown while a restart replays its history; read from disk for a tab paused before Pane restarted. */
   held?: ChatTabTranscript;
+  /** A pause is ending the agent; a start waits for it, so a send or open during the stop is delivered after it. */
+  pausing?: Promise<void>;
+  /** This start resumes a paused tab. */
+  resuming?: boolean;
   /** When the agent last sent an update or was sent a message, in ms since the epoch. */
   activeAt?: number;
 }
@@ -149,17 +152,26 @@ export class ChatTabManager {
 
   history(panelId: string, before: number, limit: number): AgentChatMessage[] {
     this.required(panelId);
-    return this.tab(panelId).transcript?.history(before, Math.min(500, limit)) ?? [];
+    const tab = this.tab(panelId);
+    if (tab.transcript) return tab.transcript.history(before, Math.min(500, limit));
+    const held = tab.held;
+    if (!held) return [];
+    const end = Math.min(before, held.start + held.messages.length) - held.start;
+    return structuredClone(held.messages.slice(Math.max(0, end - Math.min(500, limit)), Math.max(0, end)));
   }
 
   /** The conversation's messages for readers such as runpane; pages through spooled history without copying it all at once. */
   messages(panelId: string): Iterable<AgentChatMessage> {
     this.required(panelId);
-    return this.tab(panelId).transcript?.all() ?? [];
+    const tab = this.tab(panelId);
+    return tab.transcript?.all() ?? tab.held?.messages ?? [];
   }
 
   lastMessage(panelId: string, role: AgentChatMessage['role'] = 'assistant', accept: (message: AgentChatMessage) => boolean = () => true): AgentChatMessage | undefined {
-    return this.tab(panelId).transcript?.last(role, accept);
+    const tab = this.tab(panelId);
+    if (tab.transcript) return tab.transcript.last(role, accept);
+    const found = [...(tab.held?.messages ?? [])].reverse().find(message => message.role === role && accept(message));
+    return found && structuredClone(found);
   }
 
   /** The tab's status as agent status (sidebar, tabs, runpane), without starting it. */
@@ -203,38 +215,39 @@ export class ChatTabManager {
   }
 
   /**
-   * Pause: end these tabs' agents and mark them paused. A tab with work in flight is left running
-   * and reported, so a pause never cuts off a turn, an approval, a question or a queued message.
-   * The conversation stays in the agent's own store; opening the tab or sending to it resumes it.
+   * Auto-pause: end these tabs' agents and mark them paused. Only a running tab with no work in flight
+   * pauses, so a pause never cuts off a turn, an approval, a question or a queued message. The
+   * conversation stays on screen and readable; opening the tab or sending to it resumes it.
    */
   async pause(panelIds: readonly string[], mark: TerminalPausedMark): Promise<PauseOutcome> {
     const outcome: PauseOutcome = { paused: [], failed: [] };
     for (const panelId of panelIds) {
       const state = this.options.store.state(panelId);
-      if (!state) continue;
       const tab = this.tabs.get(panelId);
-      const running = !!tab?.runtime || !!tab?.starting;
-      if (state.paused && !running) continue;
+      // Only a running agent pauses: a stopped tab keeps its problem, an unstarted one has nothing to stop.
+      if (!state || !tab?.runtime?.isAlive() || state.status === 'stopped' || tab.pausing) continue;
       if (this.busy(panelId)) {
-        outcome.failed.push({ panelId, error: 'Its agent is working, waiting on an answer, or has messages queued, so it was left running.' });
+        outcome.failed.push({ panelId, error: 'Its agent is working, waiting on an answer, or has messages queued, so it was left running. The next sweep tries again.' });
         continue;
       }
+      const pausing = this.stopForPause(panelId, tab, mark);
+      tab.pausing = pausing.finally(() => { if (tab.pausing === settled) tab.pausing = undefined; });
+      const settled = tab.pausing;
       try {
-        this.update(panelId, current => ({ ...current, paused: mark }));
-        if (tab) {
-          tab.held = tab.transcript && tab.transcript.count() > 0 ? tab.transcript.snapshot(DEFAULT_VIEW_LIMIT) : tab.held;
-          await this.end(tab);
-          tab.transcript?.dispose();
-          tab.transcript = undefined;
-        }
-        this.publish(panelId);
+        await pausing;
         outcome.paused.push(panelId);
       } catch (error) {
         outcome.failed.push({ panelId, error: reasonOf(error) });
       }
     }
-    if (outcome.paused.length) this.pauseChanged(outcome.paused, true);
     return outcome;
+  }
+
+  private async stopForPause(panelId: string, tab: Tab, mark: TerminalPausedMark): Promise<void> {
+    this.update(panelId, current => ({ ...current, paused: mark }));
+    this.savePaused(panelId, tab);
+    await this.end(tab);
+    this.publish(panelId);
   }
 
   runningPanelIds(): string[] { return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() ? [panelId] : []); }
@@ -254,9 +267,12 @@ export class ChatTabManager {
   ensure(panelId: string): Promise<void> {
     const tab = this.tab(panelId);
     if (tab.runtime?.isAlive()) return Promise.resolve();
+    // A send or open during a pause starts the agent once the pause has stopped it.
+    if (tab.pausing) return tab.pausing.catch(() => undefined).then(() => this.ensure(panelId));
     // Publish after the start settles: while it runs, every view says `starting`.
     tab.starting ??= this.start(panelId, tab).finally(() => {
       tab.starting = undefined;
+      tab.resuming = false;
       // A tab closed while it started is gone; nothing is published for it.
       if (this.tabs.get(panelId) !== tab) return;
       this.publish(panelId);
@@ -524,6 +540,7 @@ export class ChatTabManager {
     await this.end(tab);
     tab.transcript?.dispose();
     this.bodies.clear(panelId);
+    rmSync(this.pausedFile(panelId), { force: true });
     this.tabs.delete(panelId);
     this.options.onClosed?.(panelId);
   }
@@ -558,9 +575,9 @@ export class ChatTabManager {
     tab.transcript = undefined;
     tab.notice = undefined;
     const generation = tab.generation;
-    const resumed = !!this.required(panelId).paused;
+    // A resume from pause reads as idle while it starts; a crash Restart does not (watch must not see READY early).
+    tab.resuming = !!this.required(panelId).paused;
     this.update(panelId, state => ({ ...state, status: 'starting', problem: undefined, paused: undefined }));
-    if (resumed) this.pauseChanged([panelId], false);
     this.publish(panelId);
     let launch: ResolvedLaunch;
     let transcript: ChatTranscript;
@@ -790,15 +807,41 @@ export class ChatTabManager {
   private endTurn(panelId: string, tab: Tab, marker: TurnMarker): ChatTabEvent | undefined {
     const ended = tab.transcript?.endTurn(marker);
     const saved = ended?.saved;
-    if (saved) {
+    // A turn that ends while history replays is the agent's own, already saved: its rows come back from the replay.
+    if (saved && !tab.loading) {
       this.update(panelId, current => current.acpSessionId ? { ...current, turnTimes: withTurnTime(current, current.acpSessionId, saved) } : current);
     }
     return ended?.event;
   }
 
-  private pauseChanged(panelIds: string[], paused: boolean): void {
-    const paneIds = [...new Set(panelIds.flatMap(panelId => this.options.store.panel(panelId)?.sessionId ?? []))];
-    this.options.onPauseChanged?.({ panelIds, paneIds, paused });
+  private pausedFile(panelId: string): string { return path.join(this.options.spoolDirectory, safeName(panelId), 'paused.json'); }
+
+  /** What a paused tab shows until its agent is back: the newest window and the composer's controls, kept on disk through a Pane restart. */
+  private savePaused(panelId: string, tab: Tab): void {
+    const sessionId = this.options.store.state(panelId)?.acpSessionId;
+    const held = tab.transcript && tab.transcript.count() > 0 ? tab.transcript.snapshot(DEFAULT_VIEW_LIMIT) : tab.held;
+    if (!sessionId || !held) return;
+    try {
+      const file = this.pausedFile(panelId);
+      mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+      writeFileSync(file, JSON.stringify({ sessionId, held: boundedWindow(held), shown: tab.shown }), { mode: 0o600 });
+    } catch (error) {
+      // Only the look after a Pane restart depends on it; the tab still pauses and resumes.
+      console.warn(`[ChatTabs] ${panelId}'s paused view was not saved: ${reasonOf(error)}`);
+    }
+  }
+
+  private loadPaused(panelId: string, tab: Tab): void {
+    const state = this.options.store.state(panelId);
+    if (!state?.paused || !state.acpSessionId) return;
+    try {
+      const saved = decodeOptionalBoundary(JSON.parse(readFileSync(this.pausedFile(panelId), 'utf8')), chatPausedViewSchema);
+      if (!saved || saved.sessionId !== state.acpSessionId) return;
+      tab.held = { ...saved.held, panelId, generation: 0 };
+      if (saved.shown) tab.shown = saved.shown;
+    } catch {
+      // No saved view: the tab looks as any tab does while it starts.
+    }
   }
 
   private exited(panelId: string, generation: number, exit: RuntimeExit): void {
@@ -914,7 +957,11 @@ export class ChatTabManager {
 
   private tab(panelId: string): Tab {
     let tab = this.tabs.get(panelId);
-    if (!tab) { tab = { generation: 0, run: 0, loading: false, delivering: false }; this.tabs.set(panelId, tab); }
+    if (!tab) {
+      tab = { generation: 0, run: 0, loading: false, delivering: false };
+      this.tabs.set(panelId, tab);
+      this.loadPaused(panelId, tab);
+    }
     return tab;
   }
 
@@ -942,6 +989,13 @@ function forgetConversation(tab: Tab): void {
   tab.held = undefined;
 }
 
+/** A held window small enough to save: the newest messages that fit in 2 MiB. */
+function boundedWindow(held: ChatTabTranscript): ChatTabTranscript {
+  let window = held;
+  while (window.messages.length > 1 && JSON.stringify(window.messages).length > 2 * 1024 * 1024) window = heldWindow(window, Math.floor(window.messages.length / 2));
+  return window;
+}
+
 /** The newest `limit` messages of a held window. */
 function heldWindow(held: ChatTabTranscript, limit: number): ChatTabTranscript {
   const messages = held.messages.slice(-limit);
@@ -954,9 +1008,9 @@ function withTurnTime(state: ChatPanelState, sessionId: string, turn: ChatTurnTi
   return { sessionId, turns: [...turns, turn].slice(-TURN_TIMES_LIMIT) };
 }
 
-/** A restart of a conversation on screen (a resume after pause) reads as idle, so the tab and sidebar do not flash a spinner. */
+/** A resume from pause with nothing to send reads as idle, so the tab and sidebar do not flash a spinner. */
 function publishedState(view: ChatTabView, tab: Tab): AgentState {
-  if (view.status === 'starting' && tab.held && view.queue.length === 0) return 'idle';
+  if (view.status === 'starting' && tab.resuming && view.queue.length === 0) return 'idle';
   return toAgentState(view);
 }
 

@@ -477,8 +477,11 @@ file and continue."
 
 A paused worker is reported once as `PAUSED` (`panel.paused`). The person
 paused it, or auto-pause did after hours without use. Its panel and
-conversation are intact. Leave it paused unless the person asks you to resume
-it, then resume it by name:
+conversation are intact. A chat-tab worker is the exception: auto-pause stops
+its idle agent after 30 minutes with no `PAUSED` event, and sending it a
+message or reading its screen resumes it, so message it as usual. Leave any
+other paused worker paused unless the person asks you to resume it, then
+resume it by name:
 
 ```sh
 runpane panels resume --panel <panel id> --wait-ready --yes --json   # one tab

@@ -1,3 +1,14 @@
+import { boundary, type BoundarySchema } from '../validation/boundaryDecoder';
+import type { TerminalPausedMark } from './panels';
+
+/** A pause mark as terminal and chat tabs save it. */
+export const pausedMarkSchema: BoundarySchema<TerminalPausedMark> = boundary.object({
+  at: boundary.nonEmptyString,
+  by: boundary.enumeration('manual', 'auto'),
+  idleHours: boundary.optional(boundary.number),
+  runScript: boundary.optional(boundary.boolean),
+});
+
 /** Auto-pause pauses Panes nobody has used for this many hours, by default. */
 export const DEFAULT_AUTO_PAUSE_HOURS = 48;
 /** The threshold Settings accepts: whole hours from 1 to 720 (30 days). */
@@ -8,12 +19,17 @@ export function isValidAutoPauseHours(hours: number): boolean {
   return Number.isInteger(hours) && hours >= MIN_AUTO_PAUSE_HOURS && hours <= MAX_AUTO_PAUSE_HOURS;
 }
 
-/** Hours typed into the auto-pause field, or null when Settings refuses them. */
-export function parseAutoPauseHours(text: string): number | null {
+/** A whole number typed into a Settings field, or null when it is not one or `valid` refuses it. */
+function parseWhole(text: string, valid: (value: number) => boolean): number | null {
   const trimmed = text.trim();
   if (!/^\d+$/.test(trimmed)) return null;
-  const hours = Number(trimmed);
-  return isValidAutoPauseHours(hours) ? hours : null;
+  const value = Number(trimmed);
+  return valid(value) ? value : null;
+}
+
+/** Hours typed into the auto-pause field, or null when Settings refuses them. */
+export function parseAutoPauseHours(text: string): number | null {
+  return parseWhole(text, isValidAutoPauseHours);
 }
 
 /**
@@ -31,8 +47,5 @@ export function isValidChatReleaseMinutes(minutes: number): boolean {
 
 /** Minutes typed into the chat threshold field, or null when Settings refuses them. */
 export function parseChatReleaseMinutes(text: string): number | null {
-  const trimmed = text.trim();
-  if (!/^\d+$/.test(trimmed)) return null;
-  const minutes = Number(trimmed);
-  return isValidChatReleaseMinutes(minutes) ? minutes : null;
+  return parseWhole(text, isValidChatReleaseMinutes);
 }

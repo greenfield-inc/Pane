@@ -1507,7 +1507,7 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:pause', async (request: PaneCommandValue): Promise<RunpanePauseResult> => {
     return withRunpaneAction(services, 'panels:pause', {}, async () => {
       const target = resolvePanel(parsePauseTarget(request, 'panelId', 'Panel pause'));
-      if (target.type === 'chat') throw new PaneError('ERR_RUNPANE_CHAT_NOT_PAUSABLE', `Panel ${target.id} is a chat tab, and chat tabs can't pause yet, so nothing was paused. Its agent keeps running.`, `Press Stop in the tab to end its turn, or close the tab: runpane panels close --panel ${target.id}.`);
+      if (target.type === 'chat') throw new PaneError('ERR_RUNPANE_CHAT_NOT_PAUSABLE', `Panel ${target.id} is a chat tab, and Pause leaves chat tabs running, so nothing was paused. Its agent keeps running.`, `Press Stop in the tab to end its turn, or close the tab: runpane panels close --panel ${target.id}.`);
       const panel = resolveTerminalPanel(target.id);
       return pauseTabs(services, { kind: 'panel', panelId: panel.id, paneId: panel.sessionId }, [panel.id], 0, mark => terminalPanelManager.pausePanels([panel.id], mark));
     }, pauseActionMetrics);

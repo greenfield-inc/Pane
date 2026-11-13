@@ -108,7 +108,7 @@ describe('auto-pause of chat tabs', () => {
     const paused: string[][] = [];
     const panes: AutoPausePane[] = ['work', 'focused', 'archived'].map(id => ({ id, createdAt: new Date(START), archived: id === 'archived' }));
     const panels = new Map<string, ToolPanel[]>([
-      ['work', [chat('work:idle'), chat('work:selected', new Date(START + 20 * MINUTE).toISOString()), chat('work:talking'), chat('work:asking'), chat('work:released')]],
+      ['work', [chat('work:idle'), chat('work:selected', new Date(START + 20 * MINUTE).toISOString()), chat('work:talking'), chat('work:asking'), chat('work:carded'), chat('work:released')]],
       ['focused', [chat('focused:idle')]],
       ['archived', [chat('archived:idle')]],
     ]);
@@ -117,6 +117,8 @@ describe('auto-pause of chat tabs', () => {
       panels: paneId => panels.get(paneId) ?? [],
       liveActivity: panelId => panelId === 'work:talking' ? new Date(START + 25 * MINUTE) : undefined,
       agentState: panelId => panelId === 'work:asking' ? 'blocked' : 'idle',
+      // A card the agent posted and ended its turn on: the tab reads idle, but the person owes an answer.
+      hasOpenNotify: panelIds => panelIds.includes('work:carded'),
       chatRunning: panelId => panelId !== 'work:released',
       pauseChats: async (panelIds) => { paused.push(panelIds); return { paused: panelIds, failed: [] }; },
       ...overrides,
