@@ -5,6 +5,7 @@ import { SETTINGS_CATEGORIES, settingDomId } from '../catalog';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { DEFAULT_SETTINGS_PREFERENCES } from '../../../types/settings';
 import type { AppConfig } from '../../../types/config';
+import { createDefaultRemoteDaemonConfig } from '../../../../../shared/types/remoteDaemon';
 
 function createPersistence(config: AppConfig = {}): SettingsPersistence {
   return {
@@ -21,6 +22,49 @@ function createPersistence(config: AppConfig = {}): SettingsPersistence {
     savePreference: () => Promise.resolve(true),
   };
 }
+
+function render(config: AppConfig = {}): string {
+  return renderToStaticMarkup(<TerminalSettings persistence={createPersistence(config)} systemMonoFonts={[]} />);
+}
+
+function toggle(markup: string, label: string): string {
+  const match = new RegExp(`<button[^>]*role="switch"[^>]*aria-label="${label}"[^>]*>`).exec(markup);
+  if (!match) {
+    throw new Error(`${label} switch not rendered`);
+  }
+  return match[0];
+}
+
+const copyOnSelectSwitch = (markup: string) => toggle(markup, 'Copy on select');
+const referencesSwitch = (markup: string) => toggle(markup, 'Reference terminals with @');
+
+describe('TerminalSettings Copy on select', () => {
+  it('registers terminal-copy-on-select under Terminal', () => {
+    const terminal = SETTINGS_CATEGORIES.find((category) => category.id === 'terminal');
+    expect(terminal?.settingIds).toContain('terminal-copy-on-select');
+  });
+
+  it('is off when absent', () => {
+    const markup = render();
+
+    expect(markup).toContain(`id="${settingDomId('terminal-copy-on-select')}"`);
+    expect(copyOnSelectSwitch(markup)).toContain('aria-checked="false"');
+  });
+
+  it('shows the saved choice', () => {
+    expect(copyOnSelectSwitch(render({ terminalCopyOnSelect: true }))).toContain('aria-checked="true"');
+  });
+
+  it('is on and locked while connected to a remote Pane', () => {
+    const remoteDaemon = createDefaultRemoteDaemonConfig();
+    const markup = render({ remoteDaemon: { ...remoteDaemon, client: { ...remoteDaemon.client, mode: 'remote' } } });
+    const toggle = copyOnSelectSwitch(markup);
+
+    expect(toggle).toContain('aria-checked="true"');
+    expect(toggle).toContain('disabled=""');
+    expect(markup).toContain('Always on while connected to a remote Pane');
+  });
+});
 
 const REFERENCE_GROUPS = ['Default terminal reference paste mode', 'Default terminal reference line count'];
 
@@ -40,7 +84,7 @@ describe('TerminalSettings terminal references switch', () => {
     const markup = renderToStaticMarkup(<TerminalSettings persistence={createPersistence()} systemMonoFonts={[]} />);
 
     expect(markup).toContain(`id="${settingDomId('terminal-references-enabled')}"`);
-    expect(markup).toMatch(/role="switch"[^>]*aria-checked="true"/);
+    expect(referencesSwitch(markup)).toContain('aria-checked="true"');
     for (const label of REFERENCE_GROUPS) {
       expect(radios(markup, label)).toMatchObject({ disabled: 0 });
       expect(radios(markup, label).count).toBeGreaterThan(0);
@@ -52,7 +96,7 @@ describe('TerminalSettings terminal references switch', () => {
       <TerminalSettings persistence={createPersistence({ terminalReferencesEnabled: false })} systemMonoFonts={[]} />,
     );
 
-    expect(markup).toMatch(/role="switch"[^>]*aria-checked="false"/);
+    expect(referencesSwitch(markup)).toContain('aria-checked="false"');
     for (const label of REFERENCE_GROUPS) {
       const { count, disabled } = radios(markup, label);
       expect(count).toBeGreaterThan(0);

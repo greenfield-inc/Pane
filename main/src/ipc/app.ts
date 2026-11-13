@@ -2,6 +2,8 @@ import { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import { revealInFileManager } from '../utils/revealInFileManager';
 import { openExternalUrl } from '../utils/openExternalUrl';
+import { showContextMenu } from '../services/nativeMenus';
+import { contextMenuEntriesSchema } from '../../../shared/types/contextMenu';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
@@ -128,6 +130,10 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
       return { success: false, error: error instanceof Error ? error.message : 'Failed to open URL' };
     }
   });
+
+  // The terminal's right-click menu: the renderer lists the items, main shows them natively.
+  ipcMain.handle('app:show-context-menu', (event, entries: PaneCommandValue) =>
+    showContextMenu(event.sender, decodeBoundary(entries, contextMenuEntriesSchema)));
 
   ipcMain.handle('app:showItemInFolder', async (_event, filePath: string, sessionId?: string) => {
     try {

@@ -2337,6 +2337,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         x={selectionPopover.x}
         y={selectionPopover.y}
         text={selectionPopover.text}
+        terminal={terminalInstance}
         panelTitle={panel.title}
         workingDirectory={pathContext?.workingDirectory ?? workingDirectory}
         homeDirectory={pathContext?.homeDirectory ?? undefined}

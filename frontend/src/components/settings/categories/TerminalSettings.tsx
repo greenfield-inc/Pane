@@ -16,6 +16,7 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { PreferredShell, PreferredTerminalPowerMode } from '../../../types/config';
+import { isCopyOnSelectEnabled } from '../../../stores/configStore';
 import { useHostShellSettings } from '../../../hooks/useHostShellSettings';
 
 interface TerminalSettingsProps {
@@ -37,6 +38,7 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
   // bundled default or a custom name. Dot-prefixed families are hidden system fonts.
   const fontOptions = [...new Set([fontFamily, ...systemMonoFonts.filter((font) => !font.startsWith('.'))])];
   const fontSize = config.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
+  const isRemoteMode = config.remoteDaemon?.client.mode === 'remote';
   const referencesEnabled = config.terminalReferencesEnabled !== false;
 
   return (
@@ -118,6 +120,25 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
             value={config.terminalPowerMode ?? 'performance'}
             options={[{ id: 'performance', label: 'Performance' }, { id: 'batterySaver', label: 'Battery Saver' }]}
             onChange={(value) => void persistence.saveConfig('terminal-power-mode', { terminalPowerMode: value })}
+          />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Selection">
+        <SettingRow
+          settingId="terminal-copy-on-select"
+          label="Copy on select"
+          description={isRemoteMode
+            ? 'Always on while connected to a remote Pane, so the text lands on this computer\'s clipboard.'
+            : 'Selecting text copies it at once, instead of showing a Copy button. Right-click still offers every clipboard option.'}
+          saveState={persistence.saveStates['terminal-copy-on-select']}
+          disabled={isRemoteMode}
+        >
+          <ImmediateToggle
+            label="Copy on select"
+            value={isCopyOnSelectEnabled(config)}
+            disabled={isRemoteMode}
+            onSave={(value) => persistence.saveConfig('terminal-copy-on-select', { terminalCopyOnSelect: value })}
           />
         </SettingRow>
       </SettingsSection>

@@ -69,6 +69,17 @@ async function clipboardWrites(page: Page): Promise<string[]> {
   return page.evaluate(() => window.__terminalClipboardWrites ?? []);
 }
 
+/**
+ * A new terminal repaints once more shortly after it first shows (TerminalPanel's
+ * delayed activation refresh), and that repaint clears any selection. Tests that
+ * keep a selection past the popover wait for it behind its mask.
+ */
+async function waitForActivationRefresh(page: Page): Promise<void> {
+  const mask = page.getByRole('tabpanel').getByTestId('terminal-activation-mask');
+  await expect(mask).toHaveCount(1);
+  await expect(mask).toHaveCount(0);
+}
+
 async function selectFirstLine(page: Page, terminal: Locator): Promise<void> {
   const viewport = terminal.locator('.xterm-screen');
   await expect(viewport).toBeVisible();
@@ -165,6 +176,72 @@ test('selection popover works in restored bottom and tab terminals', async ({ pa
   await expect.poll(() => clipboardWrites(page)).toEqual(['selection-2']);
 });
 
+test('copies a mouse selection at once, without the popover, when Copy on select is on', async ({ page }) => {
+  await installClipboardMock(page);
+  await installElectronApiMock(page, {
+    initialConfig: { terminalCopyOnSelect: true },
+    initialProjects: [project],
+    initialSessions: [session],
+    initialPanels: panels,
+    initialTerminalStates: Object.fromEntries(panels.map((panel, index) => [
+      panel.id,
+      { scrollbackBuffer: `selection-${index}\r\n` },
+    ])),
+    activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+
+  const viewport = page.getByRole('tabpanel').locator('.xterm-screen').first();
+  await expect(viewport).toBeVisible();
+  await expect(page.getByRole('tabpanel').getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  const box = await viewport.boundingBox();
+  if (!box) throw new Error('Terminal viewport has no bounding box');
+
+  await page.mouse.move(box.x + 2, box.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 4, box.y + 8, { steps: 5 });
+  await page.mouse.up();
+
+  await expect.poll(() => clipboardWrites(page)).toEqual([expect.stringContaining('selection-1')]);
+  await expect(page.getByRole('button', { name: 'Copy', exact: true })).toHaveCount(0);
+});
+
+test('with Copy on select on, right-click leaves the clipboard alone and the menu\'s Select All copies', async ({ page }) => {
+  await installClipboardMock(page);
+  await installElectronApiMock(page, {
+    initialConfig: { terminalCopyOnSelect: true },
+    contextMenuChoice: 'select-all',
+    initialProjects: [project],
+    initialSessions: [session],
+    initialPanels: panels,
+    initialTerminalStates: Object.fromEntries(panels.map((panel, index) => [
+      panel.id,
+      { scrollbackBuffer: `selection-${index}\r\n` },
+    ])),
+    activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+
+  const viewport = page.getByRole('tabpanel').locator('.xterm-screen').first();
+  await waitForActivationRefresh(page);
+  const box = await viewport.boundingBox();
+  if (!box) throw new Error('Terminal viewport has no bounding box');
+
+  await page.mouse.move(box.x + 2, box.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 4, box.y + 8, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1']);
+
+  // The right button's release must not copy again; only the menu's Select All does.
+  await page.mouse.click(box.x + 20, box.y + 8, { button: 'right' });
+  await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1', 'selection-1']);
+});
+
 test('keeps keyboard copy available when Pane shortcuts are disabled', async ({ page }) => {
   await installClipboardMock(page);
   await installElectronApiMock(page, {
@@ -183,6 +260,7 @@ test('keeps keyboard copy available when Pane shortcuts are disabled', async ({ 
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
   const terminal = page.getByRole('tabpanel').locator('.xterm').first();
+  await waitForActivationRefresh(page);
   await selectFirstLine(page, terminal);
   await terminal.locator('.xterm-helper-textarea').focus();
   await page.keyboard.press('Control+Shift+C');
@@ -256,4 +334,73 @@ test('remote mode copies a mouse selection without the selection popover', async
 
   await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1']);
   await expect(page.getByRole('button', { name: 'Copy', exact: true })).toHaveCount(0);
+});
+
+test('right-click shows the selection actions in a native menu and runs the chosen one', async ({ page }) => {
+  await installClipboardMock(page);
+  await installElectronApiMock(page, {
+    contextMenuChoice: 'copy',
+    initialProjects: [project],
+    initialSessions: [session],
+    initialPanels: panels,
+    initialTerminalStates: Object.fromEntries(panels.map((panel, index) => [
+      panel.id,
+      { scrollbackBuffer: `selection-${index}\r\n` },
+    ])),
+    activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+
+  const terminal = page.getByRole('tabpanel').locator('.xterm').first();
+  await waitForActivationRefresh(page);
+  await selectFirstLine(page, terminal);
+  await expect(page.getByRole('button', { name: 'Copy', exact: true }).first()).toBeVisible();
+
+  await terminal.locator('.xterm-screen').click({ button: 'right', position: { x: 20, y: 8 } });
+
+  await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1']);
+  await expect(page.getByRole('button', { name: 'Copy', exact: true })).toHaveCount(0);
+  const menus = await page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines __paneTestElectronMock with this recorder.
+    const mock = (window as typeof window & { __paneTestElectronMock: {
+      getInvokeCalls: (channel: string) => Array<{ args: Array<Array<{ type: string; label?: string; enabled?: boolean }>> }>;
+    } }).__paneTestElectronMock;
+    return mock.getInvokeCalls('app:show-context-menu').map((call) => call.args[0]);
+  });
+  expect(menus).toEqual([[
+    expect.objectContaining({ type: 'item', label: 'Copy', enabled: true }),
+    expect.objectContaining({ type: 'paste', label: 'Paste' }),
+    { type: 'separator' },
+    expect.objectContaining({ label: 'Select All' }),
+  ]]);
+});
+
+test('right-click offers the browser actions for a selected URL', async ({ page }) => {
+  await installClipboardMock(page);
+  await installElectronApiMock(page, {
+    contextMenuChoice: 'open-url',
+    initialProjects: [project],
+    initialSessions: [session],
+    initialPanels: panels,
+    // selectFirstLine selects 11 columns: exactly this URL.
+    initialTerminalStates: Object.fromEntries(panels.map((panel) => [panel.id, { scrollbackBuffer: 'http://e.io\r\n' }])),
+    activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+
+  const terminal = page.getByRole('tabpanel').locator('.xterm').first();
+  await waitForActivationRefresh(page);
+  await selectFirstLine(page, terminal);
+  await terminal.locator('.xterm-screen').click({ button: 'right', position: { x: 20, y: 8 } });
+
+  const opened = () => page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines __paneTestElectronMock with this recorder.
+    const mock = (window as typeof window & { __paneTestElectronMock: { getOpenedExternalUrls: () => string[] } }).__paneTestElectronMock;
+    return mock.getOpenedExternalUrls();
+  });
+  await expect.poll(opened).toEqual(['http://e.io']);
 });
