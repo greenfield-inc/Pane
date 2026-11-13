@@ -2317,6 +2317,13 @@ export class TerminalPanelManager extends EventEmitter {
     return this.terminals.get(panelId)?.lastOutputAt?.toISOString();
   }
 
+  /** When any terminal last printed, in ms since the epoch; 0 when none has. */
+  latestOutputAt(): number {
+    let latest = 0;
+    for (const terminal of this.terminals.values()) latest = Math.max(latest, terminal.lastOutputAt?.getTime() ?? 0);
+    return latest;
+  }
+
   /** Viewport text with ghost cells (dim or placeholder grey) blanked, so placeholder hints do not read as typed input. */
   getInputScreenText(panelId: string): string | undefined {
     return this.terminals.get(panelId)?.screenEmulator?.state.inputScreenText;
