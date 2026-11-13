@@ -5210,7 +5210,7 @@ function printPaneArchiveBulkResult(result: PaneArchiveBulkResult): void {
 }
 
 function describeScratch(scratch: PaneScratch): string {
-  const size = `${(scratch.bytes / 1_048_576).toFixed(1)} MB`;
+  const size = scratch.bytes < 104_858 ? `${Math.ceil(scratch.bytes / 1024)} KB` : `${(scratch.bytes / 1_048_576).toFixed(1)} MB`;
   return scratch.deletedAt
     ? `Keeps the scratch folder ${scratch.path} (${size}) until ${scratch.deletedAt.slice(0, 10)}, then deletes it, keeping its agent logs.`
     : `Deletes the scratch folder ${scratch.path} (${size}).`;

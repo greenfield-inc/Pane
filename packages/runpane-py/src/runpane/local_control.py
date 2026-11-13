@@ -2859,13 +2859,14 @@ def print_pane_archive_bulk_result(result: Dict[str, Any]) -> None:
 
 
 def describe_scratch(scratch: Dict[str, Any]) -> str:
-    megabytes = (scratch.get("bytes") or 0) / 1_048_576
+    size_bytes = scratch.get("bytes") or 0
+    size = f"{-(-size_bytes // 1024)} KB" if size_bytes < 104_858 else f"{size_bytes / 1_048_576:.1f} MB"
     if scratch.get("deletedAt"):
         return (
-            f"Keeps the scratch folder {scratch.get('path')} ({megabytes:.1f} MB) until "
+            f"Keeps the scratch folder {scratch.get('path')} ({size}) until "
             f"{str(scratch['deletedAt'])[:10]}, then deletes it, keeping its agent logs."
         )
-    return f"Deletes the scratch folder {scratch.get('path')} ({megabytes:.1f} MB)."
+    return f"Deletes the scratch folder {scratch.get('path')} ({size})."
 
 
 def print_archive_skip_reason(safety_check: Dict[str, Any], file: Any = None) -> None:
