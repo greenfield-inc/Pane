@@ -194,6 +194,11 @@ export class PaneWorkspaceHostController {
     return this.eventSink;
   }
 
+  /** Whether a connected event stream receives `channel`. */
+  hasEventSubscriber(channel: string): boolean {
+    return this.server?.hasEventSubscriber(channel) ?? false;
+  }
+
   getStatus(): WorkspaceHostStatus {
     return this.status;
   }

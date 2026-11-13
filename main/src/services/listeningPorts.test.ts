@@ -256,4 +256,25 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
       monitor.stop();
     }
   });
+
+  it('while every terminal is quiet, finds a port opened elsewhere a minute after the last read only while watched', async () => {
+    let watched = false;
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], lastOutputAt: () => 0, watched: () => watched });
+    const listed = (port: number) => monitor.snapshot().ports.some(entry => entry.port === port);
+    monitor.start();
+    try {
+      await monitor.refresh();
+      const { port } = await startListener(HTTP_SERVER);
+      // Polls still run every 2 s; only the clock jumps past the minute.
+      vi.setSystemTime(Date.now() + 2 * 60_000);
+      await new Promise(resolve => setTimeout(resolve, 5_000));
+      expect(listed(port)).toBe(false);
+
+      watched = true;
+      await vi.waitFor(() => expect(listed(port)).toBe(true), { timeout: 10_000, interval: 200 });
+    } finally {
+      monitor.stop();
+      vi.useRealTimers();
+    }
+  });
 });
