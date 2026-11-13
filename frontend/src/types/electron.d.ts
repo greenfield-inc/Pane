@@ -217,6 +217,11 @@ interface ElectronAPI {
     switchSession(sessionId: string, panelIds: string[]): Promise<import('../../../shared/types/chatTab').SessionChatSwitchResult>;
     keys(): Promise<import('../../../shared/types/chatTab').ChatTabKeyStatus>;
     setKey(agent: string, key: string | null): Promise<import('../../../shared/types/chatTab').ChatTabKeyStatus>;
+    /** Settings > Agents: the ACP Registry's agents; `refresh` reads the index again instead of the cached copy. */
+    registry(refresh?: boolean): Promise<import('../../../shared/types/agentRegistry').RegistryAgentList>;
+    /** Installs the registry's current version. A binary with no checksum is refused (AGENT_REGISTRY_UNVERIFIED) until `allowUnverified`. */
+    installAgent(id: string, options?: { allowUnverified?: boolean }): Promise<import('../../../shared/types/agentRegistry').RegistryAgentList>;
+    removeAgent(id: string): Promise<import('../../../shared/types/agentRegistry').RegistryAgentList>;
   };
 
   paneChat: {

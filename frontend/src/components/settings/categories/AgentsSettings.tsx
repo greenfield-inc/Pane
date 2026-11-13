@@ -1,12 +1,19 @@
 import { useEffect } from 'react';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Loader2 } from 'lucide-react';
 import type { ChatAgentCapabilities, ChatAgentEntry } from '../../../../../shared/types/chatTab';
+import type { RegistryAgent } from '../../../../../shared/types/agentRegistry';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { settingDomId } from '../catalog';
 import { agentIcon } from '../../ui/brandIconRegistry';
 import { refreshChatAgents, useChatAgentsStore } from '../../../stores/chatAgentsStore';
 import { isChatTabsEnabled, useConfigStore } from '../../../stores/configStore';
+import {
+  cancelUnverifiedInstall, installRegistryAgent, refreshAgentRegistry, removeRegistryAgent, useAgentRegistryStore,
+  type AgentRegistryState,
+} from '../../../stores/agentRegistryStore';
+import { Button } from '../../ui/Button';
+import { ConfirmDialog } from '../../ConfirmDialog';
 
 const CAPABILITY_LABELS: ReadonlyArray<[keyof ChatAgentCapabilities, string]> = [
   ['reopen', 'Reopens chats'],
@@ -21,6 +28,12 @@ const FULL_ACCESS_LABELS = {
 
 function agentLabels(entry: ChatAgentEntry): string[] {
   return [...CAPABILITY_LABELS.filter(([key]) => entry.capabilities?.[key]).map(([, label]) => label), FULL_ACCESS_LABELS[entry.fullAccess]];
+}
+
+function LabelList({ name, labels }: { name: string; labels: readonly string[] }) {
+  return <ul aria-label={`What ${name} supports`} className="flex flex-wrap gap-1.5 pl-6">
+    {labels.map(label => <li key={label} className="rounded-full border border-border-secondary bg-surface-secondary px-2 py-0.5 text-xs text-text-secondary">{label}</li>)}
+  </ul>;
 }
 
 function InstallLink({ url }: { url: string }) {
@@ -38,19 +51,96 @@ export function AgentList({ agents }: { agents: readonly ChatAgentEntry[] }) {
       label={entry.label}
       description={entry.description}
       leading={<span className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center text-text-secondary">{agentIcon(entry, 'h-4 w-4')}</span>}
-      details={<ul aria-label={`What ${entry.label} supports`} className="flex flex-wrap gap-1.5 pl-6">
-        {agentLabels(entry).map(label => <li key={label} className="rounded-full border border-border-secondary bg-surface-secondary px-2 py-0.5 text-xs text-text-secondary">{label}</li>)}
-      </ul>}
+      details={<LabelList name={entry.label} labels={agentLabels(entry)} />}
     >
       {entry.installed
         ? entry.version && <span className="text-xs text-text-tertiary">Version {entry.version}</span>
-        // The ACP Registry's one-click install goes here.
         : <span className="flex items-center gap-3 text-xs">
           <span className="text-text-tertiary">Not installed</span>
           {entry.installUrl && <InstallLink url={entry.installUrl} />}
         </span>}
     </SettingRow>)}
   </div>;
+}
+
+function registryLabels(agent: RegistryAgent): string[] {
+  if (agent.kind === 'npx') return ['Runs on Node.js'];
+  return agent.verified ? [] : ['No checksum'];
+}
+
+/** Install or Remove; its spinner takes the label's place in the same box, so the row never moves. */
+function RowAction({ label, busyLabel, busy, disabled, onClick }: { label: string; busyLabel: string; busy: boolean; disabled: boolean; onClick: () => void }) {
+  return <Button type="button" size="sm" variant="secondary" className="w-20" disabled={disabled} aria-busy={busy} onClick={onClick}>
+    <span className="flex h-5 items-center justify-center">
+      {busy ? <Loader2 className="h-4 w-4 animate-spin" role="img" aria-label={busyLabel} /> : label}
+    </span>
+  </Button>;
+}
+
+/** One row per agent the ACP Registry offers this computer, with Install, or its installed version and Remove. */
+export function RegistryAgentList({ state, onInstall, onRemove }: {
+  state: Pick<AgentRegistryState, 'list' | 'rows'>;
+  onInstall: (agent: RegistryAgent) => void;
+  onRemove: (agent: RegistryAgent) => void;
+}) {
+  const { list, rows } = state;
+  if (!list) return <p role="status" className="py-4 text-sm text-text-tertiary">Loading agents from the ACP Registry…</p>;
+  return <>
+    {list.error && <p role="status" className="mt-3 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-text-primary">
+      This list may be out of date. {list.error}
+    </p>}
+    <div className="divide-y divide-border-secondary">
+      {list.agents.map(agent => {
+        const row = rows[agent.id] ?? {};
+        const labels = registryLabels(agent);
+        return <SettingRow
+          key={agent.id}
+          label={agent.name}
+          description={agent.description}
+          leading={<span className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center text-text-secondary">{agentIcon(agent, 'h-4 w-4')}</span>}
+          details={(labels.length > 0 || row.error) && <div className="space-y-2">
+            {labels.length > 0 && <LabelList name={agent.name} labels={labels} />}
+            {row.error && <p role="alert" className="pl-6 text-xs text-status-error">{row.error}</p>}
+          </div>}
+        >
+          <span className="flex items-center gap-3 text-xs">
+            {agent.installedVersion
+              ? <>
+                <span className="text-text-tertiary">
+                  Version {agent.installedVersion}{agent.installedVersion !== agent.version && `, ${agent.version} on next launch`}
+                </span>
+                <RowAction label="Remove" busyLabel="Removing" busy={row.busy === 'remove'} disabled={row.busy !== undefined} onClick={() => onRemove(agent)} />
+              </>
+              : <>
+                <span className="text-text-tertiary">{agent.needs ? `Needs ${agent.needs}` : `Version ${agent.version}`}</span>
+                <RowAction label="Install" busyLabel="Installing" busy={row.busy === 'install'} disabled={row.busy !== undefined || agent.needs !== undefined} onClick={() => onInstall(agent)} />
+              </>}
+          </span>
+        </SettingRow>;
+      })}
+    </div>
+  </>;
+}
+
+/** Settings › Agents: the ACP Registry's agents, installed here with one click. */
+function RegistrySection() {
+  const client = window.electronAPI.chatTab;
+  const state = useAgentRegistryStore();
+  useEffect(() => { void refreshAgentRegistry(window.electronAPI.chatTab); }, []);
+  const pending = state.confirmUnverified;
+  return <SettingsSection title="More agents from the ACP Registry">
+    <RegistryAgentList state={state} onInstall={agent => void installRegistryAgent(client, agent)} onRemove={agent => void removeRegistryAgent(client, agent)} />
+    <p className="pt-2 text-xs text-text-tertiary">Installed agents move to the registry's new version on their next launch.</p>
+    <ConfirmDialog
+      isOpen={pending !== undefined}
+      onClose={cancelUnverifiedInstall}
+      onConfirm={() => { if (pending) void installRegistryAgent(client, pending, true); }}
+      title={`Install ${pending?.name ?? 'this agent'} without a checksum?`}
+      message="The ACP Registry publishes no checksum for this download, so Pane cannot check that the file is the one its makers released. Install it only if you trust its source."
+      confirmText="Install anyway"
+      variant="warning"
+    />
+  </SettingsSection>;
 }
 
 /** Settings › Agents: the agents this machine can open as chat tabs. */
@@ -66,6 +156,7 @@ export function AgentsSettings() {
         {error && <p role="alert" className="py-2 text-sm text-status-error">{error}</p>}
         {agents ? <AgentList agents={agents} /> : !error && <p role="status" className="py-4 text-sm text-text-tertiary">Loading agents…</p>}
       </SettingsSection>
+      <RegistrySection />
     </SettingsPage>
   );
 }
