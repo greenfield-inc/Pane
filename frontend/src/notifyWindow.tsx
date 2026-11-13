@@ -2,7 +2,9 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { NotifyWindow } from './components/notify/NotifyWindow';
 import './index.css';
+import { startCaretRest } from './services/caretRest';
 
+startCaretRest();
 const params = new URLSearchParams(window.location.search);
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -7,6 +7,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { BrowserFallback } from './components/BrowserFallback';
 import { stripIpcWrapper } from './utils/ipcErrorMessage';
 import './index.css';
+import { startCaretRest } from './services/caretRest';
 import './styles/markdown-preview.css';
 import './styles/notebook-preview.css';
 
@@ -47,6 +48,7 @@ function reportRendererFatal(payload: {
 export function mountDesktopRenderer(): void {
   if (mounted) return;
   mounted = true;
+  startCaretRest();
 
   // Global error handlers catch failures outside React error boundaries.
   window.addEventListener('unhandledrejection', (event) => {

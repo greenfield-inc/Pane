@@ -19,6 +19,11 @@ html.window-blurred *::after {
   transition: none !important;
 }
 
+/* The caret holds steady once nobody is typing (services/caretRest.ts). */
+html.caret-resting {
+  caret-animation: manual;
+}
+
 /* Ensure proper overflow handling */
 html, body, #root {
   height: 100%;
