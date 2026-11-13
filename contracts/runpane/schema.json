@@ -722,6 +722,10 @@
           "description": "A chat can load a conversation the agent's terminal started (Switch to chat).",
           "type": "boolean"
         },
+        "paneMcpHttp": {
+          "description": "Chat tabs pass Pane's MCP server to the agent over HTTP in session/new, and the agent uses it in place of a user-level server of the same name.",
+          "type": "boolean"
+        },
         "registryIds": {
           "description": "ACP Registry ids this agent covers; Settings > Agents hides them.",
           "type": "array",

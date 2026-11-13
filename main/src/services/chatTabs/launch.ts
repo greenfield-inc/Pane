@@ -10,6 +10,8 @@ import { getGitAttributionEnv } from '../../utils/attribution';
 import { getRuntimeConfigManager } from '../../core/runtime';
 import { noteContextPath } from '../noteFiles';
 import { withRunpaneBinOnPath } from '../runpaneShim';
+import { grantPaneMcp, PANE_MCP_SERVER_NAME } from '../paneMcpEndpoint';
+import type { McpServer } from '@agentclientprotocol/sdk';
 import { isStandardCustomResume, type CustomCommandResume } from '../../../../shared/types/customCommandResume';
 import { adapterEntry, checkAgentCli } from '../agentChat/adapterSetup';
 import { hostCommand, npmShimScript } from '../agentChat/hostCommand';
@@ -117,6 +119,8 @@ export class AgentChatLauncher implements ChatTabLauncher {
     // The CLI is checked in the folder and environment it will run in (#1236).
     await checkAgentCli(state.agent, executable, { cwd: state.cwd, env });
     const launch: ResolvedLaunch = { command: chatCommand(agent, chat, executable, state, env) };
+    const paneMcp = chat.paneMcpHttp ? paneMcpServer(panel, state, env) : undefined;
+    if (paneMcp) launch.mcpServers = [paneMcp];
     if (!chat.adapter) launch.ownCli = true;
     Object.assign(launch, fullAccessLaunch(chat, state.launch));
     const meta = sessionFolderMeta(state);
@@ -269,4 +273,15 @@ export function sessionFolderMeta(state: Pick<ChatPanelState, 'agent' | 'cwd' | 
   const namespace = agentConfig(state.agent)?.chat?.adapter?.sessionFolderSettingsMeta;
   if (!namespace || platform === 'win32' || !state.sessionFolder || path.resolve(state.sessionFolder) === path.resolve(state.cwd)) return undefined;
   return { [namespace]: { options: { settings: claudeSessionFolderSettings(state.sessionFolder) } } };
+}
+
+/**
+ * Pane's own MCP server over HTTP, under a token for this tab, for an agent that puts a session
+ * server in place of its user-level `pane` (`chat.paneMcpHttp`). Undefined when the endpoint isn't
+ * serving; the agent then keeps its stdio server.
+ */
+function paneMcpServer(panel: ToolPanel, state: ChatPanelState, env: ChatAgentEnv): McpServer | undefined {
+  const grant = grantPaneMcp({ panelId: panel.id, env: { ...env }, cwd: state.cwd });
+  if (!grant) return undefined;
+  return { type: 'http', name: PANE_MCP_SERVER_NAME, url: grant.url, headers: [{ name: 'Authorization', value: `Bearer ${grant.token}` }] };
 }

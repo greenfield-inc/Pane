@@ -52,6 +52,7 @@ export const AGENTS_CONFIG = {
           "dontAsk"
         ],
         "terminalConversationsLoad": true,
+        "paneMcpHttp": true,
         "registryIds": [
           "claude-acp"
         ]

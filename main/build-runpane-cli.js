@@ -1,4 +1,4 @@
-// Bundles the runpane CLI into one file that ships with Pane. At startup Pane
+// Bundles the runpane CLI into one file that ships with Pane, plus its MCP HTTP handler. At startup Pane
 // copies it to <PANE_DIR>/bin and puts a `runpane` shim first on terminal
 // PATH (see src/services/runpaneShim.ts), so agents always get the CLI that
 // matches this build instead of a global install.
@@ -8,9 +8,7 @@ const esbuild = require('esbuild');
 const { version } = require('../packages/runpane/package.json');
 const docsIndex = fs.readFileSync(path.join(__dirname, 'dist', 'runpane', 'dist', 'docs-index.json'), 'utf8');
 
-esbuild.buildSync({
-  entryPoints: [path.join(__dirname, '..', 'packages', 'runpane', 'src', 'cli.ts')],
-  outfile: path.join(__dirname, 'dist', 'runpane', 'runpane.cjs'),
+const shared = {
   bundle: true,
   platform: 'node',
   format: 'cjs',
@@ -20,9 +18,23 @@ esbuild.buildSync({
     'process.env.RUNPANE_BUNDLED_VERSION': JSON.stringify(version),
     'process.env.RUNPANE_BUNDLED_DOCS_INDEX': JSON.stringify(docsIndex),
   },
+  logLevel: 'warning',
+};
+
+esbuild.buildSync({
+  ...shared,
+  entryPoints: [path.join(__dirname, '..', 'packages', 'runpane', 'src', 'cli.ts')],
+  outfile: path.join(__dirname, 'dist', 'runpane', 'runpane.cjs'),
   // npm runpane reads this line to hand off to a newer Pane-managed CLI
   // (packages/runpane/src/managedCli.ts).
   banner: { js: `// runpane-version ${version}` },
-  logLevel: 'warning',
 });
 console.log(`Bundled runpane ${version} -> dist/runpane/runpane.cjs`);
+
+// Pane serves the same MCP tools over HTTP to the agents it starts (src/services/paneMcpEndpoint.ts).
+esbuild.buildSync({
+  ...shared,
+  entryPoints: [path.join(__dirname, '..', 'packages', 'runpane', 'src', 'mcpHttp.ts')],
+  outfile: path.join(__dirname, 'dist', 'runpane', 'mcp-http.cjs'),
+});
+console.log('Bundled runpane MCP HTTP handler -> dist/runpane/mcp-http.cjs');

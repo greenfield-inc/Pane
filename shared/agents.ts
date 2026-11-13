@@ -19,6 +19,7 @@ export interface AgentChatConfig {
   fullAccess?: { mode?: string; args?: true };
   riskyModes?: readonly string[];
   terminalConversationsLoad: boolean;
+  paneMcpHttp?: boolean;
   legacyClients?: boolean;
   registryIds?: readonly string[];
 }

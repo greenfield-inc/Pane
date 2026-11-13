@@ -153,6 +153,7 @@ export const RUNPANE_CONTRACT = {
             "dontAsk"
           ],
           "terminalConversationsLoad": true,
+          "paneMcpHttp": true,
           "registryIds": [
             "claude-acp"
           ]

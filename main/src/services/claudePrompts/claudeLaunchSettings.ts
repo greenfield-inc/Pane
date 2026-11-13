@@ -7,7 +7,7 @@ import { boundary, decodeOptionalBoundary, type JsonObject, type JsonValue } fro
 /** A Claude Code settings object, as `--settings` takes it. */
 export type ClaudeSettings = JsonObject;
 
-const CLAUDE_EXECUTABLE = /(?:^|[\\/])claude(?:\.exe|\.cmd)?$/i;
+export const CLAUDE_EXECUTABLE = /(?:^|[\\/])claude(?:\.exe|\.cmd)?$/i;
 
 /**
  * The command with exactly one `--settings`, naming `file`, and the settings to write there:

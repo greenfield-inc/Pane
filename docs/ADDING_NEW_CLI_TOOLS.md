@@ -60,6 +60,7 @@ same ids. The schema is `$defs/agent` and `$defs/agentChat` in
 | `fullAccess` | `mode` (a session mode that never asks) or `args: true` (pass `terminal.fullAccessArgs` to the chat CLI); absent, Pane answers each approval with allow once |
 | `riskyModes` | Session modes in which the agent acts without asking; viewers mark them |
 | `terminalConversationsLoad` | A chat can load a conversation the agent's terminal started (Switch to chat) |
+| `paneMcpHttp` | Chat tabs pass Pane's MCP server over HTTP in `session/new`, and the agent uses it in place of its user-level `pane` server (measured per agent: Codex and Cursor keep theirs) |
 | `legacyClients` | Pane apps from before the agent catalog may show its chat tabs; leave it off for a new agent |
 | `registryIds` | ACP Registry ids this entry covers |
 

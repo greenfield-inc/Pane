@@ -1,4 +1,5 @@
 import path from 'path';
+import { revokePaneMcp } from '../paneMcpEndpoint';
 import { PaneError } from '../../../../shared/paneError';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { getPaneEventSink } from '../../core/runtime';
@@ -110,7 +111,7 @@ export function getChatTabManager(): ChatTabManager {
     // update holds and keep-awake follow chat tabs too.
     onStatus: event => terminalPanelManager.emit('agent-status', event),
     onView: view => notifyBridge?.observe(view),
-    onClosed: panelId => notifyBridge?.forget(panelId),
+    onClosed: panelId => { notifyBridge?.forget(panelId); revokePaneMcp(panelId); },
     openConversations,
     agentName: chatAgentName,
     onInitialized: (agent, response) => {

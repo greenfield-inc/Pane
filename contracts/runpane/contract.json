@@ -151,6 +151,7 @@
             "dontAsk"
           ],
           "terminalConversationsLoad": true,
+          "paneMcpHttp": true,
           "registryIds": [
             "claude-acp"
           ]

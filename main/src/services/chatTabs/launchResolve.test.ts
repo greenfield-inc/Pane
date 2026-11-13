@@ -7,6 +7,7 @@ import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../../core/runtime';
 import { ConfigManager } from '../configManager';
 
+import { PaneMcpEndpoint, setPaneMcpEndpoint } from '../paneMcpEndpoint';
 import { AgentChatLauncher } from './launch';
 
 const bin = mkdtempSync(path.join(tmpdir(), 'pane-chat-launch-bin-'));
@@ -49,6 +50,20 @@ describe.skipIf(process.platform === 'win32')('how a chat tab starts each kind o
     expect(full.command.args[0]).toMatch(/claude-agent-acp[/\\]dist[/\\]index\.js$/);
     expect(full.command.env).toMatchObject({ ELECTRON_RUN_AS_NODE: '1', CLAUDE_CODE_EXECUTABLE: path.join(bin, 'claude') });
     expect(full.mode).toBe('bypassPermissions');
+  });
+
+  it("gives Claude Pane's tools over HTTP under the tab's own token, and leaves Cursor on its stdio server (D-32)", async () => {
+    const endpoint = new PaneMcpEndpoint({ load: () => import('../../../../packages/runpane/src/mcpHttp'), cli: () => undefined, settings: () => ({ enabled: true }) });
+    await endpoint.start();
+    setPaneMcpEndpoint(endpoint);
+    try {
+      const claude = await resolve('claude', { kind: 'agent' });
+      expect(claude.mcpServers).toEqual([{ type: 'http', name: 'pane', url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/), headers: [{ name: 'Authorization', value: expect.stringMatching(/^Bearer \S{40,}$/) }] }]);
+      expect((await resolve('cursor', { kind: 'agent' })).mcpServers).toBeUndefined();
+    } finally {
+      setPaneMcpEndpoint(undefined);
+      await endpoint.stop();
+    }
   });
 
   it('refuses an agent the host has neither configured nor installed, saying where to install agents', async () => {

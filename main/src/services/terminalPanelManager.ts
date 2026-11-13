@@ -135,6 +135,7 @@ import { resolveChosenSessionLaunch } from './agents/chosenSessionLaunch';
 import { agentConfig, agentLabel } from '../../../shared/agents';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import { forgetClaudePrompts, withClaudePromptHooks } from './claudePrompts';
+import { grantPaneMcp, PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV, revokePaneMcp, withPaneMcpConfig } from './paneMcpEndpoint';
 import {
   bracketedPaste,
   canLaunchWithPromptFile,
@@ -530,6 +531,7 @@ export class TerminalPanelManager extends EventEmitter {
     const state = resolution.customState;
     if (resolution.isCliCommand && state.agentType === 'claude' && !isWSL && !state.sshHost && state.launchMode !== 'wrapped' && !state.preserveLaunchCommand) {
       resolution.commandToRun = withClaudePromptHooks(panelId, resolution.commandToRun, state.cwd ?? process.cwd(), shellType) ?? resolution.commandToRun;
+      resolution.commandToRun = withPaneMcpConfig(resolution.commandToRun, shellType);
     }
     return resolution;
   }
@@ -2042,6 +2044,10 @@ export class TerminalPanelManager extends EventEmitter {
     const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);
     shellArgs = launch.args;
     const spawnEnv = launch.env;
+    // Pane's MCP endpoint knows this tab by the token alone; tools run with the tab's environment and folder.
+    // WSL and SSH agents can't reach this machine's loopback, so they keep `runpane mcp` over stdio.
+    const paneMcp = isWSL || panelCustomState.sshHost ? undefined : grantPaneMcp({ panelId: panel.id, env: { ...spawnEnv }, cwd });
+    if (paneMcp) Object.assign(spawnEnv, { [PANE_MCP_URL_ENV]: paneMcp.url, [PANE_MCP_TOKEN_ENV]: paneMcp.token });
     existingState = terminalCustomState(panel.state);
 
     // Read the setting once per spawn so we don't scatter config reads.
@@ -3243,6 +3249,7 @@ export class TerminalPanelManager extends EventEmitter {
   private async finishDestroyTerminal(terminal: TerminalProcess, saveState: boolean): Promise<void> {
     const panelId = terminal.panelId;
     forgetClaudePrompts(panelId);
+    revokePaneMcp(panelId);
     // Start the snapshot alongside persistence, but finish it before kill: once
     // the shell exits its surviving children may no longer be discoverable, and
     // the PTY's terminal name only identifies its session while Pane holds it.
