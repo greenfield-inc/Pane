@@ -113,12 +113,18 @@ const QUEUE_PREVIEW = 500;
 export class ChatTabManager {
   private readonly tabs = new Map<string, Tab>();
   private lastGeneration = 0;
+  private lastUpdateAt = 0;
   private readonly bodies: QueuedBodies;
   private readonly name: (agent: string) => string;
 
   constructor(private readonly options: ChatTabManagerOptions) {
     this.name = options.agentName ?? agentLabel;
     this.bodies = new QueuedBodies(panelId => path.join(options.spoolDirectory, safeName(panelId), 'queue'));
+  }
+
+  /** When any chat agent last sent an update, in ms since the epoch; 0 when none has. */
+  latestOutputAt(): number {
+    return this.lastUpdateAt;
   }
 
   /** The tab's view. Opening a tab that is not running starts it, unless it stopped for a reason. */
@@ -498,6 +504,7 @@ export class ChatTabManager {
       command: launch.command,
       generation,
       onUpdate: update => {
+        this.lastUpdateAt = Date.now();
         let event: ChatTabEvent | undefined;
         try { event = transcript.accept(update); }
         catch (error) {

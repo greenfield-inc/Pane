@@ -431,14 +431,16 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     testThresholdMs: Number(process.env.PANE_AUTO_PAUSE_TEST_THRESHOLD_MS) || undefined,
   });
   configManager.on('config-updated', () => autoPauser.sync());
+  // Terminal panels and agent CLIs (Claude, Codex) both run PTYs inside a Pane.
+  const ptyManagers = () => [terminalPanelManager, ...CliToolRegistry.getInstance().getAllManagers()];
   const listeningPortMonitor = createListeningPortMonitor({
-    // Terminal panels and agent CLIs (Claude, Codex) both run PTYs inside a Pane.
-    terminalPanes: () => [terminalPanelManager, ...CliToolRegistry.getInstance().getAllManagers()].flatMap(manager =>
+    terminalPanes: () => ptyManagers().flatMap(manager =>
       [...manager.getSessionPids()].flatMap(([sessionId, pids]) => {
         const paneName = sessionManager.getSession(sessionId)?.name ?? '';
         return pids.map(pid => ({ pid, sessionId, paneName }));
       })),
-    lastTerminalOutputAt: () => Math.max(...[terminalPanelManager, ...CliToolRegistry.getInstance().getAllManagers()].map(manager => manager.latestOutputAt())),
+    // Chat tab agents talk over stdio, not a PTY; their updates count as output too.
+    lastOutputAt: () => Math.max(getChatTabManager().latestOutputAt(), ...ptyManagers().map(manager => manager.latestOutputAt())),
     onChange: snapshot => {
       latestPorts = snapshot;
       publishPorts();

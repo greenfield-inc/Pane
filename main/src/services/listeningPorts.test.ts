@@ -216,8 +216,9 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
   });
 
   it('while every terminal is quiet, finds a new port only once a terminal prints again', async () => {
-    let lastOutputAt = 0;
-    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], lastTerminalOutputAt: () => lastOutputAt });
+    // A terminal records when it last printed, as Pane's terminal and agent managers do.
+    const terminal = { printedAt: 0, print() { this.printedAt = Date.now(); } };
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], lastOutputAt: () => terminal.printedAt });
     const listed = (port: number) => monitor.snapshot().ports.some(entry => entry.port === port);
     monitor.start();
     try {
@@ -226,7 +227,7 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
       await new Promise(resolve => setTimeout(resolve, 5_000));
       expect(listed(port)).toBe(false);
 
-      lastOutputAt = Date.now();
+      terminal.print();
       await vi.waitFor(() => expect(listed(port)).toBe(true), { timeout: 10_000, interval: 200 });
     } finally {
       monitor.stop();
