@@ -3,7 +3,7 @@ import { gunzipSync } from 'node:zlib';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import type { FirstRunAgent, FoundRepo, HostRepos, WslRepos } from '../shared/types/onboarding';
 import type { ImportSession, SessionImportScan } from '../shared/types/sessionImport';
-import type { OrchestrationSessionCreateInput } from '../shared/types/orchestrationSession';
+import type { OrchestrationSessionCreateInput, OrchestrationSessionSelector } from '../shared/types/orchestrationSession';
 import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 
 // The renderer's Content-Security-Policy only lets analytics reach the default host.
@@ -461,23 +461,47 @@ test("Home's \"Start a Session\" reopens the first-run screen, and Yes asks for 
   await expect(await openFirstRun(page, { done: true, scan: FOUND_SESSIONS }, { initialProjects: [] })).toBeVisible();
   await page.evaluate(() => {
     const requests: OrchestrationSessionCreateInput[] = [];
-    Object.defineProperty(window, '__createdSessions', { configurable: true, value: requests });
+    const agentChanges: string[] = [];
+    Object.defineProperty(window, '__homeFirstRun', { configurable: true, value: { requests, agentChanges } });
+    window.electronAPI.paneChat.setAgent = async (agent: string) => { agentChanges.push(`pane-chat:${agent}`); return { success: true }; };
     Object.assign(window.electronAPI, {
       orchestrationSessions: {
-        setAgent: async () => ({ success: true }),
-        create: async (input: OrchestrationSessionCreateInput) => { requests.push(input); return { success: false, error: 'disk full' }; },
+        setAgent: async (_selector: OrchestrationSessionSelector, agent: string) => { agentChanges.push(`session:${agent}`); return { success: true }; },
+        // The first create never answers, as if Pane were still handing off; the next one fails.
+        create: (input: OrchestrationSessionCreateInput) => {
+          requests.push(input);
+          return requests.length === 1 ? new Promise(() => undefined) : Promise.resolve({ success: false, error: 'disk full' });
+        },
       },
     });
   });
-  await page.getByRole('button', { name: 'Start a Session', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Which agent do you use?' }).getByRole('button', { name: 'Codex' }).click();
-  const offer = page.getByRole('dialog', { name: 'Bring your 4 sessions into Pane?' });
-  await offer.getByRole('button', { name: 'Yes' }).click();
-  await expect(offer.getByText("Pane couldn't start the Session that brings your work in (disk full). Try again.")).toBeVisible();
-  // SAFETY: the evaluate above installed __createdSessions.
-  const [request] = await page.evaluate(() => (window as Window & { __createdSessions: Array<{ name: string; agent: string; openingPrompt: string }> }).__createdSessions);
-  expect(request).toMatchObject({ name: 'Bring in your work', agent: 'codex' });
-  expect(request.openingPrompt).toMatch(/^Pane sent this once, when this Session started: on Pane's first-run screen the person said Yes/);
-  expect(request.openingPrompt).toContain('Follow the Migrate to Pane skill (`migrate-to-pane`) now, on its first-run path');
+  const reopen = async (agent: string) => {
+    await page.getByRole('button', { name: 'Start a Session', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Which agent do you use?' }).getByRole('button', { name: agent }).click();
+    return page.getByRole('dialog', { name: 'Bring your 4 sessions into Pane?' });
+  };
+  // SAFETY: the evaluate above installed __homeFirstRun.
+  const recorded = () => page.evaluate(() => (window as Window & { __homeFirstRun: { requests: Array<{ name: string; agent: string; openingPrompt: string }>; agentChanges: string[] } }).__homeFirstRun);
+
+  const first = await reopen('Codex');
+  await first.getByRole('button', { name: 'Yes' }).click();
+  await expect(first.getByRole('button', { name: 'Yes' })).toBeDisabled();
+  // Reopened from Home, the screen can always be closed.
+  await page.keyboard.press('Escape');
+  await expect(first).toBeHidden();
+
+  // A second reopen in the same run starts fresh instead of staying busy.
+  const second = await reopen('Claude Code');
+  await expect(second.getByRole('button', { name: 'Yes' })).toBeEnabled();
+  await second.getByRole('button', { name: 'Yes' }).click();
+  await expect(second.getByText("Pane couldn't start the Session that brings your work in (disk full). Try again.")).toBeVisible();
+
+  const { requests, agentChanges } = await recorded();
+  expect(requests.map(request => request.agent)).toEqual(['codex', 'claude']);
+  expect(requests[1]).toMatchObject({ name: 'Bring in your work' });
+  expect(requests[1].openingPrompt).toMatch(/^Pane sent this once, when this Session started: on Pane's first-run screen the person said Yes/);
+  expect(requests[1].openingPrompt).toContain('Follow the Migrate to Pane skill (`migrate-to-pane`) now, on its first-run path');
+  // The pick is only for the new Session, and onboarding's saved answer stays as it was.
+  expect(agentChanges).toEqual([]);
   expect(await preferences(page)).not.toHaveProperty('onboarding_handoff');
 });

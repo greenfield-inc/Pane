@@ -352,13 +352,25 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   const titleRef = useRef<HTMLHeadingElement>(null);
   // Repos already added by an Open that partly failed, keyed by path, so the next Open still counts them.
   const openedRef = useRef(new Map<string, { repo: FoundRepo; projectId: number }>());
+  /** Analytics for this screen; a reopen from Home is tagged so it stays out of the first-run funnel. */
+  const track = (event: string, properties: AnalyticsProperties = {}) => capture(event, fromHome ? { ...properties, opened_from: 'home' } : properties);
 
   useEffect(() => {
     if (!isOpen) return;
     closedRef.current = false;
     openedRef.current.clear();
     let cancelled = false;
+    // Each opening starts fresh: a reopen from Home follows an earlier hand-off in the same run.
     setStep('agent');
+    setIsPicking(false);
+    setPickedAgent(null);
+    setBringIn(null);
+    setIsHandingOff(false);
+    setError(null);
+    setCheckedOverride(null);
+    setIsCloning(false);
+    setIsOpening(false);
+    setSample({ status: 'idle' });
     // Started now so step 2 rarely waits; a failed scan counts as nothing found.
     scanRef.current = API.sessionImport.scan().then(sessionsToBringIn, () => []);
 
@@ -371,8 +383,9 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
       if (cancelled) return;
       setEnv(nextEnv);
       const status = getEnvironmentStatus(nextEnv);
-      capture('onboarding_started', { gh_status_at_first_launch: status });
-      void recordFirstLaunchEnvironmentStatus(status);
+      track('onboarding_started', { gh_status_at_first_launch: status });
+      // Records what the first launch found; a reopen from Home is not a first launch.
+      if (!fromHome) void recordFirstLaunchEnvironmentStatus(status);
     });
 
     const findRepos = async () => {
@@ -424,7 +437,13 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
    * try again. Returns whether it handed off.
    */
   const handOff = async (handoff: OnboardingHandoff): Promise<boolean> => {
-    if (fromHome && handoff === 'migrate') return startMigrateSession();
+    if (fromHome) {
+      // Reopened from Home: onboarding is already done and its answer stays as it was.
+      if (handoff === 'migrate') return startMigrateSession();
+      closedRef.current = true;
+      await openOnboardingSession(navigateToPaneChat);
+      return true;
+    }
     try {
       await setPreference(ONBOARDING_HANDOFF_PREFERENCE, handoff);
     } catch (cause) {
@@ -456,7 +475,6 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
       return false;
     }
     closedRef.current = true;
-    await markOnboardingComplete();
     void useSessionStore.getState().setActiveSession(null);
     navigateToPaneChat();
     return true;
@@ -464,7 +482,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
 
   const complete = async (properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }): Promise<boolean> => {
     if (!(await handOff(properties.entry === 'migrate_sessions' ? 'migrate' : 'project'))) return false;
-    capture('onboarding_completed', properties);
+    track('onboarding_completed', properties);
     onClose();
     return true;
   };
@@ -477,20 +495,23 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   const pickAgent = async (agent: PaneChatAgent) => {
     setIsPicking(true);
     setError(null);
-    try {
-      const saved = await API.paneChat.setAgent(agent);
-      if (!saved.success) throw new Error(saved.error);
-      // Runtimes without Sessions run the legacy chat, which the call above already switched.
-      if (window.electronAPI.orchestrationSessions) {
-        const switched = await API.orchestrationSessions.setAgent({ sessionId: LEGACY_ORCHESTRATION_SESSION_ID }, agent);
-        if (!switched.success) throw new Error(switched.error);
+    // From Home the pick is only for the new Session; the Onboarding Session keeps its agent.
+    if (!fromHome) {
+      try {
+        const saved = await API.paneChat.setAgent(agent);
+        if (!saved.success) throw new Error(saved.error);
+        // Runtimes without Sessions run the legacy chat, which the call above already switched.
+        if (window.electronAPI.orchestrationSessions) {
+          const switched = await API.orchestrationSessions.setAgent({ sessionId: LEGACY_ORCHESTRATION_SESSION_ID }, agent);
+          if (!switched.success) throw new Error(switched.error);
+        }
+      } catch (cause) {
+        setError(`Couldn't switch to that agent: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not save it')}. Pick it again, or change it later in Settings.`);
+        setIsPicking(false);
+        return;
       }
-    } catch (cause) {
-      setError(`Couldn't switch to that agent: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not save it')}. Pick it again, or change it later in Settings.`);
-      setIsPicking(false);
-      return;
     }
-    capture('onboarding_agent_picked', { agent });
+    track('onboarding_agent_picked', { agent });
     setPickedAgent(agent);
     setIsPicking(false);
     setStep('sessions');
@@ -511,7 +532,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   };
 
   const declineSessions = () => {
-    capture('onboarding_sessions_declined', { session_count: bringIn?.length ?? 0 });
+    track('onboarding_sessions_declined', { session_count: bringIn?.length ?? 0 });
     setStep('project');
   };
 
@@ -623,7 +644,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   };
 
   const handleSkip = async () => {
-    capture('onboarding_skipped', { step: env ? getEnvironmentStatus(env) : 'detecting' });
+    track('onboarding_skipped', { step: env ? getEnvironmentStatus(env) : 'detecting' });
     setError(null);
     if (await handOff('project')) onClose();
   };
@@ -659,12 +680,12 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
       <Modal
         ariaLabel={title}
         isOpen={isOpen}
-        onClose={() => {}}
+        onClose={fromHome ? onClose : () => {}}
         size="md"
         initialFocusRef={titleRef}
         closeOnOverlayClick={false}
-        closeOnEscape={false}
-        showCloseButton={false}
+        closeOnEscape={fromHome}
+        showCloseButton={fromHome}
       >
         <div className="p-6 border-b border-border-primary">
           <div className="flex items-center">
@@ -699,12 +720,12 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
     <Modal
       ariaLabel="Open your project"
       isOpen={isOpen}
-      onClose={() => {}}
+      onClose={fromHome ? onClose : () => {}}
       size={wslDistro ? 'lg' : 'md'}
       initialFocusRef={titleRef}
       closeOnOverlayClick={false}
-      closeOnEscape={false}
-      showCloseButton={false}
+      closeOnEscape={fromHome}
+      showCloseButton={fromHome}
     >
       <div className="p-6 border-b border-border-primary">
         <div className="flex items-center">
