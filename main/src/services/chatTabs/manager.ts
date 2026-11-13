@@ -175,9 +175,15 @@ export class ChatTabManager {
 
   runningPanelIds(): string[] { return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() ? [panelId] : []); }
   processId(panelId: string): number | undefined { return this.tabs.get(panelId)?.runtime?.pid; }
-  /** Adapter process IDs of a Pane's running chat tabs, for archive cleanup. */
-  sessionPids(sessionId: string): number[] {
-    return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.pid && this.options.store.panel(panelId)?.sessionId === sessionId ? [tab.runtime.pid] : []);
+  /** Pane ID → adapter process IDs of its running chat tabs, for archive cleanup and port ownership. */
+  getSessionPids(): Map<string, number[]> {
+    const result = new Map<string, number[]>();
+    for (const [panelId, tab] of this.tabs) {
+      const sessionId = this.options.store.panel(panelId)?.sessionId;
+      if (!tab.runtime?.pid || !sessionId) continue;
+      result.set(sessionId, [...(result.get(sessionId) ?? []), tab.runtime.pid]);
+    }
+    return result;
   }
 
   /** Starts the tab's agent once; concurrent callers share the same start. */

@@ -9,7 +9,7 @@ import {
 import { cn } from '../../../utils/cn';
 
 const GROUP_LABELS = {
-  'pane-terminal': 'From Pane terminals',
+  'pane-terminal': 'From Panes',
   other: 'Other apps',
   system: 'System',
   pane: 'Pane',

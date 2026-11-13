@@ -3,7 +3,7 @@ import type { BoundarySchema } from '../validation/boundaryDecoder';
 
 /**
  * Who opened a listening port, in the order the Ports list shows the groups:
- * a process started in a Pane terminal, any other app, an OS service, or Pane
+ * a process started in a Pane (a terminal or agent tab), any other app, an OS service, or Pane
  * itself.
  */
 export type ListeningPortGroup = 'pane-terminal' | 'other' | 'system' | 'pane';
@@ -23,7 +23,7 @@ export interface ListeningPort {
   process: string;
   group: ListeningPortGroup;
   kind: ListeningPortKind;
-  /** The Pane whose terminal started the process, for `pane-terminal` ports. */
+  /** The Pane whose terminal or agent tab started the process, for `pane-terminal` ports. */
   sessionId?: string;
   paneName?: string;
   /** The HTTPS address phones open this web port at; absent until its Serve handler exists. */
