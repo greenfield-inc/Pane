@@ -17,7 +17,7 @@ type ToolResult = {
 
 const DEFAULT_TOOLSETS = ['core'];
 // Every agent runs its own long-lived server, so it trades a little GC time for a tighter heap:
-// 42 MB settled footprint becomes 28 MB, with the same startup and tool-call latency.
+// 42 MB settled footprint becomes 28 MB, tool-call latency is unchanged, startup is ~20 ms slower.
 const SERVER_V8_FLAGS = '--optimize-for-size';
 const DOCS_URI_PREFIX = 'runpane-docs:';
 
