@@ -17453,7 +17453,7 @@
   "agentContext": {
     "brief": {
       "title": "Pane agent context",
-      "summary": "Pane runs coding agents in parallel git worktrees. A Pane is a visible workspace for one feature or PR, with its own Pane-managed worktree and branch; a panel is a terminal tab in a Pane and shares its worktree; an agent is a CLI process running in a panel.",
+      "summary": "Pane runs coding agents in parallel git worktrees. A Pane is a visible workspace for one feature or PR, with its own Pane-managed git worktree and branch; a panel is a terminal tab in a Pane and shares its worktree; an agent is a CLI process running in a panel.",
       "rules": [
         "Start with `runpane doctor --json` to understand wrapper, platform, daemon reachability, and the next safe commands before mutating Pane state.",
         "In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`.",
