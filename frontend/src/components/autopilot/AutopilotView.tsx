@@ -67,9 +67,9 @@ function WalkBar({ snapshot }: { snapshot: AutopilotSnapshot }) {
       <span className={cn('min-w-0 truncate font-medium', sentinelOn ? 'text-autopilot-on-tint' : 'text-text-primary')} data-testid="autopilot-walk-status">{status}</span>
       <div className="scrollbar-thin flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
         {sessions.map((session) => (
-          <span key={session.id} data-testid="autopilot-walk-session"
-            className={cn('inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-px', session.id === snapshot.walk.sessionId ? 'bg-autopilot-subtle text-autopilot-on-tint' : 'bg-surface-tertiary text-text-secondary')}>
-            {session.name}<span className="tabular-nums opacity-80">{session.waiting}</span>
+          <span key={session.id} data-testid="autopilot-walk-session" title={session.name}
+            className={cn('inline-flex min-w-16 max-w-[50%] items-center gap-1 rounded-full px-2 py-px', session.id === snapshot.walk.sessionId ? 'bg-autopilot-subtle text-autopilot-on-tint' : 'bg-surface-tertiary text-text-secondary')}>
+            <span className="min-w-0 truncate">{session.name}</span><span className="shrink-0 tabular-nums opacity-80">{session.waiting}</span>
           </span>
         ))}
       </div>
@@ -95,7 +95,8 @@ function StartCard({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending
     );
   }
   return (
-    <div className="mx-auto mt-4 w-full max-w-[560px] px-6" data-testid="autopilot-start">
+    // Lines up with the composer: the chat's column width and gutters.
+    <div className="mx-auto w-full max-w-[var(--thread-max-width)] shrink-0 p-4" data-testid="autopilot-start">
       <div className="rounded-2xl bg-surface-primary p-5 shadow-card ring-1 ring-autopilot-border">
         <div className="flex items-center gap-2 text-[15px] font-semibold text-text-primary">
           <Navigation className="h-4 w-4 text-autopilot" aria-hidden="true" />
@@ -288,6 +289,7 @@ export function AutopilotView() {
   // Turning Autopilot off while it is open leaves for the Sessions home.
   useEffect(() => { if (snapshot && !snapshot.enabled) navigateToSessions(); }, [snapshot, navigateToSessions]);
   if (!snapshot) return <div className="flex flex-1 items-center justify-center bg-bg-primary text-[13px] text-text-tertiary">Loading Autopilot…</div>;
+  const fresh = snapshot.state === 'stopped' && snapshot.stack.entries.length === 0;
 
   return (
     <div ref={viewBox.ref} className="autopilot-view flex min-h-0 min-w-0 flex-1 bg-bg-primary" data-testid="autopilot-view" data-state={snapshot.state}>
@@ -302,27 +304,31 @@ export function AutopilotView() {
         <Header snapshot={snapshot} pending={pending} />
         <WalkBar snapshot={snapshot} />
         <AutopilotReach snapshot={snapshot} />
-        {/* Start follows Autopilot's state, not the chat's: after a restart the agent reloads its conversation but waits for Start. */}
-        {snapshot.panelId && snapshot.state === 'stopped' && <StartCard snapshot={snapshot} pending={pending} />}
-        <div className="min-h-0 flex-1">
-          {snapshot.panelId ? (
-            <Suspense fallback={null}>
-              <ChatTabPanel
-                clearable={false}
-                key={snapshot.panelId}
-                panelId={snapshot.panelId}
-                client={window.electronAPI.chatTab}
-                machine={machine}
-                placeholder="Message Autopilot…"
-                rendering={RENDERING}
-                // Stopped on purpose (before Start): the Start card above stands in for the stopped notice.
-                stoppedNotice={<span hidden />}
-                dock={<CurrentDock snapshot={snapshot} />}
-                working={working}
-                actions={actions}
-              />
-            </Suspense>
-          ) : <StartCard snapshot={snapshot} pending={pending} />}
+        {/* The Start card sits on the chat's surface, not in a band of its own. Before the first
+            Start the status line has nothing to show but its "…", so it stays out until then. */}
+        <div className={cn('agent-chat flex min-h-0 flex-1 flex-col', fresh && '[&_.chat-statusline]:hidden')}>
+          {/* Start follows Autopilot's state, not the chat's: after a restart the agent reloads its conversation but waits for Start. */}
+          {snapshot.panelId && snapshot.state === 'stopped' && <StartCard snapshot={snapshot} pending={pending} />}
+          <div className="min-h-0 flex-1">
+            {snapshot.panelId ? (
+              <Suspense fallback={null}>
+                <ChatTabPanel
+                  clearable={false}
+                  key={snapshot.panelId}
+                  panelId={snapshot.panelId}
+                  client={window.electronAPI.chatTab}
+                  machine={machine}
+                  placeholder="Message Autopilot…"
+                  rendering={RENDERING}
+                  // Stopped on purpose (before Start): the Start card above stands in for the stopped notice.
+                  stoppedNotice={<span hidden />}
+                  dock={<CurrentDock snapshot={snapshot} />}
+                  working={working}
+                  actions={actions}
+                />
+              </Suspense>
+            ) : <StartCard snapshot={snapshot} pending={pending} />}
+          </div>
         </div>
       </section>
       <StackWithApproval />
