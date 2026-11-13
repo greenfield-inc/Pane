@@ -28,7 +28,7 @@ function host(count: number) {
     onEvent: callback => { events.add(callback); return () => events.delete(callback); },
     onState: () => () => undefined,
     send: unused, receipt: unused, unqueue: unused, sendNow: unused, editQueued: unused, clear: unused, stopTask: unused, configure: unused, cancel: unused, permission: unused, answer: unused, restart: unused, signIn: unused,
-    conversations: unused, resume: unused, dismissBanner: unused,
+    conversations: unused, resume: unused, dismissBanner: unused, agents: unused,
   };
   /** Appends a message on the host; `deliver: false` loses the event on the way. */
   const append = (deliver = true) => {

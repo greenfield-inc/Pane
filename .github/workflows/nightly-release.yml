@@ -16,6 +16,10 @@ on:
         type: string
         required: true
         default: main
+      dry_run:
+        description: 'Build only; create no tag or prerelease'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -73,9 +77,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # One job per macOS arch, as in build.yml.
           - os: macos-latest
-            command: build:mac:ci
-            artifact_name: pane-macos
+            command: build:mac:arm64
+            artifact_name: pane-macos-arm64
+            artifact_path: |
+              dist-electron/*.dmg
+          - os: macos-latest
+            command: build:mac:x64
+            artifact_name: pane-macos-x64
             artifact_path: |
               dist-electron/*.dmg
           - os: ubuntu-latest
@@ -102,12 +112,14 @@ jobs:
 
       - uses: pnpm/action-setup@v6
 
+      # macOS skips both caches, as in build.yml: nothing on main saves them.
       - uses: actions/setup-node@v6
         with:
           node-version: '22.23.4'
-          cache: 'pnpm'
+          cache: ${{ runner.os != 'macOS' && 'pnpm' || '' }}
 
       - uses: actions/cache@v5
+        if: runner.os != 'macOS'
         with:
           path: |
             ~/.cache/electron
@@ -123,7 +135,8 @@ jobs:
           echo 'CFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
           echo 'CXXFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
 
-      - run: pnpm install --frozen-lockfile
+      # electron-builder rebuilds the native modules per arch on macOS.
+      - run: pnpm install --frozen-lockfile ${{ runner.os == 'macOS' && '--ignore-scripts' || '' }}
 
       - name: Stamp prerelease version
         env:
@@ -149,7 +162,7 @@ jobs:
           name: ${{ matrix.artifact_name }}-${{ needs.metadata.outputs.channel }}-${{ needs.metadata.outputs.tag }}
           path: ${{ matrix.artifact_path }}
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ inputs.dry_run && 1 || 30 }}
 
   build-windows:
     needs: metadata
@@ -205,9 +218,10 @@ jobs:
           path: |
             dist-electron/*-Windows-${{ matrix.arch }}.exe
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ inputs.dry_run && 1 || 30 }}
 
   publish:
+    if: ${{ !inputs.dry_run }}
     needs:
       - metadata
       - build

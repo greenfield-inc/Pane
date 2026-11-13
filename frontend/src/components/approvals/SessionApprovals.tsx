@@ -55,11 +55,12 @@ export function SessionApprovalsCountButton({ sessionId, onOpenSession }: { sess
 }
 
 /** The approval column for one Session: its pager walks the Session's waiting approvals. */
-export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLabel, onClose }: {
-  sessionId: string; sessionName: string; inChat?: string; closeLabel: string; onClose: () => void;
+export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLabel, onClose, focused }: {
+  sessionId: string; sessionName: string; inChat?: string; closeLabel: string; onClose: () => void; focused?: boolean;
 }) {
   const surface = `session:${sessionId}` as const;
   const open = useApprovalColumnStore((state) => state.open[surface]);
+  const close = useApprovalColumnStore((state) => state.close);
   const waiting = useSessionApprovals(sessionId);
   if (!open) return null;
   return (
@@ -72,7 +73,10 @@ export function SessionApprovalColumn({ sessionId, sessionName, inChat, closeLab
       closeLabel={closeLabel}
       onClose={onClose}
       inChat={inChat}
+      focused={focused}
       renderOrigin={(item) => <ApprovalOrigin item={item} />}
+      // Send closes the column; the chat's status line names who reads the reply (P7).
+      onSent={() => close(surface)}
     />
   );
 }

@@ -30,7 +30,7 @@ export function isMissionControlEnabled(config: AppConfig | null): boolean {
   return config?.missionControlEnabled === true;
 }
 
-/** Chat tabs are experimental: the + menu offers them only after this opt-in. */
+/** Chat tabs: on for a fresh install (D-329); a config saved without the key keeps them off. */
 export function isChatTabsEnabled(config: AppConfig | null): boolean {
   return config?.chatTabsEnabled === true;
 }

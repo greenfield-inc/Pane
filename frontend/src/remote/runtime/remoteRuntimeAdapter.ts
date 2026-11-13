@@ -1,6 +1,6 @@
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import type { ChatTabClient, ChatTabCreate } from '../../../../shared/types/chatTab';
-import { decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
+import type { ChatTabClient, ChatTabCreate, ChatTabView } from '../../../../shared/types/chatTab';
+import { decodeChatAgents, decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
@@ -154,8 +154,20 @@ export class RemoteRuntimeAdapter {
     resume: (panelId, sessionId) => this.invoke('chat-tab:resume', [panelId, sessionId]),
     dismissBanner: panelId => this.invoke('chat-tab:dismiss-banner', [panelId]),
     signIn: panelId => this.invoke('chat-tab:sign-in', [panelId]),
+    agents: async () => decodeChatAgents(await this.invoke('chat-tab:agents')),
     onEvent: callback => this.onEvent(event => { if (event.channel === 'chat-tab:event') callback(decodeChatTabEvent(event.args[0])); }),
-    onState: callback => this.onEvent(event => { if (event.channel === 'chat-tab:state') callback(decodeChatTabView(event.args[0])); }),
+    // chat-tab:view carries every agent's view; chat-tab:state is kept for older clients' decoders.
+    onState: callback => this.onEvent(event => {
+      if (event.channel !== 'chat-tab:view') return;
+      let view: ChatTabView;
+      try {
+        view = decodeChatTabView(event.args[0]);
+      } catch (error) {
+        console.warn(`[ChatTabs] Ignored a chat view this app could not read: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      callback(view);
+    }),
     onReconnect: callback => this.onStatus(state => { if (state.status === 'connected') callback(); }),
   };
 
@@ -174,7 +186,7 @@ export class RemoteRuntimeAdapter {
   }
 
   getPanels(sessionId: string): Promise<ToolPanel[]> {
-    return this.invoke<ToolPanel[]>('panels:list', [sessionId, { chatTabs: true }]);
+    return this.invoke<ToolPanel[]>('panels:list', [sessionId, { chatTabs: true, chatAgents: true }]);
   }
 
   getActivePanel(sessionId: string): Promise<ToolPanel | null> {
@@ -253,11 +265,11 @@ export class RemoteRuntimeAdapter {
    * leaves the host's selected Session alone so a phone never moves the desktop.
    */
   openOrchestrationSession(sessionId: string): Promise<OrchestrationSessionView<Session>> {
-    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:get', [{ sessionId }, { chatTabs: true }]);
+    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:get', [{ sessionId }, { chatTabs: true, chatAgents: true }]);
   }
 
   createOrchestrationSession(input: OrchestrationSessionCreateInput): Promise<OrchestrationSessionView<Session>> {
-    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:create', [input, { chatTabs: true }]);
+    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:create', [input, { chatTabs: true, chatAgents: true }]);
   }
 
   updateOrchestrationSession(sessionId: string, input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> {

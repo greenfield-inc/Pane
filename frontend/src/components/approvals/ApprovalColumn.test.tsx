@@ -25,7 +25,7 @@ const q20: NotifyItem = {
 function show(item: NotifyItem, order: string[] = [item.id], closeLabel?: string): string {
   const snapshot: NotifySnapshot = {
     settings: DEFAULT_NOTIFY_SETTINGS, items: [item], queue: [], hidden: [], strip: null, stripSurface: null, pausedUntil: null,
-    shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [],
+    shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [], cardsOn: { kind: 'any' }, thisMachine: null,
   };
   useNotifyStore.setState({ snapshot });
   return renderToStaticMarkup(
@@ -38,26 +38,26 @@ function text(markup: string): string {
 }
 
 describe('ApprovalColumn', () => {
-  beforeEach(() => useApprovalColumnStore.setState({ open: {}, lastReplied: null }));
+  beforeEach(() => useApprovalColumnStore.setState({ open: {} }));
 
   it('waiting: the pager, tabs in order, both questions and one reply box', () => {
     const visible = text(show(q20, ['a', 'q20', 'b'], 'Back to doozy-overhaul'));
     expect(visible).toContain('2 of 3');
     expect(visible).toContain('Back to doozy-overhaul');
-    expect(visible).toMatch(/Questions & answers Summary PR #2480 doozy-overhaul's tab/);
+    expect(visible).toMatch(/Decide Summary PR #2480 doozy-overhaul's tab/);
     expect(visible).toContain('Question 1 of 2');
     expect(visible).toContain('Question 2 of 2');
     expect(visible).toContain('Recommended');
-    expect(visible).toContain('Pick an option, or reply in your own words: an answer, or a question about it.');
+    expect(visible).toContain('Recommended picks are pre-selected; change any before you send.');
   });
 
   it('Reading your reply…', () => {
-    expect(text(show({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'reading' } }))).toContain('Reading your reply…');
+    expect(text(show({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'reading' } }))).toContain('doozy-overhaul is reading your reply…');
   });
 
   it('Taken as a question, with its fix, in amber', () => {
     const markup = show({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'question', reader: { kind: 'asker', name: 'doozy-overhaul' } } });
-    expect(text(markup)).toContain('Taken as a question: asking doozy-overhaul. Getting more context…');
+    expect(text(markup)).toContain('Taken as a question: doozy-overhaul is getting more context…');
     expect(text(markup)).toContain('It was my answer');
     expect(markup).toContain('data-tone="warning"');
   });

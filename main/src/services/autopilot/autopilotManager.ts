@@ -23,6 +23,7 @@ import { AutopilotStore, type AutopilotRunState } from './autopilotStore';
 import { pushEntry, resolveEntries, sameRef, showEntry, shownEntry, stepStack } from './autopilotStack';
 import { assertAutopilotEntitled, autopilotEntitlement } from './entitlement';
 import { autopilotInstructions, OWN_INSTRUCTIONS_LABEL } from './autopilotInstructions';
+import { DEFAULT_AGENT_ID } from '../../../../shared/agents';
 
 /** A Session as the walk sees it, in sidebar order. */
 /** What a push did: the snapshot after it, and the entry it made or refreshed. */
@@ -700,7 +701,7 @@ export class AutopilotManager extends EventEmitter {
     const panelId = panelIdOf(run.id);
     if (this.ports.chat.exists(panelId)) return;
     const state: ChatPanelState = {
-      agent: 'claude',
+      agent: DEFAULT_AGENT_ID,
       launch: this.ports.launch(),
       cwd: run.folder,
       status: 'stopped',
@@ -765,7 +766,7 @@ export class AutopilotManager extends EventEmitter {
 
   private requireChatTabs(action: string): void {
     if (this.ports.config.chatTabsEnabled()) return;
-    throw new PaneError('AUTOPILOT_NEEDS_CHAT_TABS', `Autopilot runs as a chat tab, and chat tabs are off. ${action} was not done.`, 'Turn on Chat tabs in Settings › Advanced › Experimental, then try again.');
+    throw new PaneError('AUTOPILOT_NEEDS_CHAT_TABS', `Autopilot runs as a chat tab, and chat tabs are off. ${action} was not done.`, 'Turn on Chat tabs in Settings › AI & Agents, then try again.');
   }
 
   private requireRun(): AutopilotRunInfo {

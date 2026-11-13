@@ -33,6 +33,7 @@ import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandReg
 import { registerOrchestrationSessionHandlers } from '../ipc/orchestrationSessions';
 import * as wslUtils from '../utils/wslUtils';
 import { PaneError, toPaneDaemonError } from '../../../shared/paneError';
+import { agentTerminalCommand } from '../../../shared/agents';
 
 const liveStates = new Map<string, AgentState>();
 
@@ -173,7 +174,7 @@ function createFixture(
   });
   const skillCacheManager = serviceStub<SkillCacheManager>({
     ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'),
-    launchCommand: vi.fn((agent: PaneChatAgent) => RUNPANE_CONTRACT.agentTemplates[agent].command),
+    launchCommand: vi.fn((agent: PaneChatAgent) => agentTerminalCommand(agent)),
   });
   const store = createStore();
   if (initialData) store.write(initialData);
@@ -384,13 +385,13 @@ describe('OrchestrationSessionManager', () => {
   });
 
   // Cursor runs no Session on Windows, so there is nothing to check there.
-  it.skipIf(process.platform === 'win32')('keeps a Cursor Session orchestrator in a terminal when chat tabs are on', async () => {
+  it.skipIf(process.platform === 'win32')('opens a Cursor Session orchestrator as a chat tab when chat tabs are on', async () => {
     const fixture = createFixture();
     fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
     Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
     try {
-      const cursor = await fixture.manager.create({ name: 'Cursor stays a terminal', agent: 'cursor' });
-      expect(cursor.panel.type).toBe('terminal');
+      const cursor = await fixture.manager.create({ name: 'Cursor as a chat', agent: 'cursor' });
+      expect(cursor.panel.type).toBe('chat');
     } finally {
       Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
     }
@@ -699,7 +700,7 @@ describe('OrchestrationSessionManager', () => {
     expect(reopened.session).toMatchObject({ runtime: 'wsl', wslDistribution: 'Ubuntu' });
     expect(reopened.panel.state.customState).toMatchObject({
       orchestrationWorkspace: wslUtils.windowsPathToWSLMount(sessionWorkspacePath(created.session.id)),
-      initialCommand: RUNPANE_CONTRACT.agentTemplates.cursor.command,
+      initialCommand: agentTerminalCommand('cursor'),
     });
     const workspace = sessionWorkspacePath(created.session.id);
     expect(fs.readFileSync(path.join(workspace, 'runtime-context.md'), 'utf8')).toContain('powershell.exe');
@@ -1460,7 +1461,7 @@ describe('OrchestrationSessionManager', () => {
     const reloaded = new OrchestrationSessionManager(
       first.configManager,
       first.sessionManager,
-      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), launchCommand: vi.fn((agent: PaneChatAgent) => RUNPANE_CONTRACT.agentTemplates[agent].command) }),
+      serviceStub<SkillCacheManager>({ ensurePaneChatGuide: vi.fn(async () => '/tmp/issue-653/guide.md'), launchCommand: vi.fn((agent: PaneChatAgent) => agentTerminalCommand(agent)) }),
       serviceStub<PaneChatManager>({ getOrCreate: vi.fn(async () => { throw new Error('legacy migration must run once'); }) }),
       undefined,
       secondStore,

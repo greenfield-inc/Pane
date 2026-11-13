@@ -11,6 +11,7 @@ import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscri
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
 import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
+import type { AnalyticsEnvironment } from '../../../shared/types/analyticsEnvironment';
 import type { KeyboardShortcutOverrides } from '../../../shared/utils/keyboardBindings';
 import type { SessionRetention } from '../../../shared/types/orchestrationSession';
 
@@ -39,6 +40,8 @@ export interface AnalyticsIdentity {
   appVersion?: string;
   platform?: string;
   electronVersion?: string;
+  /** Where Pane runs (CI, container, display); sent as event context, never saved. */
+  environment?: AnalyticsEnvironment;
   webDistinctId?: string;
   webAttributionPresent?: boolean;
   isFirstLaunch?: boolean;
@@ -53,8 +56,7 @@ export interface AnalyticsIdentity {
 type HtmlFileOpenMode = 'preview' | 'source';
 
 export interface AppConfig {
-  // Experimental: open Claude and Codex agent tabs as Chat (off by default).
-  // Experimental: chat tabs (Claude and Codex over ACP, no terminal). Off until they ship on desktop and mobile.
+  // Chat tabs (Claude and Codex over ACP, no terminal). On for a fresh install; see ConfigManager.
   chatTabsEnabled?: boolean;
   /** Experimental: Autopilot, one always-running agent above every Session (needs chat tabs). */
   autopilotEnabled?: boolean;
@@ -119,6 +121,10 @@ export interface AppConfig {
   notify?: Partial<NotifySettings>;
   /** Epoch ms `notify.enabled` last changed, on the machine where the person changed it; shared with it. Absent: 0. */
   notifyEnabledChangedAt?: number;
+  /** Epoch ms `notify.cardsOn` last changed, on the machine where the person changed it; shared with it. Absent: 0. */
+  notifyCardsOnChangedAt?: number;
+  /** This Pane install's id, which other machines know it by (as "Show cards on" names it). Created on first start. */
+  machineId?: string;
   // Dev mode for debugging
   devMode?: boolean;
   // Additional paths to add to PATH environment variable

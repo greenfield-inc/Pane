@@ -12,6 +12,10 @@ import { decodeChatPanelState } from './state';
 import { databaseService } from '../database';
 import type { TerminalPanelState, ToolPanel } from '../../../../shared/types/panels';
 import type { ChatTabNotifyBridge } from './notifyBridge';
+import { agentConfig } from '../../../../shared/agents';
+import { ChatAgentCatalog } from './agentCatalog';
+import { isOnPath } from '../../utils/onPath';
+import { chatAgentName, getAgentRegistry, registryCatalogEntries } from '../agentRegistry';
 
 /** Chat tab state lives in the panel's custom state; only the host writes it. */
 const store: ChatTabStore = {
@@ -25,7 +29,7 @@ const store: ChatTabStore = {
 
 /**
  * Conversations open in Pane tabs on this machine other than `panelId` and the terminal it replaced
- * (D-282): every chat tab's saved conversation, and every Claude or Codex terminal tab's, running or
+ * (D-282): every chat tab's saved conversation, and every terminal tab's whose conversation a chat can load, running or
  * not, since a terminal resumes its conversation when it starts again.
  */
 function openConversations(panelId: string): Map<string, { panelId: string; title: string }> {
@@ -45,10 +49,19 @@ function conversationOf(panel: ToolPanel): string | undefined {
   if (panel.type !== 'terminal') return undefined;
   // SAFETY: terminal panels persist TerminalPanelState as their custom state.
   const state = (panel.state.customState ?? {}) as TerminalPanelState;
-  return state.agentType === 'claude' || state.agentType === 'codex' ? state.agentSessionId : undefined;
+  return state.agentType && agentConfig(state.agentType)?.chat?.terminalConversationsLoad ? state.agentSessionId : undefined;
 }
 
 let manager: ChatTabManager | undefined;
+let catalog: ChatAgentCatalog | undefined;
+
+/** The agents this host can open as chat tabs (chat-tab:agents), with what each supports. */
+export function getChatAgentCatalog(): ChatAgentCatalog {
+  // With the scripted test agent (development and end-to-end tests only), it stands in for every agent.
+  const scripted = !!process.env.PANE_CHAT_TEST_AGENT && !app.isPackaged;
+  catalog ??= new ChatAgentCatalog({ file: path.join(getAppDirectory(), 'chat-agent-capabilities.json'), onPath: scripted ? async () => true : isOnPath, registryAgents: registryCatalogEntries });
+  return catalog;
+}
 let context: ChatLaunchContext = { unsupportedHost: () => undefined, projectEnv: async () => ({ env: {}, warnings: [] }) };
 let profiles: ChatProfileResolver | undefined;
 let notifyBridge: ChatTabNotifyBridge | undefined;
@@ -65,7 +78,7 @@ export function configureChatTabs(options: { context: ChatLaunchContext; profile
 /**
  * Development and end-to-end tests only: PANE_CHAT_TEST_AGENT names a scripted
  * ACP agent (testing/scriptedAgent.mjs) that chat tabs run instead of the real
- * adapters, so journeys never touch a real Claude or Codex account. A packaged
+ * adapters, so journeys never touch a real agent account. A packaged
  * Pane ignores it.
  */
 function scriptedAgentLauncher(): ChatTabLauncher | undefined {
@@ -84,6 +97,7 @@ export function getChatTabManager(): ChatTabManager {
     store,
     launcher: scriptedAgentLauncher() ?? new AgentChatLauncher({
       secrets: chatTabSecrets,
+      registry: { resolve: agent => getAgentRegistry().resolve(agent) },
       context: { unsupportedHost: panel => context.unsupportedHost(panel), projectEnv: panel => context.projectEnv(panel) },
       profiles: { resolve: (panel, state, env) => {
         if (!profiles) throw new PaneError('CHAT_PROFILE_UNSUPPORTED', 'This Pane cannot start Agent Farm profiles in chat tabs yet.', 'Start the profile in a terminal tab.');
@@ -98,6 +112,17 @@ export function getChatTabManager(): ChatTabManager {
     onView: view => notifyBridge?.observe(view),
     onClosed: panelId => notifyBridge?.forget(panelId),
     openConversations,
+    agentName: chatAgentName,
+    onInitialized: (agent, response) => {
+      getChatAgentCatalog().record(agent, response);
+      // A registry agent that started no longer needs versions no tab runs (D-15). Every running
+      // tab's folder stays: its process loads files from it. A cleanup error never stops the tab.
+      try {
+        if (!getAgentRegistry().installedRecord(agent)) return;
+        getAgentRegistry().removeVersionsExcept(agent, getChatTabManager().launchedVersions(agent));
+      }
+      catch (error) { console.warn(`[AgentRegistry] Could not remove ${agent}'s older versions: ${error instanceof Error ? error.message : String(error)}`); }
+    },
   });
   return manager;
 }

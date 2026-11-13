@@ -4,7 +4,9 @@ import type {
   NotifyActor,
   NotifyAgentAction,
   NotifyAnswer,
+  NotifyCardsOnStatus,
   NotifyChoice,
+  NotifySubQuestion,
   NotifyClosed,
   NotifyConnected,
   NotifyInstructionsFile,
@@ -24,6 +26,8 @@ import type {
   NotifyVersion,
 } from '../../../../shared/types/notify';
 import { NOTIFY_VERSIONS_MAX } from '../../../../shared/types/notify';
+import type { MachineState } from '../../../../shared/types/machineConnections';
+import type { AppConfig } from '../../types/config';
 import { PaneError } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { leadingQn } from '../../../../shared/autopilotDecision';
@@ -138,6 +142,13 @@ export interface WorkerQuestion {
   context?: string;
   /** The options its status file's question offers: the card asks with them instead of a text box. */
   choices?: NotifyChoice[];
+  /** Several questions from its status file, each with its own buttons, instead of `choices`. */
+  questions?: NotifySubQuestion[];
+  /** Set when Pane tidied its question by rule: the question and context as sent. */
+  asSent?: NotifyItem['asSent'];
+  /** Its own Summary page, and its status file (read for where it stands). */
+  summaryPage?: string;
+  statusFile?: string;
 }
 
 export interface NotifyQueueEnvironment {
@@ -147,6 +158,8 @@ export interface NotifyQueueEnvironment {
   instructionFiles: () => NotifyInstructionsFile[];
   /** This machine's name, as connected screens and phones show it. */
   machine?: string;
+  /** This machine's install id (`AppConfig.machineId`), which "Show cards on" names it by. */
+  machineId?: string;
   /** Where a secret card's answer goes. The value is passed here and nowhere else. */
   secrets?: {
     exists(project: string, name: string): boolean;
@@ -164,6 +177,8 @@ export interface NotifyQueueEnvironment {
   askerGone?: (item: NotifyItem) => string | undefined;
   /** The person used this computer in the last 2 minutes, with its screen unlocked (D-144). Absent: yes. */
   inUse?: () => boolean;
+  /** Where "Show cards on" leaves this machine. Absent: whichever computer is in use. */
+  cardsOn?: () => NotifyCardsOnStatus;
   /** A worker's question closed because its asker is gone: its inbox item goes with it. */
   workerQuestionGone?: (inboxId: string) => void;
   /**
@@ -176,6 +191,30 @@ export interface NotifyQueueEnvironment {
   /** Autopilot's chat tab, while Autopilot is on; it reads replies no one else can (D-258). */
   autopilotReader?: () => { panelId: string } | undefined;
 }
+
+/**
+ * Where "Show cards on" leaves this machine (D-6 to D-8): the picked machine alerts, and every other
+ * machine stays quiet while the picked one reads it (`readsHere`). When it can't, this machine alerts
+ * as if nothing were picked, so no question goes unseen. Names follow this machine's picker.
+ */
+export function cardsOnStatus(config: AppConfig, readsHere: (machineId: string) => boolean, machines: MachineState[], now = Date.now()): NotifyCardsOnStatus {
+  const picked = config.notify?.cardsOn;
+  if (!picked) return { kind: 'any' };
+  if (picked.id === config.machineId) return { kind: 'here' };
+  const saved = machines.find(machine => machine.kind === 'remote' && machine.installId === picked.id);
+  const name = saved?.label ?? picked.name;
+  // A picked machine that slept or left the network can leave its stream half-open here for minutes; this
+  // machine's own connection to it notices within its heartbeat timeout, so that one is believed first.
+  if (saved?.status === 'offline') return { kind: 'not-connected', name };
+  if (readsHere(picked.id)) return { kind: 'elsewhere', name };
+  // A machine that just came online may still be waiting to reconnect to this one, so it counts as not added only after a while.
+  const onlineFor = saved?.status === 'online' && saved.onlineSince ? now - Date.parse(saved.onlineSince) : 0;
+  const answering = onlineFor >= NOT_ADDED_AFTER_MS;
+  return { kind: answering ? 'not-added' : 'not-connected', name };
+}
+
+/** Longer than a desktop's reconnect backoff to a machine that restarted (about 30 s). */
+const NOT_ADDED_AFTER_MS = 60_000;
 
 /** Who runs `--took` or `--update`: the calling tab. */
 export interface NotifyReaderCaller {
@@ -261,7 +300,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly tabsTyping = new Set<string>();
   /** Replies whose line is being typed into their reader's tab right now: not replaceable until it's known whether it went. */
   private readonly repliesTyping = new Set<string>();
-  private lastInUse: boolean | undefined;
+  /** In use and "Show cards on" as last polled; a change redraws the strip and Settings. */
+  private lastAlertState: string | undefined;
 
   constructor(private readonly env: NotifyQueueEnvironment) {
     super();
@@ -333,6 +373,8 @@ export class NotifyQueue extends EventEmitter {
     if (again) {
       // The same tab asks the same thing (after a restart, say): it joins the card already there (J19).
       Object.assign(again.item, question);
+      // A card sent well formed this time is no longer one Pane tidied.
+      if (!question.asSent) delete again.item.asSent;
       again.restored = false;
       this.save(again);
       const result = this.wait(again, request.returnAfterMs, signal);
@@ -472,7 +514,7 @@ export class NotifyQueue extends EventEmitter {
     if (this.entries.has(question.id) || this.isRewrittenFrom(question.id) || this.env.store?.readItem(question.id)) return;
     const item: NotifyItem = {
       id: question.id,
-      ui: question.choices?.length ? 'options' : 'ask',
+      ui: question.choices?.length || question.questions?.length ? 'options' : 'ask',
       title: question.question,
       source: this.withSession(question.source),
       state: 'waiting',
@@ -483,7 +525,11 @@ export class NotifyQueue extends EventEmitter {
     if (Date.now() - question.at < relayAfterMs()) item.quiet = true;
     if (question.links?.length) item.links = question.links;
     if (question.context) item.context = question.context;
-    if (question.choices?.length) item.choices = question.choices;
+    if (question.asSent) item.asSent = question.asSent;
+    if (question.summaryPage) item.summaryPage = question.summaryPage;
+    if (question.statusFile) item.statusFile = question.statusFile;
+    if (question.questions?.length) item.questions = question.questions;
+    else if (question.choices?.length) item.choices = question.choices;
     item.connected = question.connected ?? connectedOf(item, this.machine());
     const entry: Entry = { item, resumeLoop: false };
     this.entries.set(item.id, entry);
@@ -666,6 +712,10 @@ export class NotifyQueue extends EventEmitter {
       return Promise.resolve({ unavailable: `There's no waiting worker question ${id}: it was answered or closed, or its worker moved on. Nothing was shown.`, next: 'Check runpane inbox for the answer.' });
     }
     const { title, ...improved } = question;
+    // The orchestrator's card replaces the worker's: its buttons and Show as sent, not both.
+    if (improved.questions) delete entry.item.choices;
+    if (improved.choices) delete entry.item.questions;
+    if (!improved.asSent) delete entry.item.asSent;
     Object.assign(entry.item, improved, title.trim() ? { title } : {});
     // It reads a reply when the worker's tab can't (D-258).
     if (by?.panelId) entry.item.relayedBy = { panelId: by.panelId, name: by.session ? `the ${by.session.name} orchestrator` : by.name };
@@ -957,6 +1007,8 @@ export class NotifyQueue extends EventEmitter {
       delete item.questions;
     }
     if (update.links) item.links = update.links;
+    // The asker's new version replaces what Pane tidied: it's no longer "as sent".
+    if (update.title?.trim() || update.questions || update.choices) delete item.asSent;
     item.version = (item.version ?? 1) + 1;
     const by = item.reply?.reader?.name ?? askerName(item);
     item.revision = { asked: update.asked.trim(), whatChanged: update.whatChanged.split('\n').map(line => line.trim()).filter(Boolean), by, at: now };
@@ -1191,11 +1243,11 @@ export class NotifyQueue extends EventEmitter {
     }
   }
 
-  /** The person just came back to, or left, this computer: the strip follows (D-144). */
+  /** The person came back to or left this computer, or "Show cards on" moved: the strip and Settings follow (D-144). */
   pollInUse(): void {
-    const now = this.inUse();
-    if (now === this.lastInUse) return;
-    this.lastInUse = now;
+    const now = JSON.stringify([this.inUse(), this.cardsOn()]);
+    if (now === this.lastAlertState) return;
+    this.lastAlertState = now;
     this.changed();
   }
 
@@ -1211,9 +1263,18 @@ export class NotifyQueue extends EventEmitter {
     return this.env.inUse?.() ?? true;
   }
 
+  private cardsOn(): NotifyCardsOnStatus {
+    return this.env.cardsOn?.() ?? { kind: 'any' };
+  }
+
+  /** Cards pop up and chime here while it's in use, unless "Show cards on" picked a machine that reads this one (D-6, D-7). */
+  private alertsHere(): boolean {
+    return this.inUse() && this.cardsOn().kind !== 'elsewhere';
+  }
+
   private chime(): void {
     const settings = this.env.settings();
-    if (settings.enabled && settings.sound && !this.isPaused() && this.inUse()) this.emit('chime');
+    if (settings.enabled && settings.sound && !this.isPaused() && this.alertsHere()) this.emit('chime');
   }
 
   /** What no surface should raise, whatever it's asked: quiet and stale items, and what's hidden. */
@@ -1564,6 +1625,8 @@ export class NotifyQueue extends EventEmitter {
       instructionFiles: this.env.instructionFiles(),
       firstRun: strip?.kind === 'question' && (this.hintItemId === undefined || this.hintItemId === strip.itemId),
       importError: this.importError,
+      cardsOn: this.cardsOn(),
+      thisMachine: this.env.machineId ? { id: this.env.machineId, name: this.machine() } : null,
     };
   }
 
@@ -1600,8 +1663,15 @@ export class NotifyQueue extends EventEmitter {
     return new Promise((resolve) => {
       let returnTimer: Timer | undefined;
       const onAbort = () => {
+        if (entry.waiter !== waiter) return;
+        // A worker's question doesn't belong to the call relaying it: the worker still waits for
+        // its answer in its tab, so an orchestrator's ended --relays call only lets go of it.
+        if (entry.item.originKind === 'worker') {
+          waiter.detach();
+          return;
+        }
         // Pane stopping its server ends every call; that isn't the asker leaving (J6).
-        if (entry.waiter === waiter && !this.quitting) this.expire(entry.item.id);
+        if (!this.quitting) this.expire(entry.item.id);
       };
       const waiter: Waiter = {
         resolve: (result) => {
@@ -1621,10 +1691,12 @@ export class NotifyQueue extends EventEmitter {
       }
       signal?.addEventListener('abort', onAbort, { once: true });
       if (returnAfterMs !== undefined && returnAfterMs > 0) {
-        // Each round has its own 15 minutes: an updated version counts from when it was posted.
+        // Each round has its own 15 minutes: an updated version counts from when it was posted. A
+        // worker's question has no such limit, so each of its relay calls waits a full round.
         const remaining = (entry.item.revision?.at ?? entry.item.createdAt) + NOTIFY_RESUME_CAP_MS - Date.now();
         returnTimer = setTimeout(() => {
-          if (remaining <= returnAfterMs) {
+          const worker = entry.item.originKind === 'worker';
+          if (remaining <= returnAfterMs && !worker) {
             // An answer in its Undo hold reaches this call when the hold ends.
             if (entry.item.state === 'sent') return;
             this.expire(entry.item.id, unavailable('Nobody answered within 15 minutes.'));
@@ -1636,8 +1708,9 @@ export class NotifyQueue extends EventEmitter {
             id: entry.item.id,
             next: `Call \`runpane notify --resume ${entry.item.id}\` now to keep waiting for the answer.`,
           });
-          entry.graceTimer = setTimeout(() => this.expire(entry.item.id), NOTIFY_RESUME_GRACE_MS);
-        }, Math.min(returnAfterMs, Math.max(remaining, 0)));
+          // A relayed worker question keeps waiting for its worker even if the relay never resumes.
+          if (!worker) entry.graceTimer = setTimeout(() => this.expire(entry.item.id), NOTIFY_RESUME_GRACE_MS);
+        }, entry.item.originKind === 'worker' ? returnAfterMs : Math.min(returnAfterMs, Math.max(remaining, 0)));
       }
     });
   }
@@ -1934,7 +2007,7 @@ export class NotifyQueue extends EventEmitter {
 
   private canShowStrip(): boolean {
     const settings = this.env.settings();
-    if (!settings.enabled || this.isPaused() || this.roundOpen || !this.inUse()) return false;
+    if (!settings.enabled || this.isPaused() || this.roundOpen || !this.alertsHere()) return false;
     return this.paneFocused || (settings.showOutsidePane && this.env.showOutsideSupported);
   }
 

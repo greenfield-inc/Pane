@@ -142,6 +142,13 @@ interface WorkspaceConfigProvider {
 }
 
 /**
+ * Whether this Pane may change Tailscale Serve and, when it may, whether Workspaces is on while
+ * config says nothing. Serve is machine-wide, so a development build, or a second Pane on a data
+ * directory another one serves, is refused: it would re-point or remove the real Pane's handler.
+ */
+export type WorkspaceServeAccess = { kind: 'allowed'; onByDefault: boolean } | { kind: 'refused'; reason: string };
+
+/**
  * Puts this Pane's own daemon on the owner's tailnet: a loopback listener published with
  * `tailscale serve --https=8443` in HTTP proxy mode. It trusts the owner's Tailscale login, or
  * everyone on the tailnet under "tailnet" visibility, plus the password when one is set.
@@ -174,7 +181,7 @@ export class PaneWorkspaceHostController {
   constructor(
     private readonly commandRegistry: PaneCommandRegistry,
     private readonly configManager: WorkspaceConfigProvider,
-    private readonly defaultEnabled: boolean,
+    private readonly serveAccess: WorkspaceServeAccess,
     private readonly run: RemoteSetupCommandRunner = runRemoteSetupCommand,
     private readonly isForwardedPort?: (port: number) => boolean,
     private readonly paneVersion?: string,
@@ -191,8 +198,14 @@ export class PaneWorkspaceHostController {
     return this.status;
   }
 
+  /** False for a Pane that must leave Tailscale Serve alone; see WorkspaceServeAccess. */
+  mayChangeServe(): boolean {
+    return this.serveAccess.kind === 'allowed';
+  }
+
   isEnabled(): boolean {
-    return this.configManager.getConfig().workspaces?.enabled ?? this.defaultEnabled;
+    if (this.serveAccess.kind === 'refused') return false;
+    return this.configManager.getConfig().workspaces?.enabled ?? this.serveAccess.onByDefault;
   }
 
   getAccess(): WorkspaceAccessSummary {
@@ -259,6 +272,10 @@ export class PaneWorkspaceHostController {
   sync(): Promise<void> {
     return this.enqueue(async () => {
       this.clearCheck();
+      if (this.serveAccess.kind === 'refused') {
+        this.status = { state: 'off', reason: this.serveAccess.reason, fix: 'Use the installed Pane for Workspaces' };
+        return;
+      }
       if (!this.isEnabled()) {
         await this.stopServer();
         const removal = await this.unserve();

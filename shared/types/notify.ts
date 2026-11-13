@@ -38,6 +38,8 @@ export interface NotifyChoice {
 export interface NotifySubQuestion {
   title: string;
   choices: NotifyChoice[];
+  /** Why this question matters, shown under it. Older machines ignore it. */
+  why?: string;
 }
 
 /** An options approval asks 2 to this many questions at once; each takes one pick. */
@@ -88,6 +90,18 @@ export interface NotifyQuestion {
    * answer itself, since the paused turn resumes with it. It reads "Sent to <agent>", with no fix.
    */
   replyIsAnswer?: boolean;
+  /**
+   * Set by the host when it tidied an old paragraph card by rule (P8): the title and context
+   * exactly as they were sent, for Show as sent. The card reads "Tidied by Pane".
+   */
+  asSent?: { title: string; context?: string };
+  /**
+   * Set by the host: the asker's own Summary page (an .html passed as a worker's --summary-file,
+   * or `summary` in its needs_you). Absent: Pane writes the Summary from the card (P4).
+   */
+  summaryPage?: string;
+  /** Set by the host for a worker's card: its status file, read for "where it stands" on the Summary. */
+  statusFile?: string;
   /**
    * Set by the chat tab bridge for a built-in question that takes only its own choices: typed text
    * can't answer it and nobody could read it as a reply, so it has no reply box.
@@ -145,7 +159,10 @@ export interface NotifyCaller {
   agent?: string;
 }
 
-export type NotifyResult =
+/** Each notify result may carry the card check's warnings (a long title, no subtitle, …): the card was posted anyway. */
+export type NotifyResult = NotifyResultBody & { warnings?: string[] };
+
+export type NotifyResultBody =
   /** `answers`: one pick per question, when the approval asks several (`answer` joins them with " · "). */
   | { answer: string; note?: string; answers?: string[] }
   /**
@@ -177,6 +194,14 @@ export interface NotifySettings {
   sound: boolean;
   /** Whether pop-up cards open with details shown. Showing or hiding details on a card sets it. */
   showDetails: boolean;
+  /** "Show cards on": the one machine where cards pop up and chime, synced to every machine; null: whichever computer is in use. */
+  cardsOn: NotifyCardsOn | null;
+}
+
+/** A machine that "Show cards on" picks: its install id (`AppConfig.machineId`), and its name for display. */
+export interface NotifyCardsOn {
+  id: string;
+  name: string;
 }
 
 export const DEFAULT_NOTIFY_SETTINGS: NotifySettings = {
@@ -187,6 +212,7 @@ export const DEFAULT_NOTIFY_SETTINGS: NotifySettings = {
   updatesHideAfterSeconds: 6,
   sound: true,
   showDetails: false,
+  cardsOn: null,
 };
 
 export const NOTIFY_UPDATES_HIDE_AFTER_CHOICES = [4, 6, 10, 20] as const;
@@ -462,7 +488,21 @@ export interface NotifySnapshot {
   instructionFiles: NotifyInstructionsFile[];
   /** Saved approvals couldn't be imported on this start: nothing was lost and it retries on the next. */
   importError?: { code: string; message: string; next: string };
+  /** Where "Show cards on" leaves this machine; Settings › Approvals says why. */
+  cardsOn: NotifyCardsOnStatus;
+  /** This machine as "Show cards on" names it; null before it has an install id. */
+  thisMachine: NotifyCardsOn | null;
 }
+
+/**
+ * What "Show cards on" means for this machine. any: whichever computer is in use alerts. here: this
+ * machine is the picked one. elsewhere: the picked machine reads this one, so this one stays quiet.
+ * not-added and not-connected: the picked machine can't read this one, so this one alerts as under any;
+ * not-added when it answers this machine (so it hasn't saved this one), not-connected otherwise.
+ */
+export type NotifyCardsOnStatus =
+  | { kind: 'any' | 'here' }
+  | { kind: 'elsewhere' | 'not-added' | 'not-connected'; name: string };
 
 /**
  * What a host shares with every connected screen and phone (`notify:remote-snapshot`, and the
@@ -589,3 +629,18 @@ export interface NotifyWindowSize {
   width: number;
   height: number;
 }
+
+/**
+ * `notify:summary-page <id> [{ theme }]`: an approval's Summary as one HTML page, the same on the
+ * Mac, from another machine and on the phone. `page` is the asker's own page; `template` is the
+ * one Pane writes from the card and the worker's status file. Either renders with scripts and
+ * network off: the html carries a Content-Security-Policy that allows neither, and every viewer
+ * also turns scripts off. `missing` says why there is no page (the file was removed, say).
+ */
+export type NotifySummaryPage =
+  | { kind: 'page'; path: string; html: string }
+  | { kind: 'template'; html: string }
+  | { kind: 'missing'; path?: string; message: string };
+
+/** The policy every Summary page is served with: no scripts, no network, inline styles and data: images only. */
+export const NOTIFY_SUMMARY_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";

@@ -1678,8 +1678,10 @@ def describe_report_delivery(result: Dict[str, Any]) -> List[str]:
     delivered = f" Delivered to {watchers} waiting watcher{'' if watchers == 1 else 's'}." if watchers > 0 else ""
     panel_id = result.get("panelId")
     lines = [f"Reported {describe_report(result.get('report') or {})} for panel {panel_id}.{sessions}{delivered}"]
+    # The blocked question's card check: posted anyway, but worth fixing next time.
+    warnings = [f"Warning: {warning}" for warning in result.get("warnings") or [] if isinstance(warning, str)]
     if session_ids or watchers > 0:
-        return lines
+        return lines + warnings
     stored = f"It is stored on the panel (runpane agents status --panel {panel_id})"
     if live_watchers is None:
         lines.append(f"No Session recorded this report. {stored}, and only watchers that list agent.report receive it.")
@@ -1688,7 +1690,7 @@ def describe_report_delivery(result: Dict[str, Any]) -> List[str]:
             f"No Session recorded this report and no watcher was waiting for it. {stored}, "
             "and a watch with a named cursor (runpane watch --as <name> --kinds agent.report) still receives it when it next waits."
         )
-    return lines
+    return lines + warnings
 
 
 MAX_INBOX_DETAIL_LENGTH = 300
@@ -2141,15 +2143,13 @@ def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
     if parsed.chat or parsed.agent_farm:
         if parsed.tool_command:
             raise ValueError("A chat tab runs its agent over ACP, so it takes --agent or --agent-farm, not --tool-command.")
-        if parsed.agent_farm and parsed.agent and parsed.agent not in ("claude", "codex"):
-            raise ValueError("An Agent Farm profile chooses its own agent; drop --agent.")
-        if not parsed.agent_farm and parsed.agent not in ("claude", "codex"):
-            raise ValueError("--chat opens Claude or Codex: pass --agent claude or --agent codex, or --agent-farm <profile>.")
+        if not parsed.agent_farm and not parsed.agent:
+            raise ValueError("--chat needs --agent <id> or --agent-farm <profile>. Run `runpane panels create --help` for the flags.")
         if parsed.as_file_pointer or parsed.attachments:
             raise ValueError("--as-file-pointer and --attach are for terminal tabs; send the first prompt with --initial-input.")
         initial_input = read_input_source(parsed.initial_input_file) if parsed.initial_input_file else parsed.initial_input
         chat: Dict[str, Any] = {
-            **optional_value("agent", parsed.agent if parsed.agent in ("claude", "codex") else None),
+            **optional_value("agent", parsed.agent),
             **optional_value("profile", parsed.agent_farm),
             **optional_value("args", parsed.launch_args or None),
             **optional_value("initialInput", initial_input or None),
@@ -2512,7 +2512,7 @@ def ask_agent_choice() -> str:
     agents = RUNPANE_CONTRACT["enums"]["agents"]
     print("Choose an agent:")
     for index, agent in enumerate(agents, start=1):
-        print(f"{index}) {RUNPANE_CONTRACT['agentTemplates'][agent]['title']}")
+        print(f"{index}) {RUNPANE_CONTRACT['agents']['entries'][agent]['title']}")
 
     while True:
         answer = input("Agent [1]: ").strip().lower()

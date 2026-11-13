@@ -21,7 +21,7 @@ function connection(lastMessage: string) {
   const chat: ChatTabClient = {
     get, history: async () => [], onEvent: () => () => undefined, onState: () => () => undefined,
     send: unused, receipt: unused, unqueue: unused, sendNow: unused, editQueued: unused, clear: unused, stopTask: unused, configure: unused, cancel: unused, permission: unused, answer: unused, restart: unused, signIn: unused,
-    conversations: unused, resume: unused, dismissBanner: unused,
+    conversations: unused, resume: unused, dismissBanner: unused, agents: unused,
   };
   // SAFETY: the mocked chatTabClient above only uses this object as a WeakMap key; nothing reads its members.
   const client = {} as RemoteDaemonClient;

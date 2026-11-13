@@ -52,7 +52,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     placeholder={state?.orchestrationSessionId ? 'Ask the Session anything' : undefined}
     actions={actions}
     // A Session's orchestrator chat shows its approvals as light cards above the composer (P5).
-    dock={state?.orchestrationSessionId ? <SessionApprovalCards sessionId={state.orchestrationSessionId} /> : undefined}
+    dock={state?.orchestrationSessionId ? <SessionApprovalCards sessionId={state.orchestrationSessionId} chatPanelId={panel.id} /> : undefined}
     pr={pr}
   />;
 }

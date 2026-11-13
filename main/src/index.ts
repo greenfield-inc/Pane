@@ -20,7 +20,7 @@ const launchRemoteSetup = hasRemoteSetupLaunchArg();
 
 // Fix GTK 2/3 and GTK 4 conflict on Linux (Electron 36 issue)
 // This MUST be done before importing electron
-import { app, protocol } from 'electron';
+import { app, powerMonitor, protocol } from 'electron';
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'pane-media',
@@ -117,6 +117,7 @@ import type { AnalyticsManager } from './services/analyticsManager';
 import { readWebAttribution, resolveAnalyticsIdentity } from './services/analyticsIdentity';
 import { resourceMonitorService } from './services/resourceMonitorService';
 import { applyAppDirectoryOverrideFromArgs, isPackagedOnDefaultDirectory, migrateDataDirectory } from './utils/appDirectory';
+import { analyticsEnvironment } from './utils/analyticsEnvironment';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
 import { getUpdateCapabilities } from './utils/updateCapabilities';
@@ -1185,6 +1186,9 @@ async function initializeServices() {
     invokeLocal: (channel, args) => commandRegistry.invoke(channel, args),
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
+  const machines = machineConnections;
+  powerMonitor.on('suspend', () => machines.suspend());
+  powerMonitor.on('resume', () => machines.resume());
   // The Notify inbox, badge and tray count cover every saved machine, in any mode.
   followSavedMachines(machineConnections);
 
@@ -1208,6 +1212,7 @@ async function initializeServices() {
       identity.appVersion = currentVersion;
       identity.platform = os.platform();
       identity.electronVersion = process.versions.electron;
+      identity.environment = analyticsEnvironment(app.isPackaged);
       identity.webAttributionPresent = webDistinctId !== undefined;
       identity.isFirstLaunch = isFirstLaunch;
       identity.previousVersion = previousVersion;
@@ -1360,7 +1365,7 @@ if (launchRemoteSetup) {
     await initializeServices();
     installMenu(configManager.getConfig());
     configManager.on('config-updated', () => installMenu(configManager.getConfig()));
-    if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
+    syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     void addRunpaneToUserPathBestEffort();
     if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') setTimeout(() => syncPaneMcpForApp({
       isPackaged: app.isPackaged,
@@ -1442,7 +1447,8 @@ if (launchRemoteSetup) {
     const lastVersion = databaseService.getLastAppVersion();
     const isFirstLaunch = lastVersion === null;
     // Runs in the background; it reads lastVersion before recordAppOpen below replaces it.
-    void removePaneFsmonitorConfig(lastVersion, databaseService.getAllProjects().flatMap(project => {
+    // Only the Pane that owns this data directory: it edits the repositories' git config.
+    if (paneDaemonHost?.duties.housekeeping) void removePaneFsmonitorConfig(lastVersion, databaseService.getAllProjects().flatMap(project => {
       const context = project.path ? sessionManager.getProjectContextByProjectId(project.id) : null;
       return context ? [{ path: project.path, commandRunner: context.commandRunner }] : [];
     }));
@@ -1506,6 +1512,8 @@ if (launchRemoteSetup) {
 
 // Initialize worktree pool — cleanup orphans and seed reserves
   setTimeout(async () => {
+    // Reserves belong to the Pane that owns this data directory; a second one would delete them.
+    if (!paneDaemonHost?.duties.housekeeping) return;
     try {
       const projects = databaseService.getAllProjects();
       // Cleanup leftover reserves from previous runs — await before seeding new ones

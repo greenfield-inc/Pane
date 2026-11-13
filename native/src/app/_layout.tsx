@@ -110,6 +110,8 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         <Stack.Screen name="session/[sessionId]" options={{ headerShown: false }} />
         {/* The card above its Session's tabs; draws its own bar. */}
         <Stack.Screen name="approval/[notifyId]" options={{ headerShown: false }} />
+        {/* An approval's Summary page (P4), full screen with its own bar. */}
+        <Stack.Screen name="approval/summary/[notifyId]" options={{ headerShown: false }} />
         {/* Autopilot: its chat, an approval full screen, and a document full screen; each draws its own bar. */}
         <Stack.Screen name="autopilot/index" options={{ headerShown: false }} />
         <Stack.Screen name="autopilot/item/[notifyId]" options={{ headerShown: false }} />

@@ -5,6 +5,7 @@ import { permissionSummary, rejectOption } from '../../../../shared/chatTabPermi
 import { questionFields, unshownRequiredFields, type QuestionChoice, type QuestionField } from '../../../../shared/chatTabQuestions';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { reasonOf } from '../../../../shared/paneError';
+import { agentLabel } from '../../../../shared/agents';
 
 /** What the bridge needs from Notify (NotifyQueue), as #1215's Claude prompt bridge uses it. */
 export interface ChatPromptQueue {
@@ -79,7 +80,7 @@ export class ChatTabNotifyBridge {
   private askPermission(id: string, view: ChatTabView, permission: AgentChatPermission): void {
     const source = this.options.source(view.panelId);
     if (!source) return;
-    const agent = view.agent === 'claude' ? 'Claude' : 'Codex';
+    const agent = agentLabel(view.agent);
     const summary = permissionSummary(permission, agent);
     const detail = summary.plan ?? summary.detail;
     if (detail && detail.length > MAX_DETAIL) return;

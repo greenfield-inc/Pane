@@ -1,13 +1,14 @@
+import { agentTerminalCommand, type ConfiguredAgentId } from '../../../shared/agents';
 import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { getAppDirectory } from '../utils/appDirectory';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../types/config';
 import type { Project } from '../database/models';
 import { syncPaneHomeSkill } from './paneHomeSkill';
 import { keepSessionTidySection } from './sessionTidyRules';
+import { APPROVALS_RULES } from './approvalsRules';
 
 // Every skill Pane installs for its agents ships with Pane.
 const PANE_CHAT_BUNDLE_ROOT = path.join(__dirname, 'paneChatBundle');
@@ -116,7 +117,9 @@ wrapper named by the runtime context or Pane checkout, after checking its
 version and doctor result and repeating the command check. If no verified
 wrapper is available, report one concise blocker and wait.`;
 
-const APPROVALS_SECTION = `## Approvals: what waits on the person (while Approvals is on)
+const APPROVALS_SECTION = `${APPROVALS_RULES}
+
+## Approvals: what waits on the person (while Approvals is on)
 
 You are in orchestrator mode: this Session's work moves through you.
 
@@ -134,15 +137,9 @@ You are in orchestrator mode: this Session's work moves through you.
 - **At the end of a turn**, either have an approval waiting for the person
   in Approvals that moves the work on, or be done and say so. A turn that
   ends while your workers run, with your watch armed, is fine.
-- **Ask through Approvals, always with context:** say in \`--context\` why it
-  needs them and what each option means, list the options with the one you
-  recommend first, and pass the related files, PRs and pages as \`--links\`.
-  Pane builds the approval's Summary from these fields, so: a title of about
-  80 characters, context as why it matters, each choice with what it does
-  (\`detail\`) and one \`recommended\`, and links to every reference, other
-  approvals included (\`{"label":"Q-12","approval":"<id|Q-n>"}\`). Related
-  questions go in one options card with \`--questions
-  '[{"title":"<question>","choices":[...]},...]'\` instead of \`--choices\`.
+- **Ask the way "Asking the person in Pane" above says.** As this
+  Session's orchestrator you post every approval card yourself, with
+  \`runpane notify\`, and relay a worker's question into its card.
 
 The rest of this section is how, while Approvals is on in Pane (its Settings
 switch, on by default).
@@ -162,8 +159,7 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
 \`\`\`
 
   The CLI call waits until the person answers. The MCP \`notify\` tool returns
-  \`waiting\` after a while instead, so don't use it for this, and don't block
-  your turn on \`AskUserQuestion\`.
+  \`waiting\` after a while instead, so don't use it for this.
 - A worker's blocked question already has a card: relay into it with
   \`runpane notify --relays <item> ...\` (the id from \`runpane inbox\`), which
   improves that card and rings it.
@@ -525,8 +521,8 @@ export class SkillCacheManager {
    * flags that register the helper subagents (skipped on Windows, whose
    * shells quote differently).
    */
-  launchCommand(agent: keyof typeof RUNPANE_CONTRACT.agentTemplates): string {
-    const base = RUNPANE_CONTRACT.agentTemplates[agent].command;
+  launchCommand(agent: ConfiguredAgentId): string {
+    const base = agentTerminalCommand(agent);
     const extra = agent === 'codex' && process.platform !== 'win32' ? this.codexSubagentArgs : '';
     return extra ? `${base} ${extra}` : base;
   }

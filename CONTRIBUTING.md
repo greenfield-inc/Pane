@@ -49,15 +49,21 @@ and `backend-debug.log` in the repository root. Both are reset at startup.
 
 ### Running a dev build safely
 
-A dev build is the same app as an installed Pane, and by default it shares that
-install's data:
+A dev build is the same app as an installed Pane. It keeps its own data, but it
+shares the browser profile, keychain and agent configuration with the installed
+app:
 
-- **OS startup integration is not isolated** by a separate Pane data directory
-  or Chromium profile. Startup calls `syncAutoStartOnBoot`: the default enables
-  login registration, and disabling it can remove an existing Linux autostart entry. Windows/macOS login settings can
-  also change. Native QA needs a separate OS environment or a test-runtime guard
-  for this integration before launch; setting `autoStartOnBoot: false` is not an
-  isolation mechanism.
+- **Machine-wide state is left to the installed Pane.** Only a packaged Pane on
+  `~/.pane` changes the login item (`syncAutoStartOnBoot`). A dev desktop build
+  never runs `tailscale serve`, so it can't re-point or remove the installed
+  Pane's Workspaces (`:8443`) or phone-page handlers, even with
+  `workspaces.enabled` in its config.
+- **A second Pane on one data directory** (one whose daemon socket another Pane
+  already serves) runs no scrollback retention, archive cleanup, reserve
+  worktree cleanup or upgrade-time git config cleanup, starts no remote host
+  listener, leaves Tailscale Serve alone, and on quit leaves the other Pane's
+  daemon socket in place. It logs `Another Pane already serves <dir>` at startup. Quit it and
+  give it its own `PANE_DIR`.
 - **Analytics** are on by default in a fresh data directory. Setting
   `analytics.enabled: false` in config alone does not prevent the first-render
   default policy from enabling analytics when neither `analytics_consent_shown`
@@ -67,10 +73,13 @@ install's data:
   own `PANE_DIR` or `--pane-dir`, and unpackaged builds, send no install
   heartbeat. Packaged QA on the default data directory should set
   `RUNPANE_TELEMETRY_DISABLED=1`.
-- **Pane data** (`sessions.db`, `config.json`, skills) lives in `~/.pane`
-  unless you set `PANE_DIR` or pass `--pane-dir`. Always set one for `pnpm dev`,
-  Playwright runs and scripts. Keep the path short, like `~/.pane_test`: a long
-  path pushes Pane's Unix sockets past their 104-character limit.
+- **Pane data** (`sessions.db`, `config.json`, skills): a dev (unpackaged)
+  build with neither `PANE_DIR` nor `--pane-dir` uses `~/.pane_dev`, never the
+  installed app's `~/.pane`, and says so at startup. `~/.pane_dev` lasts across
+  runs and may hold old data, so still set `PANE_DIR` for `pnpm dev`, Playwright
+  runs and scripts. Only an explicit `PANE_DIR=~/.pane` points a dev build at
+  real data. Keep the path short, like `~/.pane_test`: a long path pushes Pane's
+  Unix sockets past their 104-character limit.
 - **Pane secrets** on macOS live in your login keychain, which `PANE_DIR` does
   not move. A dev build with its own `PANE_DIR` uses its own service,
   `Pane (<data directory>)`, so it never reads or deletes the installed app's

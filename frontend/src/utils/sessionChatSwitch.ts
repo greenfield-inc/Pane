@@ -1,5 +1,8 @@
 import type { SessionChatSwitchItem, SessionChatSwitchOutcome, SessionChatSwitchPreview, SessionChatSwitchResult, SessionChatSwitchSkip } from '../../../shared/types/chatTab';
 import type { MachineCommand } from '../../../shared/types/machineConnections';
+import { useConfigStore } from '../stores/configStore';
+import { useErrorStore } from '../stores/errorStore';
+import { ipcErrorMessage } from './ipcErrorMessage';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 
 /** Where a Session lives: the host this window shows, or a machine on All machines. */
@@ -7,7 +10,6 @@ export type SessionSwitchWhere = { kind: 'here' } | { kind: 'machine'; machineId
 
 const SKIP_LABELS = {
   busy: 'busy',
-  'plain-codex': 'plain Codex',
   'no-conversation': 'no saved conversation',
   launch: 'launch chat can\'t run',
   'not-agent': 'not an agent',
@@ -18,7 +20,7 @@ const SKIP_LABELS = {
 export function skipLabel(kind: SessionChatSwitchSkip): string { return SKIP_LABELS[kind]; }
 
 const skipSchema = boundary.object({
-  kind: boundary.enumeration('busy', 'plain-codex', 'no-conversation', 'launch', 'not-agent', 'unconfirmed', 'other'),
+  kind: boundary.enumeration('busy', 'no-conversation', 'launch', 'not-agent', 'unconfirmed', 'other'),
   reason: boundary.string,
 });
 const itemFields = { panelId: boundary.nonEmptyString, title: boundary.string, paneName: boundary.string, skip: boundary.optional(skipSchema) };
@@ -73,4 +75,38 @@ export function summarizeSessionSwitch(items: readonly SessionChatSwitchOutcome[
   }
   if (failed.length) parts.push(`${failed.length} failed`);
   return parts.join(', ');
+}
+
+export type SessionSwitchMenuState =
+  | { state: 'checking' }
+  | { state: 'ready'; preview: SessionChatSwitchPreview }
+  /** `turnOn` when chat tabs are off on the host this window shows, which can turn them on. */
+  | { state: 'unavailable'; reason: string; turnOn?: boolean };
+
+/** Main's refusal when chat tabs are off on the machine that ran the preview (`prepareSwitch`). */
+const CHAT_TABS_OFF = /^Chat tabs are turned off/;
+
+/**
+ * What the menu says about a preview: ready when some tab can switch, else why nothing can,
+ * counted by reason ("Nothing to switch: 2 busy, 1 plain Codex"). Plain shells are not counted.
+ */
+export function switchMenuState(preview: SessionChatSwitchPreview, machineName: string): SessionSwitchMenuState {
+  if (switchable(preview.items).length > 0) return { state: 'ready', preview };
+  const skips = preview.items.flatMap(item => (item.skip && item.skip.kind !== 'not-agent' ? [item.skip] : []));
+  if (skips.some(skip => skip.kind === 'other' && CHAT_TABS_OFF.test(skip.reason))) {
+    return { state: 'unavailable', reason: `Chat tabs are off on ${machineName}` };
+  }
+  if (skips.length === 0) return { state: 'unavailable', reason: 'No terminal agent tabs to switch' };
+  const counts = new Map<string, number>();
+  for (const skip of skips) counts.set(skipLabel(skip.kind), (counts.get(skipLabel(skip.kind)) ?? 0) + 1);
+  return { state: 'unavailable', reason: `Nothing to switch: ${[...counts].map(([label, count]) => `${count} ${label}`).join(', ')}` };
+}
+
+/** Turns chat tabs on for the host this window shows. */
+export async function turnOnChatTabsHere(): Promise<void> {
+  try {
+    await useConfigStore.getState().updateConfig({ chatTabsEnabled: true });
+  } catch (error) {
+    useErrorStore.getState().showError({ title: 'Chat tabs are still off', error: `${ipcErrorMessage(error, 'The setting was not saved.').replace(/[^.!?]$/, '$&.')} Turn them on in Settings > Advanced > Experimental.` });
+  }
 }

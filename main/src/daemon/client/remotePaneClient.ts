@@ -54,9 +54,13 @@ interface RemoteConnectionStateMetadata {
   lastSeenAt?: string | null;
   /** The host's Pane version from its ready event; absent before ready and from older hosts. */
   hostVersion?: string;
+  /** The host's install id from its ready event; absent before ready and from older hosts. */
+  hostMachineId?: string;
 }
 
 interface RemotePaneClientOptions {
+  /** This install's id (`AppConfig.machineId`), sent on the event stream so the host knows this machine reads its cards. */
+  machineId?: string;
   eventSink?: PaneEventSink;
   initialHandshakeTimeoutMs?: number;
   heartbeatStaleTimeoutMs?: number;
@@ -109,6 +113,7 @@ interface RemoteReadyEventPayload {
   paneVersion?: string;
   /** The host runs a write once per request id and answers a repeat with the first answer. Older hosts omit it. */
   deduplicatesRequestIds?: boolean;
+  machineId?: string;
 }
 
 const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = boundary.union(
@@ -134,6 +139,7 @@ const remoteReadyEventSchema: BoundarySchema<RemoteReadyEventPayload> = boundary
   timestamp: boundary.string,
   paneVersion: boundary.optional(boundary.string),
   deduplicatesRequestIds: boundary.optional(boundary.boolean),
+  machineId: boundary.optional(boundary.string),
 });
 const remoteHeartbeatSchema: BoundarySchema<RemoteDaemonHeartbeatPayload> = boundary.object({
   timestamp: boundary.nonEmptyString,
@@ -185,6 +191,7 @@ type RemoteRequestOptions = RequestOptions & {
 export class RemotePaneClient {
   private readonly normalizedBaseUrl: URL;
   private readonly eventSink: PaneEventSink;
+  private readonly machineId?: string;
   private readonly initialHandshakeTimeoutMs: number;
   private readonly heartbeatStaleTimeoutMs: number;
   private readonly restoreTimeoutMs: number;
@@ -234,6 +241,7 @@ export class RemotePaneClient {
   ) {
     this.normalizedBaseUrl = normalizeBaseUrl(profile.baseUrl);
     this.eventSink = options.eventSink ?? noopPaneEventSink;
+    this.machineId = options.machineId;
     this.initialHandshakeTimeoutMs = options.initialHandshakeTimeoutMs
       ?? REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS;
     this.heartbeatStaleTimeoutMs = options.heartbeatStaleTimeoutMs
@@ -646,16 +654,16 @@ export class RemotePaneClient {
       };
       armTimeout(this.initialHandshakeTimeoutMs, `Timed out waiting for remote daemon ready event after ${this.initialHandshakeTimeoutMs}ms`);
 
-      request = createRequest(endpoint, this.buildRequestOptions(endpoint, {
-        method: 'GET',
-        headers: {
-          ...this.authorizationHeader(),
-          Accept: 'text/event-stream',
-          'X-Pane-Client-Label': this.profile.label,
-          'X-Pane-Client-Device-Label': getRemoteClientDeviceLabel(),
-          'X-Pane-Remote-Runtime-Id': REMOTE_RUNTIME_ID,
-        },
-      }), async (response) => {
+      const headers: http.OutgoingHttpHeaders = {
+        ...this.authorizationHeader(),
+        Accept: 'text/event-stream',
+        'X-Pane-Client-Label': this.profile.label,
+        'X-Pane-Client-Device-Label': getRemoteClientDeviceLabel(),
+        'X-Pane-Remote-Runtime-Id': REMOTE_RUNTIME_ID,
+      };
+      // Names this install, so the host knows it reads its cards ("Show cards on").
+      if (this.machineId) headers['X-Pane-Machine-Id'] = this.machineId;
+      request = createRequest(endpoint, this.buildRequestOptions(endpoint, { method: 'GET', headers }), async (response) => {
         if (response.statusCode !== 200) {
           try {
             const body = await readResponseBody(response);
@@ -693,7 +701,7 @@ export class RemotePaneClient {
               this.markRemoteSeen();
               armTimeout(this.restoreTimeoutMs, `Workspace restoration timed out after ${this.restoreTimeoutMs}ms`);
               if (resolveOnReady && !settled) { settled = true; resolve(); }
-              this.reportStatus('restoring', 'host ready', null, readyPayload.paneVersion);
+              this.reportStatus('restoring', 'host ready', null, { hostVersion: readyPayload.paneVersion, hostMachineId: readyPayload.machineId });
               void Promise.resolve().then(() => this.onResyncRequired?.()).then(() => {
                 if (!isStale()) {
                   clearHandshakeTimer();
@@ -869,11 +877,11 @@ export class RemotePaneClient {
     status: RemotePaneConnectionStatus,
     reason: string,
     errorMessage: string | null = null,
-    hostVersion?: string,
+    host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId'> = {},
   ): void {
     console.info(`[Pane remote daemon] ${this.profile.label}: ${status} (${reason})`);
     this.status = status;
-    this.onConnectionStateChange?.(status, errorMessage, { lastSeenAt: this.lastSeenAt, hostVersion });
+    this.onConnectionStateChange?.(status, errorMessage, { lastSeenAt: this.lastSeenAt, ...host });
     for (const waiter of [...this.statusWaiters]) waiter();
   }
 

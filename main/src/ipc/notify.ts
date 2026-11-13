@@ -14,7 +14,8 @@ import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { submitOnlyToAgent } from './runpane';
 import { NotifyService } from '../services/notify/notifyService';
-import { ASKING_TAB_CLOSED } from '../services/notify/notifyQueue';
+import { ASKING_TAB_CLOSED, cardsOnStatus } from '../services/notify/notifyQueue';
+import { readingMachines } from '../daemon/readingMachines';
 import { ClaudePromptBridge } from '../services/claudePrompts/claudePromptBridge';
 import { setClaudePromptBridge } from '../services/claudePrompts';
 import type { MachineConnections } from '../services/machineConnections';
@@ -23,8 +24,11 @@ import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { statusCard } from '../services/notify/workerContext';
+import { admitCard } from '../services/notify/cardAdmit';
+import { checkCard } from '../services/notify/cardCheck';
+import { summaryPage } from '../services/notify/summaryPage';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
-import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
@@ -32,6 +36,7 @@ import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore } from '../services/paneSecrets';
+import { agentLabel } from '../../../shared/agents';
 
 const MAX_CHOICES = 9;
 const MAX_TEXT = 4_000;
@@ -56,7 +61,7 @@ const choiceSchema = boundary.object({
   recommended: boundary.optional(boundary.boolean),
   was: boundary.optional(boundary.string),
 });
-const subQuestionSchema = boundary.object({ title: boundary.string, choices: boundary.array(choiceSchema) });
+const subQuestionSchema = boundary.object({ title: boundary.string, choices: boundary.array(choiceSchema), why: boundary.optional(boundary.string) });
 const sessionSchema = boundary.object({
   id: boundary.nonEmptyString,
   name: boundary.string,
@@ -171,6 +176,9 @@ const notifyItemSchema = boundary.object({
   choices: boundary.optional(boundary.array(choiceSchema)),
   questions: boundary.optional(boundary.array(subQuestionSchema)),
   replyIsAnswer: boundary.optional(boundary.boolean),
+  asSent: boundary.optional(boundary.object({ title: boundary.string, context: boundary.optional(boundary.string) })),
+  summaryPage: boundary.optional(boundary.string),
+  statusFile: boundary.optional(boundary.string),
   optionsOnly: boundary.optional(boundary.boolean),
   detail: boundary.optional(boundary.string),
   detailLabel: boundary.optional(boundary.string),
@@ -299,6 +307,8 @@ function askerPaneGone(database: NotifyServices['databaseService'], item: Notify
 }
 
 export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyServices, commandRegistry: PaneCommandRegistry): NotifyService {
+  /** Every machine's state, once the machine connections start; "Show cards on" reads it from the first snapshot. */
+  let machineList: (() => MachineState[]) | null = null;
   const notify = new NotifyService({
     configManager: services.configManager,
     getMainWindow: services.getMainWindow,
@@ -401,6 +411,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       }
     },
     idleSeconds: () => (hasHeadlessDaemonLaunchArg() ? Infinity : idleSeconds()),
+    cardsOn: () => cardsOnStatus(services.configManager.getConfig(), readingMachines.has, machineList?.() ?? []),
     tabAlive: (panelId) => panelManager.getPanel(panelId) !== undefined,
   });
 
@@ -408,7 +419,10 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
 
   /** Set once the machine connections start: every saved machine's questions then show here. */
   let saved: SavedMachinesLink | null = null;
-  followMachines = (machines) => { saved = linkSavedMachines(notify, machines); };
+  followMachines = (machines) => {
+    saved = linkSavedMachines(notify, machines);
+    machineList = () => machines.list();
+  };
 
   // Open in Pane works for the machine the app is on; another machine's card would need a switch.
   const showActiveMachine = () => {
@@ -423,10 +437,21 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     const teammate = teammatePaneCaller();
     // A secret card writes the owner's secret store, so a teammate cannot post one.
     if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');
-    return notify.ask(parsed, paneCommandSignal());
+    const warnings = admitNotifyCard(parsed);
+    const result = await notify.ask(parsed, paneCommandSignal());
+    // A card that wasn't shown (a worker's, sent back to its orchestrator) has nothing to warn about.
+    return warnings.length && !('unavailable' in result) ? { ...result, warnings } : result;
   });
 
   commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
+  // An approval's Summary (P4): the asker's page or Pane's template, served with no scripts or network.
+  commandRegistry.register('notify:summary-page', async (id: PaneCommandValue, options?: PaneCommandValue): Promise<NotifySummaryPage> => {
+    const wanted = decodeBoundary(id, boundary.nonEmptyString);
+    const theme = decodeOptionalBoundary(options ?? {}, boundary.object({ theme: boundary.optional(boundary.enumeration('light', 'dark')) }))?.theme ?? 'light';
+    const item = notify.queue.snapshot().items.find(candidate => candidate.id === wanted && (candidate.machineId ?? 'local') === 'local');
+    if (!item) throw new PaneError('ERR_NOTIFY_GONE', `There's no approval ${wanted} on this machine any more, so it has no Summary to show. Nothing was changed.`, 'Open the approval again from Approvals.');
+    return summaryPage(item, theme);
+  });
   commandRegistry.register('notify:remote-command', async (command: PaneCommandValue, sender: PaneCommandValue) => {
     // A Mac names itself "studio.local" on its event stream; cards call it "studio".
     const device = decodeBoundary(sender, remoteSenderSchema).device.replace(/\.(local|lan|home|internal)$/i, '');
@@ -488,7 +513,7 @@ function startChatTabPrompts(notify: NotifyService, services: NotifyServices): v
       const pane = panel ? services.sessionManager.getSession(panel.sessionId) : undefined;
       if (!panel || panel.type !== 'chat' || !pane || pane.archived) return undefined;
       const agent = getChatTabManager().view(panelId, 0, false).agent;
-      return { paneId: pane.id, panelId, name: pane.name, agent: agent === 'claude' ? 'Claude' : 'Codex' };
+      return { paneId: pane.id, panelId, name: pane.name, agent: agentLabel(agent) };
     },
     enabled: () => configManager.getConfig().answerPromptsFromPane !== false,
     answerPermission: (panelId, requestId, optionId) => getChatTabManager().answerPermission(panelId, requestId, optionId),
@@ -646,6 +671,42 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
   };
 }
 
+/**
+ * The card check every way of asking reaches (P3): a new card, a relayed one and an update are
+ * tidied when they are old paragraph cards, refused for the two clear mistakes and warned on the
+ * rest. Leaves the request as Pane posts it and returns the warnings. Info and secret cards, and
+ * calls that ask nothing (resume, --took), aren't cards to check.
+ */
+function admitNotifyCard(request: NotifyRequest): string[] {
+  if (request.resume || request.took !== undefined) return [];
+  if (request.update !== undefined) {
+    if (request.title === undefined && !request.choices && !request.questions) return [];
+    // An update changes only what it passes; the rest is the approval's, checked when it was asked.
+    const { refusal } = checkCard({ title: request.title ?? '', choices: request.choices, questions: request.questions });
+    if (refusal) throw new PaneError(refusal.code, refusal.message, refusal.next);
+    return [];
+  }
+  if (!request.ui || request.ui === 'info' || request.ui === 'secret' || request.title === undefined) return [];
+  // Only a card asked in words (or with options it hasn't got) is tidied into buttons.
+  const tidy = request.ui === 'ask' || request.ui === 'options';
+  const admitted = admitCard({ title: request.title, context: request.context, choices: request.choices, questions: request.questions, links: request.links }, { tidy });
+  if (admitted.asSent) {
+    const { card } = admitted;
+    request.ui = 'options';
+    request.title = card.title;
+    if (card.context !== undefined) request.context = card.context;
+    else delete request.context;
+    request.choices = card.choices;
+    request.questions = card.questions;
+    if (!request.choices) delete request.choices;
+    if (!request.questions) delete request.questions;
+    delete request.suggestions;
+    if (card.links) request.links = card.links;
+    request.asSent = admitted.asSent;
+  }
+  return admitted.warnings;
+}
+
 /** Checks a notify call the way the tool's schema promises, naming the field that's wrong. */
 function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   let decoded: ReturnType<typeof notifyRequestSchema.decode>;
@@ -722,15 +783,22 @@ function readStatusContext(request: NotifyRequest, newCard: boolean): void {
   if (!request.context) return;
   const card = statusCard(request.context, request.title ?? '');
   if (!card) return;
+  const buttons = newCard && request.ui === 'ask' && !request.suggestions?.length;
+  // Questions that can't get buttons here are written out in the context instead.
+  const context = card.questions && !buttons ? card.questionsContext : card.context;
   // An update without a line for the person clears the old context rather than keeping it.
-  if (card.context) request.context = card.context;
+  if (context) request.context = context;
   else if (newCard) delete request.context;
   else request.context = '';
   if (!newCard) return;
-  if (card.choices && request.ui === 'ask' && !request.suggestions?.length) {
+  if (buttons && card.questions) {
+    request.ui = 'options';
+    request.questions = card.questions;
+  } else if (buttons && card.choices) {
     request.ui = 'options';
     request.choices = card.choices;
   }
+  if (card.summaryPage) request.summaryPage = request.caller.cwd && !path.isAbsolute(card.summaryPage) ? path.resolve(request.caller.cwd, card.summaryPage) : card.summaryPage;
   if (card.links) {
     const files = card.links.map(link => ('path' in link && request.caller.cwd && !path.isAbsolute(link.path) ? { ...link, path: path.resolve(request.caller.cwd, link.path) } : link));
     request.links = [...request.links ?? [], ...files].slice(0, NOTIFY_LINKS_MAX);

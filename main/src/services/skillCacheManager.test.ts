@@ -405,7 +405,7 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
       expect(variant).toContain('`reply: Q-n → "<their words>" (picked: <picks>) (by you)`');
       expect(variant).toContain('`runpane notify --took <id|Q-n> question`');
       expect(variant).toContain('never post a second approval for it');
-      expect(variant).toContain('a title of about 80 characters');
+      expect(variant).toContain('about 80 to 100 characters on one line');
       expect(variant).toContain('`runpane inbox ack <item> --decision <D-n>`');
       expect(variant).toContain('stop its background command (TaskStop in Claude Code)');
       expect(variant).toContain('When you start, resume or wake, reconcile your open background calls');

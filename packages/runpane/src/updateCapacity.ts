@@ -26,6 +26,8 @@ export const PANE_UNSNAPSHOTTED_FOLDERS = [
   // Chat tab transcript pages, rebuilt from the agent's own session at every start;
   // the scripted test agent's store exists only in development builds.
   'chat-tabs', 'scripted-agent',
+  // Agents installed from the ACP Registry: downloads Pane can fetch again from the registry.
+  'agent-registry',
   // Live IPC endpoints, and the update operations themselves.
   'sockets', 'updates',
   // Repositories Pane clones for the person; no update migrates them.

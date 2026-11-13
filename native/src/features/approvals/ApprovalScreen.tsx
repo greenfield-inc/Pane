@@ -26,8 +26,9 @@ import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
 
 import { ApprovalActions, ConnectedRow, QuestionActions } from './ApprovalActions';
+import { openApprovalSummary } from './ApprovalSummaryScreen';
 import { useApprovalSort } from './approvalSortPreference';
-import { approvalKindLabel, approvalLinkTarget, linkIcon, approvalListOrder, approvalParams, approvalPosition, approvalWorkspace, connectedLink, isResolved, nextApproval, OLDER_MACHINE_NOTE, openApprovalLink, receiptLines, resolveSelection, type ApprovalList, type ApprovalWorkspace } from './approvals';
+import { approvalKindLabel, approvalLinkTarget, linkIcon, approvalListOrder, approvalParams, approvalPosition, approvalWorkspace, connectedLink, isResolved, nextApproval, OLDER_MACHINE_NOTE, openApprovalLink, receiptLines, resolveSelection, summaryItemId, type ApprovalList, type ApprovalWorkspace } from './approvals';
 
 /** The card never takes more than this share of the screen; the Session below keeps the rest. */
 const CARD_MAX_SHARE = 0.45;
@@ -86,25 +87,52 @@ export function ApprovalScreen({ notifyId, hintPaneId, list = 'waiting' }: { not
   return <Workspace workspace={workspace} topBar={topBar} card={card} quiet={!item || finished} />;
 }
 
-/** The card above the workspace: a Session's (with its chat), a Pane's tabs, or nothing for a question asked outside Pane. */
-const CONTEXT_LINES = 4;
-
-/** A card's context, four lines at most until Show more, so the answers stay in view. */
-function ClampedContext({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const [clamped, setClamped] = useState(false);
+/**
+ * The card's title and subtitle (its context, in full). A card Pane tidied (P8) says so, and Show
+ * as sent swaps in the title and context exactly as the asker sent them.
+ */
+function CardHeading({ item, collapsed }: { item: NotifyItem; collapsed: boolean }) {
+  const [asSent, setAsSent] = useState(false);
+  const sent = asSent ? item.asSent : undefined;
+  const title = sent ? sent.title : item.title;
+  const context = sent ? sent.context : item.context;
   return (
-    <View>
-      <Text testID="approval-context" variant="subhead" tone="secondary" selectable numberOfLines={open ? undefined : CONTEXT_LINES}
-        onTextLayout={event => { if (!open) setClamped(event.nativeEvent.lines.length >= CONTEXT_LINES); }}>
-        {text}
-      </Text>
-      {clamped || open ? (
-        <Pressable testID="approval-context-more" accessibilityRole="button" hitSlop={8} onPress={() => setOpen(!open)}>
-          <Text variant="footnote" tone="secondary">{open ? 'Show less' : 'Show more'}</Text>
-        </Pressable>
-      ) : null}
-    </View>
+    <>
+      <Text testID="notify-title" variant="headline" selectable numberOfLines={collapsed ? 1 : undefined}>{title}</Text>
+      {collapsed ? null : (
+        <>
+          {context ? <Text testID="approval-context" variant="subhead" tone="secondary" selectable>{context}</Text> : null}
+          {item.asSent ? (
+            <View style={styles.tidied}>
+              <Text testID="approval-tidied" variant="footnote" tone="muted">Tidied by Pane</Text>
+              <Pressable testID="approval-show-as-sent" accessibilityRole="button" accessibilityState={{ selected: asSent }} hitSlop={8} onPress={() => setAsSent(!asSent)}>
+                <Text variant="footnote" tone="accent">{asSent ? 'Show tidied' : 'Show as sent'}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </>
+      )}
+    </>
+  );
+}
+
+/** Opens the approval's Summary page; only an approval of the machine the phone is on has one here. */
+function SummaryRow({ item }: { item: NotifyItem }) {
+  const theme = useTheme();
+  const id = summaryItemId(item);
+  if (!id) return null;
+  return (
+    <Pressable
+      testID="approval-summary"
+      accessibilityRole="button"
+      accessibilityLabel="Open the Summary"
+      onPress={() => openApprovalSummary(id)}
+      style={({ pressed }) => [styles.chip, styles.summary, { borderRadius: theme.radius.md, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised }]}
+    >
+      <Icon ios="doc.richtext" android="article" size={14} color={theme.colors.textSecondary} />
+      <Text variant="subhead" numberOfLines={1} style={styles.chipLabel}>Summary</Text>
+      <Icon ios="chevron.right" android="chevron_right" size={12} color={theme.colors.textMuted} />
+    </Pressable>
   );
 }
 
@@ -284,13 +312,13 @@ function ApprovalCard({ item, shared, onNext }: { item: NotifyItem; shared: Noti
           <Icon ios={collapsed ? 'chevron.down' : 'chevron.up'} android={collapsed ? 'expand_more' : 'expand_less'} size={14} color={theme.colors.textMuted} />
         </Pressable>
         <Text testID="approval-origin" variant="footnote" tone="muted" numberOfLines={1}>{originLine(item, profile.label)}</Text>
-        <Text testID="notify-title" variant="headline" selectable numberOfLines={collapsed ? 1 : undefined}>{item.title}</Text>
+        <CardHeading item={item} collapsed={collapsed} />
         {collapsed ? null : (
           <>
-            {item.context ? <ClampedContext text={item.context} /> : null}
             <RevisionLines item={item} />
             <ConnectedRow link={connectedLink(item, profile.label)} />
             <LinkChips item={item} shared={shared} shownPaneId={shownPaneId} />
+            <SummaryRow item={item} />
             {item.relay ? null : <ReplyStatusLines item={item} fixing={fixing} onFix={as => command.mutate([{ type: 'fix-reply', id: item.id, as }])} />}
             {body}
             {receiptLines(item).filter(line => state.kind !== 'closed' || line !== state.message).map(line => (
@@ -320,12 +348,12 @@ function LinkChips({ item, shared, shownPaneId }: { item: NotifyItem; shared: No
   if (links.length === 0) return null;
   const canOpen = Boolean(shownPaneId || item.source.paneId);
   // The same query the tabs below read, so reading it again refreshes them too.
-  const panelsKey = [profile.id, 'panels:list', shownPaneId, { chatTabs: true }];
+  const panelsKey = [profile.id, 'panels:list', shownPaneId, { chatTabs: true, chatAgents: true }];
 
   const readPanels = async (): Promise<readonly string[]> => {
     void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:getActive'] });
     if (!shownPaneId) return [];
-    const panels = await queryClient.fetchQuery({ queryKey: panelsKey, queryFn: () => invokeChannel<ToolPanel[]>(client, 'panels:list', [shownPaneId, { chatTabs: true }]), staleTime: 0 });
+    const panels = await queryClient.fetchQuery({ queryKey: panelsKey, queryFn: () => invokeChannel<ToolPanel[]>(client, 'panels:list', [shownPaneId, { chatTabs: true, chatAgents: true }]), staleTime: 0 });
     return panels.map(panel => panel.id);
   };
 
@@ -390,5 +418,7 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 32, maxWidth: '100%', paddingHorizontal: 10 },
   chipLabel: { flexShrink: 1 },
+  summary: { alignSelf: 'flex-start' },
+  tidied: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   bareNote: { padding: 16, textAlign: 'center' },
 });

@@ -8,6 +8,7 @@ import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscri
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
 import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
+import type { AnalyticsEnvironment } from '../../../shared/types/analyticsEnvironment';
 import type { KeyboardShortcutOverrides } from '../../../shared/utils/keyboardBindings';
 import type { SessionRetention } from '../../../shared/types/orchestrationSession';
 
@@ -36,6 +37,8 @@ export interface AnalyticsIdentity {
   appVersion?: string;
   platform?: string;
   electronVersion?: string;
+  /** Where Pane runs (CI, container, display); sent as event context, never saved. */
+  environment?: AnalyticsEnvironment;
   webDistinctId?: string;
   webAttributionPresent?: boolean;
   isFirstLaunch?: boolean;
@@ -85,7 +88,7 @@ export interface AppConfig {
   defaultModel?: string;
   // Default agent used by the global Pane Chat orchestrator terminal
   defaultOrchestratorAgent?: PaneChatAgent;
-  // Experimental: chat tabs (Claude and Codex over ACP, no terminal).
+  // Chat tabs (Claude and Codex over ACP, no terminal).
   chatTabsEnabled?: boolean;
   autopilotEnabled?: boolean;
   // Auto-check for updates

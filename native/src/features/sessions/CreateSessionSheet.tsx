@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
+import { CONFIGURED_AGENT_IDS } from '@shared/agents';
 import {
   nextOrchestrationSessionName,
   type OrchestrationSessionCreateInput,
@@ -20,7 +21,7 @@ import { Button, Icon, Text } from '@/ui';
 import { sessionsUnavailable, sessionViewArgs } from './hooks';
 
 /** Older hosts do not report their agents; the host still rejects one it cannot run. */
-const ALL_AGENTS: RemotePwaSessionAgents = { agents: ['claude', 'codex', 'cursor'], defaultAgent: DEFAULT_PANE_CHAT_AGENT };
+const ALL_AGENTS: RemotePwaSessionAgents = { agents: [...CONFIGURED_AGENT_IDS], defaultAgent: DEFAULT_PANE_CHAT_AGENT };
 
 /**
  * Desktop's Create Session dialog for any saved machine: an optional name and that machine's
@@ -38,7 +39,7 @@ export function CreateSessionForm({ machine, onCreated }: { machine: RemotePaneC
     mutationFn: (input: OrchestrationSessionCreateInput) => send<OrchestrationSessionView<{ id: string; name: string }>>(
       machine,
       'orchestration-sessions:create',
-      [input, { chatTabs: true }],
+      [input, { chatTabs: true, chatAgents: true }],
       `The connection dropped before ${machine.label} answered. Check its Sessions before trying again: the Session may already exist.`,
       CREATE_TIMEOUT_MS,
     ),

@@ -7,6 +7,7 @@ import { originLine } from '@shared/approvalReceipts';
 
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
 import { askerLine, questionDetail, type ApprovalList } from '@/features/approvals/approvals';
+import { approvalRowSpoken, ApprovalRowLines } from '@/features/approvals/ApprovalRowLines';
 import { openApproval } from '@/features/approvals/ApprovalScreen';
 import { WaitingCount } from '@/features/approvals/WaitingCount';
 import { MachineBadge } from '@/features/machines/MachineBadge';
@@ -126,10 +127,12 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
                 testID={row.type === 'question' ? `notify-row-${row.item.id}` : `permission-row-${row.request.sessionId}`}
                 title={row.type === 'question' ? originLine(row.item, '') : askerLine(row.paneName, row.session)}
                 detail={row.type === 'question' ? questionDetail(row.item) : permission?.target ? `${permission.title}: ${permission.target}` : permission?.title ?? ''}
+                below={row.type === 'question' ? <ApprovalRowLines item={row.item} testID={`notify-row-${row.item.id}`} /> : undefined}
+                spoken={row.type === 'question' ? approvalRowSpoken(row.item) : undefined}
                 machine={machine}
                 stale={row.stale}
                 divided={divided}
-                leading={<StatusBadge status={list === 'answered' ? 'idle' : 'blocked'} />}
+                leading={<StatusBadge status={list === 'answered' || list === 'agent' ? 'idle' : 'blocked'} />}
                 onPress={() => openWaiting(row, list)}
               />
               {row.type === 'question' && row.item.state === 'waiting' ? (
@@ -281,9 +284,13 @@ function OfflineNote({ machine, since, hasRows, onRetry }: { machine: Machine | 
 }
 
 /** A row of All machines: status, name, what it is, and its machine's badge. */
-function AllRow({ title, detail, label, machine, stale, paused = false, divided = false, leading, trailing, onPress, swipe, testID }: {
+function AllRow({ title, detail, below, spoken = [], label, machine, stale, paused = false, divided = false, leading, trailing, onPress, swipe, testID }: {
   title: string;
   detail: string;
+  /** A question's subtitle and reply status, under its detail. */
+  below?: ReactNode;
+  /** What `below` says, for screen readers. */
+  spoken?: string[];
   /** Spoken instead of title and detail. */
   label?: string;
   machine: Machine | undefined;
@@ -303,7 +310,7 @@ function AllRow({ title, detail, label, machine, stale, paused = false, divided 
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={label ?? [title, paused ? 'Paused' : undefined, detail, machine?.name].filter(Boolean).join(', ')}
+      accessibilityLabel={label ?? [title, paused ? 'Paused' : undefined, detail, ...spoken, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
       {...(swipe ? swipeRowAccessibility(swipe) : {})}
       onPress={onPress}
@@ -318,6 +325,7 @@ function AllRow({ title, detail, label, machine, stale, paused = false, divided 
       <View style={styles.fill}>
         <Text variant="body" tone={paused ? 'muted' : 'primary'} numberOfLines={1}>{title}</Text>
         <Text variant="footnote" tone="muted" numberOfLines={1}>{detail}</Text>
+        {below}
       </View>
       {trailing}
       {machine ? <MachineBadge machine={machine} /> : null}

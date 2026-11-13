@@ -5,7 +5,11 @@ import {
   aliasInstallIdentityDirect,
   aliasWebVisitor,
   aliasWebVisitorDirect,
+  capture,
+  captureAppFirstOpened,
+  initPostHog,
   posthog,
+  type AnalyticsProperties,
 } from './posthog';
 
 interface AliasEvent {
@@ -17,11 +21,16 @@ interface AliasEvent {
 // SDK would send it.
 const sdkAliasEvents: AliasEvent[] = [];
 const directAliasEvents: AliasEvent[] = [];
+const sdkEvents: Array<{ event: string; properties: AnalyticsProperties }> = [];
+const directEvents: Array<{ event: string; properties: AnalyticsProperties }> = [];
 
 beforeEach(() => {
   sdkAliasEvents.length = 0;
   directAliasEvents.length = 0;
+  sdkEvents.length = 0;
+  directEvents.length = 0;
   vi.spyOn(posthog, 'capture').mockImplementation((event, properties) => {
+    sdkEvents.push({ event, properties: properties ?? {} });
     if (event === '$create_alias' && properties) {
       sdkAliasEvents.push({ distinct_id: properties.distinct_id, alias: properties.alias });
     }
@@ -29,6 +38,7 @@ beforeEach(() => {
   });
   vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
     const { event, properties } = JSON.parse(init.body);
+    directEvents.push({ event, properties });
     if (event === '$create_alias') {
       directAliasEvents.push({ distinct_id: properties.distinct_id, alias: properties.alias });
     }
@@ -92,5 +102,33 @@ describe('$create_alias payloads', () => {
     const expected = [{ distinct_id: 'install:install_abc', alias: 'web-visitor-1' }];
     expect(sdkAliasEvents).toEqual(expected);
     expect(directAliasEvents).toEqual(expected);
+  });
+});
+
+describe('environment tags', () => {
+  const tags = {
+    ci: true, ci_provider: 'github_actions', container: true, display: 'virtual' as const,
+    in_wsl: false, packaged: true, custom_pane_dir: false, automated: true,
+  };
+  const ciInstall: AnalyticsIdentity = {
+    distinctId: 'install:install_ci', identitySource: 'anonymous', installId: 'install_ci',
+    isFirstLaunch: true, environment: tags,
+  };
+
+  it('tags app_first_opened and every SDK event, such as app_opened, with where Pane runs', async () => {
+    await captureAppFirstOpened(ciInstall);
+    expect(directEvents.find((e) => e.event === 'app_first_opened')?.properties).toMatchObject(tags);
+
+    initPostHog({ enabled: false, identity: ciInstall });
+    capture('app_opened', { is_first_launch: true });
+    expect(sdkEvents.find((e) => e.event === 'app_opened')?.properties).toMatchObject(tags);
+  });
+
+  it('sends no environment tags when the main process sent none (older builds)', async () => {
+    await captureAppFirstOpened({ ...ciInstall, environment: undefined });
+    const firstOpens = directEvents.filter((e) => e.event === 'app_first_opened');
+    expect(firstOpens).toHaveLength(1);
+    expect(firstOpens[0].properties).toMatchObject({ install_id: 'install_ci', source: 'first_launch' });
+    for (const key of Object.keys(tags)) expect(firstOpens[0].properties).not.toHaveProperty(key);
   });
 });

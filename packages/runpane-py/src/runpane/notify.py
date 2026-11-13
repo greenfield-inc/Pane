@@ -262,7 +262,12 @@ def parse_questions(text: str, allow_was: bool) -> List[Dict[str, Any]]:
     for index, item in enumerate(value):
         if not isinstance(item, dict) or not is_text(item.get("title")) or "choices" not in item:
             raise invalid("questions", f'questions[{index}] must be an object with a non-empty "title" and "choices", a JSON array of 1 to {MAX_CHOICES} choices.')
-        questions.append({"title": item["title"], "choices": parse_choices(item["choices"], "questions", f"questions[{index}].choices", allow_was)})
+        if "why" in item and not isinstance(item["why"], str):
+            raise invalid("questions", f'questions[{index}].why must be text: why this question matters, shown under it.')
+        question = {"title": item["title"], "choices": parse_choices(item["choices"], "questions", f"questions[{index}].choices", allow_was)}
+        if is_text(item.get("why")):
+            question["why"] = item["why"]
+        questions.append(question)
     return questions
 
 
@@ -336,7 +341,16 @@ def is_text(value: Any) -> bool:
 
 
 def describe_notify_result(result: Dict[str, Any]) -> str:
-    """One line for people: the answer or reply, Approved or Denied, where an update went, or what to do next."""
+    """One line for people: the answer or reply, Approved or Denied, where an update went, or what to do next.
+
+    The card check's warnings follow, one line each: the card was posted anyway.
+    """
+    line = describe_notify_outcome(result)
+    warnings = [warning for warning in result.get("warnings") or [] if isinstance(warning, str)]
+    return "\n".join([line, *(f"Warning: {warning}" for warning in warnings)])
+
+
+def describe_notify_outcome(result: Dict[str, Any]) -> str:
 
     def with_note(text: str) -> str:
         return f"{text}. Note: {result['note']}" if result.get("note") else text

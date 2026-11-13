@@ -8,18 +8,21 @@ import { leadingQn } from '../../../../shared/autopilotDecision';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
 import { useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
 import { AutopilotDocument, AutopilotWebPage } from '../autopilot/AutopilotDocument';
+import { isLightTheme, useTheme } from '../../contexts/ThemeContext';
+import { sentenceStart } from '../../../../shared/approvalStatus';
+import { readSummaryPage, type SummaryRead } from './summaryPage';
 import { ItemCloseForm, NotifyCard } from '../notify/NotifyCard';
 import { relayReadOnlyLine } from './approvalGroups';
 import { relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import {
-  askedBy, canSend, cardChip, replyBeingRead, cardSummary, cardTabs, dotTone, markedQuestions, nextAfterSend, previousVersion, questionsOf, replyLine,
+  askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, recommendedPicks, replyLine,
   type CardChip, type CardQuestion, type CardTab, type ReplyLine,
 } from './approvalCard';
 
 /**
  * The approval column (P3, D-243): one tabbed column, shared by a Session, Autopilot and the
- * Approvals screen. Questions & answers first, with the pager and one reply box; then Summary,
+ * Approvals screen. Decide first, with the pager and one reply box; then Summary,
  * each reference, and the chat where it was asked.
  */
 export interface ApprovalColumnProps {
@@ -38,16 +41,19 @@ export interface ApprovalColumnProps {
   inChat?: string;
   /** The chat where it was asked, for the origin tab. */
   renderOrigin?: (item: NotifyItem) => ReactNode;
+  /**
+   * Beside a split (a Session's column): whether keyboard focus is in it. Its active tab then
+   * carries the accent only while it has focus, like a split's (D-249, D-335). Unset: always.
+   */
+  focused?: boolean;
   /** The items to read instead of the Notify store's (tests). */
   items?: readonly NotifyItem[];
+  /** After an accepted Send (P7, D-344): a chat's column closes; the Approvals screen stays on the approval. */
+  onSent?: () => void;
 }
 
 const NO_PICKS: string[] = [];
 
-/** "the Infra orchestrator" opens a sentence as "The Infra orchestrator". */
-function capitalized(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
 
 /** Below this width the header keeps the pager and ✕, and drops the group's name, the dots and the chip. */
 const NARROW_PX = 520;
@@ -79,7 +85,7 @@ const TONE_BOX = {
   info: 'bg-status-info/10',
 } satisfies Record<ReplyLine['tone'], string>;
 
-export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, closeLabel, onClose, inChat, renderOrigin, items: given }: ApprovalColumnProps) {
+export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, closeLabel, onClose, inChat, renderOrigin, focused, items: given, onSent }: ApprovalColumnProps) {
   const stored = useNotifyStore((state) => state.snapshot?.items);
   const items = given ?? stored;
   const byId = useMemo(() => new Map((items ?? []).map((item) => [item.id, item])), [items]);
@@ -100,7 +106,8 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
 
   if (!item) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col bg-bg-primary" data-testid="approval-column">
+      // No tabs to mark: a thin accent edge along the top says it has focus.
+      <div className={cn('flex min-h-0 flex-1 flex-col bg-bg-primary', focused && 'shadow-[inset_0_2px_0_0_var(--color-interactive-primary)]')} data-testid="approval-column" data-focused={focused}>
         <ColumnHeader index={0} total={0} groupLabel={groupLabel} closeLabel={closeLabel} onClose={onClose} onStep={step} dots={[]} chip={null} />
         <p className="m-auto px-6 text-center text-[13px] text-text-tertiary">That approval is no longer here: it was answered or closed.</p>
       </div>
@@ -109,7 +116,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
 
   return (
     // Focusable, so its ← → keys belong to it alone; clicking anywhere in it gives it focus.
-    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid="approval-column" data-item-id={item.id} data-narrow={narrow || undefined}>
+    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} data-focus-entry={focused !== undefined || undefined} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid="approval-column" data-item-id={item.id} data-narrow={narrow || undefined}>
       <ColumnHeader
         narrow={narrow}
         index={index}
@@ -121,15 +128,15 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
         dots={pager.map((id) => dotTone(byId.get(id), id === itemId))}
         chip={cardChip(item)}
       />
-      <TabBar tabs={tabs} active={tab?.key ?? 'qa'} onPick={(key) => setTab(surface, itemId, key)} />
+      <TabBar tabs={tabs} active={tab?.key ?? 'qa'} focused={focused} onPick={(key) => setTab(surface, itemId, key)} />
       <div className="relative min-h-0 flex-1">
         {(tab?.kind ?? 'qa') === 'qa' && (
           nested
             ? <NestedApproval item={nested} onBack={() => openNested(surface, itemId, undefined)} />
             // A new version starts afresh: its options may have changed under the picks.
-            : <QuestionsTab key={`${item.id}:${item.version ?? 1}`} item={item} order={pager} byId={byId} onSelect={onSelect} />
+            : <QuestionsTab key={`${item.id}:${item.version ?? 1}`} item={item} onSent={onSent} tabs={tabs} onOpenTab={(key) => setTab(surface, itemId, key)} />
         )}
-        {tab?.kind === 'summary' && <SummaryTab item={item} onOpenTab={(key) => setTab(surface, itemId, key)} tabs={tabs} />}
+        {tab?.kind === 'summary' && <SummaryTab key={item.id} item={item} />}
         {tab?.kind === 'link' && <LinkTab item={item} link={tab.link} onOpenApproval={(id) => openNested(surface, itemId, resolveApproval(items ?? [], id))} />}
         {tab?.kind === 'origin' && (renderOrigin?.(item) ?? <p className="p-6 text-[13px] text-text-tertiary">Asked in {item.source.name}.</p>)}
       </div>
@@ -161,9 +168,9 @@ function Chip({ chip, testId }: { chip: NonNullable<CardChip>; testId?: string }
   const tone = chip.tone === 'info' ? 'bg-status-info/10 text-status-info-on-tint' : chip.tone === 'warning' ? 'bg-status-warning/10 text-status-warning-on-tint' : chip.tone === 'success' ? 'bg-status-success/10 text-status-success-on-tint' : 'bg-surface-tertiary text-text-secondary';
   const Icon = chip.tone === 'info' ? Sparkles : chip.tone === 'warning' ? Loader2 : chip.tone === 'success' ? Check : Loader2;
   return (
-    <span className={cn('inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-medium', tone)} data-testid={testId ?? 'approval-chip'} data-tone={chip.tone}>
-      <span className="flex h-3 w-3 items-center justify-center" aria-hidden="true"><Icon className="h-3 w-3" /></span>
-      {chip.text}
+    <span className={cn('inline-flex h-[22px] min-w-0 max-w-full shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-medium', tone)} data-testid={testId ?? 'approval-chip'} data-tone={chip.tone} title={chip.text}>
+      <span className="flex h-3 w-3 shrink-0 items-center justify-center" aria-hidden="true"><Icon className="h-3 w-3" /></span>
+      <span className="truncate">{chip.text}</span>
     </span>
   );
 }
@@ -189,7 +196,7 @@ function ColumnHeader({ index, total, groupLabel, closeLabel, onClose, onStep, d
           </span>
         ))}
       </span>
-      {/* Narrow, the Questions & answers tab says it's ready again; the header keeps to the pager and ✕. */}
+      {/* Narrow, the Decide tab says it's ready again; the header keeps to the pager and ✕. */}
       {chip && chip.tone !== 'success' && !narrow && <Chip chip={chip} />}
       {onClose && closeLabel && (
         <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel}
@@ -213,7 +220,7 @@ function tabIcon(tab: CardTab) {
   return null;
 }
 
-function TabBar({ tabs, active, onPick }: { tabs: CardTab[]; active: string; onPick: (key: string) => void }) {
+function TabBar({ tabs, active, focused, onPick }: { tabs: CardTab[]; active: string; focused?: boolean; onPick: (key: string) => void }) {
   return (
     // Tabs wrap onto a second row rather than scroll out of sight in a narrow column.
     <div role="tablist" aria-label="Approval" className="flex min-h-10 shrink-0 flex-wrap items-stretch border-b border-border-primary" data-testid="approval-tabs">
@@ -227,8 +234,10 @@ function TabBar({ tabs, active, onPick }: { tabs: CardTab[]; active: string; onP
             role="tab"
             aria-selected={selected}
             onClick={() => onPick(tab.key)}
-            className={cn('-mb-px inline-flex h-10 min-w-0 items-center gap-1.5 border-b-2 px-3 text-[13px]', selected ? 'border-interactive font-semibold text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary')}
+            className={cn('-mb-px inline-flex h-10 min-w-0 items-center gap-1.5 border-b-2 px-3 text-[13px]', selected ? cn('font-semibold text-text-primary', focused === false ? 'border-transparent' : 'border-interactive') : 'border-transparent text-text-secondary hover:text-text-primary')}
             data-testid="approval-tab"
+            data-approval-tab
+            data-focused={selected && focused !== undefined ? focused : undefined}
           >
             {tab.kind === 'qa'
               ? <span className="flex h-2 w-2 items-center justify-center" aria-hidden="true"><span className="h-1.5 w-1.5 rounded-full bg-status-warning" /></span>
@@ -241,8 +250,8 @@ function TabBar({ tabs, active, onPick }: { tabs: CardTab[]; active: string; onP
   );
 }
 
-/** Questions & answers: who asks, the question, how it changed, its options and the one reply box. */
-function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order: readonly string[]; byId: ReadonlyMap<string, NotifyItem>; onSelect: (id: string) => void }) {
+/** Decide: who asks, the question, how it changed, its options and the one reply box. */
+function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onSent?: () => void; tabs: CardTab[]; onOpenTab: (key: string) => void }) {
   const now = useNow();
   const questions = useMemo(() => markedQuestions(item), [item]);
   // The draft lives in the store, so it survives paging away and a refused Send (F-4).
@@ -250,7 +259,9 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
   const draft = useApprovalColumnStore((state) => state.drafts[draftKey]);
   const setDraft = useApprovalColumnStore((state) => state.setDraft);
   const clearSentDraft = useApprovalColumnStore((state) => state.clearSentDraft);
-  const picks = draft?.picks ?? NO_PICKS;
+  // Recommended picks start selected (D-345); the person changes any before sending.
+  const preselected = useMemo(() => recommendedPicks(item), [item]);
+  const picks = draft?.picks ?? (item.state === 'waiting' ? preselected : NO_PICKS);
   const text = draft?.text ?? '';
   const setPicks = (update: (current: string[]) => string[]) => setDraft(draftKey, { picks: update(picks), text });
   const setText = (value: string) => setDraft(draftKey, { picks, text: value });
@@ -261,8 +272,6 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
     shown.current = true;
     return () => { shown.current = false; };
   }, []);
-  const lastReplied = useApprovalColumnStore((state) => state.lastReplied);
-  const noteReplied = useApprovalColumnStore((state) => state.noteReplied);
   const waiting = item.state === 'waiting';
   // What the column has no form of its own for: a secret, a prompt the terminal now holds, an update.
   const plain = item.ui === 'secret' || item.ui === 'info' || item.agentPrompt?.inTerminal || item.relay;
@@ -284,22 +293,42 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
     }
     // Refused (machine offline, already answered, still reading): the words and picks stay.
     if (!accepted) return;
-    if (typed && !item.agentPrompt) noteReplied(item.id);
     // Only what was sent is cleared: words or picks changed while Send was pending stay in the box (F-15).
     if (!clearSentDraft(draftKey, { picks, text })) return;
-    const next = shown.current ? nextAfterSend(order, item.id, byId) : undefined;
-    if (next) onSelect(next);
+    // Send closes a chat's column; the chat's status line says who reads it (P7, D-344).
+    if (shown.current) onSent?.();
   };
   const before = previousVersion(item);
   const earlier = [...item.versions ?? []].reverse();
-  const replied = lastReplied && lastReplied !== item.id ? byId.get(lastReplied) : undefined;
+  const [showSent, setShowSent] = useState(false);
+  const replyBox = useRef<HTMLTextAreaElement>(null);
+  useGrowingBox(replyBox, text);
+  const references = tabs.filter((candidate): candidate is Extract<CardTab, { kind: 'link' }> => candidate.kind === 'link');
+  const tidied = item.asSent;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5" data-testid="approval-qa">
         <p className="text-[13px] text-text-tertiary">{[...askedBy(item), relativeAge(item.createdAt, now)].join(' · ')}</p>
         <h2 className="mt-1.5 text-[19px] font-semibold leading-snug text-text-primary" data-testid="approval-title">{item.title}</h2>
-        {item.context && <p className="mt-1.5 whitespace-pre-wrap text-[14px] leading-relaxed text-text-secondary">{item.context}</p>}
+        {tidied && (
+          <div className="mt-2 rounded-lg bg-status-warning/10 px-3 py-2 text-[13px] text-status-warning-on-tint" data-testid="approval-tidied">
+            <div className="flex items-start gap-2">
+              <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1">Tidied by Pane: sent as one {[...tidied.title].length}-character question and split by rule. Show as sent has it exactly as written.</span>
+              <button type="button" className="shrink-0 font-medium hover:underline" aria-expanded={showSent} onClick={() => setShowSent((shown) => !shown)} data-testid="approval-show-as-sent">
+                {showSent ? 'Hide' : 'Show as sent'}
+              </button>
+            </div>
+            {showSent && (
+              <div className="mt-2 rounded-md bg-surface-primary px-3 py-2 text-text-primary" data-testid="approval-as-sent">
+                <p className="whitespace-pre-wrap font-semibold">{tidied.title}</p>
+                {tidied.context && <p className="mt-1 whitespace-pre-wrap text-text-secondary">{tidied.context}</p>}
+              </div>
+            )}
+          </div>
+        )}
+        {item.context && <p className="mt-1.5 whitespace-pre-wrap text-[14px] leading-relaxed text-text-secondary" data-testid="approval-subtitle">{item.context}</p>}
         {item.revision && waiting && (
           <section className="mt-4 rounded-xl border border-status-info/30 bg-status-info/10 p-4" data-testid="approval-revision">
             <div className="flex items-center gap-2 text-[14px] font-semibold text-text-primary">
@@ -349,6 +378,24 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
                 ))}
               </div>
             )}
+            {references.length > 0 && (
+              <div className="mt-4 flex flex-wrap items-center gap-1.5" data-testid="approval-references">
+                <span className="mr-1 text-[13px] text-text-tertiary">References</span>
+                {references.map((reference) => {
+                  const Icon = tabIcon(reference) ?? FileText;
+                  return (
+                    <button key={reference.key} type="button" onClick={() => onOpenTab(reference.key)}
+                      className="inline-flex max-w-[260px] items-center gap-1.5 rounded-md border border-border-secondary px-2 py-1 text-[13px] text-interactive hover:bg-surface-hover">
+                      <Icon className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
+                      <span className="truncate">{reference.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <button type="button" onClick={() => onOpenTab('summary')} className="mt-3 inline-flex items-center gap-0.5 text-left text-[13.5px] text-interactive hover:underline" data-testid="approval-read-summary">
+              Read the Summary: what’s being decided, the trade-offs and where things stand <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
             {before && earlier.length > 0 && (
               <section className="mt-4 rounded-xl border border-border-secondary" data-testid="approval-earlier">
                 {earlier.map((version) => (
@@ -380,7 +427,6 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
       {ended && line && <div className="shrink-0 border-t border-border-primary px-5 pb-1 pt-3"><ReplyNotice item={item} /></div>}
       {!plain && !ended && (
         <div className="shrink-0 border-t border-border-primary px-5 pb-4 pt-3" data-testid="approval-reply">
-          {replied && <ReplyNotice item={replied} onDismiss={() => noteReplied(null)} named />}
           {line && <ReplyNotice item={item} />}
           {item.state === 'sent' && (
             <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface-tertiary px-3 py-2 text-[13px] text-text-secondary">
@@ -390,13 +436,14 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
           )}
           {waiting && !item.agentPrompt && !item.optionsOnly && (
             <textarea
+              ref={replyBox}
               value={text}
               onChange={(event) => setText(event.target.value)}
               onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send(); } }}
               rows={2}
               aria-label="Reply"
-              placeholder="Reply: add a note, answer in your own words, or ask about it…"
-              className="w-full resize-none rounded-lg border border-border-primary bg-surface-primary px-3 py-2 text-[14px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none"
+              placeholder="Reply: pick above, add a note, answer in your own words, or ask about it…"
+              className="w-full resize-none overflow-y-auto rounded-lg border border-border-primary bg-surface-primary px-3 py-2 text-[14px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none"
               data-testid="approval-reply-box"
             />
           )}
@@ -405,7 +452,8 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
             <div className="mt-2 flex items-center gap-3">
               <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary">
                 {item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
-                  : replyBeingRead(item) ? `${capitalized(item.reply?.reader?.name ?? 'its reader')} is reading your last reply. You can send another once it says how it took it, or pick an option now.` : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
+                  : replyBeingRead(item) ? `${sentenceStart(item.reply?.reader?.name ?? item.source.name)} is reading your last reply. You can send another once it says how it took it, or pick an option now.`
+                    : preselected.some(Boolean) ? 'Recommended picks are pre-selected; change any before you send.' : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
               </p>
               {!item.agentPrompt && (
                 <button type="button" onClick={() => setClosing(true)} className="shrink-0 text-[12.5px] text-text-tertiary hover:text-text-primary" data-testid="approval-close-item">Close…</button>
@@ -422,26 +470,20 @@ function QuestionsTab({ item, order, byId, onSelect }: { item: NotifyItem; order
   );
 }
 
-/** How a reply was taken, with its one-click fix; `named` when it's about another approval than the one open. */
-function ReplyNotice({ item, onDismiss, named = false }: { item: NotifyItem; onDismiss?: () => void; named?: boolean }) {
+/** How the reply on this approval was taken, with its one-click fix. Shown only on its own approval (Q-343.3). */
+function ReplyNotice({ item }: { item: NotifyItem }) {
   const line = replyLine(item);
   if (!line) return null;
   const Icon = line.tone === 'success' ? Check : line.tone === 'warning' ? CircleAlert : Loader2;
-  const ref = /^\s*(Q-\d+)/.exec(item.title)?.[1] ?? item.title;
   return (
-    <div className={cn('mb-2 flex items-start gap-2 rounded-lg px-3 py-2 text-[13px]', TONE_BOX[line.tone])} role="status" data-testid={named ? 'approval-last-reply' : 'approval-reply-line'} data-tone={line.tone}>
+    <div className={cn('mb-2 flex items-start gap-2 rounded-lg px-3 py-2 text-[13px]', TONE_BOX[line.tone])} role="status" data-testid="approval-reply-line" data-tone={line.tone}>
       <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden="true"><Icon className={cn('h-3.5 w-3.5', TONE_TEXT[line.tone])} /></span>
-      <span className={cn('min-w-0 flex-1 leading-snug', TONE_TEXT[line.tone])}>
-        {named && <span className="font-semibold">{ref} · </span>}{line.text}
-      </span>
+      <span className={cn('min-w-0 flex-1 leading-snug', TONE_TEXT[line.tone])}>{line.text}</span>
       {line.fix && (
         <button type="button" className="shrink-0 font-medium text-interactive hover:underline" data-testid="approval-fix"
           onClick={() => runNotify({ type: 'fix-reply', id: item.id, as: line.fix?.as ?? 'answer' })}>
           {line.fix.label}
         </button>
-      )}
-      {onDismiss && (
-        <button type="button" aria-label="Dismiss" onClick={onDismiss} className="shrink-0 text-text-tertiary hover:text-text-primary"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
       )}
     </div>
   );
@@ -452,6 +494,7 @@ function QuestionBlock({ question, label, picked, disabled, onPick, showTitle }:
     <section className="mt-4 rounded-xl border border-border-secondary p-4" data-testid="approval-question">
       <div className="text-[12px] font-medium uppercase tracking-wide text-text-tertiary">{label}</div>
       {showTitle && <p className="mt-1 text-[15px] font-semibold text-text-primary">{question.title}</p>}
+      {question.why && <p className="mt-0.5 text-[13px] leading-relaxed text-text-secondary" data-testid="approval-question-why">{question.why}</p>}
       <div className="mt-2 flex flex-col gap-2" role="radiogroup" aria-label={question.title}>
         {question.choices.map((choice) => {
           const selected = picked === choice.label;
@@ -504,68 +547,43 @@ function QuestionBlock({ question, label, picked, disabled, onPick, showTitle }:
   );
 }
 
-/** Summary (D-225): written by Pane from the approval itself, the same way for every approval. */
-function SummaryTab({ item, tabs, onOpenTab }: { item: NotifyItem; tabs: CardTab[]; onOpenTab: (key: string) => void }) {
-  const summary = useMemo(() => cardSummary(item), [item]);
-  const heading = 'mt-5 text-[12px] font-semibold uppercase tracking-wide text-text-tertiary';
+/**
+ * Summary (P4): one HTML page, the asker's own or the one Pane writes from the card, read from the
+ * machine that holds the approval and shown with scripts and network off, as on the phone.
+ */
+function SummaryTab({ item }: { item: NotifyItem }) {
+  const { theme } = useTheme();
+  const dark = !isLightTheme(theme);
+  const [page, setPage] = useState<SummaryRead | null>(null);
+  useEffect(() => {
+    let current = true;
+    setPage(null);
+    void readSummaryPage(item, dark ? 'dark' : 'light').then((read) => { if (current) setPage(read); });
+    return () => { current = false; };
+    // A new version rewrites the template; the item's other changes don't.
+  }, [item.id, item.version, item.state, item.reply?.state, dark]); // eslint-disable-line react-hooks/exhaustive-deps
+  const label = page?.kind === 'page' ? baseName(page.path) : 'Written by Pane';
   return (
-    <div className="h-full overflow-y-auto px-6 py-5 text-[14px] text-text-primary" data-testid="approval-summary">
-      <p className="flex items-center gap-1.5 text-[12.5px] text-text-tertiary"><BookOpen className="h-3.5 w-3.5" aria-hidden="true" /> Summary · Pane writes this from the approval itself, in the same format for every approval</p>
-      <h3 className={heading}>Why it matters</h3>
-      <p className="mt-1.5 whitespace-pre-wrap leading-relaxed">{summary.why ?? 'The asker gave no reason.'}</p>
-      <h3 className={heading}>Recommendation</h3>
-      {summary.recommendation.length > 0 ? (
-        <div className="mt-1.5 rounded-lg bg-status-success/10 px-3 py-2.5 leading-relaxed">
-          {summary.recommendation.map((choice, at) => (
-            <p key={at}><span className="font-semibold text-status-success-on-tint">{choice.label}</span>{choice.question ? ` for “${choice.question}”` : ''}, from {item.source.name}.</p>
-          ))}
+    <div className="absolute inset-0 flex flex-col p-3" data-testid="approval-summary">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-secondary">
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border-secondary bg-surface-tertiary px-3 text-[12.5px] text-text-tertiary">
+          <BookOpen className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate font-medium text-text-secondary" data-testid="approval-summary-source">{label}</span>
+          <span className="shrink-0">· sandboxed, no scripts</span>
         </div>
-      ) : <p className="mt-1.5 text-text-secondary">{item.source.name} makes no recommendation.</p>}
-      {summary.questions.length > 0 && (
-        <>
-          <h3 className={heading}>{summary.questions.length > 1 ? 'The questions' : 'The choices'}</h3>
-          {summary.questions.map((question, at) => (
-            <div key={at} className="mt-1.5">
-              {summary.questions.length > 1 && <p className="font-semibold">{question.title}</p>}
-              <ul className="list-disc pl-5 leading-relaxed">
-                {question.choices.map((choice) => <li key={choice.label}><span className="font-semibold">{choice.label}</span>{choice.detail ? `: ${choice.detail}` : ''}</li>)}
-              </ul>
-            </div>
-          ))}
-        </>
-      )}
-      {summary.references.length > 0 && (
-        <>
-          <h3 className={heading}>References</h3>
-          <div className="mt-1.5 overflow-hidden rounded-lg border border-border-secondary">
-            {summary.references.map((reference, at) => {
-              const tab = reference.kind === 'origin' ? tabs.find((candidate) => candidate.kind === 'origin') : tabs.find((candidate) => candidate.kind === 'link' && candidate.index === at);
-              return (
-                <button key={at} type="button" disabled={!tab} onClick={() => tab && onOpenTab(tab.key)}
-                  className="flex w-full items-center gap-2 border-b border-border-secondary px-3 py-2 text-left last:border-b-0 hover:bg-surface-hover disabled:hover:bg-transparent">
-                  <span className="min-w-0 flex-1 truncate font-semibold">{reference.label}</span>
-                  <span className="min-w-0 max-w-[50%] truncate text-[12.5px] text-text-tertiary">{reference.kind === 'file' ? 'a file' : reference.kind === 'url' ? reference.detail : reference.detail}</span>
-                </button>
-              );
-            })}
-          </div>
-        </>
-      )}
-      {summary.history.length > 1 && (
-        <>
-          <h3 className={heading}>Rounds</h3>
-          <ol className="mt-1.5 flex flex-col gap-2" data-testid="approval-summary-history">
-            {summary.history.map((round) => (
-              <li key={round.version} className="leading-relaxed">
-                <span className="font-semibold">v{round.version}</span>
-                {round.asked ? <> · you asked “{round.asked}”; {round.by} changed: {round.whatChanged.join('; ')}</> : ' · as first asked'}
-              </li>
-            ))}
-          </ol>
-        </>
-      )}
+        {page === null && <p className="m-auto text-[13px] text-text-tertiary">Loading the Summary…</p>}
+        {page?.kind === 'failed' && <p className="m-auto px-6 text-center text-[13px] text-text-secondary">{page.message}</p>}
+        {(page?.kind === 'page' || page?.kind === 'template') && (
+          // sandbox with no allowances: no scripts, no forms, no navigation; the page's own policy blocks the network.
+          <iframe title={`Summary: ${item.title}`} sandbox="" srcDoc={page.html} className="min-h-0 w-full flex-1 border-0 bg-surface-primary" data-testid="approval-summary-frame" />
+        )}
+      </div>
     </div>
   );
+}
+
+function baseName(file: string): string {
+  return file.replace(/#.*$/u, '').split(/[\\/]/u).pop() ?? file;
 }
 
 /** A reference: a file in the document viewer, a URL in the in-app browser, another approval in place. */
@@ -593,8 +611,20 @@ function NestedApproval({ item, onBack }: { item: NotifyItem; onBack: () => void
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" /> Back
       </button>
       <div className="min-h-0 flex-1">
-        <QuestionsTab item={item} order={[item.id]} byId={new Map([[item.id, item]])} onSelect={() => undefined} />
+        <QuestionsTab item={item} tabs={[]} onOpenTab={() => undefined} />
       </div>
     </div>
   );
+}
+
+/** The reply box grows with what's typed, up to half the column, then scrolls (P6). */
+function useGrowingBox(ref: RefObject<HTMLTextAreaElement | null>, value: string): void {
+  useEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    const column = box.closest('[data-testid="approval-column"]');
+    const limit = Math.max(64, (column?.clientHeight ?? 600) / 2);
+    box.style.height = 'auto';
+    box.style.height = `${Math.min(Math.max(box.scrollHeight, 64), limit)}px`;
+  }, [ref, value]);
 }

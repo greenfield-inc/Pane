@@ -160,10 +160,12 @@ export function AutopilotStack() {
   const tab = tabs[tabIndex];
   const showTab = (next: number) => { if (entry) setTabByEntry((current) => ({ ...current, [entry.id]: next })); };
   const target = entry ? openTarget(entry, item) : null;
+  const sessionName = entry?.sessionName ?? item?.source.session?.name;
+  const origin = [sessionName, ...(item && !item.source.autopilot ? [item.source.agent, item.source.name] : [])].filter(Boolean).map((part) => `· ${part}`).join(' ');
 
   return (
     <section aria-label="Stack" className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary" data-testid="autopilot-stack">
-      <header className="flex h-[50px] shrink-0 items-center gap-2 border-b border-border-primary px-4">
+      <header className="flex h-view-header shrink-0 items-center gap-2 border-b border-border-primary px-4">
         <Layers className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden="true" />
         <h2 className="hidden shrink-0 text-[14px] font-semibold text-text-primary min-[1180px]:block">Stack</h2>
         <div className="flex shrink-0 items-center">
@@ -177,13 +179,13 @@ export function AutopilotStack() {
           </button>
         </div>
         <span className="shrink-0 text-[12.5px] tabular-nums text-text-tertiary" data-testid="autopilot-stack-position">{stackPositionLabel(stack)}</span>
-        <div className="scrollbar-thin flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1" role="tablist" aria-label="On the stack">
+        <div className="scrollbar-thin scroll-fade-x flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto py-1" role="tablist" aria-label="On the stack">
           {stack.entries.map((candidate) => (
             <button key={candidate.id} type="button" role="tab" aria-selected={candidate.id === entry?.id}
               onClick={() => moveAutopilotStack({ type: 'show', id: candidate.id })}
               title={candidate.title}
               className={cn(
-                'inline-flex h-7 max-w-[180px] shrink-0 items-center gap-1.5 rounded-lg border px-2 text-[12px]',
+                'inline-flex h-7 min-w-16 max-w-44 items-center gap-1.5 rounded-lg border px-2 text-caption',
                 candidate.id === entry?.id ? 'border-autopilot-border bg-autopilot-subtle text-text-primary' : 'border-border-secondary text-text-secondary hover:bg-surface-hover',
                 candidate.doneAt !== undefined && 'opacity-60',
               )}>
@@ -213,9 +215,9 @@ export function AutopilotStack() {
             <div className="flex h-5 items-center gap-1.5 text-[12.5px] text-text-tertiary">
               <KindIcon entry={entry} item={item} />
               <span className="font-semibold text-text-secondary">{entryKind(entry, item)}</span>
-              {(entry.sessionName || item?.source.session?.name) && <span className="truncate">· {entry.sessionName ?? item?.source.session?.name}</span>}
+              {/* One span, so a narrow column truncates the whole origin once, never each part to "·…". */}
+              {origin && <span className="min-w-0 truncate" title={origin}>{origin}</span>}
               {item?.machineId && item.machineId !== LOCAL_MACHINE_ID && <span className="inline-flex shrink-0 items-center gap-1 rounded bg-surface-tertiary px-1.5 font-mono text-[11px]">{mark(item.machineId)}{machineLabel(item, machines)}</span>}
-              {item && !item.source.autopilot && <span className="min-w-0 truncate">· {item.source.agent} · {item.source.name}</span>}
               {(entry.byAutopilot || item?.source.autopilot) && <span className="shrink-0 rounded-full bg-autopilot-subtle px-1.5 text-[11px] font-medium text-autopilot-on-tint">written by Autopilot</span>}
               <span className="ml-auto shrink-0 tabular-nums">{item ? relativeAge(item.createdAt, now) : relativeAge(entry.addedAt, now)}</span>
               {target && (
@@ -239,7 +241,7 @@ export function AutopilotStack() {
                     candidateIndex === tabIndex ? 'border-autopilot font-medium text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary',
                   )}>
                   <TabIcon tab={candidate} />
-                  <span className="max-w-[180px] truncate">{candidate.label}</span>
+                  <span className="max-w-44 truncate">{candidate.label}</span>
                 </button>
               ))}
             </div>

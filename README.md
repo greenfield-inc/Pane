@@ -16,9 +16,9 @@
 Appearance follows your OS — see [Appearance](docs/APPEARANCE.md).
 
 [![AGPL-3.0 License](https://img.shields.io/badge/License-AGPL--3.0-555555.svg?labelColor=333333&color=666666)](./LICENSE)
-[![Downloads](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/downloads&labelColor=333333&color=666666)](https://github.com/greenfield-inc/Pane/releases)
+[![Downloads](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/downloads&labelColor=333333&color=666666)](https://github.com/greenfield-inc/Pane/releases?utm_source=github)
 [![GitHub](https://img.shields.io/badge/GitHub-source-555555?labelColor=333333&color=666666&logo=github&logoColor=white)](https://github.com/greenfield-inc/Pane)
-[![Latest Release](https://img.shields.io/badge/Release-latest-555555?labelColor=333333&color=666666)](https://github.com/greenfield-inc/Pane/releases/latest)
+[![Latest Release](https://img.shields.io/badge/Release-latest-555555?labelColor=333333&color=666666)](https://github.com/greenfield-inc/Pane/releases/latest?utm_source=github)
 [![Changelog](https://img.shields.io/badge/Changelog-runpane.com-555555?labelColor=333333&color=666666)](https://runpane.com/changelog)
 [![Active Users](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/installs&labelColor=333333)](https://runpane.com)
 [![Discord](https://img.shields.io/badge/Discord-join-%235462eb?labelColor=%235462eb&logo=discord&logoColor=%23f5f5f5)](https://discord.gg/BdMyubeAZn)
@@ -52,15 +52,17 @@ Appearance follows your OS — see [Appearance](docs/APPEARANCE.md).
 <sub>or download the installer directly</sub><br />
 <br />
 
-<a href="https://runpane.com/api/download?platform=mac&source=readme">
-  <img src="https://img.shields.io/badge/Download_for_macOS-000?style=for-the-badge&logo=apple&logoColor=white" height="40" alt="Download for macOS">
+<a href="https://runpane.com/api/download?version=latest&amp;platform=mac&amp;arch=arm64&amp;format=dmg&amp;source=gh-readme">
+  <img src="https://img.shields.io/badge/Download_for_macOS-000?style=for-the-badge&logo=apple&logoColor=white" height="40" alt="Download for macOS (Apple Silicon)">
 </a>
-<a href="https://runpane.com/api/download?platform=windows&source=readme">
-  <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" height="40" alt="Download for Windows">
+<a href="https://runpane.com/api/download?version=latest&amp;platform=windows&amp;arch=x64&amp;format=exe&amp;source=gh-readme">
+  <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" height="40" alt="Download for Windows (x64)">
 </a>
-<a href="https://runpane.com/api/download?platform=linux&source=readme">
-  <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" height="40" alt="Download for Linux">
+<a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=x64&amp;format=appimage&amp;source=gh-readme">
+  <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" height="40" alt="Download for Linux (x64 AppImage)">
 </a>
+<br />
+<sub>Other builds: <a href="https://runpane.com/api/download?version=latest&amp;platform=mac&amp;arch=x64&amp;format=dmg&amp;source=gh-readme">macOS (Intel)</a> · <a href="https://runpane.com/api/download?version=latest&amp;platform=windows&amp;arch=arm64&amp;format=exe&amp;source=gh-readme">Windows (ARM64)</a> · <a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=arm64&amp;format=appimage&amp;source=gh-readme">Linux ARM64 AppImage</a> · Linux .deb (<a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=x64&amp;format=deb&amp;source=gh-readme">x64</a>, <a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=arm64&amp;format=deb&amp;source=gh-readme">ARM64</a>)</sub>
 
 <br />
 <br />
@@ -238,7 +240,7 @@ See [Workspaces setup, trust, and troubleshooting](docs/RUNPANE_WORKSPACES.md) f
 
 “Continue this on my Windows machine with Codex.” `runpane handoff` starts the agent in a new Pane on the other machine (or a new tab in your Pane on this one), using your pushed branch and a note about the task. When the sending tab runs Claude, Codex, Cursor or OpenCode and the receiver is the same agent, it carries the agent's own session: another machine gets a copy of the session's files and resumes it, and this machine resumes a fork of it. The CLI then checks that the receiver continued the conversation, and reports `continued`, `inconclusive` (with a question to ask the receiver), or `not-continued` (the receiver is kept, never replaced). With `--note-only`, a different agent, or no session to carry, a fresh agent starts with the note instead, and the output says so. The note carries the goal, decisions, verified state, and next steps either way. Live processes stay on the original machine.
 
-To move a whole Session instead, right-click it and choose **Move to host…**: its agent hands it off, and a Session with the same name, goal and agent appears on the other machine. With the same agent it resumes the Session's conversation when you open it; otherwise it starts by reading the note. See [Move a Session to another machine](docs/SESSIONS.md#move-a-session-to-another-machine).
+To move a whole Session instead, right-click it and choose **Move to machine…**: its agent hands it off, and a Session with the same name, goal and agent appears on the other machine. With the same agent it resumes the Session's conversation when you open it; otherwise it starts by reading the note. See [Move a Session to another machine](docs/SESSIONS.md#move-a-session-to-another-machine).
 
 To hand off a Pane's task, run from the repository you're handing off. On the destination, clone the same GitHub repository if needed and add that checkout to Pane. Install and sign in to the receiving agent there. Keep Pane running there. Use the npm CLI. On the destination, choose a repository outside WSL; WSL receivers are not supported.
 
@@ -337,14 +339,14 @@ Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ct
 | `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Keyboard Shortcuts |
 | `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` (or `k` `j`) move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
 | `Enter` | With a chat on screen and focus on no field or control, move into its message box |
-| `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel or sidebar in that direction |
-| `F6` / `⇧F6` | Next / previous region (sidebar, splits, right panel, terminal) |
+| `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel, approval column or sidebar in that direction; the focused split's active tab carries the accent underline |
+| `F6` / `⇧F6` | Next / previous region (sidebar, splits, approval column, right panel, terminal) |
 | `⌘K ⌘M` / `Ctrl+K Ctrl+M` | Maximize the focused split, Session tile, sidebar or right panel; again to restore |
 | `⌘⇧M` / `Ctrl+Shift+M` | Minimize the focused sidebar, right panel or terminal |
 | `⌘B` / `Ctrl+B` | Toggle sidebar |
 | `⌘⌥B` / `Ctrl+Alt+B` | Toggle right panel |
 | `` ⌃` `` / `` Ctrl+` `` | Toggle terminal |
-| `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab |
+| `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab in the focused split, or in a Session's approval column while it has focus (`Esc` there goes back to the chat) |
 | `⌃⇧Space` | Approvals, and back to exactly where you were (also `Esc`); change it in Settings → Notify |
 | `⌘⌥O` / `Ctrl+Alt+O` | Machine switcher (then `0` for All machines, `1-9` for a machine) |
 | `⌃⌘]` `⌃⌘[` / `Ctrl+Alt+Shift+]` `[` | Next / previous machine |
@@ -395,16 +397,16 @@ The shell installers and the other one-shot commands are at the top of this READ
 
 ### Direct Download
 
-> **[Download the Latest Release](https://github.com/greenfield-inc/Pane/releases/latest)**
+> **[Download the Latest Release](https://github.com/greenfield-inc/Pane/releases/latest?utm_source=github)**
 
 | Platform | File |
 |----------|------|
-| Windows (x64) | `Pane-x.x.x-Windows-x64.exe` |
-| Windows (ARM64) | `Pane-x.x.x-Windows-arm64.exe` |
-| macOS (Apple Silicon) | `Pane-x.x.x-macOS-arm64.dmg` |
-| macOS (Intel) | `Pane-x.x.x-macOS-x64.dmg` |
-| Linux (x64) | `Pane-x.x.x-linux-x86_64.AppImage` or `.deb` |
-| Linux (ARM64) | `Pane-x.x.x-linux-arm64.AppImage` or `.deb` |
+| Windows (x64) | [`Pane-x.x.x-Windows-x64.exe`](https://runpane.com/api/download?version=latest&platform=windows&arch=x64&format=exe&source=gh-readme) |
+| Windows (ARM64) | [`Pane-x.x.x-Windows-arm64.exe`](https://runpane.com/api/download?version=latest&platform=windows&arch=arm64&format=exe&source=gh-readme) |
+| macOS (Apple Silicon) | [`Pane-x.x.x-macOS-arm64.dmg`](https://runpane.com/api/download?version=latest&platform=mac&arch=arm64&format=dmg&source=gh-readme) |
+| macOS (Intel) | [`Pane-x.x.x-macOS-x64.dmg`](https://runpane.com/api/download?version=latest&platform=mac&arch=x64&format=dmg&source=gh-readme) |
+| Linux (x64) | [`Pane-x.x.x-linux-x86_64.AppImage`](https://runpane.com/api/download?version=latest&platform=linux&arch=x64&format=appimage&source=gh-readme) or [`.deb`](https://runpane.com/api/download?version=latest&platform=linux&arch=x64&format=deb&source=gh-readme) |
+| Linux (ARM64) | [`Pane-x.x.x-linux-arm64.AppImage`](https://runpane.com/api/download?version=latest&platform=linux&arch=arm64&format=appimage&source=gh-readme) or [`.deb`](https://runpane.com/api/download?version=latest&platform=linux&arch=arm64&format=deb&source=gh-readme) |
 
 ### Requirements
 

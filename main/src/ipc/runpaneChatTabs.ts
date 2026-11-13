@@ -8,6 +8,7 @@ import type {
 } from '../../../shared/types/runpaneOrchestration';
 import { PaneError } from '../../../shared/paneError';
 import type { ChatTabManager } from '../services/chatTabs/manager';
+import { isConfiguredAgent } from '../../../shared/agents';
 
 /**
  * runpane on chat tabs (package 5): the same commands orchestrators use on
@@ -63,7 +64,7 @@ function textSince(manager: ChatTabManager, panelId: string, since: number, coun
 function chatTabState(view: ChatTabView): RunpanePanelStateSummary {
   const running = view.status !== 'stopped';
   return {
-    initialized: view.status !== 'starting', running, isCliPanel: true, isCliReady: view.status === 'idle', agentType: view.agent,
+    initialized: view.status !== 'starting', running, isCliPanel: true, isCliReady: view.status === 'idle', agentType: isConfiguredAgent(view.agent) ? view.agent : undefined,
     activityStatus: view.status === 'working' || view.status === 'blocked' || view.status === 'starting' ? 'active' : 'idle',
   };
 }

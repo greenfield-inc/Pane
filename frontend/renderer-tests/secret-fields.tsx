@@ -28,7 +28,7 @@ const item: NotifyItem = {
 };
 const snapshot: NotifySnapshot = {
   settings: DEFAULT_NOTIFY_SETTINGS, items: [item], queue: [item.id], hidden: [], strip: null, stripSurface: null,
-  pausedUntil: null, shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [],
+  pausedUntil: null, shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [], cardsOn: { kind: 'any' }, thisMachine: null,
 };
 
 declare global {

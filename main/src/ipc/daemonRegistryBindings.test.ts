@@ -513,7 +513,7 @@ describe('daemon registry IPC bindings', () => {
 
   it('tells a phone app too old for chat tabs to update instead of sending it a chat orchestrator (D-203)', async () => {
     const registry = new PaneCommandRegistry();
-    const view = (type: 'chat' | 'terminal') => ({ session: { id: 'session-1' }, panel: { id: 'p1', type } });
+    const view = (type: 'chat' | 'terminal') => ({ session: { id: 'session-1' }, agent: 'claude', panel: { id: 'p1', type } });
     const getView = vi.fn(async () => view('chat'));
     registerOrchestrationSessionHandlers(createIpcMainStub(), createServicesStub({
       // SAFETY: The get channel only reaches this getView stub.

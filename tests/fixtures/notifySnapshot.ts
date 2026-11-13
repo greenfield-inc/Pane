@@ -96,6 +96,8 @@ export function notifyFixture(now = Date.now()): NotifySnapshot {
       { agent: 'Codex', file: '~/.codex/AGENTS.md', state: 'not-found' },
     ],
     firstRun: true,
+    cardsOn: { kind: 'any' },
+    thisMachine: { id: '6f1c2a40-0000-4000-8000-00000000mac1', name: 'qa-macbook' },
   };
 }
 
