@@ -449,16 +449,16 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     testThresholdMs: Number(process.env.PANE_AUTO_PAUSE_TEST_THRESHOLD_MS) || undefined,
   });
   configManager.on('config-updated', () => autoPauser.sync());
-  // Terminal panels and agent CLIs (Claude, Codex) both run PTYs inside a Pane.
-  const ptyManagers = () => [terminalPanelManager, ...CliToolRegistry.getInstance().getAllManagers()];
+  // Terminal panels, agent CLIs (Claude, Codex) and chat tab agents all run processes inside a Pane.
+  // Chat tab agents talk over stdio, not a PTY; their updates count as output too.
+  const paneProcessManagers = () => [terminalPanelManager, ...CliToolRegistry.getInstance().getAllManagers(), getChatTabManager()];
   const listeningPortMonitor = createListeningPortMonitor({
-    terminalPanes: () => ptyManagers().flatMap(manager =>
+    terminalPanes: () => paneProcessManagers().flatMap(manager =>
       [...manager.getSessionPids()].flatMap(([sessionId, pids]) => {
         const paneName = sessionManager.getSession(sessionId)?.name ?? '';
         return pids.map(pid => ({ pid, sessionId, paneName }));
       })),
-    // Chat tab agents talk over stdio, not a PTY; their updates count as output too.
-    lastOutputAt: () => Math.max(getChatTabManager().latestOutputAt(), ...ptyManagers().map(manager => manager.latestOutputAt())),
+    lastOutputAt: () => Math.max(...paneProcessManagers().map(manager => manager.latestOutputAt())),
     // Remote clients over the paired or the Tailscale transport. This desktop's own ports lists
     // ask for a read while they are on screen (useListeningPorts).
     watched: () => [remoteTransportController.getServer(), workspaceHost].some(server => server?.hasEventSubscriber('ports:changed')),

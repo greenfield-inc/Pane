@@ -364,6 +364,18 @@ describe('chat tab manager', () => {
     expect(manager.view('p1').notice).toBeUndefined();
   });
 
+  it("reports its running agents' process IDs by Pane, so servers they start are listed under that Pane", async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    const pids = manager.getSessionPids();
+    expect([...pids.keys()]).toEqual(['pane-1']);
+    const [pid] = pids.get('pane-1')!;
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    await manager.close('p1');
+    expect(manager.getSessionPids().size).toBe(0);
+  });
+
   it('closes a tab whose agent never answers the load, without waiting for it (review F-10)', async () => {
     const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_HANG_LOAD: '1' });
     store.add('p1', { ...newTab(directory), acpSessionId: 'never-answers' });

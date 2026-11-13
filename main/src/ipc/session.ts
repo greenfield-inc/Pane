@@ -423,7 +423,7 @@ export function registerSessionHandlers(
       ...(terminalPanelManager.getSessionPids().get(sessionId) ?? []),
       ...sessionManager.getArchiveProcessPids(sessionId),
       ...runCommandManager.getArchiveProcessPids(sessionId),
-      ...getChatTabManager().sessionPids(sessionId),
+      ...(getChatTabManager().getSessionPids().get(sessionId) ?? []),
   ];
   services.archiveCleanupManager?.setProcessRootsHandler(archiveProcessRoots);
   const teardownArchivedSession = async (sessionId: string, tracker: import('../services/archiveProcessTracker').ArchiveProcessTracker): Promise<void> => {

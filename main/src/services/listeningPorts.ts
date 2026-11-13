@@ -44,7 +44,7 @@ const MAX_LINUX_PROCESS_NAME = 64;
 const ONE_SHOT_LISTENERS = new Set(['nc', 'ncat', 'netcat', 'socat']);
 
 interface TerminalPane {
-  /** The terminal's PTY process; everything it starts descends from it. */
+  /** A terminal's PTY or a chat tab's agent process; everything it starts descends from it. */
   pid: number;
   sessionId: string;
   paneName: string;
