@@ -1,7 +1,7 @@
 import http from 'http';
 import { describe, expect, it, vi } from 'vitest';
 import { PaneCommandRegistry } from './commandRegistry';
-import { PaneWorkspaceHostController, readTailnetSelf, readWorkspacePort } from './workspaceHost';
+import { PaneWorkspaceHostController, type WorkspaceServeAccess, readTailnetSelf, readWorkspacePort } from './workspaceHost';
 import { hashWorkspacePassword } from './workspacePassword';
 import type { WorkspaceAccessConfig } from '../../../shared/types/workspaceAccess';
 import { createFakeTailscale, TAILNET_A, TAILNET_B } from './__fixtures__/fakeTailscale';
@@ -62,7 +62,7 @@ describe('readTailnetSelf', () => {
 });
 
 describe('PaneWorkspaceHostController', () => {
-  function setup(workspaces: WorkspaceAccessConfig = { enabled: true }) {
+  function setup(workspaces: WorkspaceAccessConfig = { enabled: true }, serveAccess: WorkspaceServeAccess = { kind: 'allowed', onByDefault: true }) {
     const config = { workspaces };
     const serveCalls: string[][] = [];
     let removalFails = false;
@@ -79,7 +79,7 @@ describe('PaneWorkspaceHostController', () => {
     const host = new PaneWorkspaceHostController(
       registry,
       { getConfig: () => config, on: () => ({}), off: () => ({}) },
-      true,
+      serveAccess,
       run,
     );
     /** Sends a request the way Tailscale Serve forwards it to the target it was given. */
@@ -140,6 +140,17 @@ describe('PaneWorkspaceHostController', () => {
     await host.shutdown();
   });
 
+  it('never touches Tailscale Serve when this Pane may not publish, even when turned on', async () => {
+    const { host, serveCalls } = setup({ enabled: true }, { kind: 'refused', reason: 'a development build never publishes on the tailnet' });
+    await host.start();
+    await host.sync();
+    expect(serveCalls).toEqual([]);
+    expect(host.getAccess()).toMatchObject({ state: 'off', visibility: 'off', reason: 'a development build never publishes on the tailnet' });
+    expect(host.getTailnet()).toBeNull();
+    await host.shutdown();
+    expect(serveCalls).toEqual([]);
+  });
+
   it('reports visibility "off" when turned off', async () => {
     const { host } = setup({ enabled: false, visibility: 'tailnet' });
     await host.start();
@@ -153,7 +164,7 @@ describe('PaneWorkspaceHostController', () => {
     const host = new PaneWorkspaceHostController(
       new PaneCommandRegistry(),
       { getConfig: () => ({ workspaces: { enabled: true } }), on: () => ({}), off: () => ({}) },
-      true,
+      { kind: 'allowed', onByDefault: true },
       tailscale.run,
     );
     try {
@@ -182,7 +193,7 @@ describe('PaneWorkspaceHostController', () => {
     const host = new PaneWorkspaceHostController(
       new PaneCommandRegistry(),
       { getConfig: () => ({ workspaces: { enabled: true } }), on: () => ({}), off: () => ({}) },
-      true,
+      { kind: 'allowed', onByDefault: true },
       tailscale.run,
       undefined,
       undefined,
@@ -209,7 +220,7 @@ describe('PaneWorkspaceHostController', () => {
     const host = new PaneWorkspaceHostController(
       new PaneCommandRegistry(),
       { getConfig: () => ({ workspaces: { enabled: true } }), on: () => ({}), off: () => ({}) },
-      true,
+      { kind: 'allowed', onByDefault: true },
       tailscale.run,
     );
     try {

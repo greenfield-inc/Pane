@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -1492,21 +1493,151 @@ def run_panels_last_message(parsed: Any) -> int:
     return 0 if result.get("ok") else 1
 
 
-def resolve_report_identity(parsed: Any, env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    """Where a report is for: explicit --panel (with an optional --pane), else the Pane terminal's own panel."""
+def resolve_report_identity(parsed: Any, env: Optional[Dict[str, str]] = None, command: str = "runpane report") -> Dict[str, str]:
+    """Which panel a report is for: explicit --panel (with an optional --pane), else the Pane terminal's own panel.
+
+    `runpane report` and `runpane panels conversation` share the rule.
+    """
     env = os.environ if env is None else env
     if parsed.pane_id or parsed.panel_id:
         if not parsed.panel_id:
-            raise ValueError("runpane report --pane also needs --panel <panel-id>. Find it with `runpane panels list --pane <pane-id>`.")
+            raise ValueError(f"{command} --pane also needs --panel <panel-id>. Find it with `runpane panels list --pane <pane-id>`.")
         return {"paneId": parsed.pane_id, "panelId": parsed.panel_id} if parsed.pane_id else {"panelId": parsed.panel_id}
     panel_id = (env.get("PANE_PANEL_ID") or "").strip()
     if not panel_id:
         raise ValueError(
-            "runpane report cannot tell which panel is reporting. Run it inside a Pane terminal "
+            f"{command} cannot tell which panel is reporting. Run it inside a Pane terminal "
             "(which sets PANE_SESSION_ID and PANE_PANEL_ID), or pass --pane <pane-id> --panel <panel-id>."
         )
     pane_id = (env.get("PANE_SESSION_ID") or "").strip()
     return {"paneId": pane_id, "panelId": panel_id} if pane_id else {"panelId": panel_id}
+
+
+# `runpane panels conversation --source`: what started the conversation, as Claude Code's SessionStart hook names it.
+CONVERSATION_SOURCES = ["startup", "resume", "clear", "compact"]
+# Claude and Codex session ids are UUIDs; this also bounds anything a hook sends.
+CONVERSATION_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}")
+# The SessionStart hook's stdin is a small JSON object; anything larger is not one.
+CONVERSATION_HOOK_MAX_INPUT_BYTES = 64 * 1024
+# Claude Code writes the hook's JSON and closes stdin at once; never wait longer than this for it.
+CONVERSATION_HOOK_INPUT_TIMEOUT_S = 2.0
+# With the stdin bound, the hook finishes well inside the 5 s timeout its settings entry gives it.
+CONVERSATION_HOOK_DAEMON_TIMEOUT_MS = 2_500
+
+
+def missing_conversation_error() -> RunpaneError:
+    return RunpaneError(
+        "ERR_RUNPANE_INVALID_ARGUMENT",
+        "runpane panels conversation needs --conversation <id>, or --hook when a Claude Code SessionStart hook runs it. Nothing was recorded.",
+        "Run `runpane panels conversation --conversation <id> [--source startup|resume|clear|compact]`.",
+    )
+
+
+def resolve_conversation_identity(parsed: Any, env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    return resolve_report_identity(parsed, env, "runpane panels conversation")
+
+
+def run_panels_conversation(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
+    if parsed.hook:
+        return run_panels_conversation_hook(env, pane_dir=parsed.pane_dir)
+    if parsed.conversation_id is None:
+        raise missing_conversation_error()
+    identity = resolve_conversation_identity(parsed, env)
+    request: Dict[str, Any] = {
+        **identity,
+        "conversationId": parsed.conversation_id,
+        **optional_value("source", parsed.conversation_source),
+    }
+    result = invoke_daemon("runpane:panels:conversation", [request], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+    else:
+        print(f"Recorded conversation {result.get('conversationId')} for panel {result.get('panelId')}.")
+    return 0
+
+
+def conversation_from_hook_input(text: str) -> Optional[Dict[str, str]]:
+    """The conversation a SessionStart hook's JSON names, or None when it names none runpane can pass on."""
+    try:
+        data = json.loads(strip_utf8_bom(text))
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    event = data.get("hook_event_name")
+    if event is not None and event != "SessionStart":
+        return None
+    conversation_id = data.get("session_id")
+    if not isinstance(conversation_id, str) or not CONVERSATION_ID_PATTERN.fullmatch(conversation_id):
+        return None
+    source = data.get("source")
+    return {"conversationId": conversation_id, "source": source} if source in CONVERSATION_SOURCES else {"conversationId": conversation_id}
+
+
+def read_bounded_stdin(max_bytes: int, timeout_s: float) -> Optional[str]:
+    """Stdin to its end, or None when it is a terminal, passes `max_bytes`, fails, or takes longer than `timeout_s`.
+
+    It reads the file descriptor with os.read on a daemon thread, so a reader still blocked at exit
+    holds no lock on sys.stdin's buffer.
+    """
+    try:
+        fd = sys.stdin.fileno()
+        if os.isatty(fd):
+            return None
+    except (AttributeError, OSError, ValueError):
+        return None
+    outcome: Dict[str, Optional[bytes]] = {}
+
+    def read() -> None:
+        chunks: List[bytes] = []
+        size = 0
+        try:
+            while True:
+                chunk = os.read(fd, max_bytes + 1 - size)
+                if not chunk:
+                    outcome["data"] = b"".join(chunks)
+                    return
+                size += len(chunk)
+                if size > max_bytes:
+                    outcome["data"] = None
+                    return
+                chunks.append(chunk)
+        except OSError:
+            outcome["data"] = None
+
+    reader = threading.Thread(target=read, name="runpane-hook-stdin", daemon=True)
+    reader.start()
+    reader.join(timeout_s)
+    data = outcome.get("data")
+    if reader.is_alive() or data is None:
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+def run_panels_conversation_hook(env: Optional[Dict[str, str]] = None, pane_dir: Optional[str] = None) -> int:
+    """`runpane panels conversation --hook`, the command a Claude Code SessionStart hook runs.
+
+    SessionStart stdout goes into Claude's context and a failing hook shows in Claude, so this prints
+    nothing and returns 0 whatever happens: outside Pane, bad input, Pane not running, an older daemon, any error.
+    """
+    try:
+        env = os.environ if env is None else env
+        panel_id = (env.get("PANE_PANEL_ID") or "").strip()
+        if not panel_id:
+            return 0
+        text = read_bounded_stdin(CONVERSATION_HOOK_MAX_INPUT_BYTES, CONVERSATION_HOOK_INPUT_TIMEOUT_S)
+        if text is None:
+            return 0
+        conversation = conversation_from_hook_input(text)
+        if conversation is None:
+            return 0
+        pane_id = (env.get("PANE_SESSION_ID") or "").strip()
+        request: Dict[str, Any] = {"panelId": panel_id, **optional_value("paneId", pane_id or None), **conversation}
+        invoke_daemon("runpane:panels:conversation", [request], pane_dir=pane_dir, timeout_ms=CONVERSATION_HOOK_DAEMON_TIMEOUT_MS)
+    except BaseException:
+        # Silent by design: a hook that fails must not show in Claude or stop it.
+        pass
+    return 0
 
 
 # The CLIs send one character past the daemon's 16,000 so it still marks an overlong summary truncated.
@@ -1547,8 +1678,10 @@ def describe_report_delivery(result: Dict[str, Any]) -> List[str]:
     delivered = f" Delivered to {watchers} waiting watcher{'' if watchers == 1 else 's'}." if watchers > 0 else ""
     panel_id = result.get("panelId")
     lines = [f"Reported {describe_report(result.get('report') or {})} for panel {panel_id}.{sessions}{delivered}"]
+    # The blocked question's card check: posted anyway, but worth fixing next time.
+    warnings = [f"Warning: {warning}" for warning in result.get("warnings") or [] if isinstance(warning, str)]
     if session_ids or watchers > 0:
-        return lines
+        return lines + warnings
     stored = f"It is stored on the panel (runpane agents status --panel {panel_id})"
     if live_watchers is None:
         lines.append(f"No Session recorded this report. {stored}, and only watchers that list agent.report receive it.")
@@ -1557,7 +1690,7 @@ def describe_report_delivery(result: Dict[str, Any]) -> List[str]:
             f"No Session recorded this report and no watcher was waiting for it. {stored}, "
             "and a watch with a named cursor (runpane watch --as <name> --kinds agent.report) still receives it when it next waits."
         )
-    return lines
+    return lines + warnings
 
 
 MAX_INBOX_DETAIL_LENGTH = 300
@@ -2010,15 +2143,13 @@ def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
     if parsed.chat or parsed.agent_farm:
         if parsed.tool_command:
             raise ValueError("A chat tab runs its agent over ACP, so it takes --agent or --agent-farm, not --tool-command.")
-        if parsed.agent_farm and parsed.agent and parsed.agent not in ("claude", "codex"):
-            raise ValueError("An Agent Farm profile chooses its own agent; drop --agent.")
-        if not parsed.agent_farm and parsed.agent not in ("claude", "codex"):
-            raise ValueError("--chat opens Claude or Codex: pass --agent claude or --agent codex, or --agent-farm <profile>.")
+        if not parsed.agent_farm and not parsed.agent:
+            raise ValueError("--chat needs --agent <id> or --agent-farm <profile>. Run `runpane panels create --help` for the flags.")
         if parsed.as_file_pointer or parsed.attachments:
             raise ValueError("--as-file-pointer and --attach are for terminal tabs; send the first prompt with --initial-input.")
         initial_input = read_input_source(parsed.initial_input_file) if parsed.initial_input_file else parsed.initial_input
         chat: Dict[str, Any] = {
-            **optional_value("agent", parsed.agent if parsed.agent in ("claude", "codex") else None),
+            **optional_value("agent", parsed.agent),
             **optional_value("profile", parsed.agent_farm),
             **optional_value("args", parsed.launch_args or None),
             **optional_value("initialInput", initial_input or None),
@@ -2381,7 +2512,7 @@ def ask_agent_choice() -> str:
     agents = RUNPANE_CONTRACT["enums"]["agents"]
     print("Choose an agent:")
     for index, agent in enumerate(agents, start=1):
-        print(f"{index}) {RUNPANE_CONTRACT['agentTemplates'][agent]['title']}")
+        print(f"{index}) {RUNPANE_CONTRACT['agents']['entries'][agent]['title']}")
 
     while True:
         answer = input("Agent [1]: ").strip().lower()

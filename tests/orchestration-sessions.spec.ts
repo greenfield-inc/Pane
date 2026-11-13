@@ -4,6 +4,7 @@ import { installElectronApiMock } from './electronApiMock';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import type { PanelActivationRequest, PanelLayoutNode, SessionPanelLayout, ToolPanel } from '../shared/types/panels';
 import type { TailnetMachine, TailnetMachineList } from '../shared/types/workspaceAccess';
+import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 
 type UiAssociationFixture = {
   paneId: string;
@@ -74,6 +75,9 @@ type SessionFixtureOptions = {
   initialConfig?: JsonObject;
   rememberPaneLayouts?: boolean;
   tailnetMachines?: TailnetMachineList;
+  notifySnapshot?: NotifySnapshot;
+  initialPanels?: JsonObject[];
+  initialLayout?: JsonObject;
 };
 
 function sessionFixture(
@@ -164,6 +168,9 @@ async function installSessionsFixture(
     initialSessions: paneSessions,
     rememberPaneLayouts: fixtureOptions.rememberPaneLayouts,
     tailnetMachines: fixtureOptions.tailnetMachines,
+    notifySnapshot: fixtureOptions.notifySnapshot,
+    initialPanels: fixtureOptions.initialPanels,
+    initialLayout: fixtureOptions.initialLayout,
   });
   await page.addInitScript(({ seed, listDelayMs, getDelayMs, overviewPanes, distributions }: { seed: UiSessionFixture[]; listDelayMs: number; getDelayMs: number; overviewPanes: Record<string, UiPaneOverviewFixture[]>; distributions: string[] }) => {
     type SessionRecord = UiSessionFixture;
@@ -3323,7 +3330,7 @@ async function recordAgentSubmissions(page: Page): Promise<() => Promise<unknown
   });
 }
 
-test('Move to host… sits between Rename and Archive in the Session menu, by mouse, keyboard and in the rail', async ({ page }) => {
+test('Move to machine… sits between Rename and Archive in the Session menu, by mouse, keyboard and in the rail', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')]);
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -3332,39 +3339,39 @@ test('Move to host… sits between Rename and Archive in the Session menu, by mo
   await expect(row).toBeVisible({ timeout: 10_000 });
   await row.click({ button: 'right' });
   const menu = page.getByRole('menu', { name: 'Session actions for Alpha' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Rename Session…', 'Move to host…', 'Archive Session']);
+  // Chat tabs are off in this fixture, so Switch to chat says so and offers to turn them on (D-337).
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Switch to chat…Chat tabs are off on this machine', 'Turn on chat tabs', 'Move to machine…', 'Archive Session']);
   await page.keyboard.press('Escape');
 
   await row.focus();
   await page.keyboard.press('Shift+F10');
   await expect(menu.getByRole('menuitem', { name: 'Pin Session' })).toBeFocused();
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('ArrowDown');
-  await expect(menu.getByRole('menuitem', { name: 'Move to host…' })).toBeFocused();
+  for (let step = 0; step < 5; step++) await page.keyboard.press('ArrowDown');
+  await expect(menu.getByRole('menuitem', { name: 'Move to machine…' })).toBeFocused();
   await page.screenshot({ path: 'tmp/verify/session-move-host/01-menu-keyboard.png' });
   // Closing the dialog returns focus to the row the menu was opened from, not the page.
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('dialog', { name: 'Move Session to another host' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Move Session to another host' })).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toBeHidden();
   await expect(row).toBeFocused();
 
   // The same from a mouse right-click, which never focused the row.
   await page.getByRole('button', { name: 'New Session' }).first().focus();
   await row.click({ button: 'right' });
-  await menu.getByRole('menuitem', { name: 'Move to host…' }).click();
-  await expect(page.getByRole('dialog', { name: 'Move Session to another host' })).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Move to machine…' }).click();
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Move Session to another host' })).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toBeHidden();
   await expect(row).toBeFocused();
 
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
   await page.getByTestId('compact-orchestration-session-alpha').click({ button: 'right' });
-  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Rename Session…', 'Move to host…', 'Archive Session']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pin Session', 'Pause Session', 'Rename Session…', 'Switch to chat…Chat tabs are off on this machine', 'Turn on chat tabs', 'Move to machine…', 'Archive Session']);
   await page.screenshot({ path: 'tmp/verify/session-move-host/01b-menu-rail.png' });
 });
 
-test('Move to host… lists only machines that can take the Session and asks its agent to hand off', async ({ page }) => {
+test('Move to machine… lists only machines that can take the Session and asks its agent to hand off', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const session = { ...sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z'), agent: 'codex' as const };
   await installSessionsFixture(page, [session], [], {
@@ -3379,9 +3386,9 @@ test('Move to host… lists only machines that can take the Session and asks its
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Move to host…' }).click();
+  await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
 
-  const dialog = page.getByRole('dialog', { name: 'Move Session to another host' });
+  const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog.getByRole('radio')).toHaveCount(4);
   await expect(dialog.getByRole('radio', { name: 'tylers-mac-mini', exact: true })).toBeEnabled();
   await expect(dialog.getByRole('radio', { name: 'tylers-mac-mini-1' })).toBeDisabled();
@@ -3407,7 +3414,7 @@ test('Move to host… lists only machines that can take the Session and asks its
   }]);
 });
 
-test('Move to host… viewing a Tailscale host offers this computer and leaves out the host', async ({ page }) => {
+test('Move to machine… viewing a Tailscale host offers this computer and leaves out the host', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     initialConfig: { remoteDaemon: { host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
       client: { mode: 'remote', activeProfileId: 'mini', profiles: [{ id: 'mini', label: 'tylers-mac-mini', baseUrl: 'https://tylers-mac-mini.tail1234.ts.net:8443', token: '', transport: 'http+sse', tailnetMachine: 'tylers-mac-mini', tailnetDomain: 'tail1234.ts.net' }] } } },
@@ -3416,13 +3423,13 @@ test('Move to host… viewing a Tailscale host offers this computer and leaves o
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Move to host…' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Move Session to another host' });
+  await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog.getByRole('radio')).toHaveCount(1);
   await expect(dialog.getByRole('radio', { name: 'devbox' })).toBeEnabled();
 });
 
-test('Move to host… with nothing reachable says why, names the fix, and sends nothing', async ({ page }) => {
+test('Move to machine… with nothing reachable says why, names the fix, and sends nothing', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     tailnetMachines: { ok: true, tailnet: 'example.github', domain: 'tail1234.ts.net', machines: [tailnetMachine('tylers-mac-mini', { state: 'offline' })] },
   });
@@ -3430,15 +3437,15 @@ test('Move to host… with nothing reachable says why, names the fix, and sends 
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Move to host…' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Move Session to another host' });
+  await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog).toContainText('No other machine can take this Session right now. Open Pane on the machine you want');
   await page.screenshot({ path: 'tmp/verify/session-move-host/03-nothing-reachable.png' });
   await expect(dialog.getByRole('button', { name: 'Move Session' })).toBeDisabled();
   expect(await submissions()).toEqual([]);
 });
 
-test('Move to host… is unavailable, with the reason, on a host paired with a code', async ({ page }) => {
+test('Move to machine… is unavailable, with the reason, on a host paired with a code', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     initialConfig: { remoteDaemon: { host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
       client: { mode: 'remote', activeProfileId: 'studio', profiles: [{ id: 'studio', label: 'Studio', baseUrl: 'https://studio.example:8443', token: 'paired', transport: 'http+sse' }] } } },
@@ -3446,22 +3453,22 @@ test('Move to host… is unavailable, with the reason, on a host paired with a c
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
-  const item = page.getByRole('menuitem', { name: 'Move to host…' });
+  const item = page.getByRole('menuitem', { name: 'Move to machine…' });
   await expect(item).toHaveAttribute('aria-disabled', 'true');
   await expect(item).toHaveAttribute('title', /pairing code, not over Tailscale/);
   await item.click({ force: true });
-  await expect(page.getByRole('dialog', { name: 'Move Session to another host' })).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toHaveCount(0);
 });
 
-test('Move to host… with Tailscale signed out passes on the reason and the fix', async ({ page }) => {
+test('Move to machine… with Tailscale signed out passes on the reason and the fix', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale, then try again.' },
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Move to host…' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Move Session to another host' });
+  await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog).toContainText('Tailscale is signed out. Sign in to Tailscale, then try again.');
   await expect(dialog.getByRole('button', { name: 'Move Session' })).toBeDisabled();
 });
@@ -3578,4 +3585,503 @@ test('Not now hides the Pane Chat offer for the rest of the run', async ({ page 
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(offer).toHaveCount(0);
   expect((await paneChatOfferRecord(page)).creates).toEqual([]);
+});
+
+// P3 and P4 in a Session (journeys 4 and 5): the window's focus, tab and
+// maximize keys work in a Session's splits as they do in a worktree Pane.
+test('in a Session, ⌘⌥+arrows move between splits, the tab keys work, and ⌘K ⌘M maximizes a split and restores', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('keys', 'Keys demo', '', '', '2026-09-16T12:00:00.000Z')]);
+  await page.goto('/');
+  const { groupStrips } = await openSplitSession(page, 'keys', ['plan.html']);
+  const groups = page.locator('.pane-chat-shell [data-panel-group-id]');
+  await expect(groups).toHaveCount(2);
+  const focusedGroup = () => page.evaluate(() => document.activeElement?.closest('[data-panel-group-id]')?.getAttribute('data-panel-group-id') ?? document.activeElement?.closest('[data-focus-region]')?.getAttribute('data-focus-region') ?? null);
+  const [leftId, rightId] = await groups.evaluateAll(elements => elements.map(element => element.getAttribute('data-panel-group-id')));
+
+  await page.keyboard.press('ControlOrMeta+0');
+  await expect.poll(focusedGroup).toBe('sidebar');
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await expect.poll(focusedGroup).toBe(leftId);
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+  await expect.poll(focusedGroup).toBe(rightId);
+  await page.keyboard.press('ControlOrMeta+Alt+ArrowLeft');
+  await expect.poll(focusedGroup).toBe(leftId);
+
+  // Next tab in the focused split: the conversation's group holds two tabs.
+  const leftTabs = groupStrips.nth(0).getByRole('tab');
+  const selectedBefore = await leftTabs.evaluateAll(tabs => tabs.findIndex(tab => tab.getAttribute('aria-selected') === 'true'));
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+BracketRight' : 'Control+PageDown');
+  await expect.poll(() => leftTabs.evaluateAll(tabs => tabs.findIndex(tab => tab.getAttribute('aria-selected') === 'true'))).not.toBe(selectedBefore);
+
+  // Maximize the split (⌘ held through both steps, as a terminal may have focus).
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.down(mod);
+  await page.keyboard.press('k');
+  await page.keyboard.press('m');
+  await page.keyboard.up(mod);
+  await expect(page.locator(`[data-panel-group-id="${rightId}"]`)).toBeHidden();
+  const restore = page.locator(`[data-panel-group-id="${leftId}"]`).getByTestId('restore-region');
+  await expect(restore).toHaveAttribute('aria-pressed', 'true');
+  await restore.click();
+  await expect(page.locator(`[data-panel-group-id="${rightId}"]`)).toBeVisible();
+});
+
+test('a Session inspector opened later still minimizes and maximizes by key (F-3)', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('aside', 'Aside demo', '', '', '2026-09-16T12:00:00.000Z')]);
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-aside').click();
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  const aside = page.getByRole('complementary', { name: 'Session overview' });
+  await expect(aside).toBeVisible();
+  await aside.getByRole('tab', { name: 'Overview', exact: true }).focus();
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+  await page.keyboard.down(mod);
+  await page.keyboard.press('k');
+  await page.keyboard.press('m');
+  await page.keyboard.up(mod);
+  await expect(aside.getByTestId('restore-region')).toBeVisible();
+  await aside.getByTestId('restore-region').click();
+  await aside.getByRole('tab', { name: 'Overview', exact: true }).focus();
+  await page.keyboard.press('ControlOrMeta+Shift+M');
+  await expect(page.getByRole('complementary', { name: /Session (overview|files|changes)/ })).toHaveCount(0);
+});
+
+for (const scheme of ['light', 'dark'] as const) {
+  test(`Switch to chat on a Session lists what will switch and skip, then sums up (${scheme})`, async ({ page }, testInfo) => {
+    await page.emulateMedia({ colorScheme: scheme });
+    await installSessionsFixture(page, [
+      sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
+    ], [], { initialConfig: { chatTabsEnabled: true, appearanceMode: 'system' } });
+    await page.addInitScript(() => {
+      const items = [
+        { panelId: 'orch', paneName: 'Session', title: 'Claude' },
+        { panelId: 'a', paneName: 'auth-fix', title: 'Claude' },
+        { panelId: 'b', paneName: 'auth-fix', title: 'Review' },
+        { panelId: 'c', paneName: 'docs', title: 'Claude' },
+        { panelId: 'd', paneName: 'docs', title: 'QA', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn. Nothing was switched.' } },
+      ];
+      const calls: unknown[] = [];
+      Object.assign(window, { __sessionSwitchCalls: calls });
+      Object.assign(window.electronAPI, { chatTab: {
+        previewSessionSwitch: async (sessionId: string) => ({ sessionId, items }),
+        switchSession: async (sessionId: string, panelIds: string[]) => {
+          calls.push({ sessionId, panelIds });
+          return { sessionId, items: items.map(item => ({ ...item, result: item.skip ? 'skipped' : 'switched' })) };
+        },
+      } });
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await dismissStartupDialogs(page);
+
+    await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
+    await expect(page.getByRole('menuitem', { name: 'Switch to chat…' })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath(`session-switch-menu-${scheme}.png`) });
+    await page.getByRole('menuitem', { name: 'Switch to chat…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Switch Session to chat' });
+    await expect(dialog).toContainText('Will switch (4)');
+    await expect(dialog).toContainText('busy: Claude is in the middle of a turn.');
+    await page.screenshot({ path: testInfo.outputPath(`session-switch-confirm-${scheme}.png`) });
+    await dialog.getByRole('button', { name: 'Switch 4 tabs' }).click();
+    await expect(dialog.getByTestId('session-switch-summary')).toHaveText('4 switched, 1 skipped: busy');
+    await page.screenshot({ path: testInfo.outputPath(`session-switch-summary-${scheme}.png`) });
+    // SAFETY: the init script above defines it.
+    expect(await page.evaluate(() => (window as typeof window & { __sessionSwitchCalls: unknown[] }).__sessionSwitchCalls))
+      .toEqual([{ sessionId: 'alpha', panelIds: ['orch', 'a', 'b', 'c'] }]);
+  });
+}
+
+test('Switch to chat is always in the Session menu: checking, then why nothing switches, or Turn on (D-337)', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, [
+    sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
+  ], [], { initialConfig: { chatTabsEnabled: false, appearanceMode: 'system' } });
+  await page.addInitScript(() => {
+    const items = [
+      { panelId: 'orch', paneName: 'Session', title: 'Claude', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn.' } },
+      { panelId: 'a', paneName: 'auth-fix', title: 'Claude', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn.' } },
+      { panelId: 'b', paneName: 'docs', title: 'Codex', skip: { kind: 'plain-codex', reason: 'Pane isn\'t sure which conversation this tab is on.' } },
+      { panelId: 'c', paneName: 'docs', title: 'Terminal', skip: { kind: 'not-agent', reason: 'Not an agent.' } },
+    ];
+    let release: (() => void) | null = null;
+    Object.assign(window, { __releasePreview: () => release?.() });
+    Object.assign(window.electronAPI, { chatTab: {
+      // Held until the test releases it, so the menu's checking state can be seen.
+      previewSessionSwitch: (sessionId: string) => new Promise(resolve => { release = () => resolve({ sessionId, items }); }),
+    } });
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+
+  const row = page.getByTestId('orchestration-session-alpha');
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await row.click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Session actions for Alpha' });
+  const item = menu.getByTestId('session-switch-to-chat');
+  await expect(item).toHaveText('Switch to chat…Chat tabs are off on this machine');
+  await expect(item).toHaveAttribute('aria-disabled', 'true');
+  await page.screenshot({ path: testInfo.outputPath('switch-menu-chat-tabs-off.png') });
+
+  // Turn on closes the menu, so Archive never slides under the pointer; reopened, it checks the Session.
+  await menu.getByRole('menuitem', { name: 'Turn on chat tabs' }).click();
+  await expect(menu).toHaveCount(0);
+  // Focus goes back to the row, as after Escape, not to the page.
+  await expect(row).toBeFocused();
+  await row.click({ button: 'right' });
+  await expect(item).toHaveText('Switch to chat…Checking…');
+  await expect(item).toHaveAttribute('aria-busy', 'true');
+  await page.screenshot({ path: testInfo.outputPath('switch-menu-checking.png') });
+
+  // SAFETY: the init script above defines it.
+  await page.evaluate(() => (window as typeof window & { __releasePreview: () => void }).__releasePreview());
+  await expect(item).toHaveText('Switch to chat…Nothing to switch: 2 busy, 1 plain Codex');
+  await expect(item).toHaveAttribute('aria-disabled', 'true');
+  await page.screenshot({ path: testInfo.outputPath('switch-menu-nothing.png') });
+  // Playwright waits for an aria-disabled item to enable; the click must still do nothing.
+  await item.click({ force: true });
+  await expect(page.getByRole('dialog', { name: 'Switch Session to chat' })).toHaveCount(0);
+  await expect(menu).toBeVisible();
+
+  // Reopened, it checks again rather than showing the last answer.
+  await page.keyboard.press('Escape');
+  await row.click({ button: 'right' });
+  await expect(item).toHaveText('Switch to chat…Checking…');
+});
+
+/** Q-20 and one more, waiting from the Plan demo Session (the approval card, P4). */
+function sessionApprovalsSnapshot(): NotifySnapshot {
+  const now = Date.now();
+  const session = { id: 'plans', name: 'Plan demo', paneId: '__orchestration_session_plansterminal__' };
+  const q20: NotifyItem = {
+    id: 'q20', ui: 'options', title: 'Q-20: Turn on the new-agent switch for dev QA, and merge as one train?',
+    context: 'One UPDATE in my status file keeps the person\'s test on the new agent.',
+    questions: [
+      { title: 'May I turn the new-agent switch on for the dev QA workspace?', choices: [{ label: 'Yes, turn it on', detail: 'One UPDATE on dev QA only.' }, { label: 'Not yet' }] },
+      { title: 'Merge #2470–#2480 as one train, or gate each lower PR too?', choices: [{ label: 'One train', recommended: true }, { label: 'Gate each lower PR' }] },
+    ],
+    source: { paneId: 'pane-worker', panelId: 'panel-worker', name: 'doozy-overhaul', agent: 'Claude', session },
+    state: 'waiting', createdAt: now - 4 * 60_000, originKind: 'worker',
+  };
+  const realUse: NotifyItem = {
+    id: 'real-use', ui: 'options', title: 'Real use: how do you want to use the new build before everyone switches?',
+    choices: [{ label: 'Switch for my workspace', recommended: true }, { label: 'Copy to dev' }],
+    source: { paneId: session.paneId, panelId: '__orchestration_panel_plans_claude', name: 'Plan demo', agent: 'Claude', session: { ...session, orchestrator: true } },
+    state: 'waiting', createdAt: now - 17 * 60_000, originKind: 'orchestrator',
+  };
+  return {
+    settings: { ...DEFAULT_NOTIFY_SETTINGS }, items: [realUse, q20], queue: ['real-use', 'q20'], hidden: [], strip: null, stripSurface: null,
+    pausedUntil: null, shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [],
+  };
+}
+
+test('an approval covers the Session\'s right split exactly, and ✕ shows it again unchanged; with no split it opens one and ✕ collapses it', async ({ page }, testInfo) => {
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: sessionApprovalsSnapshot() });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').click();
+  await expect(page.getByTestId('session-workspace-tabs').getByRole('tab').first()).toBeVisible();
+
+  // J3: no split open. The approval opens a split of its own, and ✕ collapses it.
+  const stage = page.locator('.panel-group-tab-bar');
+  await page.getByTestId('session-approvals-button').click();
+  const split = page.getByTestId('session-approval-split');
+  await expect(split).toBeVisible();
+  await expect(split.getByTestId('approval-pager')).toHaveText('1 of 2');
+  await expect(split.getByTestId('approval-column-close')).toHaveText('Close split');
+  const created = testInfo.outputPath('session-approval-created-split.png');
+  await page.screenshot({ path: created });
+  await testInfo.attach('session-approval-created-split.png', { path: created, contentType: 'image/png' });
+  // Paging keeps the same split.
+  await split.getByRole('button', { name: 'Next approval' }).click();
+  await expect(split.getByTestId('approval-title')).toContainText('Q-20');
+  await expect(split.getByTestId('approval-question')).toHaveCount(2);
+  await split.getByTestId('approval-column-close').click();
+  await expect(split).toHaveCount(0);
+  await expect(stage).toHaveCount(0);
+
+  // J1: a right split is open. The approval lays over it exactly; nothing under it moves.
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock adds these controls before the app loads.
+    const mock = (window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void; emitPanelActivation: (request: PanelActivationRequest) => void } }).__paneTestElectronMock;
+    const now = new Date(0).toISOString();
+    const sessionId = '__orchestration_session_plansterminal__';
+    mock.emitPanelCreated({ id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' } });
+    mock.emitPanelActivation({ sessionId, panelId: 'plan-page', placement: 'split' });
+  });
+  await expect(stage).toHaveCount(2);
+  const right = page.locator('[data-panel-group-id]').nth(1);
+  const left = page.locator('[data-panel-group-id]').nth(0);
+  const [rightBefore, leftBefore] = [await layoutBox(right), await layoutBox(left)];
+  await page.getByTestId('session-approvals-button').click();
+  const overlay = page.getByTestId('session-approval-overlay');
+  await expect(overlay).toBeVisible();
+  await expect(overlay.getByTestId('approval-column-close')).toHaveText('Back to plan.html');
+  const covered = await layoutBox(overlay);
+  expect(covered).toEqual(rightBefore);
+  // The split underneath stays mounted at its size, and the chat beside it doesn't move.
+  expect(await layoutBox(right)).toEqual(rightBefore);
+  expect(await layoutBox(left)).toEqual(leftBefore);
+  const over = testInfo.outputPath('session-approval-over-split.png');
+  await page.screenshot({ path: over });
+  await testInfo.attach('session-approval-over-split.png', { path: over, contentType: 'image/png' });
+  await overlay.getByTestId('approval-column-close').click();
+  await expect(overlay).toHaveCount(0);
+  await expect(stage.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
+  expect(await layoutBox(right)).toEqual(rightBefore);
+});
+
+/** Which side of the Session has keyboard focus: the approval column, a split group, or neither. */
+async function sessionFocusSide(page: Page): Promise<{ side: 'column' | 'group' | 'other'; group: string | null; tag: string | null }> {
+  return page.evaluate(() => {
+    const active = document.activeElement;
+    const column = active?.closest('[data-testid="session-approval-split"], [data-testid="session-approval-overlay"]');
+    const group = active?.closest('[data-panel-group-id]')?.getAttribute('data-panel-group-id') ?? null;
+    return { side: column ? 'column' as const : group ? 'group' as const : 'other' as const, group, tag: active?.tagName ?? null };
+  });
+}
+
+test('D-335: the split keys move focus between the Session chat and its approval column both ways, and the focused side carries the accent', async ({ page }, testInfo) => {
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: sessionApprovalsSnapshot() });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').click();
+  await expect(page.getByTestId('session-workspace-tabs').getByRole('tab').first()).toBeVisible();
+  const chatStrip = page.locator('.panel-tab-strip').first();
+  // The agent's terminal focuses itself once its first refresh finishes; let it, so it can't take focus back mid-test.
+  await expect(page.locator('[data-panel-group-id] .xterm-helper-textarea').first()).toBeFocused({ timeout: 15_000 });
+  const columnTab = (scope: Locator) => scope.getByTestId('approval-tab').and(page.locator('[aria-selected="true"]'));
+
+  for (const placement of ['split', 'over'] as const) {
+    if (placement === 'over') {
+      // A right split is open: the approval lays over it, and focus must land in the approval, not the page under it.
+      await page.evaluate(() => {
+        // SAFETY: installElectronApiMock adds these controls before the app loads.
+        const mock = (window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void; emitPanelActivation: (request: PanelActivationRequest) => void } }).__paneTestElectronMock;
+        const now = new Date(0).toISOString();
+        const sessionId = '__orchestration_session_plansterminal__';
+        mock.emitPanelCreated({ id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' } });
+        mock.emitPanelActivation({ sessionId, panelId: 'plan-page', placement: 'split' });
+      });
+      await expect(page.locator('.panel-group-tab-bar')).toHaveCount(2);
+    }
+    await page.getByTestId('session-approvals-button').click();
+    const column = page.getByTestId(placement === 'split' ? 'session-approval-split' : 'session-approval-overlay');
+    await expect(column).toBeVisible();
+
+    // Start typing in the agent's tab on the left: the keys must work from a text field too.
+    const left = page.locator('[data-panel-group-id]').first();
+    const leftGroup = await left.getAttribute('data-panel-group-id');
+    await left.locator('[role="tabpanel"]:not([aria-hidden="true"]) .xterm-helper-textarea').focus();
+    await expect.poll(() => sessionFocusSide(page)).toMatchObject({ side: 'group', group: leftGroup });
+    await expect(chatStrip).not.toHaveClass(/panel-tab-strip-dimmed/);
+    await expect(columnTab(column)).toHaveAttribute('data-focused', 'false');
+
+    // Right: into the approval column, with the accent moving with it.
+    await page.keyboard.press('ControlOrMeta+Alt+ArrowRight');
+    await expect.poll(() => sessionFocusSide(page)).toMatchObject({ side: 'column' });
+    await expect(chatStrip).toHaveClass(/panel-tab-strip-dimmed/);
+    await expect(columnTab(column)).toHaveAttribute('data-focused', 'true');
+    const shot = testInfo.outputPath(`session-focus-column-${placement}.png`);
+    await page.screenshot({ path: shot });
+    await testInfo.attach(`session-focus-column-${placement}.png`, { path: shot, contentType: 'image/png' });
+
+    // Left: back to the chat.
+    await page.keyboard.press('ControlOrMeta+Alt+ArrowLeft');
+    await expect.poll(() => sessionFocusSide(page)).toMatchObject({ side: 'group', group: leftGroup });
+    await expect(chatStrip).not.toHaveClass(/panel-tab-strip-dimmed/);
+    await expect(columnTab(column)).toHaveAttribute('data-focused', 'false');
+
+    // F6 reaches the column too.
+    await page.keyboard.press('F6');
+    await expect.poll(() => sessionFocusSide(page)).toMatchObject({ side: 'column' });
+    await page.keyboard.press('Shift+F6');
+    await expect.poll(() => sessionFocusSide(page)).toMatchObject({ side: 'group', group: leftGroup });
+
+    await column.getByTestId('approval-column-close').click();
+    await expect(column).toHaveCount(0);
+  }
+});
+
+const PERSON_KEY_OVERRIDES = { 'cycle-tab-prev-a': 'mod+alt+[', 'cycle-tab-next-d': 'mod+alt+]', 'focus-group-left': 'mod+shift+[', 'focus-group-right': 'mod+shift+]', 'focus-sidebar': 'mod+e' };
+const MAC = process.platform === 'darwin';
+const JOURNEY_KEYS = [
+  { name: 'the person\'s keys', config: { appearanceMode: 'fixed', theme: 'light-rounded', keyboardShortcutOverrides: PERSON_KEY_OVERRIDES },
+    sidebar: 'ControlOrMeta+e', left: 'ControlOrMeta+Shift+BracketLeft', right: 'ControlOrMeta+Shift+BracketRight', prevTab: 'ControlOrMeta+Alt+BracketLeft', nextTab: 'ControlOrMeta+Alt+BracketRight' },
+  { name: 'the default keys', config: { appearanceMode: 'fixed', theme: 'dark' },
+    sidebar: 'ControlOrMeta+0', left: 'ControlOrMeta+Alt+ArrowLeft', right: 'ControlOrMeta+Alt+ArrowRight',
+    prevTab: MAC ? 'Meta+Shift+BracketLeft' : 'Control+PageUp', nextTab: MAC ? 'Meta+Shift+BracketRight' : 'Control+PageDown' },
+] as const;
+
+for (const keys of JOURNEY_KEYS) {
+  test(`D-336: the keyboard journey, sidebar → chat → approval column and back, with ${keys.name}`, async ({ page }, testInfo) => {
+    const now = new Date(0).toISOString();
+    const chatAgent = { id: '__orchestration_panel_plans_claude', sessionId: '__orchestration_session_plansterminal__', type: 'chat', title: 'Plan demo · Claude Code',
+      state: { isActive: true, hasBeenViewed: true, customState: { agent: 'claude', launch: { kind: 'new' }, cwd: '/tmp/pane-fixtures', status: 'idle', orchestrationSessionId: 'plans' } },
+      metadata: { createdAt: now, lastActiveAt: now, position: 0 } };
+    await installSessionsFixture(page, [
+      sessionFixture('alpha', 'Alpha work', '', '', now),
+      sessionFixture('plans', 'Plan demo', '', '', now),
+      sessionFixture('gamma', 'Gamma work', '', '', now),
+    ], [], {
+      notifySnapshot: sessionApprovalsSnapshot(), initialPanels: [chatAgent],
+      initialConfig: keys.config,
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    // Where the person was: in the Session, its approval column open beside the chat.
+    await page.getByTestId('orchestration-session-plans').click();
+    await page.getByTestId('session-approvals-button').click();
+    const column = page.getByTestId('session-approval-split');
+    await expect(column).toBeVisible();
+    const chatBox = page.getByRole('textbox', { name: 'Message Claude' });
+    const columnTab = column.getByTestId('approval-tab').and(page.locator('[aria-selected="true"]'));
+    const row = (name: string) => page.getByRole('button', { name: `Open Session ${name}`, exact: true });
+
+    /**
+     * Which regions carry a focus mark, read from what is drawn, not from class names: the sidebar
+     * (it has focus), an accent underline under the chat's active tab, under the column's active tab.
+     */
+    const marks = () => page.evaluate(() => {
+      const transparent = (color: string) => color === 'transparent' || /^rgba\(\d+, \d+, \d+, 0\)$/.test(color);
+      const underlined = (tab: Element) => {
+        const style = getComputedStyle(tab);
+        const inset = /(rgba?\([^)]*\)|oklch\([^)]*\)|color\([^)]*\)) 0px -2px 0px 0px inset/.exec(style.boxShadow);
+        const shadow = Boolean(inset && !transparent(inset[1]));
+        const border = parseFloat(style.borderBottomWidth) >= 2 && !transparent(style.borderBottomColor);
+        return shadow || border;
+      };
+      const sidebar = Boolean(document.activeElement?.closest('[data-focus-region="sidebar"]'));
+      const chat = Array.from(document.querySelectorAll('.panel-tab-strip [role="tab"][aria-selected="true"]')).filter(underlined).length;
+      const column = Array.from(document.querySelectorAll('[data-approval-tab][aria-selected="true"]')).filter(underlined).length;
+      return { sidebar: sidebar ? 1 : 0, chat, column };
+    });
+    let shot = 0;
+    const step = async (name: string, marked: 'sidebar' | 'chat' | 'column') => {
+      // Step 8, throughout: exactly one region is marked, and it is the one with focus.
+      await expect.poll(marks).toEqual({ sidebar: 0, chat: 0, column: 0, [marked]: 1 });
+      shot += 1;
+      const path = testInfo.outputPath(`${String(shot).padStart(2, '0')}-${name}.png`);
+      await page.screenshot({ path });
+      await testInfo.attach(path.split('/').pop() ?? name, { path, contentType: 'image/png' });
+    };
+
+    // 1. The sidebar key puts the cursor on the open Session's row.
+    await page.keyboard.press(keys.sidebar);
+    await expect(row('Plan demo')).toBeFocused();
+    await step('sidebar', 'sidebar');
+    // 2. j/k (and ↓/↑) walk the Sessions.
+    await page.keyboard.press('j');
+    await expect(row('Gamma work')).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('k');
+    await expect(row('Alpha work')).toBeFocused();
+    await step('sidebar-walk', 'sidebar');
+    await page.keyboard.press('ArrowDown');
+    await expect(row('Plan demo')).toBeFocused();
+    // 3 and 4. Enter opens the Session and lands straight in its chat box; Enter again keeps it there.
+    await page.keyboard.press('Enter');
+    await expect(chatBox).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(chatBox).toBeFocused();
+    await page.keyboard.type('draft');
+    await step('chat', 'chat');
+    // 5. Right: the approval column, its first tab marked.
+    await page.keyboard.press(keys.right);
+    await expect(column.getByTestId('approval-column')).toBeFocused();
+    await expect(columnTab).toHaveText('Decide');
+    await step('column', 'column');
+    // The chat's card for the open approval: a neutral grey outline and an "Open" label, never blue (D-343).
+    const cards = page.getByTestId('session-approval-card');
+    const openCard = cards.and(page.locator('[data-open]'));
+    await expect(openCard).toHaveCount(1);
+    await expect(openCard.getByTestId('session-approval-card-open-label')).toHaveText('Open');
+    await expect(cards.getByTestId('session-approval-card-open-label')).toHaveCount(1);
+    const outline = await openCard.evaluate((card) => {
+      const probe = (value: string) => {
+        const el = document.createElement('span');
+        el.style.color = value;
+        document.body.append(el);
+        const color = getComputedStyle(el).color;
+        el.remove();
+        return color;
+      };
+      const ring = /(rgba?\([^)]*\)) 0px 0px 0px 1px/.exec(getComputedStyle(card).boxShadow)?.[1];
+      return { ring, grey: probe('var(--color-text-tertiary)'), accent: probe('var(--color-interactive-primary)') };
+    });
+    expect(outline.ring).toBe(outline.grey);
+    expect(outline.ring).not.toBe(outline.accent);
+    // 6. The tab keys walk the column's tabs while it has focus.
+    await page.keyboard.press(keys.nextTab);
+    await expect(columnTab).toHaveText('Summary');
+    await step('column-next-tab', 'column');
+    await page.keyboard.press(keys.prevTab);
+    await expect(columnTab).toHaveText('Decide');
+    await expect(column.getByTestId('approval-column')).toBeFocused();
+    // 7. Left: back in the chat box, the draft kept. The sidebar key goes back to the same row; Esc returns.
+    await page.keyboard.press(keys.left);
+    await expect(chatBox).toBeFocused();
+    await expect(chatBox).toHaveValue('draft');
+    await step('back-to-chat', 'chat');
+    await page.keyboard.press(keys.sidebar);
+    await expect(row('Plan demo')).toBeFocused();
+    await step('sidebar-again', 'sidebar');
+    await page.keyboard.press('Escape');
+    await expect(chatBox).toBeFocused();
+    // Esc in the column goes back to the chat it sits beside.
+    await page.keyboard.press(keys.right);
+    await expect(column.getByTestId('approval-column')).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(chatBox).toBeFocused();
+    await step('esc-from-column', 'chat');
+    // Closing the column from the keyboard puts focus back in the chat, never on nothing.
+    await page.keyboard.press(keys.right);
+    await column.getByTestId('approval-column-close').focus();
+    await page.keyboard.press('Enter');
+    await expect(column).toHaveCount(0);
+    await expect(chatBox).toBeFocused();
+    await step('closed-column', 'chat');
+  });
+}
+
+test('D-289: a worker\'s approval shows its asking tab live in the Session column\'s origin tab', async ({ page }) => {
+  const now = new Date(0).toISOString();
+  const workerTab = { id: 'panel-worker', sessionId: 'pane-worker', type: 'logs', title: 'doozy-overhaul logs', state: { isActive: true, hasBeenViewed: true }, metadata: { createdAt: now, lastActiveAt: now, position: 0 } };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now)], [paneFixture('pane-worker', 'doozy-overhaul')], { notifySnapshot: sessionApprovalsSnapshot(), initialPanels: [workerTab] });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').click();
+  await page.getByTestId('session-approvals-button').click();
+  const column = page.getByTestId('approval-column');
+  await column.getByRole('button', { name: 'Next approval' }).click();
+  await expect(column.getByTestId('approval-title')).toContainText('Q-20');
+  await column.getByTestId('approval-tab').filter({ hasText: "doozy-overhaul's tab" }).click();
+  const origin = column.getByTestId('approval-origin');
+  await expect(origin).toContainText('doozy-overhaul');
+  await expect(origin.getByTestId('approval-origin-tab')).toBeVisible();
+});
+
+test('F-8: opened cold from the sidebar count, the approval waits for the saved split and lays over it', async ({ page }) => {
+  const sessionId = '__orchestration_session_plansterminal__';
+  const now = new Date(0).toISOString();
+  // A saved layout from before the restart: the conversation, and plan.html split to its right.
+  const planPage = { id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+    { type: 'group', id: 'g1', panelIds: ['__orchestration_panel_plans_claude'], activePanelId: '__orchestration_panel_plans_claude' },
+    { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
+  ] }, focusedGroupId: 'g1' };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now)], [], { notifySnapshot: sessionApprovalsSnapshot(), rememberPaneLayouts: true, initialPanels: [planPage], initialLayout: savedLayout });
+  // The Session's tools load slowly, as on a cold start, so the approval is open before its layout is.
+  await page.addInitScript(() => {
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = async (channel, ...args) => {
+      if (channel === 'panels:checkInitialized' || channel === 'panels:get-layout') await new Promise(resolve => setTimeout(resolve, 400));
+      return invoke(channel, ...args);
+    };
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').hover();
+  await page.getByTestId('session-approvals-count-button').click();
+  await expect(page.locator('.panel-group-tab-bar')).toHaveCount(2);
+  await expect(page.getByTestId('session-approval-overlay')).toBeVisible();
+  await expect(page.getByTestId('session-approval-split')).toHaveCount(0);
 });

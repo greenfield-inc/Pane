@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { NotifyCommand, NotifySnapshot } from '../shared/types/notify';
-import type { JsonObject } from '../shared/validation/boundaryDecoder';
+import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
+import type { MachineState } from '../shared/types/machineConnections';
 import { installElectronApiMock } from './electronApiMock';
 import { notifyFixture, secretFixture } from './fixtures/notifySnapshot';
 import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
@@ -46,8 +47,10 @@ async function boot(
   paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage },
   initialPanels: JsonObject[] = [],
   initialLayout: JsonObject | null = null,
+  machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> },
 ) {
   await installElectronApiMock(page, {
+    machineConnections,
     initialConfig,
     paneSecrets,
     initialPanels,
@@ -88,7 +91,7 @@ test.describe('Approvals in the main window', () => {
     await expect(row('sms-retry')).not.toContainText('Waiting');
   });
 
-  test('Approvals lists newest first, sorts by Session, opens the selected item in place, and answers it', async ({ page }) => {
+  test('Approvals lists newest first, groups by Session, opens the selected item in the column beside the list, and answers it', async ({ page }) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();
     const queue = page.getByTestId('approvals-queue');
@@ -99,19 +102,23 @@ test.describe('Approvals in the main window', () => {
     await page.getByRole('menuitemradio', { name: 'By Session' }).click();
     await expect(queue.getByTestId('approvals-group')).toHaveText([/Launch\s*1/, /Not in a Session\s*2/]);
 
-    // The newest waiting item is selected first; others are rows.
-    const selected = queue.getByTestId('approvals-selected');
-    await expect(selected).toContainText('Which session store should the refactor use?');
-    await expect(selected.getByTestId('approvals-related').getByRole('button')).toHaveText(['plan.html', 'PR #812']);
-    await selected.getByTestId('approvals-related').getByRole('button', { name: 'PR #812' }).click();
-    await selected.getByRole('button', { name: /Keep Redis/ }).click();
+    // The first waiting item opens in the column beside the list (P4); the list stays compact rows.
+    await expect(queue.getByTestId('approvals-selected')).toHaveCount(0);
+    const column = page.getByTestId('approval-column');
+    await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
+    await expect(column.getByTestId('approval-pager')).toHaveText('1 of 3');
+    // Decide first, then Summary, each reference, and the chat where it was asked (D-224).
+    await expect(column.getByTestId('approval-tab')).toHaveText(['Decide', 'Summary', 'plan.html', 'PR #812', "auth-refactor's tab"]);
+    await column.getByRole('radio', { name: /Keep Redis/ }).click();
+    await column.getByTestId('approval-send').click();
 
     await queue.getByTestId('approvals-row').filter({ hasText: 'Apply migration 0042' }).click();
-    await queue.getByTestId('approvals-selected').getByRole('button', { name: /Approve/ }).click();
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    await column.getByRole('radio', { name: /Approve/ }).click();
+    await column.getByTestId('approval-send').click();
     await expect.poll(() => commands(page)).toEqual([
-      { type: 'open-link', id: 'q-options', index: 1, paneId: 'pane-auth' },
-      { type: 'answer', id: 'q-options', answer: { choice: 'Keep Redis' } },
-      { type: 'answer', id: 'q-approve', answer: { approved: true } },
+      { type: 'answer', id: 'q-options', answer: { picks: ['Keep Redis'] } },
+      { type: 'answer', id: 'q-approve', answer: { picks: ['Approve'] } },
     ]);
 
     await queue.getByRole('tab', { name: /Answered/ }).click();
@@ -132,7 +139,7 @@ test.describe('Approvals in the main window', () => {
     const queue = page.getByTestId('approvals-queue');
     await queue.getByRole('tab', { name: /Answered/ }).click();
     await queue.getByTestId('approvals-row').filter({ hasText: 'Which cache should staging use?' }).click();
-    const selected = queue.getByTestId('approvals-selected');
+    const selected = page.getByTestId('approval-column');
     await selected.getByRole('button', { name: 'Override' }).click();
     await expect(selected.getByRole('button', { name: 'Details' })).toHaveCount(0);
     await expect(selected.getByRole('button', { name: 'Cancel' })).toBeVisible();
@@ -140,10 +147,11 @@ test.describe('Approvals in the main window', () => {
     await expect.poll(() => commands(page)).toContainEqual({ type: 'override', id: 'q-overridable', answer: { choice: 'Keep Redis' } });
   });
 
-  test('a worker item shows its Pane beside it', async ({ page }) => {
+  test('a worker item shows its Pane in the column\'s origin tab', async ({ page }) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();
-    const beside = page.getByTestId('approvals-beside');
+    await page.getByTestId('approval-tab').filter({ hasText: "auth-refactor's tab" }).click();
+    const beside = page.getByTestId('approvals-origin');
     await expect(beside).toContainText('Pane');
     await expect(beside).toContainText('auth-refactor');
   });
@@ -164,25 +172,25 @@ test.describe('Approvals in the main window', () => {
     await page.getByRole('button', { name: 'Home' }).first().click();
 
     await page.getByTestId('approvals-nav').click();
-    const beside = page.getByTestId('approvals-beside');
+    await page.getByTestId('approval-tab').filter({ hasText: "auth-refactor's tab" }).click();
+    const beside = page.getByTestId('approvals-origin');
     await expect(beside.getByRole('tab', { name: /Asking tab/ })).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('a suggestion fills the answer field and waits for Enter', async ({ page }) => {
+  test('a suggestion fills the one reply box and waits for Send; typed text goes as a reply', async ({ page }) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();
     await page.getByTestId('approvals-row').filter({ hasText: 'release headline' }).click();
-    const card = page.getByTestId('approvals-selected');
-    await card.getByRole('button', { name: /Notify is here/ }).click();
-    const field = card.getByPlaceholder('Type your answer');
+    const column = page.getByTestId('approval-column');
+    await column.getByRole('button', { name: /Notify is here/ }).click();
+    const field = column.getByTestId('approval-reply-box');
     await expect(field).toHaveValue('Notify is here');
-    await expect(field).toBeFocused();
     expect(await commands(page)).toEqual([]);
 
     await field.press('End');
     await field.pressSequentially(' in 2.5');
-    await field.press('Enter');
-    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-ask', answer: { text: 'Notify is here in 2.5' } }]);
+    await column.getByTestId('approval-send').click();
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-ask', answer: { picks: [], text: 'Notify is here in 2.5' } }]);
   });
 
   test('says nothing waits in one line, and main can open it', async ({ page }) => {
@@ -204,6 +212,49 @@ test.describe('Approvals in the main window', () => {
     await page.getByTestId('approvals-nav').click();
     await expect(page.getByTestId('approvals-queue')).toHaveCount(0);
     await expect(page.getByTestId('approvals-nav')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('F-15: words typed while Send is pending stay in the box once the send is accepted; only what was sent is cleared', async ({ page }) => {
+    const snapshot = notifyFixture();
+    snapshot.items = snapshot.items.filter(item => item.id === 'q-options');
+    snapshot.queue = ['q-options'];
+    await boot(page, snapshot);
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    const reply = column.getByTestId('approval-reply-box');
+    await reply.fill('Send only the first sentence.');
+    // A slow Send: main takes the command and answers only when the test says so.
+    await page.evaluate(() => {
+      // SAFETY: test-only fields this test sets on the page's window, read back below.
+      const held = window as typeof window & { heldCommand?: unknown; acceptSend?: () => void };
+      window.electronAPI.notify.run = async (command) => {
+        held.heldCommand = command;
+        await new Promise<void>(resolve => { held.acceptSend = resolve; });
+      };
+    });
+    await column.getByTestId('approval-send').click();
+    await expect(column.getByTestId('approval-send')).toBeDisabled();
+    await reply.fill('These words were never sent.');
+    // SAFETY: heldCommand is set by the held notify.run above.
+    expect(await page.evaluate(() => (window as typeof window & { heldCommand?: unknown }).heldCommand)).toMatchObject({ type: 'answer', answer: { text: 'Send only the first sentence.' } });
+    // SAFETY: acceptSend is set by the held notify.run above.
+    await page.evaluate(() => (window as typeof window & { acceptSend?: () => void }).acceptSend?.());
+    await expect(reply).toHaveValue('These words were never sent.');
+    await expect(column.getByTestId('approval-send')).toBeEnabled();
+  });
+
+  test('F-15: with nothing changed while Send was pending, an accepted send clears the box', async ({ page }) => {
+    const snapshot = notifyFixture();
+    snapshot.items = snapshot.items.filter(item => item.id === 'q-options');
+    snapshot.queue = ['q-options'];
+    await boot(page, snapshot);
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    const reply = column.getByTestId('approval-reply-box');
+    await reply.fill('Keep Redis, but only for now.');
+    await column.getByTestId('approval-send').click();
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-options', answer: { picks: [''], text: 'Keep Redis, but only for now.' } }]);
+    await expect(reply).toHaveValue('');
   });
 });
 
@@ -356,6 +407,48 @@ test.describe('Settings → Approvals', () => {
     await expect(page.getByRole('button', { name: 'Change' })).toBeDisabled();
     await expect(page.getByRole('combobox', { name: 'Updates hide after' })).toBeDisabled();
     await expect(page.getByRole('switch', { name: 'Sound' })).toBeDisabled();
+  });
+
+  test('Show cards on lists this computer and each saved machine that answered, and saves the pick for every machine', async ({ page }) => {
+    const machines: MachineState[] = [
+      { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null, installId: '6f1c2a40-0000-4000-8000-00000000mac1' },
+      { id: 'profile-box', label: 'build-box', kind: 'remote', status: 'online', offlineSince: null, installId: '9a7e5c21-0000-4000-8000-0000000b0x01' },
+      { id: 'profile-old', label: 'old-laptop', kind: 'remote', status: 'online', offlineSince: null },
+    ];
+    await boot(page, notifyFixture(), {}, undefined, [], null, { machines, reads: {} });
+    await openApprovalsSettings(page);
+    const picker = page.getByRole('combobox', { name: 'Show cards on' });
+    await expect(picker).toContainText('Whichever computer is in use');
+    await expect(page.getByTestId('notify-cards-on-note')).toHaveCount(0);
+
+    await picker.click();
+    await expect(page.getByRole('option')).toHaveText(['Whichever computer is in use', 'This computer (qa-macbook)', 'build-box', 'old-laptop (needs a newer Pane)']);
+    await expect(page.getByRole('option', { name: 'old-laptop (needs a newer Pane)' })).toHaveAttribute('aria-disabled', 'true');
+    await page.getByRole('option', { name: 'build-box' }).click();
+    await expect.poll(() => configUpdates(page)).toEqual([
+      { notify: { cardsOn: { id: '9a7e5c21-0000-4000-8000-0000000b0x01', name: 'build-box' } } },
+    ]);
+  });
+
+  test('Show cards on says why this computer still pops up cards, or doesn\'t', async ({ page }) => {
+    const pickedElsewhere = { id: 'c3d4-0000-4000-8000-000000000b00', name: 'qa-mini' };
+    const snapshot = notifyFixture();
+    snapshot.settings.cardsOn = pickedElsewhere;
+    await boot(page, snapshot);
+    await openApprovalsSettings(page);
+    // A machine picked on another computer and not saved here shows by the name it was picked with.
+    await expect(page.getByRole('combobox', { name: 'Show cards on' })).toContainText('qa-mini');
+    const note = page.getByTestId('notify-cards-on-note');
+    const lines: Array<[NotifySnapshot['cardsOn'], string]> = [
+      [{ kind: 'elsewhere', name: 'qa-mini' }, "Cards pop up on qa-mini. They're still listed here."],
+      [{ kind: 'not-added', name: 'qa-mini' }, "qa-mini hasn't added this computer, so this computer's cards still pop up here. Add this computer on qa-mini to move them."],
+      [{ kind: 'not-connected', name: 'qa-mini' }, "qa-mini isn't connected, so cards pop up here for now."],
+    ];
+    for (const [cardsOn, text] of lines) {
+      // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+      await page.evaluate((next) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(next), { ...snapshot, cardsOn });
+      await expect(note).toHaveText(text);
+    }
   });
 
   test('says when the shortcut is taken or floating cards are unavailable', async ({ page }) => {

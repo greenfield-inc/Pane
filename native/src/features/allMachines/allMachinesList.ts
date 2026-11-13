@@ -4,7 +4,7 @@ import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSess
 import type { TerminalPausedMark } from '@shared/types/panels';
 import type { PanePermissionRequest } from '@shared/types/permissions';
 
-import { answeredItems, approvalAt, approvalItems, sessionKey, staleItems, waitingCounts, type OfflineMachine } from '@/features/approvals/approvals';
+import { answeredItems, approvalAt, approvalItems, isWithAgent, sessionKey, staleItems, waitingCounts, type OfflineMachine } from '@/features/approvals/approvals';
 import { paneAgent, paneDisplayStatus, type AgentStatusSnapshot } from '@/features/panes/agentStatus';
 import type { ProjectWithPanes } from '@/features/panes/paneList';
 
@@ -42,8 +42,10 @@ interface WaitingBase extends RowBase {
   session?: { id: string; name: string };
   project?: string;
   at: number;
-  /** False for an answer held for Undo: it shows, but doesn't count. */
+  /** False for an answer held for Undo, or a reply the agent is reading: it shows, but doesn't count. */
   waiting: boolean;
+  /** The agent is reading the person's reply: listed under With the agent. */
+  withAgent?: boolean;
 }
 
 type QuestionRow = WaitingBase & { type: 'question'; item: NotifyItem };
@@ -82,7 +84,7 @@ export interface AllMachinesList {
   waiting: WaitingRow[];
   /** Online machines' stale questions, oldest first: a collapsed group, out of the counts. */
   staleQuestions: QuestionRow[];
-  /** Online machines' answered and closed questions of the last 24 hours, newest first: a collapsed group, out of the counts. */
+  /** Online machines' answered and closed questions of today, newest first: a collapsed group, out of the counts. */
   answered: QuestionRow[];
   /** One row per machine that isn't online and had something waiting, instead of its cards. */
   offline: OfflineMachine[];
@@ -114,7 +116,7 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
     const base = (kind: string, id: string): RowBase => ({ key: `${machine.key}:${kind}:${id}`, machineKey: machine.key, stale: machine.offlineSince !== undefined });
     const pending = snapshot.permissions ?? [];
     const asked = approvalItems(snapshot.notify);
-    const blocked = new Set([...pending.map(request => request.sessionId), ...asked.flatMap(item => (item.state === 'waiting' && item.source.paneId) || [])]);
+    const blocked = new Set([...pending.map(request => request.sessionId), ...asked.flatMap(item => (item.state === 'waiting' && !isWithAgent(item) && item.source.paneId) || [])]);
     const sessions = (snapshot.sessions ?? []).filter(session => !session.archived);
     const sessionOf = new Map(sessions.flatMap(session => session.associations.map(association => [association.paneId, { id: session.id, name: session.name }] as const)));
     const paneNames = new Map<string, string>();
@@ -151,13 +153,14 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
     }
     // A machine that isn't online shows one row with its count, never cards you can't act on.
     if (machine.offlineSince !== undefined) {
-      const count = asked.filter(item => item.state === 'waiting').length + pending.length;
+      const count = asked.filter(item => item.state === 'waiting' && !isWithAgent(item)).length + pending.length;
       if (count > 0) offline.push({ key: machine.key, name: machine.name, waiting: count });
       continue;
     }
     const questionRow = (item: NotifyItem): QuestionRow => {
       const { session, project } = item.source;
-      return { ...base('question', item.id), type: 'question', item, at: approvalAt(item), waiting: item.state === 'waiting', ...(session ? { session: { id: session.id, name: session.name } } : {}), ...(project ? { project } : {}) };
+      const withAgent = isWithAgent(item);
+      return { ...base('question', item.id), type: 'question', item, at: approvalAt(item), waiting: item.state === 'waiting' && !withAgent, ...(withAgent ? { withAgent } : {}), ...(session ? { session: { id: session.id, name: session.name } } : {}), ...(project ? { project } : {}) };
     };
     questions.push(...asked.map(questionRow));
     staleQuestions.push(...staleItems(snapshot.notify).map(questionRow));

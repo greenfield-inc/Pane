@@ -7,7 +7,12 @@ import { cn } from '../utils/cn';
  * Children stay mounted; when it comes back, focus returns to whatever in the
  * workspace had it, unless the person has since focused something else.
  */
-export function RemoteWorkspace({ dimmed, children }: { dimmed: boolean; children: ReactNode }) {
+export function RemoteWorkspace({ dimmed, covered = false, children }: {
+  dimmed: boolean;
+  /** A maximized side region covers the main area (P4): it keeps its size but takes no focus. */
+  covered?: boolean;
+  children: ReactNode;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
 
@@ -31,7 +36,8 @@ export function RemoteWorkspace({ dimmed, children }: { dimmed: boolean; childre
   return (
     <div
       ref={ref}
-      inert={dimmed}
+      data-focus-region="main"
+      inert={dimmed || covered}
       aria-busy={dimmed || undefined}
       className={cn('relative flex min-h-0 min-w-0 flex-1 transition-opacity duration-normal', dimmed && 'opacity-50')}
     >

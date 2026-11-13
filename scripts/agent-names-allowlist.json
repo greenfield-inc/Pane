@@ -1,0 +1,350 @@
+{
+  "frontend/src/components/CreateOrchestrationSessionDialog.tsx": {
+    "reason": "Deferred terminal launch and resume rules for Session orchestrators (OpenCode direct commands, promoted Claude/Codex conversations).",
+    "count": 1
+  },
+  "frontend/src/components/CustomResumeFields.tsx": {
+    "reason": "Deferred terminal resume: custom command resume modes per agent.",
+    "count": 6
+  },
+  "frontend/src/components/DetailPanel.tsx": {
+    "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
+    "count": 2
+  },
+  "frontend/src/components/HorizontalDetailPanel.tsx": {
+    "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
+    "count": 2
+  },
+  "frontend/src/components/ProjectSettings.tsx": {
+    "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",
+    "count": 1
+  },
+  "frontend/src/components/loops/LoopDrawer.tsx": {
+    "reason": "Loops' own agent list; Loops are outside this plan's scope.",
+    "count": 7
+  },
+  "frontend/src/components/loops/loopRunView.ts": {
+    "reason": "Loops' own agent list; Loops are outside this plan's scope.",
+    "count": 2
+  },
+  "frontend/src/components/sessionImport/SessionImportCard.tsx": {
+    "reason": "Vendor file formats: sessions imported from other tools.",
+    "count": 2
+  },
+  "frontend/src/components/sessionImport/sessionImportCopy.ts": {
+    "reason": "Vendor file formats: sessions imported from other tools.",
+    "count": 2
+  },
+  "frontend/src/components/settings/catalog.tsx": {
+    "reason": "Vendor file formats: usage parsed from each agent's own transcripts.",
+    "count": 1
+  },
+  "frontend/src/components/usage/UsageView.tsx": {
+    "reason": "Vendor file formats: usage parsed from each agent's own transcripts.",
+    "count": 2
+  },
+  "frontend/src/stores/sessionPreferencesStore.ts": {
+    "reason": "Persisted record shape: the legacy toolType 'claude' column.",
+    "count": 1
+  },
+  "frontend/src/types/config.ts": {
+    "reason": "Persisted record shape: the legacy toolType 'claude' column.",
+    "count": 1
+  },
+  "frontend/src/types/session.ts": {
+    "reason": "Persisted record shape: the legacy toolType 'claude' column.",
+    "count": 2
+  },
+  "frontend/src/utils/missionControlGrouping.ts": {
+    "reason": "Mission Control reads Claude and Codex transcripts (vendor file formats).",
+    "count": 2
+  },
+  "main/src/daemon/bootstrap.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 1
+  },
+  "main/src/database/database.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 5
+  },
+  "main/src/database/models.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 2
+  },
+  "main/src/ipc/loops.ts": {
+    "reason": "Loops' own agent list; Loops are outside this plan's scope.",
+    "count": 4
+  },
+  "main/src/ipc/missionControl.ts": {
+    "reason": "Mission Control reads Claude and Codex transcripts (vendor file formats).",
+    "count": 2
+  },
+  "main/src/ipc/notify.ts": {
+    "reason": "Deferred terminal status detection: one agent's idle signal.",
+    "count": 1
+  },
+  "main/src/ipc/runpane.ts": {
+    "reason": "Deferred terminal composer delivery, readiness and resume per agent.",
+    "count": 66
+  },
+  "main/src/ipc/runpaneComposerEvidence.ts": {
+    "reason": "Deferred terminal composer delivery evidence per agent.",
+    "count": 2
+  },
+  "main/src/ipc/session.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 3
+  },
+  "main/src/services/agentStatus/manifests.ts": {
+    "reason": "Deferred terminal status detection manifests, one per agent.",
+    "count": 5
+  },
+  "main/src/services/agentTranscript/index.ts": {
+    "reason": "Vendor file format: reads this agent's own files, which Pane does not own.",
+    "count": 4
+  },
+  "main/src/services/agentUsageService.ts": {
+    "reason": "Vendor file format: parses this agent's usage logs and rate limits.",
+    "count": 4
+  },
+  "main/src/services/agents/agentIdentity.ts": {
+    "reason": "Deferred terminal status detection: maps a running process back to its agent.",
+    "count": 2
+  },
+  "main/src/services/agents/agentResume.ts": {
+    "reason": "Deferred terminal resume capture and status detection per agent.",
+    "count": 5
+  },
+  "main/src/services/agents/agentScreenSignature.ts": {
+    "reason": "Deferred terminal status detection: reads each agent's terminal screen.",
+    "count": 13
+  },
+  "main/src/services/agents/opencodeLaunch.ts": {
+    "reason": "Deferred terminal launch and resume for one agent.",
+    "count": 2
+  },
+  "main/src/services/agents/piLaunch.ts": {
+    "reason": "Deferred terminal launch and resume for one agent.",
+    "count": 1
+  },
+  "main/src/services/claudePrompts/claudePromptQuestion.ts": {
+    "reason": "Deferred terminal status: wording for Claude Code's own terminal permission prompts.",
+    "count": 2
+  },
+  "main/src/services/cliManagerFactory.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 4
+  },
+  "main/src/services/leaderboardService.ts": {
+    "reason": "Vendor file format: parses this agent's usage logs and rate limits.",
+    "count": 2
+  },
+  "main/src/services/orchestrationSessionManager.ts": {
+    "reason": "Deferred terminal launch and resume rules for Session orchestrators (OpenCode direct commands, promoted Claude/Codex conversations).",
+    "count": 17
+  },
+  "main/src/services/orchestrationSessionStore.ts": {
+    "reason": "Deferred terminal launch and resume rules for Session orchestrators (OpenCode direct commands, promoted Claude/Codex conversations).",
+    "count": 1
+  },
+  "main/src/services/paneChatBundle/skills/session-trace/scripts/build-trace.mjs": {
+    "reason": "Vendor file format: a bundled skill script that reads agent session logs.",
+    "count": 6
+  },
+  "main/src/services/paneChatManager.ts": {
+    "reason": "Deferred terminal launch and resume rules for Session orchestrators (OpenCode direct commands, promoted Claude/Codex conversations).",
+    "count": 6
+  },
+  "main/src/services/paneChatMigrateOffer.ts": {
+    "reason": "Deferred terminal launch and resume rules for Session orchestrators (OpenCode direct commands, promoted Claude/Codex conversations).",
+    "count": 1
+  },
+  "main/src/services/paneMcpRegistration.ts": {
+    "reason": "Vendor file format: writes each agent's own MCP config.",
+    "count": 6
+  },
+  "main/src/services/panelManager.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 1
+  },
+  "main/src/services/panels/claude/claudeCodeManager.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 1
+  },
+  "main/src/services/repoFinder.ts": {
+    "reason": "Vendor file format: reads repo paths from agents' own config files.",
+    "count": 2
+  },
+  "main/src/services/sessionImport/place.ts": {
+    "reason": "Vendor file format: imports sessions from another tool's store, keyed by that tool's agent names.",
+    "count": 6
+  },
+  "main/src/services/sessionImport/scan.ts": {
+    "reason": "Vendor file format: imports sessions from another tool's store, keyed by that tool's agent names.",
+    "count": 4
+  },
+  "main/src/services/sessionImport/sources/claudeCode.ts": {
+    "reason": "Vendor file format: imports sessions from another tool's store, keyed by that tool's agent names.",
+    "count": 7
+  },
+  "main/src/services/sessionImport/sources/codex.ts": {
+    "reason": "Vendor file format: imports sessions from another tool's store, keyed by that tool's agent names.",
+    "count": 6
+  },
+  "main/src/services/sessionImport/sources/conductor.ts": {
+    "reason": "Vendor file format: imports sessions from another tool's store, keyed by that tool's agent names.",
+    "count": 4
+  },
+  "main/src/services/sessionImport/sources/emdash.ts": {
+    "reason": "Vendor file format: imports sessions from another tool's store, keyed by that tool's agent names.",
+    "count": 1
+  },
+  "main/src/services/sessionImport/sources/index.ts": {
+    "reason": "Vendor file format: imports sessions from another tool's store, keyed by that tool's agent names.",
+    "count": 2
+  },
+  "main/src/services/sessionImport/sources/orca.ts": {
+    "reason": "Vendor file format: imports sessions from another tool's store, keyed by that tool's agent names.",
+    "count": 4
+  },
+  "main/src/services/sessionImport/sources/superset.ts": {
+    "reason": "Vendor file format: imports sessions from another tool's store, keyed by that tool's agent names.",
+    "count": 8
+  },
+  "main/src/services/sessionImport/sources/t3code.ts": {
+    "reason": "Vendor file format: imports sessions from another tool's store, keyed by that tool's agent names.",
+    "count": 3
+  },
+  "main/src/services/sessionManager.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 7
+  },
+  "main/src/services/setupTransfer.ts": {
+    "reason": "Persisted record shape: the setup export format names agents.",
+    "count": 4
+  },
+  "main/src/services/skillCacheManager.ts": {
+    "reason": "Deferred terminal launch: one agent's subagent flags.",
+    "count": 1
+  },
+  "main/src/services/taskQueue.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 7
+  },
+  "main/src/services/terminalPanelManager.ts": {
+    "reason": "Deferred terminal resume capture and status detection per agent.",
+    "count": 33
+  },
+  "main/src/services/usage/jsonlScanner.ts": {
+    "reason": "Vendor file format: parses this agent's usage logs and rate limits.",
+    "count": 1
+  },
+  "main/src/services/usage/usageAggregator.ts": {
+    "reason": "Vendor file format: parses this agent's usage logs and rate limits.",
+    "count": 6
+  },
+  "main/src/services/usage/usageManager.ts": {
+    "reason": "Vendor file format: parses this agent's usage logs and rate limits.",
+    "count": 2
+  },
+  "main/src/services/usage/usageParser.ts": {
+    "reason": "Vendor file format: parses this agent's usage logs and rate limits.",
+    "count": 6
+  },
+  "main/src/services/usage/usageRepository.ts": {
+    "reason": "Vendor file format: parses this agent's usage logs and rate limits.",
+    "count": 6
+  },
+  "main/src/services/workspaceHeldInput.ts": {
+    "reason": "Deferred terminal composer: held input on an agent's screen.",
+    "count": 2
+  },
+  "main/src/services/workspaceStateReader.ts": {
+    "reason": "Deferred terminal composer: reads the agent from persisted panel state.",
+    "count": 2
+  },
+  "main/src/types/config.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 2
+  },
+  "main/src/types/session.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 2
+  },
+  "main/src/utils/claudeCodeTest.ts": {
+    "reason": "Persisted record shape: the legacy toolType column and Claude Code panel type store the literal.",
+    "count": 3
+  },
+  "main/src/utils/nodeFinder.ts": {
+    "reason": "Vendor install layout: where the claude and codex npm installs keep their scripts.",
+    "count": 2
+  },
+  "native/src/features/demo/demoAutopilot.ts": {
+    "reason": "Demo fixture data shown in the phone's demo mode.",
+    "count": 1
+  },
+  "native/src/features/demo/demoData.ts": {
+    "reason": "Demo fixture data shown in the phone's demo mode.",
+    "count": 5
+  },
+  "native/src/features/demo/demoWorkspace.ts": {
+    "reason": "Demo fixture data shown in the phone's demo mode.",
+    "count": 9
+  },
+  "packages/runpane-py/src/runpane/local_control.py": {
+    "reason": "Loops' own agent list; Loops are outside this plan's scope.",
+    "count": 3
+  },
+  "packages/runpane/src/handoff.ts": {
+    "reason": "Deferred terminal launch: each agent CLI's model and effort flags and session carry in a handoff.",
+    "count": 12
+  },
+  "packages/runpane/src/localControl.ts": {
+    "reason": "Wire decoders matching the host's terminal agent shapes and Loops (published runpane).",
+    "count": 10
+  },
+  "packages/runpane/src/nativeSession.ts": {
+    "reason": "Vendor file format: carries each agent's own session store in a handoff.",
+    "count": 27
+  },
+  "shared/types/agentChat.ts": {
+    "reason": "Persisted record shape: the legacy agent conversation record.",
+    "count": 2
+  },
+  "shared/types/agentChatDecoders.ts": {
+    "reason": "Persisted record shape: the legacy agent conversation record.",
+    "count": 2
+  },
+  "shared/types/agentUsage.ts": {
+    "reason": "Vendor file formats: usage parsed from each agent's own transcripts.",
+    "count": 1
+  },
+  "shared/types/customCommandResume.ts": {
+    "reason": "Deferred terminal resume: custom command resume modes per agent.",
+    "count": 13
+  },
+  "shared/types/loop.ts": {
+    "reason": "Loops' own agent list; Loops are outside this plan's scope.",
+    "count": 3
+  },
+  "shared/types/missionControl.ts": {
+    "reason": "Mission Control reads Claude and Codex transcripts (vendor file formats).",
+    "count": 2
+  },
+  "shared/types/sessionImport.ts": {
+    "reason": "Vendor file formats: sessions imported from other tools.",
+    "count": 6
+  },
+  "shared/types/setupTransfer.ts": {
+    "reason": "Persisted record shape: the setup export format.",
+    "count": 1
+  },
+  "shared/types/usage.ts": {
+    "reason": "Vendor file formats: usage parsed from each agent's own transcripts.",
+    "count": 2
+  },
+  "shared/types/worktreeFileSync.ts": {
+    "reason": "Vendor config folders copied into new worktrees (.claude, .codex, .cursor, .pi).",
+    "count": 4
+  }
+}

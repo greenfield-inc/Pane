@@ -7,6 +7,7 @@ import { GeneralSettings } from './settings/categories/GeneralSettings';
 import { AppearanceSettings } from './settings/categories/AppearanceSettings';
 import { TerminalSettings } from './settings/categories/TerminalSettings';
 import { AIAgentsSettings } from './settings/categories/AIAgentsSettings';
+import { AgentsSettings } from './settings/categories/AgentsSettings';
 import { WorktreesGitSettings } from './settings/categories/WorktreesGitSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { NotifySettings } from './settings/categories/NotifySettings';
@@ -190,6 +191,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <TerminalSettings persistence={persistence} systemMonoFonts={systemMonoFonts} />;
       case 'ai-agents':
         return <AIAgentsSettings persistence={persistence} {...sharedDirtyProps} />;
+      case 'agents':
+        return <AgentsSettings />;
       case 'usage':
         return <UsageView />;
       case 'worktrees-git':
@@ -221,7 +224,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       case 'secrets':
         return <SecretsSettings />;
       case 'shortcuts':
-        return <ShortcutsSettings persistence={persistence} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
+        return <ShortcutsSettings persistence={persistence} platform={platform} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
       case 'privacy':
         return <PrivacySettings persistence={persistence} />;
       case 'import-export':

@@ -1,5 +1,6 @@
 import http, { type IncomingMessage, type ServerResponse } from 'http';
 import { EventEmitter } from 'events';
+import { type LookupFunction } from 'net';
 import { hostname as getOsHostname } from 'os';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
@@ -52,12 +53,28 @@ interface ConfigManagerStub extends EventEmitter {
 }
 
 const activeServers: TestRemoteServer[] = [];
+const activeControllers: RemotePaneClientController[] = [];
 
 afterEach(async () => {
+  // Disconnect before closing the servers: a client still connected reconnects as its server closes.
+  for (const controller of activeControllers.splice(0)) await controller.switchToLocalMode();
   while (activeServers.length > 0) {
     await activeServers.pop()?.close();
   }
 });
+
+/** A controller that the next afterEach disconnects. */
+function createController(): RemotePaneClientController {
+  const controller = new RemotePaneClientController();
+  activeControllers.push(controller);
+  return controller;
+}
+
+/** A resolver that knows no names, as macOS is for a ts.net host before Tailscale answers. */
+const resolvesNothing: LookupFunction = (hostname, _options, callback) => {
+  const error: NodeJS.ErrnoException = Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' });
+  queueMicrotask(() => callback(error, '', 0));
+};
 
 describe('RemotePaneClient', () => {
   it('sends authenticated invoke requests to the remote daemon', async () => {
@@ -225,7 +242,7 @@ describe('RemotePaneClient', () => {
         selected: true,
         tailscaleIp: '127.0.0.1',
       },
-    });
+    }, { dnsLookup: resolvesNothing });
 
     await expect(client.invoke('sessions:get-all', ['session-1'])).resolves.toEqual({
       channel: 'sessions:get-all',
@@ -234,6 +251,7 @@ describe('RemotePaneClient', () => {
 
     expect(server.getLastInvokeAuth()).toBe('Bearer secret-token');
     expect(server.getLastInvokeHost()).toBe(`${tailscaleHost}:${serverUrl.port}`);
+    await client.disconnect();
   });
 
   it('forwards remote daemon SSE events through the provided renderer sink', async () => {
@@ -472,7 +490,7 @@ describe('RemotePaneClient writes through a drop', () => {
   async function connectController(server: TestRemoteServer): Promise<RemotePaneClientController> {
     const remoteConfig = createDefaultRemoteDaemonConfig();
     remoteConfig.client = { profiles: [profileFor(server, 'profile-writes')], activeProfileId: 'profile-writes', mode: 'remote' };
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({ configManager: createConfigManagerStub(remoteConfig), rendererEventSink: { send() {} } });
     await waitFor(() => controller.getConnectionState().status === 'connected');
     // The host has answered the controller's ports read, so a cut-off answer can only be the test's write.
@@ -595,7 +613,7 @@ describe('RemotePaneClientController', () => {
     config.client = { mode: 'remote', activeProfileId: 'ack', profiles: [
       { id: 'ack', label: 'host', baseUrl: server.baseUrl, token: 'test-token', transport: 'http+sse' },
     ] };
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     let restoreId = 0;
     controller.initialize({
       configManager: createConfigManagerStub(config),
@@ -624,7 +642,7 @@ describe('RemotePaneClientController', () => {
     config.client = { mode: 'remote', activeProfileId: 'late', profiles: [
       { id: 'late', label: 'host', baseUrl: server.baseUrl, token: 'test-token', transport: 'http+sse' },
     ] };
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     const restoreIds: number[] = [];
     controller.initialize({
       configManager: createConfigManagerStub(config),
@@ -663,7 +681,7 @@ describe('RemotePaneClientController', () => {
     };
     const configManager = createConfigManagerStub(remoteConfig);
 
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({
       configManager,
       rendererEventSink: { send() {} },
@@ -699,7 +717,7 @@ describe('RemotePaneClientController', () => {
       mode: 'remote',
     };
     const resolved: string[] = [];
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({
       configManager: createConfigManagerStub(remoteConfig),
       rendererEventSink: { send() {} },
@@ -734,7 +752,7 @@ describe('RemotePaneClientController', () => {
     };
     const configManager = createConfigManagerStub(remoteConfig);
     const resolved: string[] = [];
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({
       configManager,
       rendererEventSink: { send() {} },
@@ -768,7 +786,7 @@ describe('RemotePaneClientController', () => {
       activeProfileId: 'tailnet-my-mac',
       mode: 'remote',
     };
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({
       configManager: createConfigManagerStub(remoteConfig),
       rendererEventSink: { send() {} },
@@ -799,7 +817,7 @@ describe('RemotePaneClientController', () => {
       activeProfileId: 'profile-mini',
       mode: 'remote',
     };
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({ configManager: createConfigManagerStub(remoteConfig), rendererEventSink: { send() {} } });
     await waitFor(() => controller.getConnectionState().status === 'connected');
 
@@ -832,7 +850,7 @@ describe('RemotePaneClientController', () => {
     };
     const configManager = createConfigManagerStub(remoteConfig);
 
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({
       configManager,
       rendererEventSink: { send() {} },
@@ -872,7 +890,7 @@ describe('RemotePaneClientController', () => {
     };
     const configManager = createConfigManagerStub(remoteConfig);
 
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({
       configManager,
       rendererEventSink: {
@@ -919,7 +937,7 @@ describe('RemotePaneClientController', () => {
     };
     const configManager = createConfigManagerStub(remoteConfig);
 
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({
       configManager,
       rendererEventSink: {
@@ -946,7 +964,7 @@ describe('RemotePaneClientController', () => {
     const profile = { id: 'recovers', label: 'host', baseUrl: server.baseUrl, token: 'test-token', transport: 'http+sse' as const };
     const config = createDefaultRemoteDaemonConfig();
     config.client = { mode: 'remote', activeProfileId: profile.id, profiles: [profile] };
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {} } });
     await waitFor(() => controller.getConnectionState().status === 'connected');
 
@@ -968,7 +986,7 @@ describe('RemotePaneClientController', () => {
     server.setEventsReady(false);
 
     const configManager = createConfigManagerStub(createDefaultRemoteDaemonConfig());
-    const controller = new RemotePaneClientController();
+    const controller = createController();
     controller.initialize({
       configManager,
       rendererEventSink: { send() {} },
@@ -1260,6 +1278,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
       }
 
       await new Promise<void>((resolve) => {
+        server.closeAllConnections();
         server.close(() => resolve());
       });
     },

@@ -209,7 +209,7 @@ test('a new contract command becomes a tool with inputs from its usage and agent
 test('notify types its inputs, so a model passes choices as objects, and needs no yes', () => {
   const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
   const notify = buildMcpTools().find((tool) => tool.name === 'notify');
-  const { ui, choices, detailLabel, suggestions, action, links } = notify.inputSchema.properties;
+  const { ui, choices, questions, detailLabel, suggestions, action, links, took, tookAs, status, update, asked, whatChanged } = notify.inputSchema.properties;
 
   assert.deepEqual(ui.enum, ['options', 'approve', 'ask', 'info']);
   assert.equal(choices.type, 'array');
@@ -217,7 +217,14 @@ test('notify types its inputs, so a model passes choices as objects, and needs n
   assert.equal(choices.maxItems, 9);
   assert.equal(choices.items.type, 'object');
   assert.deepEqual(choices.items.required, ['label']);
-  assert.deepEqual(Object.keys(choices.items.properties).sort(), ['detail', 'label', 'recommended']);
+  assert.deepEqual(Object.keys(choices.items.properties).sort(), ['detail', 'label', 'recommended', 'was']);
+  assert.equal(questions.type, 'array');
+  assert.equal(questions.minItems, 2);
+  assert.equal(questions.maxItems, 4);
+  assert.deepEqual(questions.items.required, ['title', 'choices']);
+  assert.equal(questions.items.properties.choices.maxItems, 9);
+  assert.deepEqual(tookAs.enum, ['answer', 'question']);
+  for (const input of [took, status, update, asked, whatChanged]) assert.equal(input.type, 'string');
   assert.equal(detailLabel.type, 'string');
   assert.equal(detailLabel.maxLength, 40);
   assert.equal(suggestions.items.type, 'string');
@@ -225,7 +232,7 @@ test('notify types its inputs, so a model passes choices as objects, and needs n
   assert.equal(links.type, 'array');
   assert.equal(links.maxItems, 6);
   assert.deepEqual(links.items.required, ['label']);
-  assert.deepEqual(Object.keys(links.items.properties).sort(), ['label', 'path', 'url']);
+  assert.deepEqual(Object.keys(links.items.properties).sort(), ['approval', 'label', 'path', 'url']);
   assert.equal(links.items.properties.label.maxLength, 80);
   assert.ok(!('yes' in notify.inputSchema.properties), 'notify must run without yes');
   assert.deepEqual(
@@ -240,6 +247,43 @@ test('notify types its inputs, so a model passes choices as objects, and needs n
     buildToolArgv(notify, { ui: 'ask', title: 'Which?', links: [{ label: 'Notes', path: 'docs/RELEASE.md' }, { label: 'PR', url: 'https://example.com/pr/1' }] }),
     ['notify', '--ui=ask', '--title=Which?', '--links=[{"label":"Notes","path":"docs/RELEASE.md"},{"label":"PR","url":"https://example.com/pr/1"}]', '--json'],
   );
+  assert.deepEqual(buildToolArgv(notify, { took: 'Q-20', tookAs: 'question', status: 'Checking the logs' }),
+    ['notify', '--took=Q-20', '--status=Checking the logs', '--took-as=question', '--json']);
+  assert.deepEqual(
+    buildToolArgv(notify, { update: 'Q-20', asked: 'Can it be undone?', whatChanged: 'Added: Settings turns it off', choices: [{ label: 'Turn it on', was: 'Yes' }] }),
+    ['notify', '--choices=[{"label":"Turn it on","was":"Yes"}]', '--update=Q-20', '--asked=Can it be undone?', '--what-changed=Added: Settings turns it off', '--json'],
+  );
+  assert.equal(notify.inputSchema.required, undefined, 'took and update calls need no ui or title');
+});
+
+test('notify takes a reply with took and update, and names the next step as the tool', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const reply = { reply: 'Can it be undone?', picks: ['Yes'], id: 'n-1', replyId: 'r-1', next: 'Run `runpane notify --took n-1 answer` if this answers it, or `runpane notify --took n-1 question`.' };
+  try {
+    await withStubDaemon(paneDir, { 'runpane:notify': reply }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
+        const asked = await client.callTool({ name: 'notify', arguments: { ui: 'options', title: 'Turn on the index?', choices: [{ label: 'Yes' }, { label: 'No' }], paneDir } });
+        assert.notEqual(asked.isError, true, asked.content[0].text);
+        assertMatchesAdvertisedSchema(byName.get('notify'), asked.structuredContent);
+        assert.equal(asked.structuredContent.next, 'Run `notify` with took: n-1, tookAs: answer if this answers it, or `notify` with took: n-1, tookAs: question.');
+        const took = await client.callTool({ name: 'notify', arguments: { took: 'n-1', tookAs: 'question', status: 'Checking', paneDir } });
+        assert.notEqual(took.isError, true, took.content[0].text);
+        const updated = await client.callTool({ name: 'notify', arguments: { update: 'n-1', asked: 'Can it be undone?', whatChanged: 'Added: it can be undone', context: 'It can.', paneDir } });
+        assert.notEqual(updated.isError, true, updated.content[0].text);
+        const refused = await client.callTool({ name: 'notify', arguments: { took: 'n-1', tookAs: 'answer', ui: 'ask', paneDir } });
+        assert.equal(refused.isError, true);
+        assert.match(refused.content[0].text, /took records how a reply was taken, so it takes no other fields; remove ui\./);
+      });
+      assert.deepEqual(requests.slice(1).map((request) => request.args[0]).map(({ caller: _caller, ...rest }) => rest), [
+        { took: 'n-1', tookAs: 'question', status: 'Checking' },
+        // An update waits like any notify call, so a client whose calls time out gets waiting early.
+        { update: 'n-1', asked: 'Can it be undone?', whatChanged: 'Added: it can be undone', context: 'It can.', returnAfterMs: 50000 },
+      ]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
 });
 
 test('agents reach secrets only through list, delete and request: no MCP tool sets or prints a value', async () => {

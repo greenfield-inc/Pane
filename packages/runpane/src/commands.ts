@@ -44,6 +44,8 @@ export interface ParsedArgs {
   toolCommand?: string;
   /** `--chat`: open the agent as a chat tab. */
   chat?: boolean;
+  /** `--agent` with `--chat` naming an agent outside the terminal agents; the host decides whether it can run it. */
+  chatAgent?: string;
   /** `--agent-farm <profile>`: start an Agent Farm profile in a chat tab. */
   agentFarm?: string;
   /** `--arg key=value`, repeatable: launch arguments for --agent-farm. */
@@ -145,6 +147,12 @@ export interface ParsedArgs {
   summary?: string;
   summaryFile?: string;
   question?: string;
+  /** panels conversation `--conversation`: the conversation (agent session) id the panel is on. */
+  conversationId?: string;
+  /** panels conversation `--source`: what started that conversation. */
+  conversationSource?: ConversationSource;
+  /** panels conversation `--hook`: read a SessionStart hook's stdin, silently. */
+  hook?: boolean;
   /** panels create|submit, panes create `--wait`: block until that panel reports, misses its report, is blocked, or exits. */
   waitForResult?: boolean;
   /** `--timeout` with `--wait`: give up after this long (exit 124). */
@@ -186,6 +194,15 @@ export interface ParsedArgs {
   notifyLinks?: string;
   notifyRelays?: string;
   notifyAboutSession?: string;
+  notifyQuestions?: string;
+  /** `notify --took <id|Q-n> answer|question`: the approval, and the word after it (or `--took-as`). */
+  notifyTook?: string;
+  notifyTookAs?: string;
+  notifyStatus?: string;
+  /** `notify --update <id|Q-n> --asked <text> --what-changed <text>` */
+  notifyUpdate?: string;
+  notifyAsked?: string;
+  notifyWhatChanged?: string;
   /** loops: the loop id, its cron, and create's --paused. */
   loopId?: string;
   cron?: string;
@@ -216,6 +233,17 @@ const REPORT_STATES: readonly ReportState[] = ['ready', 'blocked', 'failed', 'do
 const reportStateSchema = boundary.enumeration('ready', 'blocked', 'failed', 'done');
 const HEAD_PATTERN = /^[0-9a-fA-F]{7,40}$/;
 
+/** `runpane panels conversation --source`: what started the conversation, as Claude Code's SessionStart hook names it. */
+export type ConversationSource = 'startup' | 'resume' | 'clear' | 'compact';
+export const CONVERSATION_SOURCES: readonly ConversationSource[] = ['startup', 'resume', 'clear', 'compact'];
+const conversationSourceSchema = boundary.enumeration('startup', 'resume', 'clear', 'compact');
+/** A conversation id runpane passes on: Claude and Codex session ids are UUIDs; this also bounds anything a hook sends. */
+export const CONVERSATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+
+function isConversationSource(value: string): value is ConversationSource {
+  return CONVERSATION_SOURCES.some((source) => source === value);
+}
+
 const COMMAND_MATCHERS = RUNPANE_CONTRACT.commands
   .map((command) => ({ name: command.name, tokens: command.name.split(' ') }))
   .sort((a, b) => b.tokens.length - a.tokens.length);
@@ -228,6 +256,7 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
+const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
 const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops', 'secrets', 'autopilot']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
@@ -241,12 +270,21 @@ const AUTOPILOT_ITEM_COMMANDS = new Set(['autopilot answer', 'autopilot close', 
 const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--relays', ['notify']],
   ['--about-session', ['notify']],
+  ['--questions', ['notify']],
+  ['--took', ['notify']],
+  ['--took-as', ['notify']],
+  ['--status', ['notify', 'update']],
+  ['--update', ['notify']],
+  ['--asked', ['notify']],
+  ['--what-changed', ['notify']],
   ['--decision', ['inbox ack']],
   ['--choice', ['autopilot answer']],
   ['--approve', ['autopilot answer']],
   ['--deny', ['autopilot answer']],
   ['--because', ['autopilot answer']],
   ['--reason', ['secrets request', 'autopilot close']],
+  ['--conversation', ['panels conversation']],
+  ['--hook', ['panels conversation']],
 ]);
 const LOCAL_VALUE_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localValue);
 const LOCAL_BOOLEAN_FLAGS = createFlagSet(RUNPANE_CONTRACT.flags.localBoolean);
@@ -359,6 +397,7 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
     }
   }
   parseFlags(args, parsed);
+  if (parsed.chatAgent !== undefined && !parsed.chat) throw invalidAgentError(parsed.chatAgent);
   if (parsed.command === 'watch' && parsed.follow && parsed.timeoutMs === 0) {
     throw new Error('--timeout-ms must be greater than 0 with --follow.');
   }
@@ -390,6 +429,7 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   }
   if (parsed.command === 'watch') applyWatchDefaults(parsed);
   if (parsed.command === 'report') validateReportArgs(parsed);
+  if (parsed.command === 'panels conversation') validateConversationArgs(parsed);
   validateWaitForResultArgs(parsed);
   if (parsed.command === 'inbox ack' && !parsed.all && !parsed.inboxIds?.length) {
     throw new Error('runpane inbox ack needs the item ids to clear, or --all --session <id|name>.');
@@ -399,6 +439,10 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   }
   if (parsed.command === 'autopilot stack push') validateStackPushArgs(parsed);
   return parsed;
+}
+
+function invalidAgentError(value: string): Error {
+  return new Error(`Invalid --agent "${value}". Expected one of: ${[...AGENTS].join(', ')}. With --chat, --agent takes any agent the host can run.`);
 }
 
 /** The commands that dispatch work and accept `--wait` for its result. */
@@ -536,6 +580,30 @@ function validateReportArgs(parsed: ParsedArgs): void {
   }
 }
 
+function validateConversationArgs(parsed: ParsedArgs): void {
+  if (parsed.hook) {
+    if (parsed.conversationId !== undefined || parsed.conversationSource !== undefined || parsed.panelId !== undefined
+      || parsed.paneId !== undefined || parsed.json) {
+      throw new RunpaneError(
+        'ERR_RUNPANE_INVALID_ARGUMENT',
+        'runpane panels conversation --hook reads the conversation from the hook\'s stdin and the panel from PANE_PANEL_ID, '
+          + 'so it takes no --conversation, --source, --panel, --pane or --json. Nothing was recorded.',
+        'Run `runpane panels conversation --hook` from a SessionStart hook, or report by hand with `runpane panels conversation --conversation <id>`.',
+      );
+    }
+    return;
+  }
+  if (parsed.conversationId === undefined) throw missingConversationError();
+}
+
+export function missingConversationError(): RunpaneError {
+  return new RunpaneError(
+    'ERR_RUNPANE_INVALID_ARGUMENT',
+    'runpane panels conversation needs --conversation <id>, or --hook when a Claude Code SessionStart hook runs it. Nothing was recorded.',
+    'Run `runpane panels conversation --conversation <id> [--source startup|resume|clear|compact]`.',
+  );
+}
+
 function validateStackPushArgs(parsed: ParsedArgs): void {
   const given = [parsed.item, parsed.file, parsed.url, parsed.sessionId].filter(value => value !== undefined).length;
   if (given !== 1) {
@@ -631,6 +699,16 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
     const owners = FLAG_OWNERS.get(arg);
     if (isLocalCommand && owners && !owners.includes(parsed.command)) {
       throw new Error(`${arg} is only valid with runpane ${owners.join(' or runpane ')}.`);
+    }
+    // `notify --took <id|Q-n> answer|question`: the word after the id says how the reply was taken.
+    if (parsed.command === 'notify' && arg === '--took') {
+      parsed.notifyTook = readValue(args, ++index, arg, literalValues);
+      const word = args[index + 1];
+      if (word !== undefined && !word.startsWith('-')) {
+        setNotifyTookAs(parsed, word);
+        index++;
+      }
+      continue;
     }
     if (isLocalCommand && LOCAL_BOOLEAN_FLAGS.has(arg)) {
       parseLocalBooleanFlag(arg, parsed);
@@ -828,6 +906,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.report = true;
     return;
   }
+  if (flag === '--hook') {
+    parsed.hook = true;
+    return;
+  }
   if (flag === '--fix') {
     if (parsed.command !== 'doctor') {
       throw new Error('--fix is only valid with runpane doctor.');
@@ -977,10 +1059,13 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     return;
   }
   if (flag === '--agent') {
-    if (!AGENTS.has(value)) {
-      throw new Error(`Invalid --agent "${value}". Expected one of: ${[...AGENTS].join(', ')}`);
+    if (AGENTS.has(value)) {
+      parsed.agent = decodeBoundary(value, agentSchema);
+      return;
     }
-    parsed.agent = decodeBoundary(value, agentSchema);
+    // A chat tab runs any agent the host can run; parseRunpaneArgs refuses it without --chat.
+    if (!AGENT_ID_PATTERN.test(value)) throw invalidAgentError(value);
+    parsed.chatAgent = value;
     return;
   }
   if (flag === '--tool-command') {
@@ -1118,6 +1203,13 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
       throw new Error('--interval-ms must be a positive number.');
     }
     parsed.intervalMs = intervalMs;
+    return;
+  }
+  if (flag === '--source' && parsed.command === 'panels conversation') {
+    if (!isConversationSource(value)) {
+      throw new Error(`--source must be one of: ${CONVERSATION_SOURCES.join(', ')}.`);
+    }
+    parsed.conversationSource = decodeBoundary(value, conversationSourceSchema);
     return;
   }
   if (flag === '--source') {
@@ -1258,6 +1350,13 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.question = value;
     return;
   }
+  if (flag === '--conversation') {
+    if (!CONVERSATION_ID_PATTERN.test(value)) {
+      throw new Error('--conversation must be a conversation id: up to 256 letters, digits, ".", "_", ":" or "-", starting with a letter or digit.');
+    }
+    parsed.conversationId = value;
+    return;
+  }
   if (flag === '--ttl') {
     parsed.lockTtlMs = parseLockTtl(value);
     return;
@@ -1320,6 +1419,30 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.notifyAboutSession = value;
     return;
   }
+  if (flag === '--questions') {
+    parsed.notifyQuestions = value;
+    return;
+  }
+  if (flag === '--took-as') {
+    setNotifyTookAs(parsed, value);
+    return;
+  }
+  if (flag === '--status') {
+    parsed.notifyStatus = value;
+    return;
+  }
+  if (flag === '--update') {
+    parsed.notifyUpdate = value;
+    return;
+  }
+  if (flag === '--asked') {
+    parsed.notifyAsked = value;
+    return;
+  }
+  if (flag === '--what-changed') {
+    parsed.notifyWhatChanged = value;
+    return;
+  }
   if (flag === '--decision') {
     parsed.inboxDecision = value;
     return;
@@ -1342,6 +1465,11 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
+}
+
+function setNotifyTookAs(parsed: ParsedArgs, value: string): void {
+  if (parsed.notifyTookAs !== undefined) throw new Error('Say answer or question once: after --took <id|Q-n>, or as --took-as.');
+  parsed.notifyTookAs = value;
 }
 
 function splitList(value: string): string[] {
@@ -1438,7 +1566,7 @@ function readValue(args: string[], index: number, flag: string, literalValues: S
   const clearable = REPO_SETTING_FLAGS.includes(flag);
   if (clearable && value === '') return value;
   const freeText = (clearable && !/^--[a-z][a-z-]*$/.test(value ?? ''))
-    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains', '--because', '--reason', '--choice'].includes(flag);
+    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains', '--because', '--reason', '--choice', '--asked', '--what-changed'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

@@ -20,6 +20,10 @@ export interface MachineState {
   status: 'online' | 'connecting' | 'offline';
   /** When it went offline (ISO 8601); null unless `status` is `offline`. */
   offlineSince: string | null;
+  /** When a saved machine last came online (ISO 8601); absent unless `status` is `online`. */
+  onlineSince?: string;
+  /** The machine's install id ("Show cards on" names it by this): this computer's own, or a saved machine's from its last connection. Absent until it answers, and from releases before it. */
+  installId?: string;
 }
 
 /** The reads `machines:read` serves; each takes the arguments the same channel takes today. */
@@ -30,6 +34,7 @@ export const MACHINE_READ_CHANNELS = [
   'permission:getPending',
   'notify:remote-snapshot',
   'autopilot:read-doc',
+  'notify:summary-page',
   'panels:agent-statuses',
   'projects:get-all',
   'projects:list-branches',
@@ -76,7 +81,12 @@ export type MachineCommand =
   | { type: 'rename'; target: MachineItemRef; name: string }
   /** `request` is the `CreateSessionRequest` that `sessions:create` takes. */
   | { type: 'create-pane'; request: object }
-  | { type: 'create-session'; input: OrchestrationSessionCreateInput };
+  | { type: 'create-session'; input: OrchestrationSessionCreateInput }
+  /** What switching a Session's terminal agent tabs to chat would do, then doing it to the confirmed `panelIds`. */
+  | { type: 'preview-switch-to-chat'; sessionId: string }
+  | { type: 'switch-to-chat'; sessionId: string; panelIds: string[] }
+  /** Sends `input` to an agent tab as the person's message (`runpane panels submit`); Move to machine… uses it. */
+  | { type: 'submit-to-agent'; panelId: string; input: string };
 
 /** A read's or command's answer, exactly as the machine gave it, tagged with that machine. */
 export interface MachineResult {

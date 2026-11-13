@@ -100,7 +100,7 @@ const terminalResumeStateSchema = boundary.object({
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   wasInterrupted: boundary.optional(boundary.boolean),
   initialCommand: boundary.optional(boundary.string),
-  agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode', 'pi')),
+  agentType: boundary.optional(configuredAgentSchema),
   agentSessionId: boundary.optional(boundary.string),
   hasClaudeSessionId: boundary.optional(boundary.boolean),
 });
@@ -109,7 +109,7 @@ function parseTerminalResumeState(value: ToolPanelState['customState']): {
   customResume?: CustomCommandResume | null;
   wasInterrupted?: boolean;
   initialCommand?: string;
-  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi';
+  agentType?: ConfiguredAgentId;
   agentSessionId?: string;
   hasClaudeSessionId?: boolean;
 } | undefined {
@@ -148,6 +148,7 @@ import { detectGitBase } from './worktreeManager';
 import { panelManager } from './panelManager';
 import { ProjectEnvService, type ResolvedProjectEnv } from './projectEnvVars';
 import { teammatePaneCaller } from '../daemon/commandRegistry';
+import { configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 import type { AnalyticsManager } from './analyticsManager';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import { comparePaneOrder, type NewPanePlacement, type PaneOrderSettings } from '../../../shared/utils/paneOrder';

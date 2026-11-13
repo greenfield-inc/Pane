@@ -52,12 +52,20 @@ function failedTitle(type: NotifyCommand['type']): string | undefined {
 
 /** Runs a card's command; a refusal (asker gone, machine offline, already answered) shows the person why. */
 export function runNotify(command: NotifyCommand): void {
-  void window.electronAPI.notify.run(command)
-    .catch((error) => {
-      console.error(`Notify command ${command.type} failed:`, error);
-      const title = failedTitle(command.type);
-      if (title) showActionError(title, error);
-    });
+  void sendNotify(command);
+}
+
+/** Runs a card's command and says whether it was accepted, so a form keeps what was typed until it was (F-4). */
+export async function sendNotify(command: NotifyCommand): Promise<boolean> {
+  try {
+    await window.electronAPI.notify.run(command);
+    return true;
+  } catch (error) {
+    console.error(`Notify command ${command.type} failed:`, error);
+    const title = failedTitle(command.type);
+    if (title) showActionError(title, error);
+    return false;
+  }
 }
 
 export function notifyItem(snapshot: NotifySnapshot | null, id: string | null | undefined): NotifyItem | undefined {

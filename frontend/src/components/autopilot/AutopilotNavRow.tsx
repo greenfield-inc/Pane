@@ -19,6 +19,8 @@ export function AutopilotNavRow() {
     <button
       type="button"
       data-testid="autopilot-nav"
+      data-sidebar-item
+      data-sidebar-key="autopilot"
       onClick={navigateToAutopilot}
       aria-current={active ? 'page' : undefined}
       className={cn(

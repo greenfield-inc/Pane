@@ -1,6 +1,6 @@
-import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
-import type { ChatTabClient, ChatTabCreate } from '../../../../shared/types/chatTab';
-import { decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
+import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import type { ChatTabClient, ChatTabCreate, ChatTabView } from '../../../../shared/types/chatTab';
+import { decodeChatAgents, decodeChatConversations, decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
@@ -23,6 +23,7 @@ import type {
 } from '../../../../shared/types/voiceTranscription';
 import type { Project } from '../../types/project';
 import type { SessionWorkerSource } from '../../components/chatTab/sessionWorkers';
+import { watchHostSessionChanges } from './hostSessionChanges';
 import { savedFilePath } from '../../components/chatTab/chatAttachments';
 import type { CreateSessionRequest, Session, SessionOutput } from '../../types/session';
 import { RemoteDaemonBrowserClient, type RemoteBrowserConnectionState } from './remoteDaemonBrowserClient';
@@ -96,6 +97,17 @@ export class RemoteRuntimeAdapter {
     return this.client.onStatus(listener);
   }
 
+  /**
+   * A Pane's git status, as the host's `sessions:get-git-status` returns it (non-blocking: the
+   * cached status now, with a refresh that arrives as `git-status-updated`). Its reply carries
+   * `gitStatus` beside `success`, not under `data`, so it is read here rather than through invoke.
+   */
+  async gitStatus(paneId: string): Promise<JsonValue | undefined> {
+    const response = await this.client.invoke<{ success?: boolean; error?: string; gitStatus?: JsonValue }>('sessions:get-git-status', [paneId, true]);
+    if (response.success === false) throw new Error(response.error ?? 'sessions:get-git-status failed');
+    return response.gitStatus ?? undefined;
+  }
+
   onEvent(listener: RemoteRuntimeEventListener): () => void {
     return this.client.onEvent(event => {
       if (event.type === 'daemon-event') {
@@ -129,27 +141,40 @@ export class RemoteRuntimeAdapter {
     },
     receipt: async (panelId, operationId) => decodeChatReceipt(await this.invoke('chat-tab:receipt', [panelId, operationId])),
     unqueue: (panelId, operationId) => this.invoke('chat-tab:unqueue', [panelId, operationId]),
+    sendNow: (panelId, operationId) => this.invoke('chat-tab:send-now', [panelId, operationId]),
+    editQueued: (panelId, operationId, text) => this.invoke('chat-tab:edit-queued', [panelId, operationId, text]),
+    clear: panelId => this.invoke('chat-tab:clear', [panelId]),
+    stopTask: (panelId, taskId) => this.invoke('chat-tab:stop-task', [panelId, taskId]),
     configure: (panelId, configId, value) => this.invoke('chat-tab:configure', [panelId, configId, value]),
     cancel: panelId => this.invoke('chat-tab:cancel', [panelId]),
     permission: (panelId, requestId, optionId) => this.invoke('chat-tab:permission', [panelId, requestId, optionId]),
     answer: (panelId, questionId, response) => this.invoke('chat-tab:answer', [panelId, questionId, response]),
     restart: panelId => this.invoke('chat-tab:restart', [panelId]),
+    conversations: async panelId => decodeChatConversations(await this.invoke('chat-tab:conversations', [panelId])),
+    resume: (panelId, sessionId) => this.invoke('chat-tab:resume', [panelId, sessionId]),
+    dismissBanner: panelId => this.invoke('chat-tab:dismiss-banner', [panelId]),
     signIn: panelId => this.invoke('chat-tab:sign-in', [panelId]),
+    agents: async () => decodeChatAgents(await this.invoke('chat-tab:agents')),
     onEvent: callback => this.onEvent(event => { if (event.channel === 'chat-tab:event') callback(decodeChatTabEvent(event.args[0])); }),
-    onState: callback => this.onEvent(event => { if (event.channel === 'chat-tab:state') callback(decodeChatTabView(event.args[0])); }),
+    // chat-tab:view carries every agent's view; chat-tab:state is kept for older clients' decoders.
+    onState: callback => this.onEvent(event => {
+      if (event.channel !== 'chat-tab:view') return;
+      let view: ChatTabView;
+      try {
+        view = decodeChatTabView(event.args[0]);
+      } catch (error) {
+        console.warn(`[ChatTabs] Ignored a chat view this app could not read: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      callback(view);
+    }),
     onReconnect: callback => this.onStatus(state => { if (state.status === 'connected') callback(); }),
   };
 
   /** A Session's overview on the host, read again when its Panes, states or reports change or the connection returns. */
   readonly sessionWorkers: SessionWorkerSource = {
     overview: sessionId => this.invoke<OrchestrationSessionOverview>('orchestration-sessions:overview', [{ sessionId }]),
-    onChange: callback => {
-      const stopEvents = this.onEvent(event => {
-        if (event.channel === 'orchestration-sessions:overview-updated' || event.channel === 'orchestration-sessions:changed') callback();
-      });
-      const stopStatus = this.onStatus(state => { if (state.status === 'connected') callback(); });
-      return () => { stopEvents(); stopStatus(); };
-    },
+    onChange: callback => watchHostSessionChanges(this, callback),
   };
 
   getProjectsWithSessions(): Promise<RemoteProjectWithSessions[]> {
@@ -161,7 +186,7 @@ export class RemoteRuntimeAdapter {
   }
 
   getPanels(sessionId: string): Promise<ToolPanel[]> {
-    return this.invoke<ToolPanel[]>('panels:list', [sessionId, { chatTabs: true }]);
+    return this.invoke<ToolPanel[]>('panels:list', [sessionId, { chatTabs: true, chatAgents: true }]);
   }
 
   getActivePanel(sessionId: string): Promise<ToolPanel | null> {
@@ -240,11 +265,11 @@ export class RemoteRuntimeAdapter {
    * leaves the host's selected Session alone so a phone never moves the desktop.
    */
   openOrchestrationSession(sessionId: string): Promise<OrchestrationSessionView<Session>> {
-    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:get', [{ sessionId }, { chatTabs: true }]);
+    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:get', [{ sessionId }, { chatTabs: true, chatAgents: true }]);
   }
 
   createOrchestrationSession(input: OrchestrationSessionCreateInput): Promise<OrchestrationSessionView<Session>> {
-    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:create', [input, { chatTabs: true }]);
+    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:create', [input, { chatTabs: true, chatAgents: true }]);
   }
 
   updateOrchestrationSession(sessionId: string, input: OrchestrationSessionUpdateInput): Promise<OrchestrationSessionRecord> {

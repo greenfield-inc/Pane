@@ -12,8 +12,8 @@ import { ChatCopyButton } from './ChatCopyButton';
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
   onViewDiff?: (path: string) => void;
-  /** Opens a Session worker's Pane. */
-  onOpenWorker?: (paneId: string) => void;
+  /** Opens a Session worker's Pane, at the given tab when one is named. */
+  onOpenWorker?: (paneId: string, panelId?: string) => void;
 }
 
 /** A code block keeps its own copy button, for the code alone. */
@@ -93,6 +93,7 @@ function StepGroupRow({ group, waiting, actions }: { group: StepGroup; waiting: 
       {group.kind === 'edit' && group.steps[0].path && actions.onViewDiff && <button type="button" className="chat-link" onClick={() => actions.onViewDiff!(group.steps[0].path!)}>View diff</button>}
       {state === 'waiting' && <span className="chat-step-detail">· waiting for you</span>}
       {state === 'failed' && <span className="chat-step-detail chat-removed">· failed</span>}
+      {group.steps.some(step => step.approvedBy === 'pane') && <span className="chat-step-detail" title="This tab has full access, so Pane allowed this step once for you">· Approved by Pane</span>}
       {expandable && <button type="button" className="chat-step-toggle" aria-expanded={open} aria-label={open ? 'Hide steps' : 'Show steps'} onClick={() => setOpen(!open)}>{open ? <ChevronDown /> : <ChevronRight />}</button>}
     </div>
     {liveOutput && <Output text={liveOutput} live />}

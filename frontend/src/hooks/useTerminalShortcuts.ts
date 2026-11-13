@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useConfigStore } from '../stores/configStore';
+import type { HotkeyId } from '../../../shared/constants/keyboardShortcuts';
 import { useHotkeyStore } from '../stores/hotkeyStore';
 
 export function useTerminalShortcuts(): void {
@@ -18,7 +19,7 @@ export function useTerminalShortcuts(): void {
     const shortcuts = config?.terminalShortcuts ?? [];
     for (const shortcut of shortcuts) {
       if (!shortcut.enabled) continue;
-      const hotkeyId = `terminal-shortcut-${shortcut.id}`;
+      const hotkeyId: HotkeyId = `terminal-shortcut-${shortcut.id}`;
       register({
         id: hotkeyId,
         label: shortcut.label || `Shortcut (${shortcut.key})`,

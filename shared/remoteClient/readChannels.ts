@@ -7,9 +7,15 @@ export const REMOTE_READ_CHANNELS = new Set([
   'chat-tab:history',
   'chat-tab:receipt',
   'chat-tab:keys',
+  // The host's chat agent catalog; nothing on the host changes.
+  'chat-tab:agents',
+  // Lists the folder's past conversations for the picker; nothing on the host changes.
+  'chat-tab:conversations',
   // Autopilot's state and its documents; nothing on the host changes.
   'autopilot:snapshot',
   'autopilot:read-doc',
+  // An approval's Summary page, read or written from its card; nothing on the host changes.
+  'notify:summary-page',
   'runpane:update:progress',
   'config:get',
   'config:get-session-preferences',
@@ -70,6 +76,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   // Read a branch's changes; the phone's and the PWA's Diff tabs.
   'sessions:get-diff-manifest',
   'sessions:get-file-diff',
+  // A Pane's git status, for the chat's PR item: returns the cached status and starts a refresh, safe to resend.
+  'sessions:get-git-status',
 ]);
 
 

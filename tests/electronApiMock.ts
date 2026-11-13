@@ -131,6 +131,8 @@ export type ElectronApiMockOptions = {
   paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage };
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
+  /** machines:run answers by machine, then command type. Absent: `{ success: true }`. */
+  machineRunAnswers?: Record<string, Record<string, JsonValue>>;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -151,6 +153,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const pendingPermissions: PanePermissionRequest[] = [];
     const feedbackSubmissions: SubmitFeedbackRequest[] = [];
     const openedExternalUrls: string[] = [];
+    const panelCreates: JsonObject[] = [];
     const diffManifestCalls: Array<{ sessionId: string; scope: DiffScope }> = [];
     const fileDiffCalls: Array<{ sessionId: string; scope: DiffScope; path: string }> = [];
     const clone = <T>(value: T): T => structuredClone(value);
@@ -790,7 +793,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       },
       run: (machineId: string, command: MachineCommand) => {
         machineRuns.push({ machineId, command: clone(command) });
-        return Promise.resolve({ machineId, data: { success: true } });
+        const answer = mockOptions.machineRunAnswers?.[machineId]?.[command.type];
+        return Promise.resolve({ machineId, data: clone(answer ?? { success: true }) });
       },
       retry: () => Promise.resolve(),
       onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
@@ -838,8 +842,30 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       opened: () => Promise.resolve(clone(autopilotSnapshot)),
       onChanged: () => unsubscribe,
     } : undefined;
+    // window.electronAPI.chatTab, served when a fixture panel is a chat tab: an idle Claude chat with no messages.
+    const chatTabApi = mockPanels.some((panel) => panel.type === 'chat') ? (() => {
+      const view = (panelId: string) => ({
+        panelId, agent: 'claude', generation: 1, status: 'idle', canAttachImages: false, controls: [], commands: [], permissions: [], questions: [], queue: [], messageCount: 0,
+        transcript: { panelId, generation: 1, revision: 0, start: 0, messages: [] },
+      });
+      const done = () => Promise.resolve();
+      return {
+        // The chat loads a moment late, as a real one does, so tests exercise the wait for it.
+        get: (panelId: string) => new Promise((resolve) => { setTimeout(() => resolve(view(panelId)), 300); }),
+        history: () => Promise.resolve([]),
+        send: () => Promise.resolve({ status: 'sent' }),
+        receipt: () => Promise.resolve(undefined),
+        unqueue: done, sendNow: done, editQueued: done, clear: done, stopTask: done, configure: done, cancel: done,
+        permission: done, answer: done, restart: done, resume: done, dismissBanner: done,
+        conversations: () => Promise.resolve([]),
+        signIn: (panelId: string) => Promise.resolve({ panelId }),
+        onEvent: () => () => undefined,
+        onState: () => () => undefined,
+      };
+    })() : undefined;
     const electronAPI = {
       autopilot: autopilotApi,
+      chatTab: chatTabApi,
       notify: notifyApi,
       paneSecrets: paneSecretsApi,
       machines: machinesApi,
@@ -1218,6 +1244,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           };
           mockPanels.push(panel);
           setActiveMockPanel(sessionId, panel.id);
+          panelCreates.push(clone(panel));
           emit('panel:created', clone(panel));
           return success(clone(panel));
         },
@@ -1841,6 +1868,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getOpenedExternalUrls() {
           return clone(openedExternalUrls);
         },
+        /** Every panel the renderer created through `panels.createPanel`, in order. */
+        getPanelCreates() {
+          return clone(panelCreates);
+        },
         getPreferenceWrites() {
           return clone(preferenceWrites);
         },
@@ -2008,7 +2039,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           notifySnapshot = clone(snapshot);
           emit('notify:snapshot', clone(snapshot));
         },
-        emitNotifyNavigate(target: 'inbox' | 'settings' | { approval: string }) {
+        emitNotifyNavigate(target: 'inbox' | 'toggle-inbox' | 'settings' | { approval: string }) {
           emit('notify:navigate', target);
         },
         getMachineRuns() {

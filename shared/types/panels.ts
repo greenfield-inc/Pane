@@ -3,6 +3,7 @@ import type { CustomCommandResume } from './customCommandResume';
 import type { DiffScope } from './gitDiff';
 import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import type { BoundaryCursor, BoundarySchema } from '../validation/boundaryDecoder';
+import type { ConfiguredAgentId } from '../agents';
 
 /**
  * Panel and session types for Pane.
@@ -55,6 +56,16 @@ export interface TerminalAgentReport {
   summaryPath?: string;
   /** What the worker needs answered; present when `state` is `blocked`. */
   question?: string;
+  reportedAt: string;
+}
+
+/** A SessionStart hook's report of the conversation a terminal tab's Claude is on. */
+export interface TerminalConversationReport {
+  id: string;
+  /** The hook's `source`: startup, resume, clear or compact. */
+  source?: string;
+  /** The terminal launch that reported it; a new one starts with every process. */
+  launchId: string;
   reportedAt: string;
 }
 
@@ -137,7 +148,7 @@ export interface TerminalPanelState {
   updateResumeHold?: string;         // Update operation that stopped the panel; released by explicit resume, or when the panel starts after that update ended.
   updateResumeId?: string;           // Exact identity required by automatic update restoration.
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
-  agentType?: 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi'; // CLI agent type for panel-local resume behavior
+  agentType?: ConfiguredAgentId; // CLI agent type for panel-local resume behavior
   /** How Pane learned `agentType`: declared with the launch, from the launch command, the foreground process, or the screen. */
   agentDetection?: TerminalAgentDetection;
   /** The command the panel was launched (or staged) with, as the user gave it. */
@@ -150,6 +161,11 @@ export interface TerminalPanelState {
   agentSessionId?: string;           // Agent-generated session ID for resuming conversations
   /** Latest `runpane report` from this panel's agent. */
   agentReport?: TerminalAgentReport;
+  /**
+   * The conversation the tab's Claude last reported from its SessionStart hook (`runpane panels conversation`,
+   * D-269), and the launch it reported from. Pane is sure of it only while that launch is the one running.
+   */
+  conversationReport?: TerminalConversationReport;
   /** Stable orchestration identity for resumed Session terminals. */
   orchestrationSessionId?: string;
   /** Session-owned working directory, also used by legacy shared terminal owners. */

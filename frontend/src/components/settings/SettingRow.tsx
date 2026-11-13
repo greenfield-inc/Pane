@@ -5,7 +5,8 @@ import type { SettingSaveState, SettingsSettingId } from '../../types/settings';
 import { settingDomId } from './catalog';
 
 interface SettingRowProps {
-  settingId: SettingsSettingId;
+  /** Search and deep links land on this row; a row in a list the search reaches as a whole has none. */
+  settingId?: SettingsSettingId;
   label: string;
   description?: string;
   children: ReactNode;
@@ -32,7 +33,7 @@ export function SettingRow({
 }: SettingRowProps) {
   return (
     <div
-      id={settingDomId(settingId)}
+      id={settingId && settingDomId(settingId)}
       data-setting-id={settingId}
       tabIndex={-1}
       className={cn(

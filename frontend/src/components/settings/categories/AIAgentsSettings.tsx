@@ -10,21 +10,13 @@ import type { SettingsPersistence } from '../useSettingsPersistence';
 import { API } from '../../../utils/api';
 import { isChatTabsEnabled } from '../../../stores/configStore';
 import { ChatTabKeys } from '../ChatTabKeys';
-import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../../../shared/types/paneChat';
+import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../../../shared/types/paneChat';
 import { SessionLaunchFields } from '../../SessionLaunchFields';
 import { DEFAULT_SESSION_PROFILE } from '../../../../../shared/types/sessionProfile';
 import { visibleAgentPresets } from '../../../utils/agentPresets';
-import type { AgentLaunchPresetId } from '../../../../../shared/constants/agentLaunchPresets';
 import { SessionImportSettingsRow } from '../../sessionImport/SessionImportSettingsRow';
 
-function isPaneChatAgent(id: AgentLaunchPresetId): id is PaneChatAgent {
-  return id === 'claude' || id === 'codex' || id === 'cursor' || id === 'opencode';
-}
-
-const paneChatAgentOptions = visibleAgentPresets()
-  .map(({ id }) => id)
-  .filter(isPaneChatAgent)
-  .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
+const paneChatAgentOptions = visibleAgentPresets().map(({ id }) => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
 type McpToolsetChoice = 'core' | 'all';
 const mcpToolsetOptions: { id: McpToolsetChoice; label: string }[] = [
@@ -62,7 +54,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
     // A host without chat tabs (an older one, a test double) has no key to remove.
     const keys = window.electronAPI.chatTab?.keys;
     if (!keys) return;
-    void keys().then((status) => setKeySavedWhileOff(Boolean(status.claude || status.codex)), () => undefined);
+    void keys().then((status) => setKeySavedWhileOff(Object.values(status).some(Boolean)), () => undefined);
   }, [chatTabsOn]);
 
   const applyClaudePath = async () => {
@@ -73,20 +65,32 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
   return (
     <SettingsPage title="AI & Agents" description="Application-wide defaults for Sessions and coding-agent integrations.">
       <SettingsSection title="Agent defaults">
-        {(chatTabsOn || keySavedWhileOff) && <SettingRow settingId="chat-tab-keys" label="Chat tab sign-in" description={chatTabsOn ? 'Chat tabs use your own Claude Code or Codex sign-in on this machine; Pane never sees or copies it. Sign in with claude auth login or codex login in a terminal tab, or save an API key here.' : 'Chat tabs are off, and a key saved for them is still on this machine. Remove it here, or turn Chat tabs back on to change it.'} saveState={persistence.saveStates['chat-tab-keys']} details={<ChatTabKeys removeOnly={!chatTabsOn} onRemovedAll={() => setKeySavedWhileOff(false)} />}>
+        <SettingRow
+          settingId="chat-tabs"
+          label="Chat tabs"
+          description="Open agents as chats: the + menu offers chat tabs, and new Sessions open their agent as a chat. Chats run the agents installed on this machine, under their own sign-in, with no terminal. Settings › Agents lists them. Turning it off keeps open chat tabs."
+          saveState={persistence.saveStates['chat-tabs']}
+        >
+          <ImmediateToggle
+            label="Chat tabs"
+            value={chatTabsOn}
+            onSave={(value) => persistence.saveConfig('chat-tabs', { chatTabsEnabled: value })}
+          />
+        </SettingRow>
+        {(chatTabsOn || keySavedWhileOff) && <SettingRow settingId="chat-tab-keys" label="Chat tab sign-in" description={chatTabsOn ? 'Chat tabs use each agent\'s own sign-in on this machine; Pane never sees or copies it. Sign in by running the agent in a terminal tab, or save an API key here.' : 'Chat tabs are off, and a key saved for them is still on this machine. Remove it here, or turn Chat tabs back on to change it.'} saveState={persistence.saveStates['chat-tab-keys']} details={<ChatTabKeys removeOnly={!chatTabsOn} onRemovedAll={() => setKeySavedWhileOff(false)} />}>
           {null}
         </SettingRow>}
 
         <SettingRow
           settingId="default-pane-chat-agent"
           label="Default Sessions agent"
-          description="Choose the agent used when a Session opens a new orchestration terminal."
+          description="Choose the agent a new Session starts. It opens as a chat when Chat tabs are on, and in a terminal otherwise."
           saveState={persistence.saveStates['default-pane-chat-agent']}
         >
           {/* The legacy accessible name remains stable for existing shortcuts and fixtures. */}
           <SegmentedControl<PaneChatAgent>
             label="Default Pane Chat agent"
-            value={config.defaultOrchestratorAgent ?? 'claude'}
+            value={config.defaultOrchestratorAgent ?? DEFAULT_PANE_CHAT_AGENT}
             options={paneChatAgentOptions}
             onChange={(value) => void persistence.saveConfig('default-pane-chat-agent', { defaultOrchestratorAgent: value })}
           />

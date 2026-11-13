@@ -16,9 +16,9 @@
 Appearance follows your OS — see [Appearance](docs/APPEARANCE.md).
 
 [![AGPL-3.0 License](https://img.shields.io/badge/License-AGPL--3.0-555555.svg?labelColor=333333&color=666666)](./LICENSE)
-[![Downloads](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/downloads&labelColor=333333&color=666666)](https://github.com/greenfield-inc/Pane/releases)
+[![Downloads](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/downloads&labelColor=333333&color=666666)](https://github.com/greenfield-inc/Pane/releases?utm_source=github)
 [![GitHub](https://img.shields.io/badge/GitHub-source-555555?labelColor=333333&color=666666&logo=github&logoColor=white)](https://github.com/greenfield-inc/Pane)
-[![Latest Release](https://img.shields.io/badge/Release-latest-555555?labelColor=333333&color=666666)](https://github.com/greenfield-inc/Pane/releases/latest)
+[![Latest Release](https://img.shields.io/badge/Release-latest-555555?labelColor=333333&color=666666)](https://github.com/greenfield-inc/Pane/releases/latest?utm_source=github)
 [![Changelog](https://img.shields.io/badge/Changelog-runpane.com-555555?labelColor=333333&color=666666)](https://runpane.com/changelog)
 [![Active Users](https://img.shields.io/endpoint?url=https://runpane.com/api/badge/installs&labelColor=333333)](https://runpane.com)
 [![Discord](https://img.shields.io/badge/Discord-join-%235462eb?labelColor=%235462eb&logo=discord&logoColor=%23f5f5f5)](https://discord.gg/BdMyubeAZn)
@@ -52,15 +52,17 @@ Appearance follows your OS — see [Appearance](docs/APPEARANCE.md).
 <sub>or download the installer directly</sub><br />
 <br />
 
-<a href="https://runpane.com/api/download?platform=mac&source=readme">
-  <img src="https://img.shields.io/badge/Download_for_macOS-000?style=for-the-badge&logo=apple&logoColor=white" height="40" alt="Download for macOS">
+<a href="https://runpane.com/api/download?version=latest&amp;platform=mac&amp;arch=arm64&amp;format=dmg&amp;source=gh-readme">
+  <img src="https://img.shields.io/badge/Download_for_macOS-000?style=for-the-badge&logo=apple&logoColor=white" height="40" alt="Download for macOS (Apple Silicon)">
 </a>
-<a href="https://runpane.com/api/download?platform=windows&source=readme">
-  <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" height="40" alt="Download for Windows">
+<a href="https://runpane.com/api/download?version=latest&amp;platform=windows&amp;arch=x64&amp;format=exe&amp;source=gh-readme">
+  <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" height="40" alt="Download for Windows (x64)">
 </a>
-<a href="https://runpane.com/api/download?platform=linux&source=readme">
-  <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" height="40" alt="Download for Linux">
+<a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=x64&amp;format=appimage&amp;source=gh-readme">
+  <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" height="40" alt="Download for Linux (x64 AppImage)">
 </a>
+<br />
+<sub>Other builds: <a href="https://runpane.com/api/download?version=latest&amp;platform=mac&amp;arch=x64&amp;format=dmg&amp;source=gh-readme">macOS (Intel)</a> · <a href="https://runpane.com/api/download?version=latest&amp;platform=windows&amp;arch=arm64&amp;format=exe&amp;source=gh-readme">Windows (ARM64)</a> · <a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=arm64&amp;format=appimage&amp;source=gh-readme">Linux ARM64 AppImage</a> · Linux .deb (<a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=x64&amp;format=deb&amp;source=gh-readme">x64</a>, <a href="https://runpane.com/api/download?version=latest&amp;platform=linux&amp;arch=arm64&amp;format=deb&amp;source=gh-readme">ARM64</a>)</sub>
 
 <br />
 <br />
@@ -126,7 +128,7 @@ Each of these is a small thing. Together they compound fast.
 | **Pane on Even G2 glasses** | See every Notify card from all your computers on Even Realities G2 glasses, answer with the R1 ring or your voice, and open any Pane's live terminal to read it and dictate into it. Pair once from the Pane phone app. | [Even G2 glasses](docs/EVEN_G2_GLASSES.md) |
 | **Loops** | Run an agent or command on a cron schedule, such as a nightly bug sweep. Each run is a new Pane in a fresh worktree, ready to review. Loops are for large recurring jobs and run at most once an hour. | [Loops](docs/LOOPS.md) |
 | **@mention Terminals** | Type `@` in any terminal to pull the last 500 lines from another pane's terminal directly into your context, no copy-paste required. | <img src="images/qol-at-mention.png" alt="Cross-terminal @mention picker" width="420"> |
-| **Clipboard Shortcuts** | `Ctrl+Alt+[key]` pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
+| **Clipboard Shortcuts** | `Cmd+Option+[key]` on macOS (`Ctrl+Alt+[key]` on Windows and Linux) pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
 | **Terminal Popover** | Highlight any text in a terminal and an intelligent popover offers the right action: copy, open in browser, or show in explorer. | <img src="images/qol-terminal-popover.png" alt="Terminal text selection popover" width="420"> |
 | **Built-in Browser** | Preview any URL in a tab next to your terminals so every pane can see its own running dev server without alt-tabbing. When a Pane's terminal or agent starts a web server, Pane offers to open a live preview of it beside the agent; the preview is that Pane's tab, so it follows the Pane. A new tab, or the address bar's Ports button, lists every port listening on the machine, grouped by the Pane that started it. On your phone, the Remote Pane app opens the same ports and HTML pages over Tailscale ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)), and its Explorer tab browses, edits and previews the worktree's files ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#files-on-the-phone)). | <img src="images/qol-browser.png" alt="Built-in browser tab previewing a local dev server" width="420"> |
 | **Resource Manager** | Built-in CPU and memory monitor broken down per pane and per process, so you can catch a runaway agent before it eats your laptop. | <img src="images/qol-resource-manager.png" alt="Built-in resource manager" width="420"> |
@@ -237,7 +239,7 @@ See [Workspaces setup, trust, and troubleshooting](docs/RUNPANE_WORKSPACES.md) f
 
 “Continue this on my Windows machine with Codex.” `runpane handoff` starts the agent in a new Pane on the other machine (or a new tab in your Pane on this one), using your pushed branch and a note about the task. When the sending tab runs Claude, Codex, Cursor or OpenCode and the receiver is the same agent, it carries the agent's own session: another machine gets a copy of the session's files and resumes it, and this machine resumes a fork of it. The CLI then checks that the receiver continued the conversation, and reports `continued`, `inconclusive` (with a question to ask the receiver), or `not-continued` (the receiver is kept, never replaced). With `--note-only`, a different agent, or no session to carry, a fresh agent starts with the note instead, and the output says so. The note carries the goal, decisions, verified state, and next steps either way. Live processes stay on the original machine.
 
-To move a whole Session instead, right-click it and choose **Move to host…**: its agent hands it off, and a Session with the same name, goal and agent appears on the other machine. With the same agent it resumes the Session's conversation when you open it; otherwise it starts by reading the note. See [Move a Session to another machine](docs/SESSIONS.md#move-a-session-to-another-machine).
+To move a whole Session instead, right-click it and choose **Move to machine…**: its agent hands it off, and a Session with the same name, goal and agent appears on the other machine. With the same agent it resumes the Session's conversation when you open it; otherwise it starts by reading the note. See [Move a Session to another machine](docs/SESSIONS.md#move-a-session-to-another-machine).
 
 To hand off a Pane's task, run from the repository you're handing off. On the destination, clone the same GitHub repository if needed and add that checkout to Pane. Install and sign in to the receiving agent there. Keep Pane running there. Use the npm CLI. On the destination, choose a repository outside WSL; WSL receivers are not supported.
 
@@ -282,7 +284,7 @@ The prompt stays small because Pane ships its skills and installs them into the 
 
 The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and four Pane-specific skills, `runpane`, `pane-orchestration` (the orchestrator guide), `pane-work`, and `migrate-to-pane`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime. The skills that come from Agent Farm were last refreshed from its greenfield plugin at `a903f09` (Agent Farm 0.2.33): to refresh them, three-way merge each skill from that commit to the new one (`git merge-file`), keeping Pane's adaptations, and record the new commit here.
 
-Pane Chat and named Sessions support Claude, Codex, Cursor, and OpenCode. Choose the agent when creating a Session, and set the default in AI & Agents settings. OpenCode reads the generated Session `AGENTS.md`; this does not install OpenCode skills or MCP configuration.
+Pane Chat and named Sessions support Claude, Codex, Cursor, OpenCode, and Pi. Choose the agent when creating a Session, and set the default in AI & Agents settings. OpenCode reads the generated Session `AGENTS.md`; this does not install OpenCode skills or MCP configuration.
 
 ---
 
@@ -328,10 +330,27 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 
 ## Keyboard Shortcuts
 
+Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ctrl+K Ctrl+S`) for **Keyboard Shortcuts**, or pick **Change key…** in a command's Actions (`⌘K`) in Search. Two-step keys such as `⌘K ⌘S` are pressed one after the other; a small hint waits for the second key.
+
 | Shortcut | Action |
 |----------|--------|
-| `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command |
-| `⌘K` / `Ctrl+K` | Clear terminal scrollback |
+| `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command, and see or change its key |
+| `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Keyboard Shortcuts |
+| `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` (or `k` `j`) move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
+| `Enter` | With a chat on screen and focus on no field or control, move into its message box |
+| `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel, approval column or sidebar in that direction; the focused split's active tab carries the accent underline |
+| `F6` / `⇧F6` | Next / previous region (sidebar, splits, approval column, right panel, terminal) |
+| `⌘K ⌘M` / `Ctrl+K Ctrl+M` | Maximize the focused split, Session tile, sidebar or right panel; again to restore |
+| `⌘⇧M` / `Ctrl+Shift+M` | Minimize the focused sidebar, right panel or terminal |
+| `⌘B` / `Ctrl+B` | Toggle sidebar |
+| `⌘⌥B` / `Ctrl+Alt+B` | Toggle right panel |
+| `` ⌃` `` / `` Ctrl+` `` | Toggle terminal |
+| `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab in the focused split, or in a Session's approval column while it has focus (`Esc` there goes back to the chat) |
+| `⌃⇧Space` | Approvals, and back to exactly where you were (also `Esc`); change it in Settings → Notify |
+| `⌘⌥O` / `Ctrl+Alt+O` | Machine switcher (then `0` for All machines, `1-9` for a machine) |
+| `⌃⌘]` `⌃⌘[` / `Ctrl+Alt+Shift+]` `[` | Next / previous machine |
+| `⌃⌘0` / `Ctrl+Alt+Shift+0` | All machines ⇄ the last machine |
+| `⌘K` / `Ctrl+K` | Clear the focused terminal |
 | `⌘F` / `Ctrl+F` | Find in the focused tab (terminal, browser, file preview, Logs) |
 | `⌘G` / `Ctrl+G` | Find next |
 | `⌘⇧G` / `Ctrl+Shift+G` | Find previous |
@@ -340,9 +359,9 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 | `⌘1-9` / `Ctrl+1-9` | Switch pane |
 | `⌘,` / `Ctrl+,` | Open settings |
 | `⌘⌥<key>` / `Ctrl+Alt+<key>` | Paste a clipboard shortcut into the active terminal |
-| `⌘⌥/` / `Ctrl+Alt+/` | Open Settings → Shortcuts |
 | `⌘⌥` (hold) / `Ctrl+Alt` (hold) | Show all configured shortcuts as an overlay |
-| `⌘B` / `Ctrl+B` | Toggle sidebar |
+
+On macOS, Control+letter keys (`⌃A`, `⌃E`, `⌃K`, `⌃W`…) always reach the terminal. View → Actual Size is `⌘⇧0`, since `⌘0` focuses the sidebar.
 
 ---
 
@@ -377,16 +396,16 @@ The shell installers and the other one-shot commands are at the top of this READ
 
 ### Direct Download
 
-> **[Download the Latest Release](https://github.com/greenfield-inc/Pane/releases/latest)**
+> **[Download the Latest Release](https://github.com/greenfield-inc/Pane/releases/latest?utm_source=github)**
 
 | Platform | File |
 |----------|------|
-| Windows (x64) | `Pane-x.x.x-Windows-x64.exe` |
-| Windows (ARM64) | `Pane-x.x.x-Windows-arm64.exe` |
-| macOS (Apple Silicon) | `Pane-x.x.x-macOS-arm64.dmg` |
-| macOS (Intel) | `Pane-x.x.x-macOS-x64.dmg` |
-| Linux (x64) | `Pane-x.x.x-linux-x86_64.AppImage` or `.deb` |
-| Linux (ARM64) | `Pane-x.x.x-linux-arm64.AppImage` or `.deb` |
+| Windows (x64) | [`Pane-x.x.x-Windows-x64.exe`](https://runpane.com/api/download?version=latest&platform=windows&arch=x64&format=exe&source=gh-readme) |
+| Windows (ARM64) | [`Pane-x.x.x-Windows-arm64.exe`](https://runpane.com/api/download?version=latest&platform=windows&arch=arm64&format=exe&source=gh-readme) |
+| macOS (Apple Silicon) | [`Pane-x.x.x-macOS-arm64.dmg`](https://runpane.com/api/download?version=latest&platform=mac&arch=arm64&format=dmg&source=gh-readme) |
+| macOS (Intel) | [`Pane-x.x.x-macOS-x64.dmg`](https://runpane.com/api/download?version=latest&platform=mac&arch=x64&format=dmg&source=gh-readme) |
+| Linux (x64) | [`Pane-x.x.x-linux-x86_64.AppImage`](https://runpane.com/api/download?version=latest&platform=linux&arch=x64&format=appimage&source=gh-readme) or [`.deb`](https://runpane.com/api/download?version=latest&platform=linux&arch=x64&format=deb&source=gh-readme) |
+| Linux (ARM64) | [`Pane-x.x.x-linux-arm64.AppImage`](https://runpane.com/api/download?version=latest&platform=linux&arch=arm64&format=appimage&source=gh-readme) or [`.deb`](https://runpane.com/api/download?version=latest&platform=linux&arch=arm64&format=deb&source=gh-readme) |
 
 ### Requirements
 
@@ -415,7 +434,7 @@ OpenCode's native terminal integration starts a new conversation bare, saves the
 
 The default `opencode --auto` auto-approves non-denied operations; it is not a sandbox.
 
-Pi tabs open with a Pane-chosen `pi --session-id <id>`, so a restarted or reopened tab continues the same conversation. Pi runs tools without asking; in a folder with `.pi` settings or project skills it first asks whether to trust the folder, which Pane shows as blocked and never answers. Pi is not yet offered for Pane Chat, named Sessions or Loops. Closing, archiving, and switching retain existing lifecycle behavior, and PTY exit does not prove that agent work was cancelled.
+Pi tabs open with a Pane-chosen `pi --session-id <id>`, so a restarted or reopened tab continues the same conversation. Pi runs tools without asking; in a folder with `.pi` settings or project skills it first asks whether to trust the folder, which Pane shows as blocked and never answers. Pi is not yet offered for Loops. Closing, archiving, and switching retain existing lifecycle behavior, and PTY exit does not prove that agent work was cancelled.
 
 Moving to a new computer? **Settings → Import & Export** saves your commands, run scripts, agent defaults, shortcuts, skill and MCP choices and look to a file, and imports it after showing what would change. Keys and tokens stay behind. See [Export and import your Pane setup](docs/SETUP_EXPORT_IMPORT.md).
 

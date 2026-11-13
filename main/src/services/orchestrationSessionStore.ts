@@ -22,8 +22,9 @@ import {
   type OrchestrationSessionStoreData,
 } from '../../../shared/types/orchestrationSession';
 import { getPaneChatPanelId } from '../../../shared/types/paneChat';
+import { CONFIGURED_AGENT_IDS, configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 
-const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor', 'opencode');
+const paneChatAgentSchema = configuredAgentSchema;
 const sourceSchema = boundary.enumeration('user', 'agent', 'system');
 const activityKindSchema = boundary.enumeration(
   'created',
@@ -299,10 +300,12 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
   }
   try {
     const session = decodeBoundary(fields, sessionSchema);
-    // Sessions saved before OpenCode joined get its derived panel id.
-    const opencode = session.panelIds.opencode ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID
-      ? getPaneChatPanelId('opencode') : `__orchestration_panel_${session.id}_opencode`);
-    return { ...session, panelIds: { ...session.panelIds, opencode } };
+    // Each agent keeps its saved panel id; Sessions saved before an agent joined get its derived one.
+    const saved = decodeOptionalBoundary(fields.panelIds, boundary.jsonObject);
+    const panelIds = Object.fromEntries(CONFIGURED_AGENT_IDS.map(agent => [agent, decodeOptionalBoundary(saved?.[agent], boundary.nonEmptyString)
+      ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID ? getPaneChatPanelId(agent) : `__orchestration_panel_${session.id}_${agent}`)]));
+    // SAFETY: the map above gives every configured agent an id.
+    return { ...session, panelIds: panelIds as Record<ConfiguredAgentId, string> };
   } catch (error) {
     if (!(error instanceof BoundaryDecodeError)) throw error;
     problems.push(`dropped ${label}: ${error.message}`);

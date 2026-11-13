@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Readable } from 'node:stream';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary } from './boundaryDecoder';
@@ -8,7 +9,16 @@ import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
 import { confirmMutation } from './daemonActions';
 import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
-import { hasCadenceValueFlag, type ParsedArgs, type RunpaneAgent } from './commands';
+import {
+  CONVERSATION_ID_PATTERN,
+  CONVERSATION_SOURCES,
+  hasCadenceValueFlag,
+  missingConversationError,
+  parseRunpaneArgs,
+  type ConversationSource,
+  type ParsedArgs,
+  type RunpaneAgent,
+} from './commands';
 import type { BoundarySchema, JsonObject, JsonValue } from './boundaryDecoder';
 import { parseSessionCreatePayload, parseSessionUpdatePayload } from './sessionPayload';
 import { describeReport, effectiveWatchHeartbeatMs, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
@@ -45,8 +55,6 @@ interface OrchestrationActivity {
   panelId?: string;
 }
 
-type OrchestrationAgent = 'claude' | 'codex' | 'cursor' | 'opencode';
-
 interface OrchestrationSessionRecord {
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
@@ -56,10 +64,10 @@ interface OrchestrationSessionRecord {
   isPinned?: boolean;
   /** Set while the Session's chat and every Pane in it are paused. */
   paused?: PausedMark;
-  agent: OrchestrationAgent;
+  agent: RunpaneAgent;
   internalSessionId: string;
   /** Pane versions before OpenCode Sessions send no `opencode` panel id. */
-  panelIds: Record<Exclude<OrchestrationAgent, 'opencode'>, string> & { opencode?: string };
+  panelIds: { claude: string; codex: string; cursor: string; opencode?: string };
   goal: string;
   context: string;
   decisions: string[];
@@ -731,6 +739,8 @@ interface ReportResult {
   sessionIds: string[];
   /** Watches waiting when the report was journaled; absent from older daemons. */
   liveWatchers?: number;
+  /** A blocked report's card check: what its card misses; it was recorded anyway. */
+  warnings?: string[];
 }
 
 type PanelLastMessageResult =
@@ -738,7 +748,7 @@ type PanelLastMessageResult =
     ok: true;
     panelId: string;
     paneId: string;
-    agentType: 'claude' | 'codex';
+    agentType: string;
     text: string;
     length: number;
     limit: number;
@@ -827,7 +837,7 @@ interface PanelCreateRequest {
   type?: 'terminal' | 'chat';
   tool?: PaneToolSpec;
   /** A chat tab: a plain agent, or an Agent Farm profile with its launch arguments. */
-  chat?: { agent?: 'claude' | 'codex'; profile?: string; args?: Record<string, string>; initialInput?: string; title?: string };
+  chat?: { agent?: string; profile?: string; args?: Record<string, string>; initialInput?: string; title?: string };
   /** A native session id the new tab resumes, as panes adopt --resume. */
   resume?: string;
   noFocus?: boolean;
@@ -1172,7 +1182,6 @@ interface PaneAdoptRequestInput extends Omit<PaneAdoptRequest, 'panes'> {
 }
 
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const orchestrationAgentSchema = boundary.enumeration('claude', 'codex', 'cursor', 'opencode');
 const repoSummarySchema: BoundarySchema<RepoSummary> = boundary.object({
   id: boundary.number,
   name: boundary.string,
@@ -1339,13 +1348,33 @@ const reportResultSchema: BoundarySchema<ReportResult> = boundary.object({
   report: agentReportSchema,
   sessionIds: boundary.array(boundary.string),
   liveWatchers: boundary.optional(boundary.number),
+  warnings: boundary.optional(boundary.array(boundary.string)),
+});
+/** What `runpane:panels:conversation` returns: the recorded conversation and whether Pane is sure the panel is on it. */
+interface PanelConversationResult {
+  ok: true;
+  paneId: string;
+  panelId: string;
+  conversationId: string;
+  source?: ConversationSource;
+  sure: boolean;
+  generation?: number;
+}
+const panelConversationResultSchema: BoundarySchema<PanelConversationResult> = boundary.object({
+  ok: boundary.literal(true),
+  paneId: boundary.string,
+  panelId: boundary.string,
+  conversationId: boundary.string,
+  source: boundary.optional(boundary.enumeration('startup', 'resume', 'clear', 'compact')),
+  sure: boundary.boolean,
+  generation: boundary.optional(boundary.number),
 });
 const panelLastMessageResultSchema: BoundarySchema<PanelLastMessageResult> = boundary.union(
   boundary.object({
     ok: boundary.literal(true),
     panelId: boundary.string,
     paneId: boundary.string,
-    agentType: boundary.enumeration('claude', 'codex'),
+    agentType: boundary.string,
     text: boundary.string,
     length: boundary.number,
     limit: boundary.number,
@@ -1485,7 +1514,7 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
   paused: boundary.optional(pausedMarkSchema),
-  agent: orchestrationAgentSchema,
+  agent: agentSchema,
   internalSessionId: boundary.nonEmptyString,
   panelIds: boundary.object({
     claude: boundary.nonEmptyString,
@@ -3710,24 +3739,168 @@ export async function runPanelsLastMessage(parsed: ParsedArgs): Promise<number> 
   return result.ok ? 0 : 1;
 }
 
-/** Where a report is for: explicit --panel (with an optional --pane), else the Pane terminal's own panel. */
+/**
+ * Which panel a report is for: explicit --panel (with an optional --pane), else the Pane terminal's own
+ * panel. `runpane report` and `runpane panels conversation` share the rule.
+ */
 function resolveReportIdentity(
   parsed: Pick<ParsedArgs, 'paneId' | 'panelId'>,
   env: NodeJS.ProcessEnv = process.env,
+  command = 'runpane report',
 ): { paneId?: string; panelId: string } {
   if (parsed.paneId || parsed.panelId) {
     if (!parsed.panelId) {
-      throw new Error('runpane report --pane also needs --panel <panel-id>. Find it with `runpane panels list --pane <pane-id>`.');
+      throw new Error(`${command} --pane also needs --panel <panel-id>. Find it with \`runpane panels list --pane <pane-id>\`.`);
     }
     return parsed.paneId ? { paneId: parsed.paneId, panelId: parsed.panelId } : { panelId: parsed.panelId };
   }
   const panelId = env.PANE_PANEL_ID?.trim();
   if (!panelId) {
-    throw new Error('runpane report cannot tell which panel is reporting. Run it inside a Pane terminal '
+    throw new Error(`${command} cannot tell which panel is reporting. Run it inside a Pane terminal `
       + '(which sets PANE_SESSION_ID and PANE_PANEL_ID), or pass --pane <pane-id> --panel <panel-id>.');
   }
   const paneId = env.PANE_SESSION_ID?.trim();
   return paneId ? { paneId, panelId } : { panelId };
+}
+
+export async function runPanelsConversation(parsed: ParsedArgs, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  if (parsed.hook) return runPanelsConversationHook(env);
+  if (parsed.conversationId === undefined) throw missingConversationError();
+  const identity = resolveReportIdentity(parsed, env, 'runpane panels conversation');
+  const result = await invokeDaemon('runpane:panels:conversation', [{
+    ...identity,
+    conversationId: parsed.conversationId,
+    source: parsed.conversationSource,
+  }], panelConversationResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    console.log(`Recorded conversation ${result.conversationId} for panel ${result.panelId}.`);
+  }
+  return 0;
+}
+
+/** The SessionStart hook's stdin is a small JSON object; anything larger is not one. */
+const CONVERSATION_HOOK_MAX_INPUT_BYTES = 64 * 1024;
+/** Claude Code writes the hook's JSON and closes stdin at once; never wait longer than this for it. */
+const CONVERSATION_HOOK_INPUT_TIMEOUT_MS = 2_000;
+/** With the stdin bound, the hook finishes well inside the 5 s timeout its settings entry gives it. */
+const CONVERSATION_HOOK_DAEMON_TIMEOUT_MS = 2_500;
+
+const sessionStartInputSchema = boundary.object({
+  session_id: boundary.string,
+  source: boundary.optional(boundary.json),
+  hook_event_name: boundary.optional(boundary.json),
+});
+
+/** The conversation a SessionStart hook's JSON names, or null when it names none runpane can pass on. */
+function conversationFromHookInput(text: string): { conversationId: string; source?: ConversationSource } | null {
+  let input: ReturnType<typeof sessionStartInputSchema.decode>;
+  try {
+    input = decodeBoundary(JSON.parse(stripUtf8Bom(text)), sessionStartInputSchema);
+  } catch {
+    return null;
+  }
+  if (input.hook_event_name !== undefined && input.hook_event_name !== 'SessionStart') return null;
+  const conversationId = input.session_id;
+  if (!CONVERSATION_ID_PATTERN.test(conversationId)) return null;
+  const source = CONVERSATION_SOURCES.find((name) => name === input.source);
+  return source ? { conversationId, source } : { conversationId };
+}
+
+/**
+ * `runpane panels conversation --hook`, the command a Claude Code SessionStart hook runs. SessionStart
+ * stdout goes into Claude's context and a failing hook shows in Claude, so this prints nothing and
+ * resolves 0 whatever happens: outside Pane, bad input, Pane not running, an older daemon, any error.
+ */
+async function runPanelsConversationHook(
+  env: NodeJS.ProcessEnv = process.env,
+  stdin: Readable & { isTTY?: boolean } = process.stdin,
+  paneDir?: string,
+): Promise<0> {
+  try {
+    const panelId = env.PANE_PANEL_ID?.trim();
+    if (!panelId) return 0;
+    const text = await readBoundedInput(stdin, CONVERSATION_HOOK_MAX_INPUT_BYTES, CONVERSATION_HOOK_INPUT_TIMEOUT_MS);
+    if (text === null) return 0;
+    const conversation = conversationFromHookInput(text);
+    if (!conversation) return 0;
+    // An unset paneId is left out of the request, which travels as JSON.
+    const paneId = env.PANE_SESSION_ID?.trim() || undefined;
+    await invokeDaemon('runpane:panels:conversation', [{
+      panelId,
+      paneId,
+      conversationId: conversation.conversationId,
+      source: conversation.source,
+    }], panelConversationResultSchema, { paneDir, timeoutMs: CONVERSATION_HOOK_DAEMON_TIMEOUT_MS });
+  } catch {
+    // Silent by design: a hook that fails must not show in Claude or stop it.
+  }
+  return 0;
+}
+
+/**
+ * `runpane panels conversation --hook` straight from argv, before anything else in the CLI runs (no
+ * managed-CLI handoff, no telemetry, no output). Returns null for any other command line.
+ */
+export async function runConversationHookFromArgv(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<0 | null> {
+  if (!isConversationHookArgv(argv)) return null;
+  let paneDir: string | undefined;
+  try {
+    const parsed = parseRunpaneArgs(argv);
+    if (parsed.command !== 'panels conversation' || !parsed.hook) return 0;
+    paneDir = parsed.paneDir;
+  } catch {
+    return 0;
+  }
+  return runPanelsConversationHook(env, process.stdin, paneDir);
+}
+
+function isConversationHookArgv(argv: string[]): boolean {
+  const words = argv.filter((arg, index) => !arg.startsWith('-') && argv[index - 1] !== '--pane-dir');
+  return words[0] === 'panels' && words[1] === 'conversation' && argv.includes('--hook');
+}
+
+/** Reads a stream to its end, or null when it is a terminal, passes `maxBytes`, fails, or takes longer than `timeoutMs`. */
+function readBoundedInput(
+  stream: Readable & { isTTY?: boolean },
+  maxBytes: number,
+  timeoutMs: number,
+): Promise<string | null> {
+  if (stream.isTTY) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      stream.removeListener('data', onData);
+      stream.removeListener('end', onEnd);
+      stream.removeListener('error', onError);
+      stream.destroy();
+      resolve(value);
+    };
+    const onData = (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'utf8');
+      size += buffer.length;
+      if (size > maxBytes) {
+        finish(null);
+        return;
+      }
+      chunks.push(buffer);
+    };
+    const onEnd = () => finish(Buffer.concat(chunks).toString('utf8'));
+    const onError = () => finish(null);
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    stream.on('data', onData);
+    stream.once('end', onEnd);
+    stream.once('error', onError);
+    stream.resume();
+  });
 }
 
 /** The CLIs send one character past the daemon's 16,000 so it still marks an overlong summary truncated. */
@@ -3770,13 +3943,15 @@ function describeReportDelivery(result: ReportResult): string[] {
   const watchers = result.liveWatchers ?? 0;
   const delivered = watchers > 0 ? ` Delivered to ${watchers} waiting watcher${watchers === 1 ? '' : 's'}.` : '';
   const lines = [`Reported ${describeReport(result.report)} for panel ${result.panelId}.${sessions}${delivered}`];
-  if (result.sessionIds.length > 0 || watchers > 0) return lines;
+  // The blocked question's card check: posted anyway, but worth fixing next time.
+  const warnings = (result.warnings ?? []).map(warning => `Warning: ${warning}`);
+  if (result.sessionIds.length > 0 || watchers > 0) return [...lines, ...warnings];
   const stored = `It is stored on the panel (runpane agents status --panel ${result.panelId})`;
   lines.push(result.liveWatchers === undefined
     ? `No Session recorded this report. ${stored}, and only watchers that list agent.report receive it.`
     : `No Session recorded this report and no watcher was waiting for it. ${stored}, `
       + 'and a watch with a named cursor (runpane watch --as <name> --kinds agent.report) still receives it when it next waits.');
-  return lines;
+  return [...lines, ...warnings];
 }
 
 interface InboxItem {
@@ -4313,12 +4488,12 @@ export async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<Panel
   if (parsed.launchArgs && !parsed.agentFarm) throw new Error('--arg is a launch argument for --agent-farm; pass --agent-farm <profile> too.');
   if (parsed.chat || parsed.agentFarm) {
     if (parsed.toolCommand) throw new Error('A chat tab runs its agent over ACP, so it takes --agent or --agent-farm, not --tool-command.');
-    if (parsed.agentFarm && parsed.agent && parsed.agent !== 'claude' && parsed.agent !== 'codex') throw new Error('An Agent Farm profile chooses its own agent; drop --agent.');
-    if (!parsed.agentFarm && parsed.agent !== 'claude' && parsed.agent !== 'codex') throw new Error('--chat opens Claude or Codex: pass --agent claude or --agent codex, or --agent-farm <profile>.');
+    const agent = parsed.chatAgent ?? parsed.agent;
+    if (!parsed.agentFarm && !agent) throw new Error('--chat needs --agent <id> or --agent-farm <profile>. Run `runpane panels create --help` for the flags.');
     if (parsed.asFilePointer || parsed.attachments?.length) throw new Error('--as-file-pointer and --attach are for terminal tabs; send the first prompt with --initial-input.');
     const initialInput = parsed.initialInputFile ? stripUtf8Bom(readInputSource(parsed.initialInputFile)) : parsed.initialInput;
     const chat: NonNullable<PanelCreateRequest['chat']> = {};
-    if (parsed.agent === 'claude' || parsed.agent === 'codex') chat.agent = parsed.agent;
+    if (agent) chat.agent = agent;
     if (parsed.agentFarm) chat.profile = parsed.agentFarm;
     if (parsed.launchArgs) chat.args = parsed.launchArgs;
     if (initialInput) chat.initialInput = initialInput;
@@ -4813,7 +4988,7 @@ async function askAgentChoice(): Promise<RunpaneAgent> {
   try {
     console.log('Choose an agent:');
     agents.forEach((agent, index) => {
-      const template = RUNPANE_CONTRACT.agentTemplates[agent];
+      const template = RUNPANE_CONTRACT.agents.entries[agent];
       console.log(`${index + 1}) ${template.title}`);
     });
 

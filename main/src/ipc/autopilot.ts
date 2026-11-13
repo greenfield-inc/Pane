@@ -17,12 +17,12 @@ import { getPaneEventSink } from '../core/runtime';
 import { parseRewriteQuestion } from './notify';
 import { listTailnetMachines } from './workspaceAccess';
 import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
 import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { AutopilotDocument, AutopilotSnapshot, AutopilotStackPushRequest } from '../../../shared/types/autopilot';
+import { DEFAULT_AGENT_ID, agentTerminalCommand } from '../../../shared/agents';
 
 const stackCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('step'), direction: boundary.union(boundary.literal(1), boundary.literal(-1)) }),
@@ -101,7 +101,8 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
         await panelManager.createPanel({ id: panelId, sessionId: ownerPaneId, type: 'chat', title, initialState: { customState: state }, metadata: { permanent: true } });
       },
       ensure: (panelId) => chatTabs().ensure(panelId),
-      isRunning: (panelId) => chatTabs().isRunning(panelId),
+      // A /clear swaps the agent for a fresh conversation; Autopilot must not read that as its agent stopping.
+      isRunning: (panelId) => chatTabs().isRunning(panelId) || chatTabs().isClearing(panelId),
       send: (panelId, text) => { chatTabs().send(panelId, { operationId: `autopilot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, text }); },
       stop: (panelId, message, next) => chatTabs().stop(panelId, { message, next }),
       resume: async (panelId) => {
@@ -135,10 +136,16 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
       list: () => sessionsList,
       subscribe: (listener) => { sessionListeners.add(listener); return () => sessionListeners.delete(listener); },
     },
-    launch: () => chatLaunchFromCommand(RUNPANE_CONTRACT.agentTemplates.claude.command, 'claude') ?? { kind: 'agent' },
+    launch: () => chatLaunchFromCommand(agentTerminalCommand(DEFAULT_AGENT_ID), DEFAULT_AGENT_ID) ?? { kind: 'agent' },
     skillPath: path.join(services.skillCacheManager?.paneChatSkillsRoot ?? path.join(getAppDirectory(), 'skills', 'pane-chat', 'skills'), 'pane-autopilot', 'SKILL.md'),
   });
   manager.on('changed', (snapshot: AutopilotSnapshot) => getPaneEventSink().send('autopilot:changed', snapshot));
+  // While it's on, Autopilot reads the replies no asker or relaying orchestrator can (D-258).
+  notify.setAutopilotReader(() => {
+    if (services.configManager.getConfig().autopilotEnabled !== true) return undefined;
+    const { state, panelId } = manager.snapshot();
+    return state !== 'stopped' && panelId ? { panelId } : undefined;
+  });
   // The snapshot carries both switches: Start and Settings follow Chat tabs turning on or off.
   let switches = '';
   services.configManager.on('config-updated', (config: { chatTabsEnabled?: boolean; autopilotEnabled?: boolean }) => {
@@ -257,9 +264,11 @@ export function refusePersonOnly(manager: Pick<AutopilotManager, 'isAutopilotCal
     case 'notify:remote-command': {
       const type = decodeBoundary(args[0] ?? {}, remoteCommandTypeSchema).type;
       // Autopilot's own commands carry its name and the machine that holds the item checks them; these would read as the person's.
-      if (type === 'answer' || type === 'undo' || type === 'close' || type === 'reopen' || type === 'override') manager.refuseAnswerFrom(caller, 'an approval or question as if it were the person');
       // Hiding, skipping or snoozing a card takes it from the person, which is just as much theirs.
       if (type === 'dismiss' || type === 'skip' || type === 'remind') manager.refuseAnswerFrom(caller, 'an approval or question (hiding or putting off its card)');
+      // Anything else but its own agent-* commands and opening a link would read as the person's:
+      // an answer, an Undo, a close or reopen, an Override, or the fix of how a reply was taken.
+      if (!type.startsWith('agent-') && type !== 'open-link') manager.refuseAnswerFrom(caller, 'an approval or question as if it were the person');
       return;
     }
     case 'permission:respond':

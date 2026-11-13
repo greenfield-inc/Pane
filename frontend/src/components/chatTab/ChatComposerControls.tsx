@@ -3,22 +3,32 @@ import { Check, ChevronDown, FilePen, Hand, ListTodo, Shield, ShieldOff, Sparkle
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import { Dropdown } from '../ui/Dropdown';
 import { Toggle } from '../ui/Toggle';
-import { choiceName, isRiskyMode, modelSummary, onOffValues, phoneSettingsOrder, triggerLabels, type ComposerControls } from '../../../../shared/chatComposerControls';
+import { choiceName, isRiskyMode, modelSummary, onOffValues, paneFullAccessOn, phoneSettingsOrder, triggerLabels, type ComposerControls } from '../../../../shared/chatComposerControls';
 
 type Configure = (id: string, value: string) => void;
 
-/** Claude Code's and Codex's permission modes; any other mode shows the plain shield. */
+/** Icons for common permission modes; a mode that never asks shows the open shield, any other the plain one. */
 const MODE_ICONS = new Map<string, LucideIcon>([
   ['default', Hand], ['read-only', Hand], ['acceptEdits', FilePen], ['plan', ListTodo], ['auto', Sparkles], ['agent', Sparkles],
-  ['bypassPermissions', ShieldOff], ['dontAsk', ShieldOff], ['agent-full-access', ShieldOff],
 ]);
 
-/** The permission mode, as a quiet chip that opens the mode list. */
-export function ChatModeChip({ control, disabled, configure }: { control: AgentChatConfigOption; disabled: boolean; configure: Configure }) {
-  const Icon = MODE_ICONS.get(control.currentValue) ?? Shield;
+/**
+ * The setting that lets the agent act without asking right now: a mode that never asks, or
+ * Pane's own Full access when it is on. Viewers mark either one the same way.
+ */
+export function riskySetting(arranged: ComposerControls): AgentChatConfigOption | undefined {
+  return isRiskyMode(arranged.mode) ? arranged.mode : paneFullAccessOn(arranged.more);
+}
+
+/**
+ * The permission mode, as a quiet chip that opens the mode list; amber for a mode that never asks
+ * (D-267), and while Pane's Full access is on (`risky`).
+ */
+export function ChatModeChip({ control, risky, disabled, configure }: { control: AgentChatConfigOption; risky: boolean; disabled: boolean; configure: Configure }) {
+  const Icon = isRiskyMode(control) ? ShieldOff : MODE_ICONS.get(control.currentValue) ?? Shield;
   return <Dropdown className="chat-anchor chat-anchor-mode" position="top-left" width="md" selectedId={control.currentValue} selectedMark="check" menuLabel={control.name}
     items={control.options.map(option => ({ id: option.value, label: option.name, onClick: () => { if (option.value !== control.currentValue) configure(control.id, option.value); } }))}
-    trigger={<button type="button" disabled={disabled} title={`${control.name}: ${choiceName(control)}`} className="chat-chip">
+    trigger={<button type="button" disabled={disabled} title={`${control.name}: ${choiceName(control)}`} className="chat-chip" data-tone={risky ? 'warning' : undefined}>
       <Icon className="chat-chip-icon" aria-hidden />
       <span className="sr-only">{control.name}: </span><span className="chat-chip-label">{choiceName(control)}</span>
     </button>} />;
@@ -82,10 +92,13 @@ export function usePhoneWidth(ref: RefObject<HTMLElement | null>): boolean {
   return phone;
 }
 
-/** On a phone the mode leaves the row; a mode that never asks keeps a small marker so it is never forgotten. */
-export function ChatRiskyModeMarker({ mode }: { mode: AgentChatConfigOption | undefined }) {
-  if (!mode || !isRiskyMode(mode)) return null;
-  const label = `Permissions: ${choiceName(mode)}`;
+/**
+ * On a phone the mode leaves the row, and an agent may have no mode at all: a setting that lets the
+ * agent act without asking (riskySetting) keeps a small marker so it is never forgotten.
+ */
+export function ChatRiskyModeMarker({ setting }: { setting: AgentChatConfigOption | undefined }) {
+  if (!setting) return null;
+  const label = `${isRiskyMode(setting) ? 'Permissions' : setting.name}: ${choiceName(setting)}`;
   return <span role="img" aria-label={label} title={label} className="chat-risk"><ShieldOff aria-hidden /></span>;
 }
 

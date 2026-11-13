@@ -37,6 +37,8 @@ function setup(ids: string[]) {
         connect: vi.fn(async () => undefined),
         disconnect: vi.fn(async () => undefined),
         retryNow: vi.fn(async () => undefined),
+        suspend: vi.fn(),
+        resume: vi.fn(),
       };
       clients.set(saved.id, client);
       return client;
@@ -96,6 +98,32 @@ describe('MachineConnections', () => {
     expect(result).toEqual({ machineId: 'build-box', data: { success: true } });
   });
 
+  it('previews and switches a Session to chat on that machine, with the tabs the person confirmed', async () => {
+    const { machines, client, connect } = setup(['build-box']);
+    connect('build-box');
+
+    await machines.run('build-box', { type: 'preview-switch-to-chat', sessionId: 's-1' });
+    await machines.run('build-box', { type: 'switch-to-chat', sessionId: 's-1', panelIds: ['p-1', 'p-2'] });
+
+    expect(client('build-box').invoke.mock.calls).toEqual([
+      ['chat-tab:preview-session-switch', ['s-1']],
+      ['chat-tab:switch-session', ['s-1', ['p-1', 'p-2']]],
+    ]);
+  });
+
+  it('sends a Session\'s agent a message on that machine as the person, for Move to machine…', async () => {
+    const { machines, client, connect } = setup(['build-box']);
+    connect('build-box');
+
+    await machines.run('build-box', { type: 'submit-to-agent', panelId: 's-1-c', input: 'Hand this Session off.' });
+
+    expect(client('build-box').invoke.mock.calls).toEqual([
+      ['runpane:panels:submit', [{ panelId: 's-1-c', input: 'Hand this Session off.', source: 'user' }]],
+    ]);
+    await expect(machines.run('build-box', { type: 'submit-to-agent', panelId: 's-1-c', input: '' }))
+      .rejects.toThrow(/Pane can't send "submit-to-agent" to another machine/);
+  });
+
   it('sets a Pane\'s pin to the requested state in one host call', async () => {
     const { machines, client, connect } = setup(['build-box']);
     connect('build-box');
@@ -140,6 +168,23 @@ describe('MachineConnections', () => {
       { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
       { id: 'build-box', label: 'build-box', kind: 'remote', status: 'offline', offlineSince: '2026-10-30T09:14:00.000Z' },
     ]);
+  });
+
+  it('learns each machine\'s install id from its ready event, and when it came online', () => {
+    vi.setSystemTime(new Date('2026-11-12T20:00:00.000Z'));
+    const { machines, client, connect } = setup(['build-box']);
+    client('build-box').options.onConnectionStateChange?.('restoring', null, { hostMachineId: 'c3d4-book' });
+    connect('build-box');
+
+    expect(machines.list().find(machine => machine.id === 'build-box')).toMatchObject({ installId: 'c3d4-book', status: 'online', onlineSince: '2026-11-12T20:00:00.000Z' });
+  });
+
+  it('closes every saved machine\'s stream while this computer sleeps, and reopens them on wake', () => {
+    const { machines, client } = setup(['build-box', 'mini']);
+    machines.suspend();
+    expect([client('build-box').suspend, client('mini').suspend].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
+    machines.resume();
+    expect([client('build-box').resume, client('mini').resume].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
   });
 
   it('refuses a write to an offline machine before sending it', async () => {

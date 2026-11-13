@@ -99,31 +99,207 @@
       "pi"
     ]
   },
-  "agentTemplates": {
-    "codex": {
-      "title": "Codex",
-      "command": "codex --yolo",
-      "description": "Open a Codex terminal tab and allow the initial input to drive the agent."
-    },
-    "claude": {
-      "title": "Claude Code",
-      "command": "claude --dangerously-skip-permissions",
-      "description": "Open a Claude Code terminal tab and allow the initial input to drive the agent."
-    },
-    "cursor": {
-      "title": "Cursor",
-      "command": "cursor-agent --force --trust",
-      "description": "Open a Cursor Agent terminal tab and allow the initial input to drive the agent."
-    },
-    "opencode": {
-      "title": "OpenCode",
-      "command": "opencode --auto",
-      "description": "Open an OpenCode terminal tab and allow the initial input to drive the agent."
-    },
-    "pi": {
-      "title": "Pi",
-      "command": "pi",
-      "description": "Open a Pi terminal tab and allow the initial input to drive the agent."
+  "agents": {
+    "default": "claude",
+    "registryUrl": "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json",
+    "entries": {
+      "claude": {
+        "title": "Claude Code",
+        "label": "Claude",
+        "icon": "claude",
+        "description": "Open a Claude Code terminal tab and allow the initial input to drive the agent.",
+        "executables": [
+          "claude"
+        ],
+        "terminal": {
+          "args": [],
+          "fullAccessArgs": [
+            "--dangerously-skip-permissions"
+          ],
+          "hotkey": "mod+alt+3",
+          "reportsConversation": true
+        },
+        "install": {
+          "url": "https://code.claude.com/docs/en/setup",
+          "command": "npm install -g @anthropic-ai/claude-code@latest"
+        },
+        "signIn": [
+          "auth",
+          "login"
+        ],
+        "onboarding": true,
+        "onboardingPanelId": "__pane_chat_terminal__",
+        "chat": {
+          "adapter": {
+            "package": "@agentclientprotocol/claude-agent-acp",
+            "executableEnv": "CLAUDE_CODE_EXECUTABLE",
+            "npmShimScript": "@anthropic-ai/claude-code/cli.js",
+            "sessionFolderSettingsMeta": "claudeCode"
+          },
+          "minimumVersion": "2.1.316",
+          "apiKeyEnv": [
+            "ANTHROPIC_API_KEY"
+          ],
+          "fullAccess": {
+            "mode": "bypassPermissions"
+          },
+          "legacyClients": true,
+          "riskyModes": [
+            "bypassPermissions",
+            "dontAsk"
+          ],
+          "terminalConversationsLoad": true,
+          "registryIds": [
+            "claude-acp"
+          ]
+        }
+      },
+      "codex": {
+        "title": "Codex",
+        "label": "Codex",
+        "icon": "codex",
+        "description": "Open a Codex terminal tab and allow the initial input to drive the agent.",
+        "executables": [
+          "codex"
+        ],
+        "terminal": {
+          "args": [],
+          "fullAccessArgs": [
+            "--yolo"
+          ],
+          "hotkey": "mod+alt+4"
+        },
+        "install": {
+          "url": "https://developers.openai.com/codex/cli",
+          "command": "npm install -g @openai/codex@latest"
+        },
+        "signIn": [
+          "login"
+        ],
+        "onboarding": true,
+        "chat": {
+          "adapter": {
+            "package": "@agentclientprotocol/codex-acp",
+            "executableEnv": "CODEX_PATH"
+          },
+          "minimumVersion": "0.165.0",
+          "apiKeyEnv": [
+            "OPENAI_API_KEY",
+            "CODEX_API_KEY"
+          ],
+          "fullAccess": {
+            "mode": "agent-full-access"
+          },
+          "legacyClients": true,
+          "riskyModes": [
+            "agent-full-access"
+          ],
+          "terminalConversationsLoad": true,
+          "registryIds": [
+            "codex-acp"
+          ]
+        }
+      },
+      "cursor": {
+        "title": "Cursor",
+        "label": "Cursor",
+        "icon": "cursor",
+        "description": "Open a Cursor Agent terminal tab and allow the initial input to drive the agent.",
+        "executables": [
+          "cursor-agent"
+        ],
+        "terminal": {
+          "args": [
+            "--trust"
+          ],
+          "fullAccessArgs": [
+            "--force"
+          ],
+          "hotkey": "mod+alt+5",
+          "platforms": [
+            "darwin",
+            "linux",
+            "wsl"
+          ]
+        },
+        "install": {
+          "url": "https://cursor.com/docs/cli/installation",
+          "command": "curl https://cursor.com/install -fsS | bash"
+        },
+        "signIn": [
+          "login"
+        ],
+        "onboarding": true,
+        "chat": {
+          "args": [
+            "acp"
+          ],
+          "minimumVersion": "2026.10.22",
+          "apiKeyEnv": [
+            "CURSOR_API_KEY"
+          ],
+          "fullAccess": {
+            "args": true
+          },
+          "terminalConversationsLoad": false,
+          "registryIds": [
+            "cursor"
+          ]
+        }
+      },
+      "opencode": {
+        "title": "OpenCode",
+        "label": "OpenCode",
+        "icon": "opencode",
+        "description": "Open an OpenCode terminal tab and allow the initial input to drive the agent.",
+        "executables": [
+          "opencode"
+        ],
+        "terminal": {
+          "args": [],
+          "fullAccessArgs": [
+            "--auto"
+          ],
+          "hotkey": "mod+alt+6"
+        },
+        "install": {
+          "url": "https://opencode.ai/docs",
+          "command": "npm install -g opencode-ai@latest"
+        },
+        "signIn": [
+          "auth",
+          "login"
+        ],
+        "chat": {
+          "args": [
+            "acp"
+          ],
+          "minimumVersion": "1.18.14",
+          "terminalConversationsLoad": true,
+          "registryIds": [
+            "opencode",
+            "opencode-v2"
+          ]
+        }
+      },
+      "pi": {
+        "title": "Pi",
+        "label": "Pi",
+        "icon": "pi",
+        "description": "Open a Pi terminal tab and allow the initial input to drive the agent.",
+        "executables": [
+          "pi"
+        ],
+        "terminal": {
+          "args": [],
+          "fullAccessArgs": [],
+          "hotkey": "mod+alt+7"
+        },
+        "install": {
+          "url": "https://pi.dev",
+          "command": "npm install -g @earendil-works/pi-coding-agent@latest"
+        }
+      }
     }
   },
   "terminalKeys": {
@@ -227,7 +403,7 @@
       "name": "agents doctor",
       "summary": "Diagnose whether a built-in agent command is available in a Pane repository environment.",
       "usage": [
-        "runpane agents doctor --agent <codex|claude|cursor|pi> [--repo <selector>] [--json] [--pane-dir <path>]"
+        "runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
         "admin"
@@ -567,7 +743,7 @@
       "summary": "Hand your task to another agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it. A same-agent handoff from a Pane tab carries and resumes your own session (a fork on this machine) and checks it continued; otherwise a fresh agent starts with the note. From a Session's terminal, create the Session on another machine instead.",
       "usage": [
         "runpane handoff --template",
-        "runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]"
+        "runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]"
       ],
       "mutates": true,
       "wrappers": [
@@ -594,8 +770,8 @@
       "name": "panes create",
       "summary": "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.",
       "usage": [
-        "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|pi> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
-        "runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|pi>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
+        "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
+        "runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
         "runpane panes create --from-json <path|-> [--yes] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
@@ -614,8 +790,8 @@
       "name": "panes adopt",
       "summary": "Adopt an existing externally managed git worktree as a Pane without changing the worktree.",
       "usage": [
-        "runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|pi> [--resume <id>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]",
-        "runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|pi>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]"
+        "runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|opencode|pi> [--resume <id>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]",
+        "runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--folder <name>] [--launch [--prompt <text>|--prompt-file <path|->] [--wait-ready] [--ready-timeout-ms <ms>]] [--no-pinned] [--no-associate] [--dry-run] [--yes] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -755,8 +931,8 @@
       "name": "panels create",
       "summary": "Open a new agent or terminal tab inside an existing Pane, sharing its worktree. The default for review, QA, fixes and any other agent on work that already has a Pane.",
       "usage": [
-        "runpane panels create --pane <pane-id> --agent <codex|claude|cursor|pi> [--source user|agent] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]",
-        "runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|pi>] [--title <title>] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]"
+        "runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]",
+        "runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--title <title>] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -959,6 +1135,25 @@
       ],
       "jsonSchemas": [
         "panelLastMessageResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "panels conversation",
+      "summary": "Record which conversation a terminal panel's agent is on, so Switch to chat and restarts open that one. A Claude Code SessionStart hook runs it with --hook.",
+      "usage": [
+        "runpane panels conversation --conversation <id> [--source startup|resume|clear|compact] [--panel <panel-id>] [--pane <pane-id>] [--json] [--pane-dir <path>]",
+        "runpane panels conversation --hook [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "idempotent": true,
+      "toolsets": [
+        "panels"
+      ],
+      "jsonSchemas": [
+        "panelConversationRequest",
+        "panelConversationResult"
       ],
       "localControl": true
     },
@@ -1396,7 +1591,7 @@
       "name": "agents start",
       "summary": "Start an agent on a task and wait until it is ready: as a new tab in an existing Pane with --pane <id> (review, audit, fix, QA), or in a new Pane with --repo and --name for new work.",
       "usage": [
-        "runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]"
+        "runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -1470,7 +1665,9 @@
       "name": "notify",
       "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
       "usage": [
-        "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
+        "runpane notify --update <id|Q-n> --asked <text> --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "runpane notify --resume <id> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
@@ -1681,7 +1878,7 @@
       "name": "sessions set-agent",
       "summary": "Switch the durable terminal agent for a named Session.",
       "usage": [
-        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]"
+        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "idempotent": true,
@@ -2169,7 +2366,7 @@
       },
       {
         "name": "--agent",
-        "value": "<codex|claude|cursor|pi>",
+        "value": "<codex|claude|cursor|opencode|pi>",
         "description": "Built-in agent terminal template to open. With --tool-command, the agent that command runs."
       },
       {
@@ -2266,7 +2463,7 @@
       {
         "name": "--source",
         "value": "<user|agent>",
-        "description": "Identify whether a local-control mutation is user-initiated or agent/orchestrator-initiated."
+        "description": "Identify whether a local-control mutation is user-initiated or agent/orchestrator-initiated. On panels conversation it is instead what started the conversation: startup, resume, clear, or compact."
       },
       {
         "name": "--strategy",
@@ -2429,6 +2626,11 @@
         "description": "What a blocked worker needs answered; required with --state blocked."
       },
       {
+        "name": "--conversation",
+        "value": "<id>",
+        "description": "The conversation (agent session) id a panel's agent is on, for runpane panels conversation."
+      },
+      {
         "name": "--cwd",
         "value": "<path>",
         "description": "Working directory on the target machine for workspace exec."
@@ -2526,12 +2728,12 @@
       {
         "name": "--context",
         "value": "<text>",
-        "description": "notify: background shown under Details."
+        "description": "notify: the card's subtitle: one or two sentences on why it matters (up to 240 characters)."
       },
       {
         "name": "--choices",
         "value": "<json>",
-        "description": "notify --ui options: 1 to 9 choices as a JSON array of {label, detail?, recommended?}."
+        "description": "notify --ui options: 1 to 9 choices as a JSON array of {label, detail?, recommended?}; with --update a reworded choice adds \"was\", its old label."
       },
       {
         "name": "--detail",
@@ -2556,7 +2758,7 @@
       {
         "name": "--links",
         "value": "<json>",
-        "description": "notify: up to 6 related files or pages as a JSON array of {label, path} or {label, url}; any ui."
+        "description": "notify: up to 6 related files, pages or approvals as a JSON array of {label, path}, {label, url} or {label, approval}; any ui."
       },
       {
         "name": "--content",
@@ -2587,6 +2789,41 @@
         "name": "--about-session",
         "value": "<id|name>",
         "description": "notify only, for Autopilot's own items: the Session the item is about."
+      },
+      {
+        "name": "--questions",
+        "value": "<json>",
+        "description": "notify --ui options, instead of --choices: 2 to 4 questions as a JSON array of {title, choices}, each with 1 to 9 choices and one pick."
+      },
+      {
+        "name": "--took",
+        "value": "<id|Q-n>",
+        "description": "notify only: say how you took the person's reply to this approval; answer or question follows the id."
+      },
+      {
+        "name": "--took-as",
+        "value": "<answer|question>",
+        "description": "notify --took: the word after the id, as a flag (the MCP tool's tookAs)."
+      },
+      {
+        "name": "--status",
+        "value": "<text>",
+        "description": "notify --took <id> question: what you are doing about it, shown on the approval. Defaults to \"Getting more context…\"."
+      },
+      {
+        "name": "--update",
+        "value": "<id|Q-n>",
+        "description": "notify only: save a new version of this approval after the person's question, and wait on it."
+      },
+      {
+        "name": "--asked",
+        "value": "<text>",
+        "description": "notify --update: the person's question, as they typed it."
+      },
+      {
+        "name": "--what-changed",
+        "value": "<text>",
+        "description": "notify --update: what changed, one line per change."
       },
       {
         "name": "--decision",
@@ -2743,7 +2980,7 @@
       },
       {
         "name": "--chat",
-        "description": "Open the agent as a chat tab (Claude or Codex over ACP, no terminal) instead of a terminal tab."
+        "description": "Open --agent as a chat tab (over ACP, no terminal) instead of a terminal tab; the host lists the agents it can run."
       },
       {
         "name": "--next",
@@ -2756,6 +2993,10 @@
       {
         "name": "--deny",
         "description": "autopilot answer only: deny the item."
+      },
+      {
+        "name": "--hook",
+        "description": "runpane panels conversation: read a Claude Code SessionStart hook's JSON from stdin and report it for PANE_PANEL_ID. Prints nothing and always exits 0."
       }
     ]
   },
@@ -2773,7 +3014,7 @@
         "  runpane daemon repair [--pane-dir <path>] [--yes] [--json]",
         "  runpane agent-context [--json]",
         "  runpane mcp [--toolsets <name,...>] [--read-only]",
-        "  runpane agents doctor --agent <codex|claude|cursor|pi> [--repo <selector>] [--json]",
+        "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
         "  runpane repos get [--repo <selector>] [--json]",
@@ -2791,7 +3032,7 @@
         "  runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
         "  runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
         "  runpane sessions pause|resume --session <id|name> [--json] [--pane-dir <path>]",
-        "  runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]",
+        "  runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]",
         "  runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
         "  runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
@@ -2808,11 +3049,11 @@
         "  runpane workspace <machine> read|write|exec|<command>",
         "  runpane watch --follow",
         "  runpane watch --until-event",
-        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|pi> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
+        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes",
         "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes",
         "  runpane panes pause|resume --pane <pane-id> --yes [--json]",
-        "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|pi> [--source user|agent] [--focus|--no-focus] --yes",
+        "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] --yes",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
@@ -2823,6 +3064,7 @@
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels conversation (--conversation <id> [--source startup|resume|clear|compact]|--hook) [--json]",
         "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
@@ -2834,11 +3076,11 @@
         "  runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]",
         "  runpane docs search --query <text> [--limit <count>] [--json]",
         "  runpane docs read --doc <path> [--json]",
-        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
+        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
         "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--json]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
         "  runpane autopilot status|waiting|stack [--json]",
@@ -3140,7 +3382,7 @@
         "Commands:",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
-        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|pi> [options]",
+        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [options]",
         "  runpane panes archive --pane <pane-id> [--force] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
         "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes [--json]",
         "  runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]",
@@ -3264,8 +3506,8 @@
       ],
       "panes create": [
         "Usage:",
-        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|pi> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
-        "  runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|pi>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
+        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
+        "  runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
         "  runpane panes create --from-json <path|-> [--yes] [--json]",
         "",
         "Creates a Pane in a saved repository and opens a terminal-backed tool tab. 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create one only when the work's branch has no Pane yet; for existing work use `runpane panels create --pane <id>`.",
@@ -3278,7 +3520,7 @@
         "  --worktree-name <name>         Worktree directory name; defaults to --name",
         "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
         "  --base-branch <ref>            Ref to branch from; --base is an alias",
-        "  --agent <codex|claude|cursor|pi>  Built-in terminal template; with --tool-command, the agent it runs",
+        "  --agent <codex|claude|cursor|opencode|pi>  Built-in terminal template; with --tool-command, the agent it runs",
         "  --tool-command <command>       Custom terminal command",
         "  --title <title>                Terminal tab title",
         "  --initial-input <text>         Text sent after the command is ready",
@@ -3312,8 +3554,8 @@
       ],
       "panes adopt": [
         "Usage:",
-        "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|pi> [options]",
-        "  runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|pi>] [options]",
+        "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|opencode|pi> [options]",
+        "  runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [options]",
         "",
         "Adopts an existing externally managed git worktree without creating, syncing, or deleting it. Archiving only removes its worktree with `panes archive --remove-worktree`. To start new work on a named branch, use `panes create --base <ref> --branch <name>` instead of `git worktree add` plus adopt.",
         "",
@@ -3402,7 +3644,7 @@
         "  runpane panels <command> [options]",
         "",
         "Commands:",
-        "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|pi> [options]",
+        "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [options]",
         "  runpane panels open (--url <url>|--file <path>) [--split|--tab] --yes [--json]",
         "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
         "  runpane panels list --pane <pane-id> [--json]",
@@ -3415,6 +3657,7 @@
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels conversation (--conversation <id> [--source startup|resume|clear|compact]|--hook) [--json]",
         "",
         "Run \"runpane help panels create\" or another command-specific topic for options."
       ],
@@ -3495,12 +3738,12 @@
       ],
       "agents doctor": [
         "Usage:",
-        "  runpane agents doctor --agent <codex|claude|cursor|pi> [--repo <selector>] [--json]",
+        "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
         "",
         "Diagnoses whether Codex or Claude is available in the same repository environment Pane will use.",
         "",
         "Options:",
-        "  --agent <codex|claude|cursor|pi>      Built-in agent command to diagnose",
+        "  --agent <codex|claude|cursor|opencode|pi>         Built-in agent command to diagnose",
         "  --repo <selector>              active, id, exact path, or saved repository name; defaults to active",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
@@ -3570,13 +3813,15 @@
         "Create a terminal-backed tool panel inside an existing Pane session.",
         "",
         "Usage:",
-        "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|pi> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
-        "  runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|pi>] [--title <title>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
+        "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
+        "  runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--title <title>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
+        "  runpane panels create --pane <pane-id> --chat --agent <id> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
         "",
         "Options:",
         "  --pane <pane-id>              Existing Pane session to add the panel to.",
-        "  --agent <codex|claude|cursor|pi> Built-in agent command template, or with --tool-command the agent it runs.",
+        "  --agent <codex|claude|cursor|opencode|pi> Built-in agent command template, or with --tool-command the agent it runs.",
         "  --tool-command <command>      Custom terminal command to launch.",
+        "  --chat                        Open --agent as a chat tab instead of a terminal; the host lists the agents it can run.",
         "  --title <title>               Panel title override.",
         "  --initial-input, --prompt     Initial input to send after the tool starts.",
         "  --initial-input-file <path|-> Read initial input from a file or stdin.",
@@ -3656,7 +3901,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "sessions create": [
@@ -3667,7 +3912,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output.",
         "",
         "JSON isPinned: true pins the Session; omitted or false leaves it unpinned.",
@@ -3681,7 +3926,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "sessions update": [
@@ -3692,20 +3937,20 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output.",
         "",
         "JSON isPinned: true/false sets the Session pin star. Select the Session with --session, not a session field in JSON."
       ],
       "sessions set-agent": [
         "Usage:",
-        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]",
+        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]",
         "",
         "Options:",
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "sessions associate": [
@@ -3716,7 +3961,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "sessions detach": [
@@ -3727,7 +3972,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "sessions overview": [
@@ -3738,7 +3983,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "panes git-status": [
@@ -3985,14 +4230,14 @@
       ],
       "agents start": [
         "Usage:",
-        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
+        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
         "",
         "Start an agent on a task and wait until it is ready: as a new tab in an existing Pane with --pane <id> (review, audit, fix, QA), or in a new Pane with --repo and --name for new work.",
         "",
         "Options:",
         "  --repo <selector>               Repository: active, id, exact path, or saved name.",
         "  --name <name>                   Name for the new Pane.",
-        "  --agent <codex|claude|cursor|pi>  Built-in agent to launch.",
+        "  --agent <codex|claude|cursor|opencode|pi>   Built-in agent to launch.",
         "  --tool-command <command>        Custom terminal command instead of a built-in agent.",
         "  --prompt <task>                 The task to send once the agent is ready.",
         "  --base-branch <branch>          Branch to start the worktree from.",
@@ -4062,33 +4307,49 @@
       ],
       "notify": [
         "Usage:",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
+        "  runpane notify --update <id|Q-n> --asked <text> --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
         "",
         "Asks the person a question, or tells them something, on screen wherever they are, and",
         "prints their answer. The call waits until they answer; --ui info returns at once.",
         "Inside a Pane terminal the question names its Pane from PANE_SESSION_ID and PANE_PANEL_ID.",
         "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
+        "A typed reply comes back as a reply result (or a `reply:` line in your tab): it may answer",
+        "the question or ask one. Say which with --took; for a question, find out, then --update.",
         "",
         "Options:",
         "  --ui <ui>                      options, approve, ask, or info",
-        "  --title <text>                 The question or update in one line",
-        "  --context <text>               Background shown under Details",
+        "  --title <text>                 The question or update in one line, about 80 characters",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
+        "  --questions <json>             options, instead of --choices: 2 to 4 of [{\"title\":\"...\",\"choices\":[...]}], one pick each",
         "  --detail <text>                approve: the command or SQL to approve",
         "  --detail-label <text>          approve: label of the disclosure for --detail (default Show details)",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --action <json>                info: one button, such as {\"label\":\"Open PR\",\"url\":\"https://...\"}",
-        "  --links <json>                 Any ui: up to 6 related files or pages, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
+        "  --links <json>                 Any ui: up to 6 related files, pages or approvals, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
+        "                                 or [{\"label\":\"Q-19\",\"approval\":\"Q-19\"}]",
         "  --relays <item>                Session orchestrator: improve this worker's waiting card (an id from runpane inbox)",
         "                                 instead of posting a second one; the call waits on it, and the answer goes to the worker's tab",
         "  --about-session <id|name>      Autopilot's own item: the Session it is about",
+        "  --took <id|Q-n> <answer|question>",
+        "                                 Say how you took the person's reply: answer records it as the answer;",
+        "                                 question shows that you are getting more context",
+        "  --status <text>                With --took question: what you are doing (default Getting more context…)",
+        "  --update <id|Q-n>              Save a new version of the approval after the person's question, and wait on it;",
+        "                                 pass only what changed, and mark a reworded choice with \"was\" (its old label)",
+        "  --asked <text>                 With --update: the person's question, as they typed it",
+        "  --what-changed <text>          With --update: one line per change",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "",
-        "Example:",
-        "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'"
+        "Examples:",
+        "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'",
+        "  runpane notify --took Q-20 answer",
+        "  runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: it can be undone from Settings\" --context \"...\""
       ],
       "panels resume": [
         "Usage:",
@@ -4134,6 +4395,32 @@
         "  --limit <count>                Maximum characters to return; defaults to 20000 (the end is kept)",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
+      ],
+      "panels conversation": [
+        "Usage:",
+        "  runpane panels conversation --conversation <id> [--source startup|resume|clear|compact] [--panel <panel-id>] [--pane <pane-id>] [--json] [--pane-dir <path>]",
+        "  runpane panels conversation --hook [--pane-dir <path>]",
+        "",
+        "Records which conversation a terminal panel's agent is on. Switch to chat, and every restart",
+        "of the panel, open the conversation recorded since its agent started. Inside a Pane terminal",
+        "the panel comes from PANE_SESSION_ID and PANE_PANEL_ID.",
+        "",
+        "--hook is for a Claude Code SessionStart command hook: it reads the hook's JSON from stdin",
+        "(session_id, source; at most 64 KiB, for at most 2 seconds) and reports it for PANE_PANEL_ID.",
+        "It prints nothing and always exits 0, so it never shows in Claude's context or blocks Claude:",
+        "outside Pane, with bad input, when Pane is not running, or with an older Pane.",
+        "",
+        "Options:",
+        "  --conversation <id>            Conversation (agent session) id",
+        "  --source <source>              What started it: startup, resume, clear, or compact",
+        "  --hook                         Read a SessionStart hook's JSON from stdin, silently",
+        "  --panel <panel-id>             Panel id when not running inside a Pane terminal",
+        "  --pane <pane-id>               Pane id, with --panel",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Example:",
+        "  runpane panels conversation --conversation 0b6c5f0e-8d1a-4f43-9a51-2f7d0c1e9b44 --source resume"
       ],
       "lock": [
         "Usage:",
@@ -4396,7 +4683,7 @@
       "handoff": [
         "Usage:",
         "  runpane handoff --template",
-        "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]",
+        "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]",
         "",
         "Hand your task to another agent. You write the note (runpane handoff --template); the CLI checks it,",
         "makes sure your branch is pushed, sends the note to the destination, and starts the agent there.",
@@ -4412,7 +4699,7 @@
         "  --template                      Print the note template, with this checkout's (or Session's) origin and git state filled in.",
         "  --note-file <path|->            The note to check and send; every template section must be filled in.",
         "  --machine <name>                Destination machine (Tailscale name or unique prefix); overrides the text.",
-        "  --agent <codex|claude|cursor|pi>  Receiving agent; overrides the text.",
+        "  --agent <codex|claude|cursor|opencode|pi>   Receiving agent; overrides the text.",
         "  --model <model>                 Model for the receiving agent; overrides the text.",
         "  --effort <level>                minimal, low, medium, high, xhigh, or max; supported for Claude and Codex only; overrides the text. Cursor effort is rejected.",
         "  --repo <selector>               Saved repository on the destination; defaults to the one with the same remote.",
@@ -4604,7 +4891,7 @@
         "Options:",
         "  --ui <ui>                      options, approve, or ask",
         "  --title <text>                 The question in one line",
-        "  --context <text>               Background shown under Details",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --links <json>                 Up to 6 related files or pages, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
@@ -4704,7 +4991,7 @@
         "  runpane daemon repair [--pane-dir <path>] [--yes] [--json]",
         "  runpane agent-context [--json]",
         "  runpane mcp [--toolsets <name,...>] [--read-only]",
-        "  runpane agents doctor --agent <codex|claude|cursor|pi> [--repo <selector>] [--json]",
+        "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
         "  runpane repos get [--repo <selector>] [--json]",
@@ -4720,11 +5007,11 @@
         "  runpane workspace state [--repo <selector>] [--json]",
         "  runpane watch --follow",
         "  runpane watch --until-event",
-        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|pi> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
+        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base-branch <branch>] [--source user|agent] [--focus|--no-focus] [--wait-ready]",
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes",
         "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes",
         "  runpane panes pause|resume --pane <pane-id> --yes [--json]",
-        "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor|pi> [--source user|agent] [--focus|--no-focus] --yes",
+        "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] --yes",
         "  runpane panels list --pane <pane-id> [--json]",
         "  runpane panels output --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panels screen --panel <panel-id> [--limit <count>] [--json]",
@@ -4735,6 +5022,7 @@
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels conversation (--conversation <id> [--source startup|resume|clear|compact]|--hook) [--json]",
         "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
@@ -4746,11 +5034,11 @@
         "  runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]",
         "  runpane docs search --query <text> [--limit <count>] [--json]",
         "  runpane docs read --doc <path> [--json]",
-        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
+        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
         "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--json]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
         "  runpane autopilot status|waiting|stack [--json]",
@@ -5058,7 +5346,7 @@
         "Commands:",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
-        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|pi> [options]",
+        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [options]",
         "  runpane panes archive --pane <pane-id> [--force] [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
         "  runpane panes archive --session <id|name> --merged [--closed] [--remove-worktree] [--dry-run] --yes [--json]",
         "  runpane panes pin --pane <pane-id> --yes [--dry-run] [--json]",
@@ -5174,8 +5462,8 @@
       ],
       "panes create": [
         "Usage:",
-        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|pi> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
-        "  python -m runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|pi>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
+        "  runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
+        "  python -m runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options]",
         "  runpane panes create --from-json <path|-> [--yes] [--json]",
         "",
         "Creates a Pane in a saved repository and opens a terminal-backed tool tab. 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create one only when the work's branch has no Pane yet; for existing work use `runpane panels create --pane <id>`.",
@@ -5188,7 +5476,7 @@
         "  --worktree-name <name>         Worktree directory name; defaults to --name",
         "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
         "  --base-branch <ref>            Ref to branch from; --base is an alias",
-        "  --agent <codex|claude|cursor|pi>  Built-in terminal template; with --tool-command, the agent it runs",
+        "  --agent <codex|claude|cursor|opencode|pi>  Built-in terminal template; with --tool-command, the agent it runs",
         "  --tool-command <command>       Custom terminal command",
         "  --title <title>                Terminal tab title",
         "  --initial-input <text>         Text sent after the command is ready",
@@ -5222,8 +5510,8 @@
       ],
       "panes adopt": [
         "Usage:",
-        "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|pi> [options]",
-        "  runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|pi>] [options]",
+        "  runpane panes adopt --repo <selector> --path <dir> --name <name> --agent <codex|claude|cursor|opencode|pi> [options]",
+        "  runpane panes adopt --repo <selector> --path <dir> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [options]",
         "",
         "Adopts an existing externally managed git worktree without creating, syncing, or deleting it. Archiving only removes its worktree with `panes archive --remove-worktree`. To start new work on a named branch, use `panes create --base <ref> --branch <name>` instead of `git worktree add` plus adopt.",
         "",
@@ -5312,7 +5600,7 @@
         "  runpane panels <command> [options]",
         "",
         "Commands:",
-        "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|pi> [options]",
+        "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [options]",
         "  runpane panels open (--url <url>|--file <path>) [--split|--tab] --yes [--json]",
         "  runpane panels close --panel <panel-id> [--dry-run] [--force] --yes [--json]",
         "  runpane panels list --pane <pane-id> [--json]",
@@ -5325,6 +5613,7 @@
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
         "  runpane panels pause --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
+        "  runpane panels conversation (--conversation <id> [--source startup|resume|clear|compact]|--hook) [--json]",
         "",
         "Run \"runpane help panels create\" or another command-specific topic for options."
       ],
@@ -5397,12 +5686,12 @@
       ],
       "agents doctor": [
         "Usage:",
-        "  runpane agents doctor --agent <codex|claude|cursor|pi> [--repo <selector>] [--json]",
+        "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
         "",
         "Diagnoses whether Codex or Claude is available in the same repository environment Pane will use.",
         "",
         "Options:",
-        "  --agent <codex|claude|cursor|pi>      Built-in agent command to diagnose",
+        "  --agent <codex|claude|cursor|opencode|pi>         Built-in agent command to diagnose",
         "  --repo <selector>              active, id, exact path, or saved repository name; defaults to active",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
@@ -5472,13 +5761,15 @@
         "Create a terminal-backed tool panel inside an existing Pane session.",
         "",
         "Usage:",
-        "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor|pi> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
-        "  python -m runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|pi>] [--title <title>] [--no-focus] [--wait-ready] --yes [--json]",
+        "  python -m runpane panels create --pane <pane-id> --agent <codex|claude|cursor|opencode|pi> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
+        "  python -m runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--title <title>] [--no-focus] [--wait-ready] --yes [--json]",
+        "  python -m runpane panels create --pane <pane-id> --chat --agent <id> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
         "",
         "Options:",
         "  --pane <pane-id>              Existing Pane session to add the panel to.",
-        "  --agent <codex|claude|cursor|pi> Built-in agent command template, or with --tool-command the agent it runs.",
+        "  --agent <codex|claude|cursor|opencode|pi> Built-in agent command template, or with --tool-command the agent it runs.",
         "  --tool-command <command>      Custom terminal command to launch.",
+        "  --chat                        Open --agent as a chat tab instead of a terminal; the host lists the agents it can run.",
         "  --title <title>               Panel title override.",
         "  --initial-input, --prompt     Initial input to send after the tool starts.",
         "  --initial-input-file <path|-> Read initial input from a file or stdin.",
@@ -5558,7 +5849,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "sessions create": [
@@ -5569,7 +5860,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output.",
         "",
         "JSON isPinned: true pins the Session; omitted or false leaves it unpinned.",
@@ -5583,7 +5874,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "sessions update": [
@@ -5594,20 +5885,20 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output.",
         "",
         "JSON isPinned: true/false sets the Session pin star. Select the Session with --session, not a session field in JSON."
       ],
       "sessions set-agent": [
         "Usage:",
-        "python -m runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]",
+        "python -m runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]",
         "",
         "Options:",
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "sessions associate": [
@@ -5618,7 +5909,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "sessions detach": [
@@ -5629,7 +5920,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "sessions overview": [
@@ -5640,7 +5931,7 @@
         "  --session <id|name>         Named Session id or exact name.",
         "  --from-json <path|->         Read structured JSON from a file or stdin.",
         "  --pane <pane-id>             User-visible Pane to associate or detach.",
-        "  --agent <codex|claude|cursor|pi>  Agent terminal to use.",
+        "  --agent <codex|claude|cursor|opencode|pi>  Agent terminal to use.",
         "  --json                       Print JSON output."
       ],
       "panes git-status": [
@@ -5880,7 +6171,7 @@
       ],
       "agents start": [
         "Usage:",
-        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
+        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
         "",
         "`runpane agents start` ships in the npm package and the Pane app, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest agents start"
@@ -5932,33 +6223,49 @@
       ],
       "notify": [
         "Usage:",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
+        "  runpane notify --update <id|Q-n> --asked <text> --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
         "",
         "Asks the person a question, or tells them something, on screen wherever they are, and",
         "prints their answer. The call waits until they answer; --ui info returns at once.",
         "Inside a Pane terminal the question names its Pane from PANE_SESSION_ID and PANE_PANEL_ID.",
         "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
+        "A typed reply comes back as a reply result (or a `reply:` line in your tab): it may answer",
+        "the question or ask one. Say which with --took; for a question, find out, then --update.",
         "",
         "Options:",
         "  --ui <ui>                      options, approve, ask, or info",
-        "  --title <text>                 The question or update in one line",
-        "  --context <text>               Background shown under Details",
+        "  --title <text>                 The question or update in one line, about 80 characters",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
+        "  --questions <json>             options, instead of --choices: 2 to 4 of [{\"title\":\"...\",\"choices\":[...]}], one pick each",
         "  --detail <text>                approve: the command or SQL to approve",
         "  --detail-label <text>          approve: label of the disclosure for --detail (default Show details)",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --action <json>                info: one button, such as {\"label\":\"Open PR\",\"url\":\"https://...\"}",
-        "  --links <json>                 Any ui: up to 6 related files or pages, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
+        "  --links <json>                 Any ui: up to 6 related files, pages or approvals, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
+        "                                 or [{\"label\":\"Q-19\",\"approval\":\"Q-19\"}]",
         "  --relays <item>                Session orchestrator: improve this worker's waiting card (an id from runpane inbox)",
         "                                 instead of posting a second one; the call waits on it, and the answer goes to the worker's tab",
         "  --about-session <id|name>      Autopilot's own item: the Session it is about",
+        "  --took <id|Q-n> <answer|question>",
+        "                                 Say how you took the person's reply: answer records it as the answer;",
+        "                                 question shows that you are getting more context",
+        "  --status <text>                With --took question: what you are doing (default Getting more context…)",
+        "  --update <id|Q-n>              Save a new version of the approval after the person's question, and wait on it;",
+        "                                 pass only what changed, and mark a reworded choice with \"was\" (its old label)",
+        "  --asked <text>                 With --update: the person's question, as they typed it",
+        "  --what-changed <text>          With --update: one line per change",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "",
-        "Example:",
-        "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'"
+        "Examples:",
+        "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'",
+        "  runpane notify --took Q-20 answer",
+        "  runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: it can be undone from Settings\" --context \"...\""
       ],
       "panels resume": [
         "Usage:",
@@ -6004,6 +6311,32 @@
         "  --limit <count>                Maximum characters to return; defaults to 20000 (the end is kept)",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
+      ],
+      "panels conversation": [
+        "Usage:",
+        "  runpane panels conversation --conversation <id> [--source startup|resume|clear|compact] [--panel <panel-id>] [--pane <pane-id>] [--json] [--pane-dir <path>]",
+        "  runpane panels conversation --hook [--pane-dir <path>]",
+        "",
+        "Records which conversation a terminal panel's agent is on. Switch to chat, and every restart",
+        "of the panel, open the conversation recorded since its agent started. Inside a Pane terminal",
+        "the panel comes from PANE_SESSION_ID and PANE_PANEL_ID.",
+        "",
+        "--hook is for a Claude Code SessionStart command hook: it reads the hook's JSON from stdin",
+        "(session_id, source; at most 64 KiB, for at most 2 seconds) and reports it for PANE_PANEL_ID.",
+        "It prints nothing and always exits 0, so it never shows in Claude's context or blocks Claude:",
+        "outside Pane, with bad input, when Pane is not running, or with an older Pane.",
+        "",
+        "Options:",
+        "  --conversation <id>            Conversation (agent session) id",
+        "  --source <source>              What started it: startup, resume, clear, or compact",
+        "  --hook                         Read a SessionStart hook's JSON from stdin, silently",
+        "  --panel <panel-id>             Panel id when not running inside a Pane terminal",
+        "  --pane <pane-id>               Pane id, with --panel",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Example:",
+        "  runpane panels conversation --conversation 0b6c5f0e-8d1a-4f43-9a51-2f7d0c1e9b44 --source resume"
       ],
       "lock": [
         "Usage:",
@@ -6245,7 +6578,7 @@
       "handoff": [
         "Usage:",
         "  runpane handoff --template",
-        "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]",
+        "  runpane handoff \"<destination>\" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]",
         "",
         "`runpane handoff` ships in the npm package and the Pane app, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest handoff"
@@ -6428,7 +6761,7 @@
         "Options:",
         "  --ui <ui>                      options, approve, or ask",
         "  --title <text>                 The question in one line",
-        "  --context <text>               Background shown under Details",
+        "  --context <text>               Subtitle: why it matters, one or two sentences",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --links <json>                 Up to 6 related files or pages, such as [{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"}]",
@@ -6610,7 +6943,7 @@
       "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
       "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
       "runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
-      "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]",
+      "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]",
       "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
       "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
       "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
@@ -6626,6 +6959,7 @@
       "runpane agents send --pane <pane-id> --text \"Also add a test\" --yes --json",
       "runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json",
       "runpane panels last-message --panel <panel-id> --json",
+      "runpane panels conversation --conversation <id> --source resume --json",
       "runpane panels close --panel <panel-id> --yes --json",
       "runpane panels resume --panel <panel-id> --wait-ready --yes --json",
       "runpane panels resume --session <id|name> --wait-ready --yes --json",
@@ -6696,13 +7030,14 @@
       "`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
       "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
-      "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}` or `{label, url}`), shown as chips on the card. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
+      "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab): the reply may answer the question or ask one. `runpane notify --took <id|Q-n> answer` records it as the answer; `--took <id|Q-n> question [--status <text>]` shows that the agent is getting more context, and `runpane notify --update <id|Q-n> --asked <text> --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
       "Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.",
       "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. A send with --no-expect-report is a reply (an answer, or an addition to the current work): it is delivered while a report is outstanding and leaves that expectation in place. Then watch for the original result.",
       "`runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on), plus `answers`, what its workers were told, kept 7 days; an answer with no `decision` still needs its D-n. `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items, and `runpane inbox ack <item-id>... --decision <D-n>` records the D-n, even on an item already cleared. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.",
       "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`, Agent Farm `agent-farm run <profile> --resume <id>` with the ID Agent Farm printed; the result's `agentSessionId` names it), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`); one whose agent exited back to its shell is stopped, and resume runs its saved command again in that shell (`action: \"resumed\"`). If that command exits at once, `--wait-ready` returns `ok: false` with `reason.code: \"command-exited\"` and the error line it printed. `--panel` also resumes a paused tab. `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope and skips paused ones, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, or once an agent exits back to its shell, stopped panels report `running: false` (`initialized` stays true while the shell lives) in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
       "`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does, without asking, keeps its agent's conversation, and marks it paused. A chat tab can't pause yet: `panels pause --panel` on one fails with `ERR_RUNPANE_CHAT_NOT_PAUSABLE`, and `panes pause` and `sessions pause` leave its agent running and count it in `chatTabsNotPaused`. A paused tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, chatTabsNotPaused, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: \"manual\" | \"auto\", idleHours? }`) and `inactiveSince`, the latest terminal output or input in its tabs or the last time the person selected it; `panels list` reports each tab's `paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.",
       "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
+      "`runpane panels conversation --conversation <id> [--source startup|resume|clear|compact]` records which conversation a terminal panel's agent is on (daemon action `runpane:panels:conversation`, request `{ panelId, paneId?, conversationId, source? }`, result `{ ok: true, paneId, panelId, conversationId, source?, sure }`; `sure` is true when the report came since the panel's agent started). It is not an `agent.report` event. The panel comes from `--panel` (with an optional `--pane`), else `PANE_PANEL_ID` and `PANE_SESSION_ID`, as for `runpane report`. `runpane panels conversation --hook` is the command for a Claude Code `SessionStart` hook: it reads the hook's JSON from stdin (`session_id`, `source`; at most 64 KiB, for at most 2 seconds), reports it for `PANE_PANEL_ID`, prints nothing on stdout or stderr, and always exits 0: outside Pane, on bad input, when Pane is not running, and with a Pane that predates the action. Without `--hook` it prints `Recorded conversation <id> for panel <panel-id>.` and fails like any other command.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
       "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
@@ -7429,6 +7764,32 @@
         "--limit",
         "5000",
         "--json"
+      ],
+      [
+        "panels",
+        "conversation",
+        "--conversation",
+        "0b6c5f0e-8d1a-4f43-9a51-2f7d0c1e9b44",
+        "--source",
+        "resume",
+        "--panel",
+        "panel-1",
+        "--pane",
+        "session-1",
+        "--json"
+      ],
+      [
+        "panels",
+        "conversation",
+        "--conversation=abc",
+        "--source=compact",
+        "--pane-dir",
+        "/tmp/pane"
+      ],
+      [
+        "panels",
+        "conversation",
+        "--hook"
       ],
       [
         "panes",
@@ -8205,6 +8566,40 @@
         "Why",
         "--choices=[{\"label\":\"A\"}]",
         "--links=[{\"label\":\"Notes\",\"url\":\"https://example.com\"}]",
+        "--json"
+      ],
+      [
+        "notify",
+        "--took",
+        "Q-20",
+        "answer",
+        "--json"
+      ],
+      [
+        "notify",
+        "--took=n-1",
+        "question",
+        "--status",
+        "Checking the logs",
+        "--json"
+      ],
+      [
+        "notify",
+        "--took",
+        "Q-20",
+        "--took-as",
+        "answer"
+      ],
+      [
+        "notify",
+        "--update",
+        "Q-20",
+        "--asked",
+        "Can it be undone?",
+        "--what-changed",
+        "- Added: it can be undone",
+        "--questions",
+        "[{\"title\":\"A\",\"choices\":[{\"label\":\"x\"}]},{\"title\":\"B\",\"choices\":[{\"label\":\"y\"}]}]",
         "--json"
       ]
     ],
@@ -9959,10 +10354,8 @@
                             "type": "boolean"
                           },
                           "agentType": {
-                            "enum": [
-                              "codex",
-                              "claude"
-                            ]
+                            "type": "string",
+                            "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
                           },
                           "lastActivity": {
                             "type": "string"
@@ -12198,10 +12591,8 @@
               "type": "boolean"
             },
             "agentType": {
-              "enum": [
-                "codex",
-                "claude"
-              ]
+              "type": "string",
+              "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
             },
             "lastActivity": {
               "type": "string"
@@ -12494,10 +12885,8 @@
               "type": "boolean"
             },
             "agentType": {
-              "enum": [
-                "codex",
-                "claude"
-              ]
+              "type": "string",
+              "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
             },
             "lastActivity": {
               "type": "string"
@@ -12755,10 +13144,8 @@
                   "type": "boolean"
                 },
                 "agentType": {
-                  "enum": [
-                    "codex",
-                    "claude"
-                  ]
+                  "type": "string",
+                  "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
                 },
                 "lastActivity": {
                   "type": "string"
@@ -12975,10 +13362,8 @@
                         "type": "boolean"
                       },
                       "agentType": {
-                        "enum": [
-                          "codex",
-                          "claude"
-                        ]
+                        "type": "string",
+                        "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
                       },
                       "lastActivity": {
                         "type": "string"
@@ -13055,10 +13440,8 @@
               "type": "string"
             },
             "agentType": {
-              "enum": [
-                "claude",
-                "codex"
-              ]
+              "type": "string",
+              "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
             },
             "text": {
               "type": "string"
@@ -13104,6 +13487,80 @@
           "additionalProperties": false
         }
       ]
+    },
+    "panelConversationRequest": {
+      "type": "object",
+      "description": "What runpane panels conversation sends the daemon (runpane:panels:conversation).",
+      "required": [
+        "panelId",
+        "conversationId"
+      ],
+      "properties": {
+        "panelId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "paneId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conversationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source": {
+          "enum": [
+            "startup",
+            "resume",
+            "clear",
+            "compact"
+          ],
+          "description": "What started the conversation, as Claude Code's SessionStart hook names it."
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelConversationResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "paneId",
+        "panelId",
+        "conversationId",
+        "sure"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "conversationId": {
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "startup",
+            "resume",
+            "clear",
+            "compact"
+          ],
+          "description": "What started the conversation, as Claude Code's SessionStart hook names it."
+        },
+        "sure": {
+          "type": "boolean",
+          "description": "True when this report came since the panel's agent started, so Pane knows the panel is on this conversation."
+        },
+        "generation": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
     },
     "agentDoctorResult": {
       "type": "object",
@@ -13340,10 +13797,8 @@
                   "type": "boolean"
                 },
                 "agentType": {
-                  "enum": [
-                    "codex",
-                    "claude"
-                  ]
+                  "type": "string",
+                  "description": "The agent's id: a configured agent, or an ACP Registry agent installed on the host."
                 },
                 "lastActivity": {
                   "type": "string"
@@ -15252,6 +15707,34 @@
         "recommended": {
           "type": "boolean",
           "description": "Shade this choice as the one you recommend."
+        },
+        "was": {
+          "type": "string",
+          "minLength": 1,
+          "description": "--update only: the label this choice had before it was reworded. A choice whose label stays but whose detail changed may repeat its label here."
+        }
+      },
+      "additionalProperties": false
+    },
+    "notifySubQuestion": {
+      "description": "One question of an options approval that asks several at once; the person picks one choice.",
+      "type": "object",
+      "required": [
+        "title",
+        "choices"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 9,
+          "items": {
+            "$ref": "#/jsonSchemas/notifyChoice"
+          }
         }
       },
       "additionalProperties": false
@@ -15275,7 +15758,7 @@
       "additionalProperties": false
     },
     "notifyLink": {
-      "description": "A related file or page shown as a chip on the card: a label and exactly one of path or url.",
+      "description": "A related file, page or approval shown as a chip on the card: a label and exactly one of path, url or approval.",
       "type": "object",
       "required": [
         "label"
@@ -15298,12 +15781,17 @@
           "type": "string",
           "pattern": "^https?://\\S+$",
           "description": "An http or https page."
+        },
+        "approval": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Another approval, by its id or Q-n; it opens in place, with Back."
         }
       },
       "additionalProperties": false
     },
     "notifyRequest": {
-      "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, with relays or aboutSession when they apply, or resume alone. Only `secrets request` sends ui secret.",
+      "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, with relays or aboutSession when they apply; resume alone; took with tookAs (and status); or update with asked, whatChanged and the changed fields. Only `secrets request` sends ui secret.",
       "type": "object",
       "required": [
         "caller"
@@ -15332,6 +15820,15 @@
           "items": {
             "$ref": "#/jsonSchemas/notifyChoice"
           }
+        },
+        "questions": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/jsonSchemas/notifySubQuestion"
+          },
+          "description": "ui options, instead of choices: several questions, one pick each."
         },
         "detail": {
           "type": "string"
@@ -15380,6 +15877,38 @@
           "type": "string",
           "minLength": 1
         },
+        "took": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The approval (id or Q-n) whose reply the reader took; sent with tookAs and nothing but status."
+        },
+        "tookAs": {
+          "enum": [
+            "answer",
+            "question"
+          ],
+          "description": "answer records the reply as the answer; question shows the reader is getting more context."
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "description": "tookAs question: what the reader is doing, shown on the approval."
+        },
+        "update": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The approval (id or Q-n) to save a new version of; the question fields sent replace those fields. No ui."
+        },
+        "asked": {
+          "type": "string",
+          "minLength": 1,
+          "description": "update: the person's question, as they typed it."
+        },
+        "whatChanged": {
+          "type": "string",
+          "minLength": 1,
+          "description": "update: what changed, one line per change."
+        },
         "relays": {
           "type": "string",
           "minLength": 1,
@@ -15425,11 +15954,79 @@
           "properties": {
             "answer": {
               "type": "string",
-              "description": "options: the chosen label. ask: the typed answer."
+              "description": "options: the chosen label (with questions, the picks joined with \" · \"). ask: the typed answer."
             },
             "note": {
               "type": "string",
               "description": "What the person typed with their answer."
+            },
+            "answers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "options with questions: one pick per question, in order."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "The person typed a reply: it may answer the question or ask one. The approval keeps waiting; say which with `runpane notify --took <replyId> answer|question` (see next).",
+          "required": [
+            "reply",
+            "id",
+            "replyId",
+            "next"
+          ],
+          "properties": {
+            "reply": {
+              "type": "string",
+              "description": "What the person typed."
+            },
+            "picks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "What they picked with it, one label per question."
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The approval, for --took and --update."
+            },
+            "replyId": {
+              "type": "string",
+              "minLength": 1,
+              "description": "This call's private id for the reply (not the id other screens show). Pass it to --took and --update: only this call was given it, so it lets its agent continue, also from outside a Pane tab."
+            },
+            "next": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "--took: how the reply was recorded.",
+          "required": [
+            "took",
+            "id"
+          ],
+          "properties": {
+            "took": {
+              "enum": [
+                "answer",
+                "question"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "next": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -16855,7 +17452,7 @@
         "When a command needs a secret (an API key, a token), run it with `runpane secrets exec --project <project> -- <command>`. If the secret is missing, ask the person with `runpane secrets request`; never ask them to paste a secret into the chat, and never print one.",
         "If WSL cannot reach Pane, the user may be running Windows Pane; try `/mnt/c/Users/<you>/.pane/bin/runpane doctor --json`, or with an older Pane build `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'`.",
         "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
-        "Use `runpane agents doctor --agent <codex|claude|cursor|pi> --repo <selector> --json` when agent availability differs across host, Windows, WSL, or repo environments.",
+        "Use `runpane agents doctor --agent <codex|claude|cursor|opencode|pi> --repo <selector> --json` when agent availability differs across host, Windows, WSL, or repo environments.",
         "Use `runpane panes create --wait-ready` to create Panes, wait for each agent's input box, and verify its starting message in one call.",
         "Use `runpane panels screen` for compact current state, including Claude and Codex composer state. Use `panels wait` for create-time readiness or text checks. Use `runpane watch --follow` to block on workspace transitions (READY, BLOCKED, IDLE, STUCK, EXIT) without polling, or `runpane watch --until-event` to exit on the first one. Use `panels submit` to send and submit a new turn. Use `panels submit-composer --strategy auto` only for a composer that was filled separately.",
         "Use `runpane panels input` only when exact bytes are required, such as Ctrl-C or handcrafted terminal input.",
@@ -16887,7 +17484,7 @@
           "name": "agents doctor",
           "summary": "Check whether Codex or Claude is available in the repo environment Pane will use.",
           "arguments": [
-            "--agent <codex|claude|cursor|pi>",
+            "--agent <codex|claude|cursor|opencode|pi>",
             "--repo <selector>",
             "--json"
           ]
@@ -17006,7 +17603,7 @@
           "arguments": [
             "--repo <selector>",
             "--name <name>",
-            "--agent <codex|claude|cursor|pi>",
+            "--agent <codex|claude|cursor|opencode|pi>",
             "--tool-command <command>",
             "--prompt <text>",
             "--initial-input-file <path|->",
@@ -17087,7 +17684,7 @@
           "summary": "Open reviewer, QA, fix or helper agent tabs inside an existing Pane; they share that Pane's worktree. The default for any later agent on existing work.",
           "arguments": [
             "--pane <pane-id>",
-            "--agent <codex|claude|cursor|pi>",
+            "--agent <codex|claude|cursor|opencode|pi>",
             "--tool-command <command>",
             "--source <user|agent>",
             "--no-focus",
@@ -18221,7 +18818,7 @@
           },
           {
             "name": "--agent",
-            "value": "<codex|claude|cursor|pi>",
+            "value": "<codex|claude|cursor|opencode|pi>",
             "required": false,
             "description": "Built-in agent terminal template to open. With --tool-command, the agent that command runs."
           },
@@ -18433,7 +19030,7 @@
           },
           {
             "name": "--agent",
-            "value": "<codex|claude|cursor|pi>",
+            "value": "<codex|claude|cursor|opencode|pi>",
             "required": false,
             "description": "Agent whose terminal to create; with --tool-command, the agent that command runs."
           },
@@ -19079,7 +19676,7 @@
         "arguments": [
           {
             "name": "--agent",
-            "value": "<codex|claude|cursor|pi>",
+            "value": "<codex|claude|cursor|opencode|pi>",
             "required": true,
             "description": "Built-in agent command to diagnose."
           },
@@ -19535,6 +20132,61 @@
           "A worker that ran `runpane report` already handed back its state, PR, head, and summary; read those with `agents status` before reading the whole reply."
         ]
       },
+      "panels conversation": {
+        "name": "panels conversation",
+        "summary": "Record which conversation a terminal panel's agent is on, so Switch to chat and restarts open that one. A Claude Code SessionStart hook runs it with --hook.",
+        "details": "Pane calls this for you: the Claude Code SessionStart hook that Agent Farm and Pane's plain claude tabs install runs `runpane panels conversation --hook` on start, /resume, /clear and compact. Run it yourself only to tell Pane a panel is on a conversation it could not learn from the hook.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--conversation",
+            "value": "<id>",
+            "required": false,
+            "description": "Conversation (agent session) id the panel is on."
+          },
+          {
+            "name": "--source",
+            "value": "<startup|resume|clear|compact>",
+            "required": false,
+            "description": "What started the conversation."
+          },
+          {
+            "name": "--panel",
+            "value": "<panel-id>",
+            "required": false,
+            "description": "Panel id; defaults to PANE_PANEL_ID inside a Pane terminal."
+          },
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": false,
+            "description": "Pane id, with --panel; defaults to PANE_SESSION_ID."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panels conversation --conversation <id> --source resume --json"
+        ],
+        "jsonSchemas": [
+          "panelConversationRequest",
+          "panelConversationResult"
+        ],
+        "notes": [
+          "`sure` in the result is true when the report came since the panel's agent started; a Switch to chat or restart opens a sure conversation, and otherwise opens the folder's most recent one.",
+          "`--hook` reads the hook's stdin, prints nothing and always exits 0; it is not offered over MCP."
+        ]
+      },
       "panels create": {
         "name": "panels create",
         "summary": "Open a new agent tab (reviewer, auditor, QA, fix or helper) inside an existing Pane, sharing its worktree. 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane: use this, not panes create, for any later agent on existing work.",
@@ -19550,7 +20202,7 @@
           },
           {
             "name": "--agent",
-            "value": "<codex|claude|cursor|pi>",
+            "value": "<codex|claude|cursor|opencode|pi>",
             "required": false,
             "description": "Built-in agent command template to launch. With --tool-command, the agent that command runs."
           },
@@ -19563,7 +20215,7 @@
           {
             "name": "--chat",
             "required": false,
-            "description": "Open --agent claude or codex as a chat tab (ACP, no terminal) instead of a terminal tab. Needs chat tabs on in Settings > Advanced."
+            "description": "Open --agent as a chat tab (ACP, no terminal) instead of a terminal tab. --agent then takes any agent id; if the host cannot run it, the error lists the agents it can. Needs chat tabs on in Settings > AI & Agents."
           },
           {
             "name": "--agent-farm",
@@ -20906,7 +21558,7 @@
           },
           {
             "name": "--agent",
-            "value": "<codex|claude|cursor|pi>",
+            "value": "<codex|claude|cursor|opencode|pi>",
             "required": false,
             "description": "Built-in agent to launch."
           },
@@ -21274,7 +21926,7 @@
           }
         ],
         "examples": [
-          "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]"
+          "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode|pi> [--json] [--pane-dir <path>]"
         ],
         "jsonSchemas": [
           "sessionResult"
@@ -21732,7 +22384,7 @@
           },
           {
             "name": "--agent",
-            "value": "<codex|claude|cursor|pi>",
+            "value": "<codex|claude|cursor|opencode|pi>",
             "required": false,
             "description": "Receiving agent; overrides the text."
           },
@@ -22544,7 +23196,7 @@
             "name": "--ui",
             "value": "<options|approve|ask|info>",
             "required": false,
-            "description": "options: pick one of choices. approve: Approve or Deny. ask: a typed answer. info: an update that returns at once. Required unless resume.",
+            "description": "options: pick one of choices. approve: Approve or Deny. ask: a typed answer. info: an update that returns at once. Required unless resume, took or update.",
             "schema": {
               "type": "string",
               "enum": [
@@ -22559,19 +23211,19 @@
             "name": "--title",
             "value": "<text>",
             "required": false,
-            "description": "The question or update in one line; long titles wrap to 3 lines. Required unless resume."
+            "description": "The question or update in one line, about 80 characters; long titles wrap to 3 lines. Required unless resume, took or update."
           },
           {
             "name": "--context",
             "value": "<text>",
             "required": false,
-            "description": "Background the person can open under Details."
+            "description": "The card's subtitle: one or two sentences on why it matters, up to 240 characters."
           },
           {
             "name": "--choices",
             "value": "<json>",
             "required": false,
-            "description": "ui options only, and required there: 1 to 9 choices. The answer is the chosen label. Mark at most the one you recommend.",
+            "description": "ui options only, and required there unless questions: 1 to 9 choices. The answer is the chosen label. Say what each does in detail, and mark the one you recommend. With update, a reworded choice adds was, its old label.",
             "schema": {
               "type": "array",
               "minItems": 1,
@@ -22623,7 +23275,7 @@
             "name": "--links",
             "value": "<json>",
             "required": false,
-            "description": "Any ui: up to 6 related files or pages, shown as chips on the card. A file is {label, path}, on this machine; a relative path resolves against the working directory. A page is {label, url}, http or https.",
+            "description": "Any ui: up to 6 related files, pages or approvals, shown as chips on the card. A file is {label, path}, on this machine; a relative path resolves against the working directory. A page is {label, url}, http or https. Another approval is {label, approval}, its id or Q-n.",
             "schema": {
               "type": "array",
               "maxItems": 6,
@@ -22643,6 +23295,63 @@
             "value": "<id|name>",
             "required": false,
             "description": "Autopilot's own item: the Session it is about, shown as its connected Session. Without it, the item links to Autopilot's chat."
+          },
+          {
+            "name": "--questions",
+            "value": "<json>",
+            "required": false,
+            "description": "ui options only, instead of choices: 2 to 4 questions asked at once, each with 1 to 9 choices and one pick. The result's answers holds one label per question; answer joins them with \" · \".",
+            "schema": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 4,
+              "items": {
+                "$ref": "#/jsonSchemas/notifySubQuestion"
+              }
+            }
+          },
+          {
+            "name": "--took",
+            "value": "<id|Q-n>",
+            "required": false,
+            "description": "After a reply result or a `reply:` line: the approval's id or Q-n, with tookAs answer (record the reply as the answer) or question (it asked something; find out, then call update). Pass no question fields."
+          },
+          {
+            "name": "--took-as",
+            "value": "<answer|question>",
+            "required": false,
+            "description": "With took: answer or question. On the command line it can follow the id instead (`--took Q-20 answer`).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "answer",
+                "question"
+              ]
+            }
+          },
+          {
+            "name": "--status",
+            "value": "<text>",
+            "required": false,
+            "description": "With took question: what you are doing about it, shown on the approval. Defaults to \"Getting more context…\"."
+          },
+          {
+            "name": "--update",
+            "value": "<id|Q-n>",
+            "required": false,
+            "description": "After you took a reply as a question and found out: the approval's id or Q-n. Saves a new version with any of title, context, choices, questions and links you pass (the rest stay), shows it as updated, and waits on it like any notify call. Needs asked and whatChanged; takes no ui."
+          },
+          {
+            "name": "--asked",
+            "value": "<text>",
+            "required": false,
+            "description": "With update: the person's question, as they typed it."
+          },
+          {
+            "name": "--what-changed",
+            "value": "<text>",
+            "required": false,
+            "description": "With update: what changed, one line per change."
           },
           {
             "name": "--resume",
@@ -22669,6 +23378,10 @@
           "runpane notify --ui info --title \"PR #812 is ready for review\" --action '{\"label\":\"Open PR\",\"url\":\"https://github.com/org/repo/pull/812\"}' --json",
           "runpane notify --ui approve --title \"Ship the release notes?\" --links '[{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"},{\"label\":\"PR #812\",\"url\":\"https://github.com/org/repo/pull/812\"}]' --json",
           "runpane notify --relays in-1a2b3c4d --ui options --title \"Q-39: Run the script?\" --choices '[{\"label\":\"Run it\",\"recommended\":true},{\"label\":\"Hold\"}]' --json",
+          "runpane notify --ui options --title \"Ship 2.5 today: which parts go out?\" --questions '[{\"title\":\"Release notes\",\"choices\":[{\"label\":\"Ship as written\",\"recommended\":true},{\"label\":\"Hold\"}]},{\"title\":\"Intel Mac build\",\"choices\":[{\"label\":\"Include it\"},{\"label\":\"Skip it\"}]}]' --json",
+          "runpane notify --took Q-20 answer --json",
+          "runpane notify --took Q-20 question --status \"Checking whether it can be undone\" --json",
+          "runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: Settings > Search turns it off again\" --context \"Search takes 4 s; the index brings it under 100 ms. It can be undone from Settings.\" --json",
           "runpane notify --resume n-4f2a --json"
         ],
         "jsonSchemas": [
@@ -22677,13 +23390,15 @@
         ],
         "notes": [
           "Write the card the way the pane MCP server's instructions say: in plain words, what the work is for, what just happened, and what you need.",
-          "Results: options returns {answer: <chosen label>, note?}; approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
+          "Results: options returns {answer: <chosen label>, note?}, with questions also answers (one label per question); approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
+          "A result of {reply, picks?, id, replyId, next} means the person typed a reply instead of only picking: it may answer the question or ask one. Read it, then call `runpane notify --took <replyId> answer` to record it as the answer, or `runpane notify --took <replyId> question` and find out, then `runpane notify --update <replyId> --asked \"<their question>\" --what-changed \"<one line per change>\"` with whatever changed, instead of asking again. With no open call the reply reaches your tab as a `reply:` line; `correction:` lines fix how it was taken. --took returns {took, id, next?}. Use its replyId rather than the Q-n: only this call was given it, so it works from outside a Pane tab too.",
+          "Only the reply's reader may run took and update: the asker, the orchestrator that relayed it, or Autopilot. Anyone else gets ERR_NOTIFY_NOT_READER.",
           "A result of {waiting: true, id} means the question is still on screen and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting. After 15 minutes on this loop Pane gives up and returns unavailable.",
           "A result of {unavailable, next} means nobody can answer through Pane right now (Pane is not running, Notify is off, or the wait ended): ask in the terminal instead. It is a result, not an error.",
           "Inside a Pane terminal the question names its Pane and panel (PANE_SESSION_ID and PANE_PANEL_ID); elsewhere it names the working directory.",
           "An older Pane ignores links and shows the card without them.",
           "With relays the call waits on the worker's card as on any notify, and the answer also goes straight to the worker's tab as `answer: Q-n → <answer> (by you)`. Then record it: `runpane inbox ack <item> --decision <D-n>`.",
-          "Invalid input, such as choices with ui ask or 10 choices, fails with a message naming the field, and nothing is shown."
+          "Invalid input, such as choices with ui ask, 10 choices, or ui with took or update, fails with a message naming the field, and nothing is shown."
         ]
       },
       "autopilot status": {
@@ -23004,7 +23719,7 @@
             "name": "--context",
             "value": "<text>",
             "required": false,
-            "description": "Background the person can open under Details."
+            "description": "The card's subtitle: one or two sentences on why it matters, up to 240 characters."
           },
           {
             "name": "--choices",
@@ -23078,7 +23793,7 @@
       "",
       "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.",
       "",
-      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question \"<question>\"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
+      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question \"<question>\"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",
@@ -23086,11 +23801,13 @@
     ],
     "notifyGuidance": {
       "rules": [
+        "Which card: Claude's own card (AskUserQuestion) only when you are answering the person's latest message in the chat they are typing in, the answer only steers this turn, and the question needs no context, links or Summary. Everything else is an approval card (`notify`, or `runpane report` for a worker): a worker's question in a Session, a question a Session orchestrator relays, and anything that waits, blocks other work, is recorded as a decision or approves an ask-first action. Unsure? Use an approval card. Codex and other agents without a built-in card always do.",
         "In a Session, only its orchestrator asks the person. A worker in a Session (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator or a parent status file) doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"`, and the answer reaches its tab as `answer: Q-n → <answer> (by you)`; `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)` lines are the person's word too. A Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` is set) posts each item that waits on the person once, as a background `runpane notify ... --json`, as its pane-orchestration guide says. Any other agent calls `notify`.",
         "Ask only what you can't find out yourself.",
         "Put related questions in one card.",
         "Send `info` rarely, only for what the person must know now.",
-        "Keep titles short and choices to a few words.",
+        "Write the card as its Summary: a title of about 80 to 100 characters on one line; context as a subtitle of one or two sentences saying why it matters; 2 to 4 choices, each saying what it does, with exactly one recommended; links to every file, page or approval it mentions. Pane refuses a title over 160 characters or with a line break, and two recommended choices.",
+        "A `reply:` line (or a `{reply, replyId}` result) is the person's typed reply: an answer or a question. If it answers, run `runpane notify --took <id|Q-n> answer`. If it asks, run `--took <id|Q-n> question`, find out, then `runpane notify --update <id|Q-n> --asked \"<their question>\" --what-changed \"<one line per change>\"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` (a reworded choice adds `\"was\"`, its old label) instead of asking again. A `correction:` line fixes how it was taken. From a `{reply, replyId}` result, pass its replyId to --took and --update.",
         "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`."
       ],
       "cardRule": "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",

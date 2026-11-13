@@ -42,7 +42,7 @@ export function PromoteChatButton({ panel, paneName, initiallyOpen = false, onCl
     <Modal isOpen={open} onClose={() => { if (!busy) close(); }} ariaLabel="Move chat to Session">
       <ModalHeader title="Move chat to Session" />
       <ModalBody>
-        <p className="mb-4 text-sm text-text-secondary">Resume this conversation in a Session with its own terminal and files. Your worktree becomes a child; its files and changes stay where they are. Wait for the agent to finish first. Currently supports saved Claude and Codex chats.</p>
+        <p className="mb-4 text-sm text-text-secondary">Resume this conversation in a Session with its own terminal and files. Your worktree becomes a child; its files and changes stay where they are. Wait for the agent to finish first. Works with agents whose saved chats Pane can resume.</p>
         <Input label="Session name" value={name} onChange={event => setName(event.target.value)} disabled={busy} fullWidth />
         {error && <p role="alert" className="mt-3 text-sm text-status-error">{error}</p>}
       </ModalBody>

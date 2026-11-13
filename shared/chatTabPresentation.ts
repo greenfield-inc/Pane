@@ -22,6 +22,8 @@ export interface ChatStep {
   /** The diff shown on demand ("View diff"), never by default. */
   diff?: { path: string; oldText: string | null; newText: string };
   command?: string;
+  /** `pane`: Pane approved this step with "allow once" because the tab has full access. */
+  approvedBy?: 'pane';
   /** Command output or tool result as text, for the step's own row. */
   output?: string;
   input?: JsonValue;
@@ -139,6 +141,7 @@ function cachedStep(part: ToolPart): ChatStep {
 function toStep(part: ToolPart): ChatStep {
   const kind = stepKind(part.kind);
   const step: ChatStep = { id: part.id, kind, title: part.title, status: part.status };
+  if (part.approvedBy) step.approvedBy = part.approvedBy;
   const input = decodeOptionalBoundary(part.input, commandInput);
   const location = decodeOptionalBoundary(part.locations, locationList)?.[0]?.path;
   for (const entry of part.content ?? []) {
@@ -359,14 +362,22 @@ export interface ChatWorkerLine {
   attachedAt?: string;
   /** When its report last changed. */
   reportedAt?: string;
+  /** Its tabs whose agent is working now, whatever the Pane's report says (D-276). */
+  working?: WorkingTab[];
 }
+
+/** A tab whose agent is working; the panel id is missing only when the overview did not name it. */
+export interface WorkingTab { panelId?: string; title: string }
+
+/** One agent working now (D-276): a Pane's tab, so a Pane with two working tabs is two agents. */
+export interface WorkingAgent extends WorkingTab { paneId: string; name: string }
 
 export interface WorkerPaneInput {
   paneId: string;
   name: string;
   missing: boolean;
   archived: boolean;
-  panels: Array<{ state: string; missing?: boolean }>;
+  panels: Array<{ state: string; missing?: boolean; panelId?: string; title?: string }>;
   report?: { state: string; pr?: number; summary?: string; question?: string; reportedAt?: string };
   git?: { prNumber?: number };
 }
@@ -391,8 +402,17 @@ export function workerLines(panes: readonly WorkerPaneInput[], attachedAt: Reado
     const at = attachedAt.get(pane.paneId);
     if (at) line.attachedAt = at;
     if (report?.reportedAt) line.reportedAt = report.reportedAt;
+    // Every working tab counts, even beside a blocked sibling or after the Pane reported (review F-1 on #1281).
+    const working = pane.missing ? [] : pane.panels.filter(panel => panel.state === 'working' && !panel.missing)
+      .map(panel => panel.panelId ? { panelId: panel.panelId, title: panel.title ?? '' } : { title: panel.title ?? '' });
+    if (working.length) line.working = working;
     return line;
   });
+}
+
+/** The agents actively working (D-276): one per working tab, never a waiting, idle or finished one. */
+export function workingAgents(workers: readonly ChatWorkerLine[] | undefined): WorkingAgent[] {
+  return (workers ?? []).flatMap(worker => (worker.working ?? []).map(tab => ({ paneId: worker.paneId, name: worker.name, ...tab })));
 }
 
 /** When something happened, short for the chat and full for a tooltip (D-202). */
@@ -443,19 +463,22 @@ function turnFooter(turn: ChatTurn, hasActivity: boolean, now?: Date, locale?: s
 export interface WorkerNote { worker: ChatWorkerLine; text: string }
 
 /**
- * Which workers the Session chat mentions (D-201): one blocked or waiting on the person,
- * or one that finished or reported in the latest turn. Idle, running and unchanged
- * workers stay out of the chat; the sidebar lists every Pane.
+ * Which workers the Session chat mentions (D-201, narrowed by D-223): one that finished or
+ * failed while the latest turn ran, once that turn has ended, so the line belongs to the turn
+ * that reported it. A worker's question reaches the person as an approval the orchestrator
+ * relays (D-220), never as a line here; idle, running and unchanged workers stay out too.
  */
 export function workerNotes(turns: readonly ChatTurn[], workers: readonly ChatWorkerLine[]): WorkerNote[] {
   const latest = turns.at(-1);
-  // A running turn has no start time yet; it began after the turn before it ended.
-  const since = Date.parse(latest?.startedAt ?? turns.at(-2)?.endedAt ?? '');
-  const changed = (at?: string) => !!at && !Number.isNaN(since) && Date.parse(at) >= since;
+  if (!latest || latest.running) return [];
+  const since = Date.parse(latest.startedAt ?? turns.at(-2)?.endedAt ?? '');
+  const until = Date.parse(latest.endedAt ?? '');
+  const during = (at?: string) => {
+    const time = Date.parse(at ?? '');
+    return !Number.isNaN(time) && !Number.isNaN(since) && time >= since && (Number.isNaN(until) || time <= until);
+  };
   return workers.flatMap(worker => {
-    if (worker.state === 'waiting') return [{ worker, text: `${worker.name} is asking you` }];
-    if (!changed(worker.reportedAt)) return [];
-    const verb = worker.state === 'done' ? 'finished' : worker.state === 'failed' ? 'failed' : 'reported';
-    return [{ worker, text: `${worker.name} ${verb}` }];
+    if ((worker.state !== 'done' && worker.state !== 'failed') || !during(worker.reportedAt)) return [];
+    return [{ worker, text: `${worker.name} ${worker.state === 'done' ? 'finished' : 'failed'}` }];
   });
 }

@@ -2,6 +2,8 @@ import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './C
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { SessionApprovalsCount } from './approvals/ApprovalsCount';
+import { SessionApprovalsCountButton } from './approvals/SessionApprovals';
+import { openApprovalsFromCount } from './approvals/useSessionApprovals';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import {
@@ -24,6 +26,8 @@ import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../
 import { dropOrder, stepOrder, type SessionDropTarget } from '../utils/sessionReorder';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { MoveSessionToHostDialog } from './MoveSessionToHostDialog';
+import { SessionSwitchMenuItem, SessionSwitchToChatDialog, useSessionSwitchPreview } from './SessionSwitchToChat';
+import type { SessionChatSwitchPreview } from '../../../shared/types/chatTab';
 import { archiveOrchestrationSession, clearArchivedToast, restoreArchivedPanes, setArchivedToast, setOrchestrationSessionPinned, useArchivedSessionToastStore } from './orchestrationSessionActions';
 import { useMoveToHostBlockedReason } from '../hooks/useMoveToHostBlockedReason';
 import { PausedGlyph } from './ui/AgentStatusDot';
@@ -385,7 +389,7 @@ export function OrchestrationSessionNav({
   }, [archivedToast, openSession, refresh, update]);
 
   const moveDialogElement = (
-    <MoveSessionToHostDialog sessionId={movingSessionId} onClose={() => setMovingSessionId(null)} onMoved={sessionId => void openSession(sessionId)} />
+    <MoveSessionToHostDialog target={movingSessionId === null ? null : { kind: 'here', sessionId: movingSessionId }} onClose={() => setMovingSessionId(null)} onMoved={sessionId => void openSession(sessionId)} />
   );
 
   const archivedToastElement = archivedToast && (
@@ -434,12 +438,15 @@ export function OrchestrationSessionNav({
       <button
         type="button"
         data-testid={rowId}
+        data-sidebar-item
+        data-sidebar-key={`session-${placement}-${session.id}`}
+        aria-current={isOpen ? 'page' : undefined}
         aria-label={isLegacy ? label : `Open Session ${session.name}`}
         // Dragging a row tiles the Session beside another, the same gesture
         // as dragging a tab, or reorders it within its own list. Repository
         // rows carry only text/plain, so the drags never answer each other.
         {...drag.source}
-        onClick={() => { resumeChatOnOpen(session); void openSession(session.id); }}
+        onClick={event => { openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
         onContextMenu={event => handleSessionContextMenu(event, session)}
         onKeyDown={event => handleSessionKeyDown(event, session, placement)}
         className="flex min-w-0 flex-1 items-center gap-2 rounded pl-2 pr-2 py-1 text-left focus:outline-none"
@@ -453,7 +460,7 @@ export function OrchestrationSessionNav({
           <>
             <SessionActivityDot session={session} paneIds={visiblePaneIds} />
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
-            <SessionApprovalsCount sessionId={session.id} otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
+            <SessionApprovalsCount sessionId={session.id} opensApprovals otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
           </>
         )}
       </button>
@@ -468,7 +475,7 @@ export function OrchestrationSessionNav({
             className={cn('pointer-events-none absolute inset-x-3 z-20 h-0.5 rounded-full bg-interactive', drag.indicator === 'before' ? '-top-px' : '-bottom-px')}
           />
         )}
-        <div className={cn(
+        <div data-sidebar-row data-sidebar-selected={isOpen || undefined} className={cn(
           'group/orchestration-row relative mx-2 flex h-7 w-[calc(100%-1rem)] items-center rounded-md text-[13px] transition-colors',
           isOpen ? 'bg-surface-selected text-text-primary' : 'text-text-secondary hover:bg-surface-hover',
         )}>
@@ -488,6 +495,7 @@ export function OrchestrationSessionNav({
               ? 'bg-[linear-gradient(var(--color-surface-selected),var(--color-surface-selected))]'
               : 'group-hover/orchestration-row:bg-[linear-gradient(var(--color-surface-hover),var(--color-surface-hover))]',
           )}>
+            <SessionApprovalsCountButton sessionId={session.id} onOpenSession={() => { resumeChatOnOpen(session); void openSession(session.id); }} />
             <button
               type="button"
               aria-label={`Actions for ${label}`}
@@ -543,7 +551,7 @@ export function OrchestrationSessionNav({
               title={session.name}
               {...drag.source}
               {...drag.target}
-              onClick={() => { resumeChatOnOpen(session); void openSession(session.id); }}
+              onClick={event => { openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
               onContextMenu={event => handleSessionContextMenu(event, session)}
               onKeyDown={event => handleSessionKeyDown(event, session, 'rail')}
               className={cn(
@@ -607,6 +615,7 @@ export function OrchestrationSessionNav({
           <div data-testid="orchestration-pinned-section-header" className="group/section flex items-center justify-between gap-2 pl-4 pr-3 py-1">
             <button
               type="button"
+              data-sidebar-item
               aria-expanded={isPinnedSectionExpanded}
               aria-controls="orchestration-pinned-list"
               onClick={() => setPinnedSectionExpanded(!isPinnedSectionExpanded)}
@@ -634,6 +643,7 @@ export function OrchestrationSessionNav({
         <div data-testid="sessions-section-header" className="pane-sidebar-sessions-header group/section sticky top-0 bottom-8 z-30 mt-3 flex h-8 shrink-0 items-center justify-between gap-2 bg-surface-secondary pl-4 pr-3 py-1">
           <button
             type="button"
+            data-sidebar-item
             aria-expanded={sectionExpanded}
             aria-controls="orchestration-sessions-list"
             onClick={() => setSectionExpanded(!sectionExpanded)}
@@ -707,6 +717,9 @@ export function OrchestrationSessionNav({
   );
 }
 
+/** This sidebar lists the Sessions of the host the window shows. */
+const HERE = { kind: 'here' } as const;
+
 interface SessionContextMenuProps {
   menu: SessionContextMenuState | null;
   onClose: () => void;
@@ -722,6 +735,9 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Always shown: checking, ready, or why nothing in the Session can switch.
+  const switchMenu = useSessionSwitchPreview(HERE, menu?.sessionId ?? null);
+  const [switching, setSwitching] = useState<{ sessionName: string; preview: SessionChatSwitchPreview } | null>(null);
 
   useEffect(() => {
     if (menu?.trigger) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
@@ -777,6 +793,11 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
         }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename Session…</span>
         </PopoverButton>
+        <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => {
+          if (!menu) return;
+          menu.returnFocusTo?.focus();
+          setSwitching({ sessionName: menu.sessionName, preview }); onClose();
+        }} onClose={() => { menu?.returnFocusTo?.focus(); onClose(); }} />
         <PopoverButton
           role="menuitem"
           // Focusable while unavailable, so arrow keys reach it and its reason is announced.
@@ -790,7 +811,7 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
             onMoveToHost();
           }}
         >
-          <span className="flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" />Move to host…</span>
+          <span className="flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" />Move to machine…</span>
         </PopoverButton>
         <PopoverButton role="menuitem" variant="danger" onClick={onArchive}>
           <span className="flex items-center gap-2">
@@ -800,6 +821,7 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
         </PopoverButton>
       </div>
     </TerminalPopover>
+    {switching && <SessionSwitchToChatDialog where={HERE} sessionName={switching.sessionName} preview={switching.preview} onClose={() => setSwitching(null)} />}
     <Modal isOpen={renaming !== null} onClose={() => { if (!busy) setRenaming(null); }} ariaLabel="Rename Session">
       <form onSubmit={event => {
         event.preventDefault();

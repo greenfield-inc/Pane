@@ -38,7 +38,7 @@ export function sessionsUnavailable(error: Error | null): boolean {
 }
 
 /** The get channel's arguments; `chatTabs` tells the host this app can open a chat orchestrator (D-203). */
-export const sessionViewArgs = (sessionId: string) => [{ sessionId }, { chatTabs: true }];
+export const sessionViewArgs = (sessionId: string) => [{ sessionId }, { chatTabs: true, chatAgents: true }];
 
 /** A Session with its workspace Pane and agent chat. Never selects it on the host, so the desktop stays put. */
 export function useSessionView(sessionId: string) {

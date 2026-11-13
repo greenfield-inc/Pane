@@ -48,7 +48,8 @@ const cases = [
     key: 'Shift+ArrowUp', vt: '\x1b[1;2A',
     win32: ['\x1b[16;42;0;1;16;1_', '\x1b[38;72;0;1;272;1_', '\x1b[38;72;0;0;272;1_', '\x1b[16;42;0;0;0;1_'],
   },
-  { key: 'F6', vt: '\x1b[17~', win32: ['\x1b[117;64;0;1;0;1_', '\x1b[117;64;0;0;0;1_'] },
+  // F6 is Pane's Focus Next Region (D-236), so the function-key check uses F5.
+  { key: 'F5', vt: '\x1b[15~', win32: ['\x1b[116;63;0;1;0;1_', '\x1b[116;63;0;0;0;1_'] },
 ];
 
 for (const fullscreen of [false, true]) {
@@ -98,6 +99,10 @@ for (const fullscreen of [false, true]) {
           : (win32 ? records : [vt]);
         expect(await inputMessages(page), key).toEqual(expected);
       }
+      // Pane's navigation keys leave the shell and full-screen programs alike.
+      await page.evaluate(() => window.__terminalInputMessages.length = 0);
+      await page.keyboard.press('F6');
+      expect(await inputMessages(page), 'F6').toEqual([]);
     });
   }
 }

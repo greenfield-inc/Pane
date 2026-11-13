@@ -37,14 +37,18 @@ import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
-import { runNotify, subscribeNotify, useNotifyStore } from './stores/notifyStore';
+import { subscribeNotify, useNotifyStore } from './stores/notifyStore';
 import { subscribeAutopilot } from './stores/autopilotStore';
 import { acceleratorFromKeys } from './components/notify/notifyFormat';
-import { openApprovals } from './components/approvals/approvalsNavigation';
+import { openApprovals, toggleApprovals } from './components/approvals/approvalsNavigation';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
+import { onOpenSettingsRequest } from './utils/openSettings';
 import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { useRegionNavigation } from './hooks/useRegionNavigation';
+import { KeySequenceHint } from './components/KeySequenceHint';
+import { KeymapNotice } from './components/KeymapNotice';
 import { RestartToUpdateToast } from './components/RestartToUpdateToast';
 import { useRestartToUpdateStore, useRestartToUpdateSync } from './stores/restartToUpdateStore';
 import { createVisibilityAwareInterval } from './utils/performanceUtils';
@@ -128,6 +132,7 @@ function App() {
   const activeProjectId = useNavigationStore(s => s.activeProjectId);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
   const sidebarCollapsed = useNavigationStore(s => s.sidebarCollapsed);
+  const sidebarMaximized = useNavigationStore(s => s.maximizedRegion === 'sidebar' && !s.sidebarCollapsed);
   const [titleBarControlsSlot, setTitleBarControlsSlot] = useState<HTMLDivElement | null>(null);
   const setSidebarCollapsed = useNavigationStore(s => s.setSidebarCollapsed);
 
@@ -195,17 +200,24 @@ function App() {
       if (acceleratorFromKeys(event, false) !== snapshot.settings.shortcut) return;
       event.preventDefault();
       event.stopPropagation();
-      runNotify({ type: 'open-round' });
+      // In front, the shortcut goes to Approvals and back (D-251), as main does elsewhere.
+      toggleApprovals();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, []);
+  // Menus deep in the window, such as the + menu's More agents…, open Settings here.
+  useEffect(() => onOpenSettingsRequest(openSettings), [openSettings]);
   useEffect(() => window.electronAPI?.notify?.onNavigate((target) => {
     if (target === 'settings') {
       openSettings({ category: 'notify' });
       return;
     }
     closeSettings();
+    if (target === 'toggle-inbox') {
+      toggleApprovals();
+      return;
+    }
     openApprovals(target === 'inbox' ? undefined : target.approval);
   }), [closeSettings, openSettings]);
 
@@ -258,7 +270,6 @@ function App() {
   useHotkey({
     id: 'open-command-palette',
     label: 'Open Search',
-    keys: 'mod+shift+p',
     category: 'navigation',
     action: () => {
       setSearchOpenCount(count => count + 1);
@@ -269,7 +280,6 @@ function App() {
   useHotkey({
     id: 'toggle-sidebar',
     label: 'Toggle Sidebar',
-    keys: 'mod+b',
     category: 'view',
     action: handleToggleSidebar,
   });
@@ -277,42 +287,25 @@ function App() {
   useHotkey({
     id: 'open-settings',
     label: 'Open Settings',
-    keys: 'mod+,',
     category: 'navigation',
     action: () => openSettings(),
   });
 
-  useHotkey({
-    id: 'focus-sidebar',
-    label: 'Focus Sidebar',
-    keys: 'mod+shift+e',
-    category: 'navigation',
-    action: () => {
-      if (sidebarCollapsed) handleToggleSidebar();
-      // Land on the selected pane (or the first row) so arrow keys work from here.
-      requestAnimationFrame(() => {
-        const shell = document.querySelector<HTMLElement>('.pane-sidebar-shell');
-        const target = shell?.querySelector<HTMLElement>('[aria-current="page"]')
-          ?? shell?.querySelector<HTMLElement>('button, [tabindex="0"]');
-        target?.focus();
-      });
-    },
-  });
+  // ⌘0, ⌘⌥+arrows, F6 and the sidebar's arrow keys (P3).
+  useRegionNavigation();
 
   useHotkey({
     id: 'open-shortcut-settings',
-    label: 'Open Shortcut Settings',
-    keys: 'mod+alt+/',
+    label: 'Open Keyboard Shortcuts',
     category: 'shortcuts',
     action: () => {
-      openSettings({ category: 'shortcuts', setting: 'terminal-shortcuts' });
+      openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' });
     },
   });
 
   useHotkey({
     id: 'new-session',
     label: 'New Pane',
-    keys: 'mod+n',
     category: 'session',
     action: () => {
       if (activeProject) setShowCreateSessionDialog(true);
@@ -324,7 +317,6 @@ function App() {
   useHotkey({
     id: 'new-orchestration-session',
     label: 'New Session',
-    keys: '',
     category: 'navigation',
     action: () => window.dispatchEvent(new Event('open-create-orchestration-session')),
   });
@@ -332,7 +324,6 @@ function App() {
   useHotkey({
     id: 'new-project',
     label: 'New Project',
-    keys: 'mod+shift+n',
     category: 'navigation',
     action: () => setShowAddProjectDialog(true),
   });
@@ -346,6 +337,7 @@ function App() {
   // Load config on app startup
   useEffect(() => {
     fetchConfig();
+    return useConfigStore.getState().subscribeToUpdates();
   }, [fetchConfig]);
 
   // Remember where the user is on the active host, so a host switch can return here.
@@ -992,9 +984,14 @@ function App() {
           />
         )}
         <div className={isSettingsOpen ? 'hidden' : 'contents'}>
+        {/* Maximized (P4), the sidebar spreads over the main area while this
+            placeholder keeps the main area's size, so no terminal refits. */}
+        {sidebarMaximized && <div aria-hidden="true" className="flex-shrink-0" style={{ width: `${sidebarWidth}px` }} />}
         <div
-          className="pane-sidebar-slot pane-reveal flex-shrink-0 overflow-hidden transition-[width] duration-reveal ease-out-strong"
-          style={{ width: sidebarCollapsed ? '48px' : `${sidebarWidth}px` }}
+          className={sidebarMaximized
+            ? 'pane-sidebar-slot absolute inset-y-0 left-0 right-0 z-30 overflow-hidden'
+            : 'pane-sidebar-slot pane-reveal flex-shrink-0 overflow-hidden transition-[width] duration-reveal ease-out-strong'}
+          style={sidebarMaximized ? undefined : { width: sidebarCollapsed ? '48px' : `${sidebarWidth}px` }}
         >
           <Sidebar
             onAboutClick={() => setIsAboutOpen(true)}
@@ -1003,6 +1000,7 @@ function App() {
             onAddMachineClick={() => openSettings({ category: 'remote-access', setting: 'remote-add-code' })}
             onMachinePasswordRequest={(machine) => openSettings({ category: 'remote-access', setting: 'remote-machines', machine })}
             width={sidebarWidth}
+            maximized={sidebarMaximized}
             onResize={startResize}
             collapsed={sidebarCollapsed}
             onToggleCollapse={handleToggleSidebar}
@@ -1018,7 +1016,7 @@ function App() {
           />
         </div>
         {/* The checklist carries its own fix buttons, so it never dims. */}
-        <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck}>
+        <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck} covered={sidebarMaximized}>
           {shownConnectionCheck
             ? <ConnectionChecklist check={shownConnectionCheck} onOpenSettings={openSettings} onUpdatePane={() => void updatePane()} />
             : offlineMachineShown
@@ -1044,6 +1042,8 @@ function App() {
         <FeedbackDialog isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
         <LoopDrawer />
         <RestartToUpdateToast />
+        <KeySequenceHint />
+        <KeymapNotice onOpenKeyboardShortcuts={() => openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' })} />
         <UpdateDialog
           isOpen={isUpdateDialogOpen}
           onClose={() => setIsUpdateDialogOpen(false)}
@@ -1089,10 +1089,15 @@ function App() {
           isOpen={showAddProjectDialog}
           onClose={() => setShowAddProjectDialog(false)}
         />
-        <Help isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+        <Help
+          isOpen={isHelpOpen}
+          onClose={() => setIsHelpOpen(false)}
+          onOpenKeyboardShortcuts={() => { setIsHelpOpen(false); openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' }); }}
+        />
         <Help
           isOpen={isKeyboardShortcutsOpen}
           onClose={() => setIsKeyboardShortcutsOpen(false)}
+          onOpenKeyboardShortcuts={() => { setIsKeyboardShortcutsOpen(false); openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' }); }}
           shortcutsOnly
         />
         <DocsDialog isOpen={isDocsOpen} onClose={() => setIsDocsOpen(false)} />

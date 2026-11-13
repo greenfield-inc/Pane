@@ -11,8 +11,9 @@ import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
 import * as openCodeLaunch from './agents/opencodeLaunch';
+import * as claudePrompts from './claudePrompts';
 
-import { TerminalPanelManager } from './terminalPanelManager';
+import { TerminalPanelManager, relaunchLogDetail } from './terminalPanelManager';
 import { databaseService } from './database';
 import { ShellDetector } from '../utils/shellDetector';
 import * as shellPathUtils from '../utils/shellPath';
@@ -61,6 +62,7 @@ type TerminalUnderTest = {
   agentType?: 'claude' | 'codex' | 'cursor' | 'opencode';
   agentSessionScrapeBuffer: string;
   capturedAgentSessionId?: string;
+  launchId?: string;
   agentProbe?: unknown;
   bracketedPasteMode?: boolean;
   heldInput?: string[];
@@ -160,6 +162,9 @@ function echoStagedWrites(terminal: TerminalUnderTest): void {
     terminal.lastOutputAt = new Date();
   });
 }
+
+// Direct Claude launches get Pane's --settings file (its hooks are tested in claudePrompts); these tests read the rest of the command.
+beforeEach(() => { vi.spyOn(claudePrompts, 'withClaudePromptHooks').mockImplementation((_panelId, command) => command); });
 
 function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnderTest {
   return {
@@ -2819,6 +2824,42 @@ describe('TerminalPanelManager Agent Farm resume', () => {
     disposeFlowControlRecord(terminal.flowControl);
   });
 
+  it('records a SessionStart report for the running launch, and a later launch ID line does not undo it (D-269)', async () => {
+    const manager = testAccess<AgentSessionCaptureAccess & { currentLaunchId(panelId: string): string | undefined; recordConversationReport(panelId: string, id: string, source?: string): Promise<boolean> }>(new TerminalPanelManager());
+    const terminal = createTerminal({ launchId: 'launch-1' });
+    terminal.agentType = 'claude';
+    manager.terminals.set('panel-1', terminal);
+    mockFarmPanel({ initialCommand: FARM, agentType: 'claude', agentSessionId: LAUNCH_ID });
+
+    await expect(manager.recordConversationReport('panel-1', 'after-clear', 'clear')).resolves.toBe(true);
+    const panel = panelManager.getPanel('panel-1');
+    expect(panel?.state.customState).toMatchObject({ agentSessionId: 'after-clear', conversationReport: { id: 'after-clear', source: 'clear', launchId: 'launch-1' } });
+    expect(manager.currentLaunchId('panel-1')).toBe('launch-1');
+
+    // The launch's own ID line, read after the report, is not the conversation any more.
+    manager.captureAgentSessionId(terminal, `PANE_AGENT_SESSION_ID=${LAUNCH_ID}\r\n`);
+    expect(panel?.state.customState).toMatchObject({ agentSessionId: 'after-clear' });
+    expect(terminal.capturedAgentSessionId).toBe('after-clear');
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('gives a direct Claude launch the settings file with the conversation hook, and a wrapped launch none', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const hooks = vi.mocked(claudePrompts.withClaudePromptHooks).mockImplementation((_panelId, command) => `${command} --settings pane.json`);
+    expect(manager.resolveCliLaunchCommand('panel-1', 'claude', { initialCommand: 'claude', agentType: 'claude' }, 'bash').commandToRun).toContain('--settings pane.json');
+    hooks.mockClear();
+    manager.resolveCliLaunchCommand('panel-1', FARM, { initialCommand: FARM, agentType: 'claude', launchMode: 'wrapped' }, 'bash');
+    expect(hooks).not.toHaveBeenCalled();
+  });
+
+  it('records nothing for a tab with no running launch', async () => {
+    const manager = testAccess<{ recordConversationReport(panelId: string, id: string, source?: string): Promise<boolean>; currentLaunchId(panelId: string): string | undefined }>(new TerminalPanelManager());
+    mockFarmPanel({ initialCommand: FARM, agentType: 'claude' });
+    await expect(manager.recordConversationReport('panel-1', 'conv', 'startup')).resolves.toBe(false);
+    expect(manager.currentLaunchId('panel-1')).toBeUndefined();
+    expect(panelManager.updatePanel).not.toHaveBeenCalled();
+  });
+
   it('captures from a declared Claude wrapper panel whose terminal is Codex-detected later', () => {
     const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
     const terminal = createTerminal();
@@ -2929,4 +2970,14 @@ describe.skipIf(process.platform === 'win32')('TerminalPanelManager orphan reapi
     expect(processTree.isProcessAlive(terminal.workerPid)).toBe(false);
     expect(processTree.isProcessAlive(bystander.pid)).toBe(true);
   }, 30_000);
+});
+
+describe('relaunchLogDetail (review F-1)', () => {
+  it('names the conversation and never the launch command, which can carry credentials or a prompt', () => {
+    const state: TerminalPanelState = { initialCommand: 'env ANTHROPIC_API_KEY=sk-secret claude "fix the login bug"', agentSessionId: 'conv-1' };
+    const line = relaunchLogDetail(state);
+    expect(line).toBe('on conversation conv-1');
+    expect(line).not.toContain('sk-secret');
+    expect(relaunchLogDetail({})).toBe('with no saved conversation');
+  });
 });

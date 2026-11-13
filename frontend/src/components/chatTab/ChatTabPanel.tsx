@@ -3,10 +3,10 @@ import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
   useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
 } from '@assistant-ui/react';
-import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
-import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns, waitingToolIds, workerNotes, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import type { ChatTabClient, ChatTabSend } from '../../../../shared/types/chatTab';
+import { chatTurns, messageTime, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -18,11 +18,18 @@ import { ChatPermissionCard } from './ChatPermissionCard';
 import { ChatTurnView, WorkerNoteLine, type ChatTurnActions } from './ChatTurns';
 import { ChatBlocksContext, type ChatRendering } from './chatRendering';
 import { ChatCommandMenu } from './ChatCommandMenu';
-import { matchingCommands } from './chatCommands';
-import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
+import { CLEAR_COMMAND, isClearCommand, isResumeCommand, matchingCommands, withPaneCommands, type ChatMenuCommand } from './chatCommands';
+import { ChatQueue } from './ChatQueue';
+import { ChatSwitchBanner } from './ChatSwitchBanner';
+import { ConversationPicker } from './ConversationPicker';
+import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, riskySetting, usePhoneWidth } from './ChatComposerControls';
+import { ChatStatusBar, type ChatStatusPullRequest } from './ChatStatusBar';
+import { sendNowKeys } from './chatKeys';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
 import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
 import { ChatCopyButton } from './ChatCopyButton';
+import { useChatAgents } from '../../stores/chatAgentsStore';
+import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
@@ -125,7 +132,11 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
   return record;
 }
 
-const AGENT_NAMES = { claude: 'Claude', codex: 'Codex' } as const;
+/** Where a fresh conversation started after /clear: "Cleared · 2:04 PM". */
+function ClearedDivider({ at }: { at: string }) {
+  const time = messageTime(at);
+  return <p className="chat-divider" role="separator" title={time?.full}><span>{time ? `Cleared · ${time.short}` : 'Cleared'}</span></p>;
+}
 
 export interface ChatTabPanelProps {
   panelId: string;
@@ -148,6 +159,18 @@ export interface ChatTabPanelProps {
   stoppedNotice?: ReactNode;
   /** Above the composer, below the conversation: such as Autopilot's answer receipts. */
   dock?: ReactNode;
+  /**
+   * Offers /clear (a fresh conversation in this tab). Off for Autopilot, whose conversation
+   * holds what Start told it; a fresh one would carry on without it.
+   */
+  clearable?: boolean;
+  /** The Pane's pull request, for the status bar. */
+  pr?: ChatStatusPullRequest;
+  /**
+   * The agents working, for the status bar's "N working" (D-276). Defaults to the working tabs
+   * of `workers`; Autopilot passes the workers of every Session it walks.
+   */
+  working?: readonly WorkingAgent[];
 }
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
@@ -157,14 +180,19 @@ const PASTE_LIMIT = 1024 * 1024;
 const NO_ACTIONS: ChatTurnActions = {};
 const NO_RENDERING: ChatRendering = {};
 
-export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
+  const catalog = useChatAgents(client);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
   const [busy, setBusy] = useState(false);
   /** Paged with Earlier or Newer messages: stay put until the reader scrolls back to the live end, even once the window reaches it. */
   const [paged, setPaged] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
+  /** "Continue a past conversation", from /resume or the Switch to chat banner's "Pick another" (D-277). */
+  const [picking, setPicking] = useState(false);
+  const loadConversations = useCallback(() => client.conversations(panelId), [client, panelId]);
+  const resumeConversation = useCallback((sessionId: string) => client.resume(panelId, sessionId), [client, panelId]);
   const messages = useMemo(() => snapshot.transcript?.messages ?? [], [snapshot.transcript?.messages]);
   const followLiveEnd = useRef<(() => void) | undefined>(undefined);
   /** The sent message's transcript ID: when the host's copy of it renders, the chat follows the live end once more. */
@@ -185,6 +213,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
+  const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);
   const [copying, setCopying] = useState(0);
   const canAttachImages = !!view?.canAttachImages;
   const attachments = useMemo(() => {
@@ -197,13 +226,24 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const dragDepth = useRef(0);
   const stopped = view?.status === 'stopped';
   const disabled = !connected || stopped || !view;
-  const agentName = view ? AGENT_NAMES[view.agent] : 'the agent';
-  const commands = matchingCommands(snapshot.draft, view?.commands ?? []);
+  const agentName = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
+  const commands = matchingCommands(snapshot.draft, clearable ? withPaneCommands(view?.commands ?? []) : view?.commands ?? []);
+  /** Cmd/Ctrl+Enter: the message being sent goes ahead of the queue and interrupts the turn (D-211, D-222 item 7). */
+  const sendNowNext = useRef(false);
+  /** /clear while a turn runs asks first. */
+  const [confirmClear, setConfirmClear] = useState(false);
   const activeCommand = commands[Math.min(commandIndex, commands.length - 1)];
   const composerRow = useMemo(() => arrangeComposerControls(view?.controls ?? []), [view?.controls]);
   const settingsLocked = disabled || view?.status !== 'idle';
   const actionsRef = useRef<HTMLDivElement>(null);
   const phone = usePhoneWidth(actionsRef);
+  const footerRef = useRef<HTMLDivElement>(null);
+  /** The bar's "2 queued": brings the queue into view and puts focus on its first row. */
+  const showQueue = () => {
+    const queue = footerRef.current?.querySelector<HTMLElement>('.chat-queue');
+    queue?.scrollIntoView({ block: 'nearest' });
+    queue?.querySelector<HTMLElement>('button')?.focus();
+  };
 
   /** True when the host took the message. */
   const settle = (receipt: AgentChatReceipt): boolean => {
@@ -245,6 +285,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     onNew: async message => {
       const parts = [...message.content, ...(message.attachments ?? []).flatMap(attachment => attachment.content)];
       const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
+      const now = sendNowNext.current;
+      sendNowNext.current = false;
+      // The Send button with "/clear" typed: Pane's own command, never sent to the agent.
+      if (clearable && isClearCommand(text) && !message.attachments?.length) { requestClear(); return; }
+      // Exactly /resume is Pane's: it opens the picker and never reaches the agent.
+      if (isResumeCommand(text) && !message.attachments?.length) { openPicker(); return; }
       const imageParts = parts.flatMap(part => {
         if (part.type !== 'image') return [];
         const match = /^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/s.exec(part.image);
@@ -260,8 +306,11 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       if (viewer.snapshot().hasNewer) await viewer.jumpToLatest();
       requestAnimationFrame(() => followLiveEnd.current?.());
       const operationId = crypto.randomUUID();
+      const request: ChatTabSend = { operationId, text, images: imageParts };
+      // Send now only means something while a turn runs; otherwise it is a plain send.
+      if (now && working) request.now = true;
       followSent.current = `user:${operationId}`;
-      if (!await deliver({ operationId, text, images: imageParts }, true)) return;
+      if (!await deliver(request, true)) return;
       // Typing while an approval waits tells the agent what to do instead (round 2): once the message is in.
       await Promise.all(waitingPermissions.map(permission => {
         const reject = rejectOption(permission);
@@ -320,7 +369,31 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   };
   const configure = (id: string, value: string) => void act(() => client.configure(panelId, id, value));
   const answerPermission = (permission: AgentChatPermission, optionId: string) => void act(() => client.permission(panelId, permission.id, optionId));
-  const pickCommand = (command: ChatTabCommand) => {
+  const clearConversation = () => {
+    setConfirmClear(false);
+    void act(() => client.clear(panelId));
+  };
+  const requestClear = () => {
+    if (disabled) return;
+    // The command is taken: the draft and its command menu go, so they never cover the question below.
+    viewer.setDraft('');
+    runtime.thread.composer.setText('');
+    if (working) setConfirmClear(true);
+    else clearConversation();
+  };
+  const editQueued = async (operationId: string, text: string): Promise<boolean> => {
+    try { await client.editQueued(panelId, operationId, text); viewer.setError(undefined); return true; }
+    catch (error) { viewer.setError(ipcErrorMessage(error, 'Pane did not say why.')); return false; }
+  };
+  function openPicker() {
+    viewer.setDraft('');
+    runtime.thread.composer.setText('');
+    setCommandIndex(0);
+    setPicking(true);
+  }
+  const pickCommand = (command: ChatMenuCommand) => {
+    // Pane's own command runs at once; the agent's is completed in the composer for its arguments.
+    if (command.source === 'pane') { openPicker(); return; }
     const text = `/${command.name} `;
     viewer.setDraft(text);
     runtime.thread.composer.setText(text);
@@ -343,12 +416,18 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         onRestart={() => void act(() => client.restart(panelId))}
         onSignIn={() => void act(() => client.signIn(panelId))}
         onInstall={url => void window.electronAPI?.openExternal(url)} />}
+      {view?.banner && <ChatSwitchBanner banner={view.banner} busy={busy || !connected}
+        onPickAnother={() => setPicking(true)} onDismiss={() => void act(() => client.dismissBanner(panelId))} />}
       {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}
+      {picking && <ConversationPicker load={loadConversations} onResume={resumeConversation} onClose={() => setPicking(false)} />}
       {!!attachProblems.length && <div role="alert" className="chat-alert chat-attach-alert">
         <ul>{attachProblems.map((problem, index) => <li key={index}>{problem}</li>)}</ul>
         <button type="button" className="chat-icon" aria-label="Dismiss" title="Dismiss" onClick={() => setAttachProblems([])}><X className="h-3.5 w-3.5" /></button>
       </div>}
       {turns.length > 0 && <div className="chat-header-bar">
+        {clearable && <button type="button" className="chat-copy chat-copy-all" disabled={disabled} title="Start a fresh conversation in this tab (/clear)" onClick={requestClear}>
+          <Eraser className="h-3.5 w-3.5" aria-hidden /><span>Clear</span>
+        </button>}
         <ChatCopyButton label="Copy conversation" className="chat-copy chat-copy-all" showLabel text={() => conversationMarkdown(turns, agentName)} />
       </div>}
       <ThreadPrimitive.Viewport ref={viewportRef} onScroll={onViewportScroll} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer && !paged}>
@@ -356,6 +435,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           {(snapshot.transcript?.start ?? 0) > 0 && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadEarlier(); }}>
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
+          {view?.clearedAt && (snapshot.transcript?.start ?? 0) === 0 && <ClearedDivider at={view.clearedAt} />}
           {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
           <ChatBlocksContext.Provider value={rendering}>
             {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
@@ -367,7 +447,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           {!snapshot.hasNewer && view?.notice && <p role="status" className="chat-notice">{view.notice}</p>}
         </div>
       </ThreadPrimitive.Viewport>
-      <div className="chat-composer-footer">
+      <div ref={footerRef} className="chat-composer-footer">
         <ScrollToLatest viewer={viewer} hasNewer={snapshot.hasNewer} follow={followLiveEnd} />
         {dock}
         {snapshot.pendingDelivery && <div className="chat-dock" role="status">
@@ -378,17 +458,23 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         {view?.questions.map(question => <ChatQuestionCard key={question.id} question={question} disabled={disabled || busy} onAnswer={answer => void act(() => client.answer(panelId, question.id, answer))} />)}
         {view?.permissions.map(permission => <ChatPermissionCard key={permission.id} permission={permission} agent={agentName} machine={machine && !machine.local ? machine.name : undefined}
           disabled={disabled || busy} composerEmpty={!snapshot.draft.trim()} onAnswer={answerPermission} />)}
-        {!!view?.queue.length && <ul className="chat-queue" aria-label="Queued messages">
-          {view.queue.map((item, index) => <li key={item.operationId}>
-            <span className="chat-queue-text">{rendering.queued?.(item.text) ?? (item.text || 'Image')}</span>
-            <span className="chat-queue-label">{index === 0 ? 'Sends next' : 'Queued'}</span>
-            <button type="button" className="chat-icon" aria-label="Remove from queue" title="Remove from queue" onClick={() => void act(() => client.unqueue(panelId, item.operationId))}><X className="h-3.5 w-3.5" /></button>
-          </li>)}
-        </ul>}
+        {/* A non-modal dialog inside the footer: the conversation above stays readable. */}
+        {confirmClear && <dialog open className="chat-dock chat-confirm" role="alertdialog" aria-label="Clear the conversation?">
+          <span>{agentName} is working. Clearing stops this turn and starts a fresh conversation.</span>
+          <button type="button" className="chat-button chat-button-outline" onClick={() => setConfirmClear(false)}>Cancel</button>
+          <button type="button" className="chat-button chat-button-primary" disabled={disabled} onClick={clearConversation}>Clear</button>
+        </dialog>}
+        <ChatQueue queue={view?.queue ?? []} working={working} disabled={disabled} label={rendering.queued}
+          onRemove={operationId => void act(() => client.unqueue(panelId, operationId))}
+          onSendNow={operationId => void act(() => client.sendNow(panelId, operationId))}
+          onEdit={editQueued} />
+        {view && <ChatStatusBar context={view.context} tasks={view.tasks}
+          queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
+          onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
         <ComposerPrimitive.Root className="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
-          <ComposerPrimitive.Input readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? 'Ask anything'} rows={1}
+          <ComposerPrimitive.Input data-chat-composer={panelId} readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? 'Ask anything'} rows={1}
             // Pasted images and files attach through attachFiles, which shows any refusal.
             addAttachmentOnPaste={false}
             onPaste={event => {
@@ -407,10 +493,28 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             onKeyDown={event => {
               // Keys that pick an IME candidate are the input method's.
               if (event.nativeEvent.isComposing) return;
+              // Sending exactly /resume opens the picker, also while sending is off (a stopped chat).
+              if (event.key === 'Enter' && !event.shiftKey && isResumeCommand(snapshot.draft) && !runtime.thread.composer.getState().attachments.length) {
+                event.preventDefault();
+                openPicker();
+                return;
+              }
               // Esc stops the turn, as it does for the agent in a terminal.
               if (event.key === 'Escape' && working && !activeCommand) {
                 event.preventDefault();
                 void act(() => client.cancel(panelId));
+                return;
+              }
+              if (clearable && event.key === 'Enter' && !event.shiftKey && isClearCommand(snapshot.draft) && (!activeCommand || activeCommand.name === CLEAR_COMMAND.name)) {
+                event.preventDefault();
+                requestClear();
+                return;
+              }
+              // Cmd/Ctrl+Enter sends now: while a turn runs it interrupts it; otherwise it is a plain send.
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
+                event.preventDefault();
+                sendNowNext.current = true;
+                void runtime.thread.composer.send();
                 return;
               }
               if (!activeCommand) return;
@@ -425,16 +529,17 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             className="chat-input" />
           <div ref={actionsRef} className="chat-composer-actions" data-layout={phone ? 'phone' : 'desktop'} data-working={working || undefined}>
             {attachments && <ComposerPrimitive.AddAttachment aria-label={saveFile ? 'Attach files' : 'Attach image'} title={saveFile ? 'Attach photos or files' : 'Attach image'} className="chat-icon"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
-            {phone
-              ? <ChatRiskyModeMarker mode={composerRow.mode} />
-              : composerRow.mode && <ChatModeChip control={composerRow.mode} disabled={settingsLocked} configure={configure} />}
+            {/* Model and mode stay on the composer row (D-267). */}
+            {phone || !composerRow.mode
+              ? <ChatRiskyModeMarker setting={riskySetting(composerRow)} />
+              : <ChatModeChip control={composerRow.mode} risky={!!riskySetting(composerRow)} disabled={settingsLocked} configure={configure} />}
             <div className="chat-composer-end">
               {phone
                 ? <ChatPhoneModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />
                 : <ChatModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />}
               {working
                 ? <>
-                  <ComposerPrimitive.Send aria-label="Queue message" title="Queue message (sends after this turn)" className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
+                  <ComposerPrimitive.Send aria-label="Queue message" title={`Queue message: sends after this turn (Enter). Send now: ${sendNowKeys()}`} className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
                   <button type="button" aria-label="Stop agent turn" title="Stop" className="chat-send" onClick={() => void act(() => client.cancel(panelId))}><Square className="h-3.5 w-3.5 fill-current" /></button>
                 </>
                 : <ComposerPrimitive.Send aria-label="Send message" title="Send message" className="chat-send"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>}

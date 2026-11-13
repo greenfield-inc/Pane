@@ -12,7 +12,7 @@
     "terminology",
     "defaults",
     "enums",
-    "agentTemplates",
+    "agents",
     "agentContext",
     "commands",
     "flags",
@@ -236,11 +236,9 @@
       },
       "additionalProperties": false
     },
-    "agentTemplates": {
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#/$defs/agentTemplate"
-      }
+    "agents": {
+      "description": "Every agent fact Pane uses, for terminal and chat tabs alike. Code reads these; it never names an agent.",
+      "$ref": "#/$defs/agents"
     },
     "terminalKeys": {
       "description": "Named keys for `panels input --keys`, mapped to the bytes a terminal receives.",
@@ -435,26 +433,256 @@
       },
       "additionalProperties": false
     },
-    "agentTemplate": {
+    "agents": {
       "type": "object",
       "required": [
-        "title",
-        "command"
+        "default",
+        "registryUrl",
+        "entries"
       ],
+      "additionalProperties": false,
       "properties": {
-        "title": {
+        "default": {
+          "description": "The agent a new Session and the first-run screen start with.",
           "type": "string",
           "minLength": 1
         },
-        "command": {
+        "registryUrl": {
+          "description": "The ACP Registry index Settings > Agents installs from.",
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "entries": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/agent"
+          }
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": [
+        "title",
+        "label",
+        "icon",
+        "executables",
+        "terminal",
+        "install"
+      ],
+      "dependentRequired": {
+        "chat": [
+          "signIn"
+        ]
+      },
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "description": "Full name, used for terminal tab titles.",
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "description": "Short name for menus and chat headings.",
+          "type": "string",
+          "minLength": 1
+        },
+        "icon": {
+          "description": "Key into the clients' brand icon registry; unknown keys get a generic icon.",
           "type": "string",
           "minLength": 1
         },
         "description": {
           "type": "string"
+        },
+        "executables": {
+          "description": "CLI names on PATH. The first one launches; all of them identify the agent in a command.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "terminal": {
+          "type": "object",
+          "required": [
+            "args",
+            "fullAccessArgs",
+            "hotkey"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "fullAccessArgs": {
+              "description": "Flags that let the agent act without asking. The terminal launch command is the executable, these flags, then args.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "hotkey": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reportsConversation": {
+              "description": "Pane's SessionStart hook reports the terminal's live conversation, so Switch to chat can be sure which one it is on.",
+              "type": "boolean"
+            },
+            "platforms": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "install": {
+          "type": "object",
+          "required": [
+            "url",
+            "command"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "pattern": "^https://"
+            },
+            "command": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "signIn": {
+          "description": "Arguments to the agent's CLI that sign it in, run in a terminal tab when a chat agent advertises no terminal sign-in of its own. Required with chat.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "onboarding": {
+          "description": "Offered on the first-run screen.",
+          "type": "boolean"
+        },
+        "onboardingPanelId": {
+          "description": "The saved panel id of this agent's Onboarding Session terminal, for an agent whose id predates the derived form. Others use __pane_chat_terminal_<id>__.",
+          "type": "string",
+          "minLength": 1
+        },
+        "chat": {
+          "$ref": "#/$defs/agentChat"
         }
-      },
-      "additionalProperties": false
+      }
+    },
+    "agentChat": {
+      "type": "object",
+      "required": [
+        "minimumVersion",
+        "terminalConversationsLoad"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "description": "Arguments that start the agent's own CLI as an ACP agent. Absent when a bundled adapter runs it.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "adapter": {
+          "description": "A bundled ACP adapter package (pinned in package.json) that runs the person's CLI.",
+          "type": "object",
+          "required": [
+            "package",
+            "executableEnv"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "package": {
+              "type": "string",
+              "minLength": 1
+            },
+            "executableEnv": {
+              "description": "The variable that points the adapter at the CLI.",
+              "type": "string",
+              "minLength": 1
+            },
+            "npmShimScript": {
+              "description": "On Windows, the script a standard npm shim for the CLI runs, relative to node_modules.",
+              "type": "string",
+              "minLength": 1
+            },
+            "sessionFolderSettingsMeta": {
+              "description": "The _meta namespace under which the adapter accepts Session folder settings (`options.settings`) on session/new and session/load.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "minimumVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        },
+        "apiKeyEnv": {
+          "description": "Variables an API key saved in Settings is passed as.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "fullAccess": {
+          "description": "How the agent acts without asking: a session mode, or the terminal fullAccessArgs passed to the chat CLI. Absent: Pane answers each request with allow once.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "minLength": 1
+            },
+            "args": {
+              "const": true
+            }
+          }
+        },
+        "riskyModes": {
+          "description": "Session modes in which the agent acts without asking.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "legacyClients": {
+          "description": "Pane apps from before the agent catalog can show this agent's chat tabs. The host hides every other agent's chat tabs from them.",
+          "type": "boolean"
+        },
+        "terminalConversationsLoad": {
+          "description": "A chat can load a conversation the agent's terminal started (Switch to chat).",
+          "type": "boolean"
+        },
+        "registryIds": {
+          "description": "ACP Registry ids this agent covers; Settings > Agents hides them.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     },
     "flag": {
       "type": "object",
@@ -540,6 +768,7 @@
         "panels resume",
         "panels pause",
         "panels last-message",
+        "panels conversation",
         "panels close",
         "agent-context",
         "mcp",
@@ -768,6 +997,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panels last-message": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels conversation": {
           "$ref": "#/$defs/helpLines"
         },
         "panels close": {

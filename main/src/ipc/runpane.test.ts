@@ -47,6 +47,7 @@ import { createLoopTestDb } from '../services/loops/loopTestDb';
 import type { TaskQueue } from '../services/taskQueue';
 import { PaneError } from '../../../shared/paneError';
 import Database from 'better-sqlite3-multiple-ciphers';
+import { agentTerminalCommand, configuredAgent } from '../../../shared/agents';
 
 /** The approvals table on its own, for tests that don't look at it. */
 const memoryDatabase = () => new Database(':memory:');
@@ -1086,7 +1087,7 @@ describe('runpane IPC handlers', () => {
 
       expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
         initialState: expect.objectContaining({
-          initialCommand: RUNPANE_CONTRACT.agentTemplates.claude.command,
+          initialCommand: agentTerminalCommand('claude'),
           initialInput: 'Read and follow prompt.md',
           initialInputMode: 'argument',
           agentType: 'claude',
@@ -1127,7 +1128,7 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({ ok: true, items: [{ ok: true }] });
       const initialState = vi.mocked(panelManager.createPanel).mock.calls[0][0].initialState;
       expect(initialState).toMatchObject({
-        initialCommand: RUNPANE_CONTRACT.agentTemplates.codex.command,
+        initialCommand: agentTerminalCommand('codex'),
         resumeDirectory: expect.any(String),
         initialInput: 'Continue with step 2',
         initialInputSubmitStrategy: 'codex-ctrl-enter',
@@ -2725,8 +2726,8 @@ describe('runpane IPC handlers', () => {
         ok: true,
         name: 'issue-252',
         tool: {
-          title: RUNPANE_CONTRACT.agentTemplates.codex.title,
-          command: RUNPANE_CONTRACT.agentTemplates.codex.command,
+          title: configuredAgent('codex').title,
+          command: agentTerminalCommand('codex'),
           agent: 'codex',
         },
       }],
@@ -3099,14 +3100,14 @@ describe('runpane IPC handlers', () => {
     expect(panelManager.createPanel).toHaveBeenCalledWith({
       sessionId: session.id,
       type: 'terminal',
-      title: RUNPANE_CONTRACT.agentTemplates.claude.title,
+      title: configuredAgent('claude').title,
       initialState: {
-        initialCommand: RUNPANE_CONTRACT.agentTemplates.claude.command,
+        initialCommand: agentTerminalCommand('claude'),
         initialInput: '/review',
         initialInputMode: 'argument',
         initialInputSubmitStrategy: 'enter',
         agentType: 'claude',
-        launchCommand: RUNPANE_CONTRACT.agentTemplates.claude.command,
+        launchCommand: agentTerminalCommand('claude'),
         isCliPanel: true,
       },
       metadata: { openedBy: { source: 'agent' } },
@@ -5697,12 +5698,12 @@ describe('runpane IPC handlers', () => {
       type: 'terminal',
       title: 'Issue 252',
       initialState: {
-        initialCommand: RUNPANE_CONTRACT.agentTemplates.codex.command,
+        initialCommand: agentTerminalCommand('codex'),
         initialInput: '$discussion https://github.com/dcouple/Pane/issues/252',
         initialInputMode: 'argument',
         initialInputSubmitStrategy: 'enter',
         agentType: 'codex',
-        launchCommand: RUNPANE_CONTRACT.agentTemplates.codex.command,
+        launchCommand: agentTerminalCommand('codex'),
         isCliPanel: true,
       },
       activate: false,
@@ -6298,7 +6299,7 @@ describe('runpane IPC handlers', () => {
 
     expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
       initialState: expect.objectContaining({
-        initialCommand: RUNPANE_CONTRACT.agentTemplates.claude.command,
+        initialCommand: agentTerminalCommand('claude'),
         initialInput: 'Please start issue 302',
         initialInputMode: 'argument',
         initialInputSubmitStrategy: 'enter',

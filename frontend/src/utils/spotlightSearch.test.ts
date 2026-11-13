@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import type { HotkeyDefinition } from '../stores/hotkeyStore';
+import type { EffectiveHotkeyDefinition } from '../stores/hotkeyStore';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import { buildMachineSearchItems, buildSearchItems, searchItems, type SearchItem, type SearchResults, type SearchSources } from './spotlightSearch';
@@ -33,7 +33,7 @@ function session(id: string, name: string, updatedMinutesAgo: number, paneIds: s
     name,
     agent: 'claude',
     internalSessionId: `${id}-terminal`,
-    panelIds: { claude: `${id}-claude`, codex: `${id}-codex`, cursor: `${id}-cursor`, opencode: `${id}-opencode` },
+    panelIds: { claude: `${id}-claude`, codex: `${id}-codex`, cursor: `${id}-cursor`, opencode: `${id}-opencode`, pi: `${id}-pi` },
     goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
     associations: paneIds.map(paneId => ({ paneId, panelIds: [], attachedAt: ago(100) })),
     activity: [],
@@ -43,8 +43,9 @@ function session(id: string, name: string, updatedMinutesAgo: number, paneIds: s
   };
 }
 
-function command(id: string, label: string, keys = '', extra: Partial<HotkeyDefinition> = {}): HotkeyDefinition {
-  return { id, label, keys, category: 'session', action: () => {}, ...extra };
+function command(id: string, label: string, keys = '', extra: Partial<EffectiveHotkeyDefinition> = {}): EffectiveHotkeyDefinition {
+  // SAFETY: fixtures name commands freely; the store's id type only guards registration.
+  return { id: id as EffectiveHotkeyDefinition['id'], label, keys, category: 'session', action: () => {}, ...extra };
 }
 
 const PANE = project(1, 'Pane');
@@ -214,9 +215,9 @@ describe('matchedRanges', () => {
 describe('search in All machines', () => {
   const snapshot = (projects: Array<Project & { sessions: Session[] }>) => ({ projects, sessions: [], statuses: [], notify: null, permissions: [] });
   const views = [
-    { machine: { id: 'local', name: 'studio-mac', os: 'macOS' as const, slot: 0 }, offline: false,
+    { machine: { id: 'local', name: 'studio-mac', os: 'macOS' as const, slot: 0, letters: 'S' }, offline: false,
       snapshot: snapshot([{ ...project(1, 'acme-web'), sessions: [pane('p1', 'fix-checkout-race', 1)] }]) },
-    { machine: { id: 'devbox', name: 'parsa-devbox', os: 'Windows' as const, slot: 2 }, offline: false,
+    { machine: { id: 'devbox', name: 'parsa-devbox', os: 'Windows' as const, slot: 2, letters: 'P' }, offline: false,
       snapshot: snapshot([{ ...project(1, 'pane'), sessions: [pane('p1', 'windows-installer', 1)] }]) },
   ];
 

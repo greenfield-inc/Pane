@@ -3,16 +3,23 @@ import type { AgentChatConfigOption, AgentChatMessage, AgentChatPart, AgentChatP
 import type { TerminalAgentReport } from './panels';
 
 /**
- * Chat tabs: an agent tab that runs Claude or Codex through its ACP adapter,
- * with no terminal. The host owns the adapter process; desktop, the remote PWA
- * and the phone only relay the conversation (chat-tab:* commands and events).
+ * Chat tabs: an agent tab that runs any ACP agent, with no terminal. The host owns
+ * the agent process; desktop, the remote PWA and the phone only relay the
+ * conversation (chat-tab:* commands and events).
+ *
+ * An agent id: a configured agent (shared/agents.ts) or an ACP Registry agent
+ * installed on the host. Clients learn labels and icons from the host's catalog.
  */
-export type ChatAgent = 'claude' | 'codex';
+export type ChatAgent = string;
 
 /** How a chat tab is launched. Saved without env: env is rebuilt at every start. */
 export type ChatTabLaunch =
-  /** `mode`: the session mode to select at every start, such as bypassPermissions for a Session orchestrator. */
-  | { kind: 'agent'; mode?: string }
+  /**
+   * `mode`: the session mode to select at every start, such as a profile's permission mode.
+   * `fullAccess`: the agent acts without asking, through its own switch when its config names
+   * one, otherwise through Pane answering each approval with the agent's "allow once".
+   */
+  | { kind: 'agent'; mode?: string; fullAccess?: true }
   | { kind: 'profile'; profile: string; args?: Record<string, string> };
 
 /** Last known runtime state. `stopped` always carries a `problem` or an explicit stop. */
@@ -57,14 +64,89 @@ export interface ChatPanelState {
   /** Set on Autopilot's own chat tab (its run id): the control plane refuses its answers (D-66). */
   autopilotRunId?: string;
   agentReport?: TerminalAgentReport;
+  /**
+   * Switch to chat when Pane was not sure of the terminal's conversation (D-282): the next start opens the
+   * folder's most recent conversation that no other Pane tab has open, instead of `acpSessionId`.
+   */
+  open?: 'most-recent';
+  /** What Switch to chat did, shown on the chat until it is closed or another conversation is picked. */
+  banner?: ChatTabSwitchBanner;
+  /** When /clear last started a fresh conversation in this tab; shown as a divider at its start. */
+  clearedAt?: string;
 }
 
 /**
- * Switch to chat reopened the conversation in chat tab `panelId`; any failure to do so is an error,
- * with the terminal running again. `terminalKept`: the chat has the conversation, but the
+ * The one-shot message a chat opened by Switch to chat carries (D-282, D-278 style 3).
+ * `most-recent`: Pane was not sure, and opened the folder's newest conversation.
+ * `none`: Pane was not sure, and the folder had none to open. `known-empty`: the terminal's
+ * conversation had no messages yet. `list-failed`: Pane was not sure and could not list the folder's conversations.
+ */
+export type ChatTabSwitchBanner =
+  | { kind: 'most-recent' }
+  | { kind: 'none' }
+  | { kind: 'known-empty' }
+  | { kind: 'list-failed'; reason: string };
+
+/**
+ * The most conversations Pane lists for one folder (picker and Switch to chat). A picker showing
+ * this many may have older ones left out, and says so.
+ */
+export const CHAT_CONVERSATION_LIMIT = 2000;
+
+/** One past conversation in a chat tab's folder, for the picker (/resume, "Pick another"). */
+export interface ChatTabConversation {
+  sessionId: string;
+  title?: string;
+  /** ISO time of the last change, when the agent reports it. */
+  updatedAt?: string;
+  /** This tab's own conversation ("open here"). */
+  current?: true;
+  /** Open in another Pane tab on this machine: it cannot be picked. */
+  openIn?: { panelId: string; title: string };
+}
+
+/**
+ * Switch to chat reopened the conversation in chat tab `panelId`. A failure is an error: before the
+ * terminal stopped, nothing changed; after, `CHAT_SWITCH_FAILED` (Pane was sure of a conversation with
+ * messages) restarts the terminal on it, and `CHAT_SWITCH_NOT_STARTED` leaves it stopped. `terminalKept`: the chat has the conversation, but the
  * terminal tab could not be closed or the Session could not be moved; `reason` says what to do.
  */
-export interface ChatTabSwitchResult { panelId: string; terminalKept: boolean; reason?: string }
+export interface ChatTabSwitchResult {
+  panelId: string;
+  terminalKept: boolean;
+  reason?: string;
+  /** Which conversation the chat opened: the one Pane knew, the folder's most recent one, or a new one. */
+  outcome?: 'known' | 'most-recent' | 'new';
+}
+
+/**
+ * Why a Session's terminal tab will not switch to chat: mid-turn, a terminal that has not reported
+ * its conversation, a launch chat cannot run, an agent chat cannot open, or another refusal that
+ * `reason` spells out.
+ */
+export type SessionChatSwitchSkip = 'busy' | 'no-conversation' | 'launch' | 'not-agent' | 'unconfirmed' | 'other';
+
+/** One terminal tab of a Session, and whether Switch to chat will move it. */
+export interface SessionChatSwitchItem {
+  panelId: string;
+  title: string;
+  /** The Pane it is in; the Session's own tab says `Session`. */
+  paneName: string;
+  /** Present when it will not switch. */
+  skip?: { kind: SessionChatSwitchSkip; reason: string };
+}
+
+/** What switching a whole Session to chat will do, in the order it does it. */
+export interface SessionChatSwitchPreview { sessionId: string; items: SessionChatSwitchItem[] }
+
+/** What happened to one tab: `failed` passed the preview but the switch itself refused or fell back. */
+export interface SessionChatSwitchOutcome extends SessionChatSwitchItem {
+  result: 'switched' | 'skipped' | 'failed';
+  /** A switched tab whose terminal stayed open says why (ChatTabSwitchResult.reason). */
+  note?: string;
+}
+
+export interface SessionChatSwitchResult { sessionId: string; items: SessionChatSwitchOutcome[] }
 
 /**
  * A prompt waiting for the agent. With `stored`, `text` is a preview and the full
@@ -111,12 +193,40 @@ export interface ChatTabView {
   transcript?: ChatTabTranscript;
   /** Total messages in this generation, including those before the window. */
   messageCount: number;
+  /** What Switch to chat did (D-282), until closed or another conversation is picked. */
+  banner?: ChatTabSwitchBanner;
+  /**
+   * How full the conversation's context window is, as the adapter last reported it (ACP `usage_update`).
+   * Absent until the adapter reports usage; viewers then show nothing rather than a guess.
+   */
+  context?: ChatTabContextUsage;
+  /** Background work the agent is running beside its turns (Claude's background shells and subagents). */
+  tasks?: ChatTabTask[];
+  /** When /clear last started a fresh conversation in this tab. */
+  clearedAt?: string;
+}
+
+/** Tokens in the conversation's context and the size of its window. */
+export interface ChatTabContextUsage { used: number; size: number }
+
+/** One piece of background work, as the adapter's async task updates describe it. */
+export interface ChatTabTask {
+  id: string;
+  /** The adapter's task type, such as `bash` or `subagent`. */
+  kind: string;
+  /** What it is doing, when the adapter says. */
+  title?: string;
+  startedAt: string;
+  /** False when the adapter says the task cannot be stopped from the client (a Monitor); absent means it can. */
+  canStop?: false;
 }
 
 export interface ChatTabSend {
   operationId: string;
   text: string;
   images?: Array<{ mimeType: string; data: string }>;
+  /** Send now: the message goes ahead of the queue and interrupts the running turn. Not part of the message's fingerprint. */
+  now?: boolean;
 }
 
 export type ChatTabChange =
@@ -163,12 +273,28 @@ export interface ChatTabClient {
   send(panelId: string, request: ChatTabSend): Promise<AgentChatReceipt>;
   receipt(panelId: string, operationId: string): Promise<AgentChatReceipt | undefined>;
   unqueue(panelId: string, operationId: string): Promise<void>;
+  /** Moves a queued message to the front and interrupts the running turn, so it is sent next, now. */
+  sendNow(panelId: string, operationId: string): Promise<void>;
+  /** Replaces a queued message's text; its images are kept. */
+  editQueued(panelId: string, operationId: string, text: string): Promise<void>;
+  /** Ends the agent and starts a fresh conversation in the same tab, with the same agent and settings (/clear). */
+  clear(panelId: string): Promise<void>;
+  /** Stops one background task without ending the turn. */
+  stopTask(panelId: string, taskId: string): Promise<void>;
   configure(panelId: string, configId: string, value: string): Promise<void>;
   cancel(panelId: string): Promise<void>;
   permission(panelId: string, requestId: string, optionId: string): Promise<void>;
   answer(panelId: string, questionId: string, response: ChatTabAnswer): Promise<void>;
   restart(panelId: string): Promise<void>;
+  /** The folder's past conversations, newest first, with this tab's and other tabs' marked. */
+  conversations(panelId: string): Promise<ChatTabConversation[]>;
+  /** Reloads the tab on another conversation of its folder; refused mid-turn or when it is open in another tab. */
+  resume(panelId: string, sessionId: string): Promise<void>;
+  /** Closes the Switch to chat banner or note. */
+  dismissBanner(panelId: string): Promise<void>;
   signIn(panelId: string): Promise<{ panelId: string }>;
+  /** The agents the host can open as chat tabs (its catalog). */
+  agents(): Promise<ChatAgentEntry[]>;
   onEvent(callback: (event: ChatTabEvent) => void): () => void;
   onState(callback: (view: ChatTabView) => void): () => void;
 }
@@ -177,8 +303,44 @@ export type ChatTabAnswer = { action: 'accept'; content: Record<string, JsonValu
 
 export interface ChatTabApplyResult { transcript: ChatTabTranscript; resync: boolean }
 
-/** Which agents have an API key set on a host; never the keys. */
-export interface ChatTabKeyStatus { claude: boolean; codex: boolean }
+/** Which agents have an API key set on a host, by agent id; never the keys. */
+export type ChatTabKeyStatus = Record<ChatAgent, boolean>;
+
+/**
+ * The composer setting Pane adds for an agent whose full access is not one of its own
+ * session modes: `on` and `off`. Changing it never reaches the agent as an ACP setting.
+ */
+export const CHAT_FULL_ACCESS_CONTROL = 'pane.full-access';
+
+/** What an agent's chat can do, from its ACP initialize reply. */
+export interface ChatAgentCapabilities { reopen: boolean; list: boolean; images: boolean }
+
+/**
+ * One agent this host can open as a chat tab, from main's catalog (chat-tab:agents). Clients
+ * render these and name no agent of their own; an id with no entry gets a generic label and icon.
+ */
+export interface ChatAgentEntry {
+  id: ChatAgent;
+  label: string;
+  /** A key into the clients' brand icons; unknown keys show the generic chat icon. */
+  icon: string;
+  /** An image for an agent the clients have no brand icon for (registry agents). */
+  iconUrl?: string;
+  description?: string;
+  /** `config`: a first-class agent from Pane's agents config. `registry`: installed from the ACP Registry. */
+  source: 'config' | 'registry';
+  /** Its CLI or package is on this host, so a chat can start. */
+  installed: boolean;
+  version?: string;
+  /** Known once Pane has started this agent's chat at this version. */
+  capabilities?: ChatAgentCapabilities;
+  /** `agent`: full access is the agent's own switch. `pane`: Pane answers each approval with allow once. */
+  fullAccess: 'agent' | 'pane';
+  /** Whether a terminal tab running this agent can switch to chat, and why not. */
+  switchFromTerminal: { ok: true } | { ok: false; reason: string };
+  /** Where to install it from, when it is not installed. */
+  installUrl?: string;
+}
 
 /** Apply one host event to a client's window. A gap or a new generation needs a fresh snapshot. */
 export function applyChatTabEvent(transcript: ChatTabTranscript, event: ChatTabEvent): ChatTabApplyResult {

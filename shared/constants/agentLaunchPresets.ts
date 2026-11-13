@@ -1,63 +1,25 @@
-export type AgentLaunchPresetId = 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi';
+import { CONFIGURED_AGENT_IDS, agentTerminalCommand, configuredAgent, type ConfiguredAgentId } from '../agents';
+import { agentTerminalShortcutId, type KeyboardShortcutId } from './keyboardShortcuts';
+
+export type AgentLaunchPresetId = ConfiguredAgentId;
 
 export interface AgentLaunchPreset {
   id: AgentLaunchPresetId;
   title: string;
   command: string;
   iconKey: string;
-  hotkeyId: string;
+  hotkeyId: KeyboardShortcutId;
   hotkey: string;
   platforms?: readonly string[];
 }
 
-/*
- * Launch templates duplicated from contracts/runpane/contract.json
- * agentTemplates so the renderer doesn't bundle the full generated contract.
- * agentLaunchPresets.test.ts pins this list 1:1 against the contract.
- */
-export const AGENT_LAUNCH_PRESETS: readonly AgentLaunchPreset[] = [
-  {
-    id: 'claude',
-    title: 'Claude Code',
-    command: 'claude --dangerously-skip-permissions',
-    iconKey: 'claude',
-    hotkeyId: 'add-tool-terminal-claude',
-    hotkey: 'mod+alt+3',
-  },
-  {
-    id: 'codex',
-    title: 'Codex',
-    command: 'codex --yolo',
-    iconKey: 'codex',
-    hotkeyId: 'add-tool-terminal-codex',
-    hotkey: 'mod+alt+4',
-  },
-  {
-    id: 'cursor',
-    title: 'Cursor',
-    command: 'cursor-agent --force --trust',
-    iconKey: 'cursor',
-    hotkeyId: 'add-tool-terminal-cursor',
-    hotkey: 'mod+alt+5',
-    platforms: ['darwin', 'linux', 'wsl'],
-  },
-  {
-    id: 'opencode',
-    title: 'OpenCode',
-    command: 'opencode --auto',
-    iconKey: 'opencode',
-    hotkeyId: 'add-tool-terminal-opencode',
-    hotkey: 'mod+alt+6',
-  },
-  {
-    id: 'pi',
-    title: 'Pi',
-    command: 'pi',
-    iconKey: 'pi',
-    hotkeyId: 'add-tool-terminal-pi',
-    hotkey: 'mod+alt+7',
-  },
-];
+/** One terminal launch preset per configured agent, from the agents config (shared/agents.ts). */
+export const AGENT_LAUNCH_PRESETS: readonly AgentLaunchPreset[] = CONFIGURED_AGENT_IDS.map(id => {
+  const agent = configuredAgent(id);
+  const preset: AgentLaunchPreset = { id, title: agent.title, command: agentTerminalCommand(id), iconKey: agent.icon, hotkeyId: agentTerminalShortcutId(id), hotkey: agent.terminal.hotkey };
+  if (agent.terminal.platforms) preset.platforms = agent.terminal.platforms;
+  return preset;
+});
 
 export function agentPresetsForPlatform(platform: string): readonly AgentLaunchPreset[] {
   return AGENT_LAUNCH_PRESETS.filter(preset => isAgentSupportedOnPlatform(preset.id, platform));

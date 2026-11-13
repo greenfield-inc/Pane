@@ -20,6 +20,7 @@ import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import { getDefaultWSLDistribution } from '../utils/wslUtils';
 import { checkRepoFolder, findHostRepoContext, findWslRepos } from '../services/repoFinder';
 import { samePath } from '../services/paneChatMigrateOffer';
+import { configuredAgent } from '../../../shared/agents';
 
 /** Returns exec options that include the user's full shell PATH (Homebrew, nvm, etc.). */
 function shellExecOpts<Options extends object>(extra: Options): Options & { env: NodeJS.ProcessEnv } {
@@ -36,12 +37,10 @@ async function runProbe(command: string, timeout?: number): Promise<string> {
   return (await execAsync(command, shellExecOpts({ encoding: 'utf-8', timeout }))).stdout;
 }
 
-const FIRST_RUN_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor'];
-
 /** The agents the first-run screen offers on this platform, and whether a login shell finds each CLI. */
 async function findFirstRunAgents(): Promise<FirstRunAgent[]> {
   const presets = agentPresetsForPlatform(process.platform)
-    .filter((preset): preset is typeof preset & { id: PaneChatAgent } => FIRST_RUN_AGENTS.some(agent => agent === preset.id));
+    .filter(preset => configuredAgent(preset.id).onboarding);
   return Promise.all(presets.map(async preset => {
     const binary = preset.command.split(' ')[0];
     const found = await runProbe(process.platform === 'win32' ? `where ${binary}` : `command -v ${binary}`, 10_000)

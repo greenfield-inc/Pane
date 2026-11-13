@@ -139,7 +139,7 @@ function MachinePicker({ machines, selectedId, lastUsedId, disabled, onPick }: {
             !usable && 'opacity-40',
           )}
         >
-          <MachineMark os={machine.os} slot={machine.slot} presence={usable ? 'solid' : 'dimmed'} size="sm" />
+          <MachineMark letters={machine.letters} slot={machine.slot} presence={usable ? 'solid' : 'dimmed'} size="sm" />
           <span>{machine.name}</span>
           {note && <span className="text-xs font-normal text-text-tertiary">{note}</span>}
         </button>;

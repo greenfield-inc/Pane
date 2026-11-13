@@ -1,6 +1,7 @@
 import { decisionLine, receiptLine } from '@shared/approvalReceipts';
+import { approvalHolder } from '@shared/approvalStatus';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
-import type { NotifyItem, NotifyRemoteOpenLink, NotifySharedState } from '@shared/types/notify';
+import type { NotifyItem, NotifyLink, NotifyRemoteOpenLink, NotifySharedState } from '@shared/types/notify';
 
 import { NOTIFY_KIND_LABEL } from '@/features/notify/notifyQuestions';
 
@@ -35,8 +36,10 @@ export interface ApprovalEntry {
   project?: string;
   /** Epoch ms it sorts by, newest first: when it was asked, or when it was answered once it's done. */
   at: number;
-  /** It waits on you: an open question, a fallback item, or a permission request. False for an answer held for Undo. */
+  /** It waits on you: an open question, a fallback item, or a permission request. False for an answer held for Undo, and while the agent reads your reply. */
   waiting: boolean;
+  /** The agent is reading the person's reply or getting more context: listed under With the agent (P7). */
+  withAgent?: boolean;
 }
 
 export interface ApprovalGroup<T extends ApprovalEntry> {
@@ -129,31 +132,45 @@ export function staleItems(state: NotifySharedState | undefined): NotifyItem[] {
   return (state?.items ?? []).filter(isStale).sort((a, b) => a.createdAt - b.createdAt);
 }
 
-/** How long the Answered group lists an item, as the desktop's Answered list does. */
-const ANSWERED_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Local midnight of the day `now` falls on: Done today lists what ended since. */
+export function startOfDay(now: number): number {
+  const day = new Date(now);
+  day.setHours(0, 0, 0, 0);
+  return day.getTime();
+}
 
 /** It was answered or closed: its card shows a receipt, and it takes an Override or a Reopen. */
 export function isResolved(item: NotifyItem): boolean {
   return item.state === 'answered' || item.state === 'expired';
 }
 
-/** The collapsed Answered group: the last 24 hours' answered and closed items, newest first. */
+/** The collapsed Done today group: today's answered and closed items, newest first. */
 export function answeredItems(state: NotifySharedState | undefined, now: number): NotifyItem[] {
   const resolvedAt = (item: NotifyItem) => item.resolvedAt ?? item.createdAt;
-  return (state?.items ?? []).filter(item => isResolved(item) && now - resolvedAt(item) <= ANSWERED_WINDOW_MS).sort((a, b) => resolvedAt(b) - resolvedAt(a));
+  const since = startOfDay(now);
+  return (state?.items ?? []).filter(item => isResolved(item) && resolvedAt(item) >= since).sort((a, b) => resolvedAt(b) - resolvedAt(a));
 }
 
-/** Which of Approvals' lists the approval screen steps through. */
-export type ApprovalList = 'waiting' | 'stale' | 'answered';
+/** The agent holds it: it is reading the person's reply, or getting more context (With the agent). */
+export function isWithAgent(item: NotifyItem): boolean {
+  return approvalHolder(item) === 'agent';
+}
+
+/**
+ * Which of Approvals' lists the approval screen steps through: Waiting on you, With the agent,
+ * Stale, or Done today (`answered`).
+ */
+export type ApprovalList = 'waiting' | 'agent' | 'stale' | 'answered';
 
 export function parseApprovalList(value: string | undefined): ApprovalList {
-  return value === 'stale' || value === 'answered' ? value : 'waiting';
+  return value === 'stale' || value === 'answered' || value === 'agent' ? value : 'waiting';
 }
 
 /** The ids the approval screen steps through and counts for `list`: the order home shows them in. */
 export function approvalListOrder(state: NotifySharedState | undefined, list: ApprovalList, now: number, sort: ApprovalSort): string[] {
   if (list === 'stale') return staleItems(state).map(item => item.id);
-  return orderOf(list === 'answered' ? answeredItems(state, now) : approvalItems(state), sort);
+  if (list === 'answered') return orderOf(answeredItems(state, now), sort);
+  return orderOf(approvalItems(state).filter(item => isWithAgent(item) === (list === 'agent')), sort);
 }
 
 /** When an item sorts: as it was answered once it's done, else as it was asked. */
@@ -164,7 +181,8 @@ export function approvalAt(item: NotifyItem): number {
 /** A Notify item as an Approvals entry. */
 export function itemEntry(item: NotifyItem, machineKey: string): ApprovalEntry & { item: NotifyItem } {
   const { session, project } = item.source;
-  return { key: `${machineKey}:question:${item.id}`, machineKey, at: approvalAt(item), waiting: item.state === 'waiting', item, ...(session ? { session: { id: session.id, name: session.name } } : {}), ...(project ? { project } : {}) };
+  const withAgent = isWithAgent(item);
+  return { key: `${machineKey}:question:${item.id}`, machineKey, at: approvalAt(item), waiting: item.state === 'waiting' && !withAgent, ...(withAgent ? { withAgent } : {}), item, ...(session ? { session: { id: session.id, name: session.name } } : {}), ...(project ? { project } : {}) };
 }
 
 function orderOf(items: readonly NotifyItem[], sort: ApprovalSort): string[] {
@@ -173,7 +191,7 @@ function orderOf(items: readonly NotifyItem[], sort: ApprovalSort): string[] {
 
 /** The approval screen's order, the same as home's: item ids group by group. "1 of N" counts these. */
 export function approvalOrder(state: NotifySharedState | undefined, sort: ApprovalSort): string[] {
-  return orderOf(approvalItems(state), sort);
+  return approvalListOrder(state, 'waiting', 0, sort);
 }
 
 /** "1 of 5": where `id` sits in `order`, or null when it isn't there. */
@@ -299,6 +317,24 @@ export async function openApprovalLink(
   return added ? { kind: 'opened', panelId: added } : { kind: 'opened' };
 }
 
+/**
+ * Where a `{ label, approval }` link opens on the approval screen: the item it names (by id) and
+ * the list that holds it, so Next and "1 of N" step through that list. Null when none of
+ * Approvals' lists holds it (a Q-n, which only the computer resolves, or an item past a day).
+ */
+export function approvalLinkTarget(state: NotifySharedState | undefined, ref: string, now: number): { id: string; list: ApprovalList } | null {
+  const lists: ApprovalList[] = ['waiting', 'agent', 'stale', 'answered'];
+  const list = lists.find(candidate => approvalListOrder(state, candidate, now, 'recent').includes(ref));
+  return list ? { id: ref, list } : null;
+}
+
+/** A related link's chip icon: a page, another approval, or a file. */
+export function linkIcon(link: NotifyLink) {
+  if ('url' in link) return { ios: 'globe', android: 'language' } as const;
+  if ('approval' in link) return { ios: 'checkmark.circle', android: 'check_circle' } as const;
+  return { ios: 'doc.text', android: 'description' } as const;
+}
+
 /** An older machine's mirror of a worker's question: it takes no answer here. */
 export const OLDER_MACHINE_NOTE = 'Its machine runs an older Pane, so only its orchestrator can answer this one. Update Pane there to answer it here.';
 
@@ -371,4 +407,26 @@ export function questionDetail(item: NotifyItem): string {
   if (!isResolved(item)) return item.title;
   const receipt = receiptLine(item) ?? item.answerSummary;
   return receipt ? `${receipt} · ${item.title}` : item.title;
+}
+
+/** A row's subtitle: the card's context, which the row shows in up to two lines. Absent when the card has none. */
+export function questionSubtitle(item: NotifyItem): string | undefined {
+  return item.context?.trim() || undefined;
+}
+
+/**
+ * The id `notify:summary-page` takes for `item` on the machine the phone is connected to. Only
+ * that machine's own approvals have a Summary there: one it shows from another saved machine
+ * (`machineId` set to that machine) is null, and opens from that machine instead.
+ */
+export function summaryItemId(item: NotifyItem): string | null {
+  return !item.machineId || item.machineId === 'local' ? item.id : null;
+}
+
+/**
+ * The Summary's WebView loads only the page it was handed (`about:blank`, how a WebView names
+ * inline html); every link and redirect is refused, so a Summary never navigates anywhere.
+ */
+export function summaryLoadAllowed(url: string): boolean {
+  return url === 'about:blank';
 }

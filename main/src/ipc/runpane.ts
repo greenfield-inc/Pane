@@ -55,6 +55,7 @@ import {
   normalizeAgentReport,
   readPanelAgentReport,
 } from '../services/agentReport';
+import { workerCard } from '../services/notify/workerContext';
 import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand, isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
 import { isValidPiSessionId } from '../services/agents/piLaunch';
@@ -270,6 +271,7 @@ import {
   type WorkspaceIdleCandidate,
   type WorkspaceIdleSchedule,
 } from '../services/workspaceIdleTracker';
+import { agentTerminalCommand, configuredAgent, configuredAgentSchema, isConfiguredAgent } from '../../../shared/agents';
 
 const RUNPANE_CHANNELS = [
   'runpane:doctor',
@@ -316,6 +318,7 @@ const RUNPANE_CHANNELS = [
   'runpane:sessions:resume',
   'runpane:panels:last-message',
   'runpane:report',
+  'runpane:panels:conversation',
   'runpane:workspace:state',
   'runpane:workspace:wait',
   'runpane:agents:doctor',
@@ -331,7 +334,6 @@ const RUNPANE_CHANNELS = [
   'runpane:secrets:resolve',
 ] as const;
 
-const AGENT_TEMPLATES = RUNPANE_CONTRACT.agentTemplates;
 const AGENT_IDS = new Set<string>(RUNPANE_CONTRACT.enums.agents);
 const DEFAULT_PANEL_OUTPUT_LIMIT = 200;
 const DEFAULT_PANEL_SCREEN_LIMIT = 80;
@@ -387,12 +389,23 @@ const MUTATING_RUNPANE_ACTIONS = new Set([
   'panels:submit',
   'panels:submit-composer',
   'report',
+  'panels:conversation',
   'sessions:create',
   'sessions:update',
   'sessions:set-agent',
   'sessions:associate',
   'sessions:detach',
 ]);
+
+const conversationReportSchema = boundary.object({
+  panelId: boundary.nonEmptyString,
+  paneId: boundary.optional(boundary.nonEmptyString),
+  conversationId: boundary.nonEmptyString,
+  source: boundary.optional(boundary.string),
+});
+const CONVERSATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
+const CONVERSATION_SOURCE = /^[a-z_-]{1,32}$/u;
+interface RunpaneConversationReportResult { ok: true; paneId: string; panelId: string; conversationId: string; source?: string; sure: boolean }
 
 const orchestrationSelectorSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
@@ -403,7 +416,7 @@ const orchestrationSessionCreateSchema = boundary.object({
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   name: boundary.nonEmptyString,
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agent: boundary.optional(configuredAgentSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
   resume: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(orchestrationTextSchema),
@@ -419,7 +432,7 @@ const orchestrationSessionUpdateSchema = boundary.object({
   name: boundary.optional(orchestrationTextSchema),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agent: boundary.optional(configuredAgentSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
   profile: boundary.optional(orchestrationTextSchema),
   goal: boundary.optional(orchestrationTextSchema),
@@ -1894,6 +1907,8 @@ export function registerRunpaneHandlers(
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }
       const report = normalizeAgentReport(normalized, new Date().toISOString());
+      // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).
+      const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath }).warnings : [];
       if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
       else await storePanelAgentReport(panel, report);
       const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);
@@ -1906,7 +1921,30 @@ export function registerRunpaneHandlers(
         report: journalAgentReport(report),
       });
       const sessionIds = await services.orchestrationSessionManager?.recordAgentReport(panel.id, report) ?? [];
-      return { ok: true, paneId: panel.sessionId, panelId: panel.id, report, sessionIds, liveWatchers };
+      const result: RunpaneReportResult = { ok: true, paneId: panel.sessionId, panelId: panel.id, report, sessionIds, liveWatchers };
+      if (warnings.length) result.warnings = warnings;
+      return result;
+    }, result => ({ paneId: result.paneId, panelId: result.panelId, ok: result.ok }));
+  });
+
+  /**
+   * A Claude SessionStart hook says which conversation its tab is on (D-269). Recorded on a running
+   * terminal tab; a chat tab keeps the conversation it opened, so its report changes nothing. No watch event.
+   */
+  commandRegistry.register('runpane:panels:conversation', async (request: PaneCommandValue): Promise<RunpaneConversationReportResult> => {
+    return withRunpaneAction(services, 'panels:conversation', {}, async () => {
+      const input = decodeBoundary(request, conversationReportSchema);
+      if (!CONVERSATION_ID.test(input.conversationId) || (input.source !== undefined && !CONVERSATION_SOURCE.test(input.source))) {
+        throw new PaneError('ERR_CONVERSATION_ID', 'That is not a conversation ID or hook source Pane accepts. Nothing was recorded.', 'Pass the session_id and source from Claude Code\'s SessionStart hook.');
+      }
+      const panel = resolveAgentPanel(input.panelId);
+      if (input.paneId && input.paneId !== panel.sessionId) {
+        throw new PaneError('ERR_CONVERSATION_PANEL', `Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${input.paneId}. Nothing was recorded.`, 'Pass the panel\'s own Pane, or leave out --pane.');
+      }
+      const recorded = panel.type === 'terminal' && await terminalPanelManager.recordConversationReport(panel.id, input.conversationId, input.source);
+      const base = { ok: true as const, paneId: panel.sessionId, panelId: panel.id, conversationId: input.conversationId };
+      // Key order matches the CLIs' printed --json: source before sure.
+      return input.source ? { ...base, source: input.source, sure: recorded } : { ...base, sure: recorded };
     }, result => ({ paneId: result.paneId, panelId: result.panelId, ok: result.ok }));
   });
 
@@ -2965,7 +3003,7 @@ async function submitCreateInitialInput(
 }
 
 function unverifiableDeliveryMessage(agent: RunpaneAgentId | undefined): string {
-  const title = agent ? AGENT_TEMPLATES[agent].title : 'this agent';
+  const title = agent ? configuredAgent(agent).title : 'this agent';
   return `Pane cannot verify that ${title} accepted the message; check its screen.`;
 }
 
@@ -3652,7 +3690,7 @@ async function createRunpaneChatTab(services: AppServices, paneId: string, reque
   return {
     ok: view.status !== 'stopped', paneId, panelId: created.panelId, title: panel?.title ?? chat.title ?? view.agent,
     active: activate, focused: activate,
-    tool: { title: panel?.title ?? view.agent, command: chat.profile ? `agent-farm ${chat.profile} (chat)` : `${view.agent} (chat)`, agent: view.agent },
+    tool: { title: panel?.title ?? view.agent, command: chat.profile ? `agent-farm ${chat.profile} (chat)` : `${view.agent} (chat)`, agent: isConfiguredAgent(view.agent) ? view.agent : undefined },
     expectedReport: services.expectedReportTracker?.expectation(created.panelId),
     // A stopped tab says why in `panels wait` (blocked.message) and restarts with `panels resume`.
     nextCommand: view.status === 'stopped' ? `runpane panels wait --panel ${created.panelId} --json` : chat.initialInput ? `runpane panels wait --panel ${created.panelId} --for idle --json` : `runpane panels submit --panel ${created.panelId} --text "<message>" --json`,
@@ -3673,7 +3711,7 @@ async function resumeChatTab(panel: ToolPanel): Promise<RunpanePanelResumeResult
   const manager = getChatTabManager();
   const before = manager.view(panel.id, 0, false);
   if (manager.isRunning(panel.id) && before.status !== 'stopped') {
-    return { ok: true, panelId: panel.id, paneId: panel.sessionId, action: 'already-running', message: 'The chat tab\'s agent is already running.', agentType: before.agent, panel: panelToSummary(panel), nextCommand: `runpane panels wait --panel ${panel.id} --for idle --json` };
+    return { ok: true, panelId: panel.id, paneId: panel.sessionId, action: 'already-running', message: 'The chat tab\'s agent is already running.', agentType: isConfiguredAgent(before.agent) ? before.agent : undefined, panel: panelToSummary(panel), nextCommand: `runpane panels wait --panel ${panel.id} --for idle --json` };
   }
   await (before.status === 'stopped' ? manager.restart(panel.id) : manager.ensure(panel.id));
   const after = manager.view(panel.id, 0, false);
@@ -3681,7 +3719,7 @@ async function resumeChatTab(panel: ToolPanel): Promise<RunpanePanelResumeResult
     throw new PaneError('CHAT_RESUME_FAILED', `Chat tab ${panel.id} did not start: ${after.problem?.message ?? 'its agent stopped'}.`, after.problem?.next ?? `Open the chat tab and press Restart, or run \`runpane panels resume --panel ${panel.id}\` again.`);
   }
   return {
-    ok: true, panelId: panel.id, paneId: panel.sessionId, action: 'resumed', agentType: after.agent,
+    ok: true, panelId: panel.id, paneId: panel.sessionId, action: 'resumed', agentType: isConfiguredAgent(after.agent) ? after.agent : undefined,
     message: 'The chat tab\'s agent started again and loaded its conversation.',
     panel: panelToSummary(panelManager.getPanel(panel.id) ?? panel), nextCommand: `runpane panels wait --panel ${panel.id} --for idle --json`,
   };
@@ -3834,7 +3872,7 @@ function commandExitedReason(panel: ToolPanel, screen: RunpanePanelScreenResult)
   }
   return {
     code: 'command-exited',
-    message: `The ${AGENT_TEMPLATES[screen.state.agentType].title} command exited back to the shell, so the panel will not become ready.${said} `
+    message: `The ${configuredAgent(screen.state.agentType).title} command exited back to the shell, so the panel will not become ready.${said} `
       + `Nothing was sent to it. Fix what it reported, then run \`${panelResumeCommand(panel.id)}\` to launch it again.`,
   };
 }
@@ -3882,7 +3920,7 @@ function readinessTimeoutReason(state: RunpanePanelStateSummary, timeoutMs: numb
   }
   return {
     code: 'agent-not-ready',
-    message: `Pane detected ${AGENT_TEMPLATES[state.agentType].title}, but its input box was not ready within ${seconds} s. `
+    message: `Pane detected ${configuredAgent(state.agentType).title}, but its input box was not ready within ${seconds} s. `
       + 'Check the screen, then wait again.',
   };
 }
@@ -4455,7 +4493,7 @@ async function runAgentDoctor(
   const context = services.sessionManager.getProjectContextByProjectId(repo.id);
   const repoSummary = projectToRepoSummary(repo, services.sessionManager.getSessionsForProject(repo.id).length);
   const environment = new PathResolver(repo).environment;
-  const command = AGENT_TEMPLATES[agent].command;
+  const command = agentTerminalCommand(agent);
   const executable = agentCommandExecutable(command);
   const checks: RunpaneAgentDoctorResult['checks'] = [];
   const warnings: string[] = [];
@@ -4464,7 +4502,7 @@ async function runAgentDoctor(
     checks.push({
       name: 'platform',
       ok: false,
-      message: `${AGENT_TEMPLATES[agent].title} is not supported on ${environment} repos.`,
+      message: `${configuredAgent(agent).title} is not supported on ${environment} repos.`,
     });
     return {
       ok: false,
@@ -4569,51 +4607,27 @@ async function runAgentDoctor(
   }
 
   let sessionCapabilityOk = true;
-  if (agent === 'opencode' && executablePath) {
-    try {
-      const helpCommand = `${quoteAgentDoctorExecutable(executablePath, environment)} --help`;
-      const result = await context.commandRunner.execAsync(helpCommand, repo.path, {
-        timeout: 5_000,
-        silent: true,
-      });
-      const helpOutput = `${result.stdout}\n${result.stderr}`;
-      const sessionFlagPattern = /(?:^|\s)--session(?:,|\s|$)/m;
-      sessionCapabilityOk = sessionFlagPattern.test(helpOutput)
-        && helpOutput.split(/\r?\n/u).some(line => /^\s*--session(?:,|\s|$)/u.test(line));
-      checks.push({
-        name: 'session-capability',
-        ok: sessionCapabilityOk,
-        message: sessionCapabilityOk
-          ? 'OpenCode supports explicit sessions with --session.'
-          : 'Upgrade OpenCode to v2.0.19 or newer; Pane requires the --session flag for reliable resume.',
-      });
-    } catch (error) {
-      sessionCapabilityOk = false;
-      warnings.push(commandErrorMessage(error, `${executable} --help failed.`));
-      checks.push({
-        name: 'session-capability',
-        ok: false,
-        message: 'Upgrade OpenCode to v2.0.19 or newer; Pane could not verify the required --session flag.',
-      });
-    }
-  }
-
-  if (agent === 'pi' && executablePath) {
-    // Pane opens each pi tab's session with --session-id, which pi added in 0.76.0.
-    const upgrade = 'Upgrade pi to 0.76.0 or newer (npm install -g @earendil-works/pi-coding-agent); Pane opens each tab\'s session with --session-id.';
+  // Pane reopens each tab's conversation with this flag, which older builds lack.
+  const sessionFlag = agent === 'opencode' ? { flag: '--session', since: 'v2.0.19' }
+    : agent === 'pi' ? { flag: '--session-id', since: '0.76.0' }
+    : undefined;
+  if (sessionFlag && executablePath) {
+    const { label, install } = configuredAgent(agent);
+    const upgrade = `Upgrade ${label} to ${sessionFlag.since} or newer (${install.command}); Pane reopens each tab's conversation with ${sessionFlag.flag}.`;
     try {
       const helpCommand = `${quoteAgentDoctorExecutable(executablePath, environment)} --help`;
       const result = await context.commandRunner.execAsync(helpCommand, repo.path, { timeout: 5_000, silent: true });
-      sessionCapabilityOk = `${result.stdout}\n${result.stderr}`.split(/\r?\n/u).some(line => /^\s*--session-id\s/u.test(line));
+      const flagLine = new RegExp(`^\\s*${sessionFlag.flag}(?:,|\\s|$)`, 'u');
+      sessionCapabilityOk = `${result.stdout}\n${result.stderr}`.split(/\r?\n/u).some(line => flagLine.test(line));
       checks.push({
         name: 'session-capability',
         ok: sessionCapabilityOk,
-        message: sessionCapabilityOk ? 'Pi supports explicit sessions with --session-id.' : `${upgrade} This pi's --help does not list it.`,
+        message: sessionCapabilityOk ? `${label} supports explicit sessions with ${sessionFlag.flag}.` : `${upgrade} Its --help does not list the flag.`,
       });
     } catch (error) {
       sessionCapabilityOk = false;
       warnings.push(commandErrorMessage(error, `${executable} --help failed.`));
-      checks.push({ name: 'session-capability', ok: false, message: `${upgrade} Pane could not run pi --help to check.` });
+      checks.push({ name: 'session-capability', ok: false, message: `${upgrade} Pane could not run --help to check.` });
     }
   }
 
@@ -4805,7 +4819,7 @@ interface OrchestrationSessionAgentRequest {
 function parseOrchestrationSessionAgentRequest(value: PaneCommandValue): OrchestrationSessionAgentRequest {
   if (!isRecord(value)) throw new Error('Session agent request must be an object');
   const selector = parseOrchestrationSessionSelector(value.selector);
-  const agent = decodeBoundary(value.agent, boundary.enumeration('claude', 'codex', 'cursor', 'opencode'));
+  const agent = decodeBoundary(value.agent, configuredAgentSchema);
   return { selector, agent };
 }
 
@@ -5216,13 +5230,13 @@ function parsePanelCreateRequest(value: PaneCommandValue): RunpanePanelCreateReq
 
   if (value.type === 'chat') {
     const chat = decodeBoundary(value.chat ?? {}, boundary.object({
-      agent: boundary.optional(boundary.enumeration('claude', 'codex')),
+      agent: boundary.optional(boundary.nonEmptyString),
       profile: boundary.optional(boundary.nonEmptyString),
       args: boundary.optional(boundary.record(boundary.string)),
       initialInput: boundary.optional(boundary.string),
       title: boundary.optional(boundary.string),
     }));
-    if (!chat.agent && !chat.profile) throw new PaneError('ERR_RUNPANE_CHAT_AGENT_REQUIRED', 'A chat tab needs an agent (claude or codex) or an Agent Farm profile. No tab was created.', 'Pass --agent claude, --agent codex or --agent-farm <profile> with --chat.');
+    if (!chat.agent && !chat.profile) throw new PaneError('ERR_RUNPANE_CHAT_AGENT_REQUIRED', 'A chat tab needs an agent or an Agent Farm profile. No tab was created.', 'Pass --agent <id> or --agent-farm <profile> with --chat.');
     return {
       paneId, type: 'chat', chat,
       noFocus: optionalBoolean(value.noFocus), focus: optionalBoolean(value.focus),
@@ -6769,7 +6783,7 @@ function toolCommandTitle(command: string): string {
 
 function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment): RunpaneResolvedTool {
   if ('agent' in tool) {
-    const template = AGENT_TEMPLATES[tool.agent];
+    const template = { title: configuredAgent(tool.agent).title, command: agentTerminalCommand(tool.agent) };
     if (environment && !isAgentSupportedOnPlatform(tool.agent, environment)) {
       throw new Error(`${template.title} is not supported on ${environment} repos.`);
     }
@@ -6801,7 +6815,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
   // `--agent` with `--tool-command` names the agent the command runs. A
   // wrapper is launched as given; a plain agent command keeps its usual launch.
   return {
-    title: tool.title ?? AGENT_TEMPLATES[declaredAgent].title,
+    title: tool.title ?? configuredAgent(declaredAgent).title,
     command: tool.command,
     agent: declaredAgent,
     launchMode: commandAgent === declaredAgent ? undefined : 'wrapped',

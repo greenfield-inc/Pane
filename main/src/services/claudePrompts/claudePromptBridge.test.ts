@@ -66,7 +66,7 @@ describe('ClaudePromptBridge', () => {
     expect(await (await response).json()).toEqual({
       hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'The user said no. The user answered this prompt in Pane and wrote: Only unit tests' } },
     });
-    expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: 'No', answeredOn: 'iPhone' });
+    expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: 'No — "Only unit tests"', answeredOn: 'iPhone' });
   });
 
   it("names the tab's project in a don't-ask-again choice, where Claude keeps the rule", async () => {

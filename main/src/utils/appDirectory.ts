@@ -7,7 +7,6 @@ let customAppDir: string | undefined;
 
 interface ElectronAppLike {
   isPackaged: boolean;
-  getPath(name: 'exe'): string;
 }
 
 function getElectronApp(): ElectronAppLike | null {
@@ -90,36 +89,24 @@ function setAppDirectory(dir: string): void {
 }
 
 /**
- * Determines if Pane is running from an installed application (DMG/Applications folder)
- * rather than a development build
+ * Where Pane keeps its data when neither --pane-dir nor PANE_DIR names a
+ * directory. A development (unpackaged) Electron build gets ~/.pane_dev, so it
+ * never opens, migrates or cleans up the installed Pane's ~/.pane by accident.
+ * Pointing one at ~/.pane takes an explicit PANE_DIR=~/.pane.
  */
-function isInstalledApp(): boolean {
-  const electronApp = getElectronApp();
-
-  // Check if app is packaged (built for distribution)
-  if (!electronApp?.isPackaged) {
-    return false;
+export function defaultAppDirectory(electronApp: ElectronAppLike | null, home: string): string {
+  if (electronApp && !electronApp.isPackaged) {
+    return join(home, '.pane_dev');
   }
-  
-  // On macOS, check if running from /Applications or a mounted DMG volume
-  if (process.platform === 'darwin') {
-    const appPath = electronApp.getPath('exe');
-    // Apps installed from DMG or in /Applications will have these paths
-    const isInApplications = appPath.startsWith('/Applications/');
-    const isInVolumes = appPath.startsWith('/Volumes/');
-    const isInPrivateTmp = appPath.includes('/private/var/folders/'); // Temp mount for DMG
-    
-    return isInApplications || isInVolumes || isInPrivateTmp;
-  }
-  
-  // For other platforms, being packaged is sufficient
-  return true;
+  return join(home, '.pane');
 }
+
+let announcedDevDirectory = false;
 
 /**
  * Gets the Pane directory path. Returns the custom directory if set,
  * otherwise falls back to the environment variable PANE_DIR,
- * and finally defaults to ~/.pane
+ * and finally to defaultAppDirectory()
  */
 export function getAppDirectory(): string {
   // 1. Check if custom directory was set programmatically
@@ -140,22 +127,14 @@ export function getAppDirectory(): string {
     return envDir;
   }
 
-  // 4. If running as an installed app (from DMG, /Applications, etc), always use ~/.pane
-  if (isInstalledApp()) {
-    console.log('[Pane] Running as installed app, using ~/.pane');
-    return join(homedir(), '.pane');
-  }
-
-  // 5. If running inside Pane (detected by bundle identifier) in development, use development directory
-  // This prevents development Pane from interfering with production Pane
+  // 4. The default: ~/.pane for packaged Pane, ~/.pane_dev for a development build.
   const electronApp = getElectronApp();
-  if (process.env.__CFBundleIdentifier === 'com.dcouple.pane' && !electronApp?.isPackaged) {
-    console.log('[Pane] Detected running inside Pane development, using ~/.pane_dev for isolation');
-    return join(homedir(), '.pane_dev');
+  const dir = defaultAppDirectory(electronApp, homedir());
+  if (electronApp && !electronApp.isPackaged && !announcedDevDirectory) {
+    announcedDevDirectory = true;
+    console.log(`[Pane] Development build: using ${dir}, not the installed Pane's ~/.pane. Set PANE_DIR to choose another data directory.`);
   }
-
-  // 6. Default to ~/.pane
-  return join(homedir(), '.pane');
+  return dir;
 }
 
 /**

@@ -440,6 +440,8 @@ export function ProjectSessionList({
         {orchestrationAvailability === 'unavailable' || orchestrationAvailability === 'idle' ? (
           <button
             type="button"
+            data-sidebar-item
+            data-sidebar-key="pane-chat"
             onClick={() => {
               setSidebarNavigationScope('repositories');
               setActiveSession(null);
@@ -470,6 +472,8 @@ export function ProjectSessionList({
           <button
             type="button"
             data-testid="mission-control-nav"
+            data-sidebar-item
+            data-sidebar-key="mission-control"
             onClick={() => {
               setSidebarNavigationScope('repositories');
               navigateToMissionControl();
@@ -528,6 +532,7 @@ export function ProjectSessionList({
           <button
             type="button"
             onClick={() => onRepositoriesSectionExpandedChange(!repositoriesSectionExpanded)}
+            data-sidebar-item
             className={SIDEBAR_SECTION_TOGGLE}
           >
             <span className={SIDEBAR_SECTION_LABEL}>{inboxActive ? 'Inbox' : 'Projects'}</span>
@@ -635,6 +640,8 @@ export function ProjectSessionList({
                 >
                   <button
                     type="button"
+                    data-sidebar-item
+                    data-sidebar-key={`project-${project.id}`}
                     onClick={() => toggleProject(project.id)}
                     aria-expanded={isExpanded}
                     aria-controls={`project-sessions-${project.id}`}
@@ -746,6 +753,8 @@ export function LoopsNavRow({ active }: { active: boolean }) {
     <button
       type="button"
       data-testid="loops-nav"
+      data-sidebar-item
+      data-sidebar-key="loops"
       onClick={() => navigateToLoops()}
       className={cn(
         SIDEBAR_ROW_BASE,
@@ -783,6 +792,8 @@ export function ApprovalsNavRow() {
     <button
       type="button"
       data-testid="approvals-nav"
+      data-sidebar-item
+      data-sidebar-key="approvals"
       aria-pressed={nav.open}
       aria-label={nav.label}
       title={nav.title}
@@ -841,6 +852,7 @@ function SshHostsSection({ expanded, onExpandedChange }: { expanded: boolean; on
             if (!expanded) void refresh();
             onExpandedChange(!expanded);
           }}
+          data-sidebar-item
           className={SIDEBAR_SECTION_TOGGLE}
         >
           <span className={SIDEBAR_SECTION_LABEL}>SSH hosts</span>
@@ -854,6 +866,7 @@ function SshHostsSection({ expanded, onExpandedChange }: { expanded: boolean; on
           <button
             type="button"
             data-testid="ssh-host-row"
+            data-sidebar-item
             title={`ssh ${alias}`}
             onClick={() => open(alias, false)}
             onContextMenu={event => {
@@ -1146,6 +1159,7 @@ function SessionRow({
         rowLayout === 'single' ? 'py-1' : 'py-1.5',
         isActive ? 'bg-surface-selected' : 'hover:bg-surface-hover'
       )}
+      data-sidebar-selected={isActive || undefined}
     >
       {reorder && <DropLine edge={reorder.indicator} />}
       <Tooltip
@@ -1156,6 +1170,8 @@ function SessionRow({
         <button
           type="button"
           data-row-open
+          data-sidebar-item
+          data-sidebar-key={`pane-${session.id}`}
           onClick={() => { resumeIfOpenResumes({ kind: 'pane', id: session.id }, Boolean(session.paused)); onClick(); }}
           aria-current={isActive ? 'page' : undefined}
           aria-label={accessibleName}

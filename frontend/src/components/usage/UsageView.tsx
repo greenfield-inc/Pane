@@ -279,7 +279,6 @@ export function UsageView() {
   useHotkey({
     id: 'usage-download',
     label: 'Download usage image',
-    keys: 'mod+shift+d',
     category: 'tools',
     action: () => { void handleDownload(); },
   });
@@ -287,7 +286,6 @@ export function UsageView() {
   useHotkey({
     id: 'usage-share',
     label: 'Share usage image',
-    keys: 'mod+shift+s',
     category: 'tools',
     action: () => { void handleShare(); },
   });

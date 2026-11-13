@@ -32,6 +32,49 @@ describe('ConfigManager appearance persistence', () => {
     });
   });
 
+  it('tells existing configs once about the moved keys, and never a fresh install (D-236)', async () => {
+    const fresh = new ConfigManager();
+    await fresh.initialize();
+    expect(fresh.getConfig().keymapNotice).toBe('seen');
+
+    await fs.writeFile(configPath, JSON.stringify({ theme: 'folio' }));
+    const existing = new ConfigManager();
+    await existing.initialize();
+    expect(existing.getConfig().keymapNotice).toBe('pending');
+    await existing.updateConfig({ keymapNotice: 'seen' });
+    const relaunched = new ConfigManager();
+    await relaunched.initialize();
+    expect(relaunched.getConfig().keymapNotice).toBe('seen');
+  });
+
+  it('turns chat tabs on for a fresh install, and leaves an existing config as it was (D-329)', async () => {
+    const fresh = new ConfigManager();
+    await fresh.initialize();
+    expect(fresh.getConfig().chatTabsEnabled).toBe(true);
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).chatTabsEnabled).toBe(true);
+
+    // A config saved before the key existed had chat tabs off, and stays off.
+    await fs.writeFile(configPath, JSON.stringify({ theme: 'folio' }));
+    const existing = new ConfigManager();
+    await existing.initialize();
+    expect(existing.getConfig().chatTabsEnabled).toBe(false);
+
+    await fs.writeFile(configPath, JSON.stringify({ theme: 'folio', chatTabsEnabled: true }));
+    const optedIn = new ConfigManager();
+    await optedIn.initialize();
+    expect(optedIn.getConfig().chatTabsEnabled).toBe(true);
+  });
+
+  it('keeps keyboard overrides, drops an empty map, and keeps unknown ids for a downgrade', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    await manager.updateConfig({ keyboardShortcutOverrides: { 'focus-sidebar': 'mod+shift+e', 'from-a-newer-pane': 'mod+x' } });
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).keyboardShortcutOverrides)
+      .toEqual({ 'focus-sidebar': 'mod+shift+e', 'from-a-newer-pane': 'mod+x' });
+    await manager.updateConfig({ keyboardShortcutOverrides: {} });
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).keyboardShortcutOverrides).toBeUndefined();
+  });
+
   it('preserves the OpenCode default orchestrator agent across reload', async () => {
     const manager = new ConfigManager();
     await manager.initialize();
@@ -172,6 +215,31 @@ describe('ConfigManager appearance persistence', () => {
     expect(manager.getConfig().theme).toBe('folio');
     expect(await fs.readFile(configPath, 'utf8')).toBe(before);
     rename.mockRestore();
+  });
+
+  it('saves machine marks across reload, keeping only known parts and dropping empty ones', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    // SAFETY: the casts stand in for a renderer that sends fields the config does not know.
+    await manager.updateConfig({
+      machineMarks: {
+        local: { letters: 'SM', color: 'Lime' },
+        'travel-laptop': { color: 'Violet', extra: true } as never,
+        'build-box': {},
+      },
+    });
+    await manager.reloadFromDisk();
+    const expected = { local: { letters: 'SM', color: 'Lime' }, 'travel-laptop': { color: 'Violet' } };
+    expect(manager.getConfig().machineMarks).toEqual(expected);
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).machineMarks).toEqual(expected);
+  });
+
+  it('rejects a machine mark colour outside the palette without saving it', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    // SAFETY: the cast stands in for a renderer that sends a colour outside the palette.
+    await expect(manager.updateConfig({ machineMarks: { local: { color: 'Plaid' as never } } })).rejects.toThrow(/Violet/);
+    expect(manager.getConfig().machineMarks).toBeUndefined();
   });
 });
 

@@ -1,5 +1,5 @@
 import type { AgentState } from '@shared/types/agentStatus';
-import type { NotifyAnswer, NotifyItem, NotifyRemoteCommand, NotifySharedState } from '@shared/types/notify';
+import type { NotifyAnswer, NotifyItem, NotifyRemoteCommand, NotifyReply, NotifySharedState } from '@shared/types/notify';
 import type { OrchestrationSessionRecord, OrchestrationSessionView } from '@shared/types/orchestrationSession';
 import type { PaneChatAgent } from '@shared/types/paneChat';
 import type { TerminalPausedMark, ToolPanel } from '@shared/types/panels';
@@ -474,7 +474,20 @@ export class DemoWorkspace {
     if (command.type === 'open-link') throw new Error(`Opening related files ${NEEDS_COMPUTER}`);
     const item = this.notify.find(candidate => candidate.id === command.id);
     if (!item) throw new Error('This question is no longer waiting.');
-    if (command.type === 'answer' && item.state === 'waiting') {
+    if (command.type === 'answer' && item.state === 'waiting' && 'picks' in command.answer && command.answer.text?.trim()) {
+      // A typed reply: the sample agent reads it, then takes it as the answer, as an asker would with --took.
+      const { picks, text } = command.answer;
+      const generation = this.nextAnswerGeneration(item.id);
+      const reply: NotifyReply = { id: `${item.id}-reply-${generation}`, text: text.trim(), at: Date.now(), state: 'reading', reader: { kind: 'asker', name: item.source.agent } };
+      if (picks.some(Boolean)) reply.picks = picks;
+      this.replaceNotify({ ...item, reply, readyAgain: undefined });
+      this.later(UNDO_HOLD_MS, () => this.takeReply(item.id, generation));
+    } else if (command.type === 'fix-reply' && item.reply) {
+      // The person's fix: a question goes back to waiting on the agent; an answer is recorded as typed.
+      const reply: NotifyReply = { ...item.reply, fixed: command.as, state: command.as };
+      if (command.as === 'question') this.replaceNotify({ ...item, state: 'waiting', resolvedAt: undefined, answerSummary: undefined, reply });
+      else this.replaceNotify({ ...item, state: 'answered', resolvedAt: Date.now(), answerSummary: summarize(item, { picks: reply.picks ?? [], text: reply.text }), reply });
+    } else if (command.type === 'answer' && item.state === 'waiting') {
       const generation = this.nextAnswerGeneration(item.id);
       this.replaceNotify({ ...item, state: 'sent', answerSummary: summarize(item, command.answer) });
       // Like a host, a secret is saved and delivered at once, with no Undo hold.
@@ -494,6 +507,16 @@ export class DemoWorkspace {
     }
     this.notifyChanged();
     return null;
+  }
+
+  /** The sample agent read the reply: it takes it as the answer. */
+  private takeReply(id: string, generation: number): void {
+    const item = this.notify.find(candidate => candidate.id === id);
+    if (item?.state !== 'waiting' || item.reply?.state !== 'reading' || this.answerGeneration.get(id) !== generation) return;
+    const reply = { ...item.reply, state: 'answer' as const, deliveredAt: Date.now() };
+    this.replaceNotify({ ...item, state: 'answered', resolvedAt: Date.now(), answerSummary: summarize(item, { picks: reply.picks ?? [], text: reply.text }), reply });
+    this.notifyChanged();
+    this.autopilot.answered(id);
   }
 
   private nextAnswerGeneration(id: string): number {
@@ -530,7 +553,7 @@ export class DemoWorkspace {
     return {
       id, name, agent, archived: false, isPinned: false,
       internalSessionId: `${id}terminal__`,
-      panelIds: { claude: `${id}claude`, codex: `${id}codex`, cursor: `${id}cursor`, opencode: `${id}opencode` },
+      panelIds: { claude: `${id}claude`, codex: `${id}codex`, cursor: `${id}cursor`, opencode: `${id}opencode`, pi: `${id}pi` },
       goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
       associations: [
         { paneId: 'demo-fix-checkout-race', panelIds: [], attachedAt: at },
@@ -610,6 +633,11 @@ function summarize(item: NotifyItem, answer: NotifyAnswer): string {
   if (item.ui === 'secret') return 'approved' in answer ? 'Declined' : `Saved as ${item.secret?.project}/${item.secret?.name}`;
   if ('choice' in answer) return answer.choice;
   if ('approved' in answer) return answer.approved ? 'Approved' : 'Denied';
+  if ('picks' in answer) {
+    const picked = answer.picks.filter(Boolean).join(' · ');
+    const text = answer.text?.trim();
+    return text ? `“${text}”${picked ? ` (picked: ${picked})` : ''}` : picked;
+  }
   return answer.text;
 }
 

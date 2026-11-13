@@ -1,9 +1,11 @@
-import { lazy, useMemo } from 'react';
+import { lazy, useEffect, useMemo, useState } from 'react';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { useSessionWorkers } from '../../components/chatTab/sessionWorkers';
 import type { ChatTurnActions } from '../../components/chatTab/ChatTurns';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
+import type { ChatStatusPullRequest } from '../../components/chatTab/ChatStatusBar';
+import { watchPanePullRequest } from './panePullRequest';
 
 const ChatTabPanel = lazy(() => import('../../components/chatTab/ChatTabPanel'));
 
@@ -27,6 +29,9 @@ export function RemoteChatTab({ adapter, panel, panels, connected, onOpenWorker,
   // SAFETY: the panel type 'chat' carries ChatPanelState as its custom state.
   const sessionId = (panel.state.customState as ChatPanelState | undefined)?.orchestrationSessionId;
   const workers = useSessionWorkers(adapter.sessionWorkers, sessionId);
+  // The Pane's pull request for the status bar's PR item, from the host's git status (review F-3).
+  const [pr, setPr] = useState<ChatStatusPullRequest>();
+  useEffect(() => watchPanePullRequest(adapter, panel.sessionId, setPr), [adapter, panel.sessionId]);
   const diffPanelId = panels.find(candidate => candidate.type === 'diff')?.id;
   const actions = useMemo<ChatTurnActions>(() => ({
     onOpenWorker: sessionId ? paneId => onOpenWorker(paneId, sessionId) : undefined,
@@ -35,6 +40,6 @@ export function RemoteChatTab({ adapter, panel, panels, connected, onOpenWorker,
   // Dropped and pasted files land in the Pane's folder on the host, as the terminal's do.
   const saveFile = useMemo(() => (file: { name: string; dataUrl: string }) => adapter.saveFile(panel.sessionId, file), [adapter, panel.sessionId]);
   return <ChatTabPanel key={panel.id} panelId={panel.id} client={adapter.chatTab} connected={connected}
-    workers={workers} actions={actions} saveFile={saveFile}
+    workers={workers} actions={actions} saveFile={saveFile} pr={pr}
     placeholder={sessionId ? 'Ask the Session anything' : undefined} />;
 }

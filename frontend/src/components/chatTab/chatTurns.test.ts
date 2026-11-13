@@ -95,26 +95,51 @@ describe('worker lines in the Session chat', () => {
     ], new Map([['b', '2026-11-03T11:42:00.000Z']]));
     expect(lines).toEqual([
       { paneId: 'a', name: 'cmd-f-find', state: 'done', label: 'Done', detail: 'PR #1230 ready', pr: 1230 },
-      { paneId: 'b', name: 'csv-export', state: 'running', label: 'Running', attachedAt: '2026-11-03T11:42:00.000Z' },
+      { paneId: 'b', name: 'csv-export', state: 'running', label: 'Running', attachedAt: '2026-11-03T11:42:00.000Z', working: [{ title: '' }] },
       { paneId: 'c', name: 'notify-sound', state: 'waiting', label: 'Waiting', detail: 'Which sound?' },
     ]);
   });
 
-  it('mentions a worker only when it finished, reported or is asking in the latest turn (D-201)', () => {
+  it('counts only the agents actively working, each with the tab that is working (D-276)', async () => {
+    const { workerLines, workingAgents } = await import('../../../../shared/chatTabPresentation');
+    const lines = workerLines([
+      { paneId: 'a', name: 'csv-export', missing: false, archived: false, panels: [{ state: 'idle', panelId: 'a1', title: 'Codex' }, { state: 'working', panelId: 'a2', title: 'Claude Code' }] },
+      { paneId: 'b', name: 'asks', missing: false, archived: false, panels: [{ state: 'blocked', panelId: 'b1', title: 'Claude Code' }] },
+      { paneId: 'd', name: 'idle', missing: false, archived: false, panels: [{ state: 'idle', panelId: 'd1', title: 'Claude Code' }] },
+      { paneId: 'e', name: 'gone', missing: true, archived: false, panels: [{ state: 'working', panelId: 'e1', title: 'Claude Code' }] },
+    ]);
+    expect(workingAgents(lines)).toEqual([{ paneId: 'a', name: 'csv-export', panelId: 'a2', title: 'Claude Code' }]);
+    expect(lines.find(line => line.name === 'asks')?.working).toBeUndefined();
+    expect(workingAgents(undefined)).toEqual([]);
+  });
+
+  it('counts every working tab of a Pane, beside a blocked sibling or after its report (review F-1 on #1281)', async () => {
+    const { workerLines, workingAgents } = await import('../../../../shared/chatTabPresentation');
+    const lines = workerLines([
+      { paneId: 'a', name: 'pair', missing: false, archived: false, panels: [{ state: 'working', panelId: 'a1', title: 'Implement' }, { state: 'working', panelId: 'a2', title: 'Review' }] },
+      { paneId: 'b', name: 'split', missing: false, archived: false, panels: [{ state: 'blocked', panelId: 'b1', title: 'Asks' }, { state: 'working', panelId: 'b2', title: 'Builds' }] },
+      { paneId: 'c', name: 'reported', missing: false, archived: false, panels: [{ state: 'working', panelId: 'c1', title: 'Review' }], report: { state: 'done' } },
+    ]);
+    expect(workingAgents(lines).map(agent => `${agent.name} › ${agent.title}`)).toEqual(['pair › Implement', 'pair › Review', 'split › Builds', 'reported › Review']);
+    // The Pane's own line keeps its summary: the split Pane still reads as waiting on the person.
+    expect(lines.find(line => line.name === 'split')?.state).toBe('waiting');
+  });
+
+  it('mentions a worker only when it finished or failed during the latest finished turn, never one asking (D-223)', () => {
     const turns: ChatTurn[] = [
       { id: 't1', items: [], running: false, startedAt: '2026-11-03T11:40:00.000Z', endedAt: '2026-11-03T11:41:00.000Z' },
       { id: 't2', items: [], running: false, startedAt: '2026-11-03T11:50:00.000Z', endedAt: '2026-11-03T11:51:00.000Z' },
     ];
     const worker = (paneId: string, state: ChatWorkerLine['state'], reportedAt?: string): ChatWorkerLine => ({ paneId, name: paneId, state, label: state, reportedAt });
     const notes = workerNotes(turns, [
-      worker('running', 'running'), worker('switch-to-chat', 'waiting'), worker('approvals-global', 'done', '2026-11-03T11:50:30.000Z'),
+      worker('running', 'running'), worker('switch-to-chat', 'waiting', '2026-11-03T11:50:10.000Z'), worker('approvals-global', 'done', '2026-11-03T11:50:30.000Z'),
       worker('broke', 'failed', '2026-11-03T11:50:40.000Z'), worker('said', 'idle', '2026-11-03T11:50:50.000Z'),
-      worker('old-done', 'done', '2026-11-03T11:00:00.000Z'), worker('idle', 'idle'),
+      worker('old-done', 'done', '2026-11-03T11:00:00.000Z'), worker('after', 'done', '2026-11-03T11:52:00.000Z'), worker('idle', 'idle'),
     ]);
-    expect(notes.map(note => note.text)).toEqual(['switch-to-chat is asking you', 'approvals-global finished', 'broke failed', 'said reported']);
-    // A running turn has no start of its own yet: it began when the one before it ended.
-    const running = workerNotes([turns[0], { id: 't2', items: [], running: true }], [worker('since', 'done', '2026-11-03T11:45:00.000Z'), worker('before', 'done', '2026-11-03T11:30:00.000Z')]);
-    expect(running.map(note => note.text)).toEqual(['since finished']);
+    expect(notes.map(note => note.text)).toEqual(['approvals-global finished', 'broke failed']);
+    // While a turn runs nothing floats above the composer: the turn has not reported anything yet.
+    const running = workerNotes([turns[0], { id: 't2', items: [], running: true }], [worker('since', 'done', '2026-11-03T11:45:00.000Z')]);
+    expect(running).toEqual([]);
   });
 });
 

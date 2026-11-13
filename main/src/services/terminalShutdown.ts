@@ -2,9 +2,10 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { customCommandResumeSchema, effectiveCustomResume } from '../../../shared/types/customCommandResume';
 import type { ToolPanel } from '../../../shared/types/panels';
 import { isCliAgentType, resolveAgentTypeFromCommand } from './agents/agentIdentity';
+import { configuredAgentSchema } from '../../../shared/agents';
 
 const shutdownResumeStateSchema = boundary.object({
-  agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode', 'pi')),
+  agentType: boundary.optional(configuredAgentSchema),
   initialCommand: boundary.optional(boundary.string),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
 });
