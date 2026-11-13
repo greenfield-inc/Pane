@@ -1,11 +1,12 @@
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 
 import type { RemoteDaemonClient } from '@shared/remoteClient';
 import { ChatTabViewerRegistry, type ChatTabViewer } from '@shared/chatTabViewer';
-import type { ChatTabClient } from '@shared/types/chatTab';
+import type { ChatAgentEntry, ChatTabClient } from '@shared/types/chatTab';
 
-import { useDaemon } from '@/daemon';
+import { useDaemon, useDaemonQueryKey } from '@/daemon';
 
 import { chatTabClient } from './chatTabClient';
 
@@ -39,4 +40,11 @@ export function useChatTab(panelId: string) {
     return () => subscription.remove();
   }, [viewer]);
   return { chat, viewer, snapshot, connected: connection.status === 'connected' };
+}
+
+/** The agents the host can open as chats (chat-tab:agents); undefined while loading or when the host is too old to have a catalog. */
+export function useChatAgents(): ChatAgentEntry[] | undefined {
+  const { client } = useDaemon();
+  const queryKey = useDaemonQueryKey('chat-tab:agents');
+  return useQuery({ queryKey, queryFn: () => clientFor(client).agents(), staleTime: 5 * 60_000, retry: false }).data;
 }

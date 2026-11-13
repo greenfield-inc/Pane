@@ -3,7 +3,8 @@ import { LegendList } from '@legendapp/list/react-native';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Keyboard, StyleSheet, View } from 'react-native';
 
-import { arrangeComposerControls, choiceName, isRiskyMode, triggerLabels } from '@shared/chatComposerControls';
+import { agentLabel } from '@shared/agents';
+import { arrangeComposerControls, choiceName, isRiskyMode, paneFullAccessOn, triggerLabels } from '@shared/chatComposerControls';
 import { chatTurns, waitingToolIds, type ChatWorkerLine } from '@shared/chatTabPresentation';
 import { rejectOption } from '@shared/chatTabPermissions';
 import type { ChatTabCommand, ChatTabSend } from '@shared/types/chatTab';
@@ -22,9 +23,7 @@ import { ChatRowView, type ChatRowActions } from './ChatTabRows';
 import { chatRows } from './chatRows';
 import { chatImageAdapter, chatImageAttachment, chatSendFromComposer, chatThreadMessage, composedText, restorableAttachments } from './chatThread';
 import { pickChatImages } from './pickChatImages';
-import { useChatTab } from './useChatTab';
-
-const AGENT_NAMES = { claude: 'Claude', codex: 'Codex' } as const;
+import { useChatAgents, useChatTab } from './useChatTab';
 
 function newOperationId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
@@ -60,6 +59,7 @@ export interface ChatTabScreenProps {
 export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, placeholder, blocks, userNotice, queuedLabel, settings: showSettings = true }: ChatTabScreenProps) {
   const theme = useTheme();
   const { chat, viewer, snapshot, connected } = useChatTab(panelId);
+  const catalog = useChatAgents();
   const view = snapshot.view;
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -74,7 +74,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
     onViewDiff, onOpenWorker,
     renderBlock: (language, content) => blocks?.[language]?.(content),
   }), [onViewDiff, onOpenWorker, blocks]);
-  const agent = view ? AGENT_NAMES[view.agent] : 'the agent';
+  const agent = view ? catalog?.find(entry => entry.id === view.agent)?.label ?? agentLabel(view.agent) : 'the agent';
   const disabled = !connected || !view || view.status === 'stopped';
   const commands = matchingCommands(snapshot.draft, view?.commands ?? []);
   const pending = !!snapshot.pendingDelivery;
@@ -155,6 +155,8 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
   const error = snapshot.error;
   const arranged = arrangeComposerControls(view?.controls ?? []);
   const labels = triggerLabels(arranged);
+  // The never-asks marker: the agent's own bypass mode, or Pane's Full access answering approvals for it.
+  const riskyMode = arranged.mode && isRiskyMode(arranged.mode) ? choiceName(arranged.mode) : paneFullAccessOn(view?.controls ?? [])?.name;
   const footer = snapshot.hasNewer
     ? <DockButton testID="chat-newer" title={snapshot.loadingNewer ? 'Loading…' : 'Newer messages'} disabled={snapshot.loadingNewer} onPress={() => void viewer.loadNewer()} style={styles.newer} />
     : view?.notice ? <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>{view.notice}</Text> : null;
@@ -189,7 +191,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
         <ChatTabComposer agent={agent} placeholder={placeholder ?? 'Ask anything'}
           disabled={disabled} pending={pending} working={working} canStop={!busy && connected} canAttach={!!view?.canAttachImages}
           model={labels.model} effort={labels.effort}
-          riskyMode={arranged.mode && isRiskyMode(arranged.mode) ? choiceName(arranged.mode) : undefined} canConfigure={!!view?.controls.length} settings={showSettings}
+          riskyMode={riskyMode} canConfigure={!!view?.controls.length} settings={showSettings}
           onDraft={text => viewer.setDraft(text)} onAttach={() => void attach()} onSettings={() => setSettings(true)} onStop={() => void act(() => chat.cancel(panelId))} />
       </View>
       <ComposerSheet visible={settings} onClose={() => setSettings(false)} testID="chat-settings-sheet">

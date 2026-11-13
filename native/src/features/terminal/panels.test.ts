@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ChatAgentEntry } from '@shared/types/chatTab';
 import type { ToolPanel } from '@shared/types/panels';
 
 import { followsHost, newPanelOptions, pickPanel, sessionWorkspacePanels, stripPanels, tabView } from './panels';
@@ -122,11 +123,26 @@ describe('sessionWorkspacePanels', () => {
   });
 });
 
+function agent(entry: Pick<ChatAgentEntry, 'id' | 'label'> & Partial<ChatAgentEntry>): ChatAgentEntry {
+  return { icon: entry.id, source: 'config', installed: true, fullAccess: 'agent', switchFromTerminal: { ok: true }, ...entry };
+}
+
 describe('newPanelOptions', () => {
-  it('lists Claude, Codex and Agent Farm profile chats before the terminal group when chat tabs are on', () => {
-    const ids = newPanelOptions([], true).map(option => option.id);
-    expect(ids.slice(0, 4)).toEqual(['chat-claude', 'chat-codex', 'chat-profile', 'terminal']);
-    expect(newPanelOptions([], true).find(option => option.id === 'chat-profile')).toMatchObject({ title: 'Agent Farm profile…', chatProfile: true });
+  it('offers the host catalog\'s installed agents as chats, first-class first, then the profile chat and the terminal group', () => {
+    const catalog: ChatAgentEntry[] = [
+      agent({ id: 'goose', label: 'Goose', source: 'registry' }),
+      agent({ id: 'claude', label: 'Claude' }),
+      agent({ id: 'cursor', label: 'Cursor', installed: false }),
+      agent({ id: 'codex', label: 'Codex' }),
+    ];
+    const options = newPanelOptions([], true, catalog);
+    expect(options.slice(0, 5).map(option => option.id)).toEqual(['chat-claude', 'chat-codex', 'chat-goose', 'chat-profile', 'terminal']);
+    expect(options.find(option => option.id === 'chat-goose')).toMatchObject({ title: 'Goose', description: 'Chat with Goose on the computer', iconKey: 'goose', chat: 'goose' });
+    expect(options.find(option => option.id === 'chat-profile')).toMatchObject({ title: 'Agent Farm profile…', chatProfile: true });
+  });
+
+  it('offers Claude and Codex chats when the host sends no catalog', () => {
+    expect(newPanelOptions([], true).slice(0, 4).map(option => option.title)).toEqual(['Claude', 'Codex', 'Agent Farm profile…', 'Terminal']);
   });
 
   it('offers no chats while chat tabs are off', () => {

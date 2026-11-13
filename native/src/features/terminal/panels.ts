@@ -1,4 +1,6 @@
+import { agentConfig, agentLabel, configuredChatAgentIds, configuredAgent } from '@shared/agents';
 import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
+import type { ChatAgentEntry } from '@shared/types/chatTab';
 import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSession';
 import type { EditorPanelState, ToolPanel, ToolPanelType } from '@shared/types/panels';
 import type { RemotePwaCustomCommand } from '@shared/types/remoteDaemon';
@@ -88,18 +90,29 @@ export interface NewPanelOption {
   description: string;
   /** Command the host runs when the panel starts; none opens a shell. */
   initialCommand?: string;
-  /** A chat tab for this agent instead of a terminal. */
-  chat?: 'claude' | 'codex';
+  /** The agent's brand icon key (the agents config's `icon`, or the catalog entry's). */
+  iconKey?: string;
+  /** A chat tab for this agent id instead of a terminal. */
+  chat?: string;
   /** A chat tab running an Agent Farm profile, asked for before it opens. */
   chatProfile?: true;
 }
 
-/** The web app's Add tool menu: a shell, the agent presets, then the host's custom commands. */
-export function newPanelOptions(customCommands: readonly RemotePwaCustomCommand[], chatTabs = false): NewPanelOption[] {
+/**
+ * The agents offered as chats: the host's installed ones from its catalog, first-class first.
+ * Without a catalog (still loading, or an older host) the configured agents older hosts run.
+ */
+function chatAgents(catalog: readonly ChatAgentEntry[] | undefined): Array<{ id: string; label: string; icon?: string }> {
+  if (!catalog) return configuredChatAgentIds().filter(id => configuredAgent(id).chat?.legacyClients).map(id => ({ id, label: agentLabel(id), icon: agentConfig(id)?.icon }));
+  const installed = catalog.filter(agent => agent.installed);
+  return [...installed.filter(agent => agent.source === 'config'), ...installed.filter(agent => agent.source !== 'config')];
+}
+
+/** The web app's Add tool menu: the chat agents, a shell, the agent presets, then the host's custom commands. */
+export function newPanelOptions(customCommands: readonly RemotePwaCustomCommand[], chatTabs = false, catalog?: readonly ChatAgentEntry[]): NewPanelOption[] {
   // With chat tabs on (D-15), agents open as chats first; their terminal versions follow.
   const chats: NewPanelOption[] = chatTabs ? [
-    { id: 'chat-claude', title: 'Claude', description: 'Chat with Claude on the computer', chat: 'claude' },
-    { id: 'chat-codex', title: 'Codex', description: 'Chat with Codex on the computer', chat: 'codex' },
+    ...chatAgents(catalog).map(agent => ({ id: `chat-${agent.id}`, title: agent.label, description: `Chat with ${agent.label} on the computer`, iconKey: agent.icon, chat: agent.id })),
     { id: 'chat-profile', title: 'Agent Farm profile…', description: 'Chat with an Agent Farm profile on the computer', chatProfile: true },
   ] : [];
   return [
@@ -109,6 +122,7 @@ export function newPanelOptions(customCommands: readonly RemotePwaCustomCommand[
       id: preset.id,
       title: chatTabs ? `${preset.title} in Terminal` : preset.title,
       description: `Run ${preset.command}`,
+      iconKey: preset.iconKey,
       initialCommand: preset.command,
     })),
     ...customCommands.map((command, index) => ({
