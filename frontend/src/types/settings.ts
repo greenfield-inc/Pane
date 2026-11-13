@@ -31,6 +31,7 @@ export type SettingsSettingId =
   | 'resume-paused-on-open'
   | 'auto-pause'
   | 'auto-pause-hours'
+  | 'archive-retention'
   | 'html-file-open-mode'
   | 'theme'
   | 'appearance-mode'

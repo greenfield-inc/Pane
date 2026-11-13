@@ -2860,6 +2860,11 @@ def print_pane_archive_bulk_result(result: Dict[str, Any]) -> None:
 
 def describe_scratch(scratch: Dict[str, Any]) -> str:
     megabytes = (scratch.get("bytes") or 0) / 1_048_576
+    if scratch.get("deletedAt"):
+        return (
+            f"Keeps the scratch folder {scratch.get('path')} ({megabytes:.1f} MB) until "
+            f"{str(scratch['deletedAt'])[:10]}, then deletes it, keeping its agent logs."
+        )
     return f"Deletes the scratch folder {scratch.get('path')} ({megabytes:.1f} MB)."
 
 

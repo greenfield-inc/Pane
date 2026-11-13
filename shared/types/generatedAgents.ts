@@ -27,6 +27,9 @@ export const AGENTS_CONFIG = {
         "url": "https://code.claude.com/docs/en/setup",
         "command": "npm install -g @anthropic-ai/claude-code@latest"
       },
+      "transcriptDirs": [
+        ".claude/projects"
+      ],
       "signIn": [
         "auth",
         "login"
@@ -80,6 +83,10 @@ export const AGENTS_CONFIG = {
         "url": "https://developers.openai.com/codex/cli",
         "command": "npm install -g @openai/codex@latest"
       },
+      "transcriptDirs": [
+        ".codex/sessions",
+        ".codex/archived_sessions"
+      ],
       "signIn": [
         "login"
       ],
@@ -135,6 +142,10 @@ export const AGENTS_CONFIG = {
         "url": "https://cursor.com/docs/cli/installation",
         "command": "curl https://cursor.com/install -fsS | bash"
       },
+      "transcriptDirs": [
+        ".cursor/chats",
+        ".cursor/projects"
+      ],
       "signIn": [
         "login"
       ],
@@ -180,6 +191,9 @@ export const AGENTS_CONFIG = {
         "url": "https://opencode.ai/docs",
         "command": "npm install -g opencode-ai@latest"
       },
+      "transcriptDirs": [
+        ".local/share/opencode"
+      ],
       "signIn": [
         "auth",
         "login"
@@ -228,7 +242,10 @@ export const AGENTS_CONFIG = {
       "install": {
         "url": "https://pi.dev",
         "command": "npm install -g @earendil-works/pi-coding-agent@latest"
-      }
+      },
+      "transcriptDirs": [
+        ".pi/agent/sessions"
+      ]
     }
   }
 } as const;

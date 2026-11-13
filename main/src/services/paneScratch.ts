@@ -6,6 +6,8 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { ownsRemovableWorktree } from '../utils/owns-removable-worktree';
 import { databaseService } from './database';
 import { folderUsage, worktreePaneFolder } from './worktreePaneFolder';
+import { expiresAt } from './archiveRetention';
+import type { RunpanePaneScratch } from '../../../shared/types/runpaneOrchestration';
 
 /** `<pane-dir>/scratch/<pane-id>/`: scratch for a Pane whose folder archive keeps (a Session, a main-repo or adopted Pane). */
 function appScratchDirectory(paneId: string): string {
@@ -40,14 +42,14 @@ export async function paneScratchDirectory(paneId: string): Promise<string | und
   }
 }
 
-/** Delete a Pane's `<pane-dir>/scratch/<pane-id>/` with everything in it, once its tabs have stopped. */
-export async function removePaneScratch(paneId: string): Promise<void> {
-  await fs.rm(appScratchDirectory(paneId), { recursive: true, force: true, maxRetries: 3 })
-    .catch(error => console.warn(`[PaneScratch] Could not delete the scratch folder of ${paneId}:`, error));
-}
-
-/** The scratch folder a Pane has on disk and its size, for the archive dry run; undefined when it has none. */
-export async function paneScratchUsage(paneId: string, worktreePath: string | undefined): Promise<{ path: string; bytes: number } | undefined> {
+/**
+ * The scratch folder a Pane has on disk and its size, for the archive dry run;
+ * undefined when it has none. A folder under the Pane directory carries the
+ * date archive retention deletes it.
+ */
+export async function paneScratchUsage(paneId: string, worktreePath: string | undefined, retentionDays: number, now: Date = new Date()): Promise<RunpanePaneScratch | undefined> {
   const inWorktree = worktreePath ? await folderUsage(path.join(worktreePath, ...PANE_SCRATCH_FOLDER.split('/'))) : undefined;
-  return inWorktree ?? folderUsage(appScratchDirectory(paneId));
+  if (inWorktree) return inWorktree;
+  const kept = await folderUsage(appScratchDirectory(paneId));
+  return kept && { ...kept, deletedAt: expiresAt(now, retentionDays).toISOString() };
 }

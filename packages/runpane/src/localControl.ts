@@ -698,6 +698,7 @@ interface PaneArchiveBulkItem {
 interface PaneScratch {
   path: string;
   bytes: number;
+  deletedAt?: string;
 }
 
 interface PaneArchiveBulkResult {
@@ -1306,7 +1307,7 @@ const initialInputSchema: BoundarySchema<InitialInputDeliveryResult> = boundary.
   })),
   nextCommand: boundary.optional(boundary.string),
 });
-const paneScratchSchema: BoundarySchema<PaneScratch> = boundary.object({ path: boundary.string, bytes: boundary.number });
+const paneScratchSchema: BoundarySchema<PaneScratch> = boundary.object({ path: boundary.string, bytes: boundary.number, deletedAt: boundary.optional(boundary.string) });
 const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.object({
   performed: boundary.boolean,
   hasUncommittedChanges: boundary.optional(boundary.boolean),
@@ -5209,7 +5210,10 @@ function printPaneArchiveBulkResult(result: PaneArchiveBulkResult): void {
 }
 
 function describeScratch(scratch: PaneScratch): string {
-  return `Deletes the scratch folder ${scratch.path} (${(scratch.bytes / 1_048_576).toFixed(1)} MB).`;
+  const size = `${(scratch.bytes / 1_048_576).toFixed(1)} MB`;
+  return scratch.deletedAt
+    ? `Keeps the scratch folder ${scratch.path} (${size}) until ${scratch.deletedAt.slice(0, 10)}, then deletes it, keeping its agent logs.`
+    : `Deletes the scratch folder ${scratch.path} (${size}).`;
 }
 
 function printArchiveSkipReason(

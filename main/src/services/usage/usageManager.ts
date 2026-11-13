@@ -10,6 +10,7 @@ import { isFileUnchanged, resolveStartOffset, scanJsonlFile } from './jsonlScann
 import { getPricingSource } from './modelPricing';
 import { OpenRouterPriceProvider } from './openRouterPriceProvider';
 import { getAppDirectory } from '../../utils/appDirectory';
+import { agentLogsDirectory } from '../archiveRetention';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
   USAGE_PARSER_VERSION,
@@ -47,6 +48,9 @@ function transcriptRoots(): TranscriptRoot[] {
   return [
     { provider: 'claude', path: join(home, '.claude', 'projects') },
     { provider: 'codex', path: join(home, '.codex', 'sessions') },
+    // Logs Pane kept from folders it deleted (archiveRetention.ts); moved, never copied, so nothing counts twice.
+    { provider: 'claude', path: join(agentLogsDirectory(), 'claude') },
+    { provider: 'codex', path: join(agentLogsDirectory(), 'codex') },
   ];
 }
 

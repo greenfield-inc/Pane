@@ -5,6 +5,7 @@ import { Input } from '../../ui/Input';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
+import { ArchiveRetentionSetting } from './ArchiveRetentionSetting';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { WorktreeFileSyncEntry } from '../../../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../../../shared/types/worktreeFileSync';
@@ -168,6 +169,9 @@ export function WorktreesGitSettings({ persistence, onDirtyChange }: WorktreesGi
         </SettingRow>
       </SettingsSection>
 
+      <SettingsSection title="Archive">
+        <ArchiveRetentionSetting persistence={persistence} />
+      </SettingsSection>
       <SettingsSection title="Open in IDE">
         <SettingRow
           settingId="default-ide-command"

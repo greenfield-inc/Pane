@@ -105,6 +105,7 @@ export interface AppConfig {
   // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
+  archiveRetentionDays?: number;
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
@@ -247,6 +248,7 @@ export interface UpdateConfigRequest {
   resumePausedOnOpen?: boolean;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
+  archiveRetentionDays?: number;
   theme?: AppConfig['theme'];
   appearanceMode?: AppearanceMode;
   systemLightTheme?: Theme;

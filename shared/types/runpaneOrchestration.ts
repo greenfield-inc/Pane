@@ -1021,6 +1021,8 @@ export interface RunpanePaneArchiveDryRunResult {
 export interface RunpanePaneScratch {
   path: string;
   bytes: number;
+  /** For scratch under the Pane directory: when archive retention deletes it. Absent: deleted with the worktree. */
+  deletedAt?: string;
 }
 
 export type RunpanePaneArchiveResult =

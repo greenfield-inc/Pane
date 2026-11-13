@@ -504,6 +504,14 @@
             "minLength": 1
           }
         },
+        "transcriptDirs": {
+          "description": "Folders, relative to the home the CLI runs with (POSIX separators), that hold its session transcripts. Before Pane deletes a folder it owns, it moves these out of it into <pane-dir>/agent-logs/<agent>/.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "terminal": {
           "type": "object",
           "required": [

@@ -1,7 +1,10 @@
 # Transcript usage indexing
 
 UsageManager scans all JSONL files recursively beneath `~/.claude/projects`
-and `~/.codex/sessions`. This includes Claude subagent transcripts and Codex
+and `~/.codex/sessions`, and beneath `<pane-dir>/agent-logs/claude` and
+`<pane-dir>/agent-logs/codex`, where Pane moves agent logs out of folders it
+deletes (`archiveRetention.ts`). They are moved, never copied, so no event
+counts twice. This includes Claude subagent transcripts and Codex
 `year/month/day` directories. Roots are rediscovered on every pass, including
 when their parent directories did not exist at startup.
 

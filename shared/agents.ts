@@ -54,6 +54,8 @@ interface AgentConfigBase {
     session?: AgentSessionConfig;
   };
   install: { url: string; command: string };
+  /** Transcript folders, relative to the home the CLI runs with. */
+  transcriptDirs?: readonly string[];
   onboarding?: boolean;
   onboardingPanelId?: string;
 }

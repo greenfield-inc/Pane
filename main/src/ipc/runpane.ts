@@ -273,6 +273,7 @@ import {
 } from '../services/workspaceIdleTracker';
 import { agentConfig, agentLabel, agentTerminalCommand, configuredAgent, configuredAgentSchema, isAgentSessionId, isConfiguredAgent, typesStartingMessage } from '../../../shared/agents';
 import { paneScratchUsage } from '../services/paneScratch';
+import { archiveRetentionDays } from '../services/archiveExpiry';
 
 const RUNPANE_CHANNELS = [
   'runpane:doctor',
@@ -1214,7 +1215,7 @@ export function registerRunpaneHandlers(
                 safetyCheck,
               }
             : undefined,
-          scratch: await paneScratchUsage(pane.id, worktreeCleanupApplicable ? pane.worktreePath : undefined),
+          scratch: await paneScratchUsage(pane.id, worktreeCleanupApplicable ? pane.worktreePath : undefined, archiveRetentionDays(services.configManager.getConfig())),
         };
       }
 
@@ -6200,7 +6201,7 @@ async function archiveSessionPanes(
         continue;
       }
       if (request.dryRun) {
-        const scratch = await paneScratchUsage(pane.id, removesWorktree ? pane.worktreePath : undefined);
+        const scratch = await paneScratchUsage(pane.id, removesWorktree ? pane.worktreePath : undefined, archiveRetentionDays(services.configManager.getConfig()));
         items.push({ ...base, outcome: 'would-archive', pr, safetyCheck, scratch });
         continue;
       }

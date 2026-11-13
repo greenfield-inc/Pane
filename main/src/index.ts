@@ -155,7 +155,9 @@ import { openExternalUrl } from './utils/openExternalUrl';
 import { hardenWebviewPreferences } from './services/webviewPreferences';
 import { APP_MENU_ACTION_CHANNEL, attachEditContextMenu, installApplicationMenu, type AppMenuAction } from './services/nativeMenus';
 import { fitBoundsToWorkAreas, parseSavedWindowState, trackWindowState, WINDOW_STATE_KEY } from './utils/windowState';
+import { startArchiveExpiry } from './services/archiveExpiry';
 
+let stopArchiveExpiry: (() => void) | undefined;
 export let mainWindow: BrowserWindow | null = null;
 
 // Map webContentsId → {panelId, sessionId} for webview popup interception.
@@ -1551,6 +1553,9 @@ if (launchRemoteSetup) {
     sharedCredentialSync.start();
   }
 
+  // Delete archived folders past their retention, keeping their agent logs; deferred like usage indexing.
+  setTimeout(() => { stopArchiveExpiry = startArchiveExpiry(); }, 10000);
+
   // Index agent CLI transcripts for the usage page. Read-only, and deferred so
   // a first pass over a large ~/.claude never delays window creation.
   setTimeout(() => {
@@ -1592,6 +1597,7 @@ if (launchRemoteSetup) {
   logToFile('before-quit fired');
 
   usageManager.stop();
+  stopArchiveExpiry?.();
   void sharedCredentialSync?.stop();
   void machineConnections?.stop();
 

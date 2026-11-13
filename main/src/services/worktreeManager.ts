@@ -14,6 +14,8 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { withArchiveRepositoryLock } from './archiveRepositoryLock';
 import { describeWorktreeBase, recordProjectFetch, refreshWorktreeBase } from './worktreeBaseRefresh';
 import type { RunpanePaneBase } from '../../../shared/types/runpaneOrchestration';
+import { preserveAgentLogs } from './archiveRetention';
+import { PANE_SCRATCH_FOLDER } from '../../../shared/constants/paneFolders';
 
 type WorktreeAuditSource = 'session-delete' | 'project-delete' | 'create-cleanup';
 
@@ -561,6 +563,10 @@ export class WorktreeManager {
 
       try {
         logWorktreeAudit('remove_started', auditDetails);
+        // An agent run with its home in the scratch folder (an isolated QA instance) leaves logs there.
+        const scratch = path.join(pathResolver.toFileSystem(worktreePath), ...PANE_SCRATCH_FOLDER.split('/'));
+        await preserveAgentLogs(scratch, auditContext?.sessionId ?? path.basename(worktreePath))
+          .catch(error => console.warn(`[WorktreeManager] Could not keep agent logs from ${scratch}:`, error));
         const outcome = await removeWorktreeViaTrash(worktreePath, projectPath, pathResolver, commandRunner, {
           label: auditContext?.sessionId,
         });
