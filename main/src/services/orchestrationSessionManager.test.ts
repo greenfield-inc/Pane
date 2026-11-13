@@ -822,6 +822,16 @@ describe('OrchestrationSessionManager', () => {
     expect(codex.panel.state.customState?.customResume).toBeFalsy();
   });
 
+  it.each([
+    'claude --append-system-prompt "$(cat rules.md)"',
+    'claude --model opus # pinned for this Session',
+  ])('keeps resume and prompt hooks for an existing Claude Session launched with %s', async (launchCommand) => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Claude with a custom command', agent: 'claude', launchCommand });
+    // Not preserved: the terminal still adds Claude's session flags and prompt hooks to this command.
+    expect(created.panel.state.customState).toMatchObject({ agentType: 'claude', initialCommand: launchCommand, preserveLaunchCommand: false });
+  });
+
   it('lets the terminal add Pi\'s session flag so a Pi Session reopens its conversation', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Pi orchestrator', agent: 'pi' });

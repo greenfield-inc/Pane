@@ -188,7 +188,7 @@ function piComposer(text: string, topRule = '─'.repeat(40)): string {
 function terminalSnapshot(
   text: string,
   activityStatus: 'active' | 'idle',
-  agentType: 'claude' | 'codex' | 'cursor' | 'opencode' = 'codex',
+  agentType: 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi' = 'codex',
   lastActivityTime = '2026-01-01T00:02:00.000Z',
 ) {
   return {
@@ -3397,6 +3397,23 @@ describe('runpane IPC handlers', () => {
       enter: 'cr',
       nextCommand: `runpane panels wait --panel ${terminalPanel.id} --for ready --timeout-ms 30000 --json`,
     });
+  });
+
+  it('types nothing into a Pi selector, and submits once Pi\'s input box is back', async () => {
+    const rule = '─'.repeat(40);
+    // An extension's confirm in place of the input box, footer kept; Enter would choose Yes.
+    const confirm = `${rule}\n\n Allow deploy?\n\n → Yes\n   No\n\n ↑↓ navigate  enter select  escape/ctrl+c cancel\n\n${rule}\n/home/dev/repo (main)\n0.0%/128k (auto)          mock-model`;
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(confirm, 'idle', 'pi'));
+    const registry = createRegistry();
+
+    const refused = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'owed answer' }]);
+    expect(refused).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'agent-prompt' } });
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(piComposer(''), 'idle', 'pi'));
+    const sent = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'owed answer' }]);
+    expect(sent).toMatchObject({ ok: true });
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'owed answer\r');
   });
 
   it('stages text before submitting an idle Codex composer', async () => {

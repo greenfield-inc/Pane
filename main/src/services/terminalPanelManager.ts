@@ -985,9 +985,11 @@ export class TerminalPanelManager extends EventEmitter {
     if (terminal.initialInputHoldNoted || terminal.initialInputHeldSince === undefined) return;
     if (Date.now() - terminal.initialInputHeldSince < HELD_INPUT_AGENT_WINDOW_MS) return;
     terminal.initialInputHoldNoted = true;
-    // A create that waits for readiness has claimed the message and reports it itself.
+    // A tab with no starting message has nothing held; a create that waits for readiness has
+    // claimed the message and reports it itself.
     const panel = panelManager.getPanel(terminal.panelId);
-    if (!panel || terminalCustomState(panel.state).initialInputSentAt) return;
+    const state = panel ? terminalCustomState(panel.state) : undefined;
+    if (!state?.initialInput || state.initialInputSentAt) return;
     const label = agentLabel(terminal.agentType ?? '');
     const message = `Pane is holding the starting message: ${label} has not shown its input box, so Pane will not type into what is on screen. `
       + `It sends the message once the input box appears. To send it now, answer the prompt in the tab or use runpane panels submit.`;

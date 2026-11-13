@@ -136,13 +136,21 @@ through a wrapper or shell syntax runs unchanged, and `--resume` is refused for
 it. Pi has no `promptArgument`: as an argument, pi reads a leading `@` as a
 file to attach and sends a slash command to the model as text.
 
-A typed starting message waits for positive evidence: the agent's own idle
-input box, its manifest's `visibleIdle` rule. An idle status alone is not
-enough, because a screen no rule recognizes also reads idle, and Enter there
-could answer a prompt such as pi's project-trust question, whose first option
-is Trust. After 30 seconds without the input box, Pane records on the panel
-that it is holding the message and keeps holding it. `--wait-ready` waits for
-the same input box. Loops and handoff session carrying do not offer pi yet.
+A held starting message waits for positive evidence of the agent's own input
+box: its manifest's `visibleIdle` rule, or the composer signature in
+`agentScreenSignature.ts` (Claude, Codex). An idle status alone is not enough,
+because a screen no rule recognizes also reads idle, and Enter there could
+answer a prompt such as pi's project-trust question, whose first option is
+Trust. After 30 seconds without the input box, Pane records on the panel that
+it is holding the message and keeps holding it. `--wait-ready` waits for the
+same input box. For an agent without `promptArgument`, `panels submit` (and so
+`agents send` and Notify's owed answers) types only when the manifest
+recognizes the input box, idle (`visibleIdle`) or mid-turn (`visibleWorking`),
+and nothing blocks it. So a typed-message agent needs a `visibleIdle` rule, and
+blocked rules for every prompt or selector that can replace its input box: pi's
+`live_selector` keys on the selector's `→ ` row between the last two border
+rows, since pi keeps its footer below a selector. Loops and handoff session
+carrying do not offer pi yet.
 
 `main/src/services/agents/agentResume.ts` → `resolveResumeId` maps the agent to the
 resume id shown in the resume dialog. `sessionManager.resumeInterruptedSessions` and

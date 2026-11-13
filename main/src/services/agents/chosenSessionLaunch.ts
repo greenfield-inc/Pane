@@ -14,14 +14,15 @@ function chosenSession(agent: CliAgentType): AgentSessionConfig | undefined {
 
 /**
  * The command's arguments when Pane may add the session flag: it runs the agent directly,
- * starts its interactive UI (no subcommand), picks no conversation itself and has no `--`,
- * after which the agent reads every word as a message.
+ * starts its interactive UI (no subcommand), picks no conversation itself, and has no `--`,
+ * after which the agent reads every word as a message, and no `#` word, after which a shell
+ * reads the rest, the added flag included, as a comment.
  */
 function extendableArguments(command: string, agent: CliAgentType, session: AgentSessionConfig, platform: NodeJS.Platform): string[] | undefined {
   const args = directAgentArguments(command, agent, platform);
   if (!args || (args.length > 0 && !args[0].startsWith('-'))) return undefined;
   const selectors = new Set([session.flag, ...(session.selectors ?? [])]);
-  return args.some(word => word === '--' || selectors.has(word.split('=')[0])) ? undefined : args;
+  return args.some(word => word === '--' || word.startsWith('#') || selectors.has(word.split('=')[0])) ? undefined : args;
 }
 
 /** The id a direct command opens with the session flag (`--flag id` or `--flag=id`), if valid. */

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CLI_AGENT_TYPES,
   isCliAgentType,
+  isPlainAgentCommand,
   isShellProcessName,
   isVersionedExecutableName,
   resolveAgentTypeFromCommand,
@@ -223,5 +224,16 @@ describe('foreground process identity', () => {
     expect(resolveAgentTypeFromExecutablePath('/opt/homebrew/Caskroom/codex/0.157.1/bin/codex')).toBe('codex');
     expect(resolveAgentTypeFromExecutablePath('/Users/me/tools/versions/2.1.283')).toBeUndefined();
     expect(resolveAgentTypeFromExecutablePath(undefined)).toBeUndefined();
+  });
+});
+
+describe('isPlainAgentCommand', () => {
+  // Pane answers Claude's trust prompt for a Session's own folder only for a plain command.
+  it.each([`claude 'fix #123 today'`, 'claude --model opus'])('treats %s as plain', (command) => {
+    expect(isPlainAgentCommand(command, 'claude')).toBe(true);
+  });
+
+  it.each(['claude && echo done', 'claude "$(cat rules.md)"', 'claude > log.txt'])('treats %s as more than one program run', (command) => {
+    expect(isPlainAgentCommand(command, 'claude')).toBe(false);
   });
 });

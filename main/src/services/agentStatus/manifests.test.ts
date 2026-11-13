@@ -860,6 +860,39 @@ describe('PI_MANIFEST', () => {
     expect(r).toMatchObject({ state: 'blocked', visibleBlocker: true, matchedRuleId: 'project_trust_prompt' });
   });
 
+  // Pi's ExtensionSelectorComponent replaces the input box and keeps the footer:
+  // border, title, options (the highlighted one marked `→ `), key hint, border.
+  const selector = (title: string, options: string[], hint = ' ↑↓ navigate  enter select  escape/ctrl+c cancel') => [
+    ...header,
+    ' earlier answer from the model',
+    '',
+    rule(),
+    '',
+    ` ${title}`,
+    '',
+    ...options.map((option, index) => (index === 0 ? ` → ${option}` : `   ${option}`)),
+    '',
+    hint,
+    '',
+    rule(),
+    ...footer('↑30 ↓15 1.1%/128k (auto)'),
+  ].join('\n');
+
+  it.each([
+    ['an in-session trust menu', selector('Trust project folder?', ['Trust', 'Trust parent folder', 'Do not trust'])],
+    ['an extension confirm', selector('Allow deploy?', ['Yes', 'No'])],
+    ['a selector with a reworded hint', selector('Pick a model', ['mock-1', 'mock-2'], ' j/k navigate  space select  q cancel')],
+  ])('blocks on %s shown above the footer', (_label, text) => {
+    const r = detectAgentState(PI_MANIFEST, screen(text));
+    expect(r).toMatchObject({ state: 'blocked', visibleBlocker: true, matchedRuleId: 'live_selector' });
+    expect(r.visibleIdle).not.toBe(true);
+  });
+
+  it('reads arrows in the transcript above the input box as idle', () => {
+    const transcript = [' Plan:', ' → read the file', ' → explain it', '', rule(), ' → done', ''];
+    expect(detectAgentState(PI_MANIFEST, screen(piScreen(rule(), [], undefined, transcript)))).toMatchObject({ state: 'idle', visibleIdle: true });
+  });
+
   it('does not block on a trust prompt answered earlier in the transcript', () => {
     const answered = piScreen(rule(), [], undefined, [' Trust project folder?', ' → Trust', '   Do not trust', ' ↑↓ navigate  enter select  escape/ctrl+c cancel']);
     expect(detectAgentState(PI_MANIFEST, screen(answered)).state).not.toBe('blocked');

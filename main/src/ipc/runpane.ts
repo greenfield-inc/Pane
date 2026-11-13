@@ -271,7 +271,7 @@ import {
   type WorkspaceIdleCandidate,
   type WorkspaceIdleSchedule,
 } from '../services/workspaceIdleTracker';
-import { agentConfig, agentTerminalCommand, configuredAgent, configuredAgentSchema, isAgentSessionId, isConfiguredAgent, typesStartingMessage } from '../../../shared/agents';
+import { agentConfig, agentLabel, agentTerminalCommand, configuredAgent, configuredAgentSchema, isAgentSessionId, isConfiguredAgent, typesStartingMessage } from '../../../shared/agents';
 
 const RUNPANE_CHANNELS = [
   'runpane:doctor',
@@ -1791,6 +1791,12 @@ export function registerRunpaneHandlers(
         warnings,
         nextCommand: submission.nextCommand,
       };
+    }
+
+    // A typed-message agent (Pi, OpenCode) takes text only at its own input box: its manifest must
+    // recognize the composer, idle or working, and no prompt or selector, where Enter would choose an option.
+    if (stagedInput.length > 0 && typesStartingMessage(agentType) && !showsTypedComposer(beforeScreen, agentType)) {
+      return blocked(`Pane could not see ${agentLabel(agentType ?? '')}'s input box in this panel, so it sent nothing. A prompt or selector may be open; answer it in the tab, then submit again.`);
     }
 
     if (stagedInput.length > 0 && isComposerUnknown(panel, beforeScreen, agentType)) {
@@ -4459,6 +4465,12 @@ function screenAgentType(screen: RunpanePanelScreenResult): RunpaneAgentId | und
  * full-screen menus and Pane's own shell prompt (the agent has exited) keep
  * the plain write.
  */
+/** The agent's manifest recognizes its own input box on this screen, idle or mid-turn, with nothing blocking it. */
+function showsTypedComposer(screen: RunpanePanelScreenResult, agentType: RunpaneAgentId | undefined): boolean {
+  const detection = detectAgentState(getManifestForAgent(agentType), { screen: screen.text, oscTitle: '', oscProgress: '' });
+  return detection.state !== 'blocked' && (detection.visibleIdle === true || detection.visibleWorking === true);
+}
+
 function isComposerUnknown(
   panel: ToolPanel,
   screen: RunpanePanelScreenResult,
@@ -6601,10 +6613,10 @@ function assertResumableTool(tool: RunpaneResolvedTool, resume: string | undefin
   if (!tool.agent || !session) return;
   const label = configuredAgent(tool.agent).label;
   if (!isAgentSessionId(tool.agent, resume)) {
-    throw new Error(`${label} --resume must be a ${label} session id, matching ${session.idPattern}.`);
+    throw new PaneError('ERR_RESUME_ID', `${label} --resume must be a ${label} session id, matching ${session.idPattern}. Nothing was created.`, `Pass the id ${label} shows for the conversation, or leave out --resume to start a new one.`);
   }
   if (session.paneChoosesId && !takesChosenSession(tool.command, tool.agent)) {
-    throw new Error(`--resume needs a plain ${label} command; this one picks its own conversation, runs a subcommand or uses shell syntax.`);
+    throw new PaneError('ERR_RESUME_COMMAND', `--resume needs a plain ${label} command; this one picks its own conversation, runs a subcommand or uses shell syntax. Nothing was created.`, `Use \`--agent ${tool.agent}\` without a custom command, or resume inside ${label} itself.`);
   }
 }
 
