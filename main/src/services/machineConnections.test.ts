@@ -37,6 +37,8 @@ function setup(ids: string[]) {
         connect: vi.fn(async () => undefined),
         disconnect: vi.fn(async () => undefined),
         retryNow: vi.fn(async () => undefined),
+        suspend: vi.fn(),
+        resume: vi.fn(),
       };
       clients.set(saved.id, client);
       return client;
@@ -166,6 +168,23 @@ describe('MachineConnections', () => {
       { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
       { id: 'build-box', label: 'build-box', kind: 'remote', status: 'offline', offlineSince: '2026-10-30T09:14:00.000Z' },
     ]);
+  });
+
+  it('learns each machine\'s install id from its ready event, and when it came online', () => {
+    vi.setSystemTime(new Date('2026-11-12T20:00:00.000Z'));
+    const { machines, client, connect } = setup(['build-box']);
+    client('build-box').options.onConnectionStateChange?.('restoring', null, { hostMachineId: 'c3d4-book' });
+    connect('build-box');
+
+    expect(machines.list().find(machine => machine.id === 'build-box')).toMatchObject({ installId: 'c3d4-book', status: 'online', onlineSince: '2026-11-12T20:00:00.000Z' });
+  });
+
+  it('closes every saved machine\'s stream while this computer sleeps, and reopens them on wake', () => {
+    const { machines, client } = setup(['build-box', 'mini']);
+    machines.suspend();
+    expect([client('build-box').suspend, client('mini').suspend].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
+    machines.resume();
+    expect([client('build-box').resume, client('mini').resume].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
   });
 
   it('refuses a write to an offline machine before sending it', async () => {

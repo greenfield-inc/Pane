@@ -1,7 +1,7 @@
+import { agentTerminalCommand, type ConfiguredAgentId } from '../../../shared/agents';
 import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { getAppDirectory } from '../utils/appDirectory';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../types/config';
@@ -521,8 +521,8 @@ export class SkillCacheManager {
    * flags that register the helper subagents (skipped on Windows, whose
    * shells quote differently).
    */
-  launchCommand(agent: keyof typeof RUNPANE_CONTRACT.agentTemplates): string {
-    const base = RUNPANE_CONTRACT.agentTemplates[agent].command;
+  launchCommand(agent: ConfiguredAgentId): string {
+    const base = agentTerminalCommand(agent);
     const extra = agent === 'codex' && process.platform !== 'win32' ? this.codexSubagentArgs : '';
     return extra ? `${base} ${extra}` : base;
   }

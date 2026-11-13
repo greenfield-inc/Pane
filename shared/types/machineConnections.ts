@@ -20,6 +20,10 @@ export interface MachineState {
   status: 'online' | 'connecting' | 'offline';
   /** When it went offline (ISO 8601); null unless `status` is `offline`. */
   offlineSince: string | null;
+  /** When a saved machine last came online (ISO 8601); absent unless `status` is `online`. */
+  onlineSince?: string;
+  /** The machine's install id ("Show cards on" names it by this): this computer's own, or a saved machine's from its last connection. Absent until it answers, and from releases before it. */
+  installId?: string;
 }
 
 /** The reads `machines:read` serves; each takes the arguments the same channel takes today. */

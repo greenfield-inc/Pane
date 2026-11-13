@@ -473,6 +473,28 @@ Alerts interrupt you on the device you're using (D-144):
   so it doesn't ring like a new approval.
 - A computer can ring only for machines it has saved. Autopilot's "Can't see"
   shows that gap, and the phone push still arrives.
+- **Show cards on** (Settings → Approvals) moves the strip, its window over
+  other apps and the chime to one computer, for every machine it has saved.
+  That computer still rings only while it's in use; when it's idle or locked
+  the phone push is the backstop. Every other computer stays quiet while the
+  picked one reads it, and keeps its Approvals list, counts, tray dot and
+  answer-all shortcut. A computer the picked one can't read (it's off, asleep
+  or disconnected, or it hasn't saved this computer) rings as if nothing were
+  picked, and its Settings row says why. "Reading" means the picked computer
+  holds a live connection to this one, as its owner or a paired device, naming
+  itself by its install id (`machineId` in `config.json`; a `config.json`
+  copied to another computer carries the same id, so delete the key there).
+  A computer that has saved the picked one also checks its own connection:
+  once that drops (about 20 seconds after the picked one sleeps or leaves the
+  network), it alerts again. A computer closes its connections before it
+  sleeps. The Settings row reads one of:
+  - "Cards pop up on <name>. They're still listed here.": the picked computer
+    reads this one, so this one stays quiet.
+  - "<name> hasn't added this computer, so this computer's cards still pop up
+    here.": this computer has saved the picked one and has seen it online for
+    over a minute, but it doesn't read this one.
+  - "<name> isn't connected, so cards pop up here for now.": anything else,
+    such as off, asleep, just restarted, or not saved here.
 
 ## Other screens and your phone
 
@@ -525,7 +547,8 @@ the agent:
 Each screen keeps its own Position, Show outside Pane, Sound, Show details, answer-all
 shortcut and Pause. The Approvals switch decides whether agents can ask, and it
 is one switch across your machines: turning it off returns `unavailable` to every
-waiting agent on each machine and clears its questions from every screen.
+waiting agent on each machine and clears its questions from every screen. Show
+cards on is shared the same way.
 
 ## Settings
 
@@ -534,6 +557,7 @@ waiting agent on each machine and clears its questions from every screen.
 | Setting | Default |
 | --- | --- |
 | Approvals | On. Off hides the sidebar's Approvals row, expires open cards, returns `unavailable` ("Approvals are off in Pane.") to every waiting agent. Agents, Session orchestrators included, then ask in their own tab. Applies to all your machines ([how the switch travels](SHARED_CREDENTIALS.md#the-approvals-switch)). |
+| Show cards on | Whichever computer is in use. Or this computer, or a saved machine that has connected since Pane started: only that computer pops up cards and chimes ([Alerts](#alerts)). Applies to all your machines, saved as `notify.cardsOn`. |
 | Show outside Pane | On. It controls the floating cards over other apps. Off shows no floating card; inside Pane you answer from the Approvals row and screen, and the tray dot still shows. |
 | Position | Bottom center. Also top right or bottom right. |
 | Answer-all shortcut | ⌃⇧Space. Settings says so when another app already holds it. |
@@ -541,7 +565,7 @@ waiting agent on each machine and clears its questions from every screen.
 | Sound | On, for questions only |
 | Show details | Off. Cards open with details shown when on. Showing or hiding details on a card changes it. |
 
-Only the Approvals on/off switch is shared; the other settings here stay on each machine.
+Only the Approvals switch and Show cards on are shared; the other settings here stay on each machine.
 
 Pause for 1 hour (tray menu) hides strips and mutes sound while questions keep
 queueing. Strips show over full-screen apps, during screen sharing, and with

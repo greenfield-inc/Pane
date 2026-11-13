@@ -25,7 +25,7 @@ const q20: NotifyItem = {
 function show(item: NotifyItem, order: string[] = [item.id], closeLabel?: string): string {
   const snapshot: NotifySnapshot = {
     settings: DEFAULT_NOTIFY_SETTINGS, items: [item], queue: [], hidden: [], strip: null, stripSurface: null, pausedUntil: null,
-    shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [],
+    shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [], cardsOn: { kind: 'any' }, thisMachine: null,
   };
   useNotifyStore.setState({ snapshot });
   return renderToStaticMarkup(

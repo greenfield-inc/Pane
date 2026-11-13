@@ -120,6 +120,10 @@ export interface AppConfig {
   notify?: Partial<NotifySettings>;
   /** Epoch ms `notify.enabled` last changed, on the machine where the person changed it; shared with it. Absent: 0. */
   notifyEnabledChangedAt?: number;
+  /** Epoch ms `notify.cardsOn` last changed, on the machine where the person changed it; shared with it. Absent: 0. */
+  notifyCardsOnChangedAt?: number;
+  /** This Pane install's id, which other machines know it by (as "Show cards on" names it). Created on first start. */
+  machineId?: string;
   // Dev mode for debugging
   devMode?: boolean;
   // Additional paths to add to PATH environment variable

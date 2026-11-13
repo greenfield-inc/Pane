@@ -148,6 +148,8 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 .chat-composer-actions[data-layout=phone] .chat-send { width:44px; height:44px; padding:4px; background-clip:content-box; }
 .chat-risk { display:inline-flex; align-items:center; justify-content:center; width:28px; height:44px; color:var(--color-status-warning); }
 .chat-risk svg { width:15px; height:15px; }
+/* On desktop the marker stands in for the mode chip when an agent has no modes: same height as a chip. */
+.chat-composer-actions[data-layout=desktop] .chat-risk { height:28px; }
 .chat-phone-model { display:inline-flex; gap:6px; max-width:16rem; min-height:44px; padding:0 8px; align-self:stretch; align-items:center; border-radius:10px; font-size:15px; color:var(--chat-foreground); }
 .chat-phone-model:disabled { opacity:.55; }
 .chat-phone-model:active:not(:disabled) { background:var(--chat-muted); }

@@ -348,12 +348,12 @@ function LinkChips({ item, shared, shownPaneId }: { item: NotifyItem; shared: No
   if (links.length === 0) return null;
   const canOpen = Boolean(shownPaneId || item.source.paneId);
   // The same query the tabs below read, so reading it again refreshes them too.
-  const panelsKey = [profile.id, 'panels:list', shownPaneId, { chatTabs: true }];
+  const panelsKey = [profile.id, 'panels:list', shownPaneId, { chatTabs: true, chatAgents: true }];
 
   const readPanels = async (): Promise<readonly string[]> => {
     void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:getActive'] });
     if (!shownPaneId) return [];
-    const panels = await queryClient.fetchQuery({ queryKey: panelsKey, queryFn: () => invokeChannel<ToolPanel[]>(client, 'panels:list', [shownPaneId, { chatTabs: true }]), staleTime: 0 });
+    const panels = await queryClient.fetchQuery({ queryKey: panelsKey, queryFn: () => invokeChannel<ToolPanel[]>(client, 'panels:list', [shownPaneId, { chatTabs: true, chatAgents: true }]), staleTime: 0 });
     return panels.map(panel => panel.id);
   };
 

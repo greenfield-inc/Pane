@@ -1,20 +1,21 @@
 # Adding a New CLI Agent Tool
 
-An agent tool in Pane is **not** a panel type and **not** a manager subclass. It is a
-`type: 'terminal'` ToolPanel whose `customState.initialCommand` launches the CLI in a
-PTY, plus a handful of data-driven registrations. This guide walks through every
-integration point, using the Cursor Agent CLI (`cursor-agent`, agent id `cursor`) as
-the worked example.
-
-> Historical note: the `AbstractCliManager`/`cliToolRegistry`/panel-type-per-tool
-> architecture was removed. Only Claude's deprecated session-level path still uses
-> it. Do not build new tools on it.
+An agent in Pane is an entry in the agents config, `agents.entries` in
+`contracts/runpane/contract.json`. It runs in a `type: 'terminal'` ToolPanel
+whose `customState.initialCommand` launches the CLI in a PTY, and, when its entry
+has a `chat` section, in chat tabs over ACP ([CHAT_TABS.md](CHAT_TABS.md)).
+Menus, hotkeys, labels, command detection and chat tabs read the config, so a
+new agent starts as one config entry. Terminal resume and status detection
+still need code per agent. This guide uses the Cursor Agent CLI
+(`cursor-agent`, agent id `cursor`) as the worked example.
 
 ## 0. Learn the CLI first
 
-Before writing code, verify against the real binary (see the Cursor example):
+Before writing anything, verify against the real binary:
 
 - Launch command and permission-skip flags (`cursor-agent --force --trust`).
+- Whether it speaks ACP itself (`cursor-agent acp`), its oldest version that
+  does, and how it signs in (`cursor-agent login`, or an API key variable).
 - Whether the prompt can be passed as a positional argument, including slash-prefixed
   input (Cursor: yes, unconditionally → argument delivery).
 - Session/resume mechanics (Cursor: `create-chat` pre-creates an id; `--resume <id>`;
@@ -24,32 +25,83 @@ Before writing code, verify against the real binary (see the Cursor example):
   them into test fixtures.
 - Whether the TUI uses the alternate screen and whether it repaints while idle.
 
-## 1. Register the agent in the RunPane contract
+## 1. Add a config entry
 
-`contracts/runpane/contract.json`:
+Add the agent to `agents.entries` and its id to `enums.agents` in
+`contracts/runpane/contract.json`; the generator fails unless the two list the
+same ids. The schema is `$defs/agent` and `$defs/agentChat` in
+`contracts/runpane/schema.json`.
 
-- Add the id to `enums.agents`.
-- Add `agentTemplates.<id> = { title, command, description }`.
-- Update `<codex|claude|cursor>` usage strings.
-- Run `pnpm run generate-runpane-contract` and commit all regenerated artifacts.
-- `scripts/test-runpane-contract.js` (`checkAgentTemplateParity`) loops over the agent
-  enum, so the new agent is exercised automatically.
+| Field | What it is |
+| --- | --- |
+| `title`, `label` | Full name (terminal tab titles) and short name (menus, chat headings) |
+| `icon` | Key into the clients' brand icon registry; an unknown key gets a generic icon |
+| `description` | One line for Settings → Agents |
+| `executables` | CLI names on PATH; the first launches, all of them identify the agent in a command or process |
+| `terminal.args`, `terminal.fullAccessArgs` | The terminal launch command is the first executable, then `fullAccessArgs`, then `args` |
+| `terminal.hotkey` | Default key for "Add <title>"; it must conflict with no other key |
+| `terminal.platforms` | Platforms the agent runs on, when not all |
+| `terminal.reportsConversation` | Pane's `SessionStart` hook reports the terminal's live conversation (Claude only) |
+| `install` | Install page `url` and install `command`, shown when the CLI is missing or too old |
+| `signIn` | Arguments to the CLI that sign it in, run in a terminal tab when the agent advertises no terminal sign-in of its own |
+| `onboarding` | Offered on the first-run screen |
+| `chat` | Present when chat tabs run the agent (below) |
 
-## 2. Teach the classifier the new binary
+`chat` fields:
 
-`main/src/services/agents/agentIdentity.ts` is the **single** command→agent
-classifier (used by terminalPanelManager, sessionManager, and shutdown marking).
+| Field | What it is |
+| --- | --- |
+| `args` or `adapter` | Exactly one: arguments that start the CLI as an ACP agent (`["acp"]`), or a bundled adapter package (pinned in `package.json`) with the variable that points it at the CLI |
+| `minimumVersion` | Oldest CLI version chat supports |
+| `apiKeyEnv` | Variables an API key saved in Settings is passed as |
+| `fullAccess` | `mode` (a session mode that never asks) or `args: true` (pass `terminal.fullAccessArgs` to the chat CLI); absent, Pane answers each approval with allow once |
+| `riskyModes` | Session modes in which the agent acts without asking; viewers mark them |
+| `terminalConversationsLoad` | A chat can load a conversation the agent's terminal started (Switch to chat) |
+| `legacyClients` | Pane apps from before the agent catalog may show its chat tabs; leave it off for a new agent |
+| `registryIds` | ACP Registry ids this entry covers |
 
-- Widen `TerminalPanelState['agentType']` in `shared/types/panels.ts`.
-- Add the id to `CLI_AGENT_TYPES` and its executable name(s) to
-  `AGENT_EXECUTABLES`. The classifier parses the command into tokens (it sees
-  through `env`, `command`, `exec` and shell `-c` wrappers) and matches the
-  executable name exactly.
+Then:
 
-## 3. Launch/resume branches
+- Regenerate with `node scripts/generate-runpane-contract.js` (or `pnpm run
+  generate-runpane-contract`) and commit every generated file, including
+  `shared/types/generatedAgents.ts` and `docs/RUNPANE_CLI_CONTRACT.md`.
+- Update the hand-written `<codex|claude|cursor…>` usage strings in the
+  contract, and the agent list `scripts/test-runpane-contract.js`
+  (`checkAgentTemplateParity`) pins.
+- A new `chat.adapter` package also goes in `package.json` and `main/package.json`
+  as an exact version, and in `ADAPTERS` in `scripts/verify-chat-adapters.js`.
+
+What derives from the entry with no further code:
+
+- Terminal launch presets, the toolbar pills and Add Tool menus on desktop,
+  PWA and phone (`shared/constants/agentLaunchPresets.ts`).
+- The "Add <title>" shortcut and its default key
+  (`shared/constants/keyboardShortcuts.ts`), so Keyboard Shortcuts, Help, the
+  palette and the conflict check cover it.
+- Command and foreground-process detection: `AGENT_EXECUTABLES` and
+  `CLI_AGENT_TYPES` in `main/src/services/agents/agentIdentity.ts`, and the
+  `TerminalPanelState['agentType']` type.
+- Pane Chat and Sessions: `PaneChatAgent`, its labels
+  (`PANE_CHAT_AGENT_LABELS`), panel ids and validators in
+  `shared/types/paneChat.ts`.
+- `runpane --agent <id>` and the agent doctor's launch command.
+- Chat tabs, for an entry with `chat`: launch, version check, API key, sign-in,
+  full access, the host's agent catalog, Settings → Agents and Switch to chat.
+  A Session orchestrator for it opens as a chat tab when chat tabs are on.
+- The Settings search alias (its label).
+
+Code never hard-codes an agent fact: an id, executable, session mode or
+minimum version as a string literal, or an env var name the config lists.
+`scripts/check-agent-names.mjs` (part of `pnpm lint`, so CI runs it) fails on
+one outside `scripts/agent-names-allowlist.json`, which lists each exempt file
+with its reason and the number of such literals it may hold. The count may only
+fall. The per-agent code below lives in files already on that list; a new
+literal there means raising its count, which review sees.
+
+## 2. Terminal launch and resume
 
 `main/src/services/terminalPanelManager.ts` → `resolveCliLaunchCommand` gets a branch
-per agent: fresh launch (optionally with the prompt as a quoted argument), and
+per agent that resumes differently: fresh launch (optionally with the prompt as a quoted argument), and
 interrupted-resume (`wasInterrupted` + `agentSessionId`). Keep agent-specific string
 building in a pure module next to `agents/cursorLaunch.ts` so it is unit-testable.
 
@@ -66,7 +118,12 @@ earlier allocator (`ses_` + 32 lowercase hex) are dropped. Its idle composer gat
 once-only stdin prompt delivery; wrapped commands remain opaque. RunPane doctor
 checks the installed executable's session capability before reporting support.
 
-## 4. Status manifest
+`main/src/services/agents/agentResume.ts` → `resolveResumeId` maps the agent to the
+resume id shown in the resume dialog. `sessionManager.resumeInterruptedSessions` and
+the `index.ts` graceful-shutdown path are agent-generic once the classifier knows the
+binary.
+
+## 3. Status manifest
 
 `main/src/services/agentStatus/manifests.ts`: write a `<TOOL>_MANIFEST` from captured
 fixtures and register it in `MANIFESTS_BY_AGENT`. Unknown agents fall back to
@@ -74,68 +131,47 @@ fixtures and register it in `MANIFESTS_BY_AGENT`. Unknown agents fall back to
 gated so answered prompts in scrollback don't stick. Record the CLI version the
 fixtures came from.
 
-## 5. Restart/auto-resume
-
-`main/src/services/agents/agentResume.ts` → `resolveResumeId` maps the agent to the
-resume id shown in the resume dialog. `sessionManager.resumeInterruptedSessions` and
-the `index.ts` graceful-shutdown path are agent-generic once the classifier knows the
-binary.
-
-## 6. RunPane IPC
+## 4. RunPane IPC
 
 `main/src/ipc/runpane.ts`:
 
-- `shouldUseArgumentDelivery` — how the initial prompt reaches the CLI.
-- `runAgentDoctor` — add fallback binary paths (`AGENT_FALLBACK_BIN_PATHS`) when the
+- `shouldUseArgumentDelivery`: how the initial prompt reaches the CLI.
+- `runAgentDoctor`: add fallback binary paths (`AGENT_FALLBACK_BIN_PATHS`) when the
   install dir is typically off the GUI PATH.
 
-## 7. Frontend
+## 5. Icons and worktree file sync
 
-`shared/constants/agentLaunchPresets.ts` is the single list behind the toolbar pills
-and Add Tool dropdowns (desktop + remote). Add one preset entry with its stable
-`hotkeyId` (`platforms` gates unsupported OSes), then add the matching command and
-default key to the command catalog, `shared/constants/keyboardShortcuts.ts`
-(`mod+alt+3` to `mod+alt+6` are the built-in agents; custom commands take
-`mod+alt+7`, `8`, `9` and `0`). `agentLaunchPresets.test.ts` and
-`keyboardShortcutCatalog.test.ts` pin preset, catalog, platform and default-key
-parity. Add the brand icon to
-`frontend/src/components/ui/BrandIcons.tsx` and register it in `CLI_BRAND_ICONS`
-(`frontend/src/components/ui/brandIconRegistry.ts`), and a search alias in
-`frontend/src/components/settings/catalog.tsx`. Keyboard Shortcuts, Help, the
-palette and the conflict check read the catalog, so the new agent's key can be
-changed (and is checked against every other key) with no further UI work.
-
-## 8. Worktree file sync
+Add the brand icon to `frontend/src/components/ui/BrandIcons.tsx` and register
+it under the entry's `icon` key in `CLI_BRAND_ICONS`
+(`frontend/src/components/ui/brandIconRegistry.ts`), and a stand-in symbol in
+the phone's `BRAND_ICONS` (`native/src/app/pane/[paneId]/new-panel.tsx`).
+Without them the agent gets the generic icon.
 
 If the CLI reads a config directory (like `.cursor/`), add it to
 `DEFAULT_WORKTREE_FILE_SYNC_ENTRIES` in `shared/types/worktreeFileSync.ts` so it is
 copied into new worktrees.
 
-## 9. Pane Chat and named Sessions (optional)
+## 6. Sessions in a terminal
 
-To offer the agent as an orchestrator, widen `PaneChatAgent` and the fixed panel-id
-maps in `shared/types/paneChat.ts`, complete older persisted Session maps without
-rewriting them on read, and extend the existing manager registrations, IPC/RunPane
-validators, preload types, remote agent filter, create-dialog options, and settings.
-Configuration update/reload already uses the shared agent normalizer.
-
-Reuse the terminal's native conversation identity and launch/resume support; do not
-allocate a second orchestrator identity or replay a bootstrap prompt. Sessions emit
-generated `AGENTS.md` instructions. OpenCode uses that existing context without new
-OpenCode skill/MCP installation and retains its default `opencode --auto` behavior:
+A Session orchestrator in a terminal reuses the terminal's native conversation
+identity and launch/resume support; do not allocate a second orchestrator
+identity or replay a bootstrap prompt. Sessions emit generated `AGENTS.md`
+instructions. OpenCode uses that existing context without new OpenCode
+skill/MCP installation and retains its default `opencode --auto` behavior:
 non-denied operations are auto-approved, not sandboxed.
 
 OpenCode Session launches must be supported direct commands; wrappers and custom
 resume templates are rejected. Saved IDs restore history when it exists. Closing, archiving, switching, or PTY exit
 does not add a guarantee that shared-service work has stopped.
 
-## 10. Tests are the spec
+## 7. Tests are the spec
 
 Every step above lands test-first: `agentIdentity.test.ts`, `<tool>Launch.test.ts`,
 `terminalPanelManager.test.ts`, `agentResume.test.ts`, `manifests.test.ts` +
 `agentStatusPipeline.test.ts` (real captured bytes), `runpane.test.ts` (agent matrix +
 doctor), `agentLaunchPresets.test.ts`, `keyboardShortcutCatalog.test.ts`,
-`scripts/test-runpane-contract.js`.
+`scripts/test-runpane-contract.js`. For chat, run the chat tab suites against
+the real CLI's ACP mode.
 
 ## Agents launched through a wrapper
 
@@ -238,8 +274,8 @@ Outside Pane Chat and named Sessions, wrapped OpenCode launches run unchanged;
 the wrapper owns session selection and resume, just as it does for the other
 supported agents. OpenCode Session launches reject wrappers and custom resume.
 
-A new built-in agent works with wrappers once its executable name is in
-`AGENT_EXECUTABLES`. Add a screen signature only if the agent's UI has a stable,
+A new agent works with wrappers once its config entry lists its executable
+names (`executables`). Add a screen signature only if the agent's UI has a stable,
 distinctive frame.
 
 ## Delivery state and ghost text

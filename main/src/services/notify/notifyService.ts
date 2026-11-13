@@ -39,9 +39,9 @@ import type { ApprovalStore } from '../approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../../database/jsonStoreImport';
 import type { SessionInboxEnded } from '../sessionInbox';
 import { workerCard } from './workerContext';
+import { agentConfig } from '../../../../shared/agents';
 
-const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
-const agentName = (agentType: string | undefined): string => (agentType ? AGENT_NAMES.get(agentType) : undefined) ?? 'Agent';
+const agentName = (agentType: string | undefined): string => (agentType ? agentConfig(agentType)?.label : undefined) ?? 'Agent';
 
 export interface NotifyServiceDependencies {
   configManager: ConfigManager;
@@ -92,6 +92,8 @@ export interface NotifyServiceDependencies {
   typeIntoTab?: NotifyQueueEnvironment['typeIntoTab'];
   /** Seconds since the person last used this computer; Infinity while its screen is locked. Absent: in use. */
   idleSeconds?: () => number;
+  /** Where "Show cards on" leaves this machine (`cardsOnStatus`). Absent: whichever computer is in use. */
+  cardsOn?: NotifyQueueEnvironment['cardsOn'];
   /** Whether a tab still exists. */
   tabAlive?: (panelId: string) => boolean;
 }
@@ -150,6 +152,7 @@ export class NotifyService {
       shortcutRegistered: () => this.shortcutRegistered,
       instructionFiles: () => this.instructionFiles,
       machine: deps.machine,
+      machineId: deps.configManager.getConfig().machineId,
       secrets: deps.secrets,
       sessionOf: deps.sessionOf,
       savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.profiles ?? []).map(profile => profile.id),
@@ -157,6 +160,7 @@ export class NotifyService {
       store: deps.store,
       askerGone: (item) => this.askerGone(item),
       inUse: deps.idleSeconds ? () => (deps.idleSeconds?.() ?? 0) < IN_USE_SECONDS : undefined,
+      cardsOn: deps.cardsOn,
       typeIntoTab: deps.typeIntoTab,
       tabAlive: deps.tabAlive,
       autopilotReader: () => this.autopilotReader?.(),
@@ -194,6 +198,8 @@ export class NotifyService {
       const homeSkillChanged = homeSkill !== this.homeSkill;
       this.homeSkill = homeSkill;
       const instructionsChanged = this.applySettings(notifySettings(config));
+      // "Show cards on" moves the strip and the chime at once, not on the next poll.
+      this.queue.pollInUse();
       // The block names the `pane` skill only while it is installed.
       if (homeSkillChanged && !instructionsChanged && this.lastSettings.enabled) this.syncInstructions(true);
       // The floating windows read the palette when they load, so a new palette recreates them.
@@ -635,7 +641,7 @@ export class NotifyService {
 
   private describeSource(caller: NotifyCaller): NotifySource {
     const pane = this.deps.findPane(caller);
-    const agent = caller.agent?.trim() || (pane?.agentType ? AGENT_NAMES.get(pane.agentType) : undefined) || 'Agent';
+    const agent = caller.agent?.trim() || (pane?.agentType ? agentConfig(pane.agentType)?.label : undefined) || 'Agent';
     if (pane) {
       const source: NotifySource = { paneId: pane.paneId, name: pane.name, agent };
       if (pane.panelId) source.panelId = pane.panelId;

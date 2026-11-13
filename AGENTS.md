@@ -20,6 +20,10 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
 - Before a push: `pnpm check:fast` (type check, lint, offline links when
   lychee is installed, renderer test types, and the unit tests your changes
   reach), plus any other tests your change touches.
+  Agent facts (ids, executables, modes, versions, env var names) live in
+  `contracts/runpane/contract.json` `agents`; read them through
+  `shared/agents.ts`, never as literals. `pnpm lint` (and CI) fails on one;
+  `scripts/agent-names-allowlist.json` caps the files still exempt.
 - Tests: `pnpm --filter frontend test`. Main: `npm rebuild
   better-sqlite3-multiple-ciphers` first (setup builds it for Electron), then
   `pnpm --filter main exec vitest run` (plain `pnpm --filter main test` is watch

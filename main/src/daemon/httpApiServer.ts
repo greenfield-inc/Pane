@@ -17,6 +17,7 @@ import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type
 
 export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
+import { readingMachines } from './readingMachines';
 import {
   GLASSES_CHANNELS,
   GLASSES_EVENT_CHANNELS,
@@ -73,6 +74,8 @@ interface ConnectedRemoteEventClient {
   label: string | null;
   deviceLabel: string | null;
   remoteRuntimeId: string | null;
+  /** The Pane install reading this computer's cards on this stream (`readingMachines`); null for anything else. */
+  readerMachineId: string | null;
   remoteAddress: string | null;
   connectedAt: string;
   lastSeenAt: string;
@@ -134,6 +137,8 @@ interface RemoteReadyEventPayload {
   paneVersion?: string;
   /** A write repeated with the same `requestId` runs once and gets the first answer, so clients may resend. Hosts before it omit it. */
   deduplicatesRequestIds: true;
+  /** This host's install id (`AppConfig.machineId`), which "Show cards on" names it by. Hosts before it omit it. */
+  machineId?: string;
 }
 
 interface RemoteHealthPayload {
@@ -258,7 +263,7 @@ const WORKSPACE_ONLY_CHANNEL_PREFIXES = ['runpane:machine:', 'runpane:glasses:']
 
 const WORKSPACE_LISTEN_HOST = '127.0.0.1';
 
-type RemoteHttpConfig = Pick<ReturnType<ConfigManager['getConfig']>, 'deepgramApiKey' | 'remoteDaemon'>;
+type RemoteHttpConfig = Pick<ReturnType<ConfigManager['getConfig']>, 'deepgramApiKey' | 'remoteDaemon' | 'machineId'>;
 
 interface RemoteHttpConfigProvider {
   getConfig(): RemoteHttpConfig;
@@ -969,6 +974,8 @@ export class PaneRemoteHttpApiServer {
       deduplicatesRequestIds: true,
     };
     if (this.paneVersion) ready.paneVersion = this.paneVersion;
+    const hostMachineId = this.configManager.getConfig().machineId;
+    if (hostMachineId) ready.machineId = hostMachineId;
     writeSseEvent(stream, 'ready', ready);
 
     const clientConnectionId = String(this.nextClientConnectionId++);
@@ -984,6 +991,7 @@ export class PaneRemoteHttpApiServer {
       label: auth.client?.label ?? getClientLabelFromRequest(request, url.searchParams.get('client_label')),
       deviceLabel: getClientDeviceLabelFromHeaders(request),
       remoteRuntimeId: getRemoteRuntimeIdFromRequest(request, url.searchParams.get('runtime_id')),
+      readerMachineId: glassesClient ? null : this.readerMachineId(request, auth),
       remoteAddress: getRemoteAddress(request),
       connectedAt,
       lastSeenAt: connectedAt,
@@ -997,6 +1005,7 @@ export class PaneRemoteHttpApiServer {
       glassesOrigin: glassesClient?.origin ?? null,
     };
     this.eventClients.set(clientConnectionId, connectedClient);
+    if (connectedClient.readerMachineId) readingMachines.add(connectedClient.readerMachineId);
     if (connectedClient.remoteRuntimeId && connectedClient.deviceLabel) {
       // A phone answers from an alert button with no stream open; it keeps the name it gave here.
       this.deviceLabelsByRuntime.set(connectedClient.remoteRuntimeId, connectedClient.deviceLabel);
@@ -1224,7 +1233,7 @@ export class PaneRemoteHttpApiServer {
             'These glasses started a Session on this computer less than 30 seconds ago, so this one was not created.', 429, `Try again in ${seconds} s.`);
         }
         // Glasses never show the orchestrator's tab, so the Session starts as the person's settings say.
-        return this.commandRegistry.invokeRemote(channel, [input, { chatTabs: true }]);
+        return this.commandRegistry.invokeRemote(channel, [input, { chatTabs: true, chatAgents: true }]);
       });
       return;
     }
@@ -1398,6 +1407,7 @@ export class PaneRemoteHttpApiServer {
       this.getRemoteVisibilityViewerPrefix(client.remoteClientId, client.remoteClientTokenHash, client.remoteRuntimeId),
     );
     this.eventClients.delete(clientConnectionId);
+    if (client.readerMachineId) readingMachines.remove(client.readerMachineId);
     if (!client.stream.writableEnded) {
       client.stream.end();
     }
@@ -1467,6 +1477,17 @@ export class PaneRemoteHttpApiServer {
       ?? own?.label ?? sameClient?.label ?? auth.client?.label ?? (login || 'another device');
   }
 
+
+  /**
+   * The Pane install a desktop's stream names (`X-Pane-Machine-Id`), counted as reading this computer's
+   * cards only for the callers that may change "Show cards on": the owner, or a paired device.
+   */
+  private readerMachineId(request: IncomingMessage, auth: Extract<RemoteRequestAuthResult, { ok: true }>): string | null {
+    const machineId = getSingleHeaderValue(request.headers['x-pane-machine-id'])?.trim().slice(0, 128);
+    if (!machineId) return null;
+    const trusted = this.workspace ? this.workspaceOwnerLogin(request) !== null : Boolean(auth.client);
+    return trusted ? machineId : null;
+  }
 
   /** The request's Tailscale login when it is this workspace's owner, else null. */
   private workspaceOwnerLogin(request: IncomingMessage): string | null {

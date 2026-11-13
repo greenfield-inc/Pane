@@ -750,7 +750,7 @@ type PanelLastMessageResult =
     ok: true;
     panelId: string;
     paneId: string;
-    agentType: 'claude' | 'codex';
+    agentType: string;
     text: string;
     length: number;
     limit: number;
@@ -839,7 +839,7 @@ interface PanelCreateRequest {
   type?: 'terminal' | 'chat';
   tool?: PaneToolSpec;
   /** A chat tab: a plain agent, or an Agent Farm profile with its launch arguments. */
-  chat?: { agent?: 'claude' | 'codex'; profile?: string; args?: Record<string, string>; initialInput?: string; title?: string };
+  chat?: { agent?: string; profile?: string; args?: Record<string, string>; initialInput?: string; title?: string };
   /** A native session id the new tab resumes, as panes adopt --resume. */
   resume?: string;
   noFocus?: boolean;
@@ -1377,7 +1377,7 @@ const panelLastMessageResultSchema: BoundarySchema<PanelLastMessageResult> = bou
     ok: boundary.literal(true),
     panelId: boundary.string,
     paneId: boundary.string,
-    agentType: boundary.enumeration('claude', 'codex'),
+    agentType: boundary.string,
     text: boundary.string,
     length: boundary.number,
     limit: boundary.number,
@@ -4491,12 +4491,12 @@ export async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<Panel
   if (parsed.launchArgs && !parsed.agentFarm) throw new Error('--arg is a launch argument for --agent-farm; pass --agent-farm <profile> too.');
   if (parsed.chat || parsed.agentFarm) {
     if (parsed.toolCommand) throw new Error('A chat tab runs its agent over ACP, so it takes --agent or --agent-farm, not --tool-command.');
-    if (parsed.agentFarm && parsed.agent && parsed.agent !== 'claude' && parsed.agent !== 'codex') throw new Error('An Agent Farm profile chooses its own agent; drop --agent.');
-    if (!parsed.agentFarm && parsed.agent !== 'claude' && parsed.agent !== 'codex') throw new Error('--chat opens Claude or Codex: pass --agent claude or --agent codex, or --agent-farm <profile>.');
+    const agent = parsed.chatAgent ?? parsed.agent;
+    if (!parsed.agentFarm && !agent) throw new Error('--chat needs --agent <id> or --agent-farm <profile>. Run `runpane panels create --help` for the flags.');
     if (parsed.asFilePointer || parsed.attachments?.length) throw new Error('--as-file-pointer and --attach are for terminal tabs; send the first prompt with --initial-input.');
     const initialInput = parsed.initialInputFile ? stripUtf8Bom(readInputSource(parsed.initialInputFile)) : parsed.initialInput;
     const chat: NonNullable<PanelCreateRequest['chat']> = {};
-    if (parsed.agent === 'claude' || parsed.agent === 'codex') chat.agent = parsed.agent;
+    if (agent) chat.agent = agent;
     if (parsed.agentFarm) chat.profile = parsed.agentFarm;
     if (parsed.launchArgs) chat.args = parsed.launchArgs;
     if (initialInput) chat.initialInput = initialInput;
@@ -4991,7 +4991,7 @@ async function askAgentChoice(): Promise<RunpaneAgent> {
   try {
     console.log('Choose an agent:');
     agents.forEach((agent, index) => {
-      const template = RUNPANE_CONTRACT.agentTemplates[agent];
+      const template = RUNPANE_CONTRACT.agents.entries[agent];
       console.log(`${index + 1}) ${template.title}`);
     });
 

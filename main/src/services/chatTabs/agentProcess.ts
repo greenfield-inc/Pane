@@ -17,7 +17,7 @@ const STDERR_TAIL_BYTES = 8 * 1024;
 
 /**
  * One chat tab's adapter process. It is the leader of its own process group
- * (POSIX), so stopping it also ends the claude or codex process the adapter
+ * (POSIX), so stopping it also ends the agent process it started
  * started. Pane learns about exits from the child's own events: there is no
  * polling of the process table (a 200 ms `ps` poll cost ~11% of a core per tab).
  */

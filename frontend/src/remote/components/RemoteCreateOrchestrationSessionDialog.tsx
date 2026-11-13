@@ -8,13 +8,14 @@ import {
 } from '../../../../shared/types/orchestrationSession';
 import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../../shared/types/paneChat';
 import type { RemotePwaSessionAgents } from '../../../../shared/types/remoteDaemon';
+import { CONFIGURED_AGENT_IDS } from '../../../../shared/agents';
 import type { Session } from '../../types/session';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 import { loadStartPinnedPreference, saveStartPinnedPreference } from '../utils/startPinnedPreference';
 import { RemoteStartPinnedToggle } from './RemoteCreateSessionDialog';
 
 const START_PINNED_PREFERENCE_KEY = 'pane.remoteCreateOrchestrationSession.startPinned';
-const ALL_AGENTS: RemotePwaSessionAgents = { agents: ['claude', 'codex', 'cursor'], defaultAgent: DEFAULT_PANE_CHAT_AGENT };
+const ALL_AGENTS: RemotePwaSessionAgents = { agents: [...CONFIGURED_AGENT_IDS], defaultAgent: DEFAULT_PANE_CHAT_AGENT };
 
 interface RemoteCreateOrchestrationSessionDialogProps {
   adapter: RemoteRuntimeAdapter;

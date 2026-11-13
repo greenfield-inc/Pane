@@ -194,6 +194,14 @@ export interface NotifySettings {
   sound: boolean;
   /** Whether pop-up cards open with details shown. Showing or hiding details on a card sets it. */
   showDetails: boolean;
+  /** "Show cards on": the one machine where cards pop up and chime, synced to every machine; null: whichever computer is in use. */
+  cardsOn: NotifyCardsOn | null;
+}
+
+/** A machine that "Show cards on" picks: its install id (`AppConfig.machineId`), and its name for display. */
+export interface NotifyCardsOn {
+  id: string;
+  name: string;
 }
 
 export const DEFAULT_NOTIFY_SETTINGS: NotifySettings = {
@@ -204,6 +212,7 @@ export const DEFAULT_NOTIFY_SETTINGS: NotifySettings = {
   updatesHideAfterSeconds: 6,
   sound: true,
   showDetails: false,
+  cardsOn: null,
 };
 
 export const NOTIFY_UPDATES_HIDE_AFTER_CHOICES = [4, 6, 10, 20] as const;
@@ -479,7 +488,21 @@ export interface NotifySnapshot {
   instructionFiles: NotifyInstructionsFile[];
   /** Saved approvals couldn't be imported on this start: nothing was lost and it retries on the next. */
   importError?: { code: string; message: string; next: string };
+  /** Where "Show cards on" leaves this machine; Settings › Approvals says why. */
+  cardsOn: NotifyCardsOnStatus;
+  /** This machine as "Show cards on" names it; null before it has an install id. */
+  thisMachine: NotifyCardsOn | null;
 }
+
+/**
+ * What "Show cards on" means for this machine. any: whichever computer is in use alerts. here: this
+ * machine is the picked one. elsewhere: the picked machine reads this one, so this one stays quiet.
+ * not-added and not-connected: the picked machine can't read this one, so this one alerts as under any;
+ * not-added when it answers this machine (so it hasn't saved this one), not-connected otherwise.
+ */
+export type NotifyCardsOnStatus =
+  | { kind: 'any' | 'here' }
+  | { kind: 'elsewhere' | 'not-added' | 'not-connected'; name: string };
 
 /**
  * What a host shares with every connected screen and phone (`notify:remote-snapshot`, and the

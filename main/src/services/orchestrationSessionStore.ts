@@ -22,8 +22,9 @@ import {
   type OrchestrationSessionStoreData,
 } from '../../../shared/types/orchestrationSession';
 import { getPaneChatPanelId } from '../../../shared/types/paneChat';
+import { configuredAgentSchema } from '../../../shared/agents';
 
-const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor', 'opencode');
+const paneChatAgentSchema = configuredAgentSchema;
 const sourceSchema = boundary.enumeration('user', 'agent', 'system');
 const activityKindSchema = boundary.enumeration(
   'created',

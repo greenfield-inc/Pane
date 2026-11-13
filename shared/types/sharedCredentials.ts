@@ -1,3 +1,5 @@
+import type { NotifyCardsOn } from './notify';
+
 /** Integration keys a host shares with the other hosts its paired devices reach. */
 export const SHARED_CREDENTIAL_IDS = ['anthropicApiKey', 'openaiApiKey', 'deepgramApiKey', 'falApiKey', 'openRouterApiKey', 'apns'] as const;
 export type SharedCredentialId = typeof SHARED_CREDENTIAL_IDS[number];
@@ -96,14 +98,18 @@ export async function syncSharedCredentials(hosts: readonly SharedCredentialHost
 }
 
 /**
- * The Approvals on/off switch as a host holds it. It travels on its own commands, not with the keys:
- * a phone relays keys and has no business relaying this, and a host too old for it refuses the
- * commands instead of silently dropping it.
+ * The Approvals on/off switch and "Show cards on", as a host holds them. They travel on their own
+ * commands, not with the keys: a phone relays keys and has no business relaying these, and a host
+ * too old for them refuses the commands instead of silently dropping them.
  */
 export interface SharedNotifySwitch {
   enabled: boolean;
   /** Epoch ms of the last change, on the host where the person made it. 0: never changed since sharing began. */
   changedAt: number;
+  /** The machine where cards pop up and chime; null: whichever computer is in use. Hosts from before it omit it. */
+  cardsOn?: NotifyCardsOn | null;
+  /** Epoch ms `cardsOn` last changed, on the host where the person changed it; 0 if never. Hosts from before it omit it. */
+  cardsOnChangedAt?: number;
 }
 
 /**
@@ -111,9 +117,40 @@ export interface SharedNotifySwitch {
  * has no time, and an off there was somebody's choice, while most on values are just the default.
  * The rule looks only at the values, so every host picks the same one whatever order it reads them in.
  */
-export function isNewerNotifySwitch(candidate: SharedNotifySwitch, current: SharedNotifySwitch): boolean {
+function isNewerNotifySwitch(candidate: SharedNotifySwitch, current: SharedNotifySwitch): boolean {
   if (candidate.changedAt !== current.changedAt) return candidate.changedAt > current.changedAt;
   return !candidate.enabled && current.enabled;
+}
+
+/**
+ * The later "Show cards on" wins, on its own time, so a host that reports none (one from before it)
+ * never clears a pick. Equal times settle on the smaller id, "whichever computer is in use" first,
+ * so every host picks the same one.
+ */
+function isNewerCardsOn(candidate: SharedNotifySwitch, current: SharedNotifySwitch): boolean {
+  if (candidate.cardsOnChangedAt === undefined) return false;
+  if (current.cardsOnChangedAt === undefined) return true;
+  if (candidate.cardsOnChangedAt !== current.cardsOnChangedAt) return candidate.cardsOnChangedAt > current.cardsOnChangedAt;
+  return (candidate.cardsOn?.id ?? '') < (current.cardsOn?.id ?? '');
+}
+
+export interface NotifySwitchMerge {
+  notifySwitch: SharedNotifySwitch;
+  changed: boolean;
+}
+
+/** `current` with each part of `incoming` that is newer: the switch and "Show cards on" each by their own time. */
+export function mergeNotifySwitch(current: SharedNotifySwitch, incoming: SharedNotifySwitch): NotifySwitchMerge {
+  let notifySwitch = current;
+  if (isNewerNotifySwitch(incoming, current)) notifySwitch = { ...notifySwitch, enabled: incoming.enabled, changedAt: incoming.changedAt };
+  if (isNewerCardsOn(incoming, current)) notifySwitch = { ...notifySwitch, cardsOn: incoming.cardsOn ?? null, cardsOnChangedAt: incoming.cardsOnChangedAt };
+  return { notifySwitch, changed: notifySwitch !== current };
+}
+
+/** Whether `host` is missing a part of `newest` it can hold: a host from before "Show cards on" only takes on/off. */
+function isBehind(host: SharedNotifySwitch, newest: SharedNotifySwitch): boolean {
+  if (isNewerNotifySwitch(newest, host)) return true;
+  return host.cardsOnChangedAt !== undefined && isNewerCardsOn(newest, host);
 }
 
 export interface SharedNotifySwitchHost {
@@ -122,15 +159,15 @@ export interface SharedNotifySwitchHost {
 }
 
 /**
- * Reads every reachable host, then writes the newest value to the hosts behind it. Unreachable
+ * Reads every reachable host, then writes the newest values to the hosts behind it. Unreachable
  * hosts and hosts too old to share the switch are skipped; they catch up on a later sync.
  */
 export async function syncSharedNotifySwitch(hosts: readonly SharedNotifySwitchHost[]): Promise<{ reached: number; updated: number }> {
   const reads = await Promise.all(hosts.map(host => host.read().then(notifySwitch => ({ host, notifySwitch }), () => null)));
   const reached = reads.filter(read => read !== null);
   if (reached.length === 0) return { reached: 0, updated: 0 };
-  const newest = reached.reduce((best, read) => isNewerNotifySwitch(read.notifySwitch, best) ? read.notifySwitch : best, reached[0].notifySwitch);
-  const behind = reached.filter(read => isNewerNotifySwitch(newest, read.notifySwitch));
+  const newest = reached.reduce((best, read) => mergeNotifySwitch(best, read.notifySwitch).notifySwitch, reached[0].notifySwitch);
+  const behind = reached.filter(read => isBehind(read.notifySwitch, newest));
   const applied = await Promise.all(behind.map(read => read.host.apply(newest).then(() => true, () => false)));
   return { reached: reached.length, updated: applied.filter(Boolean).length };
 }

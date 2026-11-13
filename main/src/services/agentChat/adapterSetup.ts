@@ -2,42 +2,27 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { findExecutableInPath, getShellPath } from '../../utils/shellPath';
-import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { getShellPath } from '../../utils/shellPath';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { hostCommand } from './hostCommand';
+import { agentConfig } from '../../../../shared/agents';
 
 const execFileAsync = promisify(execFile);
-const CLAUDE_ADAPTER_VERSION = '0.100.0';
-export const CODEX_ADAPTER_VERSION = '2.5.0';
-type Provider = 'claude' | 'codex';
-/**
- * The adapters ship inside Pane as pinned dependencies, without the native
- * agent binaries their SDKs bundle. Each runs the person's own installed CLI,
- * which must be at least `minimum`: claude-agent-sdk 0.3.316 pairs with Claude
- * Code 2.1.316, and codex-acp 2.5.0 depends on @openai/codex ^0.165.0.
- * Change a pin only with its `minimum`, its `minimumReleaseAgeExclude` entries
- * in pnpm-workspace.yaml, and a packaged build: scripts/after-pack.js runs
- * scripts/verify-chat-adapters.js, which fails the build unless each packaged
- * adapter starts and answers ACP `initialize`.
- */
-const adapters = {
-  claude: { packageName: '@agentclientprotocol/claude-agent-acp', version: CLAUDE_ADAPTER_VERSION, name: 'Claude Code', minimum: '2.1.316', upgrade: 'npm install -g @anthropic-ai/claude-code@latest' },
-  codex: { packageName: '@agentclientprotocol/codex-acp', version: CODEX_ADAPTER_VERSION, name: 'Codex', minimum: '0.165.0', upgrade: 'npm install -g @openai/codex@latest' },
-};
 const checked = new Set<string>();
 
-/** The bundled adapter's entry script, or undefined when this build is missing it. */
-export function adapterEntry(provider: Provider): string | undefined {
-  const { packageName, version } = adapters[provider];
+/**
+ * The bundled ACP adapter package's entry script, or undefined when this build is missing
+ * it. The adapters ship inside Pane as exact dependencies in package.json, without the
+ * native agent binaries their SDKs bundle; each runs the person's own installed CLI.
+ * scripts/after-pack.js runs scripts/verify-chat-adapters.js, which fails a packaged
+ * build unless each adapter in the agents config starts and answers ACP `initialize`.
+ */
+export function adapterEntry(packageName: string): string | undefined {
   let root;
   try { root = path.dirname(require.resolve(`${packageName}/package.json`)); }
   catch { return; }
-  let metadata;
-  try { metadata = decodeOptionalBoundary(JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')), boundary.object({ version: boundary.string })); }
-  catch { return; }
   const entry = path.join(root, 'dist', 'index.js');
-  return metadata?.version === version && existsSync(entry) ? entry : undefined;
+  return existsSync(entry) ? entry : undefined;
 }
 
 /**
@@ -65,21 +50,22 @@ child.on('exit', (code, signal) => { if (signal) process.kill(process.pid, signa
 export interface LaunchContext { cwd?: string; env?: NodeJS.ProcessEnv }
 
 /**
- * Checks that the person's installed CLI can run under the bundled adapter.
- * Nothing is downloaded or installed. `executable` defaults to the same PATH
- * lookup terminal agent tabs use. The version is read in `context`, the folder
- * and environment the adapter will run the CLI in, because a project-selected
- * wrapper may answer only there.
+ * Checks that the person's installed CLI is new enough for chat (the agents config's
+ * `chat.minimumVersion`). Nothing is downloaded or installed. The version is read in
+ * `context`, the folder and environment the agent will run in, because a
+ * project-selected wrapper may answer only there.
  */
-export async function installAdapter(provider: Provider, executable: string | null = findExecutableInPath(provider), context: LaunchContext = {}): Promise<void> {
-  const { name, minimum, upgrade } = adapters[provider];
-  if (!adapterEntry(provider)) throw new PaneError('CHAT_ADAPTER_MISSING', `This Pane build is missing its bundled ${name} chat adapter.`, 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
-  if (!executable) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', `${name} is not installed on this machine, or not on its PATH.`, `Install it with \`${upgrade}\`, then start Chat again. Terminal agent tabs are not affected.`);
+export async function checkAgentCli(agentId: string, executable: string | null, context: LaunchContext = {}): Promise<void> {
+  const agent = agentConfig(agentId);
+  const chat = agent?.chat;
+  if (!agent || !chat) throw new PaneError('CHAT_AGENT_UNKNOWN', `Pane has no chat settings for the agent "${agentId}".`, 'Open a chat tab for an agent listed in the + menu.');
+  if (chat.adapter && !adapterEntry(chat.adapter.package)) throw new PaneError('CHAT_ADAPTER_MISSING', `This Pane build is missing its bundled ${agent.title} chat adapter.`, 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
+  if (!executable) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', `${agent.title} is not installed on this machine, or not on its PATH.`, `Install it with \`${agent.install.command}\`, then start Chat again. Terminal agent tabs are not affected.`);
   const key = `${executable}\0${context.cwd ?? ''}`;
   if (checked.has(key)) return;
-  const version = await installedVersion(name, executable, context);
-  if (compareVersions(version, minimum) < 0) {
-    throw new PaneError('CHAT_AGENT_OUTDATED', `${name} ${version} at ${executable} is older than ${minimum}, the oldest version chat supports.`, `Update it with \`${upgrade}\`, then start Chat again. Terminal agent tabs are not affected.`);
+  const version = await installedVersion(agent.title, executable, context);
+  if (compareVersions(version, chat.minimumVersion) < 0) {
+    throw new PaneError('CHAT_AGENT_OUTDATED', `${agent.title} ${version} at ${executable} is older than ${chat.minimumVersion}, the oldest version chat supports.`, `Update it with \`${agent.install.command}\`, then start Chat again. Terminal agent tabs are not affected.`);
   }
   checked.add(key);
 }

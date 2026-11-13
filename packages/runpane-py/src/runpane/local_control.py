@@ -2143,15 +2143,13 @@ def build_panel_create_request(parsed: Any) -> Dict[str, Any]:
     if parsed.chat or parsed.agent_farm:
         if parsed.tool_command:
             raise ValueError("A chat tab runs its agent over ACP, so it takes --agent or --agent-farm, not --tool-command.")
-        if parsed.agent_farm and parsed.agent and parsed.agent not in ("claude", "codex"):
-            raise ValueError("An Agent Farm profile chooses its own agent; drop --agent.")
-        if not parsed.agent_farm and parsed.agent not in ("claude", "codex"):
-            raise ValueError("--chat opens Claude or Codex: pass --agent claude or --agent codex, or --agent-farm <profile>.")
+        if not parsed.agent_farm and not parsed.agent:
+            raise ValueError("--chat needs --agent <id> or --agent-farm <profile>. Run `runpane panels create --help` for the flags.")
         if parsed.as_file_pointer or parsed.attachments:
             raise ValueError("--as-file-pointer and --attach are for terminal tabs; send the first prompt with --initial-input.")
         initial_input = read_input_source(parsed.initial_input_file) if parsed.initial_input_file else parsed.initial_input
         chat: Dict[str, Any] = {
-            **optional_value("agent", parsed.agent if parsed.agent in ("claude", "codex") else None),
+            **optional_value("agent", parsed.agent),
             **optional_value("profile", parsed.agent_farm),
             **optional_value("args", parsed.launch_args or None),
             **optional_value("initialInput", initial_input or None),
@@ -2514,7 +2512,7 @@ def ask_agent_choice() -> str:
     agents = RUNPANE_CONTRACT["enums"]["agents"]
     print("Choose an agent:")
     for index, agent in enumerate(agents, start=1):
-        print(f"{index}) {RUNPANE_CONTRACT['agentTemplates'][agent]['title']}")
+        print(f"{index}) {RUNPANE_CONTRACT['agents']['entries'][agent]['title']}")
 
     while True:
         answer = input("Agent [1]: ").strip().lower()

@@ -10,6 +10,7 @@ import { CURSOR_NO_FORK, forkNativeSession, isNativeAgent, lastMessageSnippet, l
 import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
+import { agentTerminalCommand } from './agents';
 
 /**
  * The note's sections. They extend Codex's compaction prompt
@@ -397,7 +398,7 @@ async function findRepo(destination: Destination, listed: ReturnType<typeof repo
 
 function agentCommand(destination: HandoffDestination, shell: string): string | undefined {
   if (!destination.model && !destination.effort) return undefined;
-  const base = RUNPANE_CONTRACT.agentTemplates[destination.agent].command;
+  const base = agentTerminalCommand(destination.agent);
   const { model, effort } = destination;
   const flags = destination.agent === 'codex'
     ? [model && `-m ${quote(model, shell)}`, effort && `-c ${quote(`model_reasoning_effort=${effort}`, shell)}`]
