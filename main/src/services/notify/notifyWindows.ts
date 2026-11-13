@@ -94,7 +94,7 @@ export class NotifyWindows {
   }
 
   isNotifyWindow(sender: Electron.WebContents): boolean {
-    return sender === this.strip?.webContents || sender === this.round?.webContents;
+    return this.webContents().includes(sender);
   }
 
   webContents(): Electron.WebContents[] {
@@ -102,9 +102,11 @@ export class NotifyWindows {
   }
 
   destroy(): void {
-    for (const window of [this.strip, this.round]) if (window && !window.isDestroyed()) window.destroy();
+    const windows = [this.strip, this.round];
+    // Destroying a window emits 'closed' synchronously, and its listeners call back into this class.
     this.strip = null;
     this.round = null;
+    for (const window of windows) if (window && !window.isDestroyed()) window.destroy();
   }
 
   private createStrip(): BrowserWindow {
