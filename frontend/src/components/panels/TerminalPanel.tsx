@@ -405,7 +405,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     return () => clearTimeout(timeout);
   }, [overlayActive, initAttempt]);
   const [overlayVisible, setOverlayVisible] = useState(true);
-  // Container size at this xterm's last completed fit, for unmasked hot activation.
+  // Container size at this xterm's last completed fit (any refit, visible or
+  // activation), for unmasked hot activation.
   const lastReconciledSizeRef = useRef<{ width: number; height: number } | null>(null);
   const rememberReconciledSize = useCallback(() => {
     const container = terminalRef.current;
@@ -723,6 +724,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     ) {
       return;
     }
+    rememberReconciledSize();
 
     // A dims change invalidates the renderer's cached rows; repaint the whole
     // grid so WebGL never shows cells from the previous geometry.
@@ -742,7 +744,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       dimensions.rows,
       { force },
     );
-  }, [panel.id]);
+  }, [panel.id, rememberReconciledSize]);
 
   // The terminal instance lives for the lifetime of a panel. Event handlers installed
   // during initialization read changing session/config values through this ref so those
@@ -911,7 +913,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     await resizePtyToFit();
     // A refocus refresh may finish after switching to another session's terminal.
     if (xtermRef.current !== terminal) return;
-    rememberReconciledSize();
     if (terminal.rows > 0) terminal.refresh(0, terminal.rows - 1);
 
     if (wasNearBottom) {
@@ -923,7 +924,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       isNearBottomRef.current = false;
       setShowScrollDown(true);
     }
-  }, [resizePtyToFit, rememberReconciledSize]);
+  }, [resizePtyToFit]);
 
   const repaintTerminal = useCallback(() => {
     void reconcileMountedTerminal();
@@ -2056,7 +2057,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         }
         await waitForNextPaint();
         if (cancelled) return;
-        rememberReconciledSize();
         // Masked activations report from the overlay linger timer when the mask lifts.
         if (!masked) markPaneTerminalShown(panel.sessionId);
 
@@ -2102,7 +2102,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       if (hideOverlayTimer) clearTimeout(hideOverlayTimer);
       releaseMask();
     };
-  }, [activationVisible, panelVisible, useBatterySaverTerminalVisibility, panel.id, panel.sessionId, isInitialized, autoFocus, handleRefreshTerminal, reconcileMountedTerminal, repaintTerminal, forwardToMainLog, refreshMask, rememberReconciledSize]);
+  }, [activationVisible, panelVisible, useBatterySaverTerminalVisibility, panel.id, panel.sessionId, isInitialized, autoFocus, handleRefreshTerminal, reconcileMountedTerminal, repaintTerminal, forwardToMainLog, refreshMask]);
 
   useEffect(() => {
     const terminal = xtermRef.current;

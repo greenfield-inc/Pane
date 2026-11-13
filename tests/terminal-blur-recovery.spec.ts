@@ -359,6 +359,24 @@ test('panel hide and show after a resize retains the masked hot activation', asy
   expect(await maskAppearances(page, panel)).not.toEqual([]);
 });
 
+test('a resize while visible does not mask the next hot activation', async ({ page }) => {
+  const { panel } = await bootFixture(page);
+  const resizesOf = () => mockEvaluate(page, (mock) => mock.getInvokeCalls('terminal:resize').length);
+  const resizesBefore = await resizesOf();
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('Playwright viewport is unset; this test resizes it.');
+  await page.setViewportSize({ width: viewport.width - 120, height: viewport.height - 80 });
+  await expect.poll(resizesOf).toBeGreaterThan(resizesBefore);
+  await page.getByRole('tab', { name: secondaryPanel.title, exact: true }).click();
+  await expect(page.getByRole('tabpanel', { name: secondaryPanel.title })).toBeVisible();
+  await resetMaskAppearances(page);
+  await page.getByRole('tab', { name: primaryPanel.title, exact: true }).click();
+  await expect.poll(() => lifecycleLogs(page).then((logs) => logs.some((line) => (
+    line.includes(`Activation depth for panel ${primaryPanel.id}: hot`)
+  )))).toBe(true);
+  expect(await maskAppearances(page, panel)).toEqual([]);
+});
+
 test('session remount retains full recovery', async ({ page }) => {
   const { panel } = await bootFixture(page);
   await page.getByRole('button', { name: otherSession.name, exact: true }).click();
