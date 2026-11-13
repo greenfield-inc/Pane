@@ -64,4 +64,10 @@ describe('markdownBlocks', () => {
     const linked = 'See [the docs][docs].\n\nMore text[^1].\n\n[docs]: https://example.com\n\n[^1]: A note.';
     expect(markdownBlocks(linked)).toEqual([linked]);
   });
+
+  it('renders raw HTML that spans a blank line as the whole message does', () => {
+    for (const text of ['Before\n\n<!-- a note\n\nstill the note -->\n\nAfter', 'Before\n\n<pre>\none\n\ntwo\n</pre>\n\nAfter']) {
+      expect(markdownBlocks(text).map(html).join('')).toBe(html(text));
+    }
+  });
 });

@@ -452,9 +452,10 @@ loads the same conversation.
 - Only the chat tab on screen renders. A hidden tab is unmounted and holds no
   transcript; showing it reads the newest window from the host once.
 - A streaming reply redraws at most once per stream frame (`STREAM_FRAME_MS` in
-  `shared/constants/streamCadence.ts`, the interval terminals flush output at),
-  and its markdown is parsed block by block, so an update re-parses only the
-  block being written.
+  `shared/constants/streamCadence.ts`, also the terminals' output interval when
+  no one is typing), and its markdown is parsed block by block, so an update
+  re-parses only the block being written. A reply with link definitions,
+  footnotes or a raw HTML block that can span blank lines is parsed whole.
 - A queued message keeps only a preview in the tab's saved state; its full text
   and images wait in a file beside it until they are sent.
 - A tool step's update sends only the fields that changed; command output is sent

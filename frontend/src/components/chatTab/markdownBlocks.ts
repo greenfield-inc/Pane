@@ -1,8 +1,11 @@
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 /** A line that, after a blank line, can still belong to the block before it: indented, or a list item. */
 const CONTINUES = /^(\s|[-*+](\s|$)|\d{1,9}[.)](\s|$))/;
-/** Link reference definitions and footnotes resolve across the whole message. */
-const DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
+/**
+ * Keeps a message whole: link reference definitions and footnotes resolve across it, and
+ * these raw HTML blocks (comments, <pre>, <script>, <style>, <textarea>, <?, <!) can span blank lines.
+ */
+const WHOLE = /^ {0,3}(\[[^\]]+\]:|<([!?]|(pre|script|style|textarea)\b))/im;
 
 /**
  * Splits a message into top-level markdown blocks that render the same alone as together,
@@ -10,7 +13,7 @@ const DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
  * outside fenced code, before a line that starts a new block at the left margin.
  */
 export function markdownBlocks(text: string): string[] {
-  if (DEFINITION.test(text)) return [text];
+  if (WHOLE.test(text)) return [text];
   const blocks: string[] = [];
   const lines = text.split('\n');
   let start = 0;
