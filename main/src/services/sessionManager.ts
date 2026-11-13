@@ -1,4 +1,5 @@
 import { customCommandResumeSchema, effectiveCustomResume, type CustomCommandResume } from '../../../shared/types/customCommandResume';
+import { configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 /**
  * Session management for Pane.
  * Note: "Sessions" are called "Panes" in the UI. Internally they remain
@@ -148,7 +149,6 @@ import { detectGitBase } from './worktreeManager';
 import { panelManager } from './panelManager';
 import { ProjectEnvService, type ResolvedProjectEnv } from './projectEnvVars';
 import { teammatePaneCaller } from '../daemon/commandRegistry';
-import { configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 import type { AnalyticsManager } from './analyticsManager';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import { comparePaneOrder, type NewPanePlacement, type PaneOrderSettings } from '../../../shared/utils/paneOrder';
