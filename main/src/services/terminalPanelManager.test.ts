@@ -2148,8 +2148,28 @@ type AgentStatusAccess = {
   terminals: Map<string, TerminalUnderTest>;
   registerAgentStatusPanel(terminal: TerminalUnderTest): void;
   pollAgentStatus(): void;
-  destroyTerminal(panelId: string): void;
+  destroyTerminal(panelId: string, options?: { saveState?: boolean }): Promise<void> | void;
 };
+
+describe('TerminalPanelManager latest output', () => {
+  it('counts a terminal closing as output, so port reads notice its server is gone', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const manager = testAccess<AgentStatusAccess>(new TerminalPanelManager());
+      const terminal = createTerminal();
+      terminal.lastOutputAt = new Date('2026-11-13T10:00:00.000Z');
+      manager.terminals.set(terminal.panelId, terminal);
+      expect(manager.latestOutputAt()).toBe(Date.parse('2026-11-13T10:00:00.000Z'));
+
+      vi.setSystemTime(new Date('2026-11-13T10:05:00.000Z'));
+      await manager.destroyTerminal(terminal.panelId, { saveState: false });
+
+      expect(manager.latestOutputAt()).toBe(Date.parse('2026-11-13T10:05:00.000Z'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
 
 describe('TerminalPanelManager agent status poll', () => {
   it('re-derives status when the screen changes and holds it while the screen is unchanged', async () => {
