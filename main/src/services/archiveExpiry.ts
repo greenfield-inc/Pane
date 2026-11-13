@@ -24,7 +24,7 @@ async function runArchiveExpiry(now: Date = new Date()): Promise<string[]> {
     retentionDays: archiveRetentionDays(getRuntimeConfigManager().getConfig()),
     archivedSessions: sessions
       .filter(session => session.archived === true)
-      .map(session => ({ folder: sessionWorkspacePath(session.id), paneId: session.internalSessionId, archivedAt: new Date(session.archivedAt ?? session.updatedAt) })),
+      .map(session => ({ folder: sessionWorkspacePath(session.id), paneId: session.internalSessionId, archivedAt: new Date(session.archivedAt ?? Date.now()) })),
     paneIsArchivedOrGone: paneId => {
       const pane = databaseService.getSession(paneId);
       return !pane || Boolean(pane.archived);

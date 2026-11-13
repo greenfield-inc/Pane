@@ -117,7 +117,8 @@ and reopening keep this folder. Archiving keeps it for 14 days (**Settings →
 Worktrees & Git → Keep archived folders**), then Pane deletes it, first moving
 any agent logs inside it to `<pane-dir>/agent-logs/` (see
 [The scratch folder](#the-scratch-folder)); restoring the Session before then
-keeps it. These folders are not Git worktrees or security sandboxes.
+keeps it. A Session archived before this retention existed counts its 14 days
+from the first launch of the Pane version that added it. These folders are not Git worktrees or security sandboxes.
 Project implementation belongs in an appropriate Pane/worktree.
 
 ## Windows and WSL runtimes

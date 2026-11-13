@@ -898,7 +898,13 @@ export class OrchestrationSessionManager extends EventEmitter {
 
   private normalizePersistedSessionArchiveState(data: OrchestrationSessionStoreData): OrchestrationSessionStoreData {
     let changed = false;
+    // A Session archived before archive retention existed starts its retention period now, not at its last update.
+    const now = new Date().toISOString();
     const sessions = data.sessions.map(session => {
+      if (session.archived === true && !session.archivedAt) {
+        changed = true;
+        return { ...session, archivedAt: now };
+      }
       if (session.archived !== undefined) return session;
       changed = true;
       return { ...session, archived: false };

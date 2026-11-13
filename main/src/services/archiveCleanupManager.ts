@@ -373,8 +373,8 @@ export class ArchiveCleanupManager {
       await stopFsmonitorDaemon(job.source, context.commandRunner);
       // An agent run with its home in the scratch folder (an isolated QA instance) leaves logs there.
       const scratch = path.join(job.source, ...PANE_SCRATCH_FOLDER.split('/'));
-      await preserveAgentLogs(scratch, job.sessionId)
-        .catch(error => console.warn(`[ArchiveCleanup] Could not keep agent logs from ${scratch}:`, error));
+      // A failed move stops this cleanup step: the worktree stays, and the job retries or shows Retry cleanup.
+      await preserveAgentLogs(scratch, job.sessionId);
       await archiveFs.mkdir(path.dirname(job.quarantine), { recursive: true });
       if (archivePathKey(await archiveFs.realpath(path.dirname(job.quarantine))) !== archivePathKey(path.dirname(job.quarantine))) {
         throw new Error('Cleanup quarantine parent is redirected');
