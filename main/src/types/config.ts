@@ -2,6 +2,7 @@ import type { PaneSecretMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
+import type { MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { WorkspaceAccessConfig } from '../../../shared/types/workspaceAccess';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
@@ -9,6 +10,8 @@ import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscri
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
 import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
+import type { AnalyticsEnvironment } from '../../../shared/types/analyticsEnvironment';
+import type { KeyboardShortcutOverrides } from '../../../shared/utils/keyboardBindings';
 import type { SessionRetention } from '../../../shared/types/orchestrationSession';
 
 interface TerminalShortcut {
@@ -36,6 +39,8 @@ export interface AnalyticsIdentity {
   appVersion?: string;
   platform?: string;
   electronVersion?: string;
+  /** Where Pane runs (CI, container, display); sent as event context, never saved. */
+  environment?: AnalyticsEnvironment;
   webDistinctId?: string;
   webAttributionPresent?: boolean;
   isFirstLaunch?: boolean;
@@ -50,8 +55,7 @@ export interface AnalyticsIdentity {
 type HtmlFileOpenMode = 'preview' | 'source';
 
 export interface AppConfig {
-  // Experimental: open Claude and Codex agent tabs as Chat (off by default).
-  // Experimental: chat tabs (Claude and Codex over ACP, no terminal). Off until they ship on desktop and mobile.
+  // Chat tabs (Claude and Codex over ACP, no terminal). On for a fresh install; see ConfigManager.
   chatTabsEnabled?: boolean;
   /** Experimental: Autopilot, one always-running agent above every Session (needs chat tabs). */
   autopilotEnabled?: boolean;
@@ -118,6 +122,10 @@ export interface AppConfig {
   notify?: Partial<NotifySettings>;
   /** Epoch ms `notify.enabled` last changed, on the machine where the person changed it; shared with it. Absent: 0. */
   notifyEnabledChangedAt?: number;
+  /** Epoch ms `notify.cardsOn` last changed, on the machine where the person changed it; shared with it. Absent: 0. */
+  notifyCardsOnChangedAt?: number;
+  /** This Pane install's id, which other machines know it by (as "Show cards on" names it). Created on first start. */
+  machineId?: string;
   // Dev mode for debugging
   devMode?: boolean;
   // Additional paths to add to PATH environment variable
@@ -196,6 +204,11 @@ export interface AppConfig {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
+  // Changed keys, by catalog id (shared/constants/keyboardShortcuts.ts). A missing id
+  // follows the default, null unassigns it, and an update replaces the whole map ({} resets all).
+  keyboardShortcutOverrides?: KeyboardShortcutOverrides;
+  // 'pending' until the person dismisses the one-time notice of keys the VS Code keymap moved.
+  keymapNotice?: 'pending' | 'seen';
   // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
@@ -208,6 +221,8 @@ export interface AppConfig {
   terminalPowerMode?: TerminalPowerMode;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
+  /** Machine marks chosen on this computer only (D-252), keyed by `machineMarkKey`. Absent: automatic. */
+  machineMarks?: MachineMarkOverrides;
   // Codeless remote access over Tailscale (runpane workspace and desktop remote mode)
   workspaces?: WorkspaceAccessConfig;
   terminalFontFamily?: string;
@@ -296,6 +311,11 @@ export interface UpdateConfigRequest {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
+  // Changed keys, by catalog id (shared/constants/keyboardShortcuts.ts). A missing id
+  // follows the default, null unassigns it, and an update replaces the whole map ({} resets all).
+  keyboardShortcutOverrides?: KeyboardShortcutOverrides;
+  // 'pending' until the person dismisses the one-time notice of keys the VS Code keymap moved.
+  keymapNotice?: 'pending' | 'seen';
   // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
@@ -308,6 +328,8 @@ export interface UpdateConfigRequest {
   terminalPowerMode?: TerminalPowerMode;
   // Self-hosted remote daemon settings and saved client profiles
   remoteDaemon?: RemoteDaemonConfig;
+  /** Machine marks chosen on this computer only (D-252), keyed by `machineMarkKey`. Absent: automatic. */
+  machineMarks?: MachineMarkOverrides;
   terminalFontFamily?: string;
   terminalFontSize?: number;
 }

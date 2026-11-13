@@ -19,7 +19,7 @@ folder** on Windows and Linux) opens its folder.
 | Terminal shortcuts | Every terminal shortcut |
 | Worktree file sync | Every file sync entry with a relative path |
 | Appearance | Appearance mode, themes, high contrast, UI scale, terminal font and size |
-| Preferences | The current value of each behavior toggle from General, Notifications, Shortcuts, Worktrees & Git and Advanced, new-Pane defaults (without the base branch), and the sidebar and `@terminal` choices |
+| Preferences | The current value of each behavior toggle from General, Notifications, Shortcuts, Worktrees & Git and Advanced, the keys you changed in Keyboard Shortcuts (importing them replaces your changed keys), new-Pane defaults (without the base branch), and the sidebar and `@terminal` choices |
 
 ### What is never in the file
 

@@ -116,6 +116,7 @@ describe.skipIf(process.platform === 'win32')('findWslRepos', () => {
     vi.unstubAllEnvs();
   });
 
+  // Two login shells running git take 2 to 4 s on a busy 3-core CI runner, against the 5 s default.
   it('lists the distro repos as UNC paths and names the agents on its PATH', async () => {
     const bin = path.join(home, 'bin');
     mkdirSync(bin);
@@ -136,7 +137,7 @@ describe.skipIf(process.platform === 'win32')('findWslRepos', () => {
       ['acme-web', `\\\\wsl.localhost\\Ubuntu${path.join(home, 'dev', 'acme-web').replace(/\//g, '\\')}`, '~/dev/acme-web', 'main', 'code_folder'],
       ['infra', `\\\\wsl.localhost\\Ubuntu${fromClaude.replace(/\//g, '\\')}`, '~/elsewhere/infra', 'develop', 'claude_config'],
     ]);
-  });
+  }, 20_000);
 });
 
 describe('codexProjectPaths', () => {

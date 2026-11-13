@@ -26,8 +26,8 @@ afterAll(async () => {
   // A create replenishes the reserve after it returns. Its git commands run in the
   // fixture's project, and on Windows a folder a process runs in cannot be deleted.
   await worktreePoolManager.idle();
-  // Pane turns on core.fsmonitor for its projects, and Git then keeps a watcher
-  // daemon in each worktree. Stop them as Pane does before removing a worktree.
+  // A developer's own core.fsmonitor makes Git keep a watcher daemon in each
+  // worktree. Stop them as Pane does before removing a worktree.
   for (const project of projects.splice(0)) {
     const worktrees = git(project, 'worktree', 'list', '--porcelain').split('\n')
       .filter(line => line.startsWith('worktree ')).map(line => line.slice('worktree '.length));

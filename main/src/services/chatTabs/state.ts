@@ -10,9 +10,9 @@ const report = boundary.object({
   reportedAt: boundary.string,
 });
 const schema: BoundarySchema<ChatPanelState> = boundary.object({
-  agent: boundary.enumeration('claude', 'codex'),
+  agent: boundary.nonEmptyString,
   launch: boundary.union(
-    boundary.object({ kind: boundary.literal('agent'), mode: boundary.optional(boundary.string) }),
+    boundary.object({ kind: boundary.literal('agent'), mode: boundary.optional(boundary.string), fullAccess: boundary.optional(boundary.literal(true)) }),
     boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)) }),
   ),
   cwd: boundary.string,
@@ -36,6 +36,13 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
   sessionFolder: boundary.optional(boundary.string),
   autopilotRunId: boundary.optional(boundary.string),
   agentReport: boundary.optional(report),
+  clearedAt: boundary.optional(boundary.string),
+  notice: boundary.optional(boundary.string),
+  open: boundary.optional(boundary.literal('most-recent')),
+  banner: boundary.optional(boundary.union(
+    boundary.object({ kind: boundary.enumeration('most-recent', 'none', 'known-empty') }),
+    boundary.object({ kind: boundary.literal('list-failed'), reason: boundary.string }),
+  )),
 });
 
 /** A chat panel's saved state, or undefined when the row does not hold one. */

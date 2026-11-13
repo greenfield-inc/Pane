@@ -1,5 +1,5 @@
 import React, { useCallback, memo, useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, X, Terminal, PanelRight, FolderTree, TerminalSquare, Play, Globe, Pencil, Sprout } from 'lucide-react';
+import { Plus, X, Terminal, PanelRight, FolderTree, TerminalSquare, Play, Globe, Pencil, Sprout, Boxes } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 import { useHotkey } from '../../hooks/useHotkey';
@@ -9,18 +9,20 @@ import { useSession } from '../../contexts/SessionContext';
 import { isChatTabsEnabled, isNotesEnabled, useConfigStore } from '../../stores/configStore';
 import { showActionError } from '../../stores/errorStore';
 
-const CHAT_AGENTS = [{ id: 'claude', title: 'Claude' }, { id: 'codex', title: 'Codex' }] as const;
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { Tooltip } from '../ui/Tooltip';
 import { useTitleBarSlotStore } from '../../stores/titleBarSlotStore';
 import { Kbd } from '../ui/Kbd';
-import { getCliBrandIcon } from '../ui/brandIconRegistry';
+import { agentIcon, getCliBrandIcon } from '../ui/brandIconRegistry';
+import { refreshChatAgents, useChatAgents } from '../../stores/chatAgentsStore';
+import { menuChatAgents } from '../../../../shared/chatAgentMenu';
+import { requestOpenSettings } from '../../utils/openSettings';
 import { visibleAgentPresets } from '../../utils/agentPresets';
 import { PanelTabStrip } from './PanelTabStrip';
 import { getPanelIcon } from './panelIcon';
 import { PromoteChatButton } from './PromoteChatButton';
-import { SwitchToChatButton } from './SwitchToChatButton';
+import { SwitchToChatPaletteEntry } from './SwitchToChat';
 import { CustomCommandForm } from './CustomCommandForm';
 import { AgentFarmProfileDialog } from '../chatTab/AgentFarmProfileDialog';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
@@ -105,7 +107,10 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const [resolvedRunScript, setResolvedRunScript] = useState<{ command: string; source: string } | null>(null);
   const { config, fetchConfig, updateConfig } = useConfigStore();
   const chatTabs = isChatTabsEnabled(config);
+  const chatAgents = menuChatAgents(useChatAgents(chatTabs ? window.electronAPI.chatTab : undefined));
   const [showDropdown, setShowDropdown] = useState(false);
+  // Read the catalog again each time the menu opens, so an agent installed meanwhile is offered.
+  useEffect(() => { if (showDropdown && chatTabs) void refreshChatAgents(window.electronAPI.chatTab); }, [showDropdown, chatTabs]);
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const addToolButtonRef = useRef<HTMLButtonElement>(null);
@@ -322,7 +327,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   useHotkey({
     id: 'open-add-tool',
     label: 'Open Add Tool menu',
-    keys: 'mod+t',
     category: 'tabs',
     action: () => setShowDropdown(true),
   });
@@ -367,7 +371,6 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   useHotkey({
     id: 'run-dev-server',
     label: 'Run Dev Server',
-    keys: 'mod+shift+d',
     category: 'tools',
     action: handleRunDevServer,
     enabled: () => !!session,
@@ -423,7 +426,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
   const rightActions = (
         <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
-          {activePanel && <SwitchToChatButton key={`switch-${activePanel.id}`} panel={activePanel} palette="pane" />}
+          {activePanel && <SwitchToChatPaletteEntry key={`switch-${activePanel.id}`} panel={activePanel} view="pane" />}
           {activePanel && <PromoteChatButton key={activePanel.id} panel={activePanel} paneName={session?.name} />}
           {/* Run Dev Server button */}
           {session && (
@@ -534,6 +537,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           onPanelClose={handlePanelClose}
           isPrimary
           isFocused={primaryGroupFocused ?? true}
+          quietFocus
           showShortcutHints={!tabsInGroups}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
@@ -609,7 +613,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {chatTabs && session && (
                 <>
                   {groupLabel('New tab')}
-                  {CHAT_AGENTS.map(agent => (
+                  {chatAgents.map(agent => (
                     <button
                       key={`chat-${agent.id}`}
                       type="button"
@@ -618,11 +622,11 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                       className={menuItemClass}
                       onClick={() => {
                         setShowDropdown(false);
-                        void window.electronAPI.chatTab.create({ sessionId: session.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.title} chat`, error));
+                        void window.electronAPI.chatTab.create({ sessionId: session.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.label} chat`, error));
                       }}
                     >
-                      {getCliBrandIcon(agent.id, 'w-3.5 h-3.5 flex-shrink-0')}
-                      <span className="truncate">{agent.title}</span>
+                      {agentIcon(agent, 'w-3.5 h-3.5 flex-shrink-0')}
+                      <span className="truncate">{agent.label}</span>
                     </button>
                   ))}
                   <button
@@ -634,6 +638,16 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                   >
                     <Sprout className="w-3.5 h-3.5 flex-shrink-0" />
                     <span className="truncate">Agent Farm profile…</span>
+                  </button>
+                  <button
+                    type="button"
+                    ref={itemRef()}
+                    role="menuitem"
+                    className={menuItemClass}
+                    onClick={() => { setShowDropdown(false); requestOpenSettings({ category: 'agents' }); }}
+                  >
+                    <Boxes className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span className="truncate">More agents…</span>
                   </button>
                   {separator}
                   {groupLabel('In a terminal')}

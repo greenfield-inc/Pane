@@ -1,13 +1,14 @@
+import { agentTerminalCommand, type ConfiguredAgentId } from '../../../shared/agents';
 import { createHash } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { getAppDirectory } from '../utils/appDirectory';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../types/config';
 import type { Project } from '../database/models';
 import { syncPaneHomeSkill } from './paneHomeSkill';
 import { keepSessionTidySection } from './sessionTidyRules';
+import { APPROVALS_RULES } from './approvalsRules';
 
 // Every skill Pane installs for its agents ships with Pane.
 const PANE_CHAT_BUNDLE_ROOT = path.join(__dirname, 'paneChatBundle');
@@ -116,7 +117,9 @@ wrapper named by the runtime context or Pane checkout, after checking its
 version and doctor result and repeating the command check. If no verified
 wrapper is available, report one concise blocker and wait.`;
 
-const APPROVALS_SECTION = `## Approvals: what waits on the person (while Approvals is on)
+const APPROVALS_SECTION = `${APPROVALS_RULES}
+
+## Approvals: what waits on the person (while Approvals is on)
 
 You are in orchestrator mode: this Session's work moves through you.
 
@@ -134,9 +137,9 @@ You are in orchestrator mode: this Session's work moves through you.
 - **At the end of a turn**, either have an approval waiting for the person
   in Approvals that moves the work on, or be done and say so. A turn that
   ends while your workers run, with your watch armed, is fine.
-- **Ask through Approvals, always with context:** say in \`--context\` why it
-  needs them and what each option means, list the options with the one you
-  recommend first, and pass the related files, PRs and pages as \`--links\`.
+- **Ask the way "Asking the person in Pane" above says.** As this
+  Session's orchestrator you post every approval card yourself, with
+  \`runpane notify\`, and relay a worker's question into its card.
 
 The rest of this section is how, while Approvals is on in Pane (its Settings
 switch, on by default).
@@ -156,8 +159,7 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
 \`\`\`
 
   The CLI call waits until the person answers. The MCP \`notify\` tool returns
-  \`waiting\` after a while instead, so don't use it for this, and don't block
-  your turn on \`AskUserQuestion\`.
+  \`waiting\` after a while instead, so don't use it for this.
 - A worker's blocked question already has a card: relay into it with
   \`runpane notify --relays <item> ...\` (the id from \`runpane inbox\`), which
   improves that card and rings it.
@@ -167,9 +169,27 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
   record it with \`runpane inbox ack <item> --decision <D-n>\`. When
   \`runpane inbox\` lists the answer with \`undelivered\`, Pane can't type it
   there: pass it on with \`runpane panels submit\`, unless the reason is that
-  its tab closed (no worker is left to tell). A tab can also
+  its tab closed (no worker is left to tell). A question you relayed stays
+  open after its worker's tab closes: a reply to it comes to you. A tab can also
   receive \`closed: Q-n (by you)\` or \`correction: Q-n → <answer> (by you)\`: that
   is the person's word.
+- A typed reply comes back as your open call's result \`{reply, picks?, id,
+  next}\`, or in your tab as
+  \`reply: Q-n → "<their words>" (picked: <picks>) (by you)\`; picks alone
+  stay \`answer:\`. A reply to a worker's question you relayed goes to the
+  worker's tab, and comes to you when the worker can't read it. It is an
+  answer or a question about the approval. If it answers, run
+  \`runpane notify --took <id|Q-n> answer\` and act on it. If it's a question,
+  run \`runpane notify --took <id|Q-n> question\` at once, find out, then run
+  \`runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"\`
+  in the background, with any changed \`--title\`, \`--context\`, \`--choices\`,
+  \`--questions\` or \`--links\` (a reworded choice carries
+  \`"was":"<old label>"\`). It saves a new version of the same approval and
+  waits for the answer like a notify call; never post a second approval for
+  it. \`correction: Q-n → that was a question: "…" (by you)\` means update the
+  approval; \`correction: Q-n → that was your answer: "…" (by you)\` means it is
+  recorded as the answer: act on it. Only the reply's reader may run
+  \`--took\` and \`--update\`.
 - Stop waiting on an item that is superseded or no longer needed: stop its
   background command (TaskStop in Claude Code). Never leave a stale card up.
 - When you start, resume or wake, reconcile your open background calls
@@ -501,8 +521,8 @@ export class SkillCacheManager {
    * flags that register the helper subagents (skipped on Windows, whose
    * shells quote differently).
    */
-  launchCommand(agent: keyof typeof RUNPANE_CONTRACT.agentTemplates): string {
-    const base = RUNPANE_CONTRACT.agentTemplates[agent].command;
+  launchCommand(agent: ConfiguredAgentId): string {
+    const base = agentTerminalCommand(agent);
     const extra = agent === 'codex' && process.platform !== 'win32' ? this.codexSubagentArgs : '';
     return extra ? `${base} ${extra}` : base;
   }
@@ -710,6 +730,11 @@ what to put in delegated prompts.
   (for this Session, the bundle root above), opens it, and reports the path,
   so the work still shows.
 - Merges need the user's explicit authorization for that exact merge.
+  Merge the way the repository's own docs (AGENTS.md, CONTRIBUTING.md) say.
+  When a stack merges bottom-up with merge commits, after each merge
+  retarget the next PR to the default branch, confirm its diff shows only
+  its own commits and its required checks are still green, and do not
+  rebase or push it.
 
 ## Other orchestration capabilities
 

@@ -11,6 +11,8 @@ import { useScrollSurface } from '../hooks/useScrollSurface';
 import { InspectorTabs, type InspectorTab } from './InspectorTabs';
 import { PanelContainer } from './panels/PanelContainer';
 import type { ToolPanel } from '../../../shared/types/panels';
+import { RestoreRegionButton } from './RestoreRegionButton';
+import { useRegionActions } from '../hooks/useRegionNavigation';
 import { OuterResizeSeparator, type OuterResizeSeparatorProps } from './ui/OuterResizeSeparator';
 
 interface HorizontalDetailPanelProps {
@@ -30,6 +32,11 @@ interface HorizontalDetailPanelProps {
   changesPanel?: ToolPanel;
   changesCount?: number;
   isMainRepo?: boolean;
+  /** Spread over the work area above it (P4); that area keeps its size underneath. */
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
+  /** ⌘⇧M with focus here: collapse the panel to its strip. */
+  onMinimize?: () => void;
 }
 
 export function HorizontalDetailPanel({
@@ -49,12 +56,16 @@ export function HorizontalDetailPanel({
   changesPanel,
   changesCount,
   isMainRepo = false,
+  maximized = false,
+  onToggleMaximize,
+  onMinimize,
 }: HorizontalDetailPanelProps) {
   const hostedPanel = inspectorTab === 'files' ? filesPanel : inspectorTab === 'changes' ? changesPanel : undefined;
   const showDetails = inspectorTab === 'details' || !hostedPanel;
   const sessionContext = useSession();
   const immersiveMode = useNavigationStore(state => state.immersiveMode);
   const detailPanelRef = React.useRef<HTMLDivElement>(null);
+  useRegionActions(detailPanelRef, { toggleMaximize: onToggleMaximize, minimize: onMinimize });
   const detailScrollSurfaceRef = useScrollSurface<HTMLDivElement>({
     id: `detail:${sessionContext?.session.id ?? 'unavailable'}`,
     sessionId: sessionContext?.session.id,
@@ -88,7 +99,9 @@ export function HorizontalDetailPanel({
   return (
     <div
       ref={detailPanelRef}
-      className={`pane-detail-panel pane-detail-panel-horizontal flex-shrink-0 bg-surface-primary flex flex-col overflow-visible relative ${immersiveMode ? '' : 'border-t border-border-primary'}`}
+      data-focus-region="right-panel"
+      data-region-open={contentActive && !isCollapsed}
+      className={`pane-detail-panel pane-detail-panel-horizontal flex-shrink-0 bg-surface-primary flex flex-col overflow-visible ${maximized ? '' : 'relative'} ${immersiveMode ? '' : 'border-t border-border-primary'}`}
       style={immersiveMode
         ? { height: '0px' }
         : isCollapsed
@@ -98,13 +111,20 @@ export function HorizontalDetailPanel({
             }
           : { height: `${height ?? 200}px` }}
     >
-      {resizeSeparator && !immersiveMode && <OuterResizeSeparator {...resizeSeparator} />}
+      {resizeSeparator && !immersiveMode && !maximized && <OuterResizeSeparator {...resizeSeparator} />}
 
       <div
-        className="pane-detail-panel-inner flex flex-col h-full min-h-0 overflow-hidden"
+        className={maximized
+          ? 'pane-detail-panel-inner absolute inset-0 z-20 flex flex-col min-h-0 overflow-hidden bg-surface-primary'
+          : 'pane-detail-panel-inner flex flex-col h-full min-h-0 overflow-hidden'}
         aria-hidden={!contentActive}
         inert={!contentActive ? true : undefined}
       >
+        {maximized && onToggleMaximize && (
+          <div className="absolute right-2 top-1 z-10">
+            <RestoreRegionButton onRestore={onToggleMaximize} />
+          </div>
+        )}
         {onInspectorTabChange && bodyActive && !isCollapsed && (
           <InspectorTabs
             tab={showDetails ? 'details' : inspectorTab}

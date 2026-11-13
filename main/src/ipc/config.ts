@@ -20,12 +20,19 @@ import { getPaneEventSink } from '../core/runtime';
 import { checkDeepgramKey } from '../services/voiceTranscriptionService';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { VOICE_KEY_FIELDS, voiceKeyProblem, type VoiceKeyField } from '../../../shared/voice/voiceKeys';
+import { isConfiguredAgent } from '../../../shared/agents';
 
 export function registerConfigHandlers(
   ipcMain: IpcMain,
   { app, configManager, claudeCodeManager, databaseService, getMainWindow, sessionManager }: AppServices,
   commandRegistry?: PaneCommandRegistry,
 ): void {
+  // The renderer follows config edits made outside it (keyboard overrides from a
+  // hand-edited config.json, a second window), not only its own updates.
+  configManager.on('config-updated', (config: AppConfig) => {
+    getMainWindow()?.webContents.send('config:updated', config);
+  });
+
   if (commandRegistry) {
     const buildAffordances = (): RemotePwaAffordances => {
       const config = configManager.getConfig();
@@ -341,7 +348,7 @@ const remoteSettingsFields = {
 function buildRemotePwaSessionAgents(configuredAgent: PaneChatAgent | undefined): RemotePwaSessionAgents {
   const agents = agentPresetsForPlatform(process.platform)
     .map(preset => preset.id)
-    .filter((agent): agent is PaneChatAgent => agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode');
+    .filter(isConfiguredAgent);
   const preferred = normalizePaneChatAgent(configuredAgent);
   return { agents, defaultAgent: agents.includes(preferred) ? preferred : agents[0] ?? preferred };
 }

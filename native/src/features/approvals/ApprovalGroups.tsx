@@ -13,9 +13,10 @@ import { APPROVAL_SORTS, groupApprovals, machineOfflineLine, waitingCounts, type
 type MachineOf = (key: string) => Pick<Machine, 'os' | 'slot' | 'state' | 'name'> | undefined;
 
 /**
- * Home's Approvals: the sort menu, then the entries newest first, flat or in one card per Session or
- * project (its name and its machine's mark above it). Then one row per machine that isn't online, and
- * the collapsed Stale and Answered groups, none of which count. Each home draws its own rows.
+ * Home's Approvals: the sort menu, then what waits on you newest first, flat or in one card per
+ * Session or project (its name and its machine's mark above it). Then With the agent (approvals whose
+ * reply an agent is reading, P7), one row per machine that isn't online, and the collapsed Stale and
+ * Done today groups, none of which count. Each home draws its own rows.
  */
 export function ApprovalGroups<T extends ApprovalEntry>({ entries, stale = [], answered = [], offline = [], machineOf, renderEntry }: {
   entries: readonly T[];
@@ -28,15 +29,26 @@ export function ApprovalGroups<T extends ApprovalEntry>({ entries, stale = [], a
 }) {
   const theme = useTheme();
   const sort = useApprovalSort(state => state.sort);
+  const onYou = entries.filter(entry => !entry.withAgent);
+  const withAgent = entries.filter(entry => entry.withAgent);
   if (entries.length === 0 && stale.length === 0 && answered.length === 0 && offline.length === 0) return null;
   return (
     <View testID="approvals-section" style={styles.section}>
       {/* What waits from every Session plus what waits outside one; answers held for Undo don't count. */}
       <SectionHeader title="Approvals" count={waitingCounts(entries).total} first />
       <SortMenu sort={sort} />
-      {groupApprovals(entries, sort).map(group => (
+      {withAgent.length > 0 && onYou.length > 0 ? <ListLabel testID="approvals-waiting-label" title={`Waiting on you · ${onYou.length}`} /> : null}
+      {groupApprovals(onYou, sort).map(group => (
         <GroupCard key={group.key} group={group} machineOf={machineOf} tint={withAlpha(theme.colors.warning, 0.09)} render={(entry, divided) => renderEntry(entry, divided, 'waiting')} />
       ))}
+      {withAgent.length > 0 ? (
+        <View testID="approvals-with-agent" style={styles.group}>
+          <ListLabel testID="approvals-with-agent-label" title={`With the agent · ${withAgent.length}`} />
+          {groupApprovals(withAgent, sort).map(group => (
+            <GroupCard key={group.key} group={group} machineOf={machineOf} tint={theme.colors.surfaceRaised} render={(entry, divided) => renderEntry(entry, divided, 'agent')} />
+          ))}
+        </View>
+      ) : null}
       {offline.map(machine => {
         const mark = machineOf(machine.key);
         return (
@@ -47,7 +59,7 @@ export function ApprovalGroups<T extends ApprovalEntry>({ entries, stale = [], a
         );
       })}
       <CollapsedGroup testID="approvals-stale" title="Stale" entries={stale} groups={[{ key: 'stale', label: '', entries: [...stale] }]} machineOf={machineOf} render={(entry, divided) => renderEntry(entry, divided, 'stale')} />
-      <CollapsedGroup testID="approvals-answered" title="Answered" entries={answered} groups={groupApprovals(answered, sort)} machineOf={machineOf} render={(entry, divided) => renderEntry(entry, divided, 'answered')} />
+      <CollapsedGroup testID="approvals-answered" title="Done today" entries={answered} groups={groupApprovals(answered, sort)} machineOf={machineOf} render={(entry, divided) => renderEntry(entry, divided, 'answered')} />
     </View>
   );
 }
@@ -76,6 +88,15 @@ function SortMenu({ sort }: { sort: ApprovalSort }) {
       <Text variant="footnote" tone="secondary" numberOfLines={1}>{label}</Text>
       <Icon ios="chevron.down" android="expand_more" size={12} color={theme.colors.textMuted} />
     </Pressable>
+  );
+}
+
+/** A list's name over its cards: "Waiting on you · 2", "With the agent · 1". */
+function ListLabel({ title, testID }: { title: string; testID: string }) {
+  return (
+    <View testID={testID} style={styles.groupHeader} accessible accessibilityRole="header">
+      <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.groupLabel}>{title}</Text>
+    </View>
   );
 }
 

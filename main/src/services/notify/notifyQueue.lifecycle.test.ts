@@ -1,8 +1,9 @@
 import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifyQuestion, type NotifyResult, type NotifySource } from '../../../../shared/types/notify';
+import { DEFAULT_NOTIFY_SETTINGS, type NotifyCardsOnStatus, type NotifyItem, type NotifyQuestion, type NotifyResult, type NotifySource } from '../../../../shared/types/notify';
 import { ApprovalStore } from '../approvals/approvalStore';
-import { NotifyQueue, type NotifyQueueEnvironment } from './notifyQueue';
+import { cardsOnStatus, NotifyQueue, type NotifyQueueEnvironment } from './notifyQueue';
+import type { MachineState } from '../../../../shared/types/machineConnections';
 
 const DAY = 24 * 60 * 60_000;
 const session = { id: 's1', name: 'Sales', paneId: 'sp', orchestrator: true };
@@ -193,6 +194,30 @@ describe('NotifyQueue with its store', () => {
     expect(typed).toEqual([['w1', 'answer: Q-39 → Run (by you)']]);
     expect(queue.recordDecision('in-1', 'D-147')).toBe(true);
     expect(item(queue, 'in-1')?.decision).toBe('D-147');
+  });
+
+  it("a relay call that ends lets go of the worker's card, which keeps waiting and still answers the worker", async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-39: run?', source: worker, at: Date.now() });
+    const controller = new AbortController();
+    void queue.ask({ relays: 'in-1', question: { ui: 'options', title: 'Q-39: run the script?', choices: [{ label: 'Run', recommended: true }, { label: 'Stop' }] }, source: orchestrator }, controller.signal);
+    controller.abort();
+    expect(item(queue, 'in-1')).toMatchObject({ state: 'waiting', title: 'Q-39: run the script?' });
+    queue.run({ type: 'answer', id: 'in-1', answer: { choice: 'Run' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(typed).toEqual([['w1', 'answer: Q-39 → Run (by you)']]);
+  });
+
+  it('a relay of a worker question asked over 15 minutes ago still waits its full round before returning', async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-39: run?', source: worker, at: Date.now() - 20 * 60_000 });
+    let result: unknown;
+    void queue.ask({ relays: 'in-1', returnAfterMs: 50_000, question: { ui: 'options', title: 'Q-39: run the script?', choices: [{ label: 'Run', recommended: true }, { label: 'Stop' }] }, source: orchestrator }).then((value) => { result = value; });
+    await vi.advanceTimersByTimeAsync(49_000);
+    expect(result).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(result).toMatchObject({ waiting: true, id: 'in-1' });
+    expect(item(queue, 'in-1')).toMatchObject({ state: 'waiting' });
   });
 
   it('a relay of an item already ended returns unavailable and posts nothing', async () => {
@@ -496,6 +521,70 @@ describe('NotifyQueue with its store', () => {
     const another = { ...waiting, id: 'r2' };
     queue.setRemote('b', { machine: 'book', online: true, state: { machine: 'book', epoch: 'e', revision: 3, enabled: true, items: [waiting, another], queue: ['r1', 'r2'], hidden: [] } });
     expect(chimes).toHaveBeenCalledTimes(1);
+  });
+
+  it('Show cards on another machine that reads this one: no strip and no chime here, the list keeps every item, and an in-use computer alerts again once it stops reading', () => {
+    let cardsOn: NotifyCardsOnStatus = { kind: 'elsewhere', name: 'book' };
+    const queue = queueWith({ cardsOn: () => cardsOn });
+    const chimes = vi.fn();
+    queue.on('chime', chimes);
+    queue.setPaneFocused(true);
+    void queue.ask({ question: ask('Q-2: x?'), source: orchestrator });
+    const waiting: NotifyItem = { id: 'r1', ui: 'ask', title: 'remote', state: 'waiting', createdAt: Date.now(), source: { name: 'x', agent: 'Claude' } };
+    const remote = (items: NotifyItem[], revision: number) => queue.setRemote('b', { machine: 'book', online: true, state: { machine: 'book', epoch: 'e', revision, enabled: true, items, queue: items.map(entry => entry.id), hidden: [] } });
+    remote([], 1);
+    remote([waiting], 2);
+
+    expect(chimes).not.toHaveBeenCalled();
+    expect(queue.snapshot().stripSurface).toBeNull();
+    expect(queue.snapshot().queue).toHaveLength(2);
+    expect(queue.snapshot().cardsOn).toEqual({ kind: 'elsewhere', name: 'book' });
+
+    cardsOn = { kind: 'not-connected', name: 'book' };
+    queue.pollInUse();
+    expect(queue.snapshot().stripSurface).toBe('pane');
+    void queue.ask({ question: ask('Q-3: y?'), source: orchestrator });
+    expect(chimes).toHaveBeenCalledTimes(1);
+  });
+
+  it('Show cards on this machine still waits for it to be in use (D-6)', () => {
+    using = false;
+    const queue = queueWith({ cardsOn: () => ({ kind: 'here' }) });
+    const chimes = vi.fn();
+    queue.on('chime', chimes);
+    queue.setPaneFocused(true);
+    void queue.ask({ question: ask('Q-2: x?'), source: orchestrator });
+    expect(chimes).not.toHaveBeenCalled();
+    expect(queue.snapshot().stripSurface).toBeNull();
+    using = true;
+    queue.pollInUse();
+    expect(queue.snapshot().stripSurface).toBe('pane');
+  });
+
+  describe('cardsOnStatus', () => {
+    const MINI = 'a1b2-mini';
+    const BOOK = { id: 'c3d4-book', name: 'qa-macbook' };
+    const config = (cardsOn: typeof BOOK | null) => ({ machineId: MINI, notify: { cardsOn } });
+    const NOW = Date.parse('2026-11-12T20:00:00.000Z');
+    const saved = (status: MachineState['status'], onlineSince = '2026-11-12T19:50:00.000Z'): MachineState[] => [
+      { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null, installId: MINI },
+      { id: 'profile-7', label: 'MacBook', kind: 'remote', status, offlineSince: null, installId: BOOK.id, onlineSince },
+    ];
+    const reading = (machineId: string) => machineId === BOOK.id;
+    const nobody = () => false;
+
+    it.each([
+      ['nothing picked', config(null), reading, saved('online'), { kind: 'any' }],
+      ['this machine picked', { ...config(null), notify: { cardsOn: { id: MINI, name: 'mini' } } }, nobody, saved('online'), { kind: 'here' }],
+      ['the picked machine reads this one', config(BOOK), reading, saved('online'), { kind: 'elsewhere', name: 'MacBook' }],
+      ['the picked machine answers but hasn\'t saved this one', config(BOOK), nobody, saved('online'), { kind: 'not-added', name: 'MacBook' }],
+      ['the picked machine is offline', config(BOOK), nobody, saved('offline'), { kind: 'not-connected', name: 'MacBook' }],
+      ['the picked machine dropped off but its stream here is still half-open', config(BOOK), reading, saved('offline'), { kind: 'not-connected', name: 'MacBook' }],
+      ['the picked machine came online seconds ago and may still be reconnecting to this one', config(BOOK), nobody, saved('online', '2026-11-12T19:59:40.000Z'), { kind: 'not-connected', name: 'MacBook' }],
+      ['the picked machine isn\'t saved here', config(BOOK), nobody, [], { kind: 'not-connected', name: 'qa-macbook' }],
+    ])('%s', (_case, appConfig, readsHere, machines, expected) => {
+      expect(cardsOnStatus(appConfig, readsHere, machines, NOW)).toEqual(expected);
+    });
   });
 
   it('J26: a receipt names a machine as this screen\'s picker does', () => {

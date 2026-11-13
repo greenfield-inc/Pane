@@ -15,8 +15,9 @@ agent; a name you type or set later is kept. Each new Session opens as one Pane
 Chat and can be renamed later from the optional read-only overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
-With [chat tabs](CHAT_TABS.md) on (Settings → Advanced → Chat tabs), a new Claude
-or Codex Session runs its orchestrator in a chat tab instead of a terminal, from
+With [chat tabs](CHAT_TABS.md) on (Settings → AI & Agents → Chat tabs), a new
+Session runs its orchestrator in a chat tab instead of a terminal for any agent
+chat tabs run (Claude, Codex, Cursor and OpenCode), from
 the plain agent or the Session's `agent-farm run <profile>` launch, and sends its
 opening prompt once. Like every chat, finished turns fold to one row. A worker
 Pane shows up as one line with **Open** while it is asking the person, and when
@@ -24,11 +25,12 @@ it finished, failed or reported during the latest turn; the sidebar lists the re
 starts stay terminal tabs. Agent Farm's standard resume template
 (`{command} --resume {sessionId}`, which the dialog saves) doesn't stop a chat,
 since a chat reopens through ACP. Sessions that resume or promote a terminal
-conversation, run in WSL, use a truly custom resume command or a wrapper launch,
-and Cursor Sessions, keep their terminal, and the Session's overview says why. A
+conversation, run in WSL, or use a truly custom resume command or a wrapper
+launch keep their terminal, and the Session's overview says why. A
 Session keeps the kind of tab it started with.
-A Claude or Codex Session already running in a terminal can move to chat with
-**Switch to chat** in its toolbar (see
+A Session already running in a terminal can move to chat with
+**Switch to chat…** in the Session's right-click menu, which switches every
+terminal agent tab in it (see
 [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).
 
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
@@ -196,6 +198,16 @@ publishes this contract for Pane: when `PANE_PANEL_ID` is set it prints
 `{command} --resume <id>` as the way to reopen that conversation. Pane keeps the
 first ID line of each launch and ignores later ones, which can only be agent
 output. Every other wrapper still needs an explicit config.
+
+The launch ID is only where the conversation started: `/clear` and `/resume`
+move Claude to another one. Agent Farm's compiled Claude plugin therefore also
+carries a `SessionStart` hook that runs `runpane panels conversation --hook` on
+start, `/resume`, `/clear` and compact (D-269). Pane saves the reported
+conversation on the tab, ahead of the launch ID, so a restart resumes the
+conversation the tab was last on and Switch to chat opens it. The hook does
+nothing outside Pane and prints nothing. With an older Agent Farm there is no
+report, and Switch to chat opens the folder's most recent conversation instead
+(see [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).
 
 A command counts when it is a single `agent-farm run <profile>` or
 `agent-farm agent <profile>`, optionally preceded by `VAR=value` assignments,
@@ -377,7 +389,7 @@ replace an unrelated selection.
 
 ### Move a Session to another machine
 
-Right-click a Session, or use its ⋯ button, and choose **Move to host…** to
+Right-click a Session, or use its ⋯ button, and choose **Move to machine…** to
 continue it on another machine. The dialog lists your Tailscale machines
 running Pane, except the one the Session is on, and your teammates' machines
 running Pane, shown with the owner's login after the name. A teammate's machine
@@ -386,7 +398,10 @@ Machines Pane can't reach, or that accept only their owner, are shown disabled
 with the reason. If none can be reached, it says so:
 open Pane on the other machine, or sign in to Tailscale. While you view a host
 connected with a pairing code rather than over Tailscale, the item is disabled,
-because Pane can't tell which machine that is. Choosing a machine
+because Pane can't tell which machine that is. In All machines, the same item
+is in each Session's menu and moves the Session from its own machine, without
+switching to it; it is disabled, with the reason, while that machine isn't
+connected or was paired with a code. Choosing a machine
 sends the Session's agent a prompt to hand the Session off with
 [`runpane handoff`](RUNPANE_WORKSPACES.md#hand-a-task-to-another-machine) and
 the `handoff` skill.
@@ -1036,7 +1051,11 @@ The watch also reports when the ground under the PR moves. `pr.base_changed`
 GitHub after a stack parent merges and its branch is deleted; `base.from` and
 `base.to` name the old and new base. `pr.base_deleted` (`BASE DELETED`) fires
 when the base branch no longer exists; GitHub may close the PR right after.
-Both arrive at once under `--follow`. Rebase onto the new base and recheck CI.
+Both arrive at once under `--follow`. When the PR below this one in a stack
+merged with a merge commit and this PR now targets the branch it merged into,
+the retarget is done: confirm the diff shows only this PR's commits and recheck
+required checks (`gh pr checks <number> --required`); do not rebase or push.
+After any other base change, rebase onto the new base and recheck CI.
 
 The daemon batches up to 25 fingerprints per host every two minutes (plus up
 to ten seconds of jitter), reads details on changes and at a 30-minute
@@ -1367,35 +1386,57 @@ default), a Session has one voice to the person: its orchestrator.
   worker's `notify` call isn't shown to the person; it returns `unavailable`
   with a `next` that says to report blocked.
 - **A worker's question is a card at once.** Its blocked report shows in
-  Approvals straight away with an answer box, under one line of what the worker
-  was doing: from a JSON status file, its question's `why`, else its `summary`
-  or `step`; the file itself opens as the worker's status link. It rings once the orchestrator
+  Approvals straight away. From a JSON status file (even one the journal cut
+  short) or a bare `needs_you` block, the card takes its question and `why` as
+  context, its question's `options` as answer buttons (a `(recommended)`
+  suffix marks the recommended one; several questions get an answer box), and
+  its `files` as links. Other JSON shows one line (`summary`, `step` or
+  `title`) or none, never the raw text; the file itself opens as the worker's
+  status link. It rings once the orchestrator
   relays it or after 10 minutes, so the orchestrator first settles what the plan
   already answers (D-79). The answer goes straight to the asking tab, whether or
   not the orchestrator is running: `answer: Q-n → <answer> (by you)`, once its
   agent is at its prompt ([docs/PANE_NOTIFY.md](PANE_NOTIFY.md) has the rule).
   An answer Pane can't type shows in `runpane inbox` as `undelivered`; the
-  orchestrator passes it on unless its tab closed. The tab can
+  orchestrator passes it on unless its tab closed. A relayed question stays
+  open after its worker's tab closes, since its orchestrator can still read a
+  reply to it (the reply goes to the orchestrator). The tab can
   also receive `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)`;
   workers and orchestrators treat those as the person's word.
+- **Typed replies.** Anything the person types on an approval arrives as
+  `reply: Q-n → "<their words>" (picked: <picks>) (by you)` (or as the open
+  call's `{reply, picks?, id, replyId, next}` result, whose `replyId` the
+  reader passes to `--took` and `--update`). A worker's question's reply goes
+  to the worker's tab; when the worker can't read it, to the orchestrator that
+  relayed it; else to Autopilot. The reader decides whether it answers or asks:
+  `runpane notify --took <id|Q-n> answer`, or `--took <id|Q-n> question`, then
+  `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed
+  "<one line per change>"` with any changed fields. That saves a new version of
+  the same approval ("Updated · ready again", at most 10 kept) and waits for the
+  answer; nobody posts a second approval for it. `correction: Q-n → that was a
+  question: "…"` and `correction: Q-n → that was your answer: "…"` are the
+  person's fix of how it was taken. A worker may run `--took` and `--update`:
+  they aren't new asks. [docs/PANE_NOTIFY.md](PANE_NOTIFY.md#replies-and-new-versions)
+  has the lines, the reader order and what the approval shows.
 - **Orchestrator mode.** The generated orchestrator skill, the Session's
   `AGENTS.md` and the orchestrator guide
   (`paneChatBundle/skills/pane-orchestration/SKILL.md`, "What waits on the
   person") tell the orchestrator that only it asks the person; to keep a
   running list and keep the work moving; when the person asks about one
   thing while other work is open, to remind them and offer the next step; at
-  the end of a turn, to have an approval waiting or be done; and to ask
-  through Approvals with context (why, the options with the recommended one
-  first, related files and links). These are instructions; Pane doesn't
-  check turns.
+  the end of a turn, to have an approval waiting or be done. All three carry
+  Pane's approvals text, "Asking the person in Pane"
+  (`main/src/services/approvalsRules.ts`, also in the `pane` home skill): which
+  card to use, what a card holds and how to read a reply
+  ([PANE_NOTIFY.md](PANE_NOTIFY.md#what-an-agent-can-send)). These are
+  instructions; Pane doesn't check turns, only cards.
 - **The orchestrator relays and posts.** The same three carry the posting rule: keep every item that waits on the person (a
   worker's needs_you or blocked question, a plan or design approval, a PR
   ready to merge, a next step only they can take) posted to Approvals exactly
   once, titled with its Q-n and with the worker's files and PR as `--links`.
   Post each one with `runpane notify ... --json` as a background command (in
   Claude Code, Bash with `run_in_background`), not the MCP `notify` tool,
-  which returns `waiting` after a while, and not a blocking
-  `AskUserQuestion`. A worker's question already has a card, so the orchestrator
+  which returns `waiting` after a while, and never `AskUserQuestion`. A worker's question already has a card, so the orchestrator
   relays into it: `runpane notify --relays <item> ...`, with the id from `runpane
   inbox`, gives that card its choices, context and links and rings it, and the
   call waits on it as on any notify. The answer goes straight to the worker's

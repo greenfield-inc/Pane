@@ -176,6 +176,13 @@ export class ChatTranscript {
     }
   }
 
+  /** Marks a step Pane approved with the agent's "allow once" while the tab has full access. */
+  approvedByPane(toolCallId: string, title: string): ChatTabEvent | undefined {
+    const id = `tool:${toolCallId}`;
+    if (!this.indexes.has(id)) return this.commit({ type: 'replace', message: { id, role: 'assistant', parts: [{ type: 'tool', id: toolCallId, title, status: 'pending', approvedBy: 'pane' }] } });
+    return this.commit({ type: 'tool', id, patch: { approvedBy: 'pane' } });
+  }
+
   /**
    * The row a chunk belongs to. Chunks of the message being written join it. A message
    * the agent returns to after a step gets a new row below that step: Claude's id is

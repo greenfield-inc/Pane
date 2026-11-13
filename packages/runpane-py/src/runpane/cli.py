@@ -71,6 +71,11 @@ from .local_control import (
     run_repos_update,
     run_repos_rename,
     run_report,
+    run_panels_conversation,
+    run_panels_conversation_hook,
+    CONVERSATION_ID_PATTERN,
+    CONVERSATION_SOURCES,
+    missing_conversation_error,
     run_inbox,
     run_inbox_ack,
     run_sessions_associate,
@@ -108,6 +113,7 @@ TARGETS = set(RUNPANE_CONTRACT["enums"]["installTargets"])
 FORMATS = set(RUNPANE_CONTRACT["enums"]["artifactFormats"])
 CHANNELS = set(RUNPANE_CONTRACT["enums"]["channels"])
 AGENTS = set(RUNPANE_CONTRACT["enums"]["agents"])
+AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
@@ -148,6 +154,11 @@ NOTIFY_VALUE_FLAGS = {
     "--links": "notify_links",
     "--relays": "notify_relays",
     "--about-session": "notify_about_session",
+    "--questions": "notify_questions",
+    "--status": "notify_status",
+    "--update": "notify_update",
+    "--asked": "notify_asked",
+    "--what-changed": "notify_what_changed",
 }
 # Autopilot's commands that take a waiting item's id as their first word.
 AUTOPILOT_ITEM_COMMANDS = {"autopilot answer", "autopilot close", "autopilot rewrite"}
@@ -156,12 +167,21 @@ AUTOPILOT_ITEM_COMMANDS = {"autopilot answer", "autopilot close", "autopilot rew
 FLAG_OWNERS = {
     "--relays": ("notify",),
     "--about-session": ("notify",),
+    "--questions": ("notify",),
+    "--took": ("notify",),
+    "--took-as": ("notify",),
+    "--status": ("notify", "update"),
+    "--update": ("notify",),
+    "--asked": ("notify",),
+    "--what-changed": ("notify",),
     "--decision": ("inbox ack",),
     "--choice": ("autopilot answer",),
     "--approve": ("autopilot answer",),
     "--deny": ("autopilot answer",),
     "--because": ("autopilot answer",),
     "--reason": ("secrets request", "autopilot close"),
+    "--conversation": ("panels conversation",),
+    "--hook": ("panels conversation",),
 }
 HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
@@ -291,6 +311,10 @@ class ParsedArgs:
     summary: Optional[str] = None
     summary_file: Optional[str] = None
     question: Optional[str] = None
+    # panels conversation: --conversation, --source (what started it), and --hook.
+    conversation_id: Optional[str] = None
+    conversation_source: Optional[str] = None
+    hook: bool = False
     expect_report: Optional[bool] = None
     wait_for_result: bool = False
     wait_timeout_ms: Optional[int] = None
@@ -323,6 +347,15 @@ class ParsedArgs:
     notify_links: Optional[str] = None
     notify_relays: Optional[str] = None
     notify_about_session: Optional[str] = None
+    notify_questions: Optional[str] = None
+    # `notify --took <id|Q-n> answer|question`: the approval, and the word after it (or `--took-as`).
+    notify_took: Optional[str] = None
+    notify_took_as: Optional[str] = None
+    notify_status: Optional[str] = None
+    # `notify --update <id|Q-n> --asked <text> --what-changed <text>`
+    notify_update: Optional[str] = None
+    notify_asked: Optional[str] = None
+    notify_what_changed: Optional[str] = None
     loop_id: Optional[str] = None
     cron: Optional[str] = None
     paused: bool = False
@@ -332,6 +365,10 @@ class ParsedArgs:
 
 def main(argv: Optional[List[str]] = None) -> int:
     effective_argv = sys.argv[1:] if argv is None else argv
+    # A Claude Code SessionStart hook: silent and exit 0 whatever happens, so it runs before anything that can print.
+    hooked = run_conversation_hook_from_argv(effective_argv)
+    if hooked is not None:
+        return hooked
     telemetry_context = create_initial_telemetry_context(effective_argv)
     try:
         if not effective_argv:
@@ -366,6 +403,25 @@ def main(argv: Optional[List[str]] = None) -> int:
         own_args = effective_argv[: effective_argv.index("--")] if "--" in effective_argv else effective_argv
         print_failure(error, "--json" in own_args)
         return 1
+
+
+def is_conversation_hook_argv(argv: List[str]) -> bool:
+    words = [arg for index, arg in enumerate(argv) if not arg.startswith("-") and (index == 0 or argv[index - 1] != "--pane-dir")]
+    return words[:2] == ["panels", "conversation"] and "--hook" in argv
+
+
+def run_conversation_hook_from_argv(argv: List[str], env: Optional[Dict[str, str]] = None) -> Optional[int]:
+    """`runpane panels conversation --hook` straight from argv, before telemetry or any output. None for any other command line."""
+    if not is_conversation_hook_argv(argv):
+        return None
+    try:
+        parsed = parse_args(argv)
+        if parsed.command != "panels conversation" or not parsed.hook:
+            return 0
+        pane_dir = parsed.pane_dir
+    except BaseException:
+        return 0
+    return run_panels_conversation_hook(env, pane_dir=pane_dir)
 
 
 def print_failure(error: Exception, as_json: bool) -> None:
@@ -528,6 +584,10 @@ def take_leading_pane_dir(args: List[str]) -> List[str]:
     return taken
 
 
+def invalid_agent_error(value: str) -> ValueError:
+    return ValueError(f"Invalid --agent {value}. Expected one of: {', '.join(sorted(AGENTS))}. With --chat, --agent takes any agent the host can run.")
+
+
 def parse_args(argv: List[str]) -> ParsedArgs:
     args = list(argv)
     leading_pane_dir_args = take_leading_pane_dir(args)
@@ -570,6 +630,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
 
     args[:0] = leading_pane_dir_args
     parse_flags(args, parsed)
+    if parsed.agent is not None and parsed.agent not in AGENTS and not parsed.chat:
+        raise invalid_agent_error(parsed.agent)
     if parsed.command == "panes archive":
         validate_panes_archive_args(parsed)
     if parsed.command == "watch" and parsed.follow and parsed.timeout_ms == 0:
@@ -600,6 +662,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         apply_watch_defaults(parsed)
     if parsed.command == "report":
         validate_report_args(parsed)
+    if parsed.command == "panels conversation":
+        validate_conversation_args(parsed)
     validate_wait_for_result_args(parsed)
     if parsed.command == "inbox ack" and not parsed.all and not parsed.inbox_ids:
         raise ValueError("runpane inbox ack needs the item ids to clear, or --all --session <id|name>.")
@@ -707,6 +771,21 @@ def validate_report_args(parsed: ParsedArgs) -> None:
         raise ValueError("runpane report accepts either --summary or --summary-file, not both.")
     if parsed.report_state == "blocked" and not (parsed.question or "").strip():
         raise ValueError('runpane report --state blocked requires --question "<what you need answered>".')
+
+
+def validate_conversation_args(parsed: ParsedArgs) -> None:
+    if parsed.hook:
+        if (parsed.conversation_id is not None or parsed.conversation_source is not None or parsed.panel_id is not None
+                or parsed.pane_id is not None or parsed.json):
+            raise RunpaneError(
+                "ERR_RUNPANE_INVALID_ARGUMENT",
+                "runpane panels conversation --hook reads the conversation from the hook's stdin and the panel from PANE_PANEL_ID, "
+                "so it takes no --conversation, --source, --panel, --pane or --json. Nothing was recorded.",
+                "Run `runpane panels conversation --hook` from a SessionStart hook, or report by hand with `runpane panels conversation --conversation <id>`.",
+            )
+        return
+    if parsed.conversation_id is None:
+        raise missing_conversation_error()
 
 
 def validate_panes_archive_args(parsed: ParsedArgs) -> None:
@@ -835,6 +914,13 @@ def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
             parsed.wait_for_result = True
         elif is_local_command and arg in FLAG_OWNERS and parsed.command not in FLAG_OWNERS[arg]:
             raise ValueError(f"{arg} is only valid with runpane {' or runpane '.join(FLAG_OWNERS[arg])}.")
+        elif parsed.command == "notify" and arg == "--took":
+            # `notify --took <id|Q-n> answer|question`: the word after the id says how the reply was taken.
+            index += 1
+            parsed.notify_took = read_value(args, index, arg, literal_values)
+            if index + 1 < len(args) and not args[index + 1].startswith("-"):
+                index += 1
+                set_notify_took_as(parsed, args[index])
         elif is_local_command and arg in LOCAL_BOOLEAN_FLAGS:
             parse_local_boolean_flag(parsed, arg)
         elif is_local_command and arg in LOCAL_VALUE_FLAGS:
@@ -975,6 +1061,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--report":
         parsed.report = True
         return
+    if flag == "--hook":
+        parsed.hook = True
+        return
     if flag == "--fix":
         raise ValueError("runpane doctor --fix updates npm installs of runpane, so it runs only in the npm CLI. Run: npx --yes runpane@latest doctor --fix")
     if flag == "--read-only":
@@ -1062,8 +1151,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         parsed.base_branch = value
         return
     if flag == "--agent":
-        if value not in AGENTS:
-            raise ValueError(f"Invalid --agent {value}. Expected one of: {', '.join(sorted(AGENTS))}")
+        # A chat tab runs any agent the host can run; parse_args refuses it without --chat.
+        if value not in AGENTS and not AGENT_ID_PATTERN.match(value):
+            raise invalid_agent_error(value)
         parsed.agent = value
         return
     if flag == "--tool-command":
@@ -1188,6 +1278,11 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
             raise ValueError("--interval-ms must be a positive number.")
         parsed.interval_ms = interval_ms
         return
+    if flag == "--source" and parsed.command == "panels conversation":
+        if value not in CONVERSATION_SOURCES:
+            raise ValueError(f"--source must be one of: {', '.join(CONVERSATION_SOURCES)}.")
+        parsed.conversation_source = value
+        return
     if flag == "--source":
         if value not in {"user", "agent"}:
             raise ValueError("--source must be one of: user, agent.")
@@ -1304,6 +1399,11 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--question":
         parsed.question = value
         return
+    if flag == "--conversation":
+        if not CONVERSATION_ID_PATTERN.fullmatch(value):
+            raise ValueError('--conversation must be a conversation id: up to 256 letters, digits, ".", "_", ":" or "-", starting with a letter or digit.')
+        parsed.conversation_id = value
+        return
     if flag == "--ttl":
         parsed.lock_ttl_ms = parse_lock_ttl(value)
         return
@@ -1321,6 +1421,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--loop":
         parsed.loop_id = value
+        return
+    if flag == "--took-as":
+        set_notify_took_as(parsed, value)
         return
     if flag in NOTIFY_VALUE_FLAGS:
         setattr(parsed, NOTIFY_VALUE_FLAGS[flag], value)
@@ -1361,6 +1464,12 @@ def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None
 REPO_SETTING_FLAGS = {"--build-script", "--run-script", "--archive-script", "--worktree-folder", "--open-ide-command", "--system-prompt"}
 
 
+def set_notify_took_as(parsed: ParsedArgs, value: str) -> None:
+    if parsed.notify_took_as is not None:
+        raise ValueError("Say answer or question once: after --took <id|Q-n>, or as --took-as.")
+    parsed.notify_took_as = value
+
+
 def read_value(args: List[str], index: int, flag: str, literal_values: Set[int]) -> str:
     if index in literal_values:
         return args[index]
@@ -1370,7 +1479,7 @@ def read_value(args: List[str], index: int, flag: str, literal_values: Set[int])
     if clearable and index < len(args) and args[index] == "":
         return ""
     bare_flag = index < len(args) and re.fullmatch(r"--[a-z][a-z-]*", args[index]) is not None
-    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains", "--because", "--reason", "--choice"}
+    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains", "--because", "--reason", "--choice", "--asked", "--what-changed"}
     if index >= len(args) or not args[index] or (not free_text and args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]
@@ -1648,6 +1757,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panels resume": lambda parsed, context: run_panels_resume(parsed),
     "panels pause": lambda parsed, context: run_pause(parsed, "panel", "pause"),
     "panels last-message": lambda parsed, context: run_panels_last_message(parsed),
+    "panels conversation": lambda parsed, context: run_panels_conversation(parsed),
     "report": lambda parsed, context: run_report(parsed),
     "notify": lambda parsed, context: run_notify(parsed),
     "inbox": lambda parsed, context: run_inbox(parsed),

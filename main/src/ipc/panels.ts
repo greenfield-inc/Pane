@@ -27,6 +27,8 @@ import { readBrowserPanelFile } from '../services/browserPanelFiles';
 import { prepareRemoteBrowserFiles } from '../daemon/client/remoteBrowserFiles';
 import { clearPaneBrowserData } from '../services/browserData';
 import { ChunkedUploadStore, type UploadStart } from '../services/chunkedUploadStore';
+import { agentConfig } from '../../../shared/agents';
+import { decodeChatPanelState } from '../services/chatTabs/state';
 
 const execFileAsync = promisify(execFile);
 
@@ -528,12 +530,18 @@ const DAEMON_PANEL_CHANNELS = [
   'terminal:upload-cancel',
 ] as const;
 
+const clientOptions = boundary.object({ chatTabs: boundary.optional(boundary.boolean), chatAgents: boundary.optional(boundary.boolean) });
+
 /**
- * Phone apps released before chat tabs crash on a tab kind they do not know and send no
- * options (D-100, D-203). Newer clients pass `{ chatTabs: true }` to say they show chat tabs.
+ * Whether a client can show a chat tab running `agent`. Phone apps released before chat tabs
+ * crash on a tab kind they do not know and send no options (D-100, D-203); newer clients pass
+ * `{ chatTabs: true }`. Clients that read the host's agent
+ * catalog pass `{ chatAgents: true }` and show any agent; older ones decode only the agents
+ * whose config marks `chat.legacyClients`, so other agents' chat tabs are hidden from them.
  */
-export function clientShowsChatTabs(options: PaneCommandValue | undefined): boolean {
-  return decodeOptionalBoundary(options, boundary.object({ chatTabs: boundary.optional(boundary.boolean) }))?.chatTabs === true;
+export function clientShowsChatTab(options: PaneCommandValue | undefined, agent: string): boolean {
+  const decoded = decodeOptionalBoundary(options, clientOptions);
+  return decoded?.chatTabs === true && (decoded.chatAgents === true || agentConfig(agent)?.chat?.legacyClients === true);
 }
 
 export function registerPanelHandlers(
@@ -650,11 +658,10 @@ export function registerPanelHandlers(
     return { success: true, data: statuses };
   });
 
-  // Clients list chat tabs only when they say they understand them (`clientShowsChatTabs`).
+  // Clients list chat tabs only when they say they understand them (`clientShowsChatTab`).
   commandRegistry.register('panels:list', async (sessionId: string, options?: PaneCommandValue) => {
     try {
-      const chatTabs = clientShowsChatTabs(options);
-      const panels = panelManager.getPanelsForSession(sessionId).filter(panel => chatTabs || panel.type !== 'chat');
+      const panels = panelManager.getPanelsForSession(sessionId).filter(panel => panel.type !== 'chat' || clientShowsChatTab(options, decodeChatPanelState(panel.state.customState)?.agent ?? ''));
       return { success: true, data: panels };
     } catch (error) {
       console.error('[IPC] Failed to list panels:', error);

@@ -13,7 +13,7 @@ import { FakeKeychain } from '../test/fakeKeychain';
 import type { AppServices } from '../ipc/types';
 import { PaneError } from '../../../shared/paneError';
 import {
-  isNewerNotifySwitch,
+  mergeNotifySwitch,
   mergeSharedCredentials,
   syncSharedCredentials,
   syncSharedNotifySwitch,
@@ -114,11 +114,21 @@ function switchHost(initial: SharedNotifySwitch) {
     read: async () => current,
     apply: async (incoming) => {
       applied.push(incoming);
-      if (isNewerNotifySwitch(incoming, current)) current = incoming;
+      current = mergeNotifySwitch(current, incoming).notifySwitch;
     },
   };
   return { endpoint, current: () => current, applied };
 }
+
+/** A host with the switch but from before "Show cards on": its decoder drops the new fields. */
+function switchOnlyHost(initial: SharedNotifySwitch) {
+  const host = switchHost(initial);
+  const apply = host.endpoint.apply;
+  host.endpoint.apply = async ({ enabled, changedAt }) => apply({ enabled, changedAt });
+  return host;
+}
+
+const MAC = { id: '6f1c2a40-mac', name: 'Parsa-MacBook' };
 
 const olderBuild: SharedNotifySwitchHost = {
   read: async () => { throw new PaneError('ERR_UNKNOWN_CHANNEL', 'No Pane daemon command registered.', 'Update Pane.'); },
@@ -155,6 +165,41 @@ describe('syncSharedNotifySwitch', () => {
     expect(mac.applied.length + windows.applied.length).toBe(0);
   });
 
+  it('takes the switch and "Show cards on" each from the host that changed it last', async () => {
+    const mac = switchHost({ enabled: false, changedAt: 2_000, cardsOn: null, cardsOnChangedAt: 1_000 });
+    const windows = switchHost({ enabled: true, changedAt: 1_000, cardsOn: MAC, cardsOnChangedAt: 3_000 });
+
+    await syncSharedNotifySwitch([mac.endpoint, windows.endpoint]);
+
+    const expected = { enabled: false, changedAt: 2_000, cardsOn: MAC, cardsOnChangedAt: 3_000 };
+    expect(mac.current()).toEqual(expected);
+    expect(windows.current()).toEqual(expected);
+  });
+
+  it('keeps a pick when a host from before "Show cards on" has the newer switch, and still syncs on/off with it', async () => {
+    const old = switchOnlyHost({ enabled: false, changedAt: 5_000 });
+    const mac = switchHost({ enabled: true, changedAt: 1_000, cardsOn: MAC, cardsOnChangedAt: 2_000 });
+
+    await syncSharedNotifySwitch([old.endpoint, mac.endpoint]);
+
+    expect(mac.current()).toEqual({ enabled: false, changedAt: 5_000, cardsOn: MAC, cardsOnChangedAt: 2_000 });
+    expect(old.applied).toEqual([]);
+
+    await syncSharedNotifySwitch([old.endpoint, mac.endpoint]);
+    expect(old.applied.length + mac.applied.length).toBe(1);
+  });
+
+  it('settles a "Show cards on" tie on whichever computer is in use, whatever order hosts are read in', async () => {
+    const picked = switchHost({ enabled: true, changedAt: 0, cardsOn: MAC, cardsOnChangedAt: 4_000 });
+    const anyComputer = switchHost({ enabled: true, changedAt: 0, cardsOn: null, cardsOnChangedAt: 4_000 });
+
+    await syncSharedNotifySwitch([picked.endpoint, anyComputer.endpoint]);
+    await syncSharedNotifySwitch([anyComputer.endpoint, picked.endpoint]);
+
+    expect(picked.current().cardsOn).toBeNull();
+    expect(anyComputer.current().cardsOn).toBeNull();
+  });
+
   it.each([
     ['first', [{ enabled: false, changedAt: 0 }, { enabled: true, changedAt: 0 }]],
     ['last', [{ enabled: true, changedAt: 0 }, { enabled: false, changedAt: 0 }]],
@@ -185,8 +230,7 @@ function machine(id: string, initial: SharedNotifySwitch | 'older', credentials:
     if (current === 'older') throw new PaneError('ERR_UNKNOWN_CHANNEL', `No Pane daemon command registered for channel "${channel}".`, 'Update Pane.');
     if (channel === 'notify:switch:get') return overTheWire(current);
     if (channel === 'notify:switch:apply') {
-      const incoming = decodeBoundary(args[0], sharedNotifySwitchSchema);
-      if (isNewerNotifySwitch(incoming, current)) current = incoming;
+      current = mergeNotifySwitch(current, decodeBoundary(args[0], sharedNotifySwitchSchema)).notifySwitch;
       return overTheWire(current);
     }
     throw new Error(`unexpected channel ${channel}`);
@@ -236,7 +280,7 @@ describe('SharedCredentialSync and the Approvals switch', () => {
   /** Long enough for the debounce and any sync it sets off, so a loop would show. */
   const settled = () => new Promise(resolve => setTimeout(resolve, 1_300));
 
-  it('keeps two real machines on one switch, in both directions, and settles', async () => {
+  it('keeps two real machines on one switch and one "Show cards on", in both directions, and settles', async () => {
     const hostFor = async () => {
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-switch-sync-'));
       dirs.push(dir);
@@ -275,14 +319,22 @@ describe('SharedCredentialSync and the Approvals switch', () => {
     await vi.waitFor(() => expect(a.configManager.getConfig().notify?.enabled).toBe(true), { timeout: 5_000 });
     await settled();
 
+    await a.configManager.updateConfig({ notify: { cardsOn: MAC } });
+    await vi.waitFor(() => expect(b.configManager.getConfig().notify?.cardsOn).toEqual(MAC), { timeout: 5_000 });
+    expect(b.configManager.getConfig().notify?.enabled).toBe(true);
+    await b.configManager.updateConfig({ notify: { cardsOn: null } });
+    await vi.waitFor(() => expect(a.configManager.getConfig().notify?.cardsOn).toBeNull(), { timeout: 5_000 });
+    await settled();
+
     const stamp = a.configManager.getConfig().notifyEnabledChangedAt;
     expect(b.configManager.getConfig().notifyEnabledChangedAt).toBe(stamp);
+    expect(b.configManager.getConfig().notifyCardsOnChangedAt).toBe(a.configManager.getConfig().notifyCardsOnChangedAt);
     const writes = vi.fn();
     a.configManager.on('config-updated', writes);
     b.configManager.on('config-updated', writes);
     await settled();
     expect(writes).not.toHaveBeenCalled();
-  }, 20_000);
+  }, 30_000);
 
   it('sends a local turn-off to a machine that is behind, carrying this machine\'s time', async () => {
     const peer = machine('build-box', { enabled: true, changedAt: 0 });
@@ -292,7 +344,7 @@ describe('SharedCredentialSync and the Approvals switch', () => {
     await configManager.updateConfig({ notify: { enabled: false } });
     await vi.waitFor(() => expect(peer.current()).toMatchObject({ enabled: false }), { timeout: 5_000 });
 
-    expect(peer.current()).toEqual({ enabled: false, changedAt: configManager.getConfig().notifyEnabledChangedAt });
+    expect(peer.current()).toMatchObject({ enabled: false, changedAt: configManager.getConfig().notifyEnabledChangedAt });
     expect(configManager.getConfig().notifyEnabledChangedAt).toBeGreaterThanOrEqual(before);
   });
 

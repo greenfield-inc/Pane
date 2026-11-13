@@ -50,7 +50,7 @@ describe('phone chat rows', () => {
     expect(rows[1].kind === 'fold' && rows[1].summary).toMatch(/^Waiting for you · /);
   });
 
-  it('mentions only a worker the latest turn has news of (D-201)', () => {
+  it('mentions only a worker that finished in the latest turn, never one asking (D-223)', () => {
     const turns = chatTurns(messages, { running: false });
     const workers = [
       { paneId: 'p', name: 'csv-export', state: 'running' as const, label: 'Running' },
@@ -59,7 +59,7 @@ describe('phone chat rows', () => {
       { paneId: 'b', name: 'old', state: 'done' as const, label: 'Done', reportedAt: '2026-11-03T09:00:00.000Z' },
     ];
     const rows = chatRows(turns, { open: new Set(), workers });
-    expect(rows.flatMap(row => row.kind === 'worker' ? [row.note.text] : [])).toEqual(['switch-to-chat is asking you', 'approvals-global finished']);
+    expect(rows.flatMap(row => row.kind === 'worker' ? [row.note.text] : [])).toEqual(['approvals-global finished']);
     expect(rows.some(row => row.kind === 'fold' && row.summary.includes('worker'))).toBe(false);
   });
 

@@ -13,9 +13,19 @@ import { useScrollSurface } from '../hooks/useScrollSurface';
 import { InspectorTabs, type InspectorTab } from './InspectorTabs';
 import { PanelContainer } from './panels/PanelContainer';
 import type { ToolPanel } from '../../../shared/types/panels';
+import { RestoreRegionButton } from './RestoreRegionButton';
+import { useRegionActions } from '../hooks/useRegionNavigation';
 import { OuterResizeSeparator, type OuterResizeSeparatorProps } from './ui/OuterResizeSeparator';
 
 interface DetailPanelProps {
+  /**
+   * Spread across the Pane's work area (P4). The panel keeps its width in the
+   * row, so the splits and terminal keep their size underneath and never refit.
+   */
+  maximized?: boolean;
+  onToggleMaximize?: () => void;
+  /** ⌘⇧M with focus here: hide the panel. */
+  onMinimize?: () => void;
   isVisible: boolean;
   onToggle: () => void;
   width: number;
@@ -56,6 +66,9 @@ function DetailSection({ title, children }: { title: string; children: React.Rea
 }
 
 export function DetailPanel({
+  maximized = false,
+  onToggleMaximize,
+  onMinimize,
   isVisible,
   width,
   height,
@@ -79,6 +92,7 @@ export function DetailPanel({
   const sessionContext = useSession();
   const immersiveMode = useNavigationStore(state => state.immersiveMode);
   const detailPanelRef = React.useRef<HTMLDivElement>(null);
+  useRegionActions(detailPanelRef, { toggleMaximize: onToggleMaximize, minimize: onMinimize });
   const detailScrollSurfaceRef = useScrollSurface<HTMLDivElement>({
     id: `detail:${sessionContext?.session.id ?? 'unavailable'}`,
     sessionId: sessionContext?.session.id,
@@ -111,6 +125,9 @@ export function DetailPanel({
         changesPanel={changesPanel}
         changesCount={changesCount}
         isMainRepo={isMainRepo}
+        maximized={maximized}
+        onToggleMaximize={onToggleMaximize}
+        onMinimize={onMinimize}
       />
     );
   }
@@ -136,16 +153,25 @@ export function DetailPanel({
   return (
     <div
       ref={detailPanelRef}
-      className={`pane-detail-panel pane-detail-panel-vertical flex-shrink-0 min-w-0 bg-surface-primary flex flex-col overflow-visible relative ${isVisible && !immersiveMode && width > 0 ? 'border-l border-border-primary' : ''}`}
+      data-focus-region="right-panel"
+      data-region-open={contentActive}
+      className={`pane-detail-panel pane-detail-panel-vertical flex-shrink-0 min-w-0 bg-surface-primary flex flex-col overflow-visible ${maximized ? '' : 'relative'} ${isVisible && !immersiveMode && width > 0 ? 'border-l border-border-primary' : ''}`}
       style={{ width: isVisible && !immersiveMode ? `${width}px` : '0px' }}
     >
-      {resizeSeparator && !immersiveMode && <OuterResizeSeparator {...resizeSeparator} />}
+      {resizeSeparator && !immersiveMode && !maximized && <OuterResizeSeparator {...resizeSeparator} />}
 
       <div
-        className="pane-detail-panel-inner flex flex-col h-full min-h-0 overflow-hidden"
+        className={maximized
+          ? 'pane-detail-panel-inner absolute inset-0 z-20 flex flex-col min-h-0 overflow-hidden bg-surface-primary'
+          : 'pane-detail-panel-inner flex flex-col h-full min-h-0 overflow-hidden'}
         aria-hidden={!contentActive}
         inert={!contentActive ? true : undefined}
       >
+        {maximized && onToggleMaximize && (
+          <div className="absolute right-2 top-1 z-10">
+            <RestoreRegionButton onRestore={onToggleMaximize} />
+          </div>
+        )}
         {onInspectorTabChange && (
           <InspectorTabs
             tab={showDetails ? 'details' : inspectorTab}

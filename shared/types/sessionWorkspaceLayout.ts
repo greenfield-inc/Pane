@@ -58,6 +58,8 @@ export interface SessionWorkspaceLayout {
   root: SessionLayoutNode;
   /** Tile that owns keyboard focus; its Session is the selected one. */
   focusedTileId?: string;
+  /** Tile maximized over the others (P4). Older layouts simply lack it. */
+  maximizedTileId?: string;
 }
 
 const tileSchema: BoundarySchema<SessionTileNode> = boundary.object({
@@ -92,6 +94,7 @@ const layoutSchema: BoundarySchema<SessionWorkspaceLayout> = boundary.object({
   version: boundary.literal(SESSION_WORKSPACE_LAYOUT_VERSION),
   root: nodeSchema,
   focusedTileId: boundary.optional(boundary.nonEmptyString),
+  maximizedTileId: boundary.optional(boundary.nonEmptyString),
 });
 
 interface LayoutCensus {
@@ -129,8 +132,12 @@ export function decodeSessionWorkspaceLayout(value: unknown): SessionWorkspaceLa
   const census: LayoutCensus = { tiles: 0, depth: 1, nodeIds: new Set(), sessionIds: new Set() };
   if (!measure(decoded.root, 1, census)) return null;
   if (census.tiles === 0) return null;
-  if (decoded.focusedTileId && !census.nodeIds.has(decoded.focusedTileId)) {
-    return { version: decoded.version, root: decoded.root };
-  }
-  return decoded;
+  const focusedTileId = decoded.focusedTileId && census.nodeIds.has(decoded.focusedTileId) ? decoded.focusedTileId : undefined;
+  const maximizedTileId = decoded.maximizedTileId && census.nodeIds.has(decoded.maximizedTileId) && census.tiles > 1
+    ? decoded.maximizedTileId
+    : undefined;
+  const layout: SessionWorkspaceLayout = { version: decoded.version, root: decoded.root };
+  if (focusedTileId) layout.focusedTileId = focusedTileId;
+  if (maximizedTileId) layout.maximizedTileId = maximizedTileId;
+  return layout;
 }

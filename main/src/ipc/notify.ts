@@ -14,6 +14,8 @@ import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { submitOnlyToAgent } from './runpane';
 import { NotifyService } from '../services/notify/notifyService';
+import { ASKING_TAB_CLOSED, cardsOnStatus } from '../services/notify/notifyQueue';
+import { readingMachines } from '../daemon/readingMachines';
 import { ClaudePromptBridge } from '../services/claudePrompts/claudePromptBridge';
 import { setClaudePromptBridge } from '../services/claudePrompts';
 import type { MachineConnections } from '../services/machineConnections';
@@ -21,8 +23,12 @@ import { LOCAL_MACHINE_ID, type MachineState } from '../../../shared/types/machi
 import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
+import { statusCard } from '../services/notify/workerContext';
+import { admitCard } from '../services/notify/cardAdmit';
+import { checkCard } from '../services/notify/cardCheck';
+import { summaryPage } from '../services/notify/summaryPage';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
-import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
@@ -30,6 +36,7 @@ import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore } from '../services/paneSecrets';
+import { agentLabel } from '../../../shared/agents';
 
 const MAX_CHOICES = 9;
 const MAX_TEXT = 4_000;
@@ -41,11 +48,20 @@ const linkInputSchema = boundary.object({
   label: boundary.string,
   path: boundary.optional(boundary.string),
   url: boundary.optional(boundary.string),
+  approval: boundary.optional(boundary.string),
 });
 const linkSchema = boundary.union(
   boundary.object({ label: boundary.nonEmptyString, path: boundary.nonEmptyString }),
   boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString }),
+  boundary.object({ label: boundary.nonEmptyString, approval: boundary.nonEmptyString }),
 );
+const choiceSchema = boundary.object({
+  label: boundary.nonEmptyString,
+  detail: boundary.optional(boundary.string),
+  recommended: boundary.optional(boundary.boolean),
+  was: boundary.optional(boundary.string),
+});
+const subQuestionSchema = boundary.object({ title: boundary.string, choices: boundary.array(choiceSchema), why: boundary.optional(boundary.string) });
 const sessionSchema = boundary.object({
   id: boundary.nonEmptyString,
   name: boundary.string,
@@ -57,11 +73,8 @@ const notifyRequestSchema = boundary.object({
   ui: boundary.optional(boundary.enumeration('options', 'approve', 'ask', 'secret', 'info')),
   title: boundary.optional(boundary.string),
   context: boundary.optional(boundary.string),
-  choices: boundary.optional(boundary.array(boundary.object({
-    label: boundary.nonEmptyString,
-    detail: boundary.optional(boundary.string),
-    recommended: boundary.optional(boundary.boolean),
-  }))),
+  choices: boundary.optional(boundary.array(choiceSchema)),
+  questions: boundary.optional(boundary.array(subQuestionSchema)),
   detail: boundary.optional(boundary.string),
   detailLabel: boundary.optional(boundary.string),
   suggestions: boundary.optional(boundary.array(boundary.string)),
@@ -69,6 +82,12 @@ const notifyRequestSchema = boundary.object({
   secret: boundary.optional(boundary.object({ project: boundary.string, name: boundary.string })),
   links: boundary.optional(boundary.array(linkInputSchema)),
   resume: boundary.optional(boundary.nonEmptyString),
+  took: boundary.optional(boundary.string),
+  tookAs: boundary.optional(boundary.enumeration('answer', 'question')),
+  status: boundary.optional(boundary.string),
+  update: boundary.optional(boundary.string),
+  asked: boundary.optional(boundary.string),
+  whatChanged: boundary.optional(boundary.string),
   relays: boundary.optional(boundary.nonEmptyString),
   aboutSession: boundary.optional(boundary.nonEmptyString),
   returnAfterMs: boundary.optional(boundary.number),
@@ -81,6 +100,7 @@ const notifyRequestSchema = boundary.object({
 });
 
 const answerSchema = boundary.union(
+  boundary.object({ picks: boundary.array(boundary.string), text: boundary.optional(boundary.string) }),
   boundary.object({ choice: boundary.nonEmptyString, note: boundary.optional(boundary.string) }),
   boundary.object({ approved: boundary.boolean, note: boundary.optional(boundary.string) }),
   boundary.object({ text: boundary.string }),
@@ -104,13 +124,15 @@ const notifyCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('close'), id: boundary.nonEmptyString, reason: boundary.optional(boundary.string) }),
   idCommand('reopen'),
   boundary.object({ type: boundary.literal('override'), id: boundary.nonEmptyString, answer: answerSchema }),
+  boundary.object({ type: boundary.literal('fix-reply'), id: boundary.nonEmptyString, as: boundary.enumeration('answer', 'question') }),
 );
 /** The question of Autopilot's rewrite: checked further in parseNotifyRequest. */
 const rewriteQuestionSchema = boundary.object({
   ui: boundary.enumeration('options', 'approve', 'ask', 'info'),
   title: boundary.string,
   context: boundary.optional(boundary.string),
-  choices: boundary.optional(boundary.array(boundary.object({ label: boundary.nonEmptyString, detail: boundary.optional(boundary.string), recommended: boundary.optional(boundary.boolean) }))),
+  choices: boundary.optional(boundary.array(choiceSchema)),
+  questions: boundary.optional(boundary.array(subQuestionSchema)),
   detail: boundary.optional(boundary.string),
   detailLabel: boundary.optional(boundary.string),
   suggestions: boundary.optional(boundary.array(boundary.string)),
@@ -126,6 +148,7 @@ const notifyRemoteCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('close'), id: boundary.nonEmptyString, reason: boundary.optional(boundary.string) }),
   idCommand('reopen'),
   boundary.object({ type: boundary.literal('override'), id: boundary.nonEmptyString, answer: answerSchema }),
+  boundary.object({ type: boundary.literal('fix-reply'), id: boundary.nonEmptyString, as: boundary.enumeration('answer', 'question') }),
   boundary.object({ type: boundary.literal('agent-answer'), id: boundary.nonEmptyString, answer: answerSchema, because: boundary.nonEmptyString, machine: boundary.optional(boundary.string) }),
   boundary.object({ type: boundary.literal('agent-close'), id: boundary.nonEmptyString, reason: boundary.nonEmptyString, machine: boundary.optional(boundary.string) }),
   boundary.object({ type: boundary.literal('agent-rewrite'), id: boundary.nonEmptyString, question: rewriteQuestionSchema, reason: boundary.optional(boundary.string), machine: boundary.optional(boundary.string), newId: boundary.optional(boundary.nonEmptyString) }),
@@ -133,16 +156,30 @@ const notifyRemoteCommandSchema = boundary.union(
 /** The server's name for the sender (httpApiServer fills it in), never the caller's own claim. */
 const remoteSenderSchema = boundary.object({ device: boundary.nonEmptyString });
 const actorSchema = boundary.enumeration('you', 'autopilot', 'orchestrator', 'pane');
+const replySchema = boundary.object({
+  id: boundary.nonEmptyString,
+  text: boundary.string,
+  picks: boundary.optional(boundary.array(boundary.string)),
+  at: boundary.number,
+  state: boundary.enumeration('reading', 'answer', 'question', 'unread', 'sent'),
+  reader: boundary.optional(boundary.object({ kind: boundary.enumeration('asker', 'orchestrator', 'autopilot'), panelId: boundary.optional(boundary.string), name: boundary.string })),
+  deliveredAt: boundary.optional(boundary.number),
+  status: boundary.optional(boundary.string),
+  fixed: boundary.optional(boundary.enumeration('answer', 'question')),
+});
+const revisionSchema = boundary.object({ asked: boundary.string, whatChanged: boundary.array(boundary.string), by: boundary.string, at: boundary.number });
 const notifyItemSchema = boundary.object({
   id: boundary.nonEmptyString,
   ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
   title: boundary.string,
   context: boundary.optional(boundary.string),
-  choices: boundary.optional(boundary.array(boundary.object({
-    label: boundary.nonEmptyString,
-    detail: boundary.optional(boundary.string),
-    recommended: boundary.optional(boundary.boolean),
-  }))),
+  choices: boundary.optional(boundary.array(choiceSchema)),
+  questions: boundary.optional(boundary.array(subQuestionSchema)),
+  replyIsAnswer: boundary.optional(boundary.boolean),
+  asSent: boundary.optional(boundary.object({ title: boundary.string, context: boundary.optional(boundary.string) })),
+  summaryPage: boundary.optional(boundary.string),
+  statusFile: boundary.optional(boundary.string),
+  optionsOnly: boundary.optional(boundary.boolean),
   detail: boundary.optional(boundary.string),
   detailLabel: boundary.optional(boundary.string),
   suggestions: boundary.optional(boundary.array(boundary.string)),
@@ -187,6 +224,21 @@ const notifyItemSchema = boundary.object({
   reopened: boundary.optional(boundary.object({ by: actorSchema, device: boundary.optional(boundary.string), at: boundary.number, closedBy: actorSchema, closedReason: boundary.string })),
   pushed: boundary.optional(boundary.boolean),
   summaryOf: boundary.optional(boundary.array(boundary.string)),
+  reply: boundary.optional(replySchema),
+  version: boundary.optional(boundary.number),
+  revision: boundary.optional(revisionSchema),
+  versions: boundary.optional(boundary.array(boundary.object({
+    version: boundary.number,
+    title: boundary.string,
+    context: boundary.optional(boundary.string),
+    choices: boundary.optional(boundary.array(choiceSchema)),
+    questions: boundary.optional(boundary.array(subQuestionSchema)),
+    links: boundary.optional(boundary.array(linkSchema)),
+    at: boundary.number,
+    revision: boundary.optional(revisionSchema),
+  }))),
+  readyAgain: boundary.optional(boundary.number),
+  relayedBy: boundary.optional(boundary.object({ panelId: boundary.string, name: boundary.string })),
 });
 const notifySharedStateSchema = boundary.object({
   machine: boundary.string,
@@ -250,11 +302,13 @@ function askerPaneGone(database: NotifyServices['databaseService'], item: Notify
     if (!pane) return 'Pane deleted';
     if (pane.archived) return 'Pane archived';
   }
-  if (panelId && database?.getPanel && !database.getPanel(panelId)) return 'the asking tab was closed';
+  if (panelId && database?.getPanel && !database.getPanel(panelId)) return ASKING_TAB_CLOSED;
   return undefined;
 }
 
 export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyServices, commandRegistry: PaneCommandRegistry): NotifyService {
+  /** Every machine's state, once the machine connections start; "Show cards on" reads it from the first snapshot. */
+  let machineList: (() => MachineState[]) | null = null;
   const notify = new NotifyService({
     configManager: services.configManager,
     getMainWindow: services.getMainWindow,
@@ -268,6 +322,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       return { paneId: pane.id, panelId: panel?.id, name: pane.name, agentType };
     },
     openLink: async (paneId, link) => {
+      // Another approval opens in place on the card, never as a tab.
+      if ('approval' in link) throw new PaneError('ERR_APPROVALS_LINK_OPEN', `${link.label} is another approval, which opens on the card itself. Nothing was opened.`, 'Open it from its tab on the approval.');
       // A file page is titled by its label, as the card shows it.
       const target = 'path' in link ? { filePath: link.path } : link.url.startsWith('file:') ? { url: link.url, title: link.label } : { url: link.url };
       await commandRegistry.invoke('runpane:panels:open', [{ paneId, ...target, placement: 'tab', source: 'user' }]);
@@ -355,13 +411,18 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       }
     },
     idleSeconds: () => (hasHeadlessDaemonLaunchArg() ? Infinity : idleSeconds()),
+    cardsOn: () => cardsOnStatus(services.configManager.getConfig(), readingMachines.has, machineList?.() ?? []),
+    tabAlive: (panelId) => panelManager.getPanel(panelId) !== undefined,
   });
 
   notifyBeforeQuit = () => notify.queue.prepareForQuit();
 
   /** Set once the machine connections start: every saved machine's questions then show here. */
   let saved: SavedMachinesLink | null = null;
-  followMachines = (machines) => { saved = linkSavedMachines(notify, machines); };
+  followMachines = (machines) => {
+    saved = linkSavedMachines(notify, machines);
+    machineList = () => machines.list();
+  };
 
   // Open in Pane works for the machine the app is on; another machine's card would need a switch.
   const showActiveMachine = () => {
@@ -376,10 +437,21 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     const teammate = teammatePaneCaller();
     // A secret card writes the owner's secret store, so a teammate cannot post one.
     if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');
-    return notify.ask(parsed, paneCommandSignal());
+    const warnings = admitNotifyCard(parsed);
+    const result = await notify.ask(parsed, paneCommandSignal());
+    // A card that wasn't shown (a worker's, sent back to its orchestrator) has nothing to warn about.
+    return warnings.length && !('unavailable' in result) ? { ...result, warnings } : result;
   });
 
   commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
+  // An approval's Summary (P4): the asker's page or Pane's template, served with no scripts or network.
+  commandRegistry.register('notify:summary-page', async (id: PaneCommandValue, options?: PaneCommandValue): Promise<NotifySummaryPage> => {
+    const wanted = decodeBoundary(id, boundary.nonEmptyString);
+    const theme = decodeOptionalBoundary(options ?? {}, boundary.object({ theme: boundary.optional(boundary.enumeration('light', 'dark')) }))?.theme ?? 'light';
+    const item = notify.queue.snapshot().items.find(candidate => candidate.id === wanted && (candidate.machineId ?? 'local') === 'local');
+    if (!item) throw new PaneError('ERR_NOTIFY_GONE', `There's no approval ${wanted} on this machine any more, so it has no Summary to show. Nothing was changed.`, 'Open the approval again from Approvals.');
+    return summaryPage(item, theme);
+  });
   commandRegistry.register('notify:remote-command', async (command: PaneCommandValue, sender: PaneCommandValue) => {
     // A Mac names itself "studio.local" on its event stream; cards call it "studio".
     const device = decodeBoundary(sender, remoteSenderSchema).device.replace(/\.(local|lan|home|internal)$/i, '');
@@ -441,7 +513,7 @@ function startChatTabPrompts(notify: NotifyService, services: NotifyServices): v
       const pane = panel ? services.sessionManager.getSession(panel.sessionId) : undefined;
       if (!panel || panel.type !== 'chat' || !pane || pane.archived) return undefined;
       const agent = getChatTabManager().view(panelId, 0, false).agent;
-      return { paneId: pane.id, panelId, name: pane.name, agent: agent === 'claude' ? 'Claude' : 'Codex' };
+      return { paneId: pane.id, panelId, name: pane.name, agent: agentLabel(agent) };
     },
     enabled: () => configManager.getConfig().answerPromptsFromPane !== false,
     answerPermission: (panelId, requestId, optionId) => getChatTabManager().answerPermission(panelId, requestId, optionId),
@@ -599,6 +671,42 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
   };
 }
 
+/**
+ * The card check every way of asking reaches (P3): a new card, a relayed one and an update are
+ * tidied when they are old paragraph cards, refused for the two clear mistakes and warned on the
+ * rest. Leaves the request as Pane posts it and returns the warnings. Info and secret cards, and
+ * calls that ask nothing (resume, --took), aren't cards to check.
+ */
+function admitNotifyCard(request: NotifyRequest): string[] {
+  if (request.resume || request.took !== undefined) return [];
+  if (request.update !== undefined) {
+    if (request.title === undefined && !request.choices && !request.questions) return [];
+    // An update changes only what it passes; the rest is the approval's, checked when it was asked.
+    const { refusal } = checkCard({ title: request.title ?? '', choices: request.choices, questions: request.questions });
+    if (refusal) throw new PaneError(refusal.code, refusal.message, refusal.next);
+    return [];
+  }
+  if (!request.ui || request.ui === 'info' || request.ui === 'secret' || request.title === undefined) return [];
+  // Only a card asked in words (or with options it hasn't got) is tidied into buttons.
+  const tidy = request.ui === 'ask' || request.ui === 'options';
+  const admitted = admitCard({ title: request.title, context: request.context, choices: request.choices, questions: request.questions, links: request.links }, { tidy });
+  if (admitted.asSent) {
+    const { card } = admitted;
+    request.ui = 'options';
+    request.title = card.title;
+    if (card.context !== undefined) request.context = card.context;
+    else delete request.context;
+    request.choices = card.choices;
+    request.questions = card.questions;
+    if (!request.choices) delete request.choices;
+    if (!request.questions) delete request.questions;
+    delete request.suggestions;
+    if (card.links) request.links = card.links;
+    request.asSent = admitted.asSent;
+  }
+  return admitted.warnings;
+}
+
 /** Checks a notify call the way the tool's schema promises, naming the field that's wrong. */
 function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   let decoded: ReturnType<typeof notifyRequestSchema.decode>;
@@ -610,6 +718,28 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   const { links, ...rest } = decoded;
   const request: NotifyRequest = rest;
   if (request.resume) return request;
+  if (request.took !== undefined) {
+    if (!request.took.trim()) throw invalid('took needs the approval\'s id or Q-n.');
+    if (!request.tookAs) throw invalid('took needs answer or question: --took <id|Q-n> answer.');
+    if (request.ui !== undefined || request.update !== undefined) throw invalid('took goes on its own, without ui or update.');
+    return request;
+  }
+  if (request.tookAs !== undefined || request.status !== undefined) throw invalid('answer, question and status only go with took.');
+  if (request.update !== undefined) {
+    if (!request.update.trim()) throw invalid('update needs the approval\'s id or Q-n.');
+    if (request.ui !== undefined) throw invalid('update keeps the approval\'s ui; leave ui out.');
+    if (!request.asked?.trim()) throw invalid('update needs asked: the person\'s question, as they asked it.');
+    if (!request.whatChanged?.trim()) throw invalid('update needs whatChanged: one line per change.');
+    if ((request.title?.length ?? 0) > MAX_TEXT || (request.context?.length ?? 0) > MAX_TEXT || request.asked.length > MAX_TEXT || request.whatChanged.length > MAX_TEXT) throw invalid(`title, context, asked and whatChanged take up to ${MAX_TEXT} characters.`);
+    if (request.choices && request.questions) throw invalid('pass choices or questions, not both.');
+    if (request.choices) checkChoices(request.choices, 'choices');
+    if (request.questions) checkQuestions(request.questions);
+    if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
+    // The new version's context reads like a new card's; the card keeps its ui, and its links unless given.
+    readStatusContext(request, false);
+    return request;
+  }
+  if (request.asked !== undefined || request.whatChanged !== undefined) throw invalid('asked and whatChanged only go with update.');
   const { ui } = request;
   if (!ui) throw invalid('ui is required: options, approve, ask or info.');
   if (ui === 'secret') {
@@ -623,14 +753,15 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (!request.title?.trim()) throw invalid('title is required.');
   if (request.title.length > MAX_TEXT || (request.context?.length ?? 0) > MAX_TEXT) throw invalid(`title and context take up to ${MAX_TEXT} characters.`);
   if ((request.detail?.length ?? 0) > MAX_DETAIL) throw invalid(`detail takes up to ${MAX_DETAIL} characters.`);
-  if (ui === 'options') {
-    const count = request.choices?.length ?? 0;
-    if (count < 1 || count > MAX_CHOICES) throw invalid(`choices needs 1 to ${MAX_CHOICES} entries for an options question; it has ${count}.`);
-    const labels = new Set(request.choices?.map(choice => choice.label.trim()));
-    if (labels.size !== count) throw invalid('choices need different labels.');
-  } else if (request.choices) {
-    throw invalid(`choices only goes with ui: options, not ${ui}.`);
+  if (ui === 'options' && request.questions) {
+    if (request.choices) throw invalid('pass choices or questions, not both.');
+    checkQuestions(request.questions);
+  } else if (ui === 'options') {
+    checkChoices(request.choices ?? [], 'choices');
+  } else if (request.choices || request.questions) {
+    throw invalid(`${request.choices ? 'choices' : 'questions'} only goes with ui: options, not ${ui}.`);
   }
+  if (request.choices?.some(choice => choice.was !== undefined)) throw invalid('was only goes with update: it names a reworded choice\'s old label.');
   if (request.detail !== undefined && ui !== 'approve') throw invalid(`detail only goes with ui: approve, not ${ui}.`);
   if (request.detailLabel !== undefined && request.detail === undefined) throw invalid('detailLabel needs detail: it labels the button that shows it.');
   // Code points, as the CLIs count them.
@@ -639,12 +770,61 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.action !== undefined && ui !== 'info') throw invalid(`action only goes with ui: info, not ${ui}.`);
   if (request.action && !/^https?:\/\//i.test(request.action.url)) throw invalid('action.url must be an http(s) URL.');
   if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
+  readStatusContext(request, true);
   return request;
+}
+
+/**
+ * A context sent as a status file or a needs_you block (JSON) becomes the card it describes:
+ * its question and why as the context, its options as choices on a question that has none, its
+ * files as links. Other JSON shows as one plain line, or none; the raw text never shows.
+ */
+function readStatusContext(request: NotifyRequest, newCard: boolean): void {
+  if (!request.context) return;
+  const card = statusCard(request.context, request.title ?? '');
+  if (!card) return;
+  const buttons = newCard && request.ui === 'ask' && !request.suggestions?.length;
+  // Questions that can't get buttons here are written out in the context instead.
+  const context = card.questions && !buttons ? card.questionsContext : card.context;
+  // An update without a line for the person clears the old context rather than keeping it.
+  if (context) request.context = context;
+  else if (newCard) delete request.context;
+  else request.context = '';
+  if (!newCard) return;
+  if (buttons && card.questions) {
+    request.ui = 'options';
+    request.questions = card.questions;
+  } else if (buttons && card.choices) {
+    request.ui = 'options';
+    request.choices = card.choices;
+  }
+  if (card.summaryPage) request.summaryPage = request.caller.cwd && !path.isAbsolute(card.summaryPage) ? path.resolve(request.caller.cwd, card.summaryPage) : card.summaryPage;
+  if (card.links) {
+    const files = card.links.map(link => ('path' in link && request.caller.cwd && !path.isAbsolute(link.path) ? { ...link, path: path.resolve(request.caller.cwd, link.path) } : link));
+    request.links = [...request.links ?? [], ...files].slice(0, NOTIFY_LINKS_MAX);
+  }
+}
+
+/** 1 to 9 choices with different labels. */
+function checkChoices(choices: NonNullable<NotifyRequest['choices']>, where: string): void {
+  const count = choices.length;
+  if (count < 1 || count > MAX_CHOICES) throw invalid(`${where} needs 1 to ${MAX_CHOICES} entries for an options question; it has ${count}.`);
+  if (new Set(choices.map(choice => choice.label.trim())).size !== count) throw invalid(`${where} need different labels.`);
+}
+
+/** 2 to 4 questions, each with a title and its own choices. */
+function checkQuestions(questions: NonNullable<NotifyRequest['questions']>): void {
+  if (questions.length < 2 || questions.length > NOTIFY_QUESTIONS_MAX) throw invalid(`questions takes 2 to ${NOTIFY_QUESTIONS_MAX} questions; it has ${questions.length}. For one, use choices.`);
+  questions.forEach((question, index) => {
+    if (!question.title.trim()) throw invalid(`questions[${index}].title is required.`);
+    if (question.title.length > MAX_TEXT) throw invalid(`questions[${index}].title takes up to ${MAX_TEXT} characters.`);
+    checkChoices(question.choices, `questions[${index}].choices`);
+  });
 }
 
 /** Autopilot's rewrite takes the same checks as any notify call. */
 export function parseRewriteQuestion(value: PaneCommandValue, cwd?: string): NotifyQuestion {
-  const { caller: _caller, resume: _resume, relays: _relays, aboutSession: _about, returnAfterMs: _after, ...question } = parseNotifyRequest({ ...decodeBoundary(value, boundary.jsonObject), caller: { cwd } });
+  const { caller: _caller, resume: _resume, relays: _relays, aboutSession: _about, returnAfterMs: _after, took: _took, tookAs: _tookAs, status: _status, update: _update, asked: _asked, whatChanged: _changed, ...question } = parseNotifyRequest({ ...decodeBoundary(value, boundary.jsonObject), caller: { cwd } });
   if (!question.ui || !question.title) throw invalid('ui and title are required.');
   return { ...question, ui: question.ui, title: question.title };
 }
@@ -653,7 +833,7 @@ export function parseRewriteQuestion(value: PaneCommandValue, cwd?: string): Not
  * Related links: up to 6, each a label and exactly one of a file path (relative to the asking
  * folder) or an http(s) URL.
  */
-function parseLinks(links: Array<{ label: string; path?: string; url?: string }>, cwd: string | undefined): NotifyLink[] {
+function parseLinks(links: Array<{ label: string; path?: string; url?: string; approval?: string }>, cwd: string | undefined): NotifyLink[] {
   if (links.length > NOTIFY_LINKS_MAX) throw invalid(`links takes up to ${NOTIFY_LINKS_MAX} entries; it has ${links.length}.`);
   return links.map((link, index): NotifyLink => {
     const label = link.label.trim();
@@ -662,7 +842,9 @@ function parseLinks(links: Array<{ label: string; path?: string; url?: string }>
     if ([...label].length > NOTIFY_LINK_LABEL_MAX) throw invalid(`${where}.label takes up to ${NOTIFY_LINK_LABEL_MAX} characters.`);
     const filePath = link.path?.trim();
     const url = link.url?.trim();
-    if (Boolean(filePath) === Boolean(url)) throw invalid(`${where} needs exactly one of path or url.`);
+    const approval = link.approval?.trim();
+    if ([filePath, url, approval].filter(Boolean).length !== 1) throw invalid(`${where} needs exactly one of path, url or approval.`);
+    if (approval) return { label, approval };
     if (url) {
       if (!/^https?:\/\/\S+$/i.test(url)) throw invalid(`${where}.url must be an http(s) URL.`);
       return { label, url };

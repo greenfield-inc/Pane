@@ -25,6 +25,7 @@ import { RemoteDiffPanel } from './components/RemoteDiffPanel';
 import { RemoteChatTab } from './components/RemoteChatTab';
 import { AgentFarmProfileDialog } from '../components/chatTab/AgentFarmProfileDialog';
 import type { ChatTabCreate } from '../../../shared/types/chatTab';
+import { refreshChatAgents, useChatAgentsStore } from '../stores/chatAgentsStore';
 import { useRemoteListeningPorts } from './hooks/useRemoteListeningPorts';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
@@ -117,6 +118,7 @@ export function RemotePwaApp() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [affordances, setAffordances] = useState<RemotePwaAffordances>(EMPTY_AFFORDANCES);
   const [affordancesLoading, setAffordancesLoading] = useState(false);
+  const chatAgents = useChatAgentsStore(state => state.entries);
   const [sidebarActionId, setSidebarActionId] = useState<string | null>(null);
   const [createSessionProject, setCreateSessionProject] = useState<RemoteProjectWithSessions | null>(null);
   const [createOrchestrationOpen, setCreateOrchestrationOpen] = useState(false);
@@ -658,6 +660,11 @@ export function RemotePwaApp() {
     }
   }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
 
+  // The host's chat agents for the + menu, read again for each host and whenever it turns chat tabs on.
+  useEffect(() => {
+    if (adapter && affordances.chatTabsEnabled) void refreshChatAgents(adapter.chatTab);
+  }, [adapter, affordances.chatTabsEnabled]);
+
   /** Opens a chat tab on the host: a plain agent, or an Agent Farm profile (`launch`). Rejects with the host's reason. */
   const createChat = useCallback(async (request: Pick<ChatTabCreate, 'agent' | 'launch'>) => {
     if (!adapter || !selectedSessionId) return;
@@ -1090,6 +1097,7 @@ export function RemotePwaApp() {
           onCreateTerminal={createTerminal}
           onCreateBrowser={createBrowser}
           onCreateChat={affordances.chatTabsEnabled && adapter ? agent => void createChat({ agent }) : undefined}
+          chatAgents={chatAgents}
           onCreateProfileChat={affordances.chatTabsEnabled && adapter ? () => setProfileDialogOpen(true) : undefined}
         />
 

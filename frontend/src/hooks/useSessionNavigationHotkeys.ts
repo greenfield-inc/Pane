@@ -13,6 +13,7 @@ import {
   getPinnedSessions,
   groupSessionsByProject,
 } from '../utils/sessionOrdering';
+import type { SwitchSessionId } from '../../../shared/constants/keyboardShortcuts';
 import type { Project } from '../types/project';
 
 interface UseSessionNavigationHotkeysOptions {
@@ -124,7 +125,6 @@ export function useSessionNavigationHotkeys({
   useHotkey({
     id: 'cycle-session-next-0',
     label: 'Next Pane',
-    keys: 'mod+Tab',
     category: 'session',
     enabled: () => allActiveSessionsRef.current.length > 1,
     action: () => cycleSession('next'),
@@ -133,7 +133,6 @@ export function useSessionNavigationHotkeys({
   useHotkey({
     id: 'cycle-session-prev-0',
     label: 'Previous Pane',
-    keys: 'mod+shift+Tab',
     category: 'session',
     enabled: () => allActiveSessionsRef.current.length > 1,
     action: () => cycleSession('prev'),
@@ -142,7 +141,6 @@ export function useSessionNavigationHotkeys({
   useHotkey({
     id: 'cycle-sidebar-session-next',
     label: 'Next Pane in Sidebar',
-    keys: 'mod+ArrowDown',
     category: 'session',
     enabled: () => {
       const sessions = chooseSidebarCycleSessions(
@@ -160,7 +158,6 @@ export function useSessionNavigationHotkeys({
   useHotkey({
     id: 'cycle-sidebar-session-prev',
     label: 'Previous Pane in Sidebar',
-    keys: 'mod+ArrowUp',
     category: 'session',
     enabled: () => {
       const sessions = chooseSidebarCycleSessions(
@@ -185,9 +182,10 @@ export function useSessionNavigationHotkeys({
   const sessionLabelKey = visibleSessions.slice(0, 9).map(s => `${s.name}:${s.projectId}`).join('|');
 
   useEffect(() => {
-    const ids: string[] = [];
+    const ids: SwitchSessionId[] = [];
     for (let i = 1; i <= 9; i++) {
-      const id = `switch-session-${i}`;
+      // SAFETY: the loop is bounded to the catalog's 1..9 Pane slots.
+      const id = `switch-session-${i}` as SwitchSessionId;
       ids.push(id);
       const session = visibleSessionsRef.current[i - 1];
       let label = `Switch to pane ${i}`;
@@ -201,7 +199,6 @@ export function useSessionNavigationHotkeys({
       register({
         id,
         label,
-        keys: `mod+${i}`,
         category: 'session',
         // Empty slots keep their hotkey but stay out of the palette.
         showInPalette: !!session,

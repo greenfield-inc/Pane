@@ -11,6 +11,7 @@ const paths = {
   schema: path.join(rootDir, 'contracts', 'runpane', 'schema.json'),
   npmContract: path.join(rootDir, 'packages', 'runpane', 'src', 'generated', 'contract.ts'),
   sharedContract: path.join(rootDir, 'shared', 'types', 'generatedRunpaneContract.ts'),
+  sharedAgents: path.join(rootDir, 'shared', 'types', 'generatedAgents.ts'),
   pyContract: path.join(rootDir, 'packages', 'runpane-py', 'src', 'runpane', 'generated_contract.py'),
   fixture: path.join(rootDir, 'scripts', 'fixtures', 'runpane-contract.json'),
   docs: path.join(rootDir, 'docs', 'RUNPANE_CLI_CONTRACT.md')
@@ -182,15 +183,7 @@ function validateContract(contract, schema) {
     throw new Error('defaults.channel must be one of enums.channels');
   }
 
-  for (const agent of contract.enums.agents) {
-    const template = contract.agentTemplates?.[agent];
-    if (!template) {
-      throw new Error(`agentTemplates.${agent} is required`);
-    }
-    if (runtimeType(template.title) !== 'string' || runtimeType(template.command) !== 'string') {
-      throw new Error(`agentTemplates.${agent} must include title and command`);
-    }
-  }
+  validateAgents(contract);
 
   const flagNamesAndAliases = (flags) => flags.flatMap((flag) => [flag.name, ...(flag.aliases ?? [])]);
   const remoteValueFlags = ensureArray(contract.flags?.remoteValue, 'flags.remoteValue').map((flag) => flag.name);
@@ -221,6 +214,31 @@ function validateContract(contract, schema) {
   }
 
   validateAgentContext(contract, commandNames);
+}
+
+/** The agents config: every id it names exists, and the terminal agent list is the config's own. */
+function validateAgents(contract) {
+  const entries = contract.agents.entries;
+  const ids = Object.keys(entries);
+  if (JSON.stringify([...contract.enums.agents].sort()) !== JSON.stringify([...ids].sort())) {
+    throw new Error(`enums.agents must list exactly the agents in agents.entries (${ids.join(', ')})`);
+  }
+  if (!entries[contract.agents.default]) {
+    throw new Error(`agents.default names "${contract.agents.default}", which is not in agents.entries`);
+  }
+  const executables = new Map();
+  for (const [id, agent] of Object.entries(entries)) {
+    if (!/^[a-z][a-z0-9-]*$/.test(id)) throw new Error(`agents.entries.${id}: ids are lowercase letters, digits and dashes`);
+    for (const executable of agent.executables) {
+      if (executables.has(executable)) throw new Error(`agents.entries.${id}: executable "${executable}" is also ${executables.get(executable)}'s`);
+      executables.set(executable, id);
+    }
+    const chat = agent.chat;
+    if (!chat) continue;
+    if (Boolean(chat.args) === Boolean(chat.adapter)) throw new Error(`agents.entries.${id}.chat needs exactly one of args (the agent's own ACP command) or adapter`);
+    if (chat.fullAccess && Boolean(chat.fullAccess.mode) === Boolean(chat.fullAccess.args)) throw new Error(`agents.entries.${id}.chat.fullAccess names a mode or args, not both`);
+    if (chat.fullAccess?.args && agent.terminal.fullAccessArgs.length === 0) throw new Error(`agents.entries.${id}.chat.fullAccess.args needs terminal.fullAccessArgs`);
+  }
 }
 
 function validateAgentContext(contract, commandNames) {
@@ -271,6 +289,15 @@ function renderTypeScript(contract) {
     "export type ArtifactFormat = typeof RUNPANE_CONTRACT.enums.artifactFormats[number];",
     "export type RunpaneChannel = typeof RUNPANE_CONTRACT.enums.channels[number];",
     "export type RunpaneAgent = typeof RUNPANE_CONTRACT.enums.agents[number];",
+    ''
+  ].join('\n');
+}
+
+/** The agents config alone, so the renderer and the phone need not bundle the whole contract. */
+function renderAgents(contract) {
+  return [
+    header('//'),
+    `export const AGENTS_CONFIG = ${JSON.stringify(contract.agents, null, 2)} as const;`,
     ''
   ].join('\n');
 }
@@ -424,6 +451,7 @@ function main() {
   const outputs = new Map([
     [paths.npmContract, renderTypeScript(contract)],
     [paths.sharedContract, renderTypeScript(contract)],
+    [paths.sharedAgents, renderAgents(contract)],
     [paths.pyContract, renderPython(contract)],
     [paths.fixture, renderFixture(contract)],
     [paths.docs, renderMarkdown(contract)]

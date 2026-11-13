@@ -74,7 +74,7 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
   return (
     <DetailsFrame onBack={onBack}>
       <div className="flex items-center gap-4">
-        <MachineMark os={machine.os} slot={machine.slot} presence={machine.presence} size="lg" />
+        <MachineMark letters={machine.letters} slot={machine.slot} presence={machine.presence} size="lg" />
         <div className="min-w-0">
           <h2 className="truncate text-xl font-semibold text-text-primary">{machine.name}</h2>
           <p className="truncate text-sm text-text-tertiary">{header}</p>
@@ -112,7 +112,11 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
           <span className="h-4 w-4 flex-none rounded-full" style={{ backgroundColor: machineColorVar(machine.slot) }} aria-hidden="true" />
           <div className="min-w-0">
             <p className="text-sm font-medium text-text-primary">{colorName}</p>
-            <p className="text-xs text-text-tertiary">Marks {machine.name} everywhere in Pane, on this computer and your phone.</p>
+            <p className="text-xs text-text-tertiary">
+              {machine.customMark
+                ? `Chosen on this computer for ${machine.name}. Change it with the pencil in the machine menu.`
+                : `Marks ${machine.name} everywhere in Pane, on this computer and your phone.`}
+            </p>
           </div>
         </div>
       </RemoteGroup>

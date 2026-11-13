@@ -31,7 +31,7 @@ describe('saving a chat tab key', () => {
   it('saves no key with chat tabs off, but still removes one', async () => {
     const registry = host(false);
     await expect(registry.invokeRemote('chat-tab:set-key', ['claude', 'sk-owner'])).rejects.toMatchObject({ code: 'CHAT_TABS_DISABLED' });
-    await expect(registry.invokeRemote('chat-tab:set-key', ['claude', null])).resolves.toEqual({ claude: false, codex: false });
+    await expect(registry.invokeRemote('chat-tab:set-key', ['claude', null])).resolves.toEqual({});
   });
 });
 

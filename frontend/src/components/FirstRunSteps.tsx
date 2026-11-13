@@ -2,18 +2,15 @@ import { ExternalLink, Loader2 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { getCliBrandIcon } from './ui/brandIconRegistry';
 import { AGENT_LAUNCH_PRESETS } from '../../../shared/constants/agentLaunchPresets';
+import { CONFIGURED_AGENT_IDS, configuredAgent } from '../../../shared/agents';
 import type { FirstRunAgent } from '../../../shared/types/onboarding';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { ImportSession } from '../../../shared/types/sessionImport';
 import { TOOL_NAMES } from './sessionImport/sessionImportCopy';
 import { cn } from '../utils/cn';
 
-const INSTALL_URLS = {
-  claude: 'https://code.claude.com/docs/en/setup',
-  codex: 'https://github.com/openai/codex',
-  cursor: 'https://cursor.com/docs/cli/installation',
-  opencode: 'https://opencode.ai/docs',
-} satisfies Record<PaneChatAgent, string>;
+/** Placeholders while Pane looks for the CLIs: one row per agent the first-run screen offers, so the list keeps its height. */
+const LOADING_ROWS: FirstRunAgent[] = CONFIGURED_AGENT_IDS.filter(id => configuredAgent(id).onboarding).map(id => ({ id, found: false }));
 
 /** The Yes button and the scanning indicator share this box, so the footer never shifts. */
 const ANSWER_BOX = 'h-9 w-24';
@@ -38,7 +35,7 @@ export function AgentStep({ agents, disabled, onPick }: AgentStepProps) {
   return (
     <div className="space-y-3">
       <div role="group" aria-label="Agents" aria-busy={agents === null} className="min-h-[132px] space-y-1.5">
-        {(agents ?? [{ id: 'claude', found: false }, { id: 'codex', found: false }, { id: 'cursor', found: false }]).map(agent => {
+        {(agents ?? LOADING_ROWS).map(agent => {
           const preset = AGENT_LAUNCH_PRESETS.find(candidate => candidate.id === agent.id);
           const title = preset?.title ?? agent.id;
           if (agents === null) {
@@ -66,7 +63,7 @@ export function AgentStep({ agents, disabled, onPick }: AgentStepProps) {
               <span className="text-text-tertiary">Not found on this computer</span>
               <button
                 type="button"
-                onClick={() => window.electronAPI.openExternal(INSTALL_URLS[agent.id])}
+                onClick={() => window.electronAPI.openExternal(configuredAgent(agent.id).install.url)}
                 className="ml-auto inline-flex items-center gap-1 text-xs text-interactive hover:underline"
               >
                 Install

@@ -3,7 +3,10 @@ import path from 'path';
 import { tmpdir } from 'os';
 import { spawn } from 'child_process';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { adapterEntry, CODEX_ADAPTER_VERSION, compareVersions, installAdapter } from './adapterSetup';
+import { adapterEntry, checkAgentCli, compareVersions } from './adapterSetup';
+
+const CLAUDE_ADAPTER = '@agentclientprotocol/claude-agent-acp';
+const CODEX_ADAPTER = '@agentclientprotocol/codex-acp';
 
 let directory = '';
 beforeEach(() => { directory = mkdtempSync(path.join(tmpdir(), 'pane-adapter-cli-')); });
@@ -17,14 +20,13 @@ function fakeCli(name: string, version: string): string {
 }
 const runs = (executable: string) => readFileSync(`${executable}.runs`, 'utf8').trim().split('\n').length;
 
-it('resolves both bundled adapters at their pinned versions, with no download folder', () => {
-  expect(adapterEntry('claude')).toMatch(/claude-agent-acp[/\\]dist[/\\]index\.js$/);
-  const codex = adapterEntry('codex')!;
-  expect(codex).toMatch(/codex-acp[/\\]dist[/\\]index\.js$/);
-  expect(JSON.parse(readFileSync(path.join(codex, '..', '..', 'package.json'), 'utf8'))).toMatchObject({ version: CODEX_ADAPTER_VERSION });
+it('resolves both bundled adapters from the app\'s own dependencies, with no download folder', () => {
+  expect(adapterEntry(CLAUDE_ADAPTER)).toMatch(/claude-agent-acp[/\\]dist[/\\]index\.js$/);
+  expect(adapterEntry(CODEX_ADAPTER)).toMatch(/codex-acp[/\\]dist[/\\]index\.js$/);
+  expect(adapterEntry('@agentclientprotocol/not-a-bundled-adapter')).toBeUndefined();
 });
 
-it.skipIf(process.platform === 'win32').each(['claude', 'codex'] as const)('starts the bundled %s adapter and completes ACP initialize', async provider => {
+it.skipIf(process.platform === 'win32').each([CLAUDE_ADAPTER, CODEX_ADAPTER])('starts the bundled %s adapter and completes ACP initialize', async provider => {
   // codex-acp starts `codex app-server` first; this stand-in answers every request.
   const appServer = path.join(directory, 'app-server.js');
   writeFileSync(appServer, "let b='';process.stdin.on('data',c=>{b+=c;let e;while((e=b.indexOf('\\n'))>=0){const m=JSON.parse(b.slice(0,e));b=b.slice(e+1);if(m.id!==undefined)process.stdout.write(JSON.stringify({id:m.id,result:{}})+'\\n');}});");
@@ -43,20 +45,20 @@ it.skipIf(process.platform === 'win32').each(['claude', 'codex'] as const)('star
 }, 30_000);
 
 it('tells the person how to install a missing CLI', async () => {
-  await expect(installAdapter('codex', null)).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED', next: expect.stringContaining('npm install -g @openai/codex@latest') });
+  await expect(checkAgentCli('codex', null)).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED', next: expect.stringContaining('npm install -g @openai/codex@latest') });
 });
 
 it.skipIf(process.platform === 'win32')('rejects a CLI older than the adapter needs with the upgrade command', async () => {
   const executable = fakeCli('claude', '2.1.315 (Claude Code)');
-  await expect(installAdapter('claude', executable)).rejects.toMatchObject({
+  await expect(checkAgentCli('claude', executable)).rejects.toMatchObject({
     code: 'CHAT_AGENT_OUTDATED', message: expect.stringContaining('2.1.315'), next: expect.stringContaining('npm install -g @anthropic-ai/claude-code@latest'),
   });
 });
 
 it.skipIf(process.platform === 'win32')('accepts a CLI at the minimum version and checks it once', async () => {
   const executable = fakeCli('codex', 'codex-cli 0.165.0');
-  await installAdapter('codex', executable);
-  await installAdapter('codex', executable);
+  await checkAgentCli('codex', executable);
+  await checkAgentCli('codex', executable);
   expect(runs(executable)).toBe(1);
 });
 
@@ -66,19 +68,24 @@ it.skipIf(process.platform === 'win32')('checks the CLI from the tab\'s project 
   writeFileSync(path.join(project, '.claude-version'), '2.1.318 (Claude Code)');
   const executable = path.join(directory, 'claude-wrapper');
   writeFileSync(executable, '#!/bin/sh\n[ "$PANE_WRAPPER" = on ] && cat .claude-version || exit 3\n', { mode: 0o700 });
-  await expect(installAdapter('claude', executable, { cwd: project, env: { ...process.env, PANE_WRAPPER: 'on' } })).resolves.toBeUndefined();
+  await expect(checkAgentCli('claude', executable, { cwd: project, env: { ...process.env, PANE_WRAPPER: 'on' } })).resolves.toBeUndefined();
 });
 
 it('reports a CLI that cannot run as unreadable, with the reason, not as outdated', async () => {
   const missing = path.join(directory, 'deleted-claude');
-  await expect(installAdapter('claude', missing)).rejects.toMatchObject({
+  await expect(checkAgentCli('claude', missing)).rejects.toMatchObject({
     code: 'CHAT_AGENT_VERSION_UNREADABLE', message: expect.stringContaining('ENOENT'), next: expect.stringContaining(`${missing} --version`),
   });
 });
 
 it.skipIf(process.platform === 'win32')('reports a CLI that prints no version as unreadable', async () => {
   const executable = fakeCli('codex', 'usage: codex [options]');
-  await expect(installAdapter('codex', executable)).rejects.toMatchObject({ code: 'CHAT_AGENT_VERSION_UNREADABLE', message: expect.stringContaining('usage: codex') });
+  await expect(checkAgentCli('codex', executable)).rejects.toMatchObject({ code: 'CHAT_AGENT_VERSION_UNREADABLE', message: expect.stringContaining('usage: codex') });
+});
+
+it.skipIf(process.platform === 'win32')('checks an agent that runs its own CLI against its minimum, reading a dated version', async () => {
+  const executable = fakeCli('cursor-agent', '2026.10.21-0aa1b2c');
+  await expect(checkAgentCli('cursor', executable)).rejects.toMatchObject({ code: 'CHAT_AGENT_OUTDATED', message: expect.stringContaining('older than 2026.10.22') });
 });
 
 it('compares dotted versions numerically', () => {

@@ -1,5 +1,6 @@
+import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { getAppDirectoryOverrideFromArgs } from './appDirectory';
+import { defaultAppDirectory, getAppDirectoryOverrideFromArgs } from './appDirectory';
 
 describe('appDirectory CLI parsing', () => {
   it('parses pane-dir in both supported forms', () => {
@@ -54,5 +55,16 @@ describe('appDirectory process.argv parsing', () => {
     expect(getAppDirectoryOverrideFromArgs()).toBeUndefined();
     process.argv = devArgvPrefix;
     expect(getAppDirectoryOverrideFromArgs()).toBeUndefined();
+  });
+});
+
+describe('default data directory, when neither PANE_DIR nor --pane-dir is set', () => {
+  it('keeps a development build out of the installed Pane\'s ~/.pane', () => {
+    expect(defaultAppDirectory({ isPackaged: false }, '/Users/owner')).toBe(join('/Users/owner', '.pane_dev'));
+  });
+
+  it('uses ~/.pane for a packaged build and for plain Node tools', () => {
+    expect(defaultAppDirectory({ isPackaged: true }, '/Users/owner')).toBe(join('/Users/owner', '.pane'));
+    expect(defaultAppDirectory(null, '/Users/owner')).toBe(join('/Users/owner', '.pane'));
   });
 });

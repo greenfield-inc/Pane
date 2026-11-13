@@ -17,18 +17,26 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
 - Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x); `.nvmrc` pins 22.23.4. Use pnpm 10. Setup `pnpm run setup`; run
   `PANE_DIR=~/.pane_test pnpm dev` (not `electron-dev`: its watcher overwrites
   the bundled preload). Build the local CLI with `pnpm --filter runpane build`.
-- Before a PR: `pnpm typecheck && pnpm lint`, plus the tests your change touches.
+- Before a push: `pnpm check:fast` (type check, lint, offline links when
+  lychee is installed, renderer test types, and the unit tests your changes
+  reach), plus any other tests your change touches.
+  Agent facts (ids, executables, modes, versions, env var names) live in
+  `contracts/runpane/contract.json` `agents`; read them through
+  `shared/agents.ts`, never as literals. `pnpm lint` (and CI) fails on one;
+  `scripts/agent-names-allowlist.json` caps the files still exempt.
 - Tests: `pnpm --filter frontend test`. Main: `npm rebuild
   better-sqlite3-multiple-ciphers` first (setup builds it for Electron), then
   `pnpm --filter main exec vitest run` (plain `pnpm --filter main test` is watch
   mode); run `pnpm electron:rebuild` before starting the app again.
   Playwright: install the browser once with `pnpm exec playwright install
-  chromium`; `pnpm test:ci:minimal` launches the app, so set `PANE_DIR`.
+  chromium`; `pnpm test:ci:minimal` serves the renderer from Vite alone, while
+  `pnpm test` also launches the app, so set `PANE_DIR`.
 
 ## Rules
 
 - Never point a dev build, test run or script at your real `~/.pane`: set
-  `PANE_DIR`. It does not isolate Electron's browser profile; see
+  `PANE_DIR`. Without one a dev build uses `~/.pane_dev`, which may hold old
+  data. `PANE_DIR` does not isolate Electron's browser profile; see
   [Running a dev build safely](CONTRIBUTING.md#running-a-dev-build-safely).
 - Never release, publish, deploy or migrate real data unless asked.
 - No explicit `any`; blocking lint is the floor, with no broad suppressions
@@ -50,6 +58,8 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   `PaneError` (main) or `RunpaneError` (CLI) with a `code` and `next`. See
   [How Pane reports errors](CONTRIBUTING.md#how-pane-reports-errors).
 - Commits: present tense, focused, reference issues.
+- Merge on `CI result` only; stacks merge bottom-up with merge commits and no
+  rebase, and only when the person asks: see [Merging](CONTRIBUTING.md#merging).
 
 ## Docs
 
@@ -71,7 +81,7 @@ This repository is used with [Pane](https://runpane.com). Drive it with the CLI 
 
 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.
 
-When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question "<question>"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.
+When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question "<question>"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.
 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 

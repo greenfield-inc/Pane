@@ -13,19 +13,50 @@ side of it, and keeps its name in the CLI, the MCP server and the code.
 
 | `ui` | Card | Result |
 | --- | --- | --- |
-| `options` | The question and 1 to 9 `choices` (`{label, detail?, recommended?}`). The strip shows four, then **More**. | `{answer, note?}` |
+| `options` | The question and 1 to 9 `choices` (`{label, detail?, recommended?}`), or 2 to 4 `questions` (`{title, choices}`, one pick each) instead. The strip shows four, then **More**. | `{answer, note?}` (`answers[]` too for several questions), or `{reply, picks?, id, next}` when the person typed something ([Replies](#replies-and-new-versions)) |
 | `approve` | Deny and Approve, plus a disclosure with the preformatted `detail`. `detailLabel` names the disclosure (up to 40 characters; default **Show details**). | `{approved, note?}` |
 | `ask` | A text field, with optional `suggestions` as chips above it. | `{answer}` |
 | `secret` | A masked field with **Save securely** and **Decline**. Created only by `runpane secrets request` (MCP `secrets_request`), never with `notify --ui`. The host saves the value as a [Pane secret](PANE_SECRETS.md) and drops it; it never reaches the agent, history or other screens. No Undo. | `{status: "saved", project, name}` or `{status: "declined"}` |
 | `info` | One line, with at most one `action` button (`{label, url}`). It returns at once and hides after a few seconds. | `{delivered: "screen" \| "inbox"}` |
 
 Every card takes a `title` (one line on the strip, wrapping to three) and an
-optional `context` shown under **Details** and in the round. Any card also
+optional `context` shown under **Details** and in the round. A `context` that
+is a status file or a `needs_you` block, as JSON, never shows raw: Pane shows
+its question and `why`, adds its `files` as links, and turns an `ask` with no
+`suggestions` into an `options` card with the question's `options` as choices;
+other JSON shows one `summary`, `step` or `title` line, or none. On `--update`
+the new context is read the same way, but the card keeps its `ui`, and its
+choices and links unless the update passes them. Prose stays as written, even
+when it starts with `[` or `{`. Any card also
 takes up to 6 `links` (`--links`), related files and pages shown as chips:
 `{label, path}` for a file on the asking machine (relative to its working
-directory) or `{label, url}` for an http or https page. Older Panes ignore them.
+directory), `{label, url}` for an http or https page, or `{label, approval}`
+for another approval (its id or Q-n). Older Panes ignore them.
 In Approvals, clicking a chip opens it as a tab beside the card: a file in an
-editor tab, a page in a browser tab.
+editor tab, a page in a browser tab, another approval in place, with **Back**.
+
+Pane builds each approval's **Summary** from these fields (D-225), unless the
+asker linked its own `.html` Summary page (a worker's `--summary-file`, or
+`summary` in its `needs_you`). Agents write a card to read on its own: a
+one-line title of about 80 to 100 characters, `context` of one or two sentences
+on why it matters (up to 240 characters), 2 to 4 choices each with what it does
+(`detail`) and exactly one `recommended`, and links to every reference: files,
+PRs and other approvals. Every way of asking goes through one check
+(`main/src/services/notify/cardCheck.ts`): Pane refuses a title over 160
+characters or with a line break, and two recommended options in one question,
+and returns a warning for each softer miss, which `runpane notify` and
+`runpane report` print. An old paragraph card (the whole question in its title,
+with no buttons) is first split by fixed rules into a title, options and
+links (`cardTidy.ts`); the card reads "Tidied by Pane" and **Show as sent**
+shows what the agent sent.
+
+**Which card.** Pane's approvals text (`main/src/services/approvalsRules.ts`,
+"Asking the person in Pane") is the one rule every Pane text carries: Claude's
+own card (AskUserQuestion) only for a quick question that answers the person's
+latest message in the chat they are typing in and only steers that turn;
+everything else, including any worker's question in a Session, is an approval
+card. Codex and other agents without a built-in card always use an approval.
+`main/src/services/approvalsRules.test.ts` fails when a copy drifts.
 
 When Approvals is off or Pane isn't running, the result is
 `{unavailable, next}` ("Approvals are off in Pane.") and the agent asks in its
@@ -37,7 +68,11 @@ agent asks you to save the secret in Pane under Settings > Secrets.
 ```sh
 runpane notify --ui options --title "Which session store should the refactor use?" \
   --choices '[{"label":"Postgres table","recommended":true},{"label":"Keep Redis"}]' \
-  --links '[{"label":"Plan","path":"docs/plan.html"},{"label":"PR #12","url":"https://github.com/acme/app/pull/12"}]'
+  --links '[{"label":"Plan","path":"docs/plan.html"},{"label":"PR #12","url":"https://github.com/acme/app/pull/12"},{"label":"Q-12","approval":"Q-12"}]'
+
+# Several questions in one card
+runpane notify --ui options --title "Q-20: How should the release train start?" \
+  --questions '[{"title":"Turn it on now?","choices":[{"label":"Yes, turn it on","recommended":true},{"label":"Not yet"}]},{"title":"How many trains?","choices":[{"label":"One train","recommended":true},{"label":"Two trains"}]}]'
 ```
 
 ## Who asks: Sessions
@@ -54,7 +89,9 @@ Session go under "Not in a Session". Items Autopilot asks itself go under
   rings once the orchestrator relays it or after 10 minutes, so the orchestrator
   first settles what the plan already answers. Your answer goes straight to the
   worker's tab (`answer: Q-n → <answer> (by you)`), even with the orchestrator
-  down. A worker's `notify` call isn't shown: it returns `unavailable`, "Not shown to the
+  down. A typed reply goes there too (`reply: Q-n → …`), and to the
+  orchestrator that relayed it when the worker can't read it
+  ([Replies](#replies-and-new-versions)). A worker's `notify` call isn't shown: it returns `unavailable`, "Not shown to the
   person: in a Pane Session, only the orchestrator asks the person.", with a
   `next` that says to report blocked. Claude's own permission and plan
   prompts and a chat tab's prompts on a worker tab are the tool asking, so
@@ -94,7 +131,7 @@ the first answer from the terminal, Approvals, the strip or the phone wins.
   **No**, and its alert carries the same two buttons. The question's sheet has
   every choice.
 - **Answered in the terminal**: Pane closes the question and lists it in
-  Answered as "Answered in the terminal".
+  Done today as "Answered in the terminal".
 - **The whole command, plan or tool input** is on the card, so Yes never
   approves something you couldn't read. One over 32,000 characters is too long
   to show: its question offers no choices and says to answer in the terminal.
@@ -109,7 +146,9 @@ at a loopback endpoint on the machine running it, with a token for that tab.
 Claude reads only the last `--settings` flag, so Pane writes one settings file
 per tab (owner-only, in `claude-prompts` under Pane's data folder) that merges
 its hooks with any `--settings` the command already passes, and launches with
-that file instead. A command whose `--settings` Pane can't read, or a tab
+that file instead. The file is written with this setting off too, for the
+`SessionStart` hook that tells Pane which conversation the tab is on
+([CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)). A command whose `--settings` Pane can't read, or a tab
 whose settings file Pane can't write, launches unchanged. Wrapped launches, commands that don't start with `claude`, SSH tabs
 and WSL tabs keep their command, and their prompts stay in the terminal.
 
@@ -167,24 +206,64 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   shows an amber count of the approvals waiting from it. The row's count is the sum of every Session's count plus items not in a
   Session, across saved machines; in the one-machine sidebar its tooltip says
   how many of them wait on other machines. Beside
-  it, the queue has **Waiting** and **Answered** tabs and a sort menu,
+  it, the queue has **Waiting** and **Done today** tabs and a **Group by** menu,
   remembered per device: **Most recent** (the default) lists items flat, newest
   first, each row naming its Session and machine; **By Session** and **By
-  project** group them, with counts and machine marks, each group placed by its
-  newest item. Waiting sorts by when it was asked and Answered by when it was
+  project** group them, each group placed by its newest item; **Sidebar order**
+  groups by Session in the order the sidebar shows them (the All machines
+  arrangement when that's on), following a drag there, with Sessions the
+  sidebar doesn't show last, newest first. Each group is boxed under a header
+  with its name, machine mark and waiting count. Waiting sorts by when it was asked and Done today by when it was
   answered. A new item never moves the selection or the selected row. The
-  selected item opens in place as a card (its title, context, links and
-  answer controls). Next to it is its Session, live: an orchestrator's item
-  shows the Session's orchestrator tab (its chat tab where chat tabs are on,
-  its terminal where they are off), so you can ask it about the item in its
-  own composer; a worker's prompt or a standalone item shows the asking Pane's
-  tabs. A link opens as a tab there: a file inside that Pane's worktree in an
-  editor, any other file as a page (`file://`, as orchestrators show pages),
-  a URL as a browser tab. Another machine's item offers **Open on
-  <machine>**, which switches to it. Below about 1,100px wide, the queue stacks above the Session. After
-  you answer, the card shows "Sent to <agent>" with **Undo** for 3 seconds,
-  then moves to Answered, which lists the last 24 hours, updates (`ui info`) included. Nothing is drawn over your work inside Pane: there
-  is no in-Pane strip, docked card or Notify row in the sidebar.
+  list stays compact rows, each with a chip for "Reading your reply…",
+  "Getting more context…" or "Updated · ready again". The selected item opens
+  in **the approval column** beside the list (see below); its pager follows
+  the list as grouped. The column's last tab is the chat where it was asked,
+  live: an orchestrator's item shows the Session's orchestrator tab, so you
+  can ask it about the item in its own composer; a worker's prompt or a
+  standalone item shows the asking Pane's tabs, with **Open in Pane** (or
+  **Open on <machine>** for another machine's item). Below about 1,100px wide,
+  the list stacks above the column. After a pick, the column shows "Sent:
+  …" with **Undo** for 3 seconds; the item then moves to **Done today**,
+  which lists the last 24 hours, updates (`ui info`) included. Under Most
+  recent, once a typed reply is with an agent, Waiting splits into **Waiting
+  on you** and **With the agent**, each row naming who reads the reply. Inside Pane there is no
+  floating strip and no Notify row in the sidebar.
+- **The approval column**: one tabbed column for an approval, the same on
+  every surface. Its header pages through what's waiting (‹ n of N ›, dots, ←
+  and → while it has focus) and ✕ closes it. Its tabs are **Decide** (the
+  subtitle, each question with its why and options, recommended ones
+  pre-selected, the references and one reply box that grows up to half the
+  column), **Summary** (one HTML page: the asker's own, an `.html` passed as a
+  worker's `--summary-file` or `summary` in `needs_you`, else one Pane writes
+  from the card and the worker's status file; it renders with scripts and
+  network off, the same on the Mac, from another machine and on the phone),
+  each linked file (in the document viewer), URL (in the
+  in-app browser) or other approval (in place, with Back), and the chat where
+  it was asked, left out when you're already in it. In a **Session**, the
+  column lays over the Session's right split view without resizing it, and ✕
+  ("Back to <tab>") shows the split again as it was; with no split open it
+  opens a split of its own, and ✕ ("Close split") collapses it. There it is a
+  focus stop of its own: Focus Right (⌘⌥→) and F6 move into it from the chat,
+  the tab keys (⌘⇧[ ⌘⇧], ⌘⇧1-9) walk its tabs while it has focus, Focus Left
+  or Esc go back to the chat's message box, and its active tab carries the
+  accent only while it has focus, as a split's does. The right
+  sidebar (Overview, Files, Changes) is never covered. The Session's title
+  bar shows **Approvals n · n ready**, and a Session row's count in the
+  sidebar opens the newest ready-again approval, or the first waiting one. A
+  Session's orchestrator chat docks one compact card above its composer:
+  who asks, the title and subtitle across the card, and a bottom row with ‹ n
+  of m ›, the reference count, Summary and **Open**; its pager stays in step
+  with the column's. The chat's own AskUserQuestion isn't docked: the chat
+  already shows Claude's card, and Approvals and the phone keep the copy.
+  **Send** closes the column, and a status line in the chat names the agent
+  reading the reply ("okta-sso-account is reading your reply to Q-42"), then
+  how it was taken, with **Reopen**. "Taken as your answer" shows only on that
+  approval, its row and that line. The card open in the column has a darker
+  grey outline and an **open** label. In **Autopilot**, the column covers the Stack (✕ "Back to the
+  Stack"), and Autopilot's decision cards gain **Open**. In a Session and in
+  Autopilot, the chat tab is live too: an orchestrator's item shows its
+  Session, and a worker's or a Pane's item shows the tab that asked.
 - **The strip**: while Pane isn't in front, a borderless card at the bottom
   center of the screen with the pointer. It never takes keyboard focus when it
   appears; click a choice to answer, or click its text field to type. After
@@ -248,6 +327,99 @@ marker, and is safe to interrupt. The original file stays in place. If the impor
 fails, Approvals says why, nothing is deleted, new approvals still work, and it
 retries on the next start.
 
+## Replies and new versions
+
+An approval has one reply box. Picks alone are an answer, as before: the call
+returns `{answer}`, or Pane types `answer: Q-20 → Yes, turn it on · One train
+(by you)`. Anything typed is a **reply**, which may be an answer or a question
+about the approval. Pane doesn't decide which; the agent that reads it does
+(D-245, D-258).
+
+**The lines.** The reader's open call returns `{reply, picks?, id, replyId,
+next}`. Only that call is given `replyId`: it is private to the call, kept
+apart from the reply's own id, and in no snapshot, history or other screen. So
+passing it to `--took` and `--update` proves the caller is the reader, from a
+Pane tab or a terminal outside Pane alike (D-294). With no open call, Pane types into the reader's
+tab, once, by the same rule as an answer:
+
+```text
+reply: Q-20 → "Turn it on only if it can be undone" (picked: Yes, turn it on · One train) (by you)
+correction: Q-20 → that was a question: "…" (by you)
+correction: Q-20 → that was your answer: "…" (by you)
+```
+
+`(picked: …)` is there only when something was picked. Picks keep their
+question's place: one left unpicked reads `—` (`picked: — · One train`), and
+the result's `picks` holds `''` there. Without a Q-n the line names the title
+in quotes, and adds `[id <item id>]` before `(by you)`. Each reply has an id
+and is delivered once.
+
+One reply at a time: while its reader is reading a reply (it has the line but
+hasn't run `--took`), a second typed reply is refused, with your words left in
+the box; picks still answer. A reply still waiting for a busy tab is replaced
+by a newer one, and only the newer line is typed. The same rule holds on every
+surface: the floating strip and the round send anything typed as a reply too,
+except on a permission prompt, whose note stays a note.
+
+**Who reads a reply**, in order:
+
+1. The asker: its open call, else its tab (a busy tab gets it when it's next
+   idle).
+2. For a worker's question an orchestrator relayed, that orchestrator's tab.
+3. Autopilot, when it's on, in its chat tab.
+4. None: the approval reads "No agent can read replies right now. You can
+   still pick an option." The reply stays unread, and picks still answer.
+
+A reader that turns out gone passes the reply to the next one. A reply the
+asker or orchestrator hasn't taken after 10 minutes goes to Autopilot when
+Autopilot is on.
+
+**What the reader runs.** Only the reader may; anyone else gets
+`ERR_NOTIFY_NOT_READER` with a `next`. A worker in a Session may run both:
+they aren't new asks.
+
+```sh
+runpane notify --took Q-20 answer      # records the reply (picks and text) as the answer
+runpane notify --took Q-20 question    # "Getting more context…" (--status "<text>" to say otherwise)
+runpane notify --update Q-20 --asked "Can it be undone?" \
+  --what-changed "Added the undo path to the context" \
+  --context "<new context>" --choices '[{"label":"Yes, with undo","was":"Yes, turn it on","recommended":true},{"label":"Not yet"}]'
+```
+
+`--took` and `--update` take an item id or Q-n and no `--ui`. `--update` needs
+`--asked` (the person's question) and `--what-changed` (one line per change),
+and replaces whichever of `--title`, `--context`, `--choices`, `--questions`
+and `--links` it passes. A reworded choice carries `"was"`, its old label.
+`--update` then waits for the answer like any notify call (`waiting`,
+`unavailable` and `--return-after` work the same). It never adds a second
+approval.
+
+**Versions.** Each `--update` saves a new version on the same item: the
+question asked, What changed, who changed it and when. An item keeps at most 10
+versions; older ones fold into the oldest. They live in the item's saved JSON,
+so older items simply have none.
+
+**What the approval shows:**
+
+| State | Shows |
+| --- | --- |
+| Waiting, no reply | Waiting |
+| Reply delivered, not yet taken | "<reader> is reading your reply…", naming the reader for every kind ("okta-sso-account", "The Doozy orchestrator", "Autopilot") |
+| Taken as an answer | "Taken as your answer", with **It was a question** |
+| Taken as a question | "Taken as a question: <reader> is getting more context", with its status when the reader gave one, and **It was my answer** |
+| Updated | "Updated · ready again": your question quoted ("You asked"), What changed and by whom, choices marked NEW, REWORDED (the old label struck) or REMOVED, and a collapsed **Earlier version** |
+| No reader | "No agent can read replies right now. You can still pick an option." |
+| A chat tab's built-in question | "Sent to <agent>": the typed reply is its answer, so there is no fix |
+| A chat tab's built-in question that takes only its choices | No reply box: pick one of its options |
+| Answered | Answered |
+
+The fix is one click. **It was a question** sends the reader `correction: Q-n →
+that was a question: "…"`, and the reader updates the approval. **It was my answer**
+records the reply as the answer and sends `correction: Q-n → that was your
+answer: "…"`, and the reader acts on it. The pager skips items whose reply is
+being read or asked about. Permission prompts stay options only, with no reply
+box.
+
 ## When an approval goes away
 
 An approval exists only while you can act on it and someone can take the answer
@@ -256,11 +428,11 @@ An approval exists only while you can act on it and someone can take the answer
 | Situation | What happens |
 | --- | --- |
 | Its Session is closed or archived | Closes within 5 s: "closed: Session closed", "closed: Session archived". |
-| Its asker is gone: its Pane archived or deleted, its tab closed, the worker sent a newer report, or a `notify` caller stopped waiting | Closes within 5 s of Pane learning it, with the reason: "closed: the asking tab was closed", "closed: the worker moved on", "closed: the asker stopped waiting". A sweep every 60 seconds catches anything missed. |
+| Its asker is gone: its Pane archived or deleted, its tab closed, the worker sent a newer report, or a `notify` caller stopped waiting | Closes within 5 s of Pane learning it, with the reason: "closed: the asking tab was closed", "closed: the worker moved on", "closed: the asker stopped waiting". A sweep every 60 seconds catches anything missed. One exception: when only its tab closed and the orchestrator that relayed it, or Autopilot, can still read a reply for it, it stays open. |
 | Pane restarts | Items whose asking tab still exists stay waiting. |
 | Unanswered for 3 days | Stale: moved to a collapsed **Stale** group at the bottom of Waiting. It never rings or pushes again. |
 | You close one | One action on any card, with an optional reason. Its asker's open call returns "The person closed this question.", or `closed: Q-n (by you)` is typed into its tab. **Reopen** puts it back. |
-| You or Autopilot answered | Answered lists it for 24 hours. |
+| You or Autopilot answered | Done today lists it for 24 hours. |
 
 The store keeps answered and closed items 7 days for the record and for
 orchestrators catching up on decisions (`runpane inbox`), then drops them. On the
@@ -295,8 +467,34 @@ Alerts interrupt you on the device you're using (D-144):
   it is still waiting. Answering it, closing it or turning Approvals off cancels
   the push.
 - A worker's question rings once its orchestrator relays it or after 10 minutes.
+- **An updated approval is quiet** (D-244): "Updated · ready again" shows as a
+  notice on the computer in use, with no chime, plus its badges and counts. The
+  phone gets a push only when no computer is in use. You started the follow-up,
+  so it doesn't ring like a new approval.
 - A computer can ring only for machines it has saved. Autopilot's "Can't see"
   shows that gap, and the phone push still arrives.
+- **Show cards on** (Settings → Approvals) moves the strip, its window over
+  other apps and the chime to one computer, for every machine it has saved.
+  That computer still rings only while it's in use; when it's idle or locked
+  the phone push is the backstop. Every other computer stays quiet while the
+  picked one reads it, and keeps its Approvals list, counts, tray dot and
+  answer-all shortcut. A computer the picked one can't read (it's off, asleep
+  or disconnected, or it hasn't saved this computer) rings as if nothing were
+  picked, and its Settings row says why. "Reading" means the picked computer
+  holds a live connection to this one, as its owner or a paired device, naming
+  itself by its install id (`machineId` in `config.json`; a `config.json`
+  copied to another computer carries the same id, so delete the key there).
+  A computer that has saved the picked one also checks its own connection:
+  once that drops (about 20 seconds after the picked one sleeps or leaves the
+  network), it alerts again. A computer closes its connections before it
+  sleeps. The Settings row reads one of:
+  - "Cards pop up on <name>. They're still listed here.": the picked computer
+    reads this one, so this one stays quiet.
+  - "<name> hasn't added this computer, so this computer's cards still pop up
+    here.": this computer has saved the picked one and has seen it online for
+    over a minute, but it doesn't read this one.
+  - "<name> isn't connected, so cards pop up here for now.": anything else,
+    such as off, asleep, just restarted, or not saved here.
 
 ## Other screens and your phone
 
@@ -349,7 +547,8 @@ the agent:
 Each screen keeps its own Position, Show outside Pane, Sound, Show details, answer-all
 shortcut and Pause. The Approvals switch decides whether agents can ask, and it
 is one switch across your machines: turning it off returns `unavailable` to every
-waiting agent on each machine and clears its questions from every screen.
+waiting agent on each machine and clears its questions from every screen. Show
+cards on is shared the same way.
 
 ## Settings
 
@@ -358,6 +557,7 @@ waiting agent on each machine and clears its questions from every screen.
 | Setting | Default |
 | --- | --- |
 | Approvals | On. Off hides the sidebar's Approvals row, expires open cards, returns `unavailable` ("Approvals are off in Pane.") to every waiting agent. Agents, Session orchestrators included, then ask in their own tab. Applies to all your machines ([how the switch travels](SHARED_CREDENTIALS.md#the-approvals-switch)). |
+| Show cards on | Whichever computer is in use. Or this computer, or a saved machine that has connected since Pane started: only that computer pops up cards and chimes ([Alerts](#alerts)). Applies to all your machines, saved as `notify.cardsOn`. |
 | Show outside Pane | On. It controls the floating cards over other apps. Off shows no floating card; inside Pane you answer from the Approvals row and screen, and the tray dot still shows. |
 | Position | Bottom center. Also top right or bottom right. |
 | Answer-all shortcut | ⌃⇧Space. Settings says so when another app already holds it. |
@@ -365,7 +565,7 @@ waiting agent on each machine and clears its questions from every screen.
 | Sound | On, for questions only |
 | Show details | Off. Cards open with details shown when on. Showing or hiding details on a card changes it. |
 
-Only the Approvals on/off switch is shared; the other settings here stay on each machine.
+Only the Approvals switch and Show cards on are shared; the other settings here stay on each machine.
 
 Pause for 1 hour (tray menu) hides strips and mutes sound while questions keep
 queueing. Strips show over full-screen apps, during screen sharing, and with
@@ -408,7 +608,9 @@ on by default. It has two parts:
   background; any other agent calls `notify`), when to ask (only what the
   agent can't find out itself, related questions in one card, `info` rarely)
   and how to write a card for someone who has lost the thread: what the work
-  is for, what just happened, and what is needed.
+  is for, what just happened, and what is needed. It also says how to read a
+  typed reply: `--took` it as an answer or a question, and answer a question
+  with `--update`, never a second approval.
 
 Pane writes only those lines, plus a line
 break before them when the file didn't end with one; the rest of the file keeps

@@ -194,6 +194,10 @@ const config = {
         'input-x': 'var(--input-padding-x)',
         'input-y': 'var(--input-padding-y)',
         'modal': 'var(--modal-padding)',
+        'view-header': 'var(--view-header-height)',
+      },
+      maxWidth: {
+        '1/2': '50%',
       },
       borderRadius: {
         'button': 'var(--button-radius)',
