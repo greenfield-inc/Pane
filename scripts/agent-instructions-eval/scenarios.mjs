@@ -12,7 +12,7 @@ const write = (file, text) => {
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'ignore' });
 
 /** The notify calls that post a new card: not a reply's took/update or a resume. */
-const cards = (run) => run.calls.filter(({ argv }) => argv[0] === 'notify' && !argv.some((a) => ['--took', '--update', '--resume'].includes(a)));
+const cards = (run) => run.calls.filter(({ argv }) => argv[0] === 'notify' && !argv.some((a) => ['--took', '--update', '--resume', '--help', '-h'].includes(a)));
 const has = (run, ...words) => run.calls.some(({ argv }) => words.every((word, i) => argv[i] === word));
 const flagValue = (argv, flag) => (argv.includes(flag) ? argv[argv.indexOf(flag) + 1] : undefined);
 const json = (text) => { try { return JSON.parse(text ?? ''); } catch { return undefined; } };
@@ -151,7 +151,14 @@ export const SCENARIOS = [
     id: 'typed-reply-question',
     title: 'A typed reply that is a question is handled with --took question and --update, not a second card',
     role: 'pane',
-    setup: ({ repo }) => pkg(repo),
+    setup({ repo, runDir }) {
+      pkg(repo);
+      const origin = path.join(runDir, 'origin.git');
+      execFileSync('git', ['init', '-q', '--bare', origin]);
+      git(repo, 'remote', 'add', 'origin', origin);
+      git(repo, '-c', 'user.email=eval@example.com', '-c', 'user.name=eval', 'commit', '-qm', '1.x history', '--allow-empty');
+      git(repo, 'push', '-q', 'origin', 'HEAD:refs/heads/legacy');
+    },
     prompt: () => 'Delete the `legacy` branch on origin once I approve it: it holds the 1.x release history. Get my approval first, I am away from this chat.',
     script: () => ({
       notify: [

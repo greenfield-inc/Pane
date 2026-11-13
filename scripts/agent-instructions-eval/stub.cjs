@@ -8,7 +8,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const env = process.env;
-const args = process.argv.slice(2);
+// The MCP server passes `--flag=value`; the CLI form is `--flag value`. Log and answer one form.
+const args = process.argv.slice(2).flatMap((arg) => (/^--[a-z][a-z-]*=/.test(arg) ? [arg.slice(0, arg.indexOf('=')), arg.slice(arg.indexOf('=') + 1)] : [arg]));
 
 if (args[0] === 'mcp') {
   env.EVAL_VIA = 'mcp';

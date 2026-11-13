@@ -173,7 +173,8 @@ function observe(transcript, log, allowedRoots) {
   const init = events.find((e) => e.type === 'system' && e.subtype === 'init') ?? {};
   const calls = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
   const normalize = (p) => p.replace(/^\/private/, '');
-  const allowed = allowedRoots.map(normalize);
+  // Claude Code keeps its own background-task output under /tmp/claude-<uid>/; reading it is not the agent's scratch.
+  const allowed = [...allowedRoots.map(normalize), `/tmp/claude-${process.getuid()}/`];
   const tempPaths = [...bash, ...writes].flatMap((text) => [
     ...[...text.matchAll(/(?:\/private)?\/(?:tmp|var\/folders)\/[^\s'"`;|&)]*/g)].map((m) => m[0]).filter((p) => !allowed.some((root) => normalize(p).startsWith(root))),
     ...[...text.matchAll(/\$\{?TMPDIR\}?|\bmktemp\b|tempfile\.|os\.tmpdir\(\)/g)].map((m) => m[0]),
