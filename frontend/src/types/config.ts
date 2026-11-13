@@ -183,6 +183,8 @@ export interface AppConfig {
   customCommands?: CustomCommand[];
   // Terminal text matching a pattern opens a link, e.g. issue keys opening the issue tracker
   customLinks?: CustomLink[];
+  // Open IDE command for every project without its own, e.g. `idea .`
+  defaultIdeCommand?: string;
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
@@ -200,6 +202,8 @@ export interface AppConfig {
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
+  // Whether typing @ in a terminal opens the picker for another terminal's scrollback (on when absent)
+  terminalReferencesEnabled?: boolean;
   // Worktree file sync — files/dirs to copy from main repo into new worktrees
   worktreeFileSync?: WorktreeFileSyncEntry[];
   // Preferred shell for Windows terminals
@@ -268,6 +272,7 @@ export interface UpdateConfigRequest {
   analytics?: AnalyticsConfig;
   customCommands?: CustomCommand[];
   customLinks?: CustomLink[];
+  defaultIdeCommand?: string;
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
@@ -281,6 +286,7 @@ export interface UpdateConfigRequest {
   keymapNotice?: 'pending' | 'seen';
   commandPaletteShortcutEnabled?: boolean;
   kittyKeyboardEnabled?: boolean;
+  terminalReferencesEnabled?: boolean;
   worktreeFileSync?: WorktreeFileSyncEntry[];
   preferredShell?: PreferredShell;
   terminalPowerMode?: PreferredTerminalPowerMode;

@@ -2,6 +2,7 @@ import React, { ReactNode } from 'react';
 import { Session, GitCommands } from '../types/session';
 import type { LucideIcon } from 'lucide-react';
 import { SessionContext, type SessionContextValue } from './sessionContextValue';
+import type { ConfiguredIde } from '../../../shared/utils/ideCommands';
 
 export const SessionProvider: React.FC<{
   children: ReactNode;
@@ -25,9 +26,9 @@ export const SessionProvider: React.FC<{
   onConfigureIDE?: () => void;
   onSetTracking?: () => void;
   trackingBranch?: string | null;
-  configuredIDECommand?: string | null;
+  configuredIDE?: ConfiguredIde;
   isRemoteMode?: boolean;
-}> = ({ children, session, projectName, gitBranchActions, isMerging, gitCommands, onOpenIDEWithCommand, onOpenUrlInBrowser, onConfigureIDE, onSetTracking, trackingBranch, configuredIDECommand, isRemoteMode }) => {
+}> = ({ children, session, projectName, gitBranchActions, isMerging, gitCommands, onOpenIDEWithCommand, onOpenUrlInBrowser, onConfigureIDE, onSetTracking, trackingBranch, configuredIDE, isRemoteMode }) => {
   // FIX: Don't render children without a valid session
   // This prevents components that require session from rendering
   if (!session) {
@@ -52,7 +53,7 @@ export const SessionProvider: React.FC<{
     onConfigureIDE,
     onSetTracking,
     trackingBranch,
-    configuredIDECommand,
+    configuredIDE,
     isRemoteMode,
   };
 

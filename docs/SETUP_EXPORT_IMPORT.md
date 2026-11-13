@@ -20,7 +20,7 @@ folder** on Windows and Linux) opens its folder.
 | Custom links | Every custom link: label, pattern, URL template and on/off state |
 | Worktree file sync | Every file sync entry with a relative path |
 | Appearance | Appearance mode, themes, high contrast, UI scale, terminal font and size |
-| Preferences | The current value of each behavior toggle from General, Notifications, Shortcuts, Worktrees & Git and Advanced, the keys you changed in Keyboard Shortcuts (importing them replaces your changed keys), new-Pane defaults (without the base branch), and the sidebar and `@terminal` choices |
+| Preferences | The current value of each behavior toggle from General, Terminal, Notifications, Shortcuts, Worktrees & Git and Advanced, the keys you changed in Keyboard Shortcuts (importing them replaces your changed keys), new-Pane defaults (without the base branch), and the sidebar and `@terminal` choices |
 
 ### What is never in the file
 
@@ -29,9 +29,10 @@ is never written. That includes every API key and token Pane stores (Anthropic,
 OpenAI, fal, OpenRouter, Deepgram, APNs), shared credentials, Remote Pane and
 Workspaces settings, analytics settings and identity, leaderboard, the Claude
 executable path, extra PATH entries, the preferred shell, start on login,
-Publish Pane instructions to AGENTS.md, developer and verbose modes, and each
-repository's path, worktree folder, Open IDE Command and Project System
-Prompt. Notes, Loops and Sessions are not part of the setup.
+Publish Pane instructions to AGENTS.md, developer and verbose modes, the
+Default Open IDE Command, and each repository's path, worktree folder,
+Open IDE Command and Project System Prompt. Notes, Loops and Sessions are not
+part of the setup.
 
 Free text can still hold a secret someone typed into it. As a second check,
 Pane leaves out any command, resume template, script, Session profile or

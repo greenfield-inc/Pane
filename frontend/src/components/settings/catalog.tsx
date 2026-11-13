@@ -54,8 +54,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Terminal',
     description: 'Terminal display, references, shell, and power behavior.',
     icon: Terminal,
-    settingIds: ['terminal-font-family', 'terminal-font-size', 'terminal-power-mode', 'terminal-reference-paste-mode', 'terminal-reference-line-count', 'terminal-shell'],
-    aliases: ['font', 'shell', 'scrollback', 'gpu', 'battery'],
+    settingIds: ['terminal-font-family', 'terminal-font-size', 'terminal-power-mode', 'terminal-references-enabled', 'terminal-reference-paste-mode', 'terminal-reference-line-count', 'terminal-shell'],
+    aliases: ['font', 'shell', 'scrollback', 'gpu', 'battery', '@', 'mention', 'picker'],
   },
   {
     id: 'links',
@@ -108,10 +108,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'worktrees-git',
     label: 'Worktrees & Git',
-    description: 'Defaults for commits, pull requests, and new worktrees.',
+    description: 'Defaults for commits, pull requests, new worktrees, and opening them in your IDE.',
     icon: GitBranch,
-    settingIds: ['commit-footer', 'git-attribution', 'auto-rename-pr', 'worktree-file-sync'],
-    aliases: ['git', 'worktree', 'commit', 'pull request', 'pr', 'attribution', 'committer', 'author'],
+    settingIds: ['commit-footer', 'git-attribution', 'auto-rename-pr', 'worktree-file-sync', 'default-ide-command'],
+    aliases: ['git', 'worktree', 'commit', 'pull request', 'pr', 'attribution', 'committer', 'author', 'ide', 'editor', 'open in ide'],
   },
   {
     id: 'notifications',
