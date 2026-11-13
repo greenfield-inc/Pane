@@ -4,6 +4,7 @@ import type { CustomCommandResume } from '../../../shared/types/customCommandRes
 import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
+import { CONFIGURED_AGENT_IDS } from '../../../shared/agents';
 import type { ProjectEnvironment } from '../../../shared/types/panels';
 import type { AppConfig } from '../types/config';
 import { useConfigStore } from '../stores/configStore';
@@ -15,8 +16,7 @@ import { Input, Textarea } from './ui/Input';
 import { Toggle } from './ui/Toggle';
 import { SessionLaunchFields } from './SessionLaunchFields';
 
-const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor', 'opencode'] as const)
-  .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
+const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = CONFIGURED_AGENT_IDS.map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
 function availableSessionAgents(wsl = false, environment?: ProjectEnvironment): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
   if (wsl) return SESSION_AGENT_OPTIONS;

@@ -44,6 +44,7 @@ import { openApprovals, toggleApprovals } from './components/approvals/approvals
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
+import { onOpenSettingsRequest } from './utils/openSettings';
 import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { useRegionNavigation } from './hooks/useRegionNavigation';
 import { KeySequenceHint } from './components/KeySequenceHint';
@@ -205,6 +206,8 @@ function App() {
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, []);
+  // Menus deep in the window, such as the + menu's More agents…, open Settings here.
+  useEffect(() => onOpenSettingsRequest(openSettings), [openSettings]);
   useEffect(() => window.electronAPI?.notify?.onNavigate((target) => {
     if (target === 'settings') {
       openSettings({ category: 'notify' });
