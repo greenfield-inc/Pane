@@ -449,6 +449,12 @@ loads the same conversation.
   about 700 messages: **Earlier messages** pages older ones in
   (`chat-tab:history`) and drops the newest, **Newer messages** pages back
   down, and the jump-to-latest arrow returns to the live end.
+- Only the chat tab on screen renders. A hidden tab is unmounted and holds no
+  transcript; showing it reads the newest window from the host once.
+- A streaming reply redraws at most once per stream frame (`STREAM_FRAME_MS` in
+  `shared/constants/streamCadence.ts`, the interval terminals flush output at),
+  and its markdown is parsed block by block, so an update re-parses only the
+  block being written.
 - A queued message keeps only a preview in the tab's saved state; its full text
   and images wait in a file beside it until they are sent.
 - A tool step's update sends only the fields that changed; command output is sent

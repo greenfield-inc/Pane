@@ -51,8 +51,9 @@ import { blockedPromptKey, blockedScreenLines, detectAgentState } from './agentS
 import { getManifestForAgent } from './agentStatus/manifests';
 import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { PaneEventArgument } from '../core/eventSink';
+import { STREAM_FRAME_MS } from '../../../shared/constants/streamCadence';
 
-const OUTPUT_BATCH_INTERVAL = 32; // ms (~30fps) — wider window reduces TUI flicker
+const OUTPUT_BATCH_INTERVAL = STREAM_FRAME_MS; // wider window reduces TUI flicker
 const OUTPUT_BATCH_INTERVAL_INTERACTIVE = 8;
 const INTERACTIVE_OUTPUT_WINDOW_MS = 200;
 /** What a pause did: the tabs it stopped, and why any could not be paused. */
