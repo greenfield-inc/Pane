@@ -334,7 +334,8 @@ export const SCENARIOS = [
     grade: (run) => verdict([
       [bashMatches(run, /git\s+clone/), 'never cloned'],
       [run.tempPaths.length === 0, `used system temp: ${run.tempPaths.slice(0, 3).join(', ')}`],
-      [bashMatches(run, /git\s+clone\s+\S+\s+\S*(PANE_SCRATCH_DIR|\.pane\/scratch)/), 'did not clone into $PANE_SCRATCH_DIR'],
+      // `git clone <src> "$PANE_SCRATCH_DIR/x"` or `cd "$PANE_SCRATCH_DIR" && git clone <src> x`.
+      [run.bash.some((command) => /git\s+clone/.test(command) && /PANE_SCRATCH_DIR|\.pane\/scratch/.test(command)), 'did not clone into $PANE_SCRATCH_DIR'],
     ]),
   },
   {
@@ -356,7 +357,7 @@ export const SCENARIOS = [
     noSkill: true,
     setup: ({ repo }) => pkg(repo),
     prompt: () => 'Run `runpane doctor`. Then, without doing anything else, answer in two short lines: where would you run a rerun of this feature\'s review, and where would you put a repository you clone for research?',
-    script: () => ({}),
+    script: () => ({ realDoctor: true }),
     grade: (run) => verdict([
       [has(run, 'doctor'), 'never ran runpane doctor'],
       [/\btab\b|panels create/i.test(run.text), 'did not say the rerun is a tab in this Pane'],
