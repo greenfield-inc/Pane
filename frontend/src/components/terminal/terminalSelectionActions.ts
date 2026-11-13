@@ -1,6 +1,7 @@
 import type { ContextMenuEntry } from '../../../../shared/types/contextMenu';
 import { boundary, type BoundarySchema } from '../../../../shared/validation/boundaryDecoder';
 import { resolveTerminalPath, type TerminalFilePath } from './resolveTerminalPath';
+import { terminalCopyAccelerator, terminalPasteAccelerator } from '../../utils/terminalClipboard';
 
 const URL_PATTERN = /https?:\/\/[^\s<>"{}|\\^`[\]]+/;
 
@@ -27,6 +28,7 @@ export function findSelectionTargets(text: string, workingDirectory: string, hom
 }
 
 const TERMINAL_CONTEXT_MENU_ACTIONS = [
+  'look-up',
   'copy',
   'paste',
   'select-all',
@@ -50,14 +52,17 @@ export interface TerminalContextMenuContext {
   notesEnabled: boolean;
   isRemoteMode: boolean;
   isMac: boolean;
+  /** Off macOS, Ctrl+V pastes only while Pane keyboard shortcuts are on. */
+  keyboardShortcutsEnabled: boolean;
 }
 
 /**
- * The terminal's right-click menu: the clipboard items, then whatever the
- * selection popover would offer for the selected text.
+ * The terminal's right-click menu: macOS Look Up for a selection, the
+ * clipboard items, then whatever the selection popover would offer for the
+ * selected text.
  */
 export function terminalContextMenuEntries(context: TerminalContextMenuContext): ContextMenuEntry[] {
-  const { selection, targets, hasSession, notesEnabled, isRemoteMode, isMac } = context;
+  const { selection, targets, hasSession, notesEnabled, isRemoteMode, isMac, keyboardShortcutsEnabled } = context;
   const hasSelection = selection.length > 0;
   const item = (id: TerminalContextMenuAction, label: string, enabled = true): ContextMenuEntry =>
     ({ type: 'item', id, label, enabled });
@@ -72,9 +77,11 @@ export function terminalContextMenuEntries(context: TerminalContextMenuContext):
       : item('show-in-explorer', 'Show in Explorer', targets.file.absolutePath !== null));
   }
 
+  const lookUpText = isMac ? selection.trim() : '';
   const entries: ContextMenuEntry[] = [
-    { type: 'item', id: 'copy', label: 'Copy', enabled: hasSelection, accelerator: isMac ? 'Cmd+C' : 'Ctrl+Shift+C' },
-    { type: 'paste', id: 'paste', label: 'Paste', enabled: true, accelerator: 'CmdOrCtrl+V' },
+    ...(lookUpText ? [{ type: 'look-up', id: 'look-up', text: lookUpText } as const, { type: 'separator' } as const] : []),
+    { type: 'item', id: 'copy', label: 'Copy', enabled: hasSelection, accelerator: terminalCopyAccelerator(isMac) },
+    { type: 'paste', id: 'paste', label: 'Paste', enabled: true, accelerator: terminalPasteAccelerator(isMac, keyboardShortcutsEnabled) },
     { type: 'separator' },
     item('select-all', 'Select All'),
   ];

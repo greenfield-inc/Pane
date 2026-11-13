@@ -63,6 +63,20 @@ describe('showContextMenu', () => {
     expect(paste).toHaveBeenCalledOnce();
   });
 
+  it('performs Look Up natively, named after the selection', async () => {
+    const shown = captureMenu();
+    const showDefinitionForSelection = vi.fn();
+    // SAFETY: Look Up is the only WebContents member the menu uses.
+    const contents = { showDefinitionForSelection } as WebContents;
+
+    const choice = showContextMenu(contents, [{ type: 'look-up', id: 'look-up', text: 'a selection longer than the label shows' }]);
+    expect(shown.template[0]?.label).toBe('Look Up “a selection longer than …”');
+    click(shown.template[0]);
+
+    await expect(choice).resolves.toBe('look-up');
+    expect(showDefinitionForSelection).toHaveBeenCalledOnce();
+  });
+
   it('resolves with null when the menu closes without a choice', async () => {
     vi.useFakeTimers();
     const shown = captureMenu();

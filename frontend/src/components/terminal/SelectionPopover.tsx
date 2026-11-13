@@ -15,7 +15,7 @@ import {
 } from './terminalSelectionActions';
 import { copyTerminalText } from '../../utils/terminalClipboard';
 import { isMac } from '../../utils/platformUtils';
-import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
+import { areKeyboardShortcutsEnabled, isCopyOnSelectEnabled, isNotesEnabled, useConfigStore } from '../../stores/configStore';
 import { useCommittedRef } from '../../hooks/useCommittedRef';
 import { decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 
@@ -60,6 +60,8 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
 }) => {
   const [capture, setCapture] = useState<{ text: string; source: string; at: string }>();
   const notesEnabled = useConfigStore(state => isNotesEnabled(state.config));
+  const copyOnSelect = useConfigStore(state => isCopyOnSelectEnabled(state.config));
+  const keyboardShortcutsEnabled = useConfigStore(state => areKeyboardShortcutsEnabled(state.config));
   // Stays mounted while hidden so the error toast can outlive the popover
   const [errorToast, setErrorToast] = useState<string | null>(null);
 
@@ -142,10 +144,14 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         await copy(selection);
         return;
       case 'paste':
-        // Main performed the paste natively, into the terminal it focused.
+      case 'look-up':
+        // Main performed these natively, on the terminal it focused.
         return;
       case 'select-all':
-        terminal?.selectAll();
+        if (!terminal) return;
+        terminal.selectAll();
+        // A selection copies itself when Copy on select is on, however it was made.
+        if (copyOnSelect) await copy(terminal.getSelection());
         return;
       case 'add-to-notes':
         addToNotes(selection);
@@ -162,13 +168,15 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
     }
   };
 
-  const menuContextRef = useCommittedRef({ workingDirectory, homeDirectory, sessionId, isRemoteMode, notesEnabled, onClose, runMenuAction });
+  const menuContextRef = useCommittedRef({ workingDirectory, homeDirectory, sessionId, isRemoteMode, notesEnabled, keyboardShortcutsEnabled, onClose, runMenuAction });
   useEffect(() => {
     const element = terminal?.element;
     if (!terminal || !element) return;
-    // xterm's own contextmenu handler, on a child, has run by now and may
-    // have selected the word under the pointer (macOS); preventing the event
-    // keeps Chromium from raising the generic edit menu as well.
+    // xterm's own contextmenu handler on this element was registered first, so
+    // it has run by now: it may have selected the word under the pointer
+    // (macOS) and put the selection in its focused textarea, which Look Up
+    // reads. Preventing the event keeps Chromium from raising the generic edit
+    // menu as well.
     const showMenu = (event: MouseEvent) => {
       event.preventDefault();
       const context = menuContextRef.current;
@@ -182,6 +190,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         notesEnabled: context.notesEnabled,
         isRemoteMode: context.isRemoteMode,
         isMac: isMac(),
+        keyboardShortcutsEnabled: context.keyboardShortcutsEnabled,
       });
       // Paste lands in the focused element, so the terminal must hold focus.
       terminal.focus();

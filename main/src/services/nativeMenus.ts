@@ -115,6 +115,12 @@ export function installApplicationMenu(options: {
 }
 
 const MAX_LOOK_UP_LABEL = 24;
+
+/** macOS's dictionary item, named after the selection it looks up. */
+function lookUpLabel(selection: string): string {
+  const shown = selection.length > MAX_LOOK_UP_LABEL ? `${selection.slice(0, MAX_LOOK_UP_LABEL)}…` : selection;
+  return `Look Up “${shown}”`;
+}
 // The close callback is not ordered against the chosen item's click on every
 // platform, so a dismissal is only reported after the click has had its turn.
 const CONTEXT_MENU_DISMISS_GRACE_MS = 100;
@@ -145,9 +151,8 @@ export function attachEditContextMenu(contents: WebContents): void {
       );
     }
     if (selection && process.platform === 'darwin') {
-      const label = selection.length > MAX_LOOK_UP_LABEL ? `${selection.slice(0, MAX_LOOK_UP_LABEL)}…` : selection;
       items.push(
-        { label: `Look Up “${label}”`, click: () => contents.showDefinitionForSelection() },
+        { label: lookUpLabel(selection), click: () => contents.showDefinitionForSelection() },
         { type: 'separator' },
       );
     }
@@ -169,15 +174,27 @@ export function attachEditContextMenu(contents: WebContents): void {
 }
 
 /**
- * Shows a renderer-described menu (the terminal's right-click menu) and
- * resolves with the chosen item's id, or null when it is dismissed. The
- * renderer must have prevented the DOM contextmenu event, or Chromium raises
- * attachEditContextMenu's menu as well.
+ * Shows a renderer-described menu natively and resolves with the chosen item's
+ * id, or null when it is dismissed. The renderer must have prevented the DOM
+ * contextmenu event, or Chromium raises attachEditContextMenu's menu as well.
+ *
+ * Use it where a surface replaces the native edit menu or needs a native
+ * action (paste, look up): today, the terminal's right-click menu. Pane's own
+ * row and toolbar menus stay HTML (ui/Dropdown, ContextMenuContext).
  */
 export function showContextMenu(contents: WebContents, entries: ContextMenuEntry[]): Promise<string | null> {
   return new Promise((resolve) => {
     const template = entries.map((entry): MenuItemConstructorOptions => {
       if (entry.type === 'separator') return { type: 'separator' };
+      if (entry.type === 'look-up') {
+        return {
+          label: lookUpLabel(entry.text),
+          click: () => {
+            contents.showDefinitionForSelection();
+            resolve(entry.id);
+          },
+        };
+      }
       return {
         label: entry.label,
         enabled: entry.enabled,

@@ -9,7 +9,11 @@ import {
 } from './terminalSelectionActions';
 
 function labels(entries: ContextMenuEntry[]): string[] {
-  return entries.map((entry) => entry.type === 'separator' ? '---' : `${entry.label}${entry.enabled ? '' : ' (disabled)'}`);
+  return entries.map((entry) => {
+    if (entry.type === 'separator') return '---';
+    if (entry.type === 'look-up') return `Look Up ${entry.text}`;
+    return `${entry.label}${entry.enabled ? '' : ' (disabled)'}`;
+  });
 }
 
 function menuFor(selection: string, overrides: Partial<TerminalContextMenuContext> = {}): ContextMenuEntry[] {
@@ -20,6 +24,7 @@ function menuFor(selection: string, overrides: Partial<TerminalContextMenuContex
     notesEnabled: false,
     isRemoteMode: false,
     isMac: false,
+    keyboardShortcutsEnabled: true,
     ...overrides,
   });
 }
@@ -45,11 +50,19 @@ describe('terminalContextMenuEntries', () => {
 
   it('shows the copy key for the platform', () => {
     expect(menuFor('words')[0]).toMatchObject({ id: 'copy', enabled: true, accelerator: 'Ctrl+Shift+C' });
-    expect(menuFor('words', { isMac: true })[0]).toMatchObject({ accelerator: 'Cmd+C' });
+    expect(menuFor('words', { isMac: true }).find((entry) => entry.type === 'item' && entry.id === 'copy')).toMatchObject({ accelerator: 'Cmd+C' });
   });
 
-  it('lets main perform Paste', () => {
-    expect(menuFor('')[1]).toMatchObject({ type: 'paste', id: 'paste' });
+  it('lets main perform Paste, labelled with a key only where that key pastes', () => {
+    expect(menuFor('')[1]).toMatchObject({ type: 'paste', id: 'paste', accelerator: 'Ctrl+V' });
+    expect(menuFor('', { keyboardShortcutsEnabled: false })[1]).toMatchObject({ type: 'paste', accelerator: undefined });
+    expect(menuFor('', { isMac: true, keyboardShortcutsEnabled: false })[1]).toMatchObject({ type: 'paste', accelerator: 'Cmd+V' });
+  });
+
+  it('starts with Look Up for a selection on macOS, as the edit menu did', () => {
+    expect(labels(menuFor(' words ', { isMac: true })).slice(0, 3)).toEqual(['Look Up words', '---', 'Copy']);
+    expect(labels(menuFor('', { isMac: true }))[0]).toBe('Copy (disabled)');
+    expect(labels(menuFor('words'))[0]).toBe('Copy');
   });
 
   it('adds the browser actions for a URL', () => {
@@ -69,7 +82,7 @@ describe('terminalContextMenuEntries', () => {
   });
 
   it('builds menus main accepts, and reads its answer', () => {
-    expect(decodeBoundary(menuFor('see https://example.com', { notesEnabled: true }), contextMenuEntriesSchema)).toHaveLength(8);
+    expect(decodeBoundary(menuFor('see https://example.com', { notesEnabled: true, isMac: true }), contextMenuEntriesSchema)).toHaveLength(10);
     expect(decodeBoundary('open-url', terminalContextMenuChoiceSchema)).toBe('open-url');
     expect(decodeBoundary(null, terminalContextMenuChoiceSchema)).toBeNull();
     expect(() => decodeBoundary('format-disk', terminalContextMenuChoiceSchema)).toThrow();
