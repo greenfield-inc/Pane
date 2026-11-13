@@ -831,7 +831,12 @@ describe('PI_MANIFEST', () => {
     expect(detectAgentState(PI_MANIFEST, screen(piScreen(rule(), [], undefined, transcript))).matchedRuleId).toBe('idle_composer');
   });
 
-  it('blocks on the project trust prompt shown before the composer', () => {
+  // Pi builds the key hint from the person's keybindings, so the rule must not depend on it.
+  it.each([
+    ' ↑↓ navigate  enter select  escape/ctrl+c cancel',
+    ' j/k navigate  space select  q cancel',
+    '',
+  ])('blocks on the project trust prompt shown before the composer, with hint %j', (hint) => {
     const trust = [
       "Warning: No project session found with id '7a000000-0000-4000-8000-000000000002'; creating a new session with that id.",
       rule(),
@@ -847,7 +852,7 @@ describe('PI_MANIFEST', () => {
       '   Do not trust',
       '   Do not trust (this session only)',
       '',
-      ' ↑↓ navigate  enter select  escape/ctrl+c cancel',
+      hint,
       '',
       rule(),
     ].join('\n');
@@ -856,7 +861,7 @@ describe('PI_MANIFEST', () => {
   });
 
   it('does not block on a trust prompt answered earlier in the transcript', () => {
-    const answered = piScreen(rule(), [], undefined, [' Trust project folder?', ' ↑↓ navigate  enter select  escape/ctrl+c cancel']);
+    const answered = piScreen(rule(), [], undefined, [' Trust project folder?', ' → Trust', '   Do not trust', ' ↑↓ navigate  enter select  escape/ctrl+c cancel']);
     expect(detectAgentState(PI_MANIFEST, screen(answered)).state).not.toBe('blocked');
   });
 });

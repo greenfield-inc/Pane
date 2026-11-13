@@ -119,6 +119,8 @@ export const RUNPANE_CONTRACT = {
             "--dangerously-skip-permissions"
           ],
           "hotkey": "mod+alt+3",
+          "promptArgument": true,
+          "configDir": ".claude",
           "reportsConversation": true
         },
         "install": {
@@ -169,7 +171,9 @@ export const RUNPANE_CONTRACT = {
           "fullAccessArgs": [
             "--yolo"
           ],
-          "hotkey": "mod+alt+4"
+          "hotkey": "mod+alt+4",
+          "promptArgument": true,
+          "configDir": ".codex"
         },
         "install": {
           "url": "https://developers.openai.com/codex/cli",
@@ -218,6 +222,8 @@ export const RUNPANE_CONTRACT = {
             "--force"
           ],
           "hotkey": "mod+alt+5",
+          "promptArgument": true,
+          "configDir": ".cursor",
           "platforms": [
             "darwin",
             "linux",
@@ -262,7 +268,12 @@ export const RUNPANE_CONTRACT = {
           "fullAccessArgs": [
             "--auto"
           ],
-          "hotkey": "mod+alt+6"
+          "hotkey": "mod+alt+6",
+          "session": {
+            "flag": "--session",
+            "minimumVersion": "2.0.19",
+            "idPattern": "^ses_[A-Za-z0-9]+$"
+          }
         },
         "install": {
           "url": "https://opencode.ai/docs",
@@ -295,7 +306,23 @@ export const RUNPANE_CONTRACT = {
         "terminal": {
           "args": [],
           "fullAccessArgs": [],
-          "hotkey": "mod+alt+shift+p"
+          "hotkey": "mod+alt+shift+p",
+          "configDir": ".pi",
+          "session": {
+            "flag": "--session-id",
+            "minimumVersion": "0.76.0",
+            "idPattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$",
+            "paneChoosesId": true,
+            "selectors": [
+              "--session",
+              "--continue",
+              "-c",
+              "--resume",
+              "-r",
+              "--fork",
+              "--no-session"
+            ]
+          }
         },
         "install": {
           "url": "https://pi.dev",

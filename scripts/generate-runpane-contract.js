@@ -128,6 +128,15 @@ function validateJsonSchema(value, schemaNode, label, rootSchema) {
       }
     }
 
+    for (const [key, dependents] of Object.entries(schemaNode.dependentRequired ?? {})) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      for (const dependent of dependents) {
+        if (!Object.prototype.hasOwnProperty.call(value, dependent)) {
+          throw new Error(`${label}.${dependent} is required with ${key}`);
+        }
+      }
+    }
+
     const properties = schemaNode.properties ?? {};
     for (const [key, propertySchema] of Object.entries(properties)) {
       if (Object.prototype.hasOwnProperty.call(value, key)) {

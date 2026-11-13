@@ -119,7 +119,7 @@ Each of these is a small thing. Together they compound fast.
 
 | Feature | | |
 |---|---|---|
-| **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, reads local orchestration instructions, and can coordinate Claude, Codex, Cursor, or OpenCode across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
+| **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, reads local orchestration instructions, and can coordinate Claude, Codex, Cursor, OpenCode, or Pi across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
 | **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
 | **Pane Workspaces** | Let an agent on one of your machines read files, run commands, and drive Pane on another over Tailscale. Hand off a task with its branch and a written note; a handoff to the same agent continues your own session there. | [Workspaces](#pane-workspaces) · [Handoff](#hand-off-a-task) |
 | **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, open a Pane for each new issue, and add agent tabs to existing Panes for review and fixes (1 feature = 1 worktree = 1 branch = 1 Pane). Claude Code, Codex, and Cursor get the same commands as MCP tools. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
@@ -273,7 +273,7 @@ Add this repo, create three worktree panes for the next features, start Codex in
 
 Already working in other agent tools? Settings → AI & Agents → "Bring sessions into Pane" finds your sessions from Claude Code, Codex, Conductor, Paradev (formerly Superset), Herdr, Emdash, Orca and T3 Code, and brings them in with one click, each in a Pane tab with its own agent's resume. Say "migrate to Pane" and Pane Chat also finds OpenCode and Cursor agent sessions (or anything similar), forks ones still running, and checks that each continues where it left off. On a new install, the first-run screen asks which agent you use and offers to bring your recent sessions in; Yes opens the Onboarding Session, which brings them in, groups them into Sessions, and opens a Start here page. See [Bring your existing sessions into Pane](docs/SESSIONS.md#bring-your-existing-sessions-into-pane).
 
-Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, Cursor, or OpenCode agents in Panes through RunPane.
+Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, Cursor, OpenCode, or Pi agents in Panes through RunPane.
 
 The prompt stays small because Pane ships its skills and installs them into the Pane data directory at startup, whenever the bundled copy has changed:
 
@@ -432,9 +432,9 @@ The shell installers and the other one-shot commands are at the top of this READ
 
 OpenCode's native terminal integration starts a new conversation bare, saves the ID OpenCode prints when it exits (`opencode -s <id>`), and resumes that exact ID in project tabs, Pane Chat, and named Sessions. A conversation still running when Pane quits has no saved ID yet, so it starts fresh next time. OpenCode Sessions require supported direct commands, not wrappers or custom-resume templates.
 
-The default `opencode --auto` auto-approves non-denied operations; it is not a sandbox.
+The default `opencode --auto` auto-approves non-denied operations; it is not a sandbox. Closing, archiving, and switching retain existing lifecycle behavior, and PTY exit does not prove that agent work was cancelled.
 
-Pi tabs open with a Pane-chosen `pi --session-id <id>`, so a restarted or reopened tab continues the same conversation. Pi runs tools without asking; in a folder with `.pi` settings or project skills it first asks whether to trust the folder, which Pane shows as blocked and never answers. Pi is not yet offered for Loops. Closing, archiving, and switching retain existing lifecycle behavior, and PTY exit does not prove that agent work was cancelled.
+Pi tabs open with a Pane-chosen `pi --session-id <id>`, so a restarted or reopened tab continues the same conversation. Pi runs tools without asking; in a folder with `.pi` settings or project skills it first asks whether to trust the folder. Pane shows that as blocked, never answers it, and types a starting message only once Pi's input box is on screen. Loops do not run Pi Sessions yet.
 
 Moving to a new computer? **Settings → Import & Export** saves your commands, run scripts, agent defaults, shortcuts, skill and MCP choices and look to a file, and imports it after showing what would change. Keys and tokens stay behind. See [Export and import your Pane setup](docs/SETUP_EXPORT_IMPORT.md).
 

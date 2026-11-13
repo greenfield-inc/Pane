@@ -22,7 +22,7 @@ import {
   type OrchestrationSessionStoreData,
 } from '../../../shared/types/orchestrationSession';
 import { getPaneChatPanelId } from '../../../shared/types/paneChat';
-import { CONFIGURED_AGENT_IDS, configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
+import { CONFIGURED_AGENT_IDS, agentLabel, configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 
 const paneChatAgentSchema = configuredAgentSchema;
 const sourceSchema = boundary.enumeration('user', 'agent', 'system');
@@ -92,12 +92,8 @@ const sessionSchema = boundary.object({
   openingPrompt: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(boundary.string),
   internalSessionId: boundary.nonEmptyString,
-  panelIds: boundary.object({
-    claude: boundary.nonEmptyString,
-    codex: boundary.nonEmptyString,
-    cursor: boundary.nonEmptyString,
-    opencode: boundary.optional(boundary.nonEmptyString),
-  }),
+  // One panel id per configured agent, rebuilt in sanitizeSession.
+  panelIds: boundary.jsonObject,
   goal: boundary.string,
   context: boundary.string,
   decisions: boundary.array(boundary.string),
@@ -282,12 +278,6 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
     delete fields.reportActivityId;
     delete fields.reportAcceptedAt;
   }
-  // A bad OpenCode panel id is replaced by the derived one rather than dropping the Session.
-  const panelIds = decodeOptionalBoundary(fields.panelIds, boundary.jsonObject);
-  if (panelIds?.opencode !== undefined && decodeOptionalBoundary(panelIds.opencode, boundary.nonEmptyString) === undefined) {
-    problems.push(`${label}: replaced an invalid OpenCode panel id`);
-    fields.panelIds = Object.fromEntries(Object.entries(panelIds).filter(([agent]) => agent !== 'opencode'));
-  }
   if (fields.runtime === 'wsl' && decodeOptionalBoundary(fields.wslDistribution, boundary.nonEmptyString) === undefined) {
     problems.push(`dropped ${label}: a WSL Session requires a distribution`);
     return undefined;
@@ -300,10 +290,14 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
   }
   try {
     const session = decodeBoundary(fields, sessionSchema);
-    // Each agent keeps its saved panel id; Sessions saved before an agent joined get its derived one.
-    const saved = decodeOptionalBoundary(fields.panelIds, boundary.jsonObject);
-    const panelIds = Object.fromEntries(CONFIGURED_AGENT_IDS.map(agent => [agent, decodeOptionalBoundary(saved?.[agent], boundary.nonEmptyString)
-      ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID ? getPaneChatPanelId(agent) : `__orchestration_panel_${session.id}_${agent}`)]));
+    // Each agent keeps its saved panel id. A Session saved before an agent joined gets that
+    // agent's derived id, and an invalid saved id is replaced by it rather than dropping the Session.
+    const panelIds = Object.fromEntries(CONFIGURED_AGENT_IDS.map(agent => {
+      const saved = Object.hasOwn(session.panelIds, agent) ? session.panelIds[agent] : undefined;
+      const id = decodeOptionalBoundary(saved, boundary.nonEmptyString);
+      if (saved !== undefined && id === undefined) problems.push(`${label}: replaced an invalid ${agentLabel(agent)} panel id`);
+      return [agent, id ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID ? getPaneChatPanelId(agent) : `__orchestration_panel_${session.id}_${agent}`)];
+    }));
     // SAFETY: the map above gives every configured agent an id.
     return { ...session, panelIds: panelIds as Record<ConfiguredAgentId, string> };
   } catch (error) {

@@ -178,8 +178,8 @@ function signInCommand(agent: ChatAgent, advertised: { args: string[] } | undefi
       return nativeCommand(installed.command, advertised.args, shell);
     }
   }
-  if (!config) throw new PaneError('CHAT_SIGN_IN_UNKNOWN', `Pane does not know how to sign ${agentLabel(agent)} in.`, 'Sign in with the agent\'s own instructions in a terminal tab, then press Retry.');
-  const args = advertised && plain(advertised.args) ? advertised.args : config.signIn ?? [];
+  if (!config?.chat) throw new PaneError('CHAT_SIGN_IN_UNKNOWN', `Pane does not know how to sign ${agentLabel(agent)} in.`, 'Sign in with the agent\'s own instructions in a terminal tab, then press Retry.');
+  const args = advertised && plain(advertised.args) ? advertised.args : config.signIn;
   return [config.executables[0], ...args].join(' ');
 }
 

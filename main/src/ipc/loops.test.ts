@@ -301,11 +301,14 @@ describe('prepareLoopSession', () => {
     }
   });
 
-  it('refuses an OpenCode Session instead of switching it to the loop\'s agent', async () => {
-    const { registry, calls } = sessionRegistry({ session: { agent: 'opencode', launchCommand: 'opencode --auto' } });
+  it.each([
+    ['opencode', 'opencode --auto', 'OpenCode'],
+    ['pi', 'pi', 'Pi'],
+  ])('refuses a %s Session instead of switching it to the loop\'s agent', async (agent, launchCommand, label) => {
+    const { registry, calls } = sessionRegistry({ session: { agent, launchCommand } });
     await expect(prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'claude' })).rejects.toMatchObject({
       code: 'ERR_LOOP_INVALID',
-      message: 'Session Standups runs OpenCode, which loops cannot run yet. Nothing was saved.',
+      message: `Session Standups runs ${label}, which loops cannot run yet. Nothing was saved.`,
     });
     expect(calls.map(call => call.channel)).toEqual(['runpane:sessions:get']);
   });

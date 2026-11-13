@@ -1060,6 +1060,9 @@ describe('TerminalPanelManager hidden output delivery', () => {
       },
     });
 
+    // An empty screen is no evidence of an input box; Codex shows its idle one as a title without a spinner.
+    terminal.screenEmulator?.write('\x1b]2;repo\x07');
+    await Promise.all([terminal.screenEmulator?.refresh(), vi.advanceTimersByTimeAsync(100)]);
     echoStagedWrites(terminal);
     manager.deliverPendingInitialInput(terminal.panelId);
     manager.pollAgentStatus();
@@ -1110,6 +1113,8 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(terminal.pty.write).not.toHaveBeenCalled();
     delete panel.state.customState.initialInputSentAt;
 
+    terminal.screenEmulator?.write(`${'─'.repeat(40)}\r\n❯ \r\n${'─'.repeat(40)}`);
+    await Promise.all([terminal.screenEmulator?.refresh(), vi.advanceTimersByTimeAsync(100)]);
     echoStagedWrites(terminal);
     manager.deliverPendingInitialInput(terminal.panelId);
     manager.pollAgentStatus();
@@ -1210,7 +1215,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
 
     expect(result.commandToRun).toMatch(/^pi --session-id [0-9a-f-]{36}$/u);
-    expect(result.customState).toMatchObject({ initialInput: '@src/app.ts explain this', initialInputMode: 'stdin' });
+    expect(result.customState).toMatchObject({ initialInput: '@src/app.ts explain this' });
     expect(result.customState.initialInputSentAt).toBeUndefined();
   });
 
@@ -2203,6 +2208,47 @@ describe('TerminalPanelManager agent status poll', () => {
     expect(terminal.pty.write.mock.calls).toEqual([['/review']]);
     vi.setSystemTime(Date.now() + 400);
     await vi.waitFor(() => expect(terminal.pty.write.mock.calls).toEqual([['/review'], ['\r']]));
+
+    manager.destroyTerminal(terminal.panelId);
+    vi.useRealTimers();
+  });
+});
+
+describe('TerminalPanelManager held starting message', () => {
+  it('types nothing while the screen only reads idle, and sends once pi shows its input box', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const manager = testAccess<AgentStatusAccess & InitialInputAccess>(new TerminalPanelManager());
+    const screenEmulator = inProcessEmulatorHost().createEmulator(80, 12);
+    const terminal = createTerminal({ agentType: 'pi', screenEmulator });
+    manager.terminals.set(terminal.panelId, terminal);
+    manager.registerAgentStatusPanel(terminal);
+    vi.mocked(panelManager.getPanel).mockReturnValue({
+      id: terminal.panelId,
+      sessionId: terminal.sessionId,
+      type: 'terminal',
+      title: 'Pi',
+      state: { isActive: true, customState: { isCliReady: true, initialInput: 'explain this repo' } },
+      metadata: { createdAt: '2026-01-01T00:00:00.000Z', lastActiveAt: '2026-01-01T00:01:00.000Z', position: 0 },
+    });
+    const rule = '─'.repeat(60);
+
+    // A menu no rule knows (a reworded or future prompt) reads idle by fallback; Enter would choose its first option.
+    screenEmulator.write(' Allow this folder?\r\n → Allow\r\n   Deny\r\n');
+    await screenEmulator.refresh();
+    manager.deliverPendingInitialInput(terminal.panelId);
+    vi.setSystemTime(Date.now() + 3_000); // past the monitor's startup grace
+    manager.pollAgentStatus();
+    manager.pollAgentStatus();
+    await flushPromises();
+    expect(manager.getAgentStatus(terminal.panelId)).toBe('idle');
+    expect(terminal.pty.write).not.toHaveBeenCalled();
+
+    screenEmulator.write(`\x1b[2J\x1b[H${rule}\r\n\r\n${rule}\r\n/home/dev/repo\r\n0.0%/128k (auto)  (mock) mock-1`);
+    await screenEmulator.refresh();
+    echoStagedWrites(terminal);
+    manager.pollAgentStatus();
+    await flushPromises();
+    expect(terminal.pty.write.mock.calls[0]).toEqual(['explain this repo']);
 
     manager.destroyTerminal(terminal.panelId);
     vi.useRealTimers();

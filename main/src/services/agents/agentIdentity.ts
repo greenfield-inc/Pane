@@ -345,15 +345,31 @@ const VERSIONED_EXECUTABLE_NAME = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const CLAUDE_VERSIONED_EXECUTABLE_PATH = /(?:^|\/)claude\/versions\/[^/]+$/;
 
 /** A plain invocation of `program`: no wrapper, variable assignment, `cd` first or shell operator. */
+/** Shell syntax that makes a command more than one program run: separators, redirects, substitution, a comment. */
+const SHELL_SYNTAX = /[;&|<>`\n#]|\$\(/;
+
 export function isPlainAgentCommand(command: string, program: string): boolean {
   const words = tokenizeShellCommand(command, process.platform);
-  return words !== undefined && words.length > 0 && !/[;&|<>`\n]|\$\(/.test(command) && normalizeProcessName(words[0]) === program;
+  return words !== undefined && words.length > 0 && !SHELL_SYNTAX.test(command) && normalizeProcessName(words[0]) === program;
 }
 
-/** A process name or path as a comparable basename: `/bin/-zsh.exe` → `zsh`. */
+/**
+ * The words after `agent`'s executable when `command` runs it directly, optionally after
+ * `NAME=value` or `env NAME=value`; undefined for a wrapper or shell syntax.
+ */
+export function directAgentArguments(command: string, agent: CliAgentType, platform: NodeJS.Platform): string[] | undefined {
+  if (SHELL_SYNTAX.test(command)) return undefined;
+  const words = tokenizeShellCommand(command, platform);
+  if (!words) return undefined;
+  let index = words[0] === 'env' ? 1 : 0;
+  while (index < words.length && ENVIRONMENT_ASSIGNMENT.test(words[index])) index += 1;
+  return index < words.length && AGENT_EXECUTABLES[normalizeProcessName(words[index])] === agent ? words.slice(index + 1) : undefined;
+}
+
+/** A process name or path as a comparable basename: `/bin/-zsh.exe` → `zsh`, `C:\\npm\\pi.cmd` → `pi`. */
 export function normalizeProcessName(name: string): string {
   const basename = name.trim().replace(/\\/g, '/').split('/').pop() ?? '';
-  return basename.replace(/^-/, '').replace(/\.exe$/i, '').toLowerCase();
+  return basename.replace(/^-/, '').replace(/\.(?:exe|cmd|ps1)$/i, '').toLowerCase();
 }
 
 /** True for a foreground process name that is an interactive shell (login shells report `-zsh`). */

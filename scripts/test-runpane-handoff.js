@@ -38,7 +38,8 @@ test('flags override the freeform text', () => {
 
 test('unclear destinations fail with a message that says what to fix', () => {
   assert.throws(() => parseDestination('claude on parsas-macbook', machines), /matches several machines: parsas-macbook-pro, parsas-macbook-air/);
-  assert.throws(() => parseDestination('opus on parsas-macbook-pro', machines), /Name the agent: claude, codex, or cursor/);
+  assert.throws(() => parseDestination('opus on parsas-macbook-pro', machines), /Name the agent: .*claude.*pi\./);
+  assert.throws(() => parseDestination('pi high on parsas-macbook-pro', machines), /Pi effort is not supported/);
   assert.throws(() => parseDestination('claude codex on build-server', machines), /names two agents: claude and codex/);
   assert.throws(() => parseDestination('claude on toaster', machines), /No machine on your tailnet is called "toaster"/);
   assert.throws(() => parseDestination('claude high low on build-server', machines), /names two efforts: high and low/);

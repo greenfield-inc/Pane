@@ -527,10 +527,12 @@ export const PI_MANIFEST: AgentManifest = {
       id: 'project_trust_prompt',
       state: 'blocked',
       priority: 1000,
-      region: 'bottom_non_empty_lines(20)',
+      region: 'bottom_non_empty_lines(40)',
       visibleBlocker: true,
-      // Live only while its key hint ends the screen, above at most its closing rule.
-      regex: [/(?:^|\n)\s*Trust project folder\?\s*\n[\s\S]*\n\s*↑↓ navigate\s+enter select\s+escape\/ctrl\+c cancel\s*(?:\n\s*─{3,}\s*)?$/u],
+      // The question and its "Do not trust" option, with no composer footer below them, so an
+      // answered prompt in scrollback does not count. The key hint is not used: pi builds it from
+      // the person's keybindings.
+      regex: [/(?:^|\n)\s*Trust project folder\?[^\n]*\n(?:[^\n]*\n){0,40}?\s*(?:[→>❯›]\s*)?Do not trust\b(?![\s\S]*(?:\d+(?:\.\d+)?%|\?)\/\d+(?:\.\d+)?[kMB]?\b)/u],
     },
     {
       id: 'status_in_composer',

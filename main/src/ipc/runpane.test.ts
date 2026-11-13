@@ -851,7 +851,7 @@ describe('runpane IPC handlers', () => {
           panes: [{ path: worktreePath, name: 'Invalid Pi', tool: { agent: 'pi' }, resume }],
         }]);
 
-        expect(result).toMatchObject({ ok: false, items: [{ ok: false, error: { message: expect.stringMatching(/Pi --resume must be a pi session id/) } }] });
+        expect(result).toMatchObject({ ok: false, items: [{ ok: false, error: { message: expect.stringMatching(/Pi --resume must be a Pi session id/) } }] });
         expect(services.sessionManager.createSession).not.toHaveBeenCalled();
         expect(panelManager.createPanel).not.toHaveBeenCalled();
       },
@@ -6419,9 +6419,9 @@ describe('runpane IPC handlers', () => {
     });
   });
 
-  it('waits for pi\'s composer past its trust prompt, then types the starting message and submits with Enter', async () => {
+  it('waits for pi\'s composer past its startup frames, then types the starting message and submits with Enter', async () => {
     vi.useFakeTimers();
-    let screen: 'trust' | 'composer' = 'trust';
+    let screen: 'startup' | 'composer' = 'startup';
     let staged = false;
     let submitted = false;
     let createdPanel: ToolPanel | undefined;
@@ -6443,9 +6443,9 @@ describe('runpane IPC handlers', () => {
     const message = '@src/app.ts explain this';
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => ({
       ...terminalSnapshot(
-        screen === 'trust'
-          // Pi's startup frame before trust is answered: no composer yet, though the CLI has drawn.
-          ? `${'─'.repeat(40)}\n Trust project folder?\n /home/dev/repo\n → Trust\n   Do not trust`
+        screen === 'startup'
+          // Pi's startup frame: no rule matches, so it reads idle, but there is no input box yet.
+          ? ` ▀▀█  v1.5.2\n █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit\n\n Loading extensions...`
           : submitted
             ? ` ${message}\n\n${piComposer('', `── ⠋ Working ${'─'.repeat(27)}`)}`
             : piComposer(staged ? message : ''),

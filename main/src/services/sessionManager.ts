@@ -1,11 +1,11 @@
-import { customCommandResumeSchema, effectiveCustomResume, type CustomCommandResume } from '../../../shared/types/customCommandResume';
-import { configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 /**
  * Session management for Pane.
  * Note: "Sessions" are called "Panes" in the UI. Internally they remain
  * "sessions" in code, database, and IPC to avoid a massive refactor.
  */
 
+import { customCommandResumeSchema, effectiveCustomResume, type CustomCommandResume } from '../../../shared/types/customCommandResume';
+import { configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
 import { existsSync } from 'fs';

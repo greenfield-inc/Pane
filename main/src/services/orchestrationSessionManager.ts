@@ -2,7 +2,7 @@ import { validateCustomCommandResume, customResumeAgentType, type CustomCommandR
 import { validateWSLAvailable } from '../utils/wslUtils';
 import { sessionRuntimePath } from './sessionRuntime';
 import { findClaudeSessionTranscript } from './claudeSessionTranscript';
-import { CLI_AGENT_TYPES, resolveAgentTypeFromCommand } from './agents/agentIdentity';
+import { CLI_AGENT_TYPES, directAgentArguments, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand } from './agents/opencodeLaunch';
 import { prepareSessionWorkspace, sessionWorkspacePath, discardSessionScaffold, isPristineSessionWorkspace } from './sessionWorkspace';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
@@ -1212,8 +1212,9 @@ export class OrchestrationSessionManager extends EventEmitter {
     const resolvedAgent = record.agent === 'opencode' || effectiveAgent === 'opencode'
       ? resolveSessionAgent(record.agent, initialCommand, record.customResume)
       : launchAgent(command, record.customResume);
+    // A direct agent command lets the terminal add its own resume or session flags; anything else runs as given.
     const nativeCommand = resolvedAgent === 'opencode'
-      || /^(?:claude|codex|cursor-agent)(?:\s|$)/.test(command) && !/[;&|\n]/.test(command);
+      || (resolvedAgent !== undefined && directAgentArguments(command, resolvedAgent, process.platform) !== undefined);
     // A resumed conversation is created with its id, so even a tab repaired at startup resumes it.
     const resumed: TerminalPanelState = {};
     if (record.resume) resumed.agentSessionId = record.resume;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { LOOP_NAME_MAX_LENGTH, LOOP_NEW_SESSION, type Loop, type LoopAgent, type LoopInput, type LoopSchedulePreview } from '../../../../shared/types/loop';
+import { LOOP_NAME_MAX_LENGTH, LOOP_NEW_SESSION, isLoopAgent, type Loop, type LoopAgent, type LoopInput, type LoopSchedulePreview } from '../../../../shared/types/loop';
 import { useLoopsStore } from '../../stores/loopsStore';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { API } from '../../utils/api';
@@ -87,8 +87,8 @@ function LoopDrawerForm({ loop, onClose }: { loop: Loop | undefined; onClose: ()
   const remove = useLoopsStore(state => state.remove);
   const projects = useProjectList();
   const allSessions = useOrchestrationSessionStore(state => state.sessions);
-  // Loops run Claude, Codex or Cursor, so OpenCode Sessions are not offered.
-  const sessions = useMemo(() => allSessions.filter(session => !isArchivedOrchestrationSession(session) && session.agent !== 'opencode'), [allSessions]);
+  // Loops run only their own agents, so other Sessions are not offered.
+  const sessions = useMemo(() => allSessions.filter(session => !isArchivedOrchestrationSession(session) && isLoopAgent(session.agent)), [allSessions]);
   const loadSessions = useOrchestrationSessionStore(state => state.load);
   useEffect(() => { void loadSessions().catch(() => undefined); }, [loadSessions]);
   const [form, setForm] = useState<LoopForm>(() => formFrom(loop));

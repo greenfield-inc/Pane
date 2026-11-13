@@ -822,6 +822,14 @@ describe('OrchestrationSessionManager', () => {
     expect(codex.panel.state.customState?.customResume).toBeFalsy();
   });
 
+  it('lets the terminal add Pi\'s session flag so a Pi Session reopens its conversation', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Pi orchestrator', agent: 'pi' });
+    expect(created.panel.state.customState).toMatchObject({ agentType: 'pi', preserveLaunchCommand: false });
+    const wrapped = await fixture.manager.create({ name: 'Pi wrapped', agent: 'pi', launchCommand: 'bash -lc pi' });
+    expect(wrapped.panel.state.customState).toMatchObject({ preserveLaunchCommand: true });
+  });
+
   it('uses the requested agent over a default command for another agent and rejects a conflicting command', async () => {
     const fixture = createFixture();
     Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: 'claude --model default' });

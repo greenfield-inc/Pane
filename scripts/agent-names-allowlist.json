@@ -13,7 +13,7 @@
   },
   "frontend/src/components/loops/LoopDrawer.tsx": {
     "reason": "Loops' own agent list; Loops are outside this plan's scope.",
-    "count": 7
+    "count": 6
   },
   "frontend/src/components/loops/loopRunView.ts": {
     "reason": "Loops' own agent list; Loops are outside this plan's scope.",
@@ -65,7 +65,7 @@
   },
   "main/src/ipc/loops.ts": {
     "reason": "Loops' own agent list; Loops are outside this plan's scope.",
-    "count": 4
+    "count": 1
   },
   "main/src/ipc/missionControl.ts": {
     "reason": "Mission Control reads Claude and Codex transcripts (vendor file formats).",
@@ -77,7 +77,7 @@
   },
   "main/src/ipc/runpane.ts": {
     "reason": "Deferred terminal composer delivery, readiness and resume per agent.",
-    "count": 66
+    "count": 56
   },
   "main/src/ipc/runpaneComposerEvidence.ts": {
     "reason": "Deferred terminal composer delivery evidence per agent.",
@@ -105,7 +105,7 @@
   },
   "main/src/services/agents/agentResume.ts": {
     "reason": "Deferred terminal resume capture and status detection per agent.",
-    "count": 5
+    "count": 4
   },
   "main/src/services/agents/agentScreenSignature.ts": {
     "reason": "Deferred terminal status detection: reads each agent's terminal screen.",
@@ -114,10 +114,6 @@
   "main/src/services/agents/opencodeLaunch.ts": {
     "reason": "Deferred terminal launch and resume for one agent.",
     "count": 2
-  },
-  "main/src/services/agents/piLaunch.ts": {
-    "reason": "Deferred terminal launch and resume for one agent.",
-    "count": 1
   },
   "main/src/services/claudePrompts/claudePromptQuestion.ts": {
     "reason": "Deferred terminal status: wording for Claude Code's own terminal permission prompts.",
@@ -134,10 +130,6 @@
   "main/src/services/orchestrationSessionManager.ts": {
     "reason": "Deferred terminal launch and resume rules for Session orchestrators (OpenCode direct commands, promoted Claude/Codex conversations).",
     "count": 17
-  },
-  "main/src/services/orchestrationSessionStore.ts": {
-    "reason": "Deferred terminal launch and resume rules for Session orchestrators (OpenCode direct commands, promoted Claude/Codex conversations).",
-    "count": 1
   },
   "main/src/services/paneChatBundle/skills/session-trace/scripts/build-trace.mjs": {
     "reason": "Vendor file format: a bundled skill script that reads agent session logs.",
@@ -225,7 +217,7 @@
   },
   "main/src/services/terminalPanelManager.ts": {
     "reason": "Deferred terminal resume capture and status detection per agent.",
-    "count": 33
+    "count": 31
   },
   "main/src/services/usage/jsonlScanner.ts": {
     "reason": "Vendor file format: parses this agent's usage logs and rate limits.",
@@ -334,10 +326,6 @@
   "shared/types/usage.ts": {
     "reason": "Vendor file formats: usage parsed from each agent's own transcripts.",
     "count": 2
-  },
-  "shared/types/worktreeFileSync.ts": {
-    "reason": "Vendor config folders copied into new worktrees (.claude, .codex, .cursor, .pi).",
-    "count": 4
   },
   "shared/utils/ideCommands.ts": {
     "reason": "'cursor' here is the Cursor editor (Open in Cursor), not the Cursor agent.",

@@ -46,7 +46,7 @@ import { ApprovalStore, thisMachineName } from '../services/approvals/approvalSt
 import { importJsonStoreOnce } from '../database/jsonStoreImport';
 import { ExpectedReportTracker, MAX_MISSING_REPORT_OUTPUT_LENGTH, type PanelLastOutput } from '../services/expectedReports';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
-import { getManifestForAgent, CURSOR_MANIFEST, PI_MANIFEST } from '../services/agentStatus/manifests';
+import { getManifestForAgent, CURSOR_MANIFEST } from '../services/agentStatus/manifests';
 import { detectAgentBackgroundWork, detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
 import { agentTranscripts, type TranscriptLocator } from '../services/agentTranscript';
 import {
@@ -58,7 +58,7 @@ import {
 import { workerCard } from '../services/notify/workerContext';
 import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand, isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
-import { isValidPiSessionId } from '../services/agents/piLaunch';
+import { takesChosenSession } from '../services/agents/chosenSessionLaunch';
 import {
   bracketedPaste,
   claudePromptWarnings,
@@ -271,7 +271,7 @@ import {
   type WorkspaceIdleCandidate,
   type WorkspaceIdleSchedule,
 } from '../services/workspaceIdleTracker';
-import { agentTerminalCommand, configuredAgent, configuredAgentSchema, isConfiguredAgent } from '../../../shared/agents';
+import { agentConfig, agentTerminalCommand, configuredAgent, configuredAgentSchema, isAgentSessionId, isConfiguredAgent, typesStartingMessage } from '../../../shared/agents';
 
 const RUNPANE_CHANNELS = [
   'runpane:doctor',
@@ -2793,7 +2793,7 @@ async function createTerminalPanelForSession(
   }
   if (useArgumentDelivery) {
     initialState.initialInputMode = 'argument';
-  } else if ((tool.agent === 'opencode' || tool.agent === 'pi') && tool.initialInput) {
+  } else if (typesStartingMessage(tool.agent) && tool.initialInput) {
     initialState.initialInputMode = 'stdin';
   }
   if (initialInputFile) {
@@ -2976,7 +2976,7 @@ async function submitCreateInitialInput(
   const detection = tool.agent ? 'declared' : panelAgentDetection(panel) ?? 'detected';
 
   if (agent !== 'claude' && agent !== 'codex') {
-    const paste = (agent === 'opencode' || agent === 'pi') && isLongPrompt(text)
+    const paste = typesStartingMessage(agent) && isLongPrompt(text)
       && terminalPanelManager.isBracketedPasteEnabled(panel.id);
     logStartingMessage(panel.id, 'writing', { agent, detection, bytes: Buffer.byteLength(text, 'utf8'), submit: 'enter' });
     terminalPanelManager.writeToTerminal(panel.id, paste ? bracketedPaste(text) : text);
@@ -3083,9 +3083,10 @@ function shouldUseArgumentDelivery(tool: RunpaneResolvedTool): boolean {
   return Boolean(
     tool.initialInput &&
     tool.launchMode !== 'wrapped' &&
-    (tool.agent === 'claude' ||
-      tool.agent === 'cursor' ||
-      (tool.agent === 'codex' && !isSlashCommandInput(tool.initialInput))),
+    tool.agent &&
+    agentConfig(tool.agent)?.terminal.promptArgument &&
+    // Codex runs a slash command only when it is typed.
+    !(tool.agent === 'codex' && isSlashCommandInput(tool.initialInput)),
   );
 }
 
@@ -3950,8 +3951,9 @@ function isWaitConditionMatched(
       if (!screen.state.isCliPanel && !launched) return true;
       if (!screen.state.agentType) return false;
       if (screen.state.agentType === 'codex' && !hasConfiguredCodexScreen(screen.text)) return false;
-      // Pi draws its trust prompt and startup frames before its composer.
-      if (screen.state.agentType === 'pi' && detectAgentState(PI_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleIdle !== true) return false;
+      // An agent that is typed its starting message can draw a trust prompt or startup frames before its input box.
+      if (typesStartingMessage(screen.state.agentType)
+        && detectAgentState(getManifestForAgent(screen.state.agentType), { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleIdle !== true) return false;
       // A composer alone is enough for Claude; Codex also has a provisional one.
       return screen.state.isCliReady === true
         && (screen.composer.isPresent || (screen.state.agentType !== 'claude' && screen.state.agentType !== 'codex'));
@@ -4608,17 +4610,14 @@ async function runAgentDoctor(
 
   let sessionCapabilityOk = true;
   // Pane reopens each tab's conversation with this flag, which older builds lack.
-  const sessionFlag = agent === 'opencode' ? { flag: '--session', since: 'v2.0.19' }
-    : agent === 'pi' ? { flag: '--session-id', since: '0.76.0' }
-    : undefined;
+  const sessionFlag = agentConfig(agent)?.terminal.session;
   if (sessionFlag && executablePath) {
     const { label, install } = configuredAgent(agent);
-    const upgrade = `Upgrade ${label} to ${sessionFlag.since} or newer (${install.command}); Pane reopens each tab's conversation with ${sessionFlag.flag}.`;
+    const upgrade = `Upgrade ${label} to ${sessionFlag.minimumVersion} or newer (${install.command}); Pane reopens each tab's conversation with ${sessionFlag.flag}.`;
     try {
       const helpCommand = `${quoteAgentDoctorExecutable(executablePath, environment)} --help`;
       const result = await context.commandRunner.execAsync(helpCommand, repo.path, { timeout: 5_000, silent: true });
-      const flagLine = new RegExp(`^\\s*${sessionFlag.flag}(?:,|\\s|$)`, 'u');
-      sessionCapabilityOk = `${result.stdout}\n${result.stderr}`.split(/\r?\n/u).some(line => flagLine.test(line));
+      sessionCapabilityOk = `${result.stdout}\n${result.stderr}`.split(/\r?\n/u).some(line => line.trim().split(/[\s,]/u)[0] === sessionFlag.flag);
       checks.push({
         name: 'session-capability',
         ok: sessionCapabilityOk,
@@ -6598,8 +6597,14 @@ function assertResumableTool(tool: RunpaneResolvedTool, resume: string | undefin
   if (tool.agent === 'opencode' && !isValidOpenCodeSessionId(resume)) {
     throw new Error('OpenCode --resume must match the required ses_* format (^ses_[A-Za-z0-9]+$).');
   }
-  if (tool.agent === 'pi' && !isValidPiSessionId(resume)) {
-    throw new Error('Pi --resume must be a pi session id: letters, digits, ".", "_" and "-", starting and ending with a letter or digit.');
+  const session = tool.agent ? agentConfig(tool.agent)?.terminal.session : undefined;
+  if (!tool.agent || !session) return;
+  const label = configuredAgent(tool.agent).label;
+  if (!isAgentSessionId(tool.agent, resume)) {
+    throw new Error(`${label} --resume must be a ${label} session id, matching ${session.idPattern}.`);
+  }
+  if (session.paneChoosesId && !takesChosenSession(tool.command, tool.agent)) {
+    throw new Error(`--resume needs a plain ${label} command; this one picks its own conversation, runs a subcommand or uses shell syntax.`);
   }
 }
 

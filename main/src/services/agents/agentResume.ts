@@ -2,14 +2,14 @@ import { TerminalPanelState } from '../../../../shared/types/panels';
 import { effectiveCustomResume } from '../../../../shared/types/customCommandResume';
 import { CliAgentType } from './agentIdentity';
 import { isValidOpenCodeSessionId } from './opencodeLaunch';
-import { isValidPiSessionId } from './piLaunch';
+import { isAgentSessionId } from '../../../../shared/agents';
 
 /**
  * The resume id surfaced to the resume-sessions dialog. Claude's panel id was
  * its --session-id at launch; Codex and Cursor own their ids, so an uncaptured
  * id falls back to each CLI's own recovery entry point ('interactive' picker /
  * 'latest' chat). OpenCode resumes only a captured, validated session id, and
- * Pi only the id Pane gave it with `--session-id`.
+ * another agent with a session flag only an id of the form its config gives.
  * Custom resumes, including recognized Agent Farm commands, need a recorded id.
  */
 export function resolveResumeId(
@@ -29,9 +29,7 @@ export function resolveResumeId(
       return state.agentSessionId && isValidOpenCodeSessionId(state.agentSessionId)
         ? state.agentSessionId
         : undefined;
-    case 'pi':
-      return isValidPiSessionId(state.agentSessionId) ? state.agentSessionId : undefined;
     default:
-      return undefined;
+      return isAgentSessionId(agentType, state.agentSessionId) ? state.agentSessionId : undefined;
   }
 }
