@@ -83,6 +83,7 @@ function previewMeta(section: SetupPreviewSection, preview: SetupImportPreview):
   switch (section.id) {
     case 'customCommands':
     case 'terminalShortcuts':
+    case 'customLinks':
     case 'worktreeFileSync':
       return [
         section.added && `${section.added} new`,
