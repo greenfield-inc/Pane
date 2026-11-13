@@ -85,3 +85,23 @@ test('a phone browser tab goes back to its saved address when the host refuses t
   await page.getByTitle('Open localhost:5173').click();
   expect((await saved).postData()).toContain('"currentUrl":"http://localhost:5173"');
 });
+
+test('a phone asks the host for its ports each time a ports list comes on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route(`${PHONE_URL}/**`, route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><h1>Hello</h1>' }));
+  await openConnectedRemotePwa(page, {
+    ports: { host: 'MacBook Pro', ports: [{ port: 5173, pid: 1, process: 'node', group: 'pane-terminal', kind: 'web', phoneUrl: PHONE_URL }] },
+  });
+  const portsRead = () => page.waitForRequest(request => request.postData()?.includes('"ports:list"') ?? false);
+
+  const forNewTab = portsRead();
+  await page.getByRole('button', { name: 'Add tool' }).click();
+  await page.getByRole('menuitem', { name: /Browser/ }).click();
+  await forNewTab;
+
+  await page.getByTitle('Open localhost:5173').click();
+  await expect(page.getByRole('textbox', { name: 'Address' })).toHaveValue('localhost:5173/');
+  const forMenu = portsRead();
+  await page.getByRole('button', { name: 'Ports' }).click();
+  await forMenu;
+});

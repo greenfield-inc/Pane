@@ -40,7 +40,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [devToolsOpen, setDevToolsOpen] = useState(false);
   const [fileSession, setFileSession] = useState<{ panelId: string; partition: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
-  const ports = useListeningPorts();
+  const { snapshot: ports, refresh: refreshPorts } = useListeningPorts();
   // Null until the config loads: until then this desktop may be remote.
   const remoteMode = useConfigStore((state) => (state.config ? state.config.remoteDaemon?.client.mode === 'remote' : null));
   const isRemoteMode = remoteMode === true;
@@ -675,6 +675,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             width="auto"
             menuClassName="w-96"
             items={[]}
+            onOpenChange={open => { if (open) refreshPorts(); }}
             footer={({ close }) => (
               <PortsList
                 snapshot={ports}

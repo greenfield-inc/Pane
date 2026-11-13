@@ -282,7 +282,7 @@ export function RemotePwaApp() {
     [selectedPanels],
   );
   const selectedPanel = selectedPanels.find(panel => panel.id === selectedPanelId) ?? firstSupportedPanel(selectedPanels);
-  const listeningPorts = useRemoteListeningPorts(adapter);
+  const { snapshot: listeningPorts, refresh: refreshListeningPorts } = useRemoteListeningPorts(adapter);
 
   useEffect(() => {
     if (!selectedPanel || selectedPanel.type !== 'terminal') return;
@@ -1148,7 +1148,7 @@ export function RemotePwaApp() {
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
           >
             {selectedPanel.type === 'browser' && (
-              <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} />
+              <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} />
             )}
             {selectedPanel.type === 'explorer' && adapter && (
               <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} panelId={selectedPanel.id} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />
