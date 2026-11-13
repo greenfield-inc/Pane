@@ -636,7 +636,7 @@ test.describe('Settings', () => {
     await expect(content.getByText(/Saved pane-setup-2026-10-26\.json\. Left out deploy-prod because it looks like it contains a token\./)).toBeVisible();
     await expect(content.getByRole('button', { name: 'Show in Finder' })).toBeVisible();
     expect((await mock()).exports).toEqual([
-      ['agentPresets', 'customCommands', 'runScripts', 'skills', 'worktreeFileSync', 'appearance', 'preferences'],
+      ['agentPresets', 'customCommands', 'runScripts', 'skills', 'customLinks', 'worktreeFileSync', 'appearance', 'preferences'],
     ]);
 
     await content.getByRole('button', { name: 'Import…' }).click();
