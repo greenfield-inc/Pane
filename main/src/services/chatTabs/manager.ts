@@ -170,7 +170,8 @@ export class ChatTabManager {
   agentState(panelId: string): AgentState {
     const state = this.options.store.state(panelId);
     if (!state) return 'unknown';
-    return toAgentState(this.snapshot(panelId, state, this.tab(panelId), 0));
+    const tab = this.tab(panelId);
+    return publishedState(this.snapshot(panelId, state, tab, 0), tab);
   }
 
   /** The terminal sign-in the tab's agent advertised, when it runs as its own CLI. */
@@ -900,7 +901,7 @@ export class ChatTabManager {
     this.options.send('chat-tab:view', view);
     if (agentConfig(view.agent)?.chat?.legacyClients) this.options.send('chat-tab:state', view);
     this.options.onView?.(view);
-    const agentState = toAgentState(view);
+    const agentState = publishedState(view, tab);
     if (tab.published === agentState) return;
     const previous = tab.published;
     tab.published = agentState;
@@ -955,6 +956,12 @@ function heldWindow(held: ChatTabTranscript, limit: number): ChatTabTranscript {
 function withTurnTime(state: ChatPanelState, sessionId: string, turn: ChatTurnTime): NonNullable<ChatPanelState['turnTimes']> {
   const turns = state.turnTimes?.sessionId === sessionId ? state.turnTimes.turns : [];
   return { sessionId, turns: [...turns, turn].slice(-TURN_TIMES_LIMIT) };
+}
+
+/** A restart of a conversation on screen (a resume after pause) reads as idle, so the tab and sidebar do not flash a spinner. */
+function publishedState(view: ChatTabView, tab: Tab): AgentState {
+  if (view.status === 'starting' && tab.held && view.queue.length === 0) return 'idle';
+  return toAgentState(view);
 }
 
 function promptSize(body: Pick<ChatTabSend, 'text' | 'images'>): number {
