@@ -19,6 +19,11 @@ html.window-blurred *::after {
   transition: none !important;
 }
 
+/* The caret holds steady once nobody is typing (services/caretRest.ts). */
+html.caret-resting {
+  caret-animation: manual;
+}
+
 /* Ensure proper overflow handling */
 html, body, #root {
   height: 100%;
@@ -735,6 +740,12 @@ body.understory {
 
 .xterm .xterm-screen {
   margin: var(--pane-terminal-screen-offset-y) 0 0 var(--pane-terminal-padding-x);
+}
+
+/* xterm draws its own cursor, so the native caret of its hidden input never
+   shows and never needs to blink (services/caretRest.ts says why it costs). */
+.xterm .xterm-helper-textarea {
+  caret-animation: manual;
 }
 
 .pane-onboarding-auth-terminal .xterm {

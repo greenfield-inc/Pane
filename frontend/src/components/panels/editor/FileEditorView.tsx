@@ -10,6 +10,7 @@ import { isLightTheme, useTheme } from '../../../contexts/ThemeContext';
 import { debounce } from '../../../utils/debounce';
 import { subscribeToSessionGitChanges } from '../../../utils/session-git-events';
 import { useCommittedRef } from '../../../hooks/useCommittedRef';
+import { useCaretResting } from '../../../services/caretRest';
 import { NotebookPreview } from './NotebookPreview';
 import type { EditorPanelState } from '../../../../../shared/types/panels';
 import { fileExtension, getLanguageFromPath } from './fileKinds';
@@ -62,6 +63,7 @@ export function FileEditorView({
 
   const { theme } = useTheme();
   const isDarkMode = !isLightTheme(theme);
+  const caretResting = useCaretResting();
   const hasUnsavedChanges = fileContent !== originalContent;
 
   const ext = selectedFile ? fileExtension(selectedFile.path) : '';
@@ -321,6 +323,7 @@ export function FileEditorView({
                   fontSize: 14,
                   wordWrap: 'on',
                   automaticLayout: true,
+                  cursorBlinking: caretResting ? 'solid' : 'blink',
                 }}
                 language={getLanguageFromPath(selectedFile.path)}
               />

@@ -8,6 +8,8 @@ import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { hydrateRemoteTerminalSnapshot } from '../runtime/terminalSnapshot';
 import { terminalOutputByteLength } from '../../utils/terminalRestore';
+import { useCaretResting } from '../../services/caretRest';
+import { useCommittedRef } from '../../hooks/useCommittedRef';
 
 interface UseRemoteTerminalOptions {
   adapter: RemoteRuntimeAdapter;
@@ -37,6 +39,8 @@ export function useRemoteTerminal({
 }: UseRemoteTerminalOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const caretResting = useCaretResting();
+  const caretRestingRef = useCommittedRef(caretResting);
   const snapshotGenerationRef = useRef(0);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [statusText, setStatusText] = useState('Starting terminal...');
@@ -80,13 +84,18 @@ export function useRemoteTerminal({
     () => terminalRef.current === terminal && owns()), [adapter, panel.id]);
 
   useEffect(() => {
+    const terminal = terminalRef.current;
+    if (terminal) terminal.options.cursorBlink = !caretResting;
+  }, [caretResting]);
+
+  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const terminal = new Terminal({
       allowProposedApi: true,
       convertEol: true,
-      cursorBlink: true,
+      cursorBlink: !caretRestingRef.current,
       fontFamily: 'Menlo, Monaco, Consolas, "Liberation Mono", monospace',
       fontSize: 13,
       scrollback: 10_000,

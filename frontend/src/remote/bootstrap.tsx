@@ -4,6 +4,7 @@ import '../index.css';
 import '@xterm/xterm/css/xterm.css';
 import { THEME_CLASSES } from '../contexts/themeContextValue';
 import { RemotePwaApp } from './RemotePwaApp';
+import { startCaretRest } from '../services/caretRest';
 
 // The PWA has no theme switcher; it is fixed to light-rounded, which is what
 // `remote.html` declares and what its `theme-color` meta is set to. Taken from
@@ -18,6 +19,7 @@ let mounted = false;
 export function mountRemoteRenderer(): void {
   if (mounted) return;
   mounted = true;
+  startCaretRest();
 
   document.documentElement.classList.add(...REMOTE_THEME_CLASSES);
   document.body.classList.add(...REMOTE_THEME_CLASSES);
