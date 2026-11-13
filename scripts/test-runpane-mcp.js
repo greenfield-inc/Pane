@@ -1292,3 +1292,181 @@ test('the autopilot toolset serves Autopilot\'s reads and stack push, whose resu
     fs.rmSync(paneDir, { recursive: true, force: true });
   }
 });
+
+test('the chatgpt toolset adds a panel of the agents each chat started, with live status and open in Pane', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const chat = (id) => ({ 'openai/session': id });
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:panes:create': {
+        ok: true, repo: { id: 3, name: 'app', path: '/work/app', active: true, environment: 'linux', sessionCount: 1 },
+        items: [{
+          ok: true, index: 0, name: 'fix-login', pinned: true, sessionId: 'pane-7', panelId: 'panel-8', worktreePath: '/work/app-fix-login',
+          readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 900, state: { initialized: true } },
+          initialInput: { delivered: true, submitted: true, inputBytes: 17 },
+        }],
+      },
+      'runpane:panels:list': { ok: true, paneId: 'pane-7', panels: [
+        {
+          id: 'panel-8', panelId: 'panel-8', paneId: 'pane-7', type: 'terminal', title: 'Claude', active: true, isCliPanel: true, agentType: 'claude',
+          report: { state: 'blocked', question: 'Keep the old redirect for API clients?', reportedAt: '2026-11-11T00:00:00.000Z' },
+        },
+        { id: 'panel-9', panelId: 'panel-9', paneId: 'pane-7', type: 'terminal', title: 'Review', active: false, isCliPanel: true, agentType: 'codex' },
+        { id: 'panel-10', panelId: 'panel-10', paneId: 'pane-7', type: 'chat', title: 'Claude', active: false, agentType: 'claude' },
+      ] },
+      'runpane:panels:create': (args) => (args[0].type === 'chat'
+        ? { ok: true, paneId: args[0].paneId, panelId: 'panel-10', title: 'Claude', active: false, focused: false, tool: { title: 'Claude', command: 'claude', agent: 'claude' } }
+        : {
+          ok: true, paneId: args[0].paneId, panelId: 'panel-9', title: 'Review', active: true, focused: false, tool: { title: 'Codex', command: 'codex', agent: 'codex' },
+          readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 700, state: { initialized: true } },
+          initialInput: { delivered: true, submitted: true, verifiedSubmitted: true, inputBytes: 20 },
+        }),
+      'runpane:workspace:state': { ok: true, epoch: 'epoch-1', generation: 4, entries: [
+        { gen: 4, at: '2026-09-25T00:00:00.000Z', kind: 'agent.blocked', paneId: 'pane-7', paneName: 'fix-login', panelId: 'panel-8', source: 'agent', baseline: true },
+      ] },
+      'runpane:panels:screen': (args) => ({
+        ok: true, panelId: args[0].panelId, paneId: 'pane-7', source: 'scrollback', limit: args[0].limit, returnedLineCount: 3, hasMore: false,
+        text: 'Reading login.ts\n\nAllow edits to login.ts? (y/n)\n', state: { initialized: true }, composer: { isPresent: true, hasUndeliveredText: false },
+      }),
+      'runpane:panes:focus': (args) => ({ ok: true, paneId: args[0].paneId, panelId: args[0].panelId, focused: true }),
+      'runpane:panes:list': { ok: true, panes: [{
+        id: 'pane-7', paneId: 'pane-7', name: 'fix-login', status: 'running', worktreePath: '/work/app-fix-login', repoId: 3,
+        repoName: 'app', panelCount: 1, pinned: true, agentStatus: 'active', ownership: 'pane',
+      }] },
+      'sessions:get-git-status': { success: true, data: { gitStatus: {
+        state: 'ahead', additions: 3, deletions: 1, commitAdditions: 38, commitDeletions: 5,
+        prNumber: 41, prTitle: 'Return to the requested page after login', prState: 'OPEN', prUrl: 'https://github.com/acme/app/pull/41',
+      } } },
+      'runpane:panels:submit': (args) => ({
+        ok: true, panelId: args[0].panelId, paneId: 'pane-7', inputBytes: 1, enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
+        nextCommand: `runpane panels wait --panel ${args[0].panelId} --for ready --timeout-ms 30000 --json`, sentAt: '2026-09-25T00:00:01.000Z',
+      }),
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const { tools } = await client.listTools();
+        assert.deepEqual(tools.map((tool) => tool.name).sort(), [
+          'agents_card', 'agents_panel', 'agents_panel_focus', 'agents_panel_open', 'agents_panel_status',
+          'agents_send', 'agents_start', 'agents_status', 'autopilot_stack', 'autopilot_status', 'autopilot_waiting', 'docs_read', 'docs_search', 'doctor',
+          'inbox', 'links_create', 'panels_create', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list',
+          'sessions_list', 'sessions_overview', 'workspace_state',
+        ], 'ChatGPT gets the agent tools, reads of what waits on the person, and the panel; no raw keys, no answering');
+        const named = [...client.getInstructions().matchAll(/`([a-z]+_[a-z_]+)`/g)].map(([, name]) => name);
+        assert.ok(named.length > 5);
+        assert.deepEqual(named.filter((name) => !tools.some((tool) => tool.name === name)), [], 'the instructions name only tools ChatGPT has');
+        for (const tool of tools) {
+          for (const hint of ['readOnlyHint', 'destructiveHint', 'openWorldHint']) {
+            assert.ok([true, false].includes(tool.annotations?.[hint]), `${tool.name} must set ${hint}`);
+          }
+        }
+        assert.deepEqual(tools.find((tool) => tool.name === 'agents_start')._meta, { ui: { resourceUri: 'ui://pane/panel.html' } }, 'agent results render as inline cards');
+        const panel = tools.find((tool) => tool.name === 'agents_panel');
+        assert.equal(panel.title, 'Chat agents');
+        assert.deepEqual(panel._meta['openai/ui'].entrypoints, [{ type: 'thread' }, { type: 'global' }]);
+        assert.equal(panel.icons[0].mimeType, 'image/svg+xml');
+        const uri = panel._meta.ui.resourceUri;
+        for (const name of ['agents_panel_status', 'agents_card', 'agents_panel_open']) {
+          assert.deepEqual(tools.find((tool) => tool.name === name)._meta.ui.visibility, ['app'], `${name} is for the panel only`);
+        }
+
+        const { contents: [html] } = await client.readResource({ uri });
+        assert.equal(html.mimeType, 'text/html;profile=mcp-app');
+        assert.equal(html._meta.ui.domain, 'https://runpane.com');
+        assert.match(html.text, /<script>/);
+        assert.doesNotMatch(html.text, /<script[^>]+src=|<link[^>]+stylesheet/, 'the panel must be one self-contained file');
+
+        const empty = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
+        assert.deepEqual(empty.structuredContent.agents, []);
+
+        await client.callTool({ name: 'agents_start', arguments: {
+          repo: 'app', name: 'fix-login', agent: 'claude', prompt: 'Fix the login redirect', yes: true,
+        }, _meta: chat('chat-a') });
+
+        const shown = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
+        assert.equal(shown.isError, undefined, shown.content[0].text);
+        const card = {
+          paneId: 'pane-7', panelId: 'panel-8', name: 'fix-login', repo: 'app', status: 'blocked',
+          screen: ['Reading login.ts', 'Allow edits to login.ts? (y/n)'], link: 'pane://open?pane=pane-7&panel=panel-8',
+          report: { state: 'blocked', question: 'Keep the old redirect for API clients?' },
+          diff: { adds: 41, dels: 6 },
+          pr: { number: 41, draft: false, title: 'Return to the requested page after login', state: 'open', url: 'https://github.com/acme/app/pull/41' },
+        };
+        assert.deepEqual(shown.structuredContent.agents, [card]);
+        const otherChat = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-b') });
+        assert.deepEqual(otherChat.structuredContent.agents, []);
+
+        // The panel refreshes with the chat id from its first result, since the host may not tag app calls.
+        const refreshed = await client.callTool({ name: 'agents_panel_status', arguments: { chat: shown.structuredContent.chat } });
+        assert.equal(refreshed.structuredContent.agents[0].status, 'blocked');
+
+        // ChatGPT never answers a prompt on an agent's screen: typing into it would.
+        for (const target of [{ panel: 'panel-8' }, { pane: 'pane-7' }]) {
+          const refused = await client.callTool({ name: 'agents_send', arguments: { ...target, text: 'y', yes: true } });
+          assert.equal(refused.isError, true);
+          assert.match(refused.content[0].text, /showing a prompt.*nothing was sent/);
+          assert.deepEqual([refused.structuredContent.panelId, refused.structuredContent.delivered], ['panel-8', false]);
+        }
+
+        // The panel's Send reads `delivered` from the JSON, even when the hint names a tool in another toolset.
+        const unconfirmed = await client.callTool({ name: 'agents_send', arguments: { panel: 'panel-9', text: 'Also check the logout path', yes: true } });
+        assert.equal(unconfirmed.isError, true);
+        assert.equal(JSON.parse(unconfirmed.content[0].text).delivered, false);
+
+        // The model steers the panel to one agent; the panel's next refresh carries the choice.
+        const focused = await client.callTool({ name: 'agents_panel_focus', arguments: { pane: 'login fix' }, _meta: chat('chat-a') });
+        assert.deepEqual(focused.structuredContent.agent, card);
+        const steered = await client.callTool({ name: 'agents_panel_status', arguments: { chat: 'chat-a' } });
+        assert.equal(steered.structuredContent.focus, 'panel-8');
+        const stranger = await client.callTool({ name: 'agents_panel_focus', arguments: { pane: 'fix-login' }, _meta: chat('chat-b') });
+        assert.equal(stranger.isError, true);
+
+        // An inline card reads one agent by id.
+        const inline = await client.callTool({ name: 'agents_card', arguments: { paneId: 'pane-7', panelId: 'panel-8' } });
+        assert.deepEqual(inline.structuredContent.agent, card);
+
+        const opened = await client.callTool({ name: 'agents_panel_open', arguments: { paneId: 'pane-7', panelId: 'panel-8' } });
+        assert.equal(opened.isError, undefined, opened.content[0].text);
+
+        // A second agent opened as a tab in the same Pane gets its own card, named by its tab.
+        const tab = await client.callTool({ name: 'agents_start', arguments: { pane: 'pane-7', agent: 'codex', prompt: 'Review the fix', yes: true }, _meta: chat('chat-a') });
+        assert.equal(tab.isError, undefined, tab.content[0].text);
+        const both = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
+        assert.deepEqual(both.structuredContent.agents.map(({ panelId, name }) => ({ panelId, name })), [
+          { panelId: 'panel-8', name: 'fix-login' },
+          { panelId: 'panel-9', name: 'fix-login · Review' },
+        ]);
+
+        // A chat tab the chat opens joins its agents too.
+        const chatTab = await client.callTool({ name: 'panels_create', arguments: { pane: 'pane-7', agent: 'claude', chat: true, yes: true }, _meta: chat('chat-a') });
+        assert.equal(chatTab.isError, undefined, chatTab.content[0].text);
+        const three = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
+        assert.deepEqual(three.structuredContent.agents.map(({ panelId, name, chat }) => ({ panelId, name, chat })).at(-1), { panelId: 'panel-10', name: 'fix-login · Claude', chat: true });
+      }, { args: ['--toolsets', 'chatgpt'], env: { PANE_DIR: paneDir } });
+
+      const focus = requests.find((request) => request.channel === 'runpane:panes:focus');
+      assert.deepEqual(focus.args[0], { paneId: 'pane-7', panelId: 'panel-8', source: 'user' });
+      assert.deepEqual(requests.filter((request) => request.channel === 'runpane:panels:submit').map((request) => request.args[0].panelId), ['panel-9']);
+    });
+
+    // A restarted server still knows which agents the chat started, and shows an archived one as gone.
+    await withStubDaemon(paneDir, {
+      'runpane:panes:list': { ok: true, panes: [] },
+      'runpane:workspace:state': { ok: true, epoch: 'epoch-2', generation: 1, entries: [] },
+      'runpane:panels:list': { ok: true, paneId: 'pane-7', panels: [] },
+      'runpane:panels:screen': (args) => ({
+        ok: true, panelId: args[0].panelId, paneId: 'pane-7', source: 'scrollback', limit: args[0].limit, returnedLineCount: 0, hasMore: false,
+        text: '', state: { initialized: true }, composer: { isPresent: true, hasUndeliveredText: false },
+      }),
+    }, async () => {
+      await withMcpClient(async (client) => {
+        const shown = await client.callTool({ name: 'agents_panel', arguments: {}, _meta: chat('chat-a') });
+        assert.deepEqual(shown.structuredContent.agents.map(({ panelId, status }) => ({ panelId, status })), [
+          { panelId: 'panel-8', status: 'gone' },
+          { panelId: 'panel-9', status: 'gone' },
+          { panelId: 'panel-10', status: 'gone' },
+        ]);
+      }, { args: ['--toolsets', 'chatgpt'], env: { PANE_DIR: paneDir } });
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});

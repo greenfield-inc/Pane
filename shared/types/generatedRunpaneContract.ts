@@ -197,7 +197,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "admin"
+        "admin",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "doctorResult"
@@ -269,7 +270,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "repos"
+        "repos",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "repoListResult"
@@ -287,7 +289,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "repos"
+        "repos",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "repoAddRequest",
@@ -419,7 +422,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "paneListResult"
@@ -449,7 +453,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "workspaceStateResult"
@@ -634,7 +639,8 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "paneArchiveRequest",
@@ -758,7 +764,8 @@ export const RUNPANE_CONTRACT = {
       "additive": true,
       "toolsets": [
         "core",
-        "panels"
+        "panels",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "panelCreateRequest",
@@ -991,7 +998,8 @@ export const RUNPANE_CONTRACT = {
       },
       "toolsets": [
         "core",
-        "git"
+        "git",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "daemonActionResult"
@@ -1105,7 +1113,8 @@ export const RUNPANE_CONTRACT = {
       },
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "daemonActionResult"
@@ -1341,7 +1350,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "links"
+        "links",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "linkCreateResult"
@@ -1382,7 +1392,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "docs"
+        "docs",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "docsSearchResult"
@@ -1400,7 +1411,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "docs"
+        "docs",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "docsReadResult"
@@ -1420,7 +1432,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "agentTaskResult"
@@ -1438,7 +1451,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "agentStatusResult"
@@ -1457,7 +1471,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "agentSendResult"
@@ -1510,7 +1525,10 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "inboxListResult"
       ],
-      "localControl": true
+      "localControl": true,
+      "toolsets": [
+        "chatgpt"
+      ]
     },
     {
       "name": "inbox ack",
@@ -1533,7 +1551,8 @@ export const RUNPANE_CONTRACT = {
         "runpane autopilot status [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "autopilot"
+        "autopilot",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "autopilotStatusResult"
@@ -1547,7 +1566,8 @@ export const RUNPANE_CONTRACT = {
         "runpane autopilot waiting [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "autopilot"
+        "autopilot",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "autopilotWaitingResult"
@@ -1561,7 +1581,8 @@ export const RUNPANE_CONTRACT = {
         "runpane autopilot stack [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "autopilot"
+        "autopilot",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "autopilotStackResult"
@@ -1640,7 +1661,8 @@ export const RUNPANE_CONTRACT = {
         "runpane sessions list [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "sessions"
+        "sessions",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "sessionListResult"
@@ -1751,7 +1773,8 @@ export const RUNPANE_CONTRACT = {
         "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "sessions"
+        "sessions",
+        "chatgpt"
       ],
       "jsonSchemas": [
         "sessionOverviewResult"

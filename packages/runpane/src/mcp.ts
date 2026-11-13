@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
+import { callChatPanelTool, CHAT_TOOLSET, CHATGPT_INSTRUCTIONS, CHATGPT_TOOL_NOTES, chatIdOf, chatPanelResource, chatPanelTools, INLINE_CARD_TOOLS, inlineCardMeta, readChatPanel, recordStartedAgent, refusePromptAnswer, STARTS_AGENT } from './chatPanel';
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
@@ -106,15 +107,22 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
   }
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
   const rewrite = (text: string) => rewriteCliHints(text, allTools, toolsByName);
+  const chatPanel = options.toolsets?.includes(CHAT_TOOLSET) ?? false;
+  const panelTools = new Set(chatPanel ? chatPanelTools.map((tool) => tool.name) : []);
   const listResult = {
-    tools: tools.map((tool) => ({
-      name: tool.name,
-      title: tool.title,
-      description: rewrite(tool.description),
-      inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
-      annotations: tool.annotations,
-    })),
+    tools: [
+      ...tools.map((tool) => ({
+        name: tool.name,
+        title: tool.title,
+        description: [rewrite(tool.description), chatPanel ? CHATGPT_TOOL_NOTES.get(tool.name) : undefined].filter(Boolean).join('\n'),
+        inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema,
+        annotations: tool.annotations,
+        // With the panel toolset on, agent results render as an inline Pane card.
+        _meta: chatPanel && INLINE_CARD_TOOLS.has(tool.name) ? inlineCardMeta : undefined,
+      })),
+      ...(chatPanel ? chatPanelTools : []),
+    ],
   };
 
   const createServer = () => {
@@ -122,12 +130,17 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       { name: 'pane', title: 'Pane', version: getWrapperVersion() },
       {
         capabilities: { tools: {}, resources: {} },
-        instructions: INSTRUCTIONS,
+        instructions: chatPanel ? CHATGPT_INSTRUCTIONS : INSTRUCTIONS,
         cacheHints: { 'tools/list': LIST_CACHE, 'resources/list': LIST_CACHE },
       },
     );
     server.setRequestHandler('tools/list', () => listResult);
-    server.setRequestHandler('tools/call', (request, ctx) => {
+    server.setRequestHandler('tools/call', async (request, ctx) => {
+      const chat = () => chatIdOf(decodeBoundary(request.params._meta ?? {}, boundary.jsonObject));
+      if (panelTools.has(request.params.name)) {
+        const input = decodeBoundary(request.params.arguments ?? {}, boundary.jsonObject);
+        return callChatPanelTool(request.params.name, input, chat());
+      }
       const tool = toolsByName.get(request.params.name);
       if (!tool) {
         const other = allTools.find((candidate) => candidate.name === request.params.name);
@@ -141,6 +154,10 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       } catch (error) {
         return errorResult(`Invalid arguments for ${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
+      if (chatPanel && tool.name === 'agents_send') {
+        const refused = await refusePromptAnswer(input);
+        if (refused) return refused;
+      }
       const clientName = decodeBoundary(ctx.mcpReq.envelope, clientInfoEnvelope)?.['io.modelcontextprotocol/clientInfo']?.name
         ?? server.getClientVersion()?.name ?? '';
       const progressToken = ctx.mcpReq._meta?.progressToken;
@@ -149,17 +166,25 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
         progress += 1;
         ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress } }).catch(() => {});
       }, PROGRESS_INTERVAL_MS);
-      return callTool(tool, input, ctx.mcpReq.signal, rewrite, notifyEnv(clientName)).finally(() => clearInterval(ticker));
+      const result = await callTool(tool, input, ctx.mcpReq.signal, rewrite, notifyEnv(clientName)).finally(() => clearInterval(ticker));
+      // A start that created a Pane or tab but could not confirm the prompt still started an agent.
+      const started = result.structuredContent ?? parseJsonObject(result.content[0]?.text ?? '');
+      if (chatPanel && STARTS_AGENT.has(tool.name) && started) recordStartedAgent(chat(), started);
+      return result;
     });
     server.setRequestHandler('resources/list', () => ({
-      resources: loadDocs(undefined).map((doc) => ({
-        uri: docUri(doc.path),
-        name: doc.path,
-        title: doc.title,
-        mimeType: 'text/markdown',
-      })),
+      resources: [
+        ...(chatPanel ? [chatPanelResource] : []),
+        ...loadDocs(undefined).map((doc) => ({
+          uri: docUri(doc.path),
+          name: doc.path,
+          title: doc.title,
+          mimeType: 'text/markdown',
+        })),
+      ],
     }));
     server.setRequestHandler('resources/read', (request) => {
+      if (chatPanel && request.params.uri === chatPanelResource.uri) return readChatPanel(request.params.uri);
       const doc = loadDocs(undefined).find((entry) => docUri(entry.path) === request.params.uri);
       if (!doc) {
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, `No Pane doc at ${request.params.uri}. List them with resources/list, or search with docs_search.`);
@@ -202,7 +227,8 @@ function rewriteCliHints(text: string, allTools: readonly McpTool[], served: Rea
     const inputs = [...spoken.slice(tool.command.length).matchAll(/--([a-z][a-z0-9-]*)(?:[ =]("[^"]*"|<[^>]+>|[^\s-]\S*))?/g)]
       .filter(([, flag]) => flag !== 'json')
       .map(([, flag, value]) => `${flag.replace(/-([a-z0-9])/g, (_c, letter: string) => letter.toUpperCase())}: ${value ?? 'true'}`);
-    const where = served.has(tool.name) ? '' : ` (in the "${tool.toolsets[0] ?? 'all'}" toolset)`;
+    // No double quotes: the hint lands inside JSON strings.
+    const where = served.has(tool.name) ? '' : ` (in the ${tool.toolsets[0] ?? 'all'} toolset)`;
     return `\`${tool.name}\`${inputs.length > 0 ? ` with ${inputs.join(', ')}` : ''}${where}`;
   });
 }
