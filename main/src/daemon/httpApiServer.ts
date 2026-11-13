@@ -110,6 +110,11 @@ function glassesIdentity(client: NonNullable<GlassesAdmission['client']>): Admit
   return { remoteClientId: client.id, remoteClientTokenHash: client.tokenHash, workspaceCredentials: null, glassesOrigin: client.origin };
 }
 
+/** Glasses streams get only the glasses channels; every other stream gets every daemon event. */
+function receives(client: ConnectedRemoteEventClient, channel: string): boolean {
+  return client.glassesOrigin === null || GLASSES_EVENT_CHANNELS.has(channel);
+}
+
 interface WorkspaceCredentials {
   login: string | string[] | undefined;
   authorization: string | string[] | undefined;
@@ -328,7 +333,7 @@ export class PaneRemoteHttpApiServer {
           };
 
           for (const [clientConnectionId, client] of this.eventClients) {
-            if (client.glassesOrigin !== null && !GLASSES_EVENT_CHANNELS.has(channel)) {
+            if (!receives(client, channel)) {
               continue;
             }
             if (!this.isStillAdmitted(client)) {
@@ -354,6 +359,11 @@ export class PaneRemoteHttpApiServer {
 
   getEventSink(): PaneEventSink {
     return this.daemonEventSink;
+  }
+
+  /** Whether a connected event stream receives `channel`. */
+  hasEventSubscriber(channel: string): boolean {
+    return isPaneDaemonEventChannel(channel) && [...this.eventClients.values()].some(client => receives(client, channel));
   }
 
   getConnectedClients(): RemoteDaemonConnectedClient[] {

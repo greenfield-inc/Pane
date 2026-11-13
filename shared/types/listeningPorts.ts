@@ -10,6 +10,9 @@ export type ListeningPortGroup = 'pane-terminal' | 'other' | 'system' | 'pane';
 
 export const LISTENING_PORT_GROUP_ORDER: readonly ListeningPortGroup[] = ['pane-terminal', 'other', 'system', 'pane'];
 
+/** How often a shown ports list is read again while the host's terminals are quiet. */
+export const PORTS_QUIET_INTERVAL_MS = 60_000;
+
 /** `web` answered an HTTP request when first seen; `tcp` did not. */
 export type ListeningPortKind = 'web' | 'tcp';
 

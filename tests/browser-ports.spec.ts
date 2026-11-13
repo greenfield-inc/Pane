@@ -66,6 +66,31 @@ test('opening the Ports menu lists a port that started after the tab opened', as
   await expect(page.getByTitle('Open localhost:5175')).toBeVisible();
 });
 
+test('an open browser tab counts a port that started elsewhere within a minute', async ({ page }) => {
+  await page.clock.install();
+  await openBrowserPanel(page, 'http://localhost:5173');
+  await answerConnectionState(page, 'local');
+  await answerPortsList(page, snapshot(5173));
+  const trigger = page.getByRole('button', { name: /Ports/ });
+  await expect(trigger).toContainText('1');
+
+  await answerPortsList(page, snapshot(5173, 5175));
+  await page.clock.fastForward(60_000);
+  await expect(trigger).toContainText('2');
+});
+
+test('an open browser tab reads ports again when the window comes back on screen', async ({ page }) => {
+  await openBrowserPanel(page, 'http://localhost:5173');
+  await answerConnectionState(page, 'local');
+  await answerPortsList(page, snapshot(5173));
+  const trigger = page.getByRole('button', { name: /Ports/ });
+  await expect(trigger).toContainText('1');
+
+  await answerPortsList(page, snapshot(5173, 5175));
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(trigger).toContainText('2');
+});
+
 test('the Ports menu works from the keyboard', async ({ page }) => {
   await openBrowserPanel(page, 'http://localhost:5173');
   await answerConnectionState(page, 'local');

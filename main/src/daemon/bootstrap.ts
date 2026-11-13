@@ -441,6 +441,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       })),
     // Chat tab agents talk over stdio, not a PTY; their updates count as output too.
     lastOutputAt: () => Math.max(getChatTabManager().latestOutputAt(), ...ptyManagers().map(manager => manager.latestOutputAt())),
+    // Remote clients over the paired or the Tailscale transport. This desktop's own ports lists
+    // ask for a read while they are on screen (useListeningPorts).
+    watched: () => [remoteTransportController.getServer(), workspaceHost].some(server => server?.hasEventSubscriber('ports:changed')),
     onChange: snapshot => {
       latestPorts = snapshot;
       publishPorts();
