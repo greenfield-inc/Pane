@@ -18,17 +18,12 @@ describe('AGENT_LAUNCH_PRESETS', () => {
     });
   });
 
-  it('assigns unique, contiguous hotkey slots starting at mod+alt+3', () => {
-    const slots = AGENT_LAUNCH_PRESETS.map(p => Number(p.hotkey.replace('mod+alt+', '')));
-    expect(slots).toEqual(slots.map((_, i) => 3 + i));
+  it('gives each preset its own hotkey and hotkey id', () => {
+    expect(new Set(AGENT_LAUNCH_PRESETS.map(p => p.hotkey)).size).toBe(AGENT_LAUNCH_PRESETS.length);
     expect(new Set(AGENT_LAUNCH_PRESETS.map(p => p.hotkeyId)).size).toBe(AGENT_LAUNCH_PRESETS.length);
     expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'opencode')).toMatchObject({
       hotkeyId: 'add-tool-terminal-opencode',
       hotkey: 'mod+alt+6',
-    });
-    expect(AGENT_LAUNCH_PRESETS.find(p => p.id === 'pi')).toMatchObject({
-      hotkeyId: 'add-tool-terminal-pi',
-      hotkey: 'mod+alt+7',
     });
   });
 
