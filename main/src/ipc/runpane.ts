@@ -1048,6 +1048,8 @@ export function registerRunpaneHandlers(
         throw new Error('Task queue not initialized');
       }
 
+      const associateSession = normalized.associateSession
+        ?? (normalized.noAssociate ? undefined : await callerSessionId(services, normalized.callerPanelId));
       const items = await mapSequentially(
         normalized.panes,
         async (item, index) => {
@@ -1056,7 +1058,7 @@ export function registerRunpaneHandlers(
             waitReady: normalized.waitReady,
             readyTimeoutMs: normalized.readyTimeoutMs,
             activate: resolvePaneCreateActivation(normalized, item),
-            associateSession: normalized.associateSession,
+            associateSession,
             expectReport: normalized.expectReport,
             source: normalized.source,
             callerPanelId: normalized.callerPanelId,
@@ -5055,6 +5057,7 @@ function parsePaneCreateRequest(value: PaneCommandValue): RunpanePaneCreateReque
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
     callerPanelId: optionalString(value.callerPanelId)?.trim() || undefined,
     associateSession: optionalString(value.associateSession)?.trim() || undefined,
+    noAssociate: optionalBoolean(value.noAssociate),
     expectReport: optionalBoolean(value.expectReport),
   };
 }
@@ -5105,6 +5108,12 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
     associateSession: optionalString(value.associateSession)?.trim() || undefined,
   };
+}
+
+/** The Session the calling tab's Pane belongs to, so a Pane created from inside a Session joins it. */
+async function callerSessionId(services: AppServices, callerPanelId: string | undefined): Promise<string | undefined> {
+  const paneId = callerPanelId ? panelManager.getPanel(callerPanelId)?.sessionId : undefined;
+  return paneId ? services.orchestrationSessionManager?.sessionIdForPane(paneId, callerPanelId) : undefined;
 }
 
 /**

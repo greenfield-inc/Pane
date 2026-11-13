@@ -5749,6 +5749,27 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it("joins a Pane created from a tab in a Session's Pane to that Session, unless noAssociate", async () => {
+    vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+    vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+    const callerTab = { ...terminalPanel, id: 'worker-tab', sessionId: 'worker-pane' };
+    vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) => (panelId === callerTab.id ? callerTab : undefined));
+    const associate = vi.fn(async () => ({}));
+    const sessionIdForPane = vi.fn(async (paneId: string) => (paneId === 'worker-pane' ? 'session-a' : undefined));
+    // SAFETY: The handler only calls associate and sessionIdForPane on the Sessions manager.
+    const registry = createRegistry(createServices({ orchestrationSessionManager: { associate, sessionIdForPane } as never }));
+    const request = { repo: { id: project.id }, callerPanelId: callerTab.id, panes: [{ name: 'csv-export', tool: { agent: 'codex' } }] };
+
+    const joined = await registry.invoke('runpane:panes:create', [request]);
+    expect(associate).toHaveBeenCalledWith({ sessionId: 'session-a' }, { paneId: session.id });
+    expect(joined).toMatchObject({ items: [{ ok: true, association: { sessionId: 'session-a', ok: true } }] });
+
+    associate.mockClear();
+    const optedOut = await registry.invoke('runpane:panes:create', [{ ...request, noAssociate: true }]);
+    expect(associate).not.toHaveBeenCalled();
+    expect(optedOut).toMatchObject({ items: [expect.not.objectContaining({ association: expect.anything() })] });
+  });
+
   describe('panes create --branch', () => {
     function branchServices(existingBranches: string[] = [], paneRows: Array<{ id: string; name: string; worktree_path: string }> = []): AppServices {
       const repoPath = createTempGitRepo('branch-repo');

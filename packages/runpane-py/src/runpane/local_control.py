@@ -2212,6 +2212,7 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         apply_pane_focus_options(parsed, payload)
         if parsed.no_associate:
             payload.pop("associateSession", None)
+            payload["noAssociate"] = True
         else:
             payload.update(optional_value("associateSession", resolve_associate_session(parsed)))
         payload.pop("callerPanelId", None)
@@ -2248,6 +2249,7 @@ def build_pane_create_request(parsed: Any) -> Dict[str, Any]:
         **optional_value("source", parsed.source),
         **optional_value("callerPanelId", resolve_caller_panel_id()),
         **optional_value("associateSession", resolve_associate_session(parsed)),
+        **optional_value("noAssociate", True if parsed.no_associate else None),
     }
 
 

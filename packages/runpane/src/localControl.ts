@@ -314,6 +314,7 @@ interface PaneCreateRequest {
   /** The calling tab ($PANE_PANEL_ID); Pane records it as the opener of the tabs this creates. */
   callerPanelId?: string;
   associateSession?: string;
+  noAssociate?: boolean;
   expectReport?: boolean;
 }
 
@@ -1184,6 +1185,7 @@ interface PaneCreateRequestInput {
   focus?: boolean;
   source?: 'user' | 'agent';
   associateSession?: string;
+  noAssociate?: boolean;
 }
 
 interface PaneAdoptRequestInput extends Omit<PaneAdoptRequest, 'panes'> {
@@ -2245,6 +2247,7 @@ const paneCreateRequestInputSchema: BoundarySchema<PaneCreateRequestInput> = bou
   focus: boundary.optional(boundary.boolean),
   source: boundary.optional(boundary.enumeration('user', 'agent')),
   associateSession: boundary.optional(boundary.string),
+  noAssociate: boundary.optional(boundary.boolean),
 });
 const paneAdoptRequestInputSchema: BoundarySchema<PaneAdoptRequestInput> = boundary.object({
   repo: repoSelectorSchema,
@@ -4566,6 +4569,7 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
     }));
     applyPaneFocusOptions(parsed, request);
     request.associateSession = parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? request.associateSession;
+    if (parsed.noAssociate) request.noAssociate = true;
     request.callerPanelId = resolveCallerPanelId();
     return request;
   }
@@ -4602,6 +4606,7 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
     source,
     callerPanelId: resolveCallerPanelId(),
     associateSession: resolveAssociateSession(parsed),
+    noAssociate: parsed.noAssociate || undefined,
   };
 
   return request;
