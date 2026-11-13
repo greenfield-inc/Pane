@@ -53,7 +53,7 @@ const STATUS_BY_KIND = new Map<string, AgentStatus>([
 /**
  * `agents start`: start an agent on a task and return ids and a link.
  * With `--pane <id>` the agent opens as a new tab in that existing Pane (same worktree and branch);
- * without it, Pane creates a new Pane for new work. 1 feature = 1 worktree = 1 branch = 1 Pane.
+ * without it, Pane creates a new Pane for new work. One Pane per feature.
  */
 export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
   if (!parsed.initialInput) throw new Error('runpane agents start requires --prompt <task>.');

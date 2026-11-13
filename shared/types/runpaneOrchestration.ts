@@ -1014,6 +1014,15 @@ export interface RunpanePaneArchiveDryRunResult {
   forced: boolean;
   safetyCheck: RunpanePaneArchiveSafetyCheck;
   blocked?: RunpanePaneArchiveBlockReason;
+  scratch?: RunpanePaneScratch;
+}
+
+/** The Pane's `$PANE_SCRATCH_DIR` with everything in it, which archive deletes. */
+export interface RunpanePaneScratch {
+  path: string;
+  bytes: number;
+  /** For scratch under the Pane directory: when archive retention deletes it. Absent: deleted with the worktree. */
+  deletedAt?: string;
 }
 
 export type RunpanePaneArchiveResult =
@@ -1047,6 +1056,7 @@ export interface RunpanePaneArchiveBulkItem {
   worktreeCleanup?: RunpaneWorktreeCleanupState;
   trashDeletion?: RunpaneWorktreeTrashDeletion;
   worktreePath?: string;
+  scratch?: RunpanePaneScratch;
 }
 
 export interface RunpanePaneArchiveBulkResult {

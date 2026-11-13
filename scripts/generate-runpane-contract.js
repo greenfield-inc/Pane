@@ -282,6 +282,11 @@ function validateAgentContext(contract, commandNames) {
       throw new Error(`agentContext.brief.tools references unknown command "${tool.name}"`);
     }
   }
+  for (const [name, part] of Object.entries(context.intro ?? {})) {
+    if (part.sentences.filter((sentence) => sentence === '{approvals}').length !== 1) {
+      throw new Error(`agentContext.intro.${name}.sentences must contain "{approvals}" exactly once`);
+    }
+  }
 }
 
 function header(commentStart) {
@@ -410,7 +415,9 @@ function renderMarkdown(contract) {
     lines.push(`- \`${tool.name}\`: ${tool.summary}`);
   }
   lines.push('');
-  lines.push('Managed AGENTS.md block body:', '', fenced(contract.agentContext.managedBlock, 'md'), '');
+  const paneAndTabRules = contract.agentContext.workspaceRules.filter((rule) => rule.startsWith('Pane:') || rule.startsWith('Tab:')).join(' ');
+  const managedBlock = contract.agentContext.managedBlock.map((line) => line.replace('{{paneAndTabRules}}', paneAndTabRules));
+  lines.push('Managed AGENTS.md block body:', '', fenced(managedBlock, 'md'), '');
 
   lines.push('## Wrapper Flags', '');
   lines.push('These flags are consumed by the wrapper:', '', fenced(flagLines(contract.flags.wrapper)), '');

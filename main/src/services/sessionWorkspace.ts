@@ -7,6 +7,7 @@ import { DEFAULT_SESSION_PROFILE, PANE_CAPABILITY_CONTEXT } from '../../../share
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import { keepSessionTidySection } from './sessionTidyRules';
 import { APPROVALS_RULES } from './approvalsRules';
+import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 
 const START = '<!-- pane-session-context:start -->';
 const END = '<!-- pane-session-context:end -->';
@@ -195,7 +196,7 @@ function delegationRules(sessionId: string, record?: OrchestrationSessionRecord)
     : path.join(appDirectory, 'skills', 'pane-chat', 'runtime-context.md');
   return `## Reaching Pane and delegating work
 At the start of each task that uses Pane, run runpane doctor --json --pane-dir "${appDirectory}". Pane terminals put runpane on PATH; if it does not resolve, use "$PANE_RUNPANE_BIN", then follow ${runtimeContext} for other ways to reach this Pane install.
-1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. First find the work's Pane with runpane panes list --json (match the PR's head branch against each worktree's current branch), and add a tab there when it exists. Create a Pane with runpane panes create only when the branch has no Pane yet (each new Pane creates a worktree), and run every later agent for it as a new tab in that Pane with runpane panels create --pane <id>, never a new Pane. Panes you create or adopt here are associated with this Session automatically; confirm with runpane sessions overview --session ${sessionId} --json, and use runpane sessions associate for existing Panes.
+${paneAndTabRules()} Panes you create or adopt here are associated with this Session automatically; confirm with runpane sessions overview --session ${sessionId} --json, and use runpane sessions associate for existing Panes.
 Never substitute plain git worktrees or built-in or background subagents for work delegated to a Pane. If runpane cannot reach Pane, stop and tell the user what failed.
 Read ${guide} before coordinating Panes for the first time in a conversation. Follow its pane-orchestration guide for delivery, completion waits, and recovery.
 ## Orchestrator mode

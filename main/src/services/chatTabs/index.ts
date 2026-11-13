@@ -99,7 +99,7 @@ export function getChatTabManager(): ChatTabManager {
     launcher: scriptedAgentLauncher() ?? new AgentChatLauncher({
       secrets: chatTabSecrets,
       registry: { resolve: agent => getAgentRegistry().resolve(agent) },
-      context: { unsupportedHost: panel => context.unsupportedHost(panel), projectEnv: panel => context.projectEnv(panel) },
+      context: { unsupportedHost: panel => context.unsupportedHost(panel), projectEnv: panel => context.projectEnv(panel), scratchDirectory: panel => context.scratchDirectory?.(panel) ?? Promise.resolve(undefined) },
       profiles: { resolve: (panel, state, env) => {
         if (!profiles) throw new PaneError('CHAT_PROFILE_UNSUPPORTED', 'This Pane cannot start Agent Farm profiles in chat tabs yet.', 'Start the profile in a terminal tab.');
         return profiles.resolve(panel, state, env);

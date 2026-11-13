@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from .generated_contract import RUNPANE_CONTRACT
 from .workspaces import read_workspace_summary
+from .daemon_client import resolve_pane_directory
+from .pane_intro import pane_intro, render_pane_intro
 
 MAX_COMMAND_CANDIDATES = 5
 
@@ -40,6 +42,8 @@ def build_agent_context_result(command_name: Optional[str] = None, pane_dir: Opt
         "ok": True,
         "mode": "brief",
         "source": "runpane-contract",
+        "intro": pane_intro(resolve_pane_directory(pane_dir)),
+        "workspaceRules": RUNPANE_CONTRACT["agentContext"]["workspaceRules"],
         "summary": brief["summary"],
         "rules": brief["rules"],
         "tools": brief["tools"],
@@ -121,6 +125,8 @@ def normalize_command_name(command_name: str) -> str:
 def render_brief(result: Dict[str, Any]) -> str:
     lines = [
         RUNPANE_CONTRACT["agentContext"]["brief"]["title"],
+        "",
+        render_pane_intro(result["intro"], result["workspaceRules"]),
         "",
         result["summary"],
         "",

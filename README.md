@@ -122,7 +122,7 @@ Each of these is a small thing. Together they compound fast.
 | **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, reads local orchestration instructions, and can coordinate Claude, Codex, Cursor, OpenCode, or Pi across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
 | **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
 | **Pane Workspaces** | Let an agent on one of your machines read files, run commands, and drive Pane on another over Tailscale. Hand off a task with its branch and a written note; a handoff to the same agent continues your own session there. | [Workspaces](#pane-workspaces) · [Handoff](#hand-off-a-task) |
-| **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, open a Pane for each new issue, and add agent tabs to existing Panes for review and fixes (1 feature = 1 worktree = 1 branch = 1 Pane). Claude Code, Codex, and Cursor get the same commands as MCP tools. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
+| **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, open a Pane for each new issue, and add agent tabs to existing Panes for review and fixes (one Pane per feature). Claude Code, Codex, and Cursor get the same commands as MCP tools. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
 | **Approvals** | Agents ask you through the `notify` MCP tool instead of waiting in their terminal. Inside Pane, an Approvals row in the sidebar opens everything that waits on you, newest first, or by Session or project, beside that Session's live tabs; over other apps a strip shows the question, and one click sends the answer back as the tool's result. ⌃⇧Space answers the whole queue by keyboard. In a Session, workers relay to their orchestrator, which posts for them. A Pane desktop shows the questions of every machine it has saved, and your phone gets an alert. | [Approvals](docs/PANE_NOTIFY.md) |
 | **Pane secrets** | An agent asks you for an API key on a masked card, then runs its command with `runpane secrets exec`; the value never enters chat. Secrets are shared by every agent and synced to every machine you have saved, and Project Settings variables can point at them. | [Pane secrets](docs/PANE_SECRETS.md) |
 | **Pane on Even G2 glasses** | See every Notify card from all your computers on Even Realities G2 glasses, answer with the R1 ring or your voice, and open any Pane's live terminal to read it and dictate into it. Pair once from the Pane phone app. | [Even G2 glasses](docs/EVEN_G2_GLASSES.md) |
@@ -460,6 +460,13 @@ WSL worktrees retain the existing Git cleanup route without restart recovery.
 Unsupported native paths fail before archiving. A CLI wait timeout does not
 cancel a persisted job. Individual filesystem calls are awaited; batch budgets
 bound work between yields, not the time an operating-system call can take.
+
+Agents put scratch files in `$PANE_SCRATCH_DIR`, which archive deletes with the
+Pane; on the main checkout, an adopted worktree or in a WSL project it is kept
+14 days first.
+Archived Session folders are also kept 14 days. Agent logs inside either are
+moved to `<pane-dir>/agent-logs/` for Usage & Limits. See
+[The scratch folder](docs/SESSIONS.md#the-scratch-folder).
 
 Leaderboard submissions use the selected runtime's last 30 days of agent usage,
 matching the Usage page's source. When connected to a remote backend, Pane submits that

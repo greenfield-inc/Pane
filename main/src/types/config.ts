@@ -104,6 +104,8 @@ export interface AppConfig {
   // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
+  // Days Pane keeps archived Session folders and Pane-owned scratch before deleting them (default ARCHIVE_RETENTION_DAYS)
+  archiveRetentionDays?: number;
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
@@ -265,6 +267,7 @@ export interface UpdateConfigRequest {
   resumePausedOnOpen?: boolean;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
+  archiveRetentionDays?: number;
   appearanceMode?: AppearanceMode;
   theme?: Theme;
   systemLightTheme?: Theme;

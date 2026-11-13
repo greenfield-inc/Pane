@@ -691,6 +691,14 @@ interface PaneArchiveBulkItem {
   worktreeCleanup?: WorktreeCleanupState;
   trashDeletion?: WorktreeTrashDeletion;
   worktreePath?: string;
+  scratch?: PaneScratch;
+}
+
+/** `$PANE_SCRATCH_DIR` with everything in it, which archive deletes. */
+interface PaneScratch {
+  path: string;
+  bytes: number;
+  deletedAt?: string;
 }
 
 interface PaneArchiveBulkResult {
@@ -714,6 +722,7 @@ interface PaneArchiveDryRunResult {
   forced: boolean;
   safetyCheck: PaneArchiveSafetyCheck;
   blocked?: PaneArchiveBlockedResult['blocked'];
+  scratch?: PaneScratch;
 }
 
 type PaneArchiveResult = PaneArchiveSuccessResult | PaneArchiveBlockedResult | PaneArchiveDryRunResult;
@@ -1298,6 +1307,7 @@ const initialInputSchema: BoundarySchema<InitialInputDeliveryResult> = boundary.
   })),
   nextCommand: boundary.optional(boundary.string),
 });
+const paneScratchSchema: BoundarySchema<PaneScratch> = boundary.object({ path: boundary.string, bytes: boundary.number, deletedAt: boundary.optional(boundary.string) });
 const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.object({
   performed: boundary.boolean,
   hasUncommittedChanges: boundary.optional(boundary.boolean),
@@ -1813,6 +1823,7 @@ const paneArchiveResultSchema: BoundarySchema<PaneArchiveResult> = boundary.unio
       message: boundary.string,
       safetyCheck: archiveSafetySchema,
     })),
+    scratch: boundary.optional(paneScratchSchema),
   }),
   boundary.object({
     ok: boundary.boolean,
@@ -1867,6 +1878,7 @@ const paneArchiveBulkResultSchema: BoundarySchema<PaneArchiveBulkResult> = bound
     worktreeCleanup: boundary.optional(worktreeCleanupSchema),
     trashDeletion: boundary.optional(trashDeletionSchema),
     worktreePath: boundary.optional(boundary.string),
+    scratch: boundary.optional(paneScratchSchema),
   })),
 });
 const panePinResultSchema: BoundarySchema<PanePinResult> = boundary.object({
@@ -5160,6 +5172,7 @@ function printPaneArchiveResult(result: PaneArchiveResult): void {
       console.log(`Safety: ${result.blocked.message}`);
     }
     printArchiveCommitEvidence(result.safetyCheck);
+    if (result.scratch) console.log(describeScratch(result.scratch));
     return;
   }
   if (!('archived' in result)) {
@@ -5191,8 +5204,20 @@ function printPaneArchiveBulkResult(result: PaneArchiveBulkResult): void {
       const trash = item.trashDeletion === 'pending' ? ', files deleting in background' : '';
       const cleanup = item.worktreeCleanup ? ` worktree ${item.worktreeCleanup}${trash}` : '';
       console.log(`  ${item.outcome} ${label}${merged}${cleanup}`);
+      if (item.scratch) console.log(`    ${describeScratch(item.scratch)}`);
     }
   }
+}
+
+/** From 0.1 MB a scratch size reads in MB; below it, in KB. */
+const SCRATCH_SIZE_IN_MB_FROM = 104_858;
+
+function describeScratch(scratch: PaneScratch): string {
+  const size = scratch.bytes < 1024 ? `${scratch.bytes} bytes`
+    : scratch.bytes < SCRATCH_SIZE_IN_MB_FROM ? `${Math.ceil(scratch.bytes / 1024)} KB` : `${(scratch.bytes / 1_048_576).toFixed(1)} MB`;
+  return scratch.deletedAt
+    ? `Keeps the scratch folder ${scratch.path} (${size}) until ${scratch.deletedAt.slice(0, 10)}, then deletes it, keeping its agent logs.`
+    : `Deletes the scratch folder ${scratch.path} (${size}).`;
 }
 
 function printArchiveSkipReason(

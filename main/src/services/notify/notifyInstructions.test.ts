@@ -171,16 +171,19 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     sync(true);
     const lines = text(claudeFile).split('\n');
 
-    expect(lines.slice(0, 5)).toEqual([
+    expect(lines.slice(0, 7)).toEqual([
       BEGIN,
       '## Pane',
+      // Pane's model first, then where scratch goes, from the contract's intro and working rules.
+      expect.stringContaining('In Pane, work flows from a Session to Panes to tabs.'),
+      expect.stringContaining('- Scratch: in Pane, put temporary files'),
       'When PANE_SESSION_ID is set, you are in a Pane terminal: load the `pane` skill before using Pane (worktrees, Panes, Sessions, asking the person).',
       expect.stringContaining('run `$PANE_RUNPANE_BIN` (Pane terminals set it'),
       '',
     ]);
-    expect(lines[5]).toBe('## Pane Notify');
+    expect(lines[7]).toBe('## Pane Notify');
     // Without the MCP tool, agents fall back to the CLI instead of giving up.
-    expect(lines[6]).toContain("If that tool isn't loaded, run `runpane notify --ui options|approve|ask|info --title <text>`");
+    expect(lines[8]).toContain("If that tool isn't loaded, run `runpane notify --ui options|approve|ask|info --title <text>`");
     expect(text(claudeFile)).not.toContain('ignore this');
   });
 
@@ -193,7 +196,7 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     fs.mkdirSync(dir);
     syncNotifyInstructions(true, { homeSkill: true }, { CLAUDE_CONFIG_DIR: dir, CODEX_HOME: path.join(home, 'none') }, userHome, platform);
 
-    const fallback = text(path.join(dir, 'CLAUDE.md')).split('\n')[3];
+    const fallback = text(path.join(dir, 'CLAUDE.md')).split('\n')[5];
     expect(fallback).toContain(shim);
     expect(fallback.includes('& $env:PANE_RUNPANE_BIN')).toBe(platform === 'win32');
   });

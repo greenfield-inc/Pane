@@ -21,6 +21,7 @@ import { createRequire } from 'node:module';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import type { ProjectEnvVarInput } from '../../../shared/types/projectEnvVars';
 import { ProjectEnvService } from '../services/projectEnvVars';
+import { markScratchArchived } from '../services/archiveRetention';
 
 const loadProjectDependency = createRequire(__filename);
 
@@ -508,6 +509,12 @@ export function registerProjectHandlers(
 
       // Now safe to delete the project
       const success = databaseService.deleteProject(projectIdNum);
+      if (success) {
+        // Gone for good, once the delete committed: each Pane's <pane-dir>/scratch folder goes at the next expiry pass.
+        for (const session of allProjectSessions) {
+          await markScratchArchived(session.id, new Date(0)).catch(error => console.warn(`[Main] could not mark ${session.id}'s scratch for deletion:`, error));
+        }
+      }
       sessionManager.emit('project:list-changed');
       return { success: true, data: success };
     } catch (error) {

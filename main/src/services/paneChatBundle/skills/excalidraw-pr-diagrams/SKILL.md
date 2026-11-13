@@ -23,7 +23,7 @@ A diagram argues; it doesn't display. Its shape should carry the meaning, so a r
 
    Give each major concept its own pattern. Two PRs that fix different kinds of problems get different layouts.
 2. **Gather the real details.** Use the actual endpoint paths, event names, fields and example payloads from the code or spec. Concrete artifacts teach: a dark code box with the real query or command, a mock of the real menu or dialog built from nested rectangles, or bars on a time axis for states over time. Tag the pieces the PR adds or changes with small `NEW`, `CHANGED` or `REUSED` badges.
-3. **Write the file** in a working folder outside the repository, such as `/tmp/pr-diagrams/<repo>-<pr>/overview.excalidraw`, using the format below. Build a large diagram one region per edit, or generate repeated pieces (timeline rows, badges) with a short script. For a PR whose diff is mostly generated files, list it with `gh pr diff --name-only` and read only the files that matter.
+3. **Write the file** in a working folder outside the repository's tracked files: `$PANE_SCRATCH_DIR/pr-diagrams/<repo>-<pr>/overview.excalidraw` in Pane, else `/tmp/pr-diagrams/...`, using the format below. Build a large diagram one region per edit, or generate repeated pieces (timeline rows, badges) with a short script. For a PR whose diff is mostly generated files, list it with `gh pr diff --name-only` and read only the files that matter.
 4. **Render and look** (below), fix what you see, and repeat until the checks at the end pass, usually 2–4 rounds.
 
 A PR visual overview always has:
@@ -86,7 +86,7 @@ Text colours: title `#1e40af`, subtitle `#3b82f6`, detail `#64748b`. Colour supp
 Render from your working folder:
 
 ```bash
-node <skill-directory>/references/render.mjs /tmp/pr-diagrams/<repo>-<pr>/overview.excalidraw
+node <skill-directory>/references/render.mjs "$PANE_SCRATCH_DIR/pr-diagrams/<repo>-<pr>/overview.excalidraw"
 ```
 
 `<skill-directory>` is this skill's folder. The PNG lands next to the file, sized to the diagram. The renderer installs nothing. It needs Node 22 or newer, a browser already on the machine (Chrome, Edge or Chromium; set `BROWSER_PATH` for another location), and network access, because it loads Excalidraw from esm.sh. If it can't run, put a Mermaid flowchart with the same before and after paths in the Visual Overview, and say the image wasn't rendered.
