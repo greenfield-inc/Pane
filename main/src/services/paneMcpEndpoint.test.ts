@@ -5,7 +5,8 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { tokenizeShellCommand } from './agents/agentIdentity';
-import { PaneMcpEndpoint, setPaneMcpEndpoint, withPaneMcpConfig, type PaneMcpTab } from './paneMcpEndpoint';
+import { withClaudePromptHooks } from './claudePrompts';
+import { PaneMcpEndpoint, paneMcpTabSettings, setPaneMcpEndpoint, withPaneMcpConfig, type PaneMcpTab } from './paneMcpEndpoint';
 import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
 import { TabListener } from './tabListener';
 
@@ -238,28 +239,23 @@ describe('withPaneMcpConfig', () => {
     });
   });
 
-  it("hides the Claude plugin's own pane server in a tab that reaches Pane over HTTP", () => {
+  it("hides the Claude plugin's own pane server in the one settings file a tab on HTTP launches with", () => {
     start().grant(tab('panel-a'));
-    const launched = words(withPaneMcpConfig('panel-a', 'claude', "claude 'fix the login bug'", 'zsh'));
-    const settings = launched.filter(word => word.startsWith('--settings'));
-
-    expect(settings).toEqual([`--settings=${path.join(appDir, 'mcp', 'pane-http-settings.json')}`]);
-    expect(JSON.parse(readFileSync(settings[0].slice('--settings='.length), 'utf8'))).toEqual({ deniedMcpServers: [{ serverName: 'plugin:pane:pane' }] });
-    expect(launched.at(-1)).toBe('fix the login bug');
-  });
-
-  it('adds the plugin deny to settings JSON the command already passes, since Claude keeps only the last --settings', () => {
-    start().grant(tab('panel-a'));
+    // A Session's folder access arrives as settings JSON on the command; Claude keeps only the last --settings.
     const sessionFolder = { permissions: { additionalDirectories: ['/s'], deny: ['Edit(//s/**)'] } };
-    for (const form of [`--settings '${JSON.stringify(sessionFolder)}'`, `'--settings=${JSON.stringify(sessionFolder)}'`]) {
-      const launched = words(withPaneMcpConfig('panel-a', 'claude', `claude 'fix it' ${form}`, 'zsh'));
-      const at = launched.findIndex(word => word.startsWith('--settings'));
+    for (const command of ["claude 'fix it'", `claude 'fix it' --settings '${JSON.stringify(sessionFolder)}'`]) {
+      const withHooks = withClaudePromptHooks('panel-a', command, appDir, 'zsh', paneMcpTabSettings('panel-a', 'claude')) ?? command;
+      const launched = words(withPaneMcpConfig('panel-a', 'claude', withHooks, 'zsh'));
+      const at = launched.findIndex(word => word === '--settings' || word.startsWith('--settings='));
       const value = launched[at] === '--settings' ? launched[at + 1] : launched[at].slice('--settings='.length);
 
-      expect(launched.filter(word => word.startsWith('--settings'))).toHaveLength(1);
-      expect(JSON.parse(value)).toEqual({ ...sessionFolder, deniedMcpServers: [{ serverName: 'plugin:pane:pane' }] });
+      expect(launched.filter(word => word === '--settings' || word.startsWith('--settings='))).toHaveLength(1);
+      const settings = JSON.parse(readFileSync(value, 'utf8'));
+      expect(settings.deniedMcpServers).toEqual([{ serverName: 'plugin:pane:pane' }]);
+      if (command.includes('permissions')) expect(settings.permissions).toEqual(sessionFolder.permissions);
       expect(launched).toContain('fix it');
     }
+    expect(paneMcpTabSettings('panel-b', 'claude')).toBeUndefined();
   });
 
   it('leaves wrappers, agents without the flag, and commands that keep MCP servers out unchanged', () => {

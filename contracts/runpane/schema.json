@@ -553,11 +553,6 @@
               "type": "string",
               "pattern": "^--"
             },
-            "paneMcpSettingsFlag": {
-              "description": "The flag that takes settings for one launch (a file or JSON; the last one given wins). Pane adds a deny for the Claude plugin's `pane` server through it, so a tab that reaches Pane over HTTP sees one Pane server.",
-              "type": "string",
-              "pattern": "^--"
-            },
             "promptArgument": {
               "description": "The CLI takes the starting message as a command argument. Without it, Pane types the message into the agent's input box once the status manifest shows that box idle.",
               "type": "boolean"
