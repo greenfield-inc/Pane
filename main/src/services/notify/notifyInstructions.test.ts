@@ -50,16 +50,12 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     expect(written.startsWith(`${own}${BEGIN}\r\n## Pane\r\n`)).toBe(true);
     expect(written).toContain('\r\n## Pane Notify\r\n');
     expect(written).toContain("call the `pane` MCP's `notify` instead of asking in the terminal");
-    // A Session worker relays through its orchestrator; only the orchestrator posts, in the background.
-    expect(written).toContain("- In a Session, only its orchestrator asks the person. A worker in a Session (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't");
+    // A Session worker relays through its orchestrator instead of posting a card itself.
     expect(written).toContain("doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"`");
-    expect(written).toContain('posts each item that waits on the person once, as a background `runpane notify ... --json`');
     expect(written).toContain('- For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`.\r\n');
-    // A typed reply is an answer or a question: the agent says which, and updates the card for a question.
-    expect(written).toContain('- A `reply:` line (or a `{reply, replyId}` result) is the person\'s typed reply: an answer or a question. If it answers, run `runpane notify --took <id|Q-n> answer`.');
-    expect(written).toContain('then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"`');
-    expect(written).toContain('A `correction:` line fixes how it was taken. From a `{reply, replyId}` result, pass its replyId to --took and --update.\r\n');
-    expect(written).toContain('- Write the card as its Summary: a title of about 80 to 100 characters on one line; context as a subtitle of one or two sentences saying why it matters;');
+    // How to write the card loads with the notify tool, not in every request.
+    expect(written).toContain('its description says how to write the card');
+    expect(written).not.toContain('Write the card as its Summary');
     expect(written.endsWith(`${END}\r\n`)).toBe(true);
     // Codex's folder had no AGENTS.md, so Pane created one holding only the block.
     expect(text(codexFile).startsWith(BEGIN)).toBe(true);

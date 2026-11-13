@@ -570,7 +570,7 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
   assert.deepEqual(Object.keys(discover.capabilities).sort(), ['resources', 'tools']);
   assert.equal(discover._meta['io.modelcontextprotocol/serverInfo'].name, 'pane');
   assert.ok(discover.instructions.length > 0);
-  assert.match(discover.instructions, /For an API key, token or password, call `secrets_request` \(or `runpane secrets request`\), never `ask`\./);
+  assert.match(discover.instructions, /call `notify` instead of asking in the terminal/);
 
   const list = responses.get(2).result;
   assert.equal(list.resultType, 'complete');
@@ -590,6 +590,8 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
   assert.equal(annotationsOf('repos_list').readOnlyHint, true);
   assert.equal(annotationsOf('panes_archive').destructiveHint, true);
   assert.equal(annotationsOf('agents_start').destructiveHint, false);
+  // How to ask, the secrets rule included, comes with the notify tool rather than every request's instructions.
+  assert.match(list.tools.find((tool) => tool.name === 'notify').description, /For an API key, token or password, call `secrets_request`/);
 
   assert.equal(responses.get(3).error.code, -32602, 'an unknown tool is an Invalid Params protocol error');
   assert.equal(responses.get(4).result.isError, true, 'bad arguments are a tool execution error');
