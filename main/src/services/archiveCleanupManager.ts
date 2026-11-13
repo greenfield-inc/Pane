@@ -17,6 +17,9 @@ import { preserveAgentLogs } from './archiveRetention';
 import { PANE_SCRATCH_FOLDER } from '../../../shared/constants/paneFolders';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 
+/** File-system errors a short wait usually clears (a lock, a scanner); the cleanup job retries them. */
+const RETRYABLE_CLEANUP_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']);
+
 type CleanupStore = Pick<DatabaseService, 'getArchiveCleanupJobs' | 'saveArchiveCleanupJob' | 'getSession'>;
 type CleanupSessions = Pick<SessionManager, 'getProjectContextByProjectId' | 'runArchiveScript'>;
 
@@ -353,7 +356,7 @@ export class ArchiveCleanupManager {
       }
     } catch (error) {
       job.attempts++;
-      if (['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'].includes(archiveErrorCode(error) ?? '') && job.attempts < 3) {
+      if (RETRYABLE_CLEANUP_CODES.has(archiveErrorCode(error) ?? '') && job.attempts < 3) {
         job.status = 'queued';
         job.nextAttempt = Date.now() + job.attempts * 2000;
         job.error = error instanceof Error ? error.message : String(error);
@@ -378,6 +381,8 @@ export class ArchiveCleanupManager {
       try {
         await preserveAgentLogs(job.source, scratch, job.sessionId);
       } catch (error) {
+        // A briefly locked file keeps its code, so the job retries as it does for the worktree itself.
+        if (RETRYABLE_CLEANUP_CODES.has(archiveErrorCode(error) ?? '')) throw error;
         throw new PaneError('ERR_AGENT_LOGS_NOT_MOVED', `Could not move the agent logs out of ${scratch}: ${reasonOf(error)}. The worktree was not deleted.`, 'Close any program using those files, then retry the cleanup.');
       }
       await archiveFs.mkdir(path.dirname(job.quarantine), { recursive: true });

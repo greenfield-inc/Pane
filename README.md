@@ -462,7 +462,8 @@ cancel a persisted job. Individual filesystem calls are awaited; batch budgets
 bound work between yields, not the time an operating-system call can take.
 
 Agents put scratch files in `$PANE_SCRATCH_DIR`, which archive deletes with the
-Pane; on the main checkout or an adopted worktree it is kept 14 days first.
+Pane; on the main checkout, an adopted worktree or in a WSL project it is kept
+14 days first.
 Archived Session folders are also kept 14 days. Agent logs inside either are
 moved to `<pane-dir>/agent-logs/` for Usage & Limits. See
 [The scratch folder](docs/SESSIONS.md#the-scratch-folder).

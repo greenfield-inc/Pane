@@ -61,7 +61,8 @@ export async function worktreePaneFolder(
  */
 export async function isConfinedFolder(root: string, folder: string): Promise<boolean> {
   const relative = path.relative(root, folder);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) return false;
+  // Only a folder strictly below the root: never the root itself.
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return false;
   try {
     if (!(await fs.lstat(folder)).isDirectory()) return false;
     return await fs.realpath(folder) === path.join(await fs.realpath(root), relative);

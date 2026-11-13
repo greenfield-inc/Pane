@@ -415,7 +415,9 @@ function renderMarkdown(contract) {
     lines.push(`- \`${tool.name}\`: ${tool.summary}`);
   }
   lines.push('');
-  lines.push('Managed AGENTS.md block body:', '', fenced(contract.agentContext.managedBlock, 'md'), '');
+  const paneAndTabRules = contract.agentContext.workspaceRules.filter((rule) => rule.startsWith('Pane:') || rule.startsWith('Tab:')).join(' ');
+  const managedBlock = contract.agentContext.managedBlock.map((line) => line.replace('{{paneAndTabRules}}', paneAndTabRules));
+  lines.push('Managed AGENTS.md block body:', '', fenced(managedBlock, 'md'), '');
 
   lines.push('## Wrapper Flags', '');
   lines.push('These flags are consumed by the wrapper:', '', fenced(flagLines(contract.flags.wrapper)), '');

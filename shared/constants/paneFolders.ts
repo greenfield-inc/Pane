@@ -19,5 +19,7 @@ export const PANE_DIR_AGENT_LOGS_FOLDER = 'agent-logs';
 
 /** A Pane id as a single folder name. */
 export function paneFolderName(paneId: string): string {
-  return paneId.replace(/[^A-Za-z0-9._-]/gu, '_');
+  const name = paneId.replace(/[^A-Za-z0-9._-]/gu, '_');
+  // `.` and `..` name the parent folders; they never name a Pane's own.
+  return name === '.' || name === '..' || name === '' ? `_${name}_` : name;
 }

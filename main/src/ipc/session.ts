@@ -154,10 +154,12 @@ export function registerSessionHandlers(
     return cached ? { ...session, gitStatus: cached } : session;
   };
 
+  /** Gone for good, once the delete committed: its <pane-dir>/scratch folder goes at the next expiry pass. */
+  const markScratchGone = (sessionId: string): Promise<void> => markScratchArchived(sessionId, new Date(0))
+    .catch(error => console.warn(`[Session IPC] could not mark ${sessionId}'s scratch for deletion:`, error));
+
   const cleanupPermanentDeleteFiles = async (dbSession: DatabaseSession) => {
     const sessionId = dbSession.id;
-    // Gone for good: its <pane-dir>/scratch folder goes at the next expiry pass.
-    await markScratchArchived(sessionId, new Date(0)).catch(error => console.warn(`[Session IPC] could not mark ${sessionId}'s scratch for deletion:`, error));
 
     try {
       await runCommandManager.stopRunCommands(sessionId);
@@ -475,7 +477,7 @@ export function registerSessionHandlers(
       }
 
       // Its <pane-dir>/scratch folder's retention period starts now, on every archive route (WSL included).
-      await markScratchArchived(sessionId);
+      await markScratchArchived(sessionId).catch(error => console.warn(`[Session IPC] could not record when ${sessionId} was archived; its scratch is kept:`, error));
 
       // Archive the session immediately to provide fast feedback to the user
       if (services.archiveCleanupManager?.supports(dbSession)) {
@@ -760,6 +762,7 @@ export function registerSessionHandlers(
       if (!deleted) {
         return { success: false, error: 'Session not found or not archived' };
       }
+      await markScratchGone(sessionId);
 
       cleanupSessionLogs(sessionId);
       const allSessions = sessionManager.getAllSessions();
@@ -791,7 +794,10 @@ export function registerSessionHandlers(
       }
 
       const deletedCount = databaseService.deleteArchivedSessionsPermanently();
-      for (const session of archivedSessions) cleanupSessionLogs(session.id);
+      for (const session of archivedSessions) {
+        cleanupSessionLogs(session.id);
+        await markScratchGone(session.id);
+      }
       const allSessions = sessionManager.getAllSessions();
       sessionManager.emit('sessions-loaded', allSessions);
       return { success: true, data: { deletedCount } };
@@ -1747,7 +1753,7 @@ export function registerSessionHandlers(
       if (!restored) {
         return { success: false, error: 'Session not found or already active' };
       }
-      await clearScratchArchived(sessionId);
+      await clearScratchArchived(sessionId).catch(error => console.warn(`[Session IPC] could not clear ${sessionId}'s archive time:`, error));
       // Reload sessions so the frontend store updates
       const allSessions = sessionManager.getAllSessions();
       sessionManager.emit('sessions-loaded', allSessions);

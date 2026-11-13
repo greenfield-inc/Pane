@@ -94,6 +94,7 @@ describe('archive retention', () => {
     await clearScratchArchived('restored-pane');
     await markScratchArchived('future-pane', new Date(now.getTime() + 30 * DAY));
     await markScratchArchived('deleted-pane', new Date(0));
+    const checks: string[] = [];
 
     const deleted = await expireArchivedFolders({
       now,
@@ -103,8 +104,11 @@ describe('archive retention', () => {
         { id: 'new', folder: folders.newSession, paneId: 'new-session-pane', archivedAt: daysAgo(13) },
         { id: 'restored', folder: folders.restoredDuringPass, paneId: 'restored-session-pane', archivedAt: daysAgo(15) },
       ],
-      // Restored after the pass read the store: checked again right before the delete.
-      sessionIsArchived: id => id !== 'restored',
+      // 'restored' is restored mid-pass, after the old Session's first delete: only a check right before each delete sees it.
+      sessionIsArchived: id => {
+        checks.push(id);
+        return id !== 'restored' || checks.filter(checked => checked === 'old').length < 2;
+      },
       paneIsArchivedOrGone: () => true,
     });
 
@@ -134,5 +138,14 @@ describe('archive retention', () => {
     ['0', null], ['1', 1], ['14', 14], ['365', 365], ['366', null], ['1.5', null], ['-3', null], ['', null], [' 7 ', 7],
   ])('reads the Keep archived folders setting %j as %j', (text, days) => {
     expect(parseArchiveRetentionDays(text)).toBe(days);
+  });
+
+  it('ignores a marker whose Pane id does not match its own file, so a crafted "." never empties the scratch root', async () => {
+    const scratch = (id: string) => path.join(paneDir, 'scratch', id);
+    write(path.join(scratch('a-pane'), 'file'));
+    write(path.join(paneDir, 'scratch', '.archived', 'crafted'), JSON.stringify({ paneId: '.', archivedAt: new Date(0).toISOString() }));
+    const deleted = await expireArchivedFolders({ now: new Date(), retentionDays: 14, archivedSessions: [], sessionIsArchived: () => true, paneIsArchivedOrGone: () => true });
+    expect(deleted).toEqual([]);
+    expect(fs.existsSync(scratch('a-pane'))).toBe(true);
   });
 });

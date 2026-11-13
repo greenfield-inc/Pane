@@ -200,7 +200,8 @@ export async function expireArchivedFolders(input: ExpiryInput): Promise<string[
   for (const entry of markers) {
     const file = path.join(markersDirectory(), entry.name);
     const marker = await readMarker(file);
-    if (!marker || sessionPanes.has(marker.paneId) || !due(marker.archivedAt)) continue;
+    // A marker names its own Pane: one whose file name doesn't match its id is not Pane's.
+    if (!marker || paneFolderName(marker.paneId) !== entry.name || sessionPanes.has(marker.paneId) || !due(marker.archivedAt)) continue;
     const stillArchived = () => input.paneIsArchivedOrGone(marker.paneId);
     if (!stillArchived()) continue;
     await remove(appScratchRoot(), appScratchDirectory(marker.paneId), marker.paneId, stillArchived);

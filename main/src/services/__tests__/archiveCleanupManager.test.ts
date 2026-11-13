@@ -206,6 +206,22 @@ describe('durable archive cleanup', { timeout: 15000 }, () => {
     expect(readFileSync(path.join(f.root, 'data', 'agent-logs', 'claude', 'pane-1', 'claude-projects', '0', 'p', 's.jsonl'), 'utf8')).toBe('turn');
   });
 
+  it('keeps the worktree and its agent logs when the logs cannot be moved', async () => {
+    const f = fixture();
+    const log = path.join(f.source, '.pane', 'scratch', 'qa', 'home', '.claude', 'projects', 'p', 's.jsonl');
+    mkdirSync(path.dirname(log), { recursive: true });
+    writeFileSync(log, 'turn');
+    // A file where the agent-logs folder belongs: the move fails with a lasting error.
+    mkdirSync(path.join(f.root, 'data'), { recursive: true });
+    writeFileSync(path.join(f.root, 'data', 'agent-logs'), 'not a folder');
+    const job = await f.manager.prepare(f.session, true, false);
+    f.db.archiveSession(f.session.id, job);
+    f.restart();
+    await settled(f, 'failed');
+    expect(f.db.getArchiveCleanupJobs()[0]?.error).toMatch(/Could not move the agent logs/);
+    expect(readFileSync(log, 'utf8')).toBe('turn');
+  });
+
   it('repairs registration for an already missing source and tolerates absent artifacts', async () => {
     const f = fixture();
     rmSync(f.source, { recursive: true });

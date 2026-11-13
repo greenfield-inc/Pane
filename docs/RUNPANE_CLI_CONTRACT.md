@@ -337,7 +337,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `workspace exec`: Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.
 - `handoff`: Hand your task to another agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it. A same-agent handoff from a Pane tab carries and resumes your own session (a fork on this machine) and checks it continued; otherwise a fresh agent starts with the note. From a Session's terminal, create the Session on another machine instead.
 - `watch`: Wait for workspace agent and Pane transitions using a daemon-held cursor.
-- `panes create`: Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.
+- `panes create`: Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.
 - `panes adopt`: Adopt an existing externally managed git worktree as a Pane without changing the worktree.
 - `panes archive`: Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.
 - `panes pin`: Declaratively pin a Pane; pinned is the Pane UI's favorite/pin star and repeated requests are idempotent.
@@ -593,7 +593,7 @@ Brief tools:
 - `secrets request`: Ask the person for a secret on a masked card; returns saved or declined, never the value.
 - `panes list`: List Pane sessions, optionally scoped to a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
-- `panes create`: Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.
+- `panes create`: Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.
 - `panes archive`: Archive a Pane exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.
 - `panes pin`: Declaratively pin a Pane (the Pane UI's favorite/pin star) without changing focus.
 - `panes unpin`: Declaratively unpin a Pane (the Pane UI's favorite/pin star) without changing focus.
@@ -620,7 +620,7 @@ Managed AGENTS.md block body:
 
 This repository is used with [Pane](https://runpane.com). Drive it with the CLI or the `pane` MCP server.
 
-Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it (`runpane doctor` has Pane's working rules). Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.
+Pane: one per feature (one worktree, one branch). Before creating one, find the feature's Pane (`runpane panes list --json`, match the branch) and create one only when none exists. Tab: reviews, review reruns, QA, fixes and follow-ups for a feature go in new tabs in its Pane (`runpane panels create --pane <id>`), never a new Pane or a plain `git worktree`. With the MCP tools, open a tab with `panels_create`, or `agents_start` with `pane`.
 
 When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question "<question>"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.
 

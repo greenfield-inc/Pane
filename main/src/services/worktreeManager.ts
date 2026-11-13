@@ -605,7 +605,8 @@ export class WorktreeManager {
           reason: errorMessage,
         });
 
-        // For other errors, still throw
+        // A PaneError already says what happened and what to do next; keep its code.
+        if (error instanceof PaneError) throw error;
         throw new Error(`Failed to remove worktree: ${errorMessage}`);
       }
     }));
