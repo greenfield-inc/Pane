@@ -440,9 +440,11 @@ body.understory {
 }
 
 /* A horizontal strip with a hidden scrollbar: its trailing edge fades, so an item cut by the
-   edge reads as "more to scroll". */
+   edge reads as "more to scroll". The end padding is as wide as the fade, so an item that fits
+   ends before it. */
 .scroll-fade-x {
   mask-image: linear-gradient(to right, #000 calc(100% - var(--space-4)), transparent);
+  padding-inline-end: var(--space-4);
 }
 
 .scrollbar-thumb-border-secondary {
