@@ -11,17 +11,23 @@ import {
   type ListeningPortGroup,
   type ListeningPortKind,
   type ListeningPortsSnapshot,
+  PORTS_QUIET_INTERVAL_MS,
 } from '../../../shared/types/listeningPorts';
 
-const POLL_INTERVAL_MS = 2_000;
 /**
- * A server started by a terminal or agent is announced by output: its logs, or the agent's turn.
- * Reading the socket table costs about 55 ms of CPU on macOS, so it is read at a poll only after
- * new output, or while output came within this window (a server can bind after its last line)...
+ * How often the gate below is checked, so how long a new server waits to be listed while agents
+ * stream. Each read costs about 55 ms of CPU on macOS, so this caps reads at about 1% of a core.
+ */
+const POLL_INTERVAL_MS = 6_000;
+/**
+ * A server started by a terminal or agent is announced by output: its logs, the agent's turn, or
+ * its terminal exiting. Reading the socket table costs about 55 ms of CPU on macOS, so it is read
+ * at a poll only after new output, or while output came within this window, since a server can
+ * bind after its last line. Reads continue one poll past it, so the last one comes at least this
+ * long after the output. A server that binds later is listed at the next output or when a list
+ * asks; with no output, ports are read once a minute (PORTS_QUIET_INTERVAL_MS) only while `watched`.
  */
 const ACTIVE_WINDOW_MS = 10_000;
-/** ...and otherwise this often, which still finds ports opened outside Pane. */
-const QUIET_INTERVAL_MS = 60_000;
 /** A socket read slower than this share of the interval stretches the interval, so polling stays cheap. */
 const MAX_POLL_DUTY = 0.1;
 const READ_TIMEOUT_MS = 5_000;
@@ -50,6 +56,12 @@ export interface ListeningPortMonitorOptions {
   terminalPanes(): TerminalPane[];
   /** When any terminal or agent last printed, in ms since the epoch. Absent: read every poll. */
   lastOutputAt?(): number;
+  /**
+   * Whether a client is receiving live port changes. While one is and output is quiet, ports are
+   * read once a minute, which finds ports opened outside Pane; otherwise only output and
+   * `refresh` read them. Absent: always.
+   */
+  watched?(): boolean;
   onChange?(snapshot: ListeningPortsSnapshot): void;
 }
 
@@ -58,7 +70,7 @@ export interface ListeningPortMonitor {
   refresh(): Promise<ListeningPortsSnapshot>;
   /** The list from the last read, without reading again. */
   snapshot(): ListeningPortsSnapshot;
-  /** Refreshes at the next 2 s poll after terminal or agent output, else every minute, and less often when a read is slow, until `stop`. */
+  /** Refreshes at 6 s polls while terminals or agents print and just after, else every minute while watched, and less often when a read is slow, until `stop`. */
   start(): void;
   stop(): void;
 }
@@ -164,7 +176,8 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
   const due = () => {
     const now = Date.now();
     const outputAt = options.lastOutputAt?.() ?? now;
-    return outputAt >= lastReadAt || now - outputAt < ACTIVE_WINDOW_MS || now - lastReadAt >= QUIET_INTERVAL_MS;
+    if (outputAt >= lastReadAt || now - outputAt < ACTIVE_WINDOW_MS + POLL_INTERVAL_MS) return true;
+    return now - lastReadAt >= PORTS_QUIET_INTERVAL_MS && (options.watched?.() ?? true);
   };
 
   const schedule = (delayMs: number) => {

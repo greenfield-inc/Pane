@@ -691,6 +691,21 @@ describe('PaneRemoteHttpApiServer', () => {
     await waitFor(() => server.getConnectedClients().length === 0);
   });
 
+  it('has a subscriber for port changes only while a client event stream is open', async () => {
+    const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+    expect(server.hasEventSubscriber('ports:changed')).toBe(false);
+
+    const stream = await openEventStream(server, 'secret-token');
+    await stream.nextEvent();
+    expect(server.hasEventSubscriber('ports:changed')).toBe(true);
+    expect(server.hasEventSubscriber('not-a-daemon-event')).toBe(false);
+
+    stream.close();
+    await waitFor(() => !server.hasEventSubscriber('ports:changed'));
+  });
+
   it('names this host on the ready event and counts a paired desktop naming itself as reading its cards while its stream is open', async () => {
     const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), {
       getConfig: () => ({ remoteDaemon: createEnabledRemoteConfig(), machineId: 'mini-install' }),

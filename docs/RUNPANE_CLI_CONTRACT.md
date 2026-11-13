@@ -557,7 +557,7 @@ runpane loops delete --loop <id> --yes [--json] [--pane-dir <path>]
 
 ## Agent Context
 
-Pane lets a developer manage saved base repositories, user-visible Panes (Pane sessions) for feature/PR work, and terminal-backed panel tabs. A Pane is a visible workspace that normally maps to one Pane-managed git worktree and branch; a panel is a terminal tab inside one Pane and shares that Pane's worktree; an agent is a CLI process running inside a panel.
+Pane runs coding agents in parallel git worktrees. A Pane is a visible workspace for one feature or PR, with its own Pane-managed git worktree and branch; a panel is a terminal tab in a Pane and shares its worktree; an agent is a CLI process running in a panel.
 
 Doctor-first environment discovery:
 

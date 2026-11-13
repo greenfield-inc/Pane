@@ -570,7 +570,7 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
   assert.deepEqual(Object.keys(discover.capabilities).sort(), ['resources', 'tools']);
   assert.equal(discover._meta['io.modelcontextprotocol/serverInfo'].name, 'pane');
   assert.ok(discover.instructions.length > 0);
-  assert.match(discover.instructions, /For an API key, token or password, call `secrets_request` \(or `runpane secrets request`\), never `ask`\./);
+  assert.match(discover.instructions, /call `notify` instead of asking in the terminal/);
 
   const list = responses.get(2).result;
   assert.equal(list.resultType, 'complete');
@@ -594,6 +594,25 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
   assert.equal(responses.get(3).error.code, -32602, 'an unknown tool is an Invalid Params protocol error');
   assert.equal(responses.get(4).result.isError, true, 'bad arguments are a tool execution error');
   assert.match(responses.get(4).result.content[0].text, /bogus/);
+});
+
+test('the instructions and every tool description fit within what Claude Code shows', async () => {
+  const { CLAUDE_CODE_MCP_TEXT_LIMIT, CLAUDE_CODE_TOOL_SEARCH_DESCRIPTION_LIMIT } = require(dist('mcpTools.js'));
+  for (const args of [[], ['--toolsets', 'all']]) {
+    await withMcpClient(async (client) => {
+      const served = `runpane mcp ${args.join(' ')}`.trim();
+      const instructions = client.getInstructions() ?? '';
+      assert.ok(instructions.length <= CLAUDE_CODE_MCP_TEXT_LIMIT, `${served}: instructions are ${instructions.length} characters; Claude Code cuts them at ${CLAUDE_CODE_MCP_TEXT_LIMIT}`);
+      for (const tool of (await client.listTools()).tools) {
+        const { description } = tool;
+        assert.ok(description.length <= CLAUDE_CODE_TOOL_SEARCH_DESCRIPTION_LIMIT, `${served}: ${tool.name}'s description is ${description.length} characters; Claude Code cuts it at ${CLAUDE_CODE_TOOL_SEARCH_DESCRIPTION_LIMIT}`);
+        if (description.length <= CLAUDE_CODE_MCP_TEXT_LIMIT) continue;
+        // Past the up-front cut, the pointer to the full reference must survive it.
+        const pointerEnd = description.indexOf('\n', description.indexOf('runpane agent-context --command'));
+        assert.ok(pointerEnd > 0 && pointerEnd <= CLAUDE_CODE_MCP_TEXT_LIMIT, `${served}: ${tool.name}'s description is ${description.length} characters and its pointer to the full reference ends at ${pointerEnd}, past Claude Code's ${CLAUDE_CODE_MCP_TEXT_LIMIT}-character cut`);
+      }
+    }, { args });
+  }
 });
 
 test('serves clients that still use the 2025 initialize handshake', async () => {

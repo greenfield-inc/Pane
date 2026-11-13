@@ -43,7 +43,7 @@ function runpaneFallback(kind: InstructionsHome, home: string): string {
 }
 
 function renderBlock(options: NotifyInstructionsOptions, fallback: string): string[] {
-  const { rules, cardRule, results } = RUNPANE_CONTRACT.agentContext.notifyGuidance;
+  const { rules } = RUNPANE_CONTRACT.agentContext.notifyGuidance;
   return [
     NOTIFY_BLOCK_BEGIN,
     '## Pane',
@@ -53,10 +53,8 @@ function renderBlock(options: NotifyInstructionsOptions, fallback: string): stri
     fallback,
     '',
     '## Pane Notify',
-    "When you need the person (a choice, an approval, a short answer), call the `pane` MCP's `notify` instead of asking in the terminal. If that tool isn't loaded, run `runpane notify --ui options|approve|ask|info --title <text>` (`runpane notify --help` has the rest).",
+    "When you need the person (a choice, an approval, a short answer), call the `pane` MCP's `notify` instead of asking in the terminal; its description says how to write the card. If that tool isn't loaded, run `runpane notify --ui options|approve|ask|info --title <text>` (`runpane notify --help` has the rest).",
     ...rules.map(rule => `- ${rule}`),
-    `- ${results}`,
-    cardRule,
     NOTIFY_BLOCK_END,
   ];
 }

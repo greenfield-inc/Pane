@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
+import { PORTS_QUIET_INTERVAL_MS, type ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 
 /**
  * The host's listening ports, kept current by the host's `ports:changed` event. Null until the first read.
- * `refresh` asks the host to read them now; the host reads them only every minute while its terminals are quiet.
+ * While its terminals are quiet the host reads ports only when asked: `refresh` asks now, and `onScreen`
+ * asks when it turns on, when the window becomes visible, and once a minute while it is visible, so a
+ * shown list finds ports opened outside Pane.
  */
-export function useListeningPorts() {
+export function useListeningPorts({ onScreen = false }: { onScreen?: boolean } = {}) {
   const [snapshot, setSnapshot] = useState<ListeningPortsSnapshot | null>(null);
   const loadRef = useRef<() => void>(() => {});
+  // The first read happens on mount; `onScreen` turning on later reads again.
+  const mounted = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,6 +39,22 @@ export function useListeningPorts() {
       unsubscribeResync?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!onScreen) return;
+    const loadIfVisible = () => {
+      if (document.visibilityState === 'visible') loadRef.current();
+    };
+    if (mounted.current) loadIfVisible();
+    const timer = window.setInterval(loadIfVisible, PORTS_QUIET_INTERVAL_MS);
+    document.addEventListener('visibilitychange', loadIfVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', loadIfVisible);
+    };
+  }, [onScreen]);
+
+  useEffect(() => { mounted.current = true; }, []);
 
   const refresh = useCallback(() => loadRef.current(), []);
   return { snapshot, refresh };

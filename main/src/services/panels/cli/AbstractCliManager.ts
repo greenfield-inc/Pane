@@ -357,7 +357,7 @@ export abstract class AbstractCliManager extends EventEmitter {
     return Array.from(this.processes.keys());
   }
 
-  /** When any of this manager's PTYs last printed, in ms since the epoch; 0 when none has. */
+  /** When any of this manager's PTYs last printed or exited, in ms since the epoch; 0 when none has. */
   latestOutputAt(): number {
     return this.lastOutputAt;
   }
@@ -1039,6 +1039,8 @@ export abstract class AbstractCliManager extends EventEmitter {
     });
 
     ptyProcess.onExit(async ({ exitCode, signal }) => {
+      // An exit counts as output: a server it ran may have stopped listening.
+      this.lastOutputAt = Date.now();
       // Check for and kill any child processes
       const pid = ptyProcess.pid;
       if (pid) {

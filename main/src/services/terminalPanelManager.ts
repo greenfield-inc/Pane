@@ -420,6 +420,8 @@ interface CliLaunchResolution {
 
 export class TerminalPanelManager extends EventEmitter {
   private terminals = new Map<string, TerminalProcess>();
+  /** When a terminal last exited or closed, in ms since the epoch; 0 before any has. */
+  private lastRetiredAt = 0;
   /** Panels that had a process in this run; their next spawn is a relaunch. */
   private readonly launchedPanels = new Set<string>();
   // Retiring a PTY is not proof its shell or agent exited. Keep their identities
@@ -2399,9 +2401,9 @@ export class TerminalPanelManager extends EventEmitter {
     return this.terminals.get(panelId)?.lastOutputAt?.toISOString();
   }
 
-  /** When any terminal last printed, in ms since the epoch; 0 when none has. */
+  /** When any terminal last printed or exited, in ms since the epoch; 0 when none has. */
   latestOutputAt(): number {
-    let latest = 0;
+    let latest = this.lastRetiredAt;
     for (const terminal of this.terminals.values()) latest = Math.max(latest, terminal.lastOutputAt?.getTime() ?? 0);
     return latest;
   }
@@ -3328,6 +3330,8 @@ export class TerminalPanelManager extends EventEmitter {
       disposeFlowControlRecord(terminal.flowControl);
       this.agentStatusMonitor.unregister(panelId);
       this.terminals.delete(panelId);
+      // An exit or close counts as output: a server the terminal ran may have stopped listening.
+      this.lastRetiredAt = Date.now();
       this.visibleViewersByPanel.delete(panelId);
       this.serializedBuffers.delete(panelId);
       this.maybeStopAgentStatusPoll();

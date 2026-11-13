@@ -1,6 +1,6 @@
 {
   "name": "Pane",
-  "version": "2.4.219",
+  "version": "2.4.220",
   "private": true,
   "description": "Pane - Terminal-first AI code assistant manager with Windows support",
   "author": {
@@ -45,6 +45,7 @@
     "check:runpane-package-versions": "node scripts/sync-runpane-package-versions.js --check",
     "generate-runpane-contract": "node scripts/generate-runpane-contract.js",
     "check:runpane-contract": "node scripts/generate-runpane-contract.js --check",
+    "eval:agent-instructions": "node scripts/agent-instructions-eval/run.mjs",
     "test:runpane-contract": "pnpm run check:runpane-contract && pnpm --filter runpane build && node scripts/test-runpane-contract.js",
     "test:runpane-mcp": "pnpm --filter runpane build && node --test scripts/test-runpane-mcp.js",
     "test:runpane-workspace": "pnpm --filter runpane build && node --test scripts/test-runpane-workspace.js",

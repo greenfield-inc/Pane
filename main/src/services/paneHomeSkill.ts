@@ -261,7 +261,7 @@ const decodeErrorCode = (error: Parameters<typeof decodeBoundary>[0]): string | 
 export function buildPaneHomeSkill(): string {
   return `---
 name: pane
-description: Use whenever you work with Pane, the desktop app that runs coding agents in parallel git worktrees, through the runpane CLI or the pane MCP tools. Use in a Pane terminal (PANE_SESSION_ID is set), when a task mentions Panes, panels, Sessions or Pane worktrees, when you need the person's answer or approval (notify), when runpane or the pane MCP tools seem missing, when starting features in their own Panes or adding agent tabs (review, audit, fix, QA) to one, showing a page or file, reading or sending input to another panel, reaching another machine in the person's workspace, or coordinating Panes from a Session orchestrator.
+description: Use whenever you work with Pane (the desktop app that runs coding agents in parallel git worktrees) through runpane or the pane MCP: in a Pane terminal (PANE_SESSION_ID is set), for Panes, panels, Sessions, agent tabs, asking the person (notify), showing a page, reading or sending to another panel, reaching another machine, or when runpane or the pane tools seem missing.
 ---
 ${PANE_MANAGED_SKILL_MARKER}
 
