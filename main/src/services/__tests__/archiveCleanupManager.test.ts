@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'child_process';
 import { once } from 'events';
 import { createRequire } from 'module';
-import { mkdtempSync, mkdirSync, writeFileSync, renameSync, existsSync, rmSync, realpathSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, rmSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -191,6 +191,19 @@ describe('durable archive cleanup', { timeout: 15000 }, () => {
     f.manager.retry(f.session.id, false);
     await settled(f, 'completed');
     expect(teardown).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps agent logs from the worktree\'s scratch folder and deletes the rest', async () => {
+    const f = fixture();
+    const log = path.join(f.source, '.pane', 'scratch', 'qa', 'home', '.claude', 'projects', 'p', 's.jsonl');
+    mkdirSync(path.dirname(log), { recursive: true });
+    writeFileSync(log, 'turn');
+    const job = await f.manager.prepare(f.session, true, false);
+    f.db.archiveSession(f.session.id, job);
+    f.restart();
+    await settled(f, 'completed');
+    expect(existsSync(f.source)).toBe(false);
+    expect(readFileSync(path.join(f.root, 'data', 'agent-logs', 'claude', 'pane-1', '0', 'p', 's.jsonl'), 'utf8')).toBe('turn');
   });
 
   it('repairs registration for an already missing source and tolerates absent artifacts', async () => {

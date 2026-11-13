@@ -13,6 +13,8 @@ import { archiveFs, archiveErrorCode, archivePathKey, directoryIdentity, purgeAr
 import { getAppSubdirectory } from '../utils/appDirectory';
 import { withArchiveRepositoryKey } from './archiveRepositoryLock';
 import { ArchiveProcessTracker } from './archiveProcessTracker';
+import { preserveAgentLogs } from './archiveRetention';
+import { PANE_SCRATCH_FOLDER } from '../../../shared/constants/paneFolders';
 
 type CleanupStore = Pick<DatabaseService, 'getArchiveCleanupJobs' | 'saveArchiveCleanupJob' | 'getSession'>;
 type CleanupSessions = Pick<SessionManager, 'getProjectContextByProjectId' | 'runArchiveScript'>;
@@ -369,6 +371,10 @@ export class ArchiveCleanupManager {
       const context = job.projectId ? this.sessions.getProjectContextByProjectId(job.projectId) : null;
       if (!context) throw new Error('Cleanup project is unavailable');
       await stopFsmonitorDaemon(job.source, context.commandRunner);
+      // An agent run with its home in the scratch folder (an isolated QA instance) leaves logs there.
+      const scratch = path.join(job.source, ...PANE_SCRATCH_FOLDER.split('/'));
+      await preserveAgentLogs(scratch, job.sessionId)
+        .catch(error => console.warn(`[ArchiveCleanup] Could not keep agent logs from ${scratch}:`, error));
       await archiveFs.mkdir(path.dirname(job.quarantine), { recursive: true });
       if (archivePathKey(await archiveFs.realpath(path.dirname(job.quarantine))) !== archivePathKey(path.dirname(job.quarantine))) {
         throw new Error('Cleanup quarantine parent is redirected');
