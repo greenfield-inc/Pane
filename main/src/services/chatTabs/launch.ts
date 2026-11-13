@@ -10,8 +10,8 @@ import { getGitAttributionEnv } from '../../utils/attribution';
 import { getRuntimeConfigManager } from '../../core/runtime';
 import { noteContextPath } from '../noteFiles';
 import { withRunpaneBinOnPath } from '../runpaneShim';
-import { grantPaneMcp, PANE_MCP_SERVER_NAME } from '../paneMcpEndpoint';
-import type { McpServer } from '@agentclientprotocol/sdk';
+import { grantPaneMcp, paneMcpChatServer } from '../paneMcpEndpoint';
+import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from '../paneMcpNames';
 import { isStandardCustomResume, type CustomCommandResume } from '../../../../shared/types/customCommandResume';
 import { adapterEntry, checkAgentCli } from '../agentChat/adapterSetup';
 import { hostCommand, npmShimScript } from '../agentChat/hostCommand';
@@ -48,6 +48,8 @@ export function chatTabEnv(panel: ToolPanel, state: ChatPanelState, projectEnv: 
   const inherited = interactiveTerminalEnv();
   delete inherited.PANE_ORCHESTRATION_SESSION_ID;
   delete inherited.PANE_SESSION_DIR;
+  delete inherited[PANE_MCP_URL_ENV];
+  delete inherited[PANE_MCP_TOKEN_ENV];
   delete inherited.PANE_AUTOPILOT_RUN_ID;
   delete inherited.PANE_AUTOPILOT_DIR;
   const config = getRuntimeConfigManager().getConfig();
@@ -119,8 +121,13 @@ export class AgentChatLauncher implements ChatTabLauncher {
     // The CLI is checked in the folder and environment it will run in (#1236).
     await checkAgentCli(state.agent, executable, { cwd: state.cwd, env });
     const launch: ResolvedLaunch = { command: chatCommand(agent, chat, executable, state, env) };
-    const paneMcp = chat.paneMcpHttp ? paneMcpServer(panel, state, env) : undefined;
-    if (paneMcp) launch.mcpServers = [paneMcp];
+    // Pane's tools over HTTP, for an agent that puts a session server in place of its user-level `pane`. The
+    // token goes only into the agent's environment: the request names it as a variable (paneMcpChatServer).
+    const paneMcp = chat.paneMcpHttp ? grantPaneMcp({ panelId: panel.id, env: { ...env }, cwd: state.cwd, agentLabel: agent.label }) : undefined;
+    if (paneMcp) {
+      Object.assign(launch.command.env, paneMcp);
+      launch.mcpServers = [paneMcpChatServer()];
+    }
     if (!chat.adapter) launch.ownCli = true;
     Object.assign(launch, fullAccessLaunch(chat, state.launch));
     const meta = sessionFolderMeta(state);
@@ -275,13 +282,3 @@ export function sessionFolderMeta(state: Pick<ChatPanelState, 'agent' | 'cwd' | 
   return { [namespace]: { options: { settings: claudeSessionFolderSettings(state.sessionFolder) } } };
 }
 
-/**
- * Pane's own MCP server over HTTP, under a token for this tab, for an agent that puts a session
- * server in place of its user-level `pane` (`chat.paneMcpHttp`). Undefined when the endpoint isn't
- * serving; the agent then keeps its stdio server.
- */
-function paneMcpServer(panel: ToolPanel, state: ChatPanelState, env: ChatAgentEnv): McpServer | undefined {
-  const grant = grantPaneMcp({ panelId: panel.id, env: { ...env }, cwd: state.cwd });
-  if (!grant) return undefined;
-  return { type: 'http', name: PANE_MCP_SERVER_NAME, url: grant.url, headers: [{ name: 'Authorization', value: `Bearer ${grant.token}` }] };
-}

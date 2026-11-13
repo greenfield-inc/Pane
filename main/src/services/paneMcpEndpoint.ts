@@ -1,48 +1,41 @@
-import { randomBytes } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import http from 'http';
-import type { AddressInfo } from 'net';
+import type http from 'http';
 import path from 'path';
 import { Readable } from 'stream';
+import type { McpServer } from '@agentclientprotocol/sdk';
 import type { AuthInfo, PaneMcpHttpHandler, RunCli } from '../../../packages/runpane/src/mcpHttp';
-import { getAppSubdirectory } from '../utils/appDirectory';
+import { agentConfig } from '../../../shared/agents';
+import { getAppDirectory, getAppSubdirectory } from '../utils/appDirectory';
 import { tokenizeShellCommand } from './agents/agentIdentity';
 import { quoteShellWord } from './agents/shellWord';
-import { CLAUDE_EXECUTABLE } from './claudePrompts/claudeLaunchSettings';
+import { PANE_MCP_SERVER_NAME, PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
+import { bundledRunpanePath } from './runpaneShim';
+import { readBody, sendError, tabListener, type TabListener } from './tabListener';
 
 /** The bundled runpane HTTP module (packages/runpane/src/mcpHttp.ts). */
 export type PaneMcpHttpModule = typeof import('../../../packages/runpane/src/mcpHttp');
 
-/** The name agents know Pane's MCP server by, over stdio and HTTP alike. */
-export const PANE_MCP_SERVER_NAME = 'pane';
-/** The tab's environment carries the endpoint and its token under these names. */
-export const PANE_MCP_URL_ENV = 'PANE_MCP_URL';
-export const PANE_MCP_TOKEN_ENV = 'PANE_MCP_TOKEN';
+/** Where `pnpm build:main` puts that module (main/build-runpane-cli.js). */
+export const BUNDLED_MCP_HTTP_MODULE = bundledRunpanePath('mcp-http.cjs');
 
 const MCP_PATH = '/mcp';
-const TOKEN_BYTES = 32;
 const BEARER = /^Bearer\s+(\S+)$/i;
-/**
- * Claude Code's per-launch MCP config: Pane's `pane` server over HTTP, in place of the user-level
- * stdio entry of the same name. Claude expands the variables from the tab's environment, so the
- * file holds no token and every tab shares it.
- */
-const CLAUDE_MCP_CONFIG = {
-  mcpServers: {
-    [PANE_MCP_SERVER_NAME]: { type: 'http', url: `\${${PANE_MCP_URL_ENV}}`, headers: { Authorization: `Bearer \${${PANE_MCP_TOKEN_ENV}}` } },
-  },
-};
+/** MCP requests are small JSON-RPC messages; anything bigger is refused. */
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+/** The handler takes about 0.2 s to build, so Pane builds it this long after startup, not on a tab's spawn. */
+const WARM_UP_DELAY_MS = 10_000;
+/** The URL and header a launch's MCP config names: the agent reads both from its environment, so no token is ever in argv or on disk. */
+const URL_REFERENCE = `\${${PANE_MCP_URL_ENV}}`;
+const AUTHORIZATION_REFERENCE = `Bearer \${${PANE_MCP_TOKEN_ENV}}`;
+/** A launch's MCP config file: Pane's `pane` server over HTTP, in place of the user-level stdio entry. Every tab shares it. */
+const MCP_CONFIG = { mcpServers: { [PANE_MCP_SERVER_NAME]: { type: 'http', url: URL_REFERENCE, headers: { Authorization: AUTHORIZATION_REFERENCE } } } };
 
-/** Who a tool call runs as: the tab's own environment and folder, as its stdio server would have. */
+/** Who a tool call runs as: the tab's own environment and folder, as its stdio server would have, and its agent's name. */
 export interface PaneMcpTab {
   panelId: string;
   env: Record<string, string>;
   cwd: string;
-}
-
-export interface PaneMcpGrant {
-  url: string;
-  token: string;
+  agentLabel: string;
 }
 
 export interface PaneMcpEndpointOptions {
@@ -52,202 +45,216 @@ export interface PaneMcpEndpointOptions {
   cli(): { executable: string; script: string } | undefined;
   /** Settings > AI & Agents: Register Pane tools, and the toolsets agents get. */
   settings(): { enabled: boolean; toolsets?: string[] };
+  /** This Pane's data folder, so a tool call reaches this Pane and not another. */
+  paneDir?(): string;
+  listener?: TabListener;
 }
 
 /**
- * Serves Pane's MCP tools over streamable HTTP on loopback, to the agents Pane starts. Each tab
- * gets a random token, held only in memory and in that tab's environment; the token alone says
- * which tab a call comes from, and closing the tab revokes it. Tool calls run the runpane CLI
- * with the tab's environment and folder, exactly as the tab's own `runpane mcp` would.
+ * Serves Pane's MCP tools over streamable HTTP at `/mcp` on the tab listener, to the tabs Pane
+ * starts whose agent replaces its user-level `pane` server for one launch. The tab's token says
+ * which tab a call comes from; tool calls run the runpane CLI with that tab's environment and
+ * folder, exactly as the tab's own `runpane mcp` would.
  */
 export class PaneMcpEndpoint {
-  private server?: http.Server;
-  private url?: string;
-  private module?: PaneMcpHttpModule;
-  /** The handler for the toolsets it was built for; rebuilt when the setting changes. */
-  private handler?: { toolsets: string; serve: PaneMcpHttpHandler };
+  private readonly listener: TabListener;
   private readonly tabs = new Map<string, PaneMcpTab>();
+  /** One handler per toolsets setting, built once; a failed build stays failed until the setting changes. */
+  private readonly handlers = new Map<string, Promise<PaneMcpHttpHandler | Error>>();
+  private module?: Promise<PaneMcpHttpModule>;
+  private detach: Array<() => void> = [];
+  private warmUp?: ReturnType<typeof setTimeout>;
 
-  constructor(private readonly options: PaneMcpEndpointOptions) {}
-
-  async start(): Promise<void> {
-    if (this.server) return;
-    this.module = await this.options.load();
-    const server = http.createServer((request, response) => void this.serve(request, response));
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', () => resolve());
-    });
-    server.unref();
-    this.server = server;
-    // SAFETY: a server listening on a TCP port reports an AddressInfo, not a pipe name.
-    this.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}${MCP_PATH}`;
+  constructor(private readonly options: PaneMcpEndpointOptions) {
+    this.listener = options.listener ?? tabListener;
   }
 
-  async stop(): Promise<void> {
-    const server = this.server;
-    this.server = undefined;
-    this.url = undefined;
+  /** Mounts `/mcp` on the listener. Nothing heavy happens here: the handler is built later, off the startup path. */
+  attach(): void {
+    if (this.detach.length > 0) return;
+    this.detach = [
+      this.listener.mount(MCP_PATH, (request, response) => this.serve(request, response)),
+      this.listener.onForget(panelId => this.forgetPanel(panelId)),
+    ];
+    this.warmUp = setTimeout(() => void this.handler(), WARM_UP_DELAY_MS);
+    this.warmUp.unref();
+  }
+
+  detachAll(): void {
+    clearTimeout(this.warmUp);
+    for (const undo of this.detach) undo();
+    this.detach = [];
     this.tabs.clear();
-    if (server) {
-      server.closeAllConnections();
-      await new Promise<void>(resolve => server.close(() => resolve()));
-    }
   }
 
   /**
-   * A fresh token for a tab Pane is starting, replacing any the tab had. Undefined while the
-   * endpoint isn't listening or Pane tools are off; the tab's agent then keeps its stdio server.
+   * A fresh token for a tab Pane is starting, replacing any it had: what goes into the tab's
+   * environment. Undefined while the listener isn't listening or Pane tools are off; the agent
+   * then keeps its stdio server.
    */
-  grant(tab: PaneMcpTab): PaneMcpGrant | undefined {
-    this.revoke(tab.panelId);
-    if (!this.url || !this.currentHandler()) return undefined;
-    const token = randomBytes(TOKEN_BYTES).toString('base64url');
+  grant(tab: PaneMcpTab): Record<string, string> | undefined {
+    this.forgetPanel(tab.panelId);
+    const origin = this.listener.origin;
+    if (!origin || this.detach.length === 0 || !this.options.settings().enabled) return undefined;
+    const token = this.listener.mint(tab.panelId, 'mcp');
+    if (!token) return undefined;
     this.tabs.set(token, tab);
-    return { url: this.url, token };
+    return { [PANE_MCP_URL_ENV]: `${origin}${MCP_PATH}`, [PANE_MCP_TOKEN_ENV]: token };
   }
 
-  /** Whether a tab Pane starts now gets a token. */
-  serving(): boolean {
-    return Boolean(this.url && this.currentHandler());
+  /** Whether the tab holds a live token, which is the one condition for pointing its agent here. */
+  granted(panelId: string): boolean {
+    return this.listener.hasToken(panelId, 'mcp');
   }
 
-  /** The tab closed: its tokens stop working. */
-  revoke(panelId: string): void {
+  private forgetPanel(panelId: string): void {
+    this.listener.revoke(panelId, 'mcp');
     for (const [token, tab] of this.tabs) if (tab.panelId === panelId) this.tabs.delete(token);
   }
 
-  /** The handler for the current settings; undefined when Pane tools are off or the toolsets are invalid. */
-  private currentHandler(): PaneMcpHttpHandler | undefined {
-    const { enabled, toolsets = [] } = this.options.settings();
-    if (!enabled || !this.module) return undefined;
+  private loadModule(): Promise<PaneMcpHttpModule> {
+    this.module ??= this.options.load();
+    return this.module;
+  }
+
+  /** The handler for the current toolsets, or why it can't be built. */
+  private handler(): Promise<PaneMcpHttpHandler | Error> {
+    const toolsets = this.options.settings().toolsets ?? [];
     const key = toolsets.join(',');
-    if (this.handler?.toolsets !== key) {
-      try {
-        const serve = this.module.createPaneMcpHttpHandler({
+    let built = this.handlers.get(key);
+    if (!built) {
+      built = this.loadModule().then(
+        (module) => module.createPaneMcpHttpHandler({
           toolsets,
           runCli: (argv, signal, env, auth) => this.runCli(argv, signal, env, auth),
+          // Pane points only agents it measured holding a call open (Claude: 40 minutes over HTTP) at this endpoint.
+          clientFor: (auth) => {
+            const tab = auth && this.tabs.get(auth.token);
+            return tab ? { name: tab.agentLabel, waitsLong: true } : undefined;
+          },
           onerror: (error) => console.warn('[PaneMcp]', error.message),
-        });
-        this.handler = { toolsets: key, serve };
-      } catch (error) {
-        console.warn('[PaneMcp] Agents keep their stdio Pane tools:', error instanceof Error ? error.message : String(error));
-        return undefined;
-      }
+        }),
+      ).catch(error => {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        console.warn('[PaneMcp] Pane tools over HTTP are unavailable:', failure.message);
+        return failure;
+      });
+      this.handlers.set(key, built);
     }
-    return this.handler.serve;
+    return built;
   }
 
   private async serve(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
-    const handler = this.currentHandler();
-    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-    if (!handler || url.pathname !== MCP_PATH) {
-      response.writeHead(404).end();
-      return;
-    }
     const token = BEARER.exec(String(request.headers.authorization ?? ''))?.[1];
-    if (!token || !this.tabs.has(token)) {
-      response.writeHead(401, { 'content-type': 'application/json', 'www-authenticate': 'Bearer' })
-        .end(JSON.stringify({ error: 'This request has no valid Pane tab token. Only agents Pane starts can use this endpoint; others use `runpane mcp`.' }));
-      return;
+    if (!token || !this.tabs.has(token) || !this.listener.owner(token, 'mcp')) {
+      return sendError(response, 401, {
+        code: 'PANE_MCP_TOKEN_INVALID',
+        message: 'This request has no live Pane tab token.',
+        next: 'Only agents Pane starts can use this endpoint, until their tab closes; others use `runpane mcp`.',
+      }, { 'www-authenticate': 'Bearer' });
+    }
+    if (!this.options.settings().enabled) {
+      return sendError(response, 403, {
+        code: 'PANE_MCP_DISABLED',
+        message: 'Pane tools are turned off in Settings > AI & Agents.',
+        next: 'Turn on Register Pane tools, then restart the agent.',
+      });
+    }
+    const handler = await this.handler();
+    if (handler instanceof Error) {
+      return sendError(response, 503, { code: 'PANE_MCP_UNAVAILABLE', message: `Pane's MCP tools could not start: ${handler.message}`, next: 'Check Settings > AI & Agents toolsets, then restart the agent.' });
     }
     const closed = new AbortController();
     response.on('close', () => closed.abort());
-    try {
-      const reply = await handler(await toFetchRequest(request, url, closed.signal), { token, clientId: this.tabs.get(token)?.panelId ?? '', scopes: [] });
-      const replyHeaders: Record<string, string> = {};
-      reply.headers.forEach((value, name) => { replyHeaders[name] = value; });
-      response.writeHead(reply.status, replyHeaders);
-      if (reply.body) {
-        // SAFETY: a fetch Response body is a web ReadableStream of bytes.
-        Readable.fromWeb(reply.body as import('stream/web').ReadableStream<Uint8Array>).on('error', () => response.destroy()).pipe(response);
-      } else {
-        response.end();
-      }
-    } catch (error) {
-      console.warn('[PaneMcp] An MCP request failed:', error instanceof Error ? error.message : String(error));
-      if (!response.headersSent) response.writeHead(500);
-      response.end();
+    const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await readBody(request, MAX_BODY_BYTES);
+    const headers = new Headers();
+    for (const [name, value] of Object.entries(request.headers)) {
+      if (Array.isArray(value)) for (const item of value) headers.append(name, item);
+      else if (value !== undefined) headers.set(name, value);
     }
+    const reply = await handler(
+      new Request(`http://${request.headers.host ?? '127.0.0.1'}${MCP_PATH}`, { method: request.method, headers, body, signal: closed.signal }),
+      { token, clientId: this.tabs.get(token)?.panelId ?? '', scopes: [] },
+    );
+    const replyHeaders: Record<string, string> = {};
+    reply.headers.forEach((value, name) => { replyHeaders[name] = value; });
+    response.writeHead(reply.status, replyHeaders);
+    if (!reply.body) {
+      response.end();
+      return;
+    }
+    // SAFETY: a fetch Response body is a web ReadableStream of bytes.
+    const replyBody = reply.body as import('stream/web').ReadableStream<Uint8Array>;
+    Readable.fromWeb(replyBody).on('error', () => response.destroy()).pipe(response);
   }
 
   /** Runs one tool's runpane command as the token's tab; a revoked token runs nothing. */
   private async runCli(argv: string[], signal: AbortSignal, env: NodeJS.ProcessEnv, auth: AuthInfo | undefined): ReturnType<RunCli> {
+    const module = await this.loadModule();
     const tab = auth && this.tabs.get(auth.token);
-    if (!tab || !this.module) return failure('PANE_MCP_TAB_CLOSED', 'This tab\'s Pane tools stopped working because the tab closed or Pane restarted.', 'Restart the agent in a Pane tab.');
+    const failure = (code: string, message: string, next: string) => ({ code: 1, stdout: module.failureJson({ code, message, next }), stderr: '' });
+    if (!tab) return failure('PANE_MCP_TAB_CLOSED', 'This tab\'s Pane tools stopped working because the tab closed or Pane restarted.', 'Restart the agent in a Pane tab.');
     const cli = this.options.cli();
     if (!cli) return failure('PANE_MCP_CLI_MISSING', 'This Pane has no runpane CLI to run the tool.', 'Reinstall Pane from runpane.com.');
-    return this.module.runCliProcess(cli.executable, [cli.script, ...argv], {
-      env: { ...tab.env, ...env, ELECTRON_RUN_AS_NODE: '1' },
+    return module.runCliProcess(cli.executable, [cli.script, ...argv], {
+      // PANE_DIR as the tab's own shim sets it: a --pane-dir or dev Pane reaches itself, not ~/.pane.
+      env: { ...tab.env, ...env, ELECTRON_RUN_AS_NODE: '1', PANE_DIR: (this.options.paneDir ?? getAppDirectory)() },
       cwd: tab.cwd,
       signal,
     });
   }
 }
 
-/** A runpane `--json` failure, as the CLI itself prints one. */
-function failure(code: string, message: string, next: string): Awaited<ReturnType<RunCli>> {
-  return { code: 1, stdout: JSON.stringify({ ok: false, error: { code, message, next } }), stderr: '' };
-}
-
-async function toFetchRequest(request: http.IncomingMessage, url: URL, signal: AbortSignal): Promise<Request> {
-  const headers = new Headers();
-  for (const [name, value] of Object.entries(request.headers)) {
-    if (Array.isArray(value)) for (const item of value) headers.append(name, item);
-    else if (value !== undefined) headers.set(name, value);
-  }
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(Buffer.from(chunk));
-  const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
-  return new Request(`http://${request.headers.host ?? '127.0.0.1'}${url.pathname}${url.search}`, {
-    method: request.method,
-    headers,
-    signal,
-    body: hasBody ? Buffer.concat(chunks) : undefined,
-  });
-}
-
-/** Where `pnpm build:main` puts the bundled HTTP handler (main/build-runpane-cli.js). */
-export const BUNDLED_MCP_HTTP_MODULE = path.resolve(__dirname, '..', '..', '..', 'runpane', 'mcp-http.cjs');
-
 let current: PaneMcpEndpoint | undefined;
 
-/** Set once the endpoint listens; tabs started before then keep their stdio server. */
+/** Set once the endpoint is attached; tabs started before then keep their stdio server. */
 export function setPaneMcpEndpoint(endpoint: PaneMcpEndpoint | undefined): void {
   current = endpoint;
 }
 
-/** A token for a tab Pane is starting, or undefined when its agent should use stdio. */
-export function grantPaneMcp(tab: PaneMcpTab): PaneMcpGrant | undefined {
+/** Whether the agent reaches Pane's tools over HTTP in a terminal tab (its config names a per-launch MCP config flag). */
+export function terminalUsesPaneMcp(agentType: string | undefined): boolean {
+  return Boolean(agentType && agentConfig(agentType)?.terminal.paneMcpConfigFlag);
+}
+
+/** The environment that points a tab's agent at Pane's tools, or undefined when it should use stdio. */
+export function grantPaneMcp(tab: PaneMcpTab): Record<string, string> | undefined {
   return current?.grant(tab);
 }
 
-/** The tab closed: its token stops working. */
-export function revokePaneMcp(panelId: string): void {
-  current?.revoke(panelId);
-}
-
 /**
- * A direct Claude launch that reaches Pane's tools over HTTP: `--mcp-config=<file>` right after the
- * executable. The `=` form takes exactly one value, so a prompt argument after it stays the prompt.
- * Returns the command unchanged when the endpoint isn't serving, the command doesn't start with
- * `claude`, it already names the file, or the file can't be written; Claude then uses stdio.
+ * A terminal launch that reaches Pane's tools over HTTP: `<flag>=<file>` right after the
+ * executable, for an agent whose config names the flag and a tab that holds a live token. The
+ * `=` form takes exactly one value, so a prompt argument after it stays the prompt. A command
+ * that already names the file, keeps MCP servers out (`--strict-mcp-config`), or doesn't start
+ * with the agent's executable runs unchanged, on stdio.
  */
-export function withPaneMcpConfig(command: string, shellType: string | undefined): string {
-  if (!current?.serving()) return command;
-  const file = path.join(getAppSubdirectory('mcp'), 'claude-http.json');
-  if (command.includes(file)) return command;
+export function withPaneMcpConfig(panelId: string, agentType: string | undefined, command: string, shellType: string | undefined): string {
+  const agent = agentType ? agentConfig(agentType) : undefined;
+  const flag = agent?.terminal.paneMcpConfigFlag;
+  if (!agent || !flag || !current?.granted(panelId)) return command;
+  const file = path.join(getAppSubdirectory('mcp'), 'pane-http.json');
   const spans: Array<{ start: number; end: number }> = [];
   const tokens = tokenizeShellCommand(command, process.platform, spans);
-  const word = quoteShellWord(`--mcp-config=${file}`, shellType);
-  if (!tokens || !CLAUDE_EXECUTABLE.test(tokens[0] ?? '') || !word) return command;
-  const content = `${JSON.stringify(CLAUDE_MCP_CONFIG, null, 2)}\n`;
+  const word = quoteShellWord(`${flag}=${file}`, shellType);
+  const executable = path.basename(tokens?.[0] ?? '').replace(/\.(exe|cmd)$/i, '');
+  if (!tokens || !word || !agent.executables.includes(executable) || tokens.includes('--strict-mcp-config') || command.includes(file)) return command;
+  const content = `${JSON.stringify(MCP_CONFIG, null, 2)}\n`;
   try {
     mkdirSync(path.dirname(file), { recursive: true });
     if (!existsSync(file) || readFileSync(file, 'utf8') !== content) writeFileSync(file, content);
   } catch (error) {
-    console.warn(`[PaneMcp] Claude keeps its stdio Pane tools: ${file} could not be written (${error instanceof Error ? error.message : String(error)}).`);
+    console.warn(`[PaneMcp] ${agent.label} keeps its stdio Pane tools: ${file} could not be written (${error instanceof Error ? error.message : String(error)}).`);
     return command;
   }
   return `${command.slice(0, spans[0].end)} ${word}${command.slice(spans[0].end)}`;
+}
+
+/**
+ * Pane's MCP server for a chat tab's ACP `session/new`. Its URL and header name variables the
+ * agent reads from its own environment (from the grant), because the Claude Agent SDK passes MCP
+ * servers on the `claude` command line, where any local user could read a token.
+ */
+export function paneMcpChatServer(): McpServer {
+  return { type: 'http', name: PANE_MCP_SERVER_NAME, url: URL_REFERENCE, headers: [{ name: 'Authorization', value: AUTHORIZATION_REFERENCE }] };
 }

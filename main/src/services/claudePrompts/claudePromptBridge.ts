@@ -1,7 +1,6 @@
-import { randomBytes, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import http from 'http';
-import type { AddressInfo } from 'net';
+import type http from 'http';
 import { isDeepStrictEqual } from 'util';
 import type { AgentState } from '../../../../shared/types/agentStatus';
 import type { NotifyQuestion, NotifyResult, NotifySource } from '../../../../shared/types/notify';
@@ -9,7 +8,10 @@ import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { parseClaudeHookEvent, transcriptBlocks, type ClaudeHookEvent } from './claudeHookEvent';
 import type { ClaudeSettings } from './claudeLaunchSettings';
 import { claudePromptQuestion, type ClaudePermissionDecision } from './claudePromptQuestion';
+import { readBody, tabListener, type TabListener } from '../tabListener';
 
+/** The bridge's routes on the tab listener. */
+const ROUTE_PREFIX = '/claude';
 /** PermissionRequest posts here and waits for an answer. */
 const PROMPT_PATH = '/claude/prompt';
 /** Events that only tell Pane a prompt is over post here; Claude waits at most RELEASE_HOOK_TIMEOUT_SECONDS for each. */
@@ -44,6 +46,8 @@ export interface ClaudePromptBridgeOptions {
   hookTimeoutSeconds: number;
   /** Each prompt Pane shows, before it shows. */
   onPrompt?(): void;
+  /** The loopback listener and tab tokens it shares with Pane's other tab features. */
+  listener?: TabListener;
 }
 
 interface WaitingPrompt {
@@ -79,32 +83,27 @@ type HookOutput = { hookSpecificOutput: { hookEventName: 'PermissionRequest'; de
  * question as answered there and lets the hook go with no decision.
  */
 export class ClaudePromptBridge {
-  private server?: http.Server;
-  private url?: string;
-  private readonly tokens = new Map<string, string>();
   private readonly waiting = new Map<string, WaitingPrompt>();
+  private readonly listener: TabListener;
+  private detach: Array<() => void> = [];
 
-  constructor(private readonly options: ClaudePromptBridgeOptions) {}
+  constructor(private readonly options: ClaudePromptBridgeOptions) {
+    this.listener = options.listener ?? tabListener;
+  }
 
   async start(): Promise<void> {
-    if (this.server) return;
-    const server = http.createServer((request, response) => void this.serve(request, response));
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', () => resolve());
-    });
-    server.unref();
-    this.server = server;
-    // SAFETY: a server listening on a TCP port reports an AddressInfo, not a pipe name.
-    this.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    if (this.detach.length > 0) return;
+    await this.listener.start();
+    this.detach = [
+      this.listener.mount(ROUTE_PREFIX, (request, response, path) => this.serve(request, response, path)),
+      this.listener.onForget(panelId => this.forgetPanel(panelId)),
+    ];
   }
 
   async stop(): Promise<void> {
     for (const prompt of this.waiting.values()) prompt.abort.abort();
-    const server = this.server;
-    this.server = undefined;
-    this.url = undefined;
-    if (server) await new Promise<void>(resolve => server.close(() => resolve()));
+    for (const undo of this.detach) undo();
+    this.detach = [];
   }
 
   /**
@@ -112,10 +111,10 @@ export class ClaudePromptBridge {
    * setting is off or the endpoint isn't listening, so the tab launches without them.
    */
   hookSettings(panelId: string): ClaudeSettings | undefined {
-    const url = this.url;
-    if (!url || !this.options.enabled()) return undefined;
-    const token = randomBytes(24).toString('hex');
-    this.tokens.set(token, panelId);
+    const url = this.listener.origin;
+    if (!url || this.detach.length === 0 || !this.options.enabled()) return undefined;
+    const token = this.listener.mint(panelId, 'claude-hook');
+    if (!token) return undefined;
     const hook = (route: string, timeout: number) => [{ hooks: [{ type: 'http', url: `${url}${route}`, timeout, headers: { [TOKEN_HEADER]: token } }] }];
     const release = hook(RELEASE_PATH, RELEASE_HOOK_TIMEOUT_SECONDS);
     return {
@@ -150,28 +149,28 @@ export class ClaudePromptBridge {
 
   /** The tab closed: its tokens stop working and its questions expire. */
   forgetPanel(panelId: string): void {
-    for (const [token, owner] of this.tokens) if (owner === panelId) this.tokens.delete(token);
+    this.listener.revoke(panelId, 'claude-hook');
     for (const prompt of this.waiting.values()) if (prompt.panelId === panelId) prompt.abort.abort();
   }
 
-  private async serve(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+  private async serve(request: http.IncomingMessage, response: http.ServerResponse, path: string): Promise<void> {
     const reply = (status: number, body: HookOutput) => {
       if (response.writableEnded || response.destroyed) return;
       response.writeHead(status, { 'content-type': 'application/json' });
       response.end(JSON.stringify(body));
     };
-    if (request.method !== 'POST' || (request.url !== PROMPT_PATH && request.url !== RELEASE_PATH)) return reply(404, {});
-    const panelId = this.tokens.get(String(request.headers[TOKEN_HEADER.toLowerCase()] ?? ''));
+    if (request.method !== 'POST' || (path !== PROMPT_PATH && path !== RELEASE_PATH)) return reply(404, {});
+    const panelId = this.listener.owner(String(request.headers[TOKEN_HEADER.toLowerCase()] ?? ''), 'claude-hook');
     if (!panelId) return reply(403, {});
     // Release events fire on every tool call; with nothing waiting in this tab, their bodies go unread.
-    if (request.url === RELEASE_PATH && ![...this.waiting.values()].some(prompt => prompt.panelId === panelId)) {
+    if (path === RELEASE_PATH && ![...this.waiting.values()].some(prompt => prompt.panelId === panelId)) {
       request.resume();
       return reply(200, {});
     }
     // Claude closes the request when the hook times out or Claude exits.
     const closed = new AbortController();
     response.on('close', () => { if (!response.writableEnded) closed.abort(); });
-    const event = parseClaudeHookEvent(await readBody(request).catch(() => ''));
+    const event = parseClaudeHookEvent(await readBody(request, MAX_BODY_BYTES).then(body => body.toString('utf8'), () => ''));
     if (!event) return reply(400, {});
     try {
       reply(200, await this.handle(panelId, event, closed.signal));
@@ -304,20 +303,3 @@ function sameCall(prompt: WaitingPrompt, toolName: string | undefined, toolInput
   return toolName === prompt.toolName && (prompt.toolName === 'ExitPlanMode' || isDeepStrictEqual(toolInput, prompt.toolInput));
 }
 
-function readBody(request: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    request.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        reject(new Error('body too large'));
-        request.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    request.on('error', reject);
-  });
-}

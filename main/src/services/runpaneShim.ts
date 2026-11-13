@@ -67,10 +67,14 @@ export interface InstallRunpaneShimOptions {
 
 let currentState: RunpaneShimState | null = null;
 
-/** Where `pnpm build:main` puts the bundled CLI, relative to this compiled module. */
+/** A file `pnpm build:main` bundles from packages/runpane into main/dist/runpane. */
+export function bundledRunpanePath(file: string): string {
+  // main/dist/main/src/services/runpaneShim.js -> main/dist/runpane/<file>
+  return path.resolve(__dirname, '..', '..', '..', 'runpane', file);
+}
+
 function defaultBundledRunpaneCliPath(): string {
-  // main/dist/main/src/services/runpaneShim.js -> main/dist/runpane/runpane.cjs
-  return path.resolve(__dirname, '..', '..', '..', 'runpane', 'runpane.cjs');
+  return bundledRunpanePath('runpane.cjs');
 }
 
 /** POSIX single-quote a value for sh, bash, zsh and fish. */

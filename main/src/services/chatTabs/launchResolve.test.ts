@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { spawn, type ChildProcess } from 'child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -8,6 +9,8 @@ import { resetPaneRuntimeForTests, setPaneRuntime } from '../../core/runtime';
 import { ConfigManager } from '../configManager';
 
 import { PaneMcpEndpoint, setPaneMcpEndpoint } from '../paneMcpEndpoint';
+import { TabListener } from '../tabListener';
+import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { AgentChatLauncher } from './launch';
 
 const bin = mkdtempSync(path.join(tmpdir(), 'pane-chat-launch-bin-'));
@@ -17,7 +20,8 @@ beforeEach(() => setPaneRuntime({ eventSink: { send: () => undefined }, getConfi
 afterEach(() => resetPaneRuntimeForTests());
 
 for (const [name, version] of [['claude', '2.1.400 (Claude Code)'], ['cursor-agent', '2026.11.01-abc1234'], ['opencode', '1.18.20']]) {
-  writeFileSync(path.join(bin, name), `#!/bin/sh\necho "${version}"\n`, { mode: 0o700 });
+  // Any other launch records its arguments in ARGV_OUT (the chat adapter starting `claude`) and waits on stdin.
+  writeFileSync(path.join(bin, name), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "${version}"; exit 0; fi\nif [ "$1" = "auth" ]; then echo '{}'; exit 0; fi\n[ -n "$ARGV_OUT" ] && printf '%s\\n' "$@" >> "$ARGV_OUT"\nexec cat >/dev/null\n`, { mode: 0o700 });
 }
 
 const panel: ToolPanel = { id: 'p-1', sessionId: 's-1', type: 'chat', title: 'Chat', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
@@ -52,17 +56,41 @@ describe.skipIf(process.platform === 'win32')('how a chat tab starts each kind o
     expect(full.mode).toBe('bypassPermissions');
   });
 
-  it("gives Claude Pane's tools over HTTP under the tab's own token, and leaves Cursor on its stdio server (D-32)", async () => {
-    const endpoint = new PaneMcpEndpoint({ load: () => import('../../../../packages/runpane/src/mcpHttp'), cli: () => undefined, settings: () => ({ enabled: true }) });
-    await endpoint.start();
+  it("gives Claude Pane's tools over HTTP with the tab's token only in its environment, never on claude's command line (D-32)", async () => {
+    const listener = new TabListener();
+    await listener.start();
+    const endpoint = new PaneMcpEndpoint({ load: () => import('../../../../packages/runpane/src/mcpHttp'), cli: () => undefined, settings: () => ({ enabled: true }), listener });
+    endpoint.attach();
     setPaneMcpEndpoint(endpoint);
+    const argvFile = path.join(bin, 'claude-argv.txt');
+    let adapter: ChildProcess | undefined;
     try {
       const claude = await resolve('claude', { kind: 'agent' });
-      expect(claude.mcpServers).toEqual([{ type: 'http', name: 'pane', url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/), headers: [{ name: 'Authorization', value: expect.stringMatching(/^Bearer \S{40,}$/) }] }]);
+      const token = claude.command.env.PANE_MCP_TOKEN;
+      expect(token).toMatch(/^\S{40,}$/);
+      expect(claude.command.env.PANE_MCP_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+      expect(claude.mcpServers).toEqual([{ type: 'http', name: 'pane', url: '${PANE_MCP_URL}', headers: [{ name: 'Authorization', value: 'Bearer ${PANE_MCP_TOKEN}' }] }]);
+
+      // Pane's bundled adapter hands MCP servers to `claude` as a command-line argument, which any local user can read.
+      adapter = spawn(claude.command.executable, claude.command.args, { cwd: bin, env: { ...claude.command.env, ARGV_OUT: argvFile }, stdio: ['pipe', 'ignore', 'ignore'] });
+      const send = (id: number, method: string, params: JsonObject) => adapter?.stdin?.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+      send(1, 'initialize', { protocolVersion: 1, clientCapabilities: {} });
+      send(2, 'session/new', { cwd: bin, mcpServers: claude.mcpServers });
+      const deadline = Date.now() + 20_000;
+      while (!(existsSync(argvFile) && readFileSync(argvFile, 'utf8').includes('--mcp-config'))) {
+        if (Date.now() > deadline) throw new Error('the adapter never started claude');
+        await new Promise(resolveWait => setTimeout(resolveWait, 100));
+      }
+      const argv = readFileSync(argvFile, 'utf8');
+      expect(argv).toContain('Bearer ${PANE_MCP_TOKEN}');
+      expect(argv).not.toContain(token);
+
       expect((await resolve('cursor', { kind: 'agent' })).mcpServers).toBeUndefined();
     } finally {
+      adapter?.kill();
       setPaneMcpEndpoint(undefined);
-      await endpoint.stop();
+      endpoint.detachAll();
+      await listener.stop();
     }
   });
 

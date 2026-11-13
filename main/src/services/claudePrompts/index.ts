@@ -12,11 +12,6 @@ export function setClaudePromptBridge(next: ClaudePromptBridge | undefined): voi
   bridge = next;
 }
 
-/** The tab's agent is gone: its hook token stops working and its open prompts expire. */
-export function forgetClaudePrompts(panelId: string): void {
-  bridge?.forgetPanel(panelId);
-}
-
 /**
  * Claude reports the conversation it is on to Pane at start, /resume, /clear and compact (D-269), with
  * Notify on or off. `runpane panels conversation --hook` reads the hook's JSON, prints nothing and always

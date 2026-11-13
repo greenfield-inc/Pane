@@ -42,6 +42,7 @@ same ids. The schema is `$defs/agent` and `$defs/agentChat` in
 | `terminal.hotkey` | Default key for "Add <title>"; it must conflict with no other key |
 | `terminal.platforms` | Platforms the agent runs on, when not all |
 | `terminal.reportsConversation` | Pane's `SessionStart` hook reports the terminal's live conversation (Claude only) |
+| `terminal.paneMcpConfigFlag` | The flag that takes an MCP config file for one launch (`<flag>=<file>`) whose `pane` server replaces the user-level one; Pane's terminal tabs then reach its tools over HTTP. Set it only when a probe shows the CLI replaces, not duplicates, the user entry |
 | `terminal.promptArgument` | The CLI takes the starting message as a command argument. Without it, Pane types the message once the status manifest shows the agent's idle input box (below) |
 | `terminal.configDir` | The CLI's project config folder (`.claude`), copied into new worktrees by default |
 | `terminal.session` | How the CLI opens a saved conversation: `flag`, `minimumVersion` (the doctor checks `--help` for the flag), `idPattern`, `selectors` (flags with which a command picks its own conversation) and `paneChoosesId` (the flag also creates the conversation, so Pane picks the id) |
@@ -60,7 +61,7 @@ same ids. The schema is `$defs/agent` and `$defs/agentChat` in
 | `fullAccess` | `mode` (a session mode that never asks) or `args: true` (pass `terminal.fullAccessArgs` to the chat CLI); absent, Pane answers each approval with allow once |
 | `riskyModes` | Session modes in which the agent acts without asking; viewers mark them |
 | `terminalConversationsLoad` | A chat can load a conversation the agent's terminal started (Switch to chat) |
-| `paneMcpHttp` | Chat tabs pass Pane's MCP server over HTTP in `session/new`, and the agent uses it in place of its user-level `pane` server (measured per agent: Codex and Cursor keep theirs) |
+| `paneMcpHttp` | Chat tabs pass Pane's MCP server over HTTP in `session/new`, and the agent uses it in place of its user-level `pane` server. Set it only when a probe shows that (Codex and Cursor keep theirs) |
 | `legacyClients` | Pane apps from before the agent catalog may show its chat tabs; leave it off for a new agent |
 | `registryIds` | ACP Registry ids this entry covers |
 

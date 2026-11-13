@@ -11,7 +11,7 @@ import { getShellPath } from '../utils/shellPath';
 import { escapeForBash, linuxToUNCPath, windowsPathToWSLMount } from '../utils/wslUtils';
 import { parse as parseToml } from 'smol-toml';
 import { syncPaneUserSkills, type UserSkillTarget } from './paneUserSkills';
-import { PANE_MCP_SERVER_NAME } from './paneMcpEndpoint';
+import { PANE_MCP_SERVER_NAME } from './paneMcpNames';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const execFileAsync = promisify(execFile);

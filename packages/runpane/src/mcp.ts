@@ -102,6 +102,12 @@ export type RunCli = (argv: string[], signal: AbortSignal, env: NodeJS.ProcessEn
 
 export interface PaneMcpServerOptions extends McpServerOptions {
   runCli: RunCli;
+  /**
+   * Who the client is when the request doesn't say. Over stateless HTTP a 2025-era client names
+   * itself only at `initialize`, so later calls arrive unnamed; Pane names them from the tab, and
+   * says whether that agent holds a tool call open while `notify` waits for the person.
+   */
+  clientFor?: (auth: AuthInfo | undefined) => { name: string; waitsLong: boolean } | undefined;
 }
 
 /**
@@ -162,7 +168,9 @@ export function paneMcpServerFactory(options: PaneMcpServerOptions): (context?: 
       if (!tool) {
         const other = allTools.find((candidate) => candidate.name === request.params.name);
         const set = other?.toolsets[0] ?? 'all';
-        const hint = other ? ` It is in the "${set}" toolset: run the server with --toolsets ${set} (or all).` : ' Call tools/list for the available tools.';
+        const hint = other
+          ? ` It is in the "${set}" toolset: add it with \`runpane mcp --toolsets ${set}\` (or all), or in Pane under Settings > AI & Agents.`
+          : ' Call tools/list for the available tools.';
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${request.params.name}.${hint}`);
       }
       let input: JsonObject;
@@ -171,15 +179,16 @@ export function paneMcpServerFactory(options: PaneMcpServerOptions): (context?: 
       } catch (error) {
         return errorResult(`Invalid arguments for ${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
-      const clientName = decodeBoundary(ctx.mcpReq.envelope, clientInfoEnvelope)?.['io.modelcontextprotocol/clientInfo']?.name
-        ?? server.getClientVersion()?.name ?? '';
+      const named = decodeBoundary(ctx.mcpReq.envelope, clientInfoEnvelope)?.['io.modelcontextprotocol/clientInfo']?.name
+        ?? server.getClientVersion()?.name;
+      const client = named ? { name: named, waitsLong: LONG_WAIT_CLIENTS.test(named) } : options.clientFor?.(context?.authInfo) ?? { name: '', waitsLong: false };
       const progressToken = ctx.mcpReq._meta?.progressToken;
       let progress = 0;
       const ticker = progressToken === undefined ? undefined : setInterval(() => {
         progress += 1;
         ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress } }).catch(() => {});
       }, PROGRESS_INTERVAL_MS);
-      return callTool(tool, input, ctx.mcpReq.signal, rewrite, (argv, signal, env) => options.runCli(argv, signal, env, context?.authInfo), notifyEnv(clientName)).finally(() => clearInterval(ticker));
+      return callTool(tool, input, ctx.mcpReq.signal, rewrite, (argv, signal, env) => options.runCli(argv, signal, env, context?.authInfo), notifyEnv(client)).finally(() => clearInterval(ticker));
     });
     server.setRequestHandler('resources/list', () => ({
       resources: bundledDocs().map((doc) => ({
@@ -201,11 +210,11 @@ export function paneMcpServerFactory(options: PaneMcpServerOptions): (context?: 
 }
 
 /** What `runpane notify` needs to know about the client: its friendly name, and whether its calls time out. */
-function notifyEnv(clientName: string): NodeJS.ProcessEnv {
+function notifyEnv(client: { name: string; waitsLong: boolean }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
-  const agent = AGENT_NAMES.find(([pattern]) => pattern.test(clientName))?.[1] ?? clientName;
+  const agent = AGENT_NAMES.find(([pattern]) => pattern.test(client.name))?.[1] ?? client.name;
   if (agent) env.RUNPANE_NOTIFY_AGENT = agent;
-  if (!LONG_WAIT_CLIENTS.test(clientName)) env.RUNPANE_NOTIFY_RETURN_AFTER_MS = String(NOTIFY_RETURN_AFTER_MS);
+  if (!client.waitsLong) env.RUNPANE_NOTIFY_RETURN_AFTER_MS = String(NOTIFY_RETURN_AFTER_MS);
   return env;
 }
 

@@ -20,7 +20,8 @@ export const AGENTS_CONFIG = {
         "hotkey": "mod+alt+3",
         "promptArgument": true,
         "configDir": ".claude",
-        "reportsConversation": true
+        "reportsConversation": true,
+        "paneMcpConfigFlag": "--mcp-config"
       },
       "install": {
         "url": "https://code.claude.com/docs/en/setup",

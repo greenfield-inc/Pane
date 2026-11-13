@@ -46,6 +46,7 @@ interface AgentConfigBase {
     fullAccessArgs: readonly string[];
     hotkey: string;
     reportsConversation?: boolean;
+    paneMcpConfigFlag?: string;
     platforms?: readonly string[];
     /** Takes the starting message as an argument; otherwise Pane types it once the agent's input box is idle. */
     promptArgument?: boolean;

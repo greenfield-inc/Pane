@@ -134,8 +134,10 @@ import { assertDirectOpenCodeLaunchCommand, extractOpenCodeSessionId, resolveOpe
 import { resolveChosenSessionLaunch } from './agents/chosenSessionLaunch';
 import { agentConfig, agentLabel } from '../../../shared/agents';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
-import { forgetClaudePrompts, withClaudePromptHooks } from './claudePrompts';
-import { grantPaneMcp, PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV, revokePaneMcp, withPaneMcpConfig } from './paneMcpEndpoint';
+import { withClaudePromptHooks } from './claudePrompts';
+import { forgetTab } from './tabListener';
+import { grantPaneMcp, terminalUsesPaneMcp, withPaneMcpConfig } from './paneMcpEndpoint';
+import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
 import {
   bracketedPaste,
   canLaunchWithPromptFile,
@@ -529,10 +531,12 @@ export class TerminalPanelManager extends EventEmitter {
       resolution.customState = { ...resolution.customState, initialInput: undefined, initialInputFile: undefined, updateResumeId: undefined };
     }
     const state = resolution.customState;
-    if (resolution.isCliCommand && state.agentType === 'claude' && !isWSL && !state.sshHost && state.launchMode !== 'wrapped' && !state.preserveLaunchCommand) {
+    const direct = resolution.isCliCommand && !isWSL && !state.sshHost && state.launchMode !== 'wrapped' && !state.preserveLaunchCommand;
+    if (direct && state.agentType === 'claude') {
       resolution.commandToRun = withClaudePromptHooks(panelId, resolution.commandToRun, state.cwd ?? process.cwd(), shellType) ?? resolution.commandToRun;
-      resolution.commandToRun = withPaneMcpConfig(resolution.commandToRun, shellType);
     }
+    // Only a tab that holds a live token gets the flag: a relaunch in a shell spawned without one stays on stdio.
+    if (direct) resolution.commandToRun = withPaneMcpConfig(panelId, state.agentType, resolution.commandToRun, shellType);
     return resolution;
   }
 
@@ -2011,6 +2015,9 @@ export class TerminalPanelManager extends EventEmitter {
     // A Pane launched from an orchestrator must not inherit the parent's role or Session folder.
     delete inheritedEnv.PANE_ORCHESTRATION_SESSION_ID;
     delete inheritedEnv.PANE_SESSION_DIR;
+    // Only the grant below may point this tab at an MCP endpoint, never one Pane inherited from an outer tab.
+    delete inheritedEnv[PANE_MCP_URL_ENV];
+    delete inheritedEnv[PANE_MCP_TOKEN_ENV];
     // A Session terminal works in its folder; a worker reads the folder of the Session its Pane belongs to.
     const sessionDirectory = panelCustomState.orchestrationSessionId ? panelCustomState.orchestrationWorkspace : panelCustomState.sessionFolder;
     const sessionDirectoryEnv: Record<string, string> = {};
@@ -2044,10 +2051,14 @@ export class TerminalPanelManager extends EventEmitter {
     const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);
     shellArgs = launch.args;
     const spawnEnv = launch.env;
-    // Pane's MCP endpoint knows this tab by the token alone; tools run with the tab's environment and folder.
-    // WSL and SSH agents can't reach this machine's loopback, so they keep `runpane mcp` over stdio.
-    const paneMcp = isWSL || panelCustomState.sshHost ? undefined : grantPaneMcp({ panelId: panel.id, env: { ...spawnEnv }, cwd });
-    if (paneMcp) Object.assign(spawnEnv, { [PANE_MCP_URL_ENV]: paneMcp.url, [PANE_MCP_TOKEN_ENV]: paneMcp.token });
+    // A tab whose agent reaches Pane's tools over HTTP gets a token; Pane knows the tab by it alone, and tools
+    // run with this environment and folder. WSL and SSH agents can't reach this machine's loopback, and
+    // wrapped or preserved commands run as saved, so those keep `runpane mcp` over stdio.
+    const mcpAgent = panelCustomState.agentType ?? commandAgent;
+    const usesPaneMcp = terminalUsesPaneMcp(mcpAgent) && !isWSL && !panelCustomState.sshHost
+      && panelCustomState.launchMode !== 'wrapped' && !panelCustomState.preserveLaunchCommand;
+    const paneMcp = usesPaneMcp && mcpAgent ? grantPaneMcp({ panelId: panel.id, env: { ...spawnEnv }, cwd, agentLabel: agentLabel(mcpAgent) }) : undefined;
+    if (paneMcp) Object.assign(spawnEnv, paneMcp);
     existingState = terminalCustomState(panel.state);
 
     // Read the setting once per spawn so we don't scatter config reads.
@@ -3248,8 +3259,7 @@ export class TerminalPanelManager extends EventEmitter {
 
   private async finishDestroyTerminal(terminal: TerminalProcess, saveState: boolean): Promise<void> {
     const panelId = terminal.panelId;
-    forgetClaudePrompts(panelId);
-    revokePaneMcp(panelId);
+    forgetTab(panelId);
     // Start the snapshot alongside persistence, but finish it before kill: once
     // the shell exits its surviving children may no longer be discoverable, and
     // the PTY's terminal name only identifies its session while Pane holds it.
@@ -3305,6 +3315,8 @@ export class TerminalPanelManager extends EventEmitter {
   /** Retire exactly one terminal lifetime, before kill can call back synchronously. */
   private retireTerminal(terminal: TerminalProcess, exit?: { exitCode: number; signal?: number }): void {
     const panelId = terminal.panelId;
+    // Its shell is gone, so the tab's tokens go too; a respawn gets new ones.
+    forgetTab(panelId);
     if (this.terminals.get(panelId) !== terminal) return;
     if (terminal.outputFlushTimer) {
       clearTimeout(terminal.outputFlushTimer);

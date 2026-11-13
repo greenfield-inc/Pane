@@ -31,12 +31,14 @@ Restart a running `claude` or `codex` session to pick up a new registration. In 
 
 Claude Code and Claude chat tabs that Pane starts reach the same tools over HTTP, served by the running Pane app, instead of each starting its own `runpane mcp` process:
 
-- Pane listens on `127.0.0.1` at a random port, path `/mcp` (streamable HTTP, stateless), and answers only loopback `Host` headers and loopback or absent `Origin` headers.
-- Each tab gets a random token, held in memory and in that tab's environment as `PANE_MCP_TOKEN`, with the URL in `PANE_MCP_URL`. The token alone tells Pane which tab is calling; a tool call runs `runpane` with that tab's environment and folder, exactly as the tab's own stdio server would. A request without a live token gets `401`. Closing the tab revokes its token, and a tab restart gets a new one. Tokens are never logged or written to disk.
-- A Claude terminal launch gets `--mcp-config=<Pane data dir>/mcp/claude-http.json`. That file names the `pane` server with `${PANE_MCP_URL}` and `Bearer ${PANE_MCP_TOKEN}`, which Claude reads from the tab's environment. Claude puts it in place of the user-level `pane` entry, so the agent sees one `pane` server.
-- A Claude chat tab passes the same server in its ACP `session/new` request (the agent config's `chat.paneMcpHttp`).
+- Pane listens on `127.0.0.1` at a random port, path `/mcp` (streamable HTTP, stateless), on the same loopback listener as Claude's prompt hooks. It answers only loopback `Host` headers and loopback or absent `Origin` headers.
+- A tab whose agent uses this endpoint gets a random token, held in Pane's memory and in that tab's environment as `PANE_MCP_TOKEN`, with the URL in `PANE_MCP_URL`. Other tabs get neither. The token alone tells Pane which tab is calling; a tool call runs `runpane` with that tab's environment and folder, and Pane's own data folder (`PANE_DIR`), exactly as the tab's own stdio server would. A request without a live token gets `401`. Closing the tab, or its shell exiting, revokes the token, and a tab restart gets a new one. Tokens are never logged, written to disk, or put on a command line.
+- A Claude terminal launch gets `--mcp-config=<Pane data dir>/mcp/pane-http.json` (the agent config's `terminal.paneMcpConfigFlag`). That file names the `pane` server with `${PANE_MCP_URL}` and `Bearer ${PANE_MCP_TOKEN}`, which Claude reads from the tab's environment. Claude puts it in place of the user-level `pane` entry, so the agent sees one `pane` server. A command with `--strict-mcp-config` runs unchanged.
+- A Claude chat tab passes the same server, with the same two variables, in its ACP `session/new` request (`chat.paneMcpHttp`); the token is in the adapter's environment only.
 - Everything else keeps the user-level stdio server: Codex and Cursor tabs, WSL and SSH tabs, wrapped or preserved launch commands, and agents you start outside Pane. Codex merges a per-launch `-c mcp_servers.pane` into the user-level stdio table and then refuses to start, and its ACP adapter skips a session server whose name the config already defines. Cursor has no per-launch MCP option. Either would need a per-launch way to replace a same-named server.
-- Pane quits its tabs with itself, so after a restart each tab starts with a fresh token and URL. The same Settings switch and toolsets apply: with **Register Pane tools** off, tabs get no token.
+- Pane quits its tabs with itself, so after a restart each tab starts with a fresh token and URL.
+- Settings apply at once. With **Register Pane tools** off, new tabs get no token, and a running tab's calls get `403` until it restarts on stdio. A toolsets change applies to the next request.
+- Serving is stateless. A call ends, and its `runpane` process stops, when the agent drops the request; a separate `notifications/cancelled` message has no request to cancel. An agent that names itself only at `initialize` is named after the tab's agent, so `notify` keeps its long wait.
 
 ## Toolsets
 
@@ -169,7 +171,7 @@ Automated tests cover the registration and link logic on every OS. Check these b
 
 The server uses the MCP TypeScript SDK v2, over stdio or (in Pane) streamable HTTP. It speaks MCP revision 2026-07-28, which has no handshake: `server/discover`, with the version and client capabilities carried on each request. It also accepts the 2025 `initialize` handshake that current Claude Code and Codex releases send, negotiating down to 2025-11-25.
 
-Only JSON-RPC goes to stdout, and the server exits when stdin closes. Cancelling a call (`notifications/cancelled`) stops the `runpane` process running it.
+Over stdio, only JSON-RPC goes to stdout, the server exits when stdin closes, and cancelling a call (`notifications/cancelled`) stops the `runpane` process running it. Over Pane's HTTP endpoint, dropping the request does.
 
 ## Tools
 

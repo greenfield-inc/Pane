@@ -2,8 +2,9 @@ import { paneMcpServerFactory, runCliProcess, type PaneMcpServerOptions, type Ru
 import {
   createMcpHandler, hostHeaderValidationResponse, localhostAllowedHostnames, localhostAllowedOrigins, originValidationResponse, type AuthInfo,
 } from './mcpSdk';
+import { failureJson } from './errors';
 
-export { runCliProcess, type AuthInfo, type RunCli };
+export { failureJson, runCliProcess, type AuthInfo, type RunCli };
 
 /** Answers one authenticated request; `auth` reaches each tool call's `runCli`. */
 export type PaneMcpHttpHandler = (request: Request, auth: AuthInfo) => Promise<Response>;
@@ -13,6 +14,7 @@ export type PaneMcpHttpHandler = (request: Request, auth: AuthInfo) => Promise<R
  * Serving is stateless, so a client keeps working across server restarts with no session to
  * rebuild. It answers loopback hosts only and refuses browser origins other than loopback
  * (DNS rebinding). The caller checks the bearer token first (main/src/services/paneMcpEndpoint.ts).
+ * A dropped connection aborts the request, which ends the `runpane` process running the call.
  */
 export function createPaneMcpHttpHandler(options: PaneMcpServerOptions & { onerror?: (error: Error) => void }): PaneMcpHttpHandler {
   const handler = createMcpHandler(paneMcpServerFactory(options), { onerror: options.onerror });
