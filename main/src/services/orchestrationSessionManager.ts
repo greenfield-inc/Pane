@@ -75,10 +75,11 @@ import { applyTerminalInput, sessionNameFromMessage } from './sessionAutoName';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
+import { CONFIGURED_AGENT_IDS, agentConfig, agentTerminalCommand, configuredAgent, isConfiguredAgent } from '../../../shared/agents';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
-const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor', 'opencode'];
+const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = CONFIGURED_AGENT_IDS;
 
 const ORCHESTRATION_SESSION_TITLE = 'Session';
 const ORCHESTRATION_BOOTSTRAP_VERSION = 2;
@@ -88,7 +89,7 @@ function getOrchestrationPanelId(sessionId: string, agent: PaneChatAgent): strin
 }
 
 function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
-  return agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode';
+  return isConfiguredAgent(agent);
 }
 
 export class OrchestrationSessionManager extends EventEmitter {
@@ -195,7 +196,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /** `terminal`: start the orchestrator in a terminal even with chat tabs on, for a client that can't show a chat (D-203). */
-  async create(input: OrchestrationSessionCreateInput, sourcePanelId?: string, { terminal = false } = {}): Promise<OrchestrationSessionView<Session>> {
+  async create(input: OrchestrationSessionCreateInput, sourcePanelId?: string, { terminal = () => false }: { terminal?: (agent: PaneChatAgent) => boolean } = {}): Promise<OrchestrationSessionView<Session>> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
       validateCreateInput(input);
@@ -256,7 +257,7 @@ export class OrchestrationSessionManager extends EventEmitter {
           : input.resume ? null
           : fits('', config.defaultSessionResume) ? config.defaultSessionResume : null;
       const defaultAgent = normalizePaneChatAgent(config.defaultOrchestratorAgent);
-      const agent = explicitAgent ?? launchAgent(launchCommand.trim() || RUNPANE_CONTRACT.agentTemplates[defaultAgent].command, customResume)
+      const agent = explicitAgent ?? launchAgent(launchCommand.trim() || agentTerminalCommand(defaultAgent), customResume)
         ?? defaultAgent;
       resolveSessionAgent(agent, launchCommand, customResume);
       this.assertAgentSupported(agent, input.runtime);
@@ -278,10 +279,9 @@ export class OrchestrationSessionManager extends EventEmitter {
         profile: input.profile ?? this.configManager.getConfig().defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
         internalSessionId,
         panelIds: {
-          claude: sourceState?.agentType === 'claude' && sourcePanel ? sourcePanel.id : getOrchestrationPanelId(id, 'claude'),
-          codex: sourceState?.agentType === 'codex' && sourcePanel ? sourcePanel.id : getOrchestrationPanelId(id, 'codex'),
-          cursor: getOrchestrationPanelId(id, 'cursor'),
-          opencode: getOrchestrationPanelId(id, 'opencode'),
+          // A promoted terminal keeps its own panel as its agent's orchestrator.
+          // SAFETY: built from every configured agent id, so it has exactly the PaneChatAgent keys.
+          ...Object.fromEntries(CONFIGURED_AGENT_IDS.map(agent => [agent, sourceState?.agentType === agent && sourcePanel ? sourcePanel.id : getOrchestrationPanelId(id, agent)])) as Record<PaneChatAgent, string>,
         },
         goal: input.goal?.trim() ?? '',
         context: input.context?.trim() ?? (sourcePane ? `Conversation promoted from Pane ${sourcePane.id}. Project files remain at ${sourcePane.worktreePath}. Continue project work there; this Session folder holds coordination artifacts.` : ''),
@@ -321,7 +321,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         // Persist the durable record before creating/publishing its hidden
         // terminal owner so a process exit can be repaired during startup.
         this.createInternalSession(record);
-        const panel = await this.ensurePanelForAgent(record, terminal);
+        const panel = await this.ensurePanelForAgent(record, terminal(record.agent));
         const view = await this.viewFromRecord(record, panel);
         this.emitChanged(record, 'created');
         return view;
@@ -359,7 +359,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const customResume = input.customResume !== undefined ? input.customResume : agentChanging ? undefined : current.customResume;
       // The resumed conversation belongs to the previous agent.
       const resume = agentChanging ? undefined : current.resume;
-      const command = launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[input.agent ?? current.agent].command;
+      const command = launchCommand?.trim() || agentTerminalCommand(input.agent ?? current.agent);
       const agent = input.agent ?? launchAgent(command, customResume) ?? current.agent;
       resolveSessionAgent(agent, command, customResume);
       const nextRecord: OrchestrationSessionRecord = {
@@ -486,7 +486,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   agentLaunchCommand(panelId: string): string | undefined {
     const record = this.store.read().sessions.find(session => session.panelIds[session.agent] === panelId);
     if (!record) return undefined;
-    return record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command;
+    return record.launchCommand?.trim() || agentTerminalCommand(record.agent);
   }
 
   async associate(selector: OrchestrationSessionSelector, input: OrchestrationAssociationInput): Promise<OrchestrationSessionRecord> {
@@ -989,10 +989,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       agent,
       internalSessionId: state?.session.id ?? PANE_CHAT_SESSION_ID,
       panelIds: {
-        claude: getPaneChatPanelId('claude'),
-        codex: getPaneChatPanelId('codex'),
-        cursor: getPaneChatPanelId('cursor'),
-        opencode: getPaneChatPanelId('opencode'),
+        // SAFETY: built from every configured agent id, so it has exactly the PaneChatAgent keys.
+        ...Object.fromEntries(CONFIGURED_AGENT_IDS.map(id => [id, getPaneChatPanelId(id)])) as Record<PaneChatAgent, string>,
       },
       goal: '',
       context: '',
@@ -1084,14 +1082,14 @@ export class OrchestrationSessionManager extends EventEmitter {
       return panelManager.getPanel(panelId) ?? existing;
     }
     const chat = terminal ? undefined : this.chatLaunch(record);
-    if (chat && 'launch' in chat && (record.agent === 'claude' || record.agent === 'codex')) {
+    if (chat && 'launch' in chat && agentConfig(record.agent)?.chat) {
       const workspace = sessionRuntimePath(sessionWorkspacePath(record.id), record);
       const state: ChatPanelState = { agent: record.agent, launch: chat.launch, cwd: workspace, status: 'starting', orchestrationSessionId: record.id, sessionFolder: workspace };
       const opening = this.firstPrompt(record);
       if (opening) state.initialInput = opening;
       const panel = await panelManager.createPanel({
         id: panelId, sessionId: record.internalSessionId, type: 'chat',
-        title: `${record.name} · ${RUNPANE_CONTRACT.agentTemplates[record.agent].title}`,
+        title: `${record.name} · ${configuredAgent(record.agent).title}`,
         initialState: { customState: state }, metadata: { permanent: true },
       });
       void this.chatTabs().ensure(panel.id).catch(error => console.warn(`[Sessions] ${record.name}'s chat did not start: ${error instanceof Error ? error.message : String(error)}`));
@@ -1101,7 +1099,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       id: panelId,
       sessionId: record.internalSessionId,
       type: 'terminal',
-      title: `${record.name} · ${RUNPANE_CONTRACT.agentTemplates[record.agent].title}`,
+      title: `${record.name} · ${configuredAgent(record.agent).title}`,
       initialState: this.buildTerminalState(record),
       metadata: { permanent: true },
     });
@@ -1116,7 +1114,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     if (this.configManager.getConfig().chatTabsEnabled !== true) return undefined;
     return sessionChatLaunch({
       agent: record.agent, runtime: record.runtime, resume: record.resume, promoted: !!record.promotedFrom, customResume: record.customResume,
-      launchCommand: record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command,
+      launchCommand: record.launchCommand?.trim() || agentTerminalCommand(record.agent),
     });
   }
 
@@ -1186,7 +1184,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     if (current?.agentSessionId && current.agentSessionId !== nextCustomState.agentSessionId) {
       console.log(`[OrchestrationSessionManager] Session ${record.id} panel ${panel.id}: saved conversation ${current.agentSessionId} ${nextCustomState.agentSessionId ? `replaced by ${nextCustomState.agentSessionId}` : 'cleared'} by the Session's launch (agent ${current.agentType ?? 'unknown'} -> ${desired.agentType}, resume ${current.customResume?.mode ?? 'none'} -> ${desired.customResume?.mode ?? 'none'}).`);
     }
-    const nextTitle = `${record.name} · ${RUNPANE_CONTRACT.agentTemplates[record.agent].title}`;
+    const nextTitle = `${record.name} · ${configuredAgent(record.agent).title}`;
     const stateNeedsRefresh = JSON.stringify(current?.customResume) !== JSON.stringify(nextCustomState.customResume)
       || current?.initialCommand !== nextCustomState.initialCommand
       || current?.initialInput !== nextCustomState.initialInput
@@ -1208,7 +1206,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   private buildTerminalState(record: OrchestrationSessionRecord): TerminalPanelState {
-    const command = record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command;
+    const command = record.launchCommand?.trim() || agentTerminalCommand(record.agent);
     const initialCommand = record.launchCommand?.trim()
       || (record.runtime === 'wsl' ? command : this.skillCacheManager?.launchCommand(record.agent)) || command;
     const effectiveAgent = launchAgent(initialCommand, record.customResume);
@@ -1312,7 +1310,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     const panels: OrchestrationPanelOverview[] = allPanels.map(panel => {
       const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
         agentType: boundary.optional(boundary.enumeration(...CLI_AGENT_TYPES)),
-        agent: boundary.optional(boundary.enumeration('claude', 'codex')),
+        agent: boundary.optional(boundary.string),
         isInitialized: boundary.optional(boundary.boolean),
       }));
       const snapshot = panel.type === 'terminal' ? terminalPanelManager.getTerminalSnapshot(panel.id) : null;
@@ -1395,7 +1393,7 @@ export class OrchestrationSessionManager extends EventEmitter {
 
   private assertAgentSupported(agent: PaneChatAgent, runtime?: 'windows' | 'wsl'): void {
     if (!isAgentSupportedOnPlatform(agent, runtime === 'wsl' ? 'wsl' : process.platform)) {
-      throw new Error(`${RUNPANE_CONTRACT.agentTemplates[agent].title} is not supported on ${process.platform}.`);
+      throw new Error(`${configuredAgent(agent).title} is not supported on ${process.platform}.`);
     }
   }
 

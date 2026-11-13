@@ -1,5 +1,6 @@
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 import type { RunpaneResolvedTool } from '../../../../shared/types/runpaneOrchestration';
+import { agentTerminalCommand } from '../../../../shared/agents';
 
 /**
  * Claude Code settings that make a Session folder readable but not editable.
@@ -39,7 +40,7 @@ export function withSessionFolderAccess(
   folder: string,
   platform: NodeJS.Platform = process.platform,
 ): RunpaneResolvedTool {
-  if (platform === 'win32' || tool.agent !== 'claude' || tool.launchMode || tool.command !== RUNPANE_CONTRACT.agentTemplates.claude.command) {
+  if (platform === 'win32' || tool.agent !== 'claude' || tool.launchMode || tool.command !== agentTerminalCommand('claude')) {
     return tool;
   }
   const quoted = `'${JSON.stringify(claudeSessionFolderSettings(folder)).replace(/'/gu, `'\\''`)}'`;

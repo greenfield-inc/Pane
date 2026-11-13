@@ -39,9 +39,9 @@ import type { ApprovalStore } from '../approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../../database/jsonStoreImport';
 import type { SessionInboxEnded } from '../sessionInbox';
 import { workerCard } from './workerContext';
+import { agentConfig } from '../../../../shared/agents';
 
-const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
-const agentName = (agentType: string | undefined): string => (agentType ? AGENT_NAMES.get(agentType) : undefined) ?? 'Agent';
+const agentName = (agentType: string | undefined): string => (agentType ? agentConfig(agentType)?.label : undefined) ?? 'Agent';
 
 export interface NotifyServiceDependencies {
   configManager: ConfigManager;
@@ -641,7 +641,7 @@ export class NotifyService {
 
   private describeSource(caller: NotifyCaller): NotifySource {
     const pane = this.deps.findPane(caller);
-    const agent = caller.agent?.trim() || (pane?.agentType ? AGENT_NAMES.get(pane.agentType) : undefined) || 'Agent';
+    const agent = caller.agent?.trim() || (pane?.agentType ? agentConfig(pane.agentType)?.label : undefined) || 'Agent';
     if (pane) {
       const source: NotifySource = { paneId: pane.paneId, name: pane.name, agent };
       if (pane.panelId) source.panelId = pane.panelId;

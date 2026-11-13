@@ -19,6 +19,7 @@ import {
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { paneChatFirstPrompt, paneIsEmpty } from './paneChatMigrateOffer';
+import { agentTerminalCommand, configuredAgent, isConfiguredAgent } from '../../../shared/agents';
 
 const PANE_CHAT_TITLE = 'Pane Chat';
 const PANE_CHAT_BOOTSTRAP_VERSION = 10;
@@ -29,7 +30,7 @@ function isValidUuid(value: string | undefined): value is string {
 }
 
 function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
-  return agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode';
+  return isConfiguredAgent(agent);
 }
 
 export class PaneChatManager {
@@ -77,7 +78,7 @@ export class PaneChatManager {
 
   private assertAgentSupported(agent: PaneChatAgent): void {
     if (!isAgentSupportedOnPlatform(agent, process.platform)) {
-      throw new Error(`${RUNPANE_CONTRACT.agentTemplates[agent].title} is not supported on ${process.platform}.`);
+      throw new Error(`${configuredAgent(agent).title} is not supported on ${process.platform}.`);
     }
   }
 
@@ -140,7 +141,7 @@ export class PaneChatManager {
       type: 'terminal',
       title: agent === 'claude'
         ? session.name
-        : `${session.name} - ${RUNPANE_CONTRACT.agentTemplates[agent].title}`,
+        : `${session.name} - ${configuredAgent(agent).title}`,
       initialState: this.buildTerminalState(agent),
       metadata: { permanent: true },
     });
@@ -185,7 +186,7 @@ export class PaneChatManager {
     const agentSessionId = this.resolveAgentSessionId(agent, previousState, forceNewAgentSession);
 
     const panelState: TerminalPanelState = {
-      initialCommand: this.skillCacheManager?.launchCommand(agent) ?? RUNPANE_CONTRACT.agentTemplates[agent].command,
+      initialCommand: this.skillCacheManager?.launchCommand(agent) ?? agentTerminalCommand(agent),
       initialInput: paneChatFirstPrompt(agent, previousState, this.skillCacheManager?.paneChatSkillsRoot),
       orchestrationSessionId: 'legacy-pane-chat',
       orchestrationWorkspace: sessionWorkspacePath('legacy-pane-chat'),

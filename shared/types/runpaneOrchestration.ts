@@ -1428,7 +1428,8 @@ export type RunpanePanelLastMessageResult =
     ok: true;
     panelId: string;
     paneId: string;
-    agentType: 'claude' | 'codex';
+    /** The agent's id; a chat tab may run any agent the host can. */
+    agentType: string;
     /** The agent's last reply, from its transcript; the tail is kept when it is longer than `limit`. */
     text: string;
     length: number;

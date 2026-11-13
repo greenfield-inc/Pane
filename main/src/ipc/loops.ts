@@ -10,6 +10,7 @@ import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract
 import type { RunpanePaneCreateRequest } from '../../../shared/types/runpaneOrchestration';
 import { PaneError } from '../../../shared/paneError';
 import { isPlainAgentCommand, tokenizeShellCommand } from '../services/agents/agentIdentity';
+import { agentTerminalCommand } from '../../../shared/agents';
 
 const LOOP_CHANNELS = [
   'loops:list',
@@ -219,12 +220,12 @@ async function sendSessionLoopRun(commandRegistry: PaneCommandRegistry, context:
 
 /** The flags a built-in agent template launches with, such as `--yolo`. */
 function unattendedFlags(agent: LoopAgent): string[] {
-  return RUNPANE_CONTRACT.agentTemplates[agent].command.trim().split(/\s+/).slice(1);
+  return agentTerminalCommand(agent).trim().split(/\s+/).slice(1);
 }
 
 /** The program a built-in agent template runs, such as `cursor-agent`. */
 function agentExecutable(agent: LoopAgent): string {
-  return RUNPANE_CONTRACT.agentTemplates[agent].command.trim().split(/\s+/)[0];
+  return agentTerminalCommand(agent).trim().split(/\s+/)[0];
 }
 
 /**
