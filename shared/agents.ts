@@ -19,6 +19,7 @@ export interface AgentChatConfig {
   fullAccess?: { mode?: string; args?: true };
   riskyModes?: readonly string[];
   terminalConversationsLoad: boolean;
+  paneMcpHttp?: boolean;
   legacyClients?: boolean;
   registryIds?: readonly string[];
 }
@@ -45,6 +46,7 @@ interface AgentConfigBase {
     fullAccessArgs: readonly string[];
     hotkey: string;
     reportsConversation?: boolean;
+    paneMcpConfigFlag?: string;
     platforms?: readonly string[];
     /** Takes the starting message as an argument; otherwise Pane types it once the agent's input box is idle. */
     promptArgument?: boolean;

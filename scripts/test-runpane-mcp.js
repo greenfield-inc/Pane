@@ -1311,3 +1311,43 @@ test('the autopilot toolset serves Autopilot\'s reads and stack push, whose resu
     fs.rmSync(paneDir, { recursive: true, force: true });
   }
 });
+
+test("Pane's HTTP endpoint serves the same instructions, tools and docs as stdio, and runs each call through its runCli", async () => {
+  const http = require('node:http');
+  const { StreamableHTTPClientTransport } = sdk('client/streamableHttp.js');
+  const { createPaneMcpHttpHandler, runCliProcess } = require(dist('mcpHttp.js'));
+  const calls = [];
+  const handler = createPaneMcpHttpHandler({
+    runCli: (argv, signal, env, auth) => {
+      calls.push({ argv, client: auth?.clientId });
+      return runCliProcess(process.execPath, [dist('cli.js'), ...argv], { env: { ...process.env, ...env }, signal });
+    },
+  });
+  const server = http.createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const reply = await handler(new Request(`http://${request.headers.host}${request.url}`, {
+      method: request.method, headers: request.headers, body: request.method === 'POST' ? Buffer.concat(chunks) : undefined,
+    }), { token: 't', clientId: 'tab-1', scopes: [] });
+    response.writeHead(reply.status, Object.fromEntries(reply.headers));
+    response.end(Buffer.from(await reply.arrayBuffer()));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const overHttp = new Client({ name: 'runpane-mcp-test', version: '1.0.0' });
+  await overHttp.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.address().port}/mcp`)));
+  try {
+    const served = async (client) => ({
+      instructions: client.getInstructions(),
+      tools: (await client.listTools()).tools,
+      resources: (await client.listResources()).resources,
+    });
+    const stdio = await withMcpClient(served, { args: [] });
+    assert.deepEqual(await served(overHttp), stdio);
+    const result = await overHttp.callTool({ name: 'docs_search', arguments: { query: 'notify' } });
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(calls, [{ argv: ['docs', 'search', '--query=notify', '--json'], client: 'tab-1' }]);
+  } finally {
+    await overHttp.close();
+    server.close();
+  }
+});

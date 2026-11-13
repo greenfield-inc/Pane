@@ -536,6 +536,11 @@
               "description": "Pane's SessionStart hook reports the terminal's live conversation, so Switch to chat can be sure which one it is on.",
               "type": "boolean"
             },
+            "paneMcpConfigFlag": {
+              "description": "The flag that takes an MCP config file for one launch (written as <flag>=<file>), whose `pane` server replaces the user-level one. Terminal tabs Pane starts then reach Pane's tools over its loopback HTTP endpoint.",
+              "type": "string",
+              "pattern": "^--"
+            },
             "promptArgument": {
               "description": "The CLI takes the starting message as a command argument. Without it, Pane types the message into the agent's input box once the status manifest shows that box idle.",
               "type": "boolean"
@@ -720,6 +725,10 @@
         },
         "terminalConversationsLoad": {
           "description": "A chat can load a conversation the agent's terminal started (Switch to chat).",
+          "type": "boolean"
+        },
+        "paneMcpHttp": {
+          "description": "Chat tabs pass Pane's MCP server to the agent over HTTP in session/new, and the agent uses it in place of a user-level server of the same name.",
           "type": "boolean"
         },
         "registryIds": {

@@ -4,7 +4,7 @@ import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './bou
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
-import { ProtocolError, ProtocolErrorCode, Server, serveStdio } from './mcpSdk';
+import { ProtocolError, ProtocolErrorCode, Server, serveStdio, type AuthInfo, type McpRequestContext } from './mcpSdk';
 import { getWrapperVersion } from './version';
 import type { RunpaneFailure } from './errors';
 
@@ -74,21 +74,52 @@ function selectTools(tools: readonly McpTool[], options: McpServerOptions): McpT
 }
 
 /**
+ * Runs one `runpane` command for a tool call and returns what it printed. `env` adds to the
+ * command's environment; `auth` is who the HTTP transport authenticated (absent over stdio).
+ */
+export type RunCli = (argv: string[], signal: AbortSignal, env: NodeJS.ProcessEnv, auth: AuthInfo | undefined) => Promise<{ code: number; stdout: string; stderr: string }>;
+
+export interface PaneMcpServerOptions extends McpServerOptions {
+  runCli: RunCli;
+  /**
+   * Who the client is when the request doesn't say. Over stateless HTTP a 2025-era client names
+   * itself only at `initialize`, so later calls arrive unnamed; Pane names them from the tab, and
+   * says whether that agent holds a tool call open while `notify` waits for the person.
+   */
+  clientFor?: (auth: AuthInfo | undefined) => { name: string; waitsLong: boolean } | undefined;
+}
+
+/**
  * Serves the selected contract commands as MCP tools, and Pane's docs as resources, over stdio.
  * Speaks the 2026-07-28 revision and the 2025 `initialize` handshake current clients still use.
  * Only JSON-RPC goes to stdout; the child CLI's output is captured, never passed through.
  */
 export async function runMcpServer(options: McpServerOptions = {}): Promise<number> {
   setFlagsFromString(SERVER_V8_FLAGS);
-  const allTools = buildMcpTools();
-  let tools: McpTool[];
+  let createServer: (context?: McpRequestContext) => Server;
   try {
-    tools = selectTools(allTools, options);
+    createServer = paneMcpServerFactory({ ...options, runCli: runSelf });
   } catch (error) {
     process.stderr.write(`runpane mcp: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
+  const handle = serveStdio(createServer, { onerror: (error) => process.stderr.write(`runpane mcp: ${error.message}\n`) });
+  await new Promise<void>((resolve) => process.stdin.once('close', resolve).once('end', resolve));
+  await handle.close();
+  return 0;
+}
+
+/**
+ * Makes Pane's MCP server for any transport: stdio here, and Pane's own HTTP endpoint for the
+ * agents it starts (mcpHttp.ts). Throws when a toolset name is unknown.
+ */
+export function paneMcpServerFactory(options: PaneMcpServerOptions): (context?: McpRequestContext) => Server {
+  const allTools = buildMcpTools();
+  const tools = selectTools(allTools, options);
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+  // The docs ship with this build, so one read serves every request (Pane's endpoint serves many agents).
+  let docs: ReturnType<typeof loadDocs> | undefined;
+  const bundledDocs = () => docs ??= loadDocs(undefined);
   const rewrite = (text: string) => rewriteCliHints(text, allTools, toolsByName);
   const listResult = {
     tools: tools.map((tool) => ({
@@ -101,7 +132,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
     })),
   };
 
-  const createServer = () => {
+  return (context) => {
     const server = new Server(
       { name: 'pane', title: 'Pane', version: getWrapperVersion() },
       {
@@ -116,7 +147,9 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       if (!tool) {
         const other = allTools.find((candidate) => candidate.name === request.params.name);
         const set = other?.toolsets[0] ?? 'all';
-        const hint = other ? ` It is in the "${set}" toolset: run the server with --toolsets ${set} (or all).` : ' Call tools/list for the available tools.';
+        const hint = other
+          ? ` It is in the "${set}" toolset: add it with \`runpane mcp --toolsets ${set}\` (or all), or in Pane under Settings > AI & Agents.`
+          : ' Call tools/list for the available tools.';
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown tool: ${request.params.name}.${hint}`);
       }
       let input: JsonObject;
@@ -125,18 +158,19 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       } catch (error) {
         return errorResult(`Invalid arguments for ${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
-      const clientName = decodeBoundary(ctx.mcpReq.envelope, clientInfoEnvelope)?.['io.modelcontextprotocol/clientInfo']?.name
-        ?? server.getClientVersion()?.name ?? '';
+      const named = decodeBoundary(ctx.mcpReq.envelope, clientInfoEnvelope)?.['io.modelcontextprotocol/clientInfo']?.name
+        ?? server.getClientVersion()?.name;
+      const client = named ? { name: named, waitsLong: LONG_WAIT_CLIENTS.test(named) } : options.clientFor?.(context?.authInfo) ?? { name: '', waitsLong: false };
       const progressToken = ctx.mcpReq._meta?.progressToken;
       let progress = 0;
       const ticker = progressToken === undefined ? undefined : setInterval(() => {
         progress += 1;
         ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress } }).catch(() => {});
       }, PROGRESS_INTERVAL_MS);
-      return callTool(tool, input, ctx.mcpReq.signal, rewrite, notifyEnv(clientName)).finally(() => clearInterval(ticker));
+      return callTool(tool, input, ctx.mcpReq.signal, rewrite, (argv, signal, env) => options.runCli(argv, signal, env, context?.authInfo), notifyEnv(client)).finally(() => clearInterval(ticker));
     });
     server.setRequestHandler('resources/list', () => ({
-      resources: loadDocs(undefined).map((doc) => ({
+      resources: bundledDocs().map((doc) => ({
         uri: docUri(doc.path),
         name: doc.path,
         title: doc.title,
@@ -144,7 +178,7 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       })),
     }));
     server.setRequestHandler('resources/read', (request) => {
-      const doc = loadDocs(undefined).find((entry) => docUri(entry.path) === request.params.uri);
+      const doc = bundledDocs().find((entry) => docUri(entry.path) === request.params.uri);
       if (!doc) {
         throw new ProtocolError(ProtocolErrorCode.InvalidParams, `No Pane doc at ${request.params.uri}. List them with resources/list, or search with docs_search.`);
       }
@@ -152,19 +186,14 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
     });
     return server;
   };
-
-  const handle = serveStdio(createServer, { onerror: (error) => process.stderr.write(`runpane mcp: ${error.message}\n`) });
-  await new Promise<void>((resolve) => process.stdin.once('close', resolve).once('end', resolve));
-  await handle.close();
-  return 0;
 }
 
 /** What `runpane notify` needs to know about the client: its friendly name, and whether its calls time out. */
-function notifyEnv(clientName: string): NodeJS.ProcessEnv {
+function notifyEnv(client: { name: string; waitsLong: boolean }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
-  const agent = AGENT_NAMES.find(([pattern]) => pattern.test(clientName))?.[1] ?? clientName;
+  const agent = AGENT_NAMES.find(([pattern]) => pattern.test(client.name))?.[1] ?? client.name;
   if (agent) env.RUNPANE_NOTIFY_AGENT = agent;
-  if (!LONG_WAIT_CLIENTS.test(clientName)) env.RUNPANE_NOTIFY_RETURN_AFTER_MS = String(NOTIFY_RETURN_AFTER_MS);
+  if (!client.waitsLong) env.RUNPANE_NOTIFY_RETURN_AFTER_MS = String(NOTIFY_RETURN_AFTER_MS);
   return env;
 }
 
@@ -196,6 +225,7 @@ async function callTool(
   input: JsonObject,
   signal: AbortSignal,
   rewrite: (text: string) => string,
+  runCli: (argv: string[], signal: AbortSignal, env: NodeJS.ProcessEnv) => ReturnType<RunCli>,
   env: NodeJS.ProcessEnv,
 ): Promise<ToolResult> {
   if (tool.confirmsInServer && input.yes !== true) {
@@ -255,13 +285,21 @@ function parseJsonObject(text: string): JsonObject | undefined {
  * output. A cancelled request (notifications/cancelled) aborts the signal, which kills the child.
  * `env` adds to this server's environment.
  */
-function runCli(argv: string[], signal: AbortSignal, env: NodeJS.ProcessEnv): Promise<{ code: number; stdout: string; stderr: string }> {
+const runSelf: RunCli = (argv, signal, env) => runCliProcess(process.execPath, [process.argv[1], ...argv], { env: { ...process.env, ...env }, signal });
+
+/** Runs a runpane CLI process and collects its output; it never rejects. */
+export function runCliProcess(
+  executable: string,
+  args: string[],
+  options: { env: NodeJS.ProcessEnv; signal: AbortSignal; cwd?: string },
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [process.argv[1], ...argv], {
+    const child = spawn(executable, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...env },
+      env: options.env,
+      cwd: options.cwd,
       windowsHide: true,
-      signal,
+      signal: options.signal,
     });
     let stdout = '';
     let stderr = '';

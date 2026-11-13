@@ -10,6 +10,8 @@ import { getGitAttributionEnv } from '../../utils/attribution';
 import { getRuntimeConfigManager } from '../../core/runtime';
 import { noteContextPath } from '../noteFiles';
 import { withRunpaneBinOnPath } from '../runpaneShim';
+import { grantPaneMcp, paneMcpChatServer } from '../paneMcpEndpoint';
+import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from '../paneMcpNames';
 import { isStandardCustomResume, type CustomCommandResume } from '../../../../shared/types/customCommandResume';
 import { adapterEntry, checkAgentCli } from '../agentChat/adapterSetup';
 import { hostCommand, npmShimScript } from '../agentChat/hostCommand';
@@ -46,6 +48,8 @@ export function chatTabEnv(panel: ToolPanel, state: ChatPanelState, projectEnv: 
   const inherited = interactiveTerminalEnv();
   delete inherited.PANE_ORCHESTRATION_SESSION_ID;
   delete inherited.PANE_SESSION_DIR;
+  delete inherited[PANE_MCP_URL_ENV];
+  delete inherited[PANE_MCP_TOKEN_ENV];
   delete inherited.PANE_AUTOPILOT_RUN_ID;
   delete inherited.PANE_AUTOPILOT_DIR;
   const config = getRuntimeConfigManager().getConfig();
@@ -117,6 +121,13 @@ export class AgentChatLauncher implements ChatTabLauncher {
     // The CLI is checked in the folder and environment it will run in (#1236).
     await checkAgentCli(state.agent, executable, { cwd: state.cwd, env });
     const launch: ResolvedLaunch = { command: chatCommand(agent, chat, executable, state, env) };
+    // Pane's tools over HTTP, for an agent that puts a session server in place of its user-level `pane`. The
+    // token goes only into the agent's environment: the request names it as a variable (paneMcpChatServer).
+    const paneMcp = chat.paneMcpHttp ? grantPaneMcp({ panelId: panel.id, env: { ...env }, cwd: state.cwd, agentLabel: agent.label }) : undefined;
+    if (paneMcp) {
+      Object.assign(launch.command.env, paneMcp);
+      launch.mcpServers = [paneMcpChatServer()];
+    }
     if (!chat.adapter) launch.ownCli = true;
     Object.assign(launch, fullAccessLaunch(chat, state.launch));
     const meta = sessionFolderMeta(state);
@@ -270,3 +281,4 @@ export function sessionFolderMeta(state: Pick<ChatPanelState, 'agent' | 'cwd' | 
   if (!namespace || platform === 'win32' || !state.sessionFolder || path.resolve(state.sessionFolder) === path.resolve(state.cwd)) return undefined;
   return { [namespace]: { options: { settings: claudeSessionFolderSettings(state.sessionFolder) } } };
 }
+

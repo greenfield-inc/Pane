@@ -27,6 +27,19 @@ To turn this off, open **Settings → AI & Agents** and switch off **Register Pa
 
 Restart a running `claude` or `codex` session to pick up a new registration. In Cursor, start a new chat or use **Developer: Reload Window**. Check with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor CLI may require `agent mcp enable pane` to add the server to its local approved list; Pane leaves that trust decision to you.
 
+## Claude tabs Pane starts: one HTTP server
+
+Claude Code and Claude chat tabs that Pane starts reach the same tools over HTTP, served by the running Pane app, instead of each starting its own `runpane mcp` process:
+
+- Pane listens on `127.0.0.1` at a random port, path `/mcp` (streamable HTTP, stateless), on the same loopback listener as Claude's prompt hooks. It answers only loopback `Host` headers and loopback or absent `Origin` headers.
+- A tab whose agent uses this endpoint gets a random token, held in Pane's memory and in that tab's environment as `PANE_MCP_TOKEN`, with the URL in `PANE_MCP_URL`. Other tabs get neither. The token alone tells Pane which tab is calling; a tool call runs `runpane` with that tab's environment and folder, and Pane's own data folder (`PANE_DIR`), exactly as the tab's own stdio server would. A request without a live token gets `401`. Closing the tab, or its shell exiting, revokes the token, and a tab restart gets a new one. Tokens are never logged, written to disk, or put on a command line.
+- A Claude terminal launch gets `--mcp-config=<Pane data dir>/mcp/pane-http.json` (the agent config's `terminal.paneMcpConfigFlag`). That file names the `pane` server with `${PANE_MCP_URL}` and `Bearer ${PANE_MCP_TOKEN}`, which Claude reads from the tab's environment. Claude puts it in place of the user-level `pane` entry, so the agent sees one `pane` server. A command with `--strict-mcp-config` runs unchanged.
+- A Claude chat tab passes the same server, with the same two variables, in its ACP `session/new` request (`chat.paneMcpHttp`); the token is in the adapter's environment only.
+- Everything else keeps the user-level stdio server: Codex and Cursor tabs, WSL and SSH tabs, wrapped or preserved launch commands, and agents you start outside Pane. Codex merges a per-launch `-c mcp_servers.pane` into the user-level stdio table and then refuses to start, and its ACP adapter skips a session server whose name the config already defines. Cursor has no per-launch MCP option. Either would need a per-launch way to replace a same-named server.
+- Pane quits its tabs with itself, so after a restart each tab starts with a fresh token and URL.
+- Settings apply at once. With **Register Pane tools** off, new tabs get no token, and a running tab's calls get `403` until it restarts on stdio. A toolsets change applies to the next request.
+- Serving is stateless. A call ends, and its `runpane` process stops, when the agent drops the request; a separate `notifications/cancelled` message has no request to cancel. An agent that names itself only at `initialize` is named after the tab's agent, so `notify` keeps its long wait.
+
 ## Toolsets
 
 A server that offers dozens of tools makes models, especially smaller ones, worse at choosing the right one. So by default the server serves a lean `core` toolset, and everything else is opt-in:
@@ -65,7 +78,7 @@ For an API key, token or password, agents call `secrets_request`, never `notify`
 
 A question can wait for hours, and each client limits a tool call differently:
 
-- While any call runs, the server sends a `notifications/progress` about every minute when the request carried a progress token. That keeps Claude Code's 30-minute idle window for stdio servers open.
+- While any call runs, the server sends a `notifications/progress` about every minute when the request carried a progress token. That keeps Claude Code's 30-minute idle window open, over stdio and over Pane's HTTP endpoint alike.
 - Claude Code and Codex wait in one call. Pane's registration gives Codex a long per-server tool timeout.
 - Every other client, including Cursor's CLI (which ends each call after a fixed 60 seconds), gets `{waiting: true, id, next}` after about 50 seconds. The question stays on screen, and the agent calls `notify` again with `resume: <id>`. Pane ends this loop after 15 minutes without an answer and returns `unavailable`.
 
@@ -102,7 +115,7 @@ Any other client that can launch a stdio server uses the same command and argume
 
 `agents_send` uses the target agent's composer state. For Codex, it queues with Tab while the agent is working and submits with Enter when ready. A send is confirmed only after the text leaves the composer; if it remains, the result includes a command to retry the appropriate key. `panels_submit_composer` with `strategy: auto` uses the same keys.
 
-The server is stdio only: it runs next to the Pane app on the same machine, so there is no HTTP transport and no OAuth. To drive a remote Pane, run the server on the remote host.
+`runpane mcp` is stdio only: it runs next to the Pane app on the same machine, with no OAuth. Pane's own HTTP endpoint serves only the tabs Pane starts on this machine. To drive a remote Pane, run the server on the remote host.
 
 The Python package (`pipx run runpane`) does not include the MCP server, the docs search, or the agent tasks, because they need Node. From Python, those commands print the npm command and exit with status 2.
 
@@ -113,10 +126,11 @@ Automated tests cover the registration and link logic on every OS. Check these b
 **macOS, Windows, and Linux**
 
 1. Install and launch Pane, with Claude Code, Codex, and Cursor installed.
-2. Run `claude mcp list`, `codex mcp list`, and `agent mcp list`. Each lists `pane`. If Cursor asks for approval, run `agent mcp enable pane`; it should report ready with 35 core tools.
+2. Run `claude mcp list`, `codex mcp list`, and `agent mcp list`. Each lists `pane`. If Cursor asks for approval, run `agent mcp enable pane`; it should report ready with 37 core tools.
 3. In a fresh `claude` session, ask "Use Pane to list my repos". It calls `repos_list`.
 4. Quit and relaunch Pane. The Claude, Codex, and Cursor configs are unchanged.
 5. Turn off **Settings → AI & Agents → Register Pane tools with Claude Code, Codex, and Cursor**. `pane` is gone from all three configs, and the other entries are unchanged.
+6. Open a Claude tab in a Pane and type `/mcp`. It lists one `pane` server under built-in MCPs, and no `runpane mcp` process runs under that `claude`. Ask it to list Panes; it calls `panes_list` over HTTP.
 
 **pane:// links**
 
@@ -155,9 +169,9 @@ Automated tests cover the registration and link logic on every OS. Check these b
 
 ## Protocol
 
-The server uses the MCP TypeScript SDK v2 over stdio. It speaks MCP revision 2026-07-28, which has no handshake: `server/discover`, with the version and client capabilities carried on each request. It also accepts the 2025 `initialize` handshake that current Claude Code and Codex releases send, negotiating down to 2025-11-25.
+The server uses the MCP TypeScript SDK v2, over stdio or (in Pane) streamable HTTP. It speaks MCP revision 2026-07-28, which has no handshake: `server/discover`, with the version and client capabilities carried on each request. It also accepts the 2025 `initialize` handshake that current Claude Code and Codex releases send, negotiating down to 2025-11-25.
 
-Only JSON-RPC goes to stdout, and the server exits when stdin closes. Cancelling a call (`notifications/cancelled`) stops the `runpane` process running it.
+Over stdio, only JSON-RPC goes to stdout, the server exits when stdin closes, and cancelling a call (`notifications/cancelled`) stops the `runpane` process running it. Over Pane's HTTP endpoint, dropping the request does.
 
 ## Tools
 

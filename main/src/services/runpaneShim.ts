@@ -48,6 +48,8 @@ export interface RunpaneShimState {
   binDir: string;
   /** Absolute path to the shim agents should call (exported as PANE_RUNPANE_BIN). */
   shimPath: string;
+  /** What the shim runs: the CLI script and the runtime that runs it as Node. */
+  cli: { executable: string; script: string };
   /** Wrapper startup files that re-apply PATH after the user's own files. */
   zshDotDir: string;
   bashRcFile: string;
@@ -65,10 +67,14 @@ export interface InstallRunpaneShimOptions {
 
 let currentState: RunpaneShimState | null = null;
 
-/** Where `pnpm build:main` puts the bundled CLI, relative to this compiled module. */
+/** A file `pnpm build:main` bundles from packages/runpane into main/dist/runpane. */
+export function bundledRunpanePath(file: string): string {
+  // main/dist/main/src/services/runpaneShim.js -> main/dist/runpane/<file>
+  return path.resolve(__dirname, '..', '..', '..', 'runpane', file);
+}
+
 function defaultBundledRunpaneCliPath(): string {
-  // main/dist/main/src/services/runpaneShim.js -> main/dist/runpane/runpane.cjs
-  return path.resolve(__dirname, '..', '..', '..', 'runpane', 'runpane.cjs');
+  return bundledRunpanePath('runpane.cjs');
 }
 
 /** POSIX single-quote a value for sh, bash, zsh and fish. */
@@ -425,7 +431,7 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
   }
   const bashRc = path.join(bashDir, 'rcfile');
   writeManagedFile(bashRc, bashRcFile(binDir), MANAGED_SHELL_MARKER, 0o644);
-  currentState = { binDir, shimPath, zshDotDir, bashRcFile: bashRc };
+  currentState = { binDir, shimPath, cli: { executable: execPath, script: cliPath }, zshDotDir, bashRcFile: bashRc };
   if (platform === 'win32') {
     const wslRc = path.join(bashDir, 'wsl-rcfile');
     if (writeManagedFile(wslRc, wslBashRcFile(binDir), MANAGED_SHELL_MARKER, 0o644)) currentState.wslBashRcFile = wslRc;

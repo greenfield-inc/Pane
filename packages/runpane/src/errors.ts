@@ -41,9 +41,14 @@ function errorFieldsOf(error: Error): Partial<Pick<RunpaneFailure, 'code' | 'nex
   }
 }
 
+/** The `--json` failure the CLI prints: `{ ok: false, error: { code, message, next } }`. */
+export function failureJson(failure: RunpaneFailure): string {
+  return `${JSON.stringify({ ok: false, error: failure }, null, 2)}\n`;
+}
+
 /** People read stderr; with --json, stdout also carries `{ ok: false, error: { code, message, next } }`. */
 export function printFailure(cause: unknown, json: boolean): void {
   const failure = describeFailure(cause);
-  if (json) process.stdout.write(`${JSON.stringify({ ok: false, error: failure }, null, 2)}\n`);
+  if (json) process.stdout.write(failureJson(failure));
   process.stderr.write(`${failure.next ? `${failure.message}\nNext: ${failure.next}` : failure.message}\n`);
 }

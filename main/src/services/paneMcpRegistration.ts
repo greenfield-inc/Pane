@@ -11,11 +11,11 @@ import { getShellPath } from '../utils/shellPath';
 import { escapeForBash, linuxToUNCPath, windowsPathToWSLMount } from '../utils/wslUtils';
 import { parse as parseToml } from 'smol-toml';
 import { syncPaneUserSkills, type UserSkillTarget } from './paneUserSkills';
+import { PANE_MCP_SERVER_NAME } from './paneMcpNames';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const execFileAsync = promisify(execFile);
 
-const PANE_MCP_SERVER_NAME = 'pane';
 // Codex stops waiting for a tool after 300 s by default; `notify` waits for a person for hours.
 const CODEX_TOOL_TIMEOUT_SEC = 86_400;
 /**

@@ -1,6 +1,8 @@
 import { prepareNotifyForQuit } from '../ipc/notify';
 import { getChatTabManager } from '../services/chatTabs';
-import { installRunpaneShimBestEffort } from '../services/runpaneShim';
+import { getRunpaneShimState, installRunpaneShimBestEffort } from '../services/runpaneShim';
+import { BUNDLED_MCP_HTTP_MODULE, PaneMcpEndpoint, setPaneMcpEndpoint, type PaneMcpHttpModule } from '../services/paneMcpEndpoint';
+import { tabListener } from '../services/tabListener';
 import os from 'os';
 import path from 'path';
 import { powerMonitor, type App, type BrowserWindow } from 'electron';
@@ -250,6 +252,22 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const versionChecker = new VersionChecker(configManager, logger);
   // Terminals launched below find this build's runpane first on PATH.
   installRunpaneShimBestEffort(getAppDirectory());
+  // The loopback listener for the tabs Pane starts (Claude's prompt hooks, Pane's MCP tools). Not awaited: the
+  // first window doesn't wait for it, and a tab spawned before it listens just keeps stdio.
+  void tabListener.start().catch(error => {
+    logger.warn('[TabListener] Tabs keep stdio Pane tools and terminal-only prompts: the loopback listener did not start', error instanceof Error ? error : undefined);
+  });
+  // Tabs whose agent supports it reach Pane's tools here over HTTP instead of each starting its own `runpane mcp`.
+  const paneMcpEndpoint = new PaneMcpEndpoint({
+    load: (): Promise<PaneMcpHttpModule> => import(BUNDLED_MCP_HTTP_MODULE),
+    cli: () => getRunpaneShimState()?.cli,
+    settings: () => {
+      const agentContext = configManager.getConfig().agentContext;
+      return { enabled: agentContext?.registerMcp !== false, toolsets: agentContext?.mcpToolsets };
+    },
+  });
+  paneMcpEndpoint.attach();
+  setPaneMcpEndpoint(paneMcpEndpoint);
   const skillCacheManager = new SkillCacheManager();
   await skillCacheManager.start().catch(error => {
     logger.warn('[SkillCache] Failed to install Pane Chat skills', error instanceof Error ? error : undefined);
@@ -583,6 +601,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
       await getChatTabManager().stopAll();
+      setPaneMcpEndpoint(undefined);
+      paneMcpEndpoint.detachAll();
+      await tabListener.stop();
       resourceMonitorService.stop();
       listeningPortMonitor.stop();
       await spotlightManager.disableAll();

@@ -121,7 +121,8 @@ export const RUNPANE_CONTRACT = {
           "hotkey": "mod+alt+3",
           "promptArgument": true,
           "configDir": ".claude",
-          "reportsConversation": true
+          "reportsConversation": true,
+          "paneMcpConfigFlag": "--mcp-config"
         },
         "install": {
           "url": "https://code.claude.com/docs/en/setup",
@@ -153,6 +154,7 @@ export const RUNPANE_CONTRACT = {
             "dontAsk"
           ],
           "terminalConversationsLoad": true,
+          "paneMcpHttp": true,
           "registryIds": [
             "claude-acp"
           ]
