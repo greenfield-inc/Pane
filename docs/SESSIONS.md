@@ -1026,16 +1026,11 @@ bulk forms skip paused tabs.
 Pause stops a tab's process the way quitting Pane does, without asking, and
 keeps its panel and conversation: `runpane panels pause --panel <panel-id>
 --yes`, `runpane panes pause --pane <pane-id> --yes`, or `runpane sessions
-pause --session <session-id>` for the tabs of the Session's chat and every
-Pane in it. A chat tab's agent stops too, unless it has a turn, a queued
-message, an approval, a question or a background task: that tab keeps running
-and the result lists it in `failed`. A paused chat tab starts again when
-someone opens it or sends it a message, in the same conversation; it never
-reports `panel.paused`. A Pane or Session reads as paused from its terminal
-tabs, so a Session whose orchestrator is a chat tab never reads as paused.
-Auto-pause (Settings > Pause) also stops a chat tab's agent after 30 idle
-minutes (`chatIdleReleaseMinutes`), outside the Pane on screen.
-A paused terminal tab stays stopped through clicks, app restarts and updates until
+pause --session <session-id>` for the terminal tabs of the Session's chat and
+every Pane in it. A chat tab can't pause yet: its agent keeps running, the
+result counts it in `chatTabsNotPaused` and says so, and `panels pause` refuses
+one. A Session whose orchestrator is a chat tab therefore never reads as paused.
+A paused tab stays stopped through clicks, app restarts and updates until
 `runpane panels resume --panel <panel-id>`, `runpane panes resume --pane
 <pane-id> --yes` or `runpane sessions resume --session <session-id>` restarts
 it in its conversation. The watch reports each paused tab once as

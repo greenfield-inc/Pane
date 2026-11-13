@@ -4,34 +4,41 @@ import { reasonOf } from '../../../shared/paneError';
 import { panelManager } from './panelManager';
 import { terminalPanelManager, type PauseOutcome } from './terminalPanelManager';
 import { logsManager } from './panels/logPanel/logsManager';
-import { getChatTabManager } from './chatTabs';
 
-/** The tabs of a Pane that pausing or resuming it acts on: its terminal tabs and its chat tabs. */
-export function pausableTabIdsOf(paneIds: readonly string[]): string[] {
-  return paneIds.flatMap(paneId => panelManager.getPanelsForSession(paneId).filter(panel => panel.type === 'terminal' || panel.type === 'chat').map(panel => panel.id));
+/** The terminal tabs of a Pane: what pausing or resuming the Pane acts on. */
+export function terminalPanelIdsOf(paneIds: readonly string[]): string[] {
+  return paneIds.flatMap(paneId => panelManager.getPanelsForSession(paneId).filter(panel => panel.type === 'terminal').map(panel => panel.id));
+}
+
+/** The chat tabs of a Pane. Pause doesn't stop them yet (D-187), so a pause has to say so. */
+export function chatPanelIdsOf(paneIds: readonly string[]): string[] {
+  return paneIds.flatMap(paneId => panelManager.getPanelsForSession(paneId).filter(panel => panel.type === 'chat').map(panel => panel.id));
+}
+
+/** What a pause says about the chat tabs in its scope, which keep running. */
+export function chatTabsNotPausedNote(count: number): string {
+  if (count === 0) return '';
+  const tabs = count === 1 ? '1 chat tab was' : `${count} chat tabs were`;
+  return ` ${tabs} not paused: chat tabs can't pause yet, so their agents keep running. To stop one, press Stop in the tab or close it.`;
 }
 
 /**
- * Pauses whole Panes: their terminal tabs, their chat tabs' agents and their run script (the Logs
- * panel process). The tabs are marked first, and the script stops only once a mark records it, so
- * Resume runs it again even after Pane restarts. A Pane with no terminal tab paused keeps its script.
- * A chat tab with work in flight is left running and reported in `failed`. Each Pane is paused on its
- * own: one that fails is reported and the rest still pause.
+ * Pauses whole Panes: their terminal tabs and their run script (the Logs panel process). The tabs are
+ * marked first, and the script stops only once a mark records it, so Resume runs it again even after
+ * Pane restarts. A Pane with no tab paused keeps its script. Each Pane is paused on its own: one that
+ * fails is reported and the rest still pause.
  */
 export async function pausePanes(registry: PaneCommandRegistry, paneIds: readonly string[], mark: TerminalPausedMark): Promise<PauseOutcome> {
   const outcomes = await Promise.all(paneIds.map(async (paneId): Promise<PauseOutcome> => {
-    const panels = panelManager.getPanelsForSession(paneId);
-    const panelIds = panels.filter(panel => panel.type === 'terminal').map(panel => panel.id);
-    const chatIds = panels.filter(panel => panel.type === 'chat').map(panel => panel.id);
+    const panelIds = terminalPanelIdsOf([paneId]);
     try {
       const scriptRunning = panelIds.length > 0 && await runScriptRunning(paneId);
-      const terminals = await terminalPanelManager.pausePanels(panelIds, scriptRunning ? { ...mark, runScript: true } : mark);
-      if (scriptRunning && terminals.paused.length > 0) await stopRunScript(registry, paneId);
-      const chats = chatIds.length > 0 ? await getChatTabManager().pause(chatIds, mark) : { paused: [], failed: [] };
-      return { paused: [...terminals.paused, ...chats.paused], failed: [...terminals.failed, ...chats.failed] };
+      const outcome = await terminalPanelManager.pausePanels(panelIds, scriptRunning ? { ...mark, runScript: true } : mark);
+      if (scriptRunning && outcome.paused.length > 0) await stopRunScript(registry, paneId);
+      return outcome;
     } catch (error) {
       console.error(`[Pause] Pane ${paneId} could not be paused:`, error);
-      return { paused: [], failed: [...panelIds, ...chatIds].map(panelId => ({ panelId, error: reasonOf(error) })) };
+      return { paused: [], failed: panelIds.map(panelId => ({ panelId, error: reasonOf(error) })) };
     }
   }));
   return { paused: outcomes.flatMap(outcome => outcome.paused), failed: outcomes.flatMap(outcome => outcome.failed) };
