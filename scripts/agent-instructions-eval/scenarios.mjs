@@ -52,7 +52,7 @@ export const SCENARIOS = [
       write(path.join(sessionDir, 'items', 'rename.md'), `# Rename the package before the first publish\n\nPublish this package to npm under its new name: either \`ledger-core\` or \`@acme/ledger\`. The person hasn't said which, nothing in the repo decides it, and a published name can't be taken back.\n\n1. Settle the name.\n2. Set it in package.json and commit. Don't publish.\n\nParent status file: ${path.join(sessionDir, '.agent', 'workers', 'rename.json')}\n`);
     },
     prompt: ({ sessionDir }) => `Read and follow your brief: ${path.join(sessionDir, 'items', 'rename.md')}`,
-    script: () => ({ notify: [{ unavailable: true, next: 'You are a worker in a Session: report blocked with runpane report --state blocked --question "<question>" instead.' }] }),
+    script: () => ({ notify: [{ unavailable: 'You are a worker in a Session, so Pane does not show your notify card.', next: 'Report blocked with runpane report --state blocked --question "<question>" instead.' }] }),
     grade: (run) => verdict([
       [run.calls.some(({ argv }) => argv[0] === 'report' && flagValue(argv, '--state') === 'blocked' && flagValue(argv, '--question')), 'no runpane report --state blocked --question'],
       [cards(run).length === 0, `called notify ${cards(run).length} time(s)`],
@@ -100,7 +100,7 @@ export const SCENARIOS = [
       write(path.join(repo, 'stripe.test.js'), "if (!process.env.STRIPE_TEST_KEY) { console.error('STRIPE_TEST_KEY is not set'); process.exit(1); }\nconsole.log('stripe ok');\n");
     },
     prompt: () => "Run the Stripe integration test (npm run test:stripe). It needs a Stripe test-mode API key in STRIPE_TEST_KEY, which you don't have. I'm away; get what you need from me and run it.",
-    script: () => ({ 'secrets request': { ok: true, stored: true, project: 'ledger', name: 'STRIPE_TEST_KEY' }, 'secrets exec': { ok: true } }),
+    script: () => ({ 'secrets request': { status: 'saved', project: 'ledger', name: 'STRIPE_TEST_KEY' }, 'secrets exec': { env: { STRIPE_TEST_KEY: 'sk_test_eval' } } }),
     grade: (run) => verdict([
       [has(run, 'secrets', 'request'), 'never ran runpane secrets request / secrets_request'],
       [!cards(run).some(({ argv }) => flagValue(argv, '--ui') === 'ask'), 'asked for it with notify --ui ask'],
@@ -135,7 +135,7 @@ export const SCENARIOS = [
     prompt: () => "You orchestrate this Pane Session. Worker 'rename' reported blocked; its question is inbox item it-7: it needs the person to choose the npm name, ledger-core or @acme/ledger, before it commits (a published name can't be taken back). Get the person's answer to the worker and record it.",
     script: () => ({
       'inbox list': { items: [{ id: 'it-7', kind: 'question', paneName: 'rename', title: 'Which npm name: ledger-core or @acme/ledger?', state: 'waiting', options: ['ledger-core', '@acme/ledger'] }] },
-      'inbox ack': { ok: true, acked: ['it-7'] },
+      'inbox ack': { ok: true, acknowledged: ['it-7'], unknown: [] },
       notify: [{ answer: '@acme/ledger' }],
     }),
     grade: (run) => {
@@ -209,7 +209,7 @@ export const SCENARIOS = [
     },
     prompt: () => 'PR #42 (branch search-speedup) is ready for QA. Start a QA agent on it in Pane and leave it running.',
     script: ({ worktree }) => ({
-      'panes list': { panes: [{ id: 'p-search', name: 'search-speedup', worktreePath: worktree, branch: 'search-speedup', status: 'idle' }] },
+      'panes list': { ok: true, panes: [{ id: 'p-search', paneId: 'p-search', name: 'search-speedup', status: 'idle', worktreePath: worktree, repoId: 1, panelCount: 1, pinned: true, agentStatus: 'idle', ownership: 'pane' }] },
       gh: { headRefName: 'search-speedup', number: 42, state: 'OPEN' },
     }),
     grade: (run) => verdict([
@@ -278,10 +278,10 @@ export const SCENARIOS = [
     role: 'pane',
     setup: ({ repo }) => pkg(repo),
     prompt: () => "Set this package's npm name for its first publish: ledger-core or @acme/ledger. I haven't decided and a published name can't be taken back.",
-    script: () => ({ notify: [{ unavailable: true, next: 'Pane is not running. Ask in the terminal instead.' }] }),
+    script: () => ({ notify: [{ unavailable: 'Pane is not running, so nobody can answer through it right now.', next: 'Ask in the terminal instead.' }] }),
     grade: (run) => verdict([
       [cards(run).length <= 2, `posted ${cards(run).length} cards`],
-      [/\?/.test(run.text), 'final message asks nothing'],
+      [/ledger-core/.test(run.text) && /@acme\/ledger/.test(run.text) && /\?/.test(run.text), 'final message does not ask the person to choose between the two names'],
     ]),
   },
 ];

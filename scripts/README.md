@@ -12,38 +12,42 @@ a change to any of those texts.
 
 ```bash
 git fetch origin main
-pnpm eval:agent-instructions                     # origin/main vs your working tree, 3 runs each
-pnpm eval:agent-instructions --only rerun-is-a-tab,session-for-multipart-work --runs 5
+pnpm eval:agent-instructions                     # origin/main vs your working tree, 5 runs each
+pnpm eval:agent-instructions --only rerun-is-a-tab,session-for-multipart-work --runs 3
 ```
 
 Options: `--base <ref>` (default `origin/main`), `--head <ref>` (default your
-working tree, uncommitted changes included), `--runs`, `--concurrency`
-(default 3), `--only <scenario ids>`, `--model`, `--out <dir>`.
+working tree, uncommitted changes included), `--runs` (default 5),
+`--concurrency` (default 3), `--only <scenario ids>`, `--model`, `--out <dir>`.
 `--regrade <run root>` grades the sessions an earlier run saved (the folder it
 prints last) with the current scenarios, at no cost.
 
-Each session gets its own git repository, Pane role (`PANE_SESSION_ID`,
-`PANE_SESSION_DIR`, `PANE_ORCHESTRATION_SESSION_ID`) and `PANE_DIR` in a
-temporary folder. A stub stands in for Pane on both the CLI and the MCP
-server: it logs every call, answers with the scenario's script, and passes
-`--help` and `agent-context` to the version under test, so no card, Pane or
-secret is touched. Scenarios grade only what the agent did: its `runpane` and
-`pane` MCP calls, Bash commands and written files. `scenarios.mjs` lists them.
-The run fails (exit 1) when the head passes any scenario fewer times than the
-base. Results go to `tmp/agent-instructions-eval/<time>/results.md`; the run
-folders with each transcript and call log stay in the temporary folder.
+Each session gets its own HOME holding exactly what Pane installs for that
+version (the Notify block, the `pane` skill, the MCP server), its own git
+repository, Pane role (`PANE_SESSION_ID`, `PANE_SESSION_DIR`,
+`PANE_ORCHESTRATION_SESSION_ID`) and `PANE_DIR`, all in a temporary folder.
+It logs in with `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` when set, and
+otherwise, on macOS, through your existing Claude Code login in the keychain.
+A session that reads your real `~/.claude`, `~/.pane` or keychain folder, or
+the other version's files, is void and runs again; the report gives the void
+rate.
 
-Login: with `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set, each session
-gets its own HOME holding exactly what Pane installs. Otherwise it uses your
-Claude Code login with your user settings, memory, skills, hooks and MCP
-servers turned off; the Notify block is loaded as the repository's
-`CLAUDE.local.md` and the `pane` skill is left out for both versions. Sessions
-are not saved and write no auto memory.
+A stub stands in for Pane on both the CLI and the MCP server. It logs every
+call; answers with the scenario's script or, for anything unscripted, a
+minimal valid example of the command's result; and passes `--help`,
+`agent-context` and `docs` to the version under test, so no card, Pane or
+secret is touched. Before the first session, every scripted answer is checked
+against the MCP tool's output schema. Scenarios grade only what the agent did:
+its `runpane` and `pane` MCP calls, Bash commands and written files.
+`scenarios.mjs` lists them. The run fails (exit 1) when the head passes any
+scenario fewer times than the base. Results go to
+`tmp/agent-instructions-eval/<time>/results.md`; the run folders with each
+transcript and call log stay in the temporary folder.
 
-Cost: each session is one real Claude Code task, about $0.30 and 20 seconds
-to 2.5 minutes on the default model. The full set (15 scenarios, 2 versions,
-3 runs) is 90 sessions: about $28 and 15 minutes at concurrency 3. Use
-`--only` and `--runs` to check one change for less.
+Cost: each session is one real Claude Code task, about $0.25 to $0.45 and 20
+seconds to 2.5 minutes. The full set (15 scenarios, 2 versions, 5 runs) is 150
+sessions: about $50 and 25 minutes at concurrency 3. Use `--only` and `--runs`
+to check one change for less.
 
 ## benchmark-cold-start.mjs
 
