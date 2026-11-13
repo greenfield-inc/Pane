@@ -26,6 +26,7 @@ import { previewSessionSwitch, switchSessionToChat, type SessionSwitchPorts } fr
 import { getAppDirectory } from '../utils/appDirectory';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from '../services/claudeSessionTranscript';
 import type { TerminalPanelState } from '../../../shared/types/panels';
+import { paneScratchDirectory } from '../services/paneScratch';
 
 /** Any agent id; the launcher refuses one this host cannot run, with the agents it can. */
 const agentSchema = boundary.refine(boundary.nonEmptyString, id => /^[a-z0-9][a-z0-9._-]*$/i.test(id), 'expected an agent id');
@@ -76,6 +77,7 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
         return undefined;
       },
       projectEnv: panel => services.sessionManager.resolveProjectEnv(panel.sessionId, panel.metadata?.teammate ?? null),
+      scratchDirectory: panel => paneScratchDirectory(panel.sessionId),
     },
   });
   const manager = getChatTabManager();

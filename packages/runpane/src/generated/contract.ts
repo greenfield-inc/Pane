@@ -12051,6 +12051,23 @@ export const RUNPANE_CONTRACT = {
             },
             "blocked": {
               "$ref": "#/jsonSchemas/paneArchiveResult/oneOf/2/properties/blocked"
+            },
+            "scratch": {
+              "type": "object",
+              "required": [
+                "path",
+                "bytes"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false,
+              "description": "$PANE_SCRATCH_DIR with everything in it (clones, test instances, node_modules), which archive deletes with the worktree; present when the folder exists."
             }
           },
           "additionalProperties": false
@@ -15150,6 +15167,9 @@ export const RUNPANE_CONTRACT = {
               },
               "worktreePath": {
                 "type": "string"
+              },
+              "scratch": {
+                "$ref": "#/jsonSchemas/paneArchiveResult/oneOf/1/properties/scratch"
               }
             },
             "additionalProperties": false

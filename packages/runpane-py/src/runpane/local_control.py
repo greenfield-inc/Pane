@@ -2814,6 +2814,8 @@ def print_pane_archive_result(result: Dict[str, Any]) -> None:
         if blocked:
             print(f"Safety: {blocked.get('message')}")
         print_archive_commit_evidence(result.get("safetyCheck") or {})
+        if result.get("scratch"):
+            print(describe_scratch(result["scratch"]))
         return
 
     if "archived" not in result:
@@ -2852,6 +2854,13 @@ def print_pane_archive_bulk_result(result: Dict[str, Any]) -> None:
             trash = ", files deleting in background" if item.get("trashDeletion") == "pending" else ""
             cleanup = f" worktree {item.get('worktreeCleanup')}{trash}" if item.get("worktreeCleanup") else ""
             print(f"  {outcome} {label}{merged}{cleanup}")
+            if item.get("scratch"):
+                print(f"    {describe_scratch(item['scratch'])}")
+
+
+def describe_scratch(scratch: Dict[str, Any]) -> str:
+    megabytes = (scratch.get("bytes") or 0) / 1_048_576
+    return f"Deletes the scratch folder {scratch.get('path')} ({megabytes:.1f} MB) with the worktree."
 
 
 def print_archive_skip_reason(safety_check: Dict[str, Any], file: Any = None) -> None:

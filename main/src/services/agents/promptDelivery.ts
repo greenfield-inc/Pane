@@ -1,9 +1,9 @@
-import { execFile } from 'child_process';
 import { randomBytes } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import { promisify } from 'util';
 import { getAppDirectory } from '../../utils/appDirectory';
+import { worktreePaneFolder } from '../worktreePaneFolder';
+import { PANE_PROMPTS_FOLDER } from '../../../../shared/constants/paneFolders';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { RunpanePromptWarning } from '../../../../shared/types/runpaneOrchestration';
 
@@ -43,11 +43,6 @@ export function bracketedPaste(text: string): string {
   return `${BRACKETED_PASTE_START}${body}${BRACKETED_PASTE_END}`;
 }
 
-const execFileAsync = promisify(execFile);
-
-/** Where agent-read prompt files live inside a worktree, and the `.git/info/exclude` line that hides them. */
-const WORKTREE_PROMPTS_DIRECTORY = path.join('.pane', 'prompts');
-const WORKTREE_PROMPTS_EXCLUDE = '/.pane/prompts/';
 
 function promptFileName(now: Date): string {
   return `${now.toISOString().replace(/[:.]/gu, '-')}-${randomBytes(3).toString('hex')}`;
@@ -76,49 +71,6 @@ export async function writePromptFile(paneId: string, text: string, now: Date = 
   const file = path.join(await appPromptsDirectory(paneId), `${promptFileName(now)}.md`);
   await writePrivateFile(file, text);
   return file;
-}
-
-/**
- * `<worktree>/.pane/prompts/`, hidden from git by the repository's
- * `info/exclude` (never a committed `.gitignore`), or undefined when the path
- * is not the top of a local git checkout.
- */
-async function worktreePromptsDirectory(worktreePath: string): Promise<{ root: string; directory: string } | undefined> {
-  let top: string;
-  let exclude: string;
-  try {
-    if (!(await fs.stat(worktreePath)).isDirectory()) return undefined;
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel', '--git-path', 'info/exclude'], { cwd: worktreePath, timeout: 10_000 });
-    const [topLine, excludeLine] = stdout.split(/\r?\n/u);
-    if (!topLine || !excludeLine) return undefined;
-    // A Session folder or other non-repo folder can sit inside a repository (a tracked home directory).
-    if (await fs.realpath(topLine) !== await fs.realpath(worktreePath)) return undefined;
-    top = topLine;
-    exclude = path.resolve(worktreePath, excludeLine);
-  } catch {
-    return undefined;
-  }
-  // Check each repository-controlled component before mkdir/chmod can follow it.
-  // Even a link inside this checkout bypasses the lexical Git exclusion.
-  for (const component of ['.pane', WORKTREE_PROMPTS_DIRECTORY]) {
-    const candidate = path.join(top, component);
-    const stat = await fs.lstat(candidate).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return undefined;
-      throw error;
-    });
-    if (stat?.isSymbolicLink()) {
-      throw new PaneError('ERR_PROMPT_STORAGE_SYMLINK', `Cannot store the prompt: ${candidate} is a symbolic link. No prompt or attachments were written.`, 'Replace the symbolic link with a directory, then retry.');
-    }
-  }
-  const current = await fs.readFile(exclude, 'utf8').catch(() => '');
-  if (!current.split(/\r?\n/u).includes(WORKTREE_PROMPTS_EXCLUDE)) {
-    await fs.mkdir(path.dirname(exclude), { recursive: true });
-    await fs.appendFile(exclude, `${current && !current.endsWith('\n') ? '\n' : ''}${WORKTREE_PROMPTS_EXCLUDE}\n`);
-  }
-  const directory = path.join(top, WORKTREE_PROMPTS_DIRECTORY);
-  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  await fs.chmod(directory, 0o700);
-  return { root: path.normalize(top), directory };
 }
 
 export interface AgentPromptFile {
@@ -154,7 +106,9 @@ export async function writeAgentPromptFile(
       throw new PaneError('ERR_ATTACHMENT_UNREADABLE', `Cannot attach ${source}: it is not a file. Nothing was sent.`, 'Attach files one by one with --attach <file>, then retry.');
     }
   }
-  const worktree = options.worktreePath ? await worktreePromptsDirectory(options.worktreePath) : undefined;
+  const worktree = options.worktreePath
+    ? await worktreePaneFolder(options.worktreePath, PANE_PROMPTS_FOLDER, candidate => new PaneError('ERR_PROMPT_STORAGE_SYMLINK', `Cannot store the prompt: ${candidate} is a symbolic link. No prompt or attachments were written.`, 'Replace the symbolic link with a directory, then retry.'))
+    : undefined;
   const directory = worktree?.directory ?? await appPromptsDirectory(paneId);
   const worktreeRoot = worktree?.root;
   const name = promptFileName(options.now ?? new Date());

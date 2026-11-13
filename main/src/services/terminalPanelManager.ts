@@ -26,6 +26,7 @@ import { getShellPath, warmShellPath } from '../utils/shellPath';
 import { terminalTiming } from '../utils/terminalTiming';
 import { trimAnsiSafe } from '../utils/ansiTrim';
 import { databaseService } from './database';
+import { paneScratchDirectory } from './paneScratch';
 import { ProjectEnvService } from './projectEnvVars';
 import { ShellDetector } from '../utils/shellDetector';
 import type { AnalyticsManager } from './analyticsManager';
@@ -1999,6 +2000,7 @@ export class TerminalPanelManager extends EventEmitter {
             'PANE_UPDATE_RESUME_NONCE',
             'PANE_ORCHESTRATION_SESSION_ID',
             'PANE_SESSION_DIR',
+            'PANE_SCRATCH_DIR',
             'GIT_CEILING_DIRECTORIES',
             'WORKTREE_PATH',
             'PANE_WORKSPACE_PATH',
@@ -2020,9 +2022,13 @@ export class TerminalPanelManager extends EventEmitter {
     // Only the grant below may point this tab at an MCP endpoint, never one Pane inherited from an outer tab.
     delete inheritedEnv[PANE_MCP_URL_ENV];
     delete inheritedEnv[PANE_MCP_TOKEN_ENV];
+    delete inheritedEnv.PANE_SCRATCH_DIR;
+    const sessionDirectoryEnv: Record<string, string> = {};
+    const scratchDirectory = panelCustomState.orchestrationSessionId ? undefined : await paneScratchDirectory(panel.sessionId);
+    if (!panelManager.getPanel(panel.id) || this.terminals.has(panel.id)) return;
+    if (scratchDirectory) sessionDirectoryEnv.PANE_SCRATCH_DIR = scratchDirectory;
     // A Session terminal works in its folder; a worker reads the folder of the Session its Pane belongs to.
     const sessionDirectory = panelCustomState.orchestrationSessionId ? panelCustomState.orchestrationWorkspace : panelCustomState.sessionFolder;
-    const sessionDirectoryEnv: Record<string, string> = {};
     if (sessionDirectory) sessionDirectoryEnv.PANE_SESSION_DIR = isWSL && process.platform === 'win32' ? windowsPathToWSLMount(sessionDirectory) : sessionDirectory;
     const baseSpawnEnv = {
       ...inheritedEnv,

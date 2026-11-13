@@ -691,6 +691,13 @@ interface PaneArchiveBulkItem {
   worktreeCleanup?: WorktreeCleanupState;
   trashDeletion?: WorktreeTrashDeletion;
   worktreePath?: string;
+  scratch?: PaneScratch;
+}
+
+/** `$PANE_SCRATCH_DIR`, which archive deletes with the worktree. */
+interface PaneScratch {
+  path: string;
+  bytes: number;
 }
 
 interface PaneArchiveBulkResult {
@@ -714,6 +721,7 @@ interface PaneArchiveDryRunResult {
   forced: boolean;
   safetyCheck: PaneArchiveSafetyCheck;
   blocked?: PaneArchiveBlockedResult['blocked'];
+  scratch?: PaneScratch;
 }
 
 type PaneArchiveResult = PaneArchiveSuccessResult | PaneArchiveBlockedResult | PaneArchiveDryRunResult;
@@ -1298,6 +1306,7 @@ const initialInputSchema: BoundarySchema<InitialInputDeliveryResult> = boundary.
   })),
   nextCommand: boundary.optional(boundary.string),
 });
+const paneScratchSchema: BoundarySchema<PaneScratch> = boundary.object({ path: boundary.string, bytes: boundary.number });
 const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.object({
   performed: boundary.boolean,
   hasUncommittedChanges: boundary.optional(boundary.boolean),
@@ -1813,6 +1822,7 @@ const paneArchiveResultSchema: BoundarySchema<PaneArchiveResult> = boundary.unio
       message: boundary.string,
       safetyCheck: archiveSafetySchema,
     })),
+    scratch: boundary.optional(paneScratchSchema),
   }),
   boundary.object({
     ok: boundary.boolean,
@@ -1867,6 +1877,7 @@ const paneArchiveBulkResultSchema: BoundarySchema<PaneArchiveBulkResult> = bound
     worktreeCleanup: boundary.optional(worktreeCleanupSchema),
     trashDeletion: boundary.optional(trashDeletionSchema),
     worktreePath: boundary.optional(boundary.string),
+    scratch: boundary.optional(paneScratchSchema),
   })),
 });
 const panePinResultSchema: BoundarySchema<PanePinResult> = boundary.object({
@@ -5160,6 +5171,7 @@ function printPaneArchiveResult(result: PaneArchiveResult): void {
       console.log(`Safety: ${result.blocked.message}`);
     }
     printArchiveCommitEvidence(result.safetyCheck);
+    if (result.scratch) console.log(describeScratch(result.scratch));
     return;
   }
   if (!('archived' in result)) {
@@ -5191,8 +5203,13 @@ function printPaneArchiveBulkResult(result: PaneArchiveBulkResult): void {
       const trash = item.trashDeletion === 'pending' ? ', files deleting in background' : '';
       const cleanup = item.worktreeCleanup ? ` worktree ${item.worktreeCleanup}${trash}` : '';
       console.log(`  ${item.outcome} ${label}${merged}${cleanup}`);
+      if (item.scratch) console.log(`    ${describeScratch(item.scratch)}`);
     }
   }
+}
+
+function describeScratch(scratch: PaneScratch): string {
+  return `Deletes the scratch folder ${scratch.path} (${(scratch.bytes / 1_048_576).toFixed(1)} MB) with the worktree.`;
 }
 
 function printArchiveSkipReason(
