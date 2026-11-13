@@ -79,11 +79,11 @@ export interface TerminalPausedMark {
   runScript?: boolean;
 }
 
-/** The pause mark of a terminal tab, if Pause stopped it. */
+/** The pause mark of a terminal or chat tab, if Pause stopped it. */
 export function pausedMarkOf(panel: Pick<ToolPanel, 'type' | 'state'>): TerminalPausedMark | undefined {
-  if (panel.type !== 'terminal') return undefined;
-  // SAFETY: a terminal panel's custom state is the TerminalPanelState contract.
-  return (panel.state.customState as TerminalPanelState | undefined)?.paused;
+  if (panel.type !== 'terminal' && panel.type !== 'chat') return undefined;
+  // SAFETY: terminal and chat panels both keep their pause mark at `paused` in their custom state.
+  return (panel.state.customState as { paused?: TerminalPausedMark } | undefined)?.paused;
 }
 
 /**

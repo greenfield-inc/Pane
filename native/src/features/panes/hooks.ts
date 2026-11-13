@@ -110,7 +110,7 @@ export function useToggleFavorite() {
 }
 
 /**
- * Pauses or resumes every terminal tab of a Pane. The row grays out (or back) at once; the host's
+ * Pauses or resumes every terminal and chat tab of a Pane. The row grays out (or back) at once; the host's
  * update replaces the guess, and a failure refetches the real state.
  */
 export function useSetPanePaused() {
@@ -123,9 +123,8 @@ export function useSetPanePaused() {
     queryClient.setQueryData<ProjectWithPanes[]>(queryKey, projects =>
       projects && setPanePaused(projects, paneId, paused ? { at: new Date().toISOString(), by: 'manual' } : undefined));
     const result = await (paused ? pause : resume).mutateAsync([{ paneId }]);
+    // A busy chat tab left running, or a tab that would not start, answers `ok: false` with why.
     if (!result.ok) throw new Error(result.message);
-    // Chat tabs can't pause yet (D-187): what the person must know, for the caller to show.
-    return result.chatTabsNotPaused ? result.message : undefined;
   };
 }
 

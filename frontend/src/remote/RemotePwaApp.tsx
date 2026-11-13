@@ -795,10 +795,8 @@ export function RemotePwaApp() {
       });
     },
     setPanePaused: (paneId, paused) => void runSidebarAction(paneId, paused ? 'Failed to pause pane' : 'Failed to resume pane', async (runtime) => {
-      const note = await runtime.setPaused({ kind: 'pane', id: paneId }, paused);
+      await runtime.setPaused({ kind: 'pane', id: paneId }, paused);
       await refreshProjects(runtime);
-      // Shown where the sidebar shows what it needs the person to read.
-      if (note) throw new Error(note);
     }),
     restorePane: (paneId) => void runSidebarAction(paneId, 'Failed to restore pane', async (runtime) => {
       await runtime.restoreSession(paneId);
@@ -821,9 +819,8 @@ export function RemotePwaApp() {
       await refreshOrchestrationSessions(runtime);
     }),
     setSessionPaused: (session, paused) => void runSidebarAction(session.id, paused ? 'Failed to pause Session' : 'Failed to resume Session', async (runtime) => {
-      const note = await runtime.setPaused({ kind: 'session', id: session.id }, paused);
+      await runtime.setPaused({ kind: 'session', id: session.id }, paused);
       await Promise.all([refreshOrchestrationSessions(runtime), refreshProjects(runtime)]);
-      if (note) throw new Error(note);
     }),
     reloadSessions: () => void refreshOrchestrationSessions(adapter),
     loadArchived: () => void loadArchived(adapter),

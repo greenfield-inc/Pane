@@ -43,6 +43,14 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
     boundary.object({ kind: boundary.enumeration('most-recent', 'none', 'known-empty') }),
     boundary.object({ kind: boundary.literal('list-failed'), reason: boundary.string }),
   )),
+  paused: boundary.optional(boundary.object({
+    at: boundary.string, by: boundary.enumeration('manual', 'auto'),
+    idleHours: boundary.optional(boundary.number), runScript: boundary.optional(boundary.boolean),
+  })),
+  turnTimes: boundary.optional(boundary.object({
+    sessionId: boundary.string,
+    turns: boundary.array(boundary.object({ after: boundary.string, stopReason: boundary.string, startedAt: boundary.string, endedAt: boundary.string })),
+  })),
 });
 
 /** A chat panel's saved state, or undefined when the row does not hold one. */

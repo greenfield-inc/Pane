@@ -2,26 +2,31 @@ import { useId, useState } from 'react';
 import { SaveState, SettingRow } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
+import type { SettingsSettingId } from '../../../types/settings';
 import { cn } from '../../../utils/cn';
 import {
   DEFAULT_AUTO_PAUSE_HOURS,
+  DEFAULT_CHAT_RELEASE_MINUTES,
   MAX_AUTO_PAUSE_HOURS,
+  MAX_CHAT_RELEASE_MINUTES,
   MIN_AUTO_PAUSE_HOURS,
+  MIN_CHAT_RELEASE_MINUTES,
   parseAutoPauseHours,
+  parseChatReleaseMinutes,
 } from '../../../../../shared/types/autoPause';
 
 const RESUME_LABEL = 'Resume a paused Pane when you open it';
 const AUTO_PAUSE_LABEL = 'Pause idle Panes';
-const HOURS_ERROR = `Enter whole hours from ${MIN_AUTO_PAUSE_HOURS} to ${MAX_AUTO_PAUSE_HOURS}.`;
 
 /**
- * Resume-on-open (off by default) and auto-pause (on by default), with the idle threshold
- * under it. Turning auto-pause off disables the field but keeps its value.
+ * Resume-on-open (off by default) and auto-pause (on by default), with its two idle thresholds
+ * under it: Panes in hours, chat tabs in minutes. Turning auto-pause off disables both fields but keeps their values.
  */
 export function PauseSettings({ persistence }: { persistence: SettingsPersistence }) {
   const config = persistence.config!;
   const autoPauseEnabled = config.autoPauseEnabled !== false;
   const savedHours = config.autoPauseAfterHours ?? DEFAULT_AUTO_PAUSE_HOURS;
+  const savedMinutes = config.chatIdleReleaseMinutes ?? DEFAULT_CHAT_RELEASE_MINUTES;
 
   return (
     <>
@@ -40,10 +45,41 @@ export function PauseSettings({ persistence }: { persistence: SettingsPersistenc
       <SettingRow
         settingId="auto-pause"
         label={AUTO_PAUSE_LABEL}
-        description="Stops the agents and scripts of a Pane nobody has used for this long. Panes waiting on you are skipped. Resume brings them back in the same conversations."
+        description="Stops the agents and scripts of a Pane nobody has used for this long, and the agent of a chat tab idle for its shorter time. Panes and chats waiting on you are skipped, and so is the Pane on screen. Resume brings them back in the same conversations; a chat tab resumes when you open it or send it a message."
         saveState={persistence.saveStates['auto-pause']}
         align="start"
-        details={<AutoPauseHoursField key={savedHours} persistence={persistence} savedHours={savedHours} disabled={!autoPauseEnabled} />}
+        details={(
+          <div className="space-y-2">
+            <ThresholdField
+              key={`hours-${savedHours}`}
+              persistence={persistence}
+              saved={savedHours}
+              disabled={!autoPauseEnabled}
+              label="Pause Panes after"
+              unit="hours without use"
+              min={MIN_AUTO_PAUSE_HOURS}
+              max={MAX_AUTO_PAUSE_HOURS}
+              parse={parseAutoPauseHours}
+              error={`Enter whole hours from ${MIN_AUTO_PAUSE_HOURS} to ${MAX_AUTO_PAUSE_HOURS}.`}
+              saveKey="auto-pause-hours"
+              onSave={value => persistence.saveConfig('auto-pause-hours', { autoPauseAfterHours: value })}
+            />
+            <ThresholdField
+              key={`minutes-${savedMinutes}`}
+              persistence={persistence}
+              saved={savedMinutes}
+              disabled={!autoPauseEnabled}
+              label="Pause chat tabs after"
+              unit="idle minutes"
+              min={MIN_CHAT_RELEASE_MINUTES}
+              max={MAX_CHAT_RELEASE_MINUTES}
+              parse={parseChatReleaseMinutes}
+              error={`Enter whole minutes from ${MIN_CHAT_RELEASE_MINUTES} to ${MAX_CHAT_RELEASE_MINUTES}.`}
+              saveKey="chat-idle-release-minutes"
+              onSave={value => persistence.saveConfig('chat-idle-release-minutes', { chatIdleReleaseMinutes: value })}
+            />
+          </div>
+        )}
       >
         <ImmediateToggle
           label={AUTO_PAUSE_LABEL}
@@ -55,28 +91,42 @@ export function PauseSettings({ persistence }: { persistence: SettingsPersistenc
   );
 }
 
-function AutoPauseHoursField({ persistence, savedHours, disabled }: { persistence: SettingsPersistence; savedHours: number; disabled: boolean }) {
-  const [text, setText] = useState(String(savedHours));
+interface ThresholdFieldProps {
+  persistence: SettingsPersistence;
+  saved: number;
+  disabled: boolean;
+  label: string;
+  unit: string;
+  min: number;
+  max: number;
+  parse: (text: string) => number | null;
+  error: string;
+  saveKey: SettingsSettingId;
+  onSave: (value: number) => void;
+}
+
+function ThresholdField({ persistence, saved, disabled, label, unit, min, max, parse, error, saveKey, onSave }: ThresholdFieldProps) {
+  const [text, setText] = useState(String(saved));
   const inputId = useId();
   const errorId = `${inputId}-error`;
-  const hours = parseAutoPauseHours(text);
-  const invalid = hours === null;
+  const value = parse(text);
+  const invalid = value === null;
 
   const save = () => {
-    if (hours === null || hours === savedHours) return;
-    void persistence.saveConfig('auto-pause-hours', { autoPauseAfterHours: hours });
+    if (value === null || value === saved) return;
+    onSave(value);
   };
 
   return (
     <div className={cn('ml-0 space-y-1', disabled && 'opacity-60')}>
       <div className="flex items-center gap-2">
-        <label htmlFor={inputId} className="text-sm text-text-primary">Pause after</label>
+        <label htmlFor={inputId} className="text-sm text-text-primary">{label}</label>
         <input
           id={inputId}
           type="number"
           inputMode="numeric"
-          min={MIN_AUTO_PAUSE_HOURS}
-          max={MAX_AUTO_PAUSE_HOURS}
+          min={min}
+          max={max}
           step={1}
           value={text}
           disabled={disabled}
@@ -90,10 +140,10 @@ function AutoPauseHoursField({ persistence, savedHours, disabled }: { persistenc
             invalid ? 'border-status-error focus:ring-status-error' : 'border-border-primary focus:border-border-focus focus:ring-interactive',
           )}
         />
-        <span className="text-sm text-text-secondary">hours without use</span>
-        <SaveState state={persistence.saveStates['auto-pause-hours'] ?? { state: 'idle' }} />
+        <span className="text-sm text-text-secondary">{unit}</span>
+        <SaveState state={persistence.saveStates[saveKey] ?? { state: 'idle' }} />
       </div>
-      {invalid && <p id={errorId} role="alert" className="text-xs text-status-error">{HOURS_ERROR} Nothing was saved; Pane keeps {savedHours} hours.</p>}
+      {invalid && <p id={errorId} role="alert" className="text-xs text-status-error">{error} Nothing was saved; Pane keeps {saved}.</p>}
     </div>
   );
 }

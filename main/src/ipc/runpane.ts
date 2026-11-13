@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { paneInactiveSince, parseSessionTimestampMs } from '../services/paneInactivity';
-import { chatPanelIdsOf, chatTabsNotPausedNote, panesWithStoppedRunScripts, pausePanes, restartRunScripts, terminalPanelIdsOf } from '../services/panePause';
+import { panesWithStoppedRunScripts, pausableTabIdsOf, pausePanes, restartRunScripts } from '../services/panePause';
 import { isOrchestrationInternalSessionId, resolveSessionRetention } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
@@ -1507,16 +1507,17 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:pause', async (request: PaneCommandValue): Promise<RunpanePauseResult> => {
     return withRunpaneAction(services, 'panels:pause', {}, async () => {
       const target = resolvePanel(parsePauseTarget(request, 'panelId', 'Panel pause'));
-      if (target.type === 'chat') throw new PaneError('ERR_RUNPANE_CHAT_NOT_PAUSABLE', `Panel ${target.id} is a chat tab, and chat tabs can't pause yet, so nothing was paused. Its agent keeps running.`, `Press Stop in the tab to end its turn, or close the tab: runpane panels close --panel ${target.id}.`);
+      const scope: RunpanePauseScope = { kind: 'panel', panelId: target.id, paneId: target.sessionId };
+      if (target.type === 'chat') return pauseTabs(services, scope, [target.id], mark => getChatTabManager().pause([target.id], mark));
       const panel = resolveTerminalPanel(target.id);
-      return pauseTabs(services, { kind: 'panel', panelId: panel.id, paneId: panel.sessionId }, [panel.id], 0, mark => terminalPanelManager.pausePanels([panel.id], mark));
+      return pauseTabs(services, scope, [panel.id], mark => terminalPanelManager.pausePanels([panel.id], mark));
     }, pauseActionMetrics);
   });
 
   commandRegistry.register('runpane:panes:pause', async (request: PaneCommandValue): Promise<RunpanePauseResult> => {
     return withRunpaneAction(services, 'panes:pause', {}, async () => {
       const pane = resolvePane(sessionManager, parsePauseTarget(request, 'paneId', 'Pane pause'));
-      return pauseTabs(services, { kind: 'pane', paneId: pane.id, paneName: pane.name }, terminalPanelIdsOf([pane.id]), chatPanelIdsOf([pane.id]).length, mark => pausePanes(commandRegistry, [pane.id], mark));
+      return pauseTabs(services, { kind: 'pane', paneId: pane.id, paneName: pane.name }, pausableTabIdsOf([pane.id]), mark => pausePanes(commandRegistry, [pane.id], mark));
     }, pauseActionMetrics);
   });
 
@@ -1531,7 +1532,7 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'sessions:pause', {}, async () => {
       const record = await requireOrchestrationSessionManager(services).get({ sessionId: parsePauseTarget(request, 'sessionId', 'Session pause') });
       const paneIds = requireOrchestrationSessionManager(services).pausablePaneIds(record.id);
-      return pauseTabs(services, { kind: 'session', sessionId: record.id, sessionName: record.name }, terminalPanelIdsOf(paneIds), chatPanelIdsOf(paneIds).length, mark => pausePanes(commandRegistry, paneIds, mark));
+      return pauseTabs(services, { kind: 'session', sessionId: record.id, sessionName: record.name }, pausableTabIdsOf(paneIds), mark => pausePanes(commandRegistry, paneIds, mark));
     }, pauseActionMetrics);
   });
 
@@ -3543,7 +3544,7 @@ function pauseScopeArgument(scope: RunpanePauseScope): string {
   return scope.kind === 'pane' ? `panes resume --pane ${scope.paneId} --yes` : `sessions resume --session ${scope.sessionId}`;
 }
 
-async function pauseTabs(services: AppServices, scope: RunpanePauseScope, panelIds: string[], chatTabsNotPaused: number, pause: (mark: TerminalPausedMark) => Promise<PauseOutcome>): Promise<RunpanePauseResult> {
+async function pauseTabs(services: AppServices, scope: RunpanePauseScope, panelIds: string[], pause: (mark: TerminalPausedMark) => Promise<PauseOutcome>): Promise<RunpanePauseResult> {
   const pane = scope.kind === 'session' ? undefined : services.sessionManager.getSession(scope.paneId);
   if (pane?.archived) {
     throw new PaneError('ERR_RUNPANE_PANE_ARCHIVED', `Pane ${pane.name} is archived, so nothing was paused. Its processes already stopped when it was archived.`, 'Nothing to do; restore it from the Archived list first if you meant to run it.');
@@ -3557,23 +3558,24 @@ async function pauseTabs(services: AppServices, scope: RunpanePauseScope, panelI
     panelIds: paused,
     unchanged: Math.max(0, panelIds.length - paused.length - failed.length),
     failed,
-    chatTabsNotPaused,
-    message: `${failed.length > 0 ? `${label}: ${paused.length} tab(s) paused, ${failed.length} could not be paused.`
-      : panelIds.length === 0 ? `${label} has no terminal tabs, so nothing was paused.`
-      : paused.length === 0 ? `${label} was already paused.` : `${label} is paused: ${paused.length} tab(s) stopped. Resume keeps their conversations.`}${chatTabsNotPausedNote(chatTabsNotPaused)}`,
+    message: failed.length > 0 ? `${label}: ${paused.length} tab(s) paused, ${failed.length} could not be paused: ${failed.map(item => item.error).join(' ')}`
+      : panelIds.length === 0 ? `${label} has no terminal or chat tabs, so nothing was paused.`
+      : paused.length === 0 ? `${label} was already paused.` : `${label} is paused: ${paused.length} tab(s) stopped. Resume keeps their conversations.`,
     nextCommand: `runpane ${pauseScopeArgument(scope)}`,
   };
 }
 
 /** Resumes the paused tabs in scope through the same restart `panels resume` runs. Running tabs are left alone. */
 async function resumeTabs(services: AppServices, registry: PaneCommandRegistry, scope: RunpanePauseScope, paneIds: readonly string[]): Promise<RunpanePauseResult> {
-  const panelIds = terminalPanelIdsOf(paneIds);
+  const panelIds = pausableTabIdsOf(paneIds);
   // Read before resuming: resume clears the marks that record which run scripts Pause stopped.
   const scripts = panesWithStoppedRunScripts(paneIds);
   const paused = panelIds.filter(isPanelPaused);
   const results = await mapWithConcurrency(paused, DEFAULT_RESUME_CONCURRENCY, async (panelId) => {
     try {
-      await resumeTerminalPanel(services, resolveTerminalPanel(panelId), {});
+      const panel = resolvePanel(panelId);
+      if (panel.type === 'chat') await resumeChatTab(panel);
+      else await resumeTerminalPanel(services, resolveTerminalPanel(panelId), {});
       return { panelId };
     } catch (error) {
       return { panelId, error: reasonOf(error) };

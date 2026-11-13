@@ -632,6 +632,69 @@ describe('chat tab manager', () => {
     await expect.poll(() => manager.view('p1').tasks).toBeUndefined();
   });
 
+  it('pauses an idle tab and resumes it on the next message, with its time rows and controls', async () => {
+    const { manager, store, directory, states } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    const sessionId = store.state('p1')?.acpSessionId;
+    const controls = manager.view('p1').controls.map(control => control.id);
+    expect(controls.length).toBeGreaterThan(0);
+
+    const outcome = await manager.pause(['p1'], { at: '2026-11-13T00:00:00.000Z', by: 'auto' });
+    expect(outcome).toEqual({ paused: ['p1'], failed: [] });
+    expect(manager.isRunning('p1')).toBe(false);
+    expect(store.state('p1')?.paused).toEqual({ at: '2026-11-13T00:00:00.000Z', by: 'auto' });
+    // Paused looks like idle: same conversation on screen, same composer controls.
+    const paused = manager.view('p1', 200, false);
+    expect(paused.status).toBe('idle');
+    expect(replyText(paused)).toBe('You said: hello');
+    expect(paused.controls.map(control => control.id)).toEqual(controls);
+
+    const sentBefore = states().length;
+    manager.send('p1', { operationId: 'b', text: 'again' });
+    // While it restarts, every view keeps the composer's controls.
+    await expect.poll(() => manager.receipt('p1', 'b')?.state).toBe('completed');
+    expect(states().slice(sentBefore).filter(view => view.panelId === 'p1').every(view => view.controls.length > 0)).toBe(true);
+    expect(store.state('p1')?.paused).toBeUndefined();
+    expect(store.state('p1')?.acpSessionId).toBe(sessionId);
+    const resumed = manager.view('p1');
+    expect(replyText(resumed)).toBe('You said: hello|You said: again');
+    expect(turnEnds(resumed)).toEqual(['end_turn', 'end_turn']);
+  });
+
+  it('never pauses a tab with a turn running or a message queued', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'permission' });
+    await expect.poll(() => manager.view('p1').permissions.length).toBe(1);
+    manager.send('p1', { operationId: 'b', text: 'second' });
+    const outcome = await manager.pause(['p1'], { at: '2026-11-13T00:00:00.000Z', by: 'auto' });
+    expect(outcome.paused).toEqual([]);
+    expect(outcome.failed.map(item => item.panelId)).toEqual(['p1']);
+    expect(manager.isRunning('p1')).toBe(true);
+    expect(store.state('p1')?.paused).toBeUndefined();
+    manager.answerPermission('p1', manager.view('p1').permissions[0].id, 'allow');
+    await expect.poll(() => manager.receipt('p1', 'b')?.state).toBe('completed');
+  });
+
+  it('keeps time rows across a restart (history replay drops them otherwise)', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'one' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    manager.send('p1', { operationId: 'b', text: 'two' });
+    await expect.poll(() => manager.receipt('p1', 'b')?.state).toBe('completed');
+    const before = manager.view('p1').transcript!.messages.map(message => message.role === 'user' ? 'user' : message.parts[0]?.type === 'content' ? 'time' : message.parts[0]?.type);
+    expect(before).toEqual(['user', 'tool', 'text', 'time', 'user', 'tool', 'text', 'time']);
+    await manager.restart('p1');
+    const after = manager.view('p1').transcript!.messages.map(message => message.role === 'user' ? 'user' : message.parts[0]?.type === 'content' ? 'time' : message.parts[0]?.type);
+    expect(after).toEqual(before);
+  });
+
   it('keeps chosen settings across a restart', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));

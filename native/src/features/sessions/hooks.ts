@@ -74,8 +74,7 @@ export function useSetSessionPaused() {
       sessions: list.sessions.map(session => session.id === sessionId ? { ...session, paused: mark } : session),
     });
     const result = await (paused ? pause : resume).mutateAsync([{ sessionId }]);
+    // A busy chat tab left running, or a tab that would not start, answers `ok: false` with why.
     if (!result.ok) throw new Error(result.message);
-    // Chat tabs can't pause yet (D-187): what the person must know, for the caller to show.
-    return result.chatTabsNotPaused ? result.message : undefined;
   };
 }

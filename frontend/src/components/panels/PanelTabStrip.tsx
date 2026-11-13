@@ -349,7 +349,8 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         const isDragged = panel.id === draggedPanelId;
         const isCompactTab = panel.type === 'diff' || panel.type === 'explorer' || panel.type === 'browser';
         const isPreviewTab = editorPanelState(panel)?.isPreview === true;
-        const isPaused = pausedMarkOf(panel) !== undefined;
+        // A paused chat tab looks as usual: opening it or sending to it resumes it at once.
+        const isPaused = panel.type === 'terminal' && pausedMarkOf(panel) !== undefined;
         const shortcutHint = shortcutHints[index];
         const tabId = getPanelTabId(idNamespace, panel.id);
         const tabPanelId = getPanelTabPanelId(idNamespace, panel.id);

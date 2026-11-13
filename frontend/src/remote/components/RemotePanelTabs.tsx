@@ -137,7 +137,8 @@ export function RemotePanelTabs({
     <div className="flex min-h-12 shrink-0 items-end gap-2 border-b border-border-primary bg-bg-secondary px-2 pt-2">
       <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto" role="tablist" aria-label="Remote tool panels">
         {panels.map((panel, index) => {
-          const paused = pausedMarkOf(panel) !== undefined;
+          // A paused chat tab looks as usual: opening it or sending to it resumes it at once.
+          const paused = panel.type === 'terminal' && pausedMarkOf(panel) !== undefined;
           return (
           <button
             key={panel.id}

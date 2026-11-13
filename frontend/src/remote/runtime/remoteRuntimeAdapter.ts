@@ -225,17 +225,13 @@ export class RemoteRuntimeAdapter {
     return this.invoke<void>('sessions:delete', [sessionId]);
   }
 
-  /**
-   * Pauses or resumes every terminal tab of a Pane, or of a Session's chat and Panes.
-   * Returns what the person must know when chat tabs kept running (D-187).
-   */
-  async setPaused(target: { kind: 'pane' | 'session'; id: string }, paused: boolean): Promise<string | undefined> {
+  /** Pauses or resumes every terminal and chat tab of a Pane, or of a Session's chat and Panes. */
+  async setPaused(target: { kind: 'pane' | 'session'; id: string }, paused: boolean): Promise<void> {
     const noun = target.kind === 'pane' ? 'panes' : 'sessions';
     const key = target.kind === 'pane' ? 'paneId' : 'sessionId';
     const result = await this.invoke<RunpanePauseResult>(`runpane:${noun}:${paused ? 'pause' : 'resume'}`, [{ [key]: target.id }]);
-    // A resume that left some tabs stopped answers `ok: false` with why.
+    // A pause that left a busy chat tab running, or a resume that left some tabs stopped, answers `ok: false` with why.
     if (!result.ok) throw new Error(result.message);
-    return result.chatTabsNotPaused ? result.message : undefined;
   }
 
   /** Resumes one paused tab through the host's usual restart. */

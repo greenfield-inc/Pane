@@ -32,6 +32,7 @@ export type SettingsSettingId =
   | 'auto-pause'
   | 'auto-pause-hours'
   | 'archive-retention'
+  | 'chat-idle-release-minutes'
   | 'html-file-open-mode'
   | 'theme'
   | 'appearance-mode'

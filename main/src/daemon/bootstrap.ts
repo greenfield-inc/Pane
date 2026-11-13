@@ -432,14 +432,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const commandRegistry = registerIpcHandlers(services);
   const autoPauser = new AutoPauser({
     now: () => Date.now(),
-    settings: () => ({ enabled: configManager.getConfig().autoPauseEnabled, hours: configManager.getConfig().autoPauseAfterHours }),
+    settings: () => ({ enabled: configManager.getConfig().autoPauseEnabled, hours: configManager.getConfig().autoPauseAfterHours, chatMinutes: configManager.getConfig().chatIdleReleaseMinutes }),
     panes: () => databaseService.getAllSessions(undefined, { includeHidden: true }).map(row => {
       const pane = sessionManager.getSession(row.id);
       return { id: row.id, archived: pane?.archived ?? true, createdAt: pane?.createdAt ?? new Date(), lastViewedAt: pane?.lastViewedAt };
     }),
     panels: paneId => panelManager.getPanelsForSession(paneId),
-    liveActivity: panelId => terminalPanelManager.getLastActivity(panelId),
-    agentState: panelId => terminalPanelManager.getAgentStatus(panelId),
+    liveActivity: panelId => terminalPanelManager.getLastActivity(panelId) ?? getChatTabManager().lastActivity(panelId),
+    agentState: panelId => panelManager.getPanel(panelId)?.type === 'chat' ? getChatTabManager().agentState(panelId) : terminalPanelManager.getAgentStatus(panelId),
     hasOpenNotify: panelIds => services.notifyService?.queue.hasOpenFor(panelIds) ?? false,
     focusedPaneId: () => (options.getMainWindow()?.isFocused() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined),
     heldByUpdate: panel => {
@@ -448,6 +448,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       return !!hold && updateHoldIsLive(hold);
     },
     pause: (paneId, mark) => pausePanes(commandRegistry, [paneId], mark),
+    chatRunning: panelId => getChatTabManager().isRunning(panelId),
+    pauseChats: (panelIds, mark) => getChatTabManager().pause(panelIds, mark),
     testThresholdMs: Number(process.env.PANE_AUTO_PAUSE_TEST_THRESHOLD_MS) || undefined,
   });
   configManager.on('config-updated', () => autoPauser.sync());

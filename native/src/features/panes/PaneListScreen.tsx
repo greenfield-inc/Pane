@@ -193,12 +193,9 @@ export function PaneListScreen() {
     ]);
   };
 
-  const showPauseNote = (note: string | undefined) => { if (note) Alert.alert('Chat tabs keep running', note); };
   const togglePanePaused = (paneId: string, paused: boolean) => setPanePaused(paneId, paused)
-    .then(showPauseNote)
     .catch((error: Error) => Alert.alert(paused ? 'Couldn’t pause the pane' : 'Couldn’t resume the pane', error.message));
   const toggleSessionPaused = (sessionId: string, paused: boolean) => setSessionPaused(sessionId, paused)
-    .then(showPauseNote)
     .catch((error: Error) => Alert.alert(paused ? 'Couldn’t pause the Session' : 'Couldn’t resume the Session', error.message));
 
   const refresh = async () => {

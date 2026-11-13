@@ -1186,12 +1186,10 @@ export interface RunpanePauseResult {
   scope: RunpanePauseScope;
   /** Tabs this call paused or resumed. */
   panelIds: string[];
-  /** Terminal tabs in scope that were already paused (or already running, for resume). */
+  /** Terminal and chat tabs in scope that were already paused (or already running, for resume). */
   unchanged: number;
   /** Tabs that could not be resumed, with why; the others still were. */
   failed: Array<{ panelId: string; error: string }>;
-  /** On a pause: chat tabs in scope, which can't pause yet, so their agents keep running. */
-  chatTabsNotPaused?: number;
   message: string;
   nextCommand: string;
 }
