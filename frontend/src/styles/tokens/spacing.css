@@ -62,6 +62,7 @@
   --detail-panel-width: 17.5rem;     /* 280px */
   --detail-panel-min-width: 12.5rem; /* 200px */
   --detail-panel-max-width: 31.25rem; /* 500px */
+  --settings-control-width: 31.25rem; /* 500px: a settings row's list editor, beside its label */
   --panel-tab-height: 2rem;          /* 32px — every theme */
   --app-frame-padding: 0;
   --app-frame-gap: 0;

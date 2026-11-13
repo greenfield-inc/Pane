@@ -167,7 +167,7 @@ export function ShortcutsSettings({ persistence, platform, onDirtyChange, onShow
           saveState={persistence.saveStates['terminal-shortcuts']}
           align="start"
         >
-          <div className="w-full space-y-3 sm:w-[500px]">
+          <div className="w-full space-y-3 sm:w-settings-control">
             {shortcuts.map((shortcut, index) => (
               <div key={shortcut.id} className="space-y-2 rounded-md border border-border-secondary p-3">
                 <div className="grid grid-cols-[minmax(0,1fr)_80px_auto] items-start gap-2">
