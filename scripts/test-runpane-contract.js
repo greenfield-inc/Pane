@@ -5189,7 +5189,13 @@ function compareAgentContextParity() {
   const nodeNotifyHelp = runNode(['notify', '--help']);
   assert.match(nodeNotifyHelp, /\nNotes:\n {2}Ask only what you can't find out yourself/);
   assert.match(nodeNotifyHelp, /In plain words, say what the work is for/);
-  assert.strictEqual(runPython(['notify', '--help']), nodeNotifyHelp);
+  // A Windows pipe's code page (cp1252) can't encode the notes' "→"; pip's help must still print them.
+  const pyNotifyHelp = childProcess.execFileSync(python, ['-m', 'runpane', 'notify', '--help'], {
+    encoding: 'utf8',
+    env: { ...pythonEnv, PYTHONIOENCODING: 'cp1252' },
+    cwd: rootDir
+  }).trim();
+  assert.strictEqual(pyNotifyHelp, nodeNotifyHelp);
 
   // The workspaces block reports live Tailscale and Pane state, which can change between the two runs.
   const { workspaces: nodeWorkspaces, ...nodeBrief } = JSON.parse(runNode(['agent-context', '--json']));

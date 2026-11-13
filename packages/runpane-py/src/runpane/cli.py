@@ -1681,6 +1681,10 @@ def help_notes(topic: Optional[str]) -> List[str]:
 
 
 def print_help(parsed: ParsedArgs) -> int:
+    # Help notes carry characters such as "\u2192" that a Windows pipe's code page can't encode; npm's runpane prints UTF-8 too.
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure:
+        reconfigure(encoding="utf-8")
     print(help_text(parsed.help_topic))
     if not parsed.help_topic or parsed.help_topic == "workspace":
         print("\n".join(["", *read_workspace_summary(parsed.pane_dir)["lines"]]))
