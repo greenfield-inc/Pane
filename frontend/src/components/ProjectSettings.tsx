@@ -10,6 +10,9 @@ import { Button } from './ui/Button';
 import { EnhancedInput } from './ui/EnhancedInput';
 import { FieldWithTooltip } from './ui/FieldWithTooltip';
 import { Card } from './ui/Card';
+import { Toggle } from './ui/Toggle';
+import { useConfigStore } from '../stores/configStore';
+import { BUILT_IN_IDES, nextDefaultIdeCommand } from '../../../shared/utils/ideCommands';
 import { ProjectEnvVarsSection } from './ProjectEnvVarsSection';
 import { projectEnvInputsFrom, projectEnvRowProblem, projectEnvRowsFrom, secretProjectFor, type ProjectEnvRow } from './projectEnvRows';
 
@@ -60,12 +63,17 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
   const savedForm = useRef<{ projectId: number; form: SettingsForm } | null>(null);
   const [detectedConfig, setDetectedConfig] = useState<DetectedProjectConfig | null>(null);
   const [currentBranch, setCurrentBranch] = useState<string | null>(null);
+  const [useIdeForAllProjects, setUseIdeForAllProjects] = useState(false);
+  // "Use for all projects" when the dialog opened: only turning the toggle off clears the default.
+  const ideSharedAtOpen = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [envRows, setEnvRows] = useState<ProjectEnvRow[]>([]);
   // Null until loaded, so a failed load never saves an empty list over the stored one.
   const [loadedEnvRows, setLoadedEnvRows] = useState<ProjectEnvRow[] | null>(null);
+  const defaultIdeCommand = useConfigStore(state => state.config?.defaultIdeCommand)?.trim() || undefined;
+  const updateConfig = useConfigStore(state => state.updateConfig);
 
   const { name, path, systemPrompt, runScript, buildScript, archiveScript, openIdeCommand, worktreeFolder } = form;
   const setField = (field: keyof SettingsForm) => (value: string) => setForm(current => ({ ...current, [field]: value }));
@@ -123,6 +131,9 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
     // Opened, or switched to another project (the active Pane moved to another repo):
     // start over so no edit made for one project is saved onto another.
     setForm(saved);
+    const savedDefault = useConfigStore.getState().config?.defaultIdeCommand?.trim();
+    ideSharedAtOpen.current = Boolean(savedDefault) && project.open_ide_command?.trim() === savedDefault;
+    setUseIdeForAllProjects(ideSharedAtOpen.current);
     setError(null);
     detectProject(project);
     setEnvRows([]);
@@ -182,11 +193,31 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
         }
       }
 
+      const nextDefault = nextDefaultIdeCommand({
+        projectCommand: openIdeCommand,
+        wasShared: ideSharedAtOpen.current,
+        shared: useIdeForAllProjects,
+        currentDefault: defaultIdeCommand,
+      });
+      let defaultError: string | null = null;
+      if (nextDefault !== undefined) {
+        try {
+          await updateConfig({ defaultIdeCommand: nextDefault });
+        } catch (err) {
+          defaultError = `The project was saved, but the Default Open IDE Command was not ${nextDefault ? 'set' : 'cleared'}: `
+            + `${err instanceof Error ? err.message : 'Pane could not save it.'} Try again, or change it in Settings > Worktrees & Git.`;
+        }
+      }
+
       onUpdate();
       // Notify other components (e.g. PanelTabBar) that project settings changed so they
       // can re-resolve run scripts and refresh any config-derived state without a full
       // page reload.  Listeners subscribe via `window.addEventListener('project-settings-updated')`.
       window.dispatchEvent(new Event('project-settings-updated'));
+      if (defaultError) {
+        setError(defaultError);
+        return;
+      }
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update project');
@@ -390,9 +421,29 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
               <Input
                 value={openIdeCommand}
                 onChange={(e) => setOpenIdeCommand(e.target.value)}
-                placeholder='code .'
+                placeholder={defaultIdeCommand ?? BUILT_IN_IDES[0].command}
                 className="font-mono text-sm"
               />
+              {defaultIdeCommand && !openIdeCommand.trim() && (
+                <p className="mt-1 text-xs text-text-secondary">
+                  Empty uses the Default Open IDE Command from Settings: <span className="font-mono">{defaultIdeCommand}</span>
+                </p>
+              )}
+              <div className="mt-2 flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-text-primary">Use for all projects</div>
+                  <div className="mt-0.5 text-xs text-text-secondary">
+                    Makes this the Default Open IDE Command, used by every project without its own command.
+                  </div>
+                </div>
+                <Toggle
+                  checked={useIdeForAllProjects && Boolean(openIdeCommand.trim())}
+                  disabled={!openIdeCommand.trim()}
+                  aria-label="Use for all projects"
+                  size="sm"
+                  onChange={setUseIdeForAllProjects}
+                />
+              </div>
               <p className="mt-1 text-xs text-text-tertiary">
                 <span className="text-text-secondary font-semibold">Common Examples:</span>
                 <br />

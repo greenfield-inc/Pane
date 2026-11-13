@@ -61,6 +61,7 @@ export type SettingsSettingId =
   | 'git-attribution'
   | 'auto-rename-pr'
   | 'worktree-file-sync'
+  | 'default-ide-command'
   | 'notify-enabled'
   | 'notify-cards-on'
   | 'notify-show-outside'

@@ -27,12 +27,13 @@ import { useProjectViewActionsStore } from '../stores/projectViewActionsStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { PANEL_CAPABILITIES } from '../../../shared/types/panels';
 import type { ProjectEnvironment } from '../../../shared/types/panels';
+import type { ConfiguredIde } from '../../../shared/utils/ideCommands';
 
 interface ProjectViewProps {
   projectId: number;
   projectName: string;
   projectEnvironment: ProjectEnvironment | undefined;
-  configuredIDECommand?: string | null;
+  configuredIDE?: ConfiguredIde;
   onConfigureIDE: () => void;
 }
 
@@ -40,7 +41,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   projectId, 
   projectName,
   projectEnvironment,
-  configuredIDECommand,
+  configuredIDE,
   onConfigureIDE,
 }) => {
   const [mainRepoSessionId, setMainRepoSessionId] = useState<string | null>(null);
@@ -477,7 +478,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
           onConfigureIDE={onConfigureIDE}
           onSetTracking={mainRepoGit.handleOpenSetTracking}
           trackingBranch={mainRepoGit.currentUpstream}
-          configuredIDECommand={configuredIDECommand}
+          configuredIDE={configuredIDE}
           isRemoteMode={mainRepoGit.isRemoteMode}
         >
           {/* Tab bar at top */}
