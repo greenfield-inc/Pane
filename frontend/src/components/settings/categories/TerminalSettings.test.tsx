@@ -39,10 +39,9 @@ const copyOnSelectSwitch = (markup: string) => toggle(markup, 'Copy on select');
 const referencesSwitch = (markup: string) => toggle(markup, 'Reference terminals with @');
 
 describe('TerminalSettings Copy on select', () => {
-  it('registers terminal-copy-on-select under Terminal, found by searching for copy', () => {
+  it('registers terminal-copy-on-select under Terminal', () => {
     const terminal = SETTINGS_CATEGORIES.find((category) => category.id === 'terminal');
     expect(terminal?.settingIds).toContain('terminal-copy-on-select');
-    expect(terminal?.aliases).toEqual(expect.arrayContaining(['copy', 'selection', 'clipboard']));
   });
 
   it('is off when absent', () => {

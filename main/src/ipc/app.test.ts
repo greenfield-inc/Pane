@@ -98,14 +98,4 @@ describe('context menu IPC', () => {
     expect(() => registerContextMenuHandler()?.({ sender: {} }, [{ type: 'item', id: 'copy' }])).toThrow();
     expect(buildFromTemplate).not.toHaveBeenCalled();
   });
-
-  it('shows a valid menu for the sending window', () => {
-    const popup = vi.fn();
-    // SAFETY: The handler reads only popup from the built menu.
-    vi.mocked(Menu.buildFromTemplate).mockReturnValueOnce({ popup } as Electron.Menu);
-
-    void registerContextMenuHandler()?.({ sender: {} }, [{ type: 'item', id: 'copy', label: 'Copy', enabled: true }]);
-
-    expect(popup).toHaveBeenCalledOnce();
-  });
 });

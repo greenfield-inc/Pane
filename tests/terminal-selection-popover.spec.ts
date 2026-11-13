@@ -208,6 +208,41 @@ test('copies a mouse selection at once, without the popover, when Copy on select
   await expect(page.getByRole('button', { name: 'Copy', exact: true })).toHaveCount(0);
 });
 
+test('with Copy on select on, right-click leaves the clipboard alone and the menu\'s Select All copies', async ({ page }) => {
+  await installClipboardMock(page);
+  await installElectronApiMock(page, {
+    initialConfig: { terminalCopyOnSelect: true },
+    contextMenuChoice: 'select-all',
+    initialProjects: [project],
+    initialSessions: [session],
+    initialPanels: panels,
+    initialTerminalStates: Object.fromEntries(panels.map((panel, index) => [
+      panel.id,
+      { scrollbackBuffer: `selection-${index}\r\n` },
+    ])),
+    activeProjectId: project.id,
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+
+  const viewport = page.getByRole('tabpanel').locator('.xterm-screen').first();
+  await waitForActivationRefresh(page);
+  const box = await viewport.boundingBox();
+  if (!box) throw new Error('Terminal viewport has no bounding box');
+
+  await page.mouse.move(box.x + 2, box.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 4, box.y + 8, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1']);
+
+  // The right button's release must not copy again; only the menu's Select All does.
+  await page.mouse.click(box.x + 20, box.y + 8, { button: 'right' });
+  await expect.poll(() => clipboardWrites(page)).toEqual(['selection-1', expect.stringContaining('selection-1')]);
+  expect((await clipboardWrites(page)).length).toBe(2);
+});
+
 test('keeps keyboard copy available when Pane shortcuts are disabled', async ({ page }) => {
   await installClipboardMock(page);
   await installElectronApiMock(page, {
