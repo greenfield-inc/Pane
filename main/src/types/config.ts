@@ -188,6 +188,8 @@ export interface AppConfig {
   // PostHog analytics settings
   analytics?: {
     enabled: boolean;
+    // Set only on config sent to the renderer: DO_NOT_TRACK or RUNPANE_TELEMETRY_DISABLED turned analytics off. Never saved.
+    disabledByEnvironment?: boolean;
     posthogApiKey?: string;
     posthogHost?: string;
     installId?: string;

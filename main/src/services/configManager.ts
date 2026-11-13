@@ -45,6 +45,11 @@ const DEFAULT_POSTHOG_HOST = 'https://runpane.com/api/c';
 /** Bump when agentContext defaults change for existing configs (2: repo AGENTS.md off). */
 export const AGENT_CONTEXT_DEFAULTS_VERSION = 2;
 
+/** DO_NOT_TRACK=1 or a non-empty RUNPANE_TELEMETRY_DISABLED turns off all analytics, whatever config.json says. */
+export function analyticsDisabledByEnvironment(): boolean {
+  return process.env.DO_NOT_TRACK === '1' || Boolean(process.env.RUNPANE_TELEMETRY_DISABLED);
+}
+
 function defaultAnalyticsConfig(): NonNullable<AppConfig['analytics']> {
   return {
     enabled: true,
@@ -256,15 +261,28 @@ export class ConfigManager extends EventEmitter {
       if (disk.kind === 'invalid') {
         // Do NOT overwrite the file (user might want to recover it)
         this.logInvalidConfig(disk.reason);
+        this.analyticsOffUntilRead();
         return unchanged;
       }
       if (this.hasReadConfigFile && disk.text === this.lastConfigJson) return unchanged;
       const loaded = this.tryLoadConfigText(disk.text);
-      if (!loaded) return unchanged;
+      if (!loaded) {
+        this.analyticsOffUntilRead();
+        return unchanged;
+      }
       const { persist, emit } = loaded;
       if (persistMigration && persist && await this.commitConfig(this.config, disk) === 'conflict' && attempt < MAX_COMMIT_ATTEMPTS) continue;
       return { changed: true, restamped: emit };
     }
+  }
+
+  /**
+   * A config.json Pane has never managed to read may hold analytics off, so
+   * analytics stay off in memory until it reads. The file itself is left alone.
+   */
+  private analyticsOffUntilRead(): void {
+    if (this.hasReadConfigFile) return;
+    this.config = { ...this.config, analytics: { ...this.config.analytics!, enabled: false } };
   }
 
   /** loadConfigText, logging instead of throwing when the file cannot be decoded. */
@@ -791,7 +809,7 @@ export class ConfigManager extends EventEmitter {
   }
 
   isAnalyticsEnabled(): boolean {
-    return this.config.analytics?.enabled ?? true;
+    return !analyticsDisabledByEnvironment() && (this.config.analytics?.enabled ?? true);
   }
 
   getAnalyticsDistinctId(): string | undefined {

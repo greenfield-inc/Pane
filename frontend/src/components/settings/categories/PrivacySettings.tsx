@@ -80,10 +80,10 @@ export function PrivacySettings({ persistence }: { persistence: SettingsPersiste
         <SettingRow
           settingId="analytics"
           label="Product analytics"
-          description="Product analytics are on by default. Pane collects feature usage and may associate it with locally available GitHub or Git account details, such as a username or email. App error reports contain coarse error details and relative app stack locations. Pane never collects prompts, code, or repository paths. Pane also sends a ping with this install's ID, app version and OS each time it starts and every 24 hours while it runs, so we can count active installs. Turn this off to stop product analytics, error reports and the ping. The ping and analytics also note whether Pane runs in CI, in a container, in WSL or without a display, so we can tell people apart from automated installs."
+          description={`${analytics.disabledByEnvironment ? 'DO_NOT_TRACK or RUNPANE_TELEMETRY_DISABLED is set, so Pane sends no analytics, error reports or ping until it is unset. ' : ''}Product analytics are on by default. Pane collects feature usage and may associate it with locally available GitHub or Git account details, such as a username or email. App error reports contain coarse error details and relative app stack locations. Pane never collects prompts, code, or repository paths. Pane also sends a ping with this install's ID, app version and OS each time it starts and every 24 hours while it runs, so we can count active installs. Turn this off to stop product analytics, error reports and the ping. The ping and analytics also note whether Pane runs in CI, in a container, in WSL or without a display, so we can tell people apart from automated installs.`}
           saveState={persistence.saveStates.analytics}
         >
-          <ImmediateToggle label="Allow product analytics" value={analytics.enabled === true} onSave={saveAnalytics} />
+          <ImmediateToggle label="Allow product analytics" value={analytics.enabled === true} onSave={saveAnalytics} disabled={analytics.disabledByEnvironment === true} />
         </SettingRow>
       </SettingsSection>
       <SettingsSection title="Browser">

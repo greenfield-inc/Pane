@@ -214,14 +214,9 @@ describe('install heartbeat', () => {
     expect(heartbeatBody(0).properties).toMatchObject({ distinct_id: 'install:install_22222222-2222-4222-8222-222222222222' });
   });
 
-  it.each([
-    ['DO_NOT_TRACK=1', () => vi.stubEnv('DO_NOT_TRACK', '1'), true],
-    ['RUNPANE_TELEMETRY_DISABLED', () => vi.stubEnv('RUNPANE_TELEMETRY_DISABLED', 'yes'), true],
-    ['not the installed app', () => {}, false],
-  ])('sends nothing with %s', async (_name, arrange, installed) => {
+  it('sends nothing outside the installed app', async () => {
     vi.useFakeTimers();
-    arrange();
-    const { config, analytics } = setup(undefined, installed);
+    const { config, analytics } = setup(undefined, false);
     analytics.startHeartbeat();
     await vi.advanceTimersByTimeAsync(2 * DAY);
     expect(send).not.toHaveBeenCalled();

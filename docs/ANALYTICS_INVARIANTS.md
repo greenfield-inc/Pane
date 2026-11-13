@@ -1,7 +1,8 @@
 # Analytics Invariants
 
 These rules keep Pane's PostHog funnel person-stitchable and privacy-safe. Pane
-uses default-on product analytics for new and previously undecided installs.
+turns product analytics on by default for new installs and for undecided
+installs whose config doesn't store analytics off.
 Privacy Settings clearly discloses that default and provides the opt-out.
 Explicit choices from older versions must never be overwritten.
 
@@ -45,10 +46,29 @@ opt-in dialog. Its stored `analytics.enabled` value is authoritative. The
 `analytics_default_applied` distinguishes installs already processed by the
 new experiment from previously undecided installs.
 
-A stored `analytics.enabled: false` is always an explicit off: a fresh install's
-default is `true`. The default-on experiment never replaces it. When it finds
-`false` on an undecided install, it sends nothing, records
-`analytics_default_applied` and leaves analytics off.
+The default-on experiment never replaces a stored `analytics.enabled: false`.
+When it finds `false` on an undecided install, it sends nothing, records
+`analytics_default_applied` and leaves analytics off. That `false` is usually a
+choice, since a fresh install's default is `true`. Builds before 2026-08-31 also
+stored `false` by default, so an install that last ran one of them and never
+answered the opt-in dialog stays off too: config can't tell the two apart.
+
+## Analytics Off Means Off
+
+`ConfigManager.isAnalyticsEnabled()` is the one gate for everything the main
+process sends: forwarded usage events, error reports, `app_closed` and the
+install heartbeat. It is off when any of these holds:
+
+- "Allow product analytics" is off (`analytics.enabled: false`).
+- `DO_NOT_TRACK=1` or a non-empty `RUNPANE_TELEMETRY_DISABLED` is set. The
+  config the renderer receives then says `enabled: false` with
+  `disabledByEnvironment: true` (`rendererConfig` in `main/src/ipc/config.ts`),
+  so the renderer sends nothing, the default-on experiment waits, and Settings
+  locks the switch with a note. config.json keeps its own value.
+- config.json exists but Pane has not read it since launch, because it is not
+  JSON or a field fails to decode. Pane can't know whether it holds an off, so
+  analytics stay off in memory until the file reads, and the file is left
+  alone.
 
 ## Required Event Context
 
@@ -99,7 +119,7 @@ the request IP.
 
 Only the installed app sends it: a packaged build on the default data directory
 (no `PANE_DIR`, `FOOZOL_DIR` or `--pane-dir`). Analytics off, `DO_NOT_TRACK=1`
-or a non-empty `RUNPANE_TELEMETRY_DISABLED` turns it off.
+or a non-empty `RUNPANE_TELEMETRY_DISABLED` turns it off, as it does all analytics.
 
 Settings › Privacy discloses the payload. Adding a property means changing that
 copy and this section in the same PR.

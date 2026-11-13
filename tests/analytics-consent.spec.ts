@@ -260,3 +260,29 @@ for (const [name, analyticsConsentShown] of [
   await expect(page.getByRole('switch', { name: 'Allow product analytics' })).not.toBeChecked();
   expect(requests.map((request) => request.url)).toEqual([]);
 });
+
+test('DO_NOT_TRACK in the environment sends nothing and locks the Settings switch off', async ({ page }) => {
+  const requests: string[] = [];
+  await page.route(`${POSTHOG_HOST}/**`, async (route) => {
+    requests.push(route.request().url());
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  await installElectronApiMock(page, {
+    analyticsConsentShown: false,
+    initialPreferences: { analytics_default_applied: 'false' },
+    initialConfig: {
+      analytics: { enabled: false, disabledByEnvironment: true, posthogApiKey: 'phc_test', posthogHost: POSTHOG_HOST },
+    },
+    mainAnalyticsEvents: [{ eventName: 'app_opened', properties: { is_first_launch: true } }],
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.getByRole('button', { name: 'Settings' }).first().click();
+  await page.getByRole('button', { name: 'Privacy', exact: true }).click();
+  await expect(page.getByText('DO_NOT_TRACK or RUNPANE_TELEMETRY_DISABLED is set')).toBeVisible();
+  const toggle = page.getByRole('switch', { name: 'Allow product analytics' });
+  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toBeDisabled();
+  expect(requests).toEqual([]);
+});

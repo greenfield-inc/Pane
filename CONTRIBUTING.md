@@ -66,10 +66,10 @@ app:
   give it its own `PANE_DIR`.
 - **Analytics** are on by default in a fresh data directory. To keep a QA
   instance quiet, write `analytics.enabled: false` to its `config.json` before
-  the first launch; the default-on experiment never overrides it. Instances
-  with their own `PANE_DIR` or `--pane-dir`, and unpackaged builds, send no
-  install heartbeat. Packaged QA on the default data directory should set
-  `RUNPANE_TELEMETRY_DISABLED=1`.
+  the first launch, or launch it with `RUNPANE_TELEMETRY_DISABLED=1`; either
+  stops all analytics, error reports and the heartbeat. Instances with their
+  own `PANE_DIR` or `--pane-dir`, and unpackaged builds, send no install
+  heartbeat.
 - **Pane data** (`sessions.db`, `config.json`, skills): a dev (unpackaged)
   build with neither `PANE_DIR` nor `--pane-dir` uses `~/.pane_dev`, never the
   installed app's `~/.pane`, and says so at startup. `~/.pane_dev` lasts across

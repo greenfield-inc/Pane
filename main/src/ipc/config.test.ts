@@ -236,6 +236,27 @@ describe('config IPC handlers', () => {
     expect(nativeTheme.themeSource).toBe('dark');
   });
 
+  it('serves analytics off, marked as set by the environment, while DO_NOT_TRACK=1, and saves nothing', async () => {
+    vi.stubEnv('DO_NOT_TRACK', '1');
+    try {
+      const configManager = await createTempConfigManager();
+      await configManager.initialize();
+      const services = createServicesStub([]);
+      services.configManager = configManager;
+      const ipcMain = createIpcMainStub();
+      // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
+      registerConfigHandlers(ipcMain as IpcMain, services);
+
+      await expect(ipcMain.handlers.get('config:get')?.({})).resolves.toMatchObject({
+        success: true, data: { analytics: { enabled: false, disabledByEnvironment: true } },
+      });
+      expect(configManager.getConfig().analytics).toMatchObject({ enabled: true });
+      expect(configManager.getConfig().analytics).not.toHaveProperty('disabledByEnvironment');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   describe('remote:settings:update', () => {
     async function registerRemoteSettings() {
       const configManager = await createTempConfigManager();
