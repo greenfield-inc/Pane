@@ -342,8 +342,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   // A fresh mount starts false so it cannot skip its initial reset/replay.
   const hotActivationEligibleRef = useRef(false);
   const hotActivationPendingRef = useRef(false);
-  // The WebGL renderer kept while hidden was released for the cap, so the next
-  // activation attaches a new context and must stay masked.
+  // The WebGL renderer kept while hidden is gone (released for the cap, or its
+  // context was lost), so the next activation attaches a new context and must
+  // stay masked.
   const keptWebglReleasedRef = useRef(false);
   const [webglAllowed, setWebglAllowed] = useState(panelVisible);
   const blurDetachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -527,6 +528,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         forwardToMainLog('warn', `[TerminalPanel] WebGL context lost for panel ${panel.id}, falling back to DOM renderer`);
         try { addon.dispose(); } catch { /* already disposed */ }
         webglAddonRef.current = null;
+        if (!isActiveRef.current) {
+          keptWebglReleasedRef.current = true;
+          keptHiddenWebglRenderers.delete(panel.id);
+        }
         // Defense-in-depth: force a redraw on the restored DOM renderer.
         const fallbackTerminal = xtermRef.current;
         if (fallbackTerminal && fallbackTerminal.rows > 0) {
@@ -624,6 +629,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       // rendering for a display:none terminal, and showing it again then needs no
       // new context, whose first frame would otherwise flash blank (#1290).
       if (hotActivationPendingRef.current) {
+        // Register only on the hide itself: a re-run while hidden (app blur or
+        // refocus) must not move this tab to newest or re-register a released one.
+        if (keptWebglReleasedRef.current || keptHiddenWebglRenderers.has(panel.id)) return;
         keepHiddenWebglRenderer(panel.id, () => {
           keptWebglReleasedRef.current = true;
           disposeWebglRenderer('hidden-renderer-cap');
@@ -636,7 +644,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       return;
     }
 
-    keptHiddenWebglRenderers.delete(panel.id);
     if (windowFocused) {
       setWebglAllowed(true);
       return;
@@ -661,6 +668,13 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       }
     };
   }, [panelVisible, windowFocused, useBatterySaverTerminalVisibility, disposeWebglRenderer, panel.id]);
+
+  // A shown tab leaves the kept set in the layout phase, before any passive
+  // effect in the same commit: a tab hidden by this switch registers its keep
+  // there and could otherwise evict the tab now on screen.
+  useLayoutEffect(() => {
+    if (panelVisible) keptHiddenWebglRenderers.delete(panel.id);
+  }, [panelVisible, panel.id]);
 
   useEffect(() => () => {
     keptHiddenWebglRenderers.delete(panel.id);

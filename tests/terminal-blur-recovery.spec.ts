@@ -377,34 +377,82 @@ test('a font change while hidden masks the next hot activation', async ({ page }
   expect(await maskAppearances(page, panel)).not.toEqual([]);
 });
 
-test('hidden tabs release their kept WebGL renderers oldest first before the browser limit', async ({ page }) => {
-  // Chromium keeps at most 16 live WebGL contexts per renderer process.
-  const chromiumMaxWebglContexts = 16;
-  const extraPanels = Array.from({ length: chromiumMaxWebglContexts - 2 }, (_, index) => (
-    terminalPanel(`blur-extra-${index}`, session.id, `Extra ${index}`, 3 + index, false)
-  ));
-  const { panel, webglLoaded } = await bootFixture(page, 'performance', false, false, 'darwin', extraPanels);
-  test.skip(!webglLoaded, 'WebGL renderer not attached; there is no renderer to keep in this browser');
-  // Each tab's first activation is a full refresh; its delayed backstop logs
-  // after the tab became eligible to keep its renderer while hidden.
-  for (const next of [secondaryPanel, ...extraPanels]) {
+// Chromium keeps at most 16 live WebGL contexts per renderer process.
+const CHROMIUM_MAX_WEBGL_CONTEXTS = 16;
+const extraPanels = Array.from({ length: CHROMIUM_MAX_WEBGL_CONTEXTS - 2 }, (_, index) => (
+  terminalPanel(`blur-extra-${index}`, session.id, `Extra ${index}`, 3 + index, false)
+));
+const visitOrder = [primaryPanel, secondaryPanel, ...extraPanels];
+
+async function capReleases(page: Page, panelId?: string): Promise<number> {
+  const marker = panelId ? `WebGL renderer detached for panel ${panelId} reason=hidden-renderer-cap` : 'reason=hidden-renderer-cap';
+  return (await lifecycleLogs(page)).filter((line) => line.includes(marker)).length;
+}
+
+async function waitForActivation(page: Page, panelId: string, depth: 'full' | 'hot' | 'light'): Promise<void> {
+  await expect.poll(() => lifecycleLogs(page).then((logs) => logs.some((line) => (
+    line.includes(`Activation depth for panel ${panelId}: ${depth}`)
+  )))).toBe(true);
+}
+
+// Opens a terminal per browser WebGL context, visiting each tab once in strip
+// order so every one is eligible to keep its renderer while hidden.
+async function bootWithEveryTabVisited(page: Page): Promise<BootFixtureResult> {
+  const result = await bootFixture(page, 'performance', false, false, 'darwin', extraPanels);
+  if (!result.webglLoaded) return result;
+  for (const next of visitOrder.slice(1)) {
     await page.getByRole('tab', { name: next.title, exact: true }).click();
+    // The delayed backstop logs after the first (full) activation made the tab eligible.
     await expect.poll(() => lifecycleLogs(page).then((logs) => logs.some((line) => (
       line.includes(`Delayed activation refresh for panel ${next.id}`)
     )))).toBe(true);
   }
-  const released = (panelId: string) => lifecycleLogs(page).then((logs) => logs.some((line) => (
-    line.includes(`WebGL renderer detached for panel ${panelId} reason=hidden-renderer-cap`)
-  )));
-  expect(await released(primaryPanel.id)).toBe(true);
-  expect(await released(extraPanels[extraPanels.length - 2].id)).toBe(false);
+  return result;
+}
+
+test('hidden tabs release their kept WebGL renderers oldest first before the browser limit', async ({ page }) => {
+  const { panel, webglLoaded } = await bootWithEveryTabVisited(page);
+  test.skip(!webglLoaded, 'WebGL renderer not attached; there is no renderer to keep in this browser');
+  expect(await capReleases(page, primaryPanel.id)).toBe(1);
+  expect(await capReleases(page, extraPanels[extraPanels.length - 2].id)).toBe(0);
   // The released tab attaches a new context when shown, so it stays masked.
   await resetMaskAppearances(page);
   await page.getByRole('tab', { name: primaryPanel.title, exact: true }).click();
-  await expect.poll(() => lifecycleLogs(page).then((logs) => logs.some((line) => (
-    line.includes(`Activation depth for panel ${primaryPanel.id}: hot`)
-  )))).toBe(true);
+  await waitForActivation(page, primaryPanel.id, 'hot');
   expect(await maskAppearances(page, panel)).not.toEqual([]);
+});
+
+test('showing the oldest kept tab does not release its renderer during the switch', async ({ page }) => {
+  const { webglLoaded } = await bootWithEveryTabVisited(page);
+  test.skip(!webglLoaded, 'WebGL renderer not attached; there is no renderer to keep in this browser');
+  // Show a released tab at the start of the strip, then switch from it to the
+  // oldest tab still keeping its renderer: the tab being hidden comes earlier
+  // in the tree, so its keep runs first in that commit.
+  await page.getByRole('tab', { name: primaryPanel.title, exact: true }).click();
+  await waitForActivation(page, primaryPanel.id, 'hot');
+  const logs = await lifecycleLogs(page);
+  const oldestKept = visitOrder.slice(1).find((candidate) => !logs.some((line) => (
+    line.includes(`WebGL renderer detached for panel ${candidate.id} reason=hidden-renderer-cap`)
+  )));
+  if (!oldestKept) throw new Error('Every hidden tab was released; the cap kept none.');
+  await resetMaskAppearances(page);
+  await page.getByRole('tab', { name: oldestKept.title, exact: true }).click();
+  await waitForActivation(page, oldestKept.id, 'hot');
+  expect(await capReleases(page, oldestKept.id)).toBe(0);
+  expect(await maskAppearances(page, page.getByRole('tabpanel', { name: oldestKept.title }))).toEqual([]);
+});
+
+test('an app blur and refocus keeps every kept WebGL renderer', async ({ page }) => {
+  const { webglLoaded } = await bootWithEveryTabVisited(page);
+  test.skip(!webglLoaded, 'WebGL renderer not attached; there is no renderer to keep in this browser');
+  const shown = visitOrder[visitOrder.length - 1];
+  const releasesBefore = await capReleases(page);
+  await emitFocus(page, false);
+  await waitForWindowFocusState(page, false);
+  await emitFocus(page, true);
+  await waitForWindowFocusState(page, true);
+  await waitForActivation(page, shown.id, 'light');
+  expect(await capReleases(page)).toBe(releasesBefore);
 });
 
 test('panel hide and show after a resize retains the masked hot activation', async ({ page }) => {
