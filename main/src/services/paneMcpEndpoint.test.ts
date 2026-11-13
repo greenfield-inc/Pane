@@ -190,6 +190,22 @@ describe('PaneMcpEndpoint', () => {
     await until(() => !alive(pid), 'the runpane process to end');
   });
 
+  it("keeps new tabs on stdio once Pane's MCP tools fail to load", async () => {
+    endpoint = new PaneMcpEndpoint({
+      load: () => Promise.reject(new Error('mcp-http.cjs is missing')),
+      cli: () => ({ executable: process.execPath, script: fakeCli }),
+      settings: () => ({ enabled: true }),
+      listener,
+    });
+    endpoint.attach();
+    const grant = grantOf(endpoint.grant(tab('panel-a')));
+
+    const failed = await callRepos(grant);
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toMatchObject({ code: 'PANE_MCP_UNAVAILABLE' });
+    expect(endpoint.grant(tab('panel-b'))).toBeUndefined();
+  });
+
   it('grants nothing while Pane tools are off, and refuses a running tab once they are turned off', async () => {
     const server = start();
     const grant = grantOf(server.grant(tab('panel-a')));

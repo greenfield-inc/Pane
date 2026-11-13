@@ -61,6 +61,8 @@ export class PaneMcpEndpoint {
   private readonly tabs = new Map<string, PaneMcpTab>();
   /** One handler per toolsets setting, built once; a failed build stays failed until the setting changes. */
   private readonly handlers = new Map<string, Promise<PaneMcpHttpHandler | Error>>();
+  /** Toolsets values whose handler failed to build: tabs started meanwhile keep stdio. */
+  private readonly failedBuilds = new Set<string>();
   private module?: Promise<PaneMcpHttpModule>;
   private detach: Array<() => void> = [];
   private warmUp?: ReturnType<typeof setTimeout>;
@@ -95,7 +97,8 @@ export class PaneMcpEndpoint {
   grant(tab: PaneMcpTab): Record<string, string> | undefined {
     this.forgetPanel(tab.panelId);
     const origin = this.listener.origin;
-    if (!origin || this.detach.length === 0 || !this.options.settings().enabled) return undefined;
+    const settings = this.options.settings();
+    if (!origin || this.detach.length === 0 || !settings.enabled || this.failedBuilds.has(toolsetsKey(settings.toolsets))) return undefined;
     const token = this.listener.mint(tab.panelId, 'mcp');
     if (!token) return undefined;
     this.tabs.set(token, tab);
@@ -120,7 +123,7 @@ export class PaneMcpEndpoint {
   /** The handler for the current toolsets, or why it can't be built. */
   private handler(): Promise<PaneMcpHttpHandler | Error> {
     const toolsets = this.options.settings().toolsets ?? [];
-    const key = toolsets.join(',');
+    const key = toolsetsKey(toolsets);
     let built = this.handlers.get(key);
     if (!built) {
       built = this.loadModule().then(
@@ -136,7 +139,8 @@ export class PaneMcpEndpoint {
         }),
       ).catch(error => {
         const failure = error instanceof Error ? error : new Error(String(error));
-        console.warn('[PaneMcp] Pane tools over HTTP are unavailable:', failure.message);
+        console.warn('[PaneMcp] Pane tools over HTTP are unavailable; new tabs keep stdio:', failure.message);
+        this.failedBuilds.add(key);
         return failure;
       });
       this.handlers.set(key, built);
@@ -205,6 +209,10 @@ export class PaneMcpEndpoint {
   }
 }
 
+function toolsetsKey(toolsets: string[] | undefined): string {
+  return (toolsets ?? []).join(',');
+}
+
 let current: PaneMcpEndpoint | undefined;
 
 /** Set once the endpoint is attached; tabs started before then keep their stdio server. */
@@ -237,8 +245,8 @@ export function withPaneMcpConfig(panelId: string, agentType: string | undefined
   const spans: Array<{ start: number; end: number }> = [];
   const tokens = tokenizeShellCommand(command, process.platform, spans);
   const word = quoteShellWord(`${flag}=${file}`, shellType);
-  const executable = path.basename(tokens?.[0] ?? '').replace(/\.(exe|cmd)$/i, '');
-  if (!tokens || !word || !agent.executables.includes(executable) || tokens.includes('--strict-mcp-config') || command.includes(file)) return command;
+  const executable = path.basename(tokens?.[0] ?? '').replace(/\.(exe|cmd)$/i, '').toLowerCase();
+  if (!tokens || !word || !agent.executables.some(name => name.toLowerCase() === executable) || tokens.includes('--strict-mcp-config') || command.includes(file)) return command;
   const content = `${JSON.stringify(MCP_CONFIG, null, 2)}\n`;
   try {
     mkdirSync(path.dirname(file), { recursive: true });
