@@ -593,14 +593,23 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
   assert.equal(annotationsOf('repos_list').readOnlyHint, true);
   assert.equal(annotationsOf('panes_archive').destructiveHint, true);
   assert.equal(annotationsOf('agents_start').destructiveHint, false);
-  assert.ok(discover.instructions.length <= CLAUDE_CODE_MCP_TEXT_LIMIT, `instructions are ${discover.instructions.length} characters; Claude Code cuts them at ${CLAUDE_CODE_MCP_TEXT_LIMIT}`);
-  for (const tool of list.tools) {
-    assert.ok(tool.description.length <= CLAUDE_CODE_MCP_TEXT_LIMIT, `${tool.name}'s description is ${tool.description.length} characters; Claude Code cuts it at ${CLAUDE_CODE_MCP_TEXT_LIMIT}`);
-  }
 
   assert.equal(responses.get(3).error.code, -32602, 'an unknown tool is an Invalid Params protocol error');
   assert.equal(responses.get(4).result.isError, true, 'bad arguments are a tool execution error');
   assert.match(responses.get(4).result.content[0].text, /bogus/);
+});
+
+test('the instructions and every tool description fit within what Claude Code shows', async () => {
+  for (const args of [[], ['--toolsets', 'all']]) {
+    await withMcpClient(async (client) => {
+      const served = `runpane mcp ${args.join(' ')}`.trim();
+      const instructions = client.getInstructions() ?? '';
+      assert.ok(instructions.length <= CLAUDE_CODE_MCP_TEXT_LIMIT, `${served}: instructions are ${instructions.length} characters; Claude Code cuts them at ${CLAUDE_CODE_MCP_TEXT_LIMIT}`);
+      for (const tool of (await client.listTools()).tools) {
+        assert.ok(tool.description.length <= CLAUDE_CODE_MCP_TEXT_LIMIT, `${served}: ${tool.name}'s description is ${tool.description.length} characters; Claude Code cuts it at ${CLAUDE_CODE_MCP_TEXT_LIMIT}`);
+      }
+    }, { args });
+  }
 });
 
 test('serves clients that still use the 2025 initialize handshake', async () => {
