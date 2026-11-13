@@ -1198,7 +1198,8 @@ export type RunpanePanelCreateSource = 'user' | 'agent';
 
 /** `panels create --chat` / `--agent-farm`: a chat tab instead of a terminal panel. */
 export interface RunpaneChatTabSpec {
-  agent?: 'claude' | 'codex';
+  /** Any agent id; the host refuses one it cannot open as a chat, naming those it can. */
+  agent?: string;
   /** An Agent Farm profile, started through `agent-farm run --print-acp`. */
   profile?: string;
   args?: Record<string, string>;

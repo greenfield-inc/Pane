@@ -82,7 +82,6 @@
   "shared/types/customCommandResume.ts": "Deferred terminal resume: custom command resume modes per agent.",
   "shared/types/loop.ts": "Loops' own agent list; Loops are outside this plan's scope.",
   "shared/types/missionControl.ts": "Mission Control reads Claude and Codex transcripts (vendor file formats).",
-  "shared/types/runpaneOrchestration.ts": "Typed runpane result for terminal transcripts, which exist for Claude and Codex only.",
   "shared/types/sessionImport.ts": "Vendor file formats: sessions imported from other tools.",
   "shared/types/setupTransfer.ts": "Persisted record shape: the setup export format.",
   "shared/types/usage.ts": "Vendor file formats: usage parsed from each agent's own transcripts.",

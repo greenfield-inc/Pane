@@ -5232,13 +5232,13 @@ function parsePanelCreateRequest(value: PaneCommandValue): RunpanePanelCreateReq
 
   if (value.type === 'chat') {
     const chat = decodeBoundary(value.chat ?? {}, boundary.object({
-      agent: boundary.optional(boundary.enumeration('claude', 'codex')),
+      agent: boundary.optional(boundary.nonEmptyString),
       profile: boundary.optional(boundary.nonEmptyString),
       args: boundary.optional(boundary.record(boundary.string)),
       initialInput: boundary.optional(boundary.string),
       title: boundary.optional(boundary.string),
     }));
-    if (!chat.agent && !chat.profile) throw new PaneError('ERR_RUNPANE_CHAT_AGENT_REQUIRED', 'A chat tab needs an agent (claude or codex) or an Agent Farm profile. No tab was created.', 'Pass --agent claude, --agent codex or --agent-farm <profile> with --chat.');
+    if (!chat.agent && !chat.profile) throw new PaneError('ERR_RUNPANE_CHAT_AGENT_REQUIRED', 'A chat tab needs an agent or an Agent Farm profile. No tab was created.', 'Pass --agent <id> or --agent-farm <profile> with --chat.');
     return {
       paneId, type: 'chat', chat,
       noFocus: optionalBoolean(value.noFocus), focus: optionalBoolean(value.focus),

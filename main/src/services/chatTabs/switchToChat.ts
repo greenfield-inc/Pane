@@ -111,7 +111,7 @@ function firstSentence(reason: string): string {
 }
 
 /**
- * Switch to chat (D-129, D-184, D-282): opens a terminal Claude or Codex tab's conversation in a chat
+ * Switch to chat (D-129, D-184, D-282): opens a terminal agent tab's conversation in a chat
  * tab. The chat opens the conversation Pane is sure the terminal is on; when Pane isn't sure, the
  * folder's most recent conversation that no other Pane tab has open (the chat resolves it at start);
  * a known conversation with no messages, or nothing to open, starts new. A failure after the stop

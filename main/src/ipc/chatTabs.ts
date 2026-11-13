@@ -166,6 +166,11 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
     agent = (await agentFarmProfiles.print(launch.profile, launch.args ?? {}, DEFAULT_AGENT_ID, session.worktreePath, chatTabEnv(placeholder, probe))).harness;
   }
   if (!agent) throw new PaneError('CHAT_AGENT_REQUIRED', 'No agent was named for the chat tab, so none was created.', `Choose an agent (${configuredChatAgentIds().join(', ')}), or name an Agent Farm profile.`);
+  // Refused here, before a tab exists, naming the agents this host can open as chats.
+  if (launch.kind === 'agent') {
+    const runnable = getChatAgentCatalog().entries().map(entry => entry.id);
+    if (!runnable.includes(agent)) throw new PaneError('CHAT_AGENT_UNKNOWN', `This computer cannot open "${agent}" as a chat tab. No tab was created.`, `Pick one of the agents it can run: ${runnable.join(', ')}.`);
+  }
   const state: ChatPanelState = { agent, launch, cwd: session.worktreePath, status: 'starting' };
   if (request.initialInput) state.initialInput = request.initialInput;
   const title = request.title ?? (launch.kind === 'profile' ? launch.profile.split('/').pop() ?? agentLabel(agent) : agentLabel(agent));
