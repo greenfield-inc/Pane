@@ -38,7 +38,7 @@ export interface ChatTabRuntimeOptions {
 /** ACP's JSON-RPC code for "authentication required". */
 const AUTH_REQUIRED = RequestError.authRequired().code;
 const terminalSignIn = boundary.object({ args: boundary.optional(boundary.array(boundary.string)), env: boundary.optional(boundary.record(boundary.string)) });
-const rpcError = boundary.object({ code: boundary.number, message: boundary.optional(boundary.string) });
+const rpcError = boundary.object({ code: boundary.number, message: boundary.optional(boundary.string), data: boundary.optional(boundary.json) });
 
 /**
  * Every failure that leaves the runtime is a PaneError. An ACP authRequired
@@ -49,7 +49,9 @@ export function chatFailure(cause: unknown, fallback: { code: string; next: stri
   if (cause instanceof PaneError) return cause;
   const rpc = decodeOptionalBoundary(cause, rpcError);
   if (rpc?.code === AUTH_REQUIRED) return new PaneError('CHAT_NOT_SIGNED_IN', 'The agent is not signed in on this machine.', 'Sign in with the agent\'s own login in a terminal tab, then press Retry.');
-  return new PaneError(fallback.code, `The agent reported an error: ${reasonOf(cause)}.`, fallback.next);
+  // An agent's JSON-RPC `data` often says what is wrong (a missing provider, a bad setting).
+  const detail = decodeOptionalBoundary(rpc?.data, boundary.string) ?? decodeOptionalBoundary(rpc?.data, boundary.object({ message: boundary.string }))?.message;
+  return new PaneError(fallback.code, `The agent reported an error: ${reasonOf(cause)}${detail ? ` (${detail})` : ''}.`, fallback.next);
 }
 
 export function isAuthRequired(error: PaneError): boolean { return error.code === 'CHAT_NOT_SIGNED_IN'; }

@@ -8,8 +8,11 @@ import type { CreatePanelRequest, PanelOpener, ToolPanel } from '../../../shared
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
 import { getRuntimeConfigManager } from '../core/runtime';
+import { ShellDetector } from '../utils/shellDetector';
+import { nativeCommand } from '../services/agentChat/hostCommand';
 import { panelManager } from '../services/panelManager';
 import { configureChatTabs, getChatAgentCatalog, getChatTabManager } from '../services/chatTabs';
+import { chatAgentName, getAgentRegistry } from '../services/agentRegistry';
 import { chatTabSecrets } from '../services/chatTabs/secrets';
 import { AgentFarmProfiles, printedCli } from '../services/chatTabs/agentFarm';
 import { chatTabEnv } from '../services/chatTabs/launch';
@@ -58,7 +61,7 @@ const agentFarmProfiles = new AgentFarmProfiles({
   checkCli: (agent, context) => checkAgentCli(agent, printedCli(agent, context.env, findExecutableInPath), context),
 });
 
-const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key', 'agents'] as const;
+const CHAT_TAB_CHANNELS = ['create', 'switch', 'preview-session-switch', 'switch-session', 'get', 'history', 'send', 'receipt', 'unqueue', 'send-now', 'edit-queued', 'clear', 'stop-task', 'configure', 'cancel', 'permission', 'answer', 'restart', 'conversations', 'resume', 'dismiss-banner', 'sign-in', 'keys', 'set-key', 'agents', 'registry', 'install-agent', 'remove-agent'] as const;
 
 function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
 
@@ -120,11 +123,30 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     // Sign-in always happens in the agent's own flow on this machine; Pane never sees the login.
     // A wrapped launch runs exactly this command, without the agent-session flags Pane adds to terminals.
     const command = signInCommand(state.agent, manager.terminalSignIn(panelId(id)));
-    const terminal = await panelManager.createPanel({ sessionId: panel.sessionId, type: 'terminal', title: `Sign in to ${agentLabel(state.agent)}`, initialState: { initialCommand: command, launchCommand: command, launchMode: 'wrapped', preserveLaunchCommand: true }, announceActivation: true });
+    const terminal = await panelManager.createPanel({ sessionId: panel.sessionId, type: 'terminal', title: `Sign in to ${chatAgentName(state.agent)}`, initialState: { initialCommand: command, launchCommand: command, launchMode: 'wrapped', preserveLaunchCommand: true }, announceActivation: true });
     return { panelId: terminal.id };
   });
   registry.register('chat-tab:keys', () => chatTabSecrets.status());
   registry.register('chat-tab:agents', () => getChatAgentCatalog().entries());
+  // Settings > Agents: the ACP Registry's agents (D-15). Installing runs third-party code on this machine, so only its owner can.
+  registry.register('chat-tab:registry', (refresh?: PaneCommandValue) => getAgentRegistry().list(decodeBoundary(refresh ?? false, boundary.boolean)));
+  registry.register('chat-tab:install-agent', async (id: string, options?: PaneCommandValue) => {
+    const teammate = teammatePaneCaller();
+    if (teammate) throw teammateSecretRefusal(teammate, 'install an agent');
+    const { allowUnverified } = decodeBoundary(options ?? {}, boundary.object({ allowUnverified: boundary.optional(boundary.boolean) }));
+    await getAgentRegistry().install(decodeBoundary(id, agentSchema), { allowUnverified: allowUnverified === true });
+    return getAgentRegistry().list();
+  });
+  registry.register('chat-tab:remove-agent', (id: string) => {
+    const teammate = teammatePaneCaller();
+    if (teammate) throw teammateSecretRefusal(teammate, 'remove an agent');
+    const agent = decodeBoundary(id, agentSchema);
+    // Removing deletes the files a running agent loads (review S-9).
+    const running = manager.inUse(agent);
+    if (running) throw new PaneError('AGENT_REGISTRY_IN_USE', `${chatAgentName(agent)} is running or starting in ${running === 1 ? 'a chat tab' : `${running} chat tabs`}, so it was not removed.`, 'Close its chat tabs, then remove it.');
+    getAgentRegistry().remove(agent);
+    return getAgentRegistry().list();
+  });
   registry.register('chat-tab:set-key', (agent: string, key: PaneCommandValue) => {
     const teammate = teammatePaneCaller();
     if (teammate) throw teammateSecretRefusal(teammate, 'change a chat tab key');
@@ -146,8 +168,17 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
  */
 function signInCommand(agent: ChatAgent, advertised: { args: string[] } | undefined): string {
   const config = agentConfig(agent);
-  if (!config) throw new PaneError('CHAT_SIGN_IN_UNKNOWN', `Pane does not know how to sign ${agentLabel(agent)} in.`, 'Sign in with the agent\'s own instructions in a terminal tab, then press Retry.');
   const plain = (words: readonly string[]) => words.every(word => /^[\w@%+=:,./-]+$/.test(word));
+  if (!config) {
+    // A registry agent signs in through the terminal sign-in it advertised, run with its installed
+    // command, quoted for the shell the terminal opens (paths may hold spaces or backslashes).
+    const installed = getAgentRegistry().installedRecord(agent);
+    if (installed && advertised) {
+      const shell = ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell?.()).path;
+      return nativeCommand(installed.command, advertised.args, shell);
+    }
+  }
+  if (!config) throw new PaneError('CHAT_SIGN_IN_UNKNOWN', `Pane does not know how to sign ${agentLabel(agent)} in.`, 'Sign in with the agent\'s own instructions in a terminal tab, then press Retry.');
   const args = advertised && plain(advertised.args) ? advertised.args : config.signIn;
   return [config.executables[0], ...args].join(' ');
 }
@@ -167,8 +198,9 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   }
   if (!agent) throw new PaneError('CHAT_AGENT_REQUIRED', 'No agent was named for the chat tab, so none was created.', `Choose an agent (${configuredChatAgentIds().join(', ')}), or name an Agent Farm profile.`);
   // Refused here, before a tab exists, naming the agents this host can open as chats.
-  if (launch.kind === 'agent' && !agentConfig(agent)?.chat) {
-    throw new PaneError('CHAT_AGENT_UNKNOWN', `This computer cannot open "${agent}" as a chat tab. No tab was created.`, `Pick one of the agents it can run: ${configuredChatAgentIds().join(', ')}.`);
+  if (launch.kind === 'agent' && !agentConfig(agent)?.chat && !getAgentRegistry().installedRecord(agent)) {
+    const runnable = [...configuredChatAgentIds(), ...getAgentRegistry().installed().map(record => record.id)];
+    throw new PaneError('CHAT_AGENT_UNKNOWN', `This computer cannot open "${agent}" as a chat tab. No tab was created.`, `Pick one of the agents it can run: ${runnable.join(', ')}.`);
   }
   // A profile runs through Pane's bundled adapter for the agent it names (review F-7).
   if (launch.kind === 'profile' && request.agent && !agentConfig(request.agent)?.chat?.adapter) {
@@ -176,7 +208,7 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   }
   const state: ChatPanelState = { agent, launch, cwd: session.worktreePath, status: 'starting' };
   if (request.initialInput) state.initialInput = request.initialInput;
-  const title = request.title ?? (launch.kind === 'profile' ? launch.profile.split('/').pop() ?? agentLabel(agent) : agentLabel(agent));
+  const title = request.title ?? (launch.kind === 'profile' ? launch.profile.split('/').pop() ?? chatAgentName(agent) : chatAgentName(agent));
   const create: CreatePanelRequest = { sessionId: request.sessionId, type: 'chat', title, initialState: { customState: state }, activate: request.activate, announceActivation: request.activate !== false };
   if (openedBy) create.metadata = { openedBy };
   const panel = await panelManager.createPanel(create);

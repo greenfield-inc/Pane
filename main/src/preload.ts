@@ -506,6 +506,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     keys: () => invokeIpc('chat-tab:keys'),
     setKey: (agent: string, key: string | null) => invokeIpc('chat-tab:set-key', agent, key),
     agents: () => invokeIpc('chat-tab:agents'),
+    registry: (refresh?: boolean) => invokeIpc('chat-tab:registry', refresh ?? false),
+    installAgent: (id: string, options?: { allowUnverified?: boolean }) => invokeIpc('chat-tab:install-agent', id, options ?? {}),
+    removeAgent: (id: string) => invokeIpc('chat-tab:remove-agent', id),
     onEvent: (callback: (event: ChatTabEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, event: ChatTabEvent) => callback(event);
       ipcRenderer.on('chat-tab:event', listener);

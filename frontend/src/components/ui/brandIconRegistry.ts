@@ -31,7 +31,11 @@ export function getCliBrandIcon(nameOrCommand: string, className = 'w-4 h-4'): R
 export function agentIcon(agent: { icon?: string; iconUrl?: string } | undefined, className = 'w-4 h-4'): ReactElement {
   const brand = agent?.icon ? BRAND_ICONS_BY_KEY.get(agent.icon) : undefined;
   if (brand) return createElement(brand, { className });
-  if (agent?.iconUrl) return createElement('img', { src: agent.iconUrl, alt: '', draggable: false, className: `${className} object-contain` });
+  // Registry icons are single-colour SVGs drawn in currentColor; a mask paints them in the text colour, so they follow the theme.
+  if (agent?.iconUrl) {
+    const mask = `url("${agent.iconUrl}") center / contain no-repeat`;
+    return createElement('span', { 'aria-hidden': true, className: `${className} inline-block bg-current`, style: { mask, WebkitMask: mask } });
+  }
   return createElement(MessageSquare, { className });
 }
 

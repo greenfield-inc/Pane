@@ -28,6 +28,8 @@ export interface ResolvedLaunch {
   approveOnce?: boolean;
   /** The agent runs as its own CLI, so it may advertise a terminal sign-in Pane can run. */
   ownCli?: boolean;
+  /** The installed version this launch runs, for an agent Pane installed (ACP Registry). */
+  agentVersion?: string;
 }
 
 /** Events a chat tab sends to every viewer. */
@@ -68,6 +70,8 @@ export interface ChatTabManagerOptions {
   openConversations?: (panelId: string) => Map<string, { panelId: string; title: string }>;
   /** How long closing, stopping or quitting waits for a tab's agent to end. Default 5 s. */
   stopTimeoutMs?: number;
+  /** An agent's name for messages; defaults to its config label, or its id. */
+  agentName?: (agent: string) => string;
   /** Every initialize reply, for the agent catalog's capabilities. */
   onInitialized?: (agent: string, response: InitializeResponse) => void;
 }
@@ -110,8 +114,10 @@ export class ChatTabManager {
   private readonly tabs = new Map<string, Tab>();
   private lastGeneration = 0;
   private readonly bodies: QueuedBodies;
+  private readonly name: (agent: string) => string;
 
   constructor(private readonly options: ChatTabManagerOptions) {
+    this.name = options.agentName ?? agentLabel;
     this.bodies = new QueuedBodies(panelId => path.join(options.spoolDirectory, safeName(panelId), 'queue'));
   }
 
@@ -151,6 +157,16 @@ export class ChatTabManager {
   isRunning(panelId: string): boolean { return !!this.tabs.get(panelId)?.runtime?.isAlive(); }
   /** /clear is starting a fresh conversation: the agent is between processes, not stopped. */
   isClearing(panelId: string): boolean { return this.tabs.get(panelId)?.clearing === true; }
+  /** Tabs of `agent` that run it or are starting it: removing its files would break them. */
+  inUse(agent: string): number {
+    return [...this.tabs.entries()].filter(([panelId, tab]) => (tab.runtime?.isAlive() || tab.starting) && this.options.store.state(panelId)?.agent === agent).length;
+  }
+
+  /** The installed versions running tabs of `agent` launched from: their folders must stay. */
+  launchedVersions(agent: string): Set<string> {
+    return new Set([...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() && tab.launch?.agentVersion && this.options.store.state(panelId)?.agent === agent ? [tab.launch.agentVersion] : []));
+  }
+
   runningPanelIds(): string[] { return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() ? [panelId] : []); }
   processId(panelId: string): number | undefined { return this.tabs.get(panelId)?.runtime?.pid; }
   /** Adapter process IDs of a Pane's running chat tabs, for archive cleanup. */
@@ -357,7 +373,7 @@ export class ChatTabManager {
    */
   private async setFullAccess(panelId: string, on: boolean): Promise<void> {
     const state = this.required(panelId);
-    if (!fullAccessControlled(state)) throw new PaneError('CHAT_CONFIG_UNSUPPORTED', `${agentLabel(state.agent)} sets full access with its own permission setting. Nothing changed.`, 'Pick a permission mode in the composer instead.');
+    if (!fullAccessControlled(state)) throw new PaneError('CHAT_CONFIG_UNSUPPORTED', `${this.name(state.agent)} sets full access with its own permission setting. Nothing changed.`, 'Pick a permission mode in the composer instead.');
     if (state.launch.kind !== 'agent' || (state.launch.fullAccess === true) === on) return;
     const tab = this.tab(panelId);
     if (tab.runtime?.isRunning() || tab.delivering) throw new PaneError('CHAT_CONFIG_BUSY', 'Full access cannot change while the agent is working. Nothing changed.', 'Wait for the turn to end, or press Stop.');
@@ -472,7 +488,7 @@ export class ChatTabManager {
       launch = await this.options.launcher.resolve(panel, this.required(panelId));
     } catch (error) {
       const failure = chatFailure(error, { code: 'CHAT_LAUNCH_FAILED', next: 'Press Restart.' });
-      this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent));
+      this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent, this.name));
       throw failure;
     }
     // Closed or restarted while the launch resolved: start nothing.
@@ -554,7 +570,7 @@ export class ChatTabManager {
       tab.runtime = undefined;
       await runtime.stop().catch(() => undefined);
       const failure = chatFailure(error, { code: 'CHAT_START_FAILED', next: 'Press Restart. If it fails again, check the agent is installed and signed in on this machine.' });
-      this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent));
+      this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent, this.name));
       throw failure;
     }
   }
@@ -654,7 +670,7 @@ export class ChatTabManager {
         receipts: current.receipts?.map(receipt => receipt.operationId === next.operationId ? { ...receipt, state: outcome, error: error?.message } : receipt),
       }));
       if (error && isAuthRequired(error)) {
-        void this.release(tab).then(() => this.stopWith(panelId, signedOut(this.required(panelId).agent)));
+        void this.release(tab).then(() => this.stopWith(panelId, signedOut(this.required(panelId).agent, this.name)));
         return;
       }
       this.publish(panelId);
@@ -854,14 +870,14 @@ function fullAccessControl(state: ChatPanelState): AgentChatConfigOption[] {
   return [{ id: CHAT_FULL_ACCESS_CONTROL, name: 'Full access', currentValue: state.launch.fullAccess ? FULL_ACCESS_ON : 'off', options: [{ value: FULL_ACCESS_ON, name: 'On' }, { value: 'off', name: 'Off' }] }];
 }
 
-function signedOut(agent: ChatPanelState['agent']): ChatTabProblem {
+function signedOut(agent: ChatPanelState['agent'], name: (agent: string) => string): ChatTabProblem {
   const config = agentConfig(agent);
   const command = config ? ` (\`${[config.executables[0], ...config.signIn].join(' ')}\`)` : '';
-  return { code: 'signed-out', message: `${agentLabel(agent)} is not signed in on this machine.`, next: `Press Sign in to sign in${command} in a terminal tab, then press Retry.`, action: 'sign-in' };
+  return { code: 'signed-out', message: `${name(agent)} is not signed in on this machine.`, next: `Press Sign in to sign in${command} in a terminal tab, then press Retry.`, action: 'sign-in' };
 }
 
-function problemFrom(error: PaneError, agent: ChatPanelState['agent']): ChatTabProblem {
-  if (isAuthRequired(error)) return signedOut(agent);
+function problemFrom(error: PaneError, agent: ChatPanelState['agent'], name: (agent: string) => string): ChatTabProblem {
+  if (isAuthRequired(error)) return signedOut(agent, name);
   const install = agentConfig(agent)?.install.url;
   const action = (next: string): ChatTabProblem => install ? { code: 'not-installed', message: error.message, next, action: 'install', url: install } : { code: 'not-installed', message: error.message, next };
   if (error.code === 'CHAT_AGENT_NOT_INSTALLED') return action(error.next ?? 'Install it, then press Retry.');
