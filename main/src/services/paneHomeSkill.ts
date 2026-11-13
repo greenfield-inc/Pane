@@ -10,6 +10,7 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { linuxToUNCPath } from '../utils/wslUtils';
 import { APPROVALS_RULES } from './approvalsRules';
 import { agentsIntroForInstructions, scratchRule } from '../../../packages/runpane/src/paneIntro';
+import { isPanePluginEnabled } from './claudePanePlugin';
 
 /**
  * A user-level skill that teaches any agent in a Pane terminal how to reach
@@ -107,7 +108,14 @@ async function syncPaneHomeSkillNow(
   wslDistros: string[],
 ): Promise<PaneHomeSkillResult[]> {
   const enabled = isPaneHomeSkillEnabled(config);
-  const results = enabled ? await installPaneHomeSkill(dirs) : await removePaneHomeSkill(dirs);
+  // Pane's Claude plugin carries this skill, so Claude's copy steps aside while the plugin is on.
+  const claudeDir = paneHomeSkillDirs()[0];
+  const claudeSettings = path.join(path.dirname(path.dirname(claudeDir)), 'settings.json');
+  const retired = enabled && dirs.includes(claudeDir) && await isPanePluginEnabled(claudeSettings) ? claudeDir : undefined;
+  const results: PaneHomeSkillResult[] = [];
+  for (const dir of dirs) {
+    results.push(...(enabled && dir !== retired ? await installPaneHomeSkill([dir]) : await removePaneHomeSkill([dir])));
+  }
   if (process.platform !== 'win32') return results;
 
   const recorded = await readWslDistroRecord();
@@ -318,6 +326,17 @@ full working rules.
   \`--follow\` never exits on news.
 - Workers end with \`runpane report --state <ready|blocked|failed|done> --summary-file <path>\`
   (\`--question\` when blocked, \`--pr\` and \`--head\` when there is a PR).
+
+## With the pane MCP tools
+
+When the \`pane\` MCP tools are loaded, use them for the jobs above:
+\`agents_start\` starts an agent on a task, \`agents_status\` checks on it, and
+\`agents_send\` sends it a follow-up, each in one call. Answer a menu in an
+agent's terminal with \`panels_input\` \`keys\`, then check \`agents_status\`.
+Show the user a page or file with \`panels_open\` rather than the system
+browser. Before guessing how Pane works, call \`docs_search\`, then
+\`docs_read\`. When you need the person, use \`notify\` as the next section says
+rather than asking in the terminal.
 
 ${APPROVALS_RULES}
 

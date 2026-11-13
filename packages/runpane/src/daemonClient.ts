@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -350,7 +351,10 @@ export async function invokeDaemon<T>(
           `Could not connect to Pane daemon at ${endpoint.path} (${error.code ?? error.message}). Pane is not running for ${appDirectory}, or it was started with a different PANE_DIR. Nothing was changed.`,
           code,
           true,
-          `Open Pane on this machine, then check the connection with ${doctorCommand(options.paneDir)}.`,
+          // Pane creates its data folder on first launch, so without one Pane has never run here.
+          fs.existsSync(appDirectory)
+            ? `Open Pane on this machine, then check the connection with ${doctorCommand(options.paneDir)}.`
+            : `Pane has not run on this machine yet. Install Pane from https://runpane.com (free), open it, then restart this agent session so its Pane tools connect.`,
         ) });
     });
 

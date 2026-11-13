@@ -570,7 +570,7 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
   assert.deepEqual(Object.keys(discover.capabilities).sort(), ['resources', 'tools']);
   assert.equal(discover._meta['io.modelcontextprotocol/serverInfo'].name, 'pane');
   assert.ok(discover.instructions.length > 0);
-  assert.match(discover.instructions, /call `notify` instead of asking in the terminal/);
+  assert.match(discover.instructions, /`notify` asks the person/);
 
   const list = responses.get(2).result;
   assert.equal(list.resultType, 'complete');
@@ -819,6 +819,64 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   const readOnly = await names(['--toolsets', 'all', '--read-only']);
   assert.ok(readOnly.length > 0 && readOnly.every((tool) => tool.annotations.readOnlyHint));
   assert.ok(!readOnly.some((tool) => tool.name === 'panes_archive'));
+});
+
+// The Claude plugin serves `--toolsets plugin`, and a pinned plugin hands calls to whichever Pane
+// release is installed, so these hold on every release (Anthropic directory policy §2 and §5).
+test('the plugin toolset is core without the tools that reach other machines', async () => {
+  const tools = await withMcpClient(async (client) => (await client.listTools()).tools, { args: ['--toolsets', 'plugin'] });
+  assert.deepEqual(tools.map((tool) => tool.name).sort(), [
+    'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
+    'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
+    'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
+    'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
+    'workspace_state',
+  ]);
+});
+
+test('doctor over MCP only diagnoses: repairing the install and filing an issue stay in the CLI', async () => {
+  const doctor = await withMcpClient(async (client) => (await client.listTools()).tools.find((tool) => tool.name === 'doctor'), { args: ['--toolsets', 'plugin'] });
+  assert.equal(doctor.annotations.readOnlyHint, true);
+  assert.deepEqual(Object.keys(doctor.inputSchema.properties).sort(), ['format', 'paneDir', 'panePath', 'verbose']);
+});
+
+test('PR watch tools say they change state', async () => {
+  const tools = await withMcpClient(async (client) => (await client.listTools()).tools);
+  const annotationsOf = (name) => tools.find((tool) => tool.name === name).annotations;
+  assert.equal(annotationsOf('pr_watch').readOnlyHint, false);
+  assert.equal(annotationsOf('pr_watch').destructiveHint, false);
+  assert.equal(annotationsOf('pr_unwatch').readOnlyHint, false);
+});
+
+test('server text describes the tools without steering the model away from its own tools', async () => {
+  await withMcpClient(async (client) => {
+    assert.doesNotMatch(client.getInstructions() ?? '', /\bprefer|instead of|before guessing/i);
+    // Descriptions may rank Pane's own options; they never rank a tool against the client's terminal, browser or judgment.
+    for (const tool of (await client.listTools()).tools) assert.doesNotMatch(tool.description, /before guessing|asking in the terminal|system browser/i, tool.name);
+  }, { args: ['--toolsets', 'plugin'] });
+});
+
+test("doctor's report stays JSON when its text names tools this server does not serve", async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-doctor-json-'));
+  try {
+    const result = await withMcpClient((client) => client.callTool({ name: 'doctor', arguments: { paneDir } }), { args: ['--toolsets', 'plugin'] });
+    const report = result.structuredContent ?? JSON.parse(result.content[0].text);
+    assert.match(report.watchDefaults.follow.summary, /`watch` with follow: true \(in the "agents" toolset\)/);
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('with no Pane on this machine, a tool says where to get Pane', async () => {
+  const paneDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-no-pane-')), 'never-ran');
+  try {
+    const result = await withMcpClient((client) => client.callTool({ name: 'panes_list', arguments: {} }), { args: ['--toolsets', 'plugin'], env: { PANE_DIR: paneDir } });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /Install Pane from https:\/\/runpane\.com/);
+    assert.match(result.content[0].text, /restart/);
+  } finally {
+    fs.rmSync(path.dirname(paneDir), { recursive: true, force: true });
+  }
 });
 
 test('agents start refuses --pane together with --repo or --name before changing anything, and says which form to use', () => {

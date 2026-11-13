@@ -137,7 +137,7 @@ import { agentConfig, agentLabel } from '../../../shared/agents';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import { withClaudePromptHooks } from './claudePrompts';
 import { forgetTab } from './tabListener';
-import { grantPaneMcp, terminalUsesPaneMcp, withPaneMcpConfig } from './paneMcpEndpoint';
+import { grantPaneMcp, paneMcpTabSettings, terminalUsesPaneMcp, withPaneMcpConfig } from './paneMcpEndpoint';
 import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
 import {
   bracketedPaste,
@@ -536,7 +536,7 @@ export class TerminalPanelManager extends EventEmitter {
     const state = resolution.customState;
     const direct = resolution.isCliCommand && !isWSL && !state.sshHost && state.launchMode !== 'wrapped' && !state.preserveLaunchCommand;
     if (direct && state.agentType === 'claude') {
-      resolution.commandToRun = withClaudePromptHooks(panelId, resolution.commandToRun, state.cwd ?? process.cwd(), shellType) ?? resolution.commandToRun;
+      resolution.commandToRun = withClaudePromptHooks(panelId, resolution.commandToRun, state.cwd ?? process.cwd(), shellType, paneMcpTabSettings(panelId, state.agentType)) ?? resolution.commandToRun;
     }
     // Only a tab that holds a live token gets the flag: a relaunch in a shell spawned without one stays on stdio.
     if (direct) resolution.commandToRun = withPaneMcpConfig(panelId, state.agentType, resolution.commandToRun, shellType);

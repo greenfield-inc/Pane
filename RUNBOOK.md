@@ -142,6 +142,38 @@ unchecked. Manual runs are named after their choices, for example
 `HOMEBREW_TAP_TOKEN` permits the cask push; without it, the Homebrew job logs
 a notice and skips. npm publishes with `--provenance`.
 
+### Claude plugin
+
+Anthropic's plugin directory lists `claude-plugin/` from the `claude-plugin`
+branch, which moves only when the plugin needs a new version. Every version
+that runs a pinned `npx` package waits for an Anthropic reviewer, so bump it
+rarely: the pinned `runpane` hands each call to the installed Pane's newer CLI,
+so tool and server fixes reach users without a plugin release.
+
+1. Run `pnpm sync:claude-plugin` after changing either skill or the icon; the
+   `claudePlugin.test.ts` main test fails while a copy is stale.
+2. To release the plugin, set the `runpane@x.y.z` pin in
+   `claude-plugin/.claude-plugin/plugin.json` to a published npm release that
+   serves `--toolsets plugin`, raise the plugin's `version`, and run
+   `claude plugin validate --strict claude-plugin` (Claude Code 2.1.281 or later).
+3. After that change is on `main`, push it to the `claude-plugin` branch, for
+   example `git push origin <commit>:refs/heads/claude-plugin`. The directory
+   picks it up through its GitHub webhook and holds it for review.
+
+Submitting, the portal's Validate step and its data-handling answers are done
+by hand at claude.ai/directory/manage.
+
+### MCP Registry
+
+`packages/runpane/server.json` is runpane's entry in the official MCP Registry,
+`io.github.greenfield-inc/runpane`; `package.json` `mcpName` must match it, and
+the release sync keeps its version on the release. After the npm release is
+out, run the `Publish to MCP Registry` workflow by hand
+(`gh workflow run mcp-registry.yml`). It signs in with GitHub OIDC, because the
+interactive `mcp-publisher login github` cannot publish to an organization
+namespace. Check the listing with
+`curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=runpane"`.
+
 `CI result` is the check branch protection requires. It fails if another
 `Code Quality` job fails or is cancelled, except Markdown Links, which it does
 not wait for. It is the only check a merge waits

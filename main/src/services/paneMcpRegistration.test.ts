@@ -250,6 +250,28 @@ describe('syncMcpRegistration', () => {
     expect(await readConfig()).toEqual({ numStartups: 3, mcpServers: { docs: other } });
   });
 
+  it('steps aside for the pane Claude plugin while it is on, and registers again once it is off', async () => {
+    const dir = await tempDir();
+    const configPath = path.join(dir, '.claude.json');
+    const settingsPath = path.join(dir, 'settings.json');
+    const claude = fakeClaudeCli(configPath);
+    const target: McpRegistrationTarget = { label: 'test', server, claude: { configPath, settingsPath, run: claude.run } };
+    const registered = async () => Object.keys(JSON.parse(await fs.readFile(configPath, 'utf8')).mcpServers);
+    const plugins = (enabledPlugins: Record<string, boolean>) => fs.writeFile(settingsPath, JSON.stringify({ model: 'opus', enabledPlugins }));
+
+    expect(await syncMcpRegistration(target, true)).toEqual([{ client: 'Claude Code', action: 'added' }]);
+    for (const id of ['pane@claude-plugins-official', 'pane@synced']) {
+      await plugins({ [id]: true, 'grain@grain-plugins': true });
+      expect((await syncMcpRegistration(target, true))[0]).toMatchObject({ client: 'Claude Code', action: 'removed' });
+      expect(await registered()).toEqual([]);
+      await plugins({ [id]: false });
+      expect(await syncMcpRegistration(target, true)).toEqual([{ client: 'Claude Code', action: 'added' }]);
+    }
+    await plugins({ 'panes@other': true });
+    expect(await syncMcpRegistration(target, true)).toEqual([{ client: 'Claude Code', action: 'unchanged' }]);
+    expect(await registered()).toEqual(['pane']);
+  });
+
   it('leaves a pane server the user added to Claude Code by hand alone', async () => {
     const configPath = path.join(await tempDir(), '.claude.json');
     const handAdded = { type: 'stdio', command: 'npx', args: ['--yes', 'runpane@latest', 'mcp'], env: {} };

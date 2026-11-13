@@ -2,6 +2,7 @@
   "name": "runpane",
   "version": "2.4.220",
   "description": "Thin npm installer and remote setup CLI for Pane",
+  "mcpName": "io.github.greenfield-inc/runpane",
   "license": "AGPL-3.0",
   "homepage": "https://runpane.com",
   "repository": {
