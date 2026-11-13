@@ -17,7 +17,7 @@ export function archiveRetentionDays(config: Pick<AppConfig, 'archiveRetentionDa
 }
 
 /** One expiry pass over archived Sessions and archived Panes' scratch. */
-export async function runArchiveExpiry(now: Date = new Date()): Promise<string[]> {
+async function runArchiveExpiry(now: Date = new Date()): Promise<string[]> {
   const sessions = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json')).read().sessions;
   return expireArchivedFolders({
     now,

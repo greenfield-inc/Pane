@@ -16,7 +16,7 @@ export function agentLogsDirectory(): string {
 }
 
 /** `<pane-dir>/scratch/`, which holds `<pane-id>/` scratch for Panes whose own folder archive keeps. */
-export function appScratchRoot(): string {
+function appScratchRoot(): string {
   return path.join(getAppDirectory(), 'scratch');
 }
 

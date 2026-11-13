@@ -45,13 +45,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function transcriptRoots(): TranscriptRoot[] {
   const home = homedir();
-  return [
+  const homeRoots: TranscriptRoot[] = [
     { provider: 'claude', path: join(home, '.claude', 'projects') },
     { provider: 'codex', path: join(home, '.codex', 'sessions') },
-    // Logs Pane kept from folders it deleted (archiveRetention.ts); moved, never copied, so nothing counts twice.
-    { provider: 'claude', path: join(agentLogsDirectory(), 'claude') },
-    { provider: 'codex', path: join(agentLogsDirectory(), 'codex') },
   ];
+  // Logs Pane kept from folders it deleted (archiveRetention.ts); moved, never copied, so nothing counts twice.
+  return [...homeRoots, ...homeRoots.map(root => ({ provider: root.provider, path: join(agentLogsDirectory(), root.provider) }))];
 }
 
 /**
