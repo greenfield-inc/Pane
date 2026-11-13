@@ -10,8 +10,11 @@ import {
   customLinkPatternProblem,
   customLinkProblem,
   customLinkUrlProblem,
-  findCustomLinks,
 } from '../../../../../shared/utils/customLinks';
+import { CUSTOM_LINK_MATCH_TIMEOUT_MS, matchCustomLinks, type CustomLinkMatchResult } from '../../../utils/customLinkMatcher';
+
+/** How long Try it waits after the last keystroke before matching. */
+const TRY_IT_DEBOUNCE_MS = 300;
 
 interface LinksSettingsProps {
   persistence: SettingsPersistence;
@@ -24,6 +27,7 @@ export function LinksSettings({ persistence, onDirtyChange }: LinksSettingsProps
   const persistedKey = JSON.stringify(persistedLinks);
   const [links, setLinks] = useState<CustomLink[]>(persistedLinks);
   const [sample, setSample] = useState('');
+  const [tried, setTried] = useState<CustomLinkMatchResult | null>(null);
   const dirty = JSON.stringify(links) !== persistedKey;
 
   // SAFETY: App-owned storage writes this value through the matching typed serializer.
@@ -32,7 +36,19 @@ export function LinksSettings({ persistence, onDirtyChange }: LinksSettingsProps
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   const invalid = links.some((link) => !link.label.trim() || customLinkProblem(link) !== undefined);
-  const sampleMatches = findCustomLinks(sample, links);
+
+  useEffect(() => {
+    let current = true;
+    const timer = setTimeout(() => {
+      void matchCustomLinks(sample, links).then((result) => {
+        if (current) setTried(result);
+      });
+    }, TRY_IT_DEBOUNCE_MS);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [sample, links]);
 
   const update = (index: number, patch: Partial<CustomLink>) => {
     setLinks((current) => current.map((link, linkIndex) => (linkIndex === index ? { ...link, ...patch } : link)));
@@ -55,11 +71,11 @@ export function LinksSettings({ persistence, onDirtyChange }: LinksSettingsProps
         <SettingRow
           settingId="custom-links"
           label="Custom links"
-          description="Text matching a pattern (a regular expression) becomes a link. In the link, $0 is the whole match and $1 to $9 are its groups. Ctrl+Click (Cmd+Click on macOS) opens it. Where two patterns match the same text, the first one wins."
+          description={`Text matching a pattern (a regular expression) becomes a link. In the link, $0 is the whole match and $1 to $9 are its groups. Ctrl+Click (Cmd+Click on macOS) opens it. Where two patterns match the same text, the first one wins. A pattern that takes longer than ${CUSTOM_LINK_MATCH_TIMEOUT_MS} ms on a line, such as one with nested repeats like (a+)+, is stopped and that line gets no links.`}
           saveState={persistence.saveStates['custom-links']}
           align="start"
         >
-          <div className="w-full space-y-3 sm:w-[500px]">
+          <div className="w-full space-y-3 sm:w-settings-control">
             {links.map((link, index) => (
               <div key={link.id} className="space-y-2 rounded-md border border-border-secondary p-3">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
@@ -134,10 +150,11 @@ export function LinksSettings({ persistence, onDirtyChange }: LinksSettingsProps
                   spellCheck={false}
                   fullWidth
                 />
-                {sample && (
+                {sample && tried && (
                   <ul className="space-y-1 text-xs text-text-secondary" aria-label="Links found">
-                    {sampleMatches.length === 0 && <li>No links in this text.</li>}
-                    {sampleMatches.map((match) => (
+                    {tried.timedOut && <li className="text-status-warning">Matching this text took longer than {CUSTOM_LINK_MATCH_TIMEOUT_MS} ms, so Pane stopped it. A terminal line like this gets no links.</li>}
+                    {!tried.timedOut && tried.matches.length === 0 && <li>No links in this text.</li>}
+                    {tried.matches.map((match) => (
                       <li key={match.start} className="break-all font-mono">
                         <span className="text-text-primary">{match.text}</span> → {match.url}
                       </li>

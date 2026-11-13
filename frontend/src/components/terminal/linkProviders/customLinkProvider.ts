@@ -1,5 +1,5 @@
 import type { ILink, ILinkProvider } from '@xterm/xterm';
-import { findCustomLinks } from '../../../../../shared/utils/customLinks';
+import { matchCustomLinks } from '../../../utils/customLinkMatcher';
 import type { LinkProviderConfig } from './types';
 import { isMac, getModifierKeyName } from '../../../utils/platformUtils';
 
@@ -15,26 +15,28 @@ export function createCustomLinkProvider(config: LinkProviderConfig): ILinkProvi
 
       const isMacPlatform = isMac();
       const modifierKey = getModifierKeyName();
-      const links = findCustomLinks(line.translateToString(), config.customLinks ?? []).map((match): ILink => ({
-        range: {
-          start: { x: match.start + 1, y: lineNumber },
-          end: { x: match.end, y: lineNumber },
-        },
-        text: match.text,
-        activate: (event: MouseEvent) => {
-          if (isMacPlatform ? event.metaKey : event.ctrlKey) {
-            config.onOpenUrl(match.url);
-          }
-        },
-        hover: (event: MouseEvent) => {
-          config.onShowTooltip(event, match.url, `${modifierKey}+Click to open`);
-        },
-        leave: () => {
-          config.onHideTooltip();
-        },
-      }));
-
-      callback(links.length > 0 ? links : undefined);
+      // Trimmed so a pattern anchored with $ matches where the text ends, not after the row's padding.
+      void matchCustomLinks(line.translateToString(true), config.customLinks ?? []).then(({ matches }) => {
+        const links = matches.map((match): ILink => ({
+          range: {
+            start: { x: match.start + 1, y: lineNumber },
+            end: { x: match.end, y: lineNumber },
+          },
+          text: match.text,
+          activate: (event: MouseEvent) => {
+            if (isMacPlatform ? event.metaKey : event.ctrlKey) {
+              config.onOpenUrl(match.url);
+            }
+          },
+          hover: (event: MouseEvent) => {
+            config.onShowTooltip(event, match.url, `${modifierKey}+Click to open`);
+          },
+          leave: () => {
+            config.onHideTooltip();
+          },
+        }));
+        callback(links.length > 0 ? links : undefined);
+      });
     },
   };
 }
