@@ -68,7 +68,7 @@ function WalkBar({ snapshot }: { snapshot: AutopilotSnapshot }) {
       <div className="scrollbar-thin scroll-fade-x flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
         {sessions.map((session) => (
           <span key={session.id} data-testid="autopilot-walk-session" title={session.name}
-            className={cn('inline-flex min-w-16 max-w-[50%] items-center gap-1 rounded-full px-2 py-px', session.id === snapshot.walk.sessionId ? 'bg-autopilot-subtle text-autopilot-on-tint' : 'bg-surface-tertiary text-text-secondary')}>
+            className={cn('inline-flex min-w-16 max-w-1/2 items-center gap-1 rounded-full px-2 py-px', session.id === snapshot.walk.sessionId ? 'bg-autopilot-subtle text-autopilot-on-tint' : 'bg-surface-tertiary text-text-secondary')}>
             <span className="min-w-0 truncate">{session.name}</span><span className="shrink-0 tabular-nums opacity-80">{session.waiting}</span>
           </span>
         ))}
@@ -186,7 +186,7 @@ function RunMenu({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: 
         <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 top-full z-dropdown mt-1 w-[290px] rounded-xl bg-surface-primary p-1.5 shadow-card ring-1 ring-border-secondary">
+        <div role="menu" className="absolute right-0 top-full z-dropdown mt-1 w-72 rounded-xl bg-surface-primary p-1.5 shadow-card ring-1 ring-border-secondary">
           {folder && (
             <button type="button" role="menuitem" className={item} title={folder} data-testid="autopilot-folder"
               onClick={() => { setOpen(false); void window.electronAPI.openExternal(`file://${folder}`); }}>
@@ -220,7 +220,7 @@ function RunMenu({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: 
  */
 function Header({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: boolean }) {
   return (
-    <header className="flex h-[50px] shrink-0 items-center gap-2.5 border-b border-border-primary px-4">
+    <header className="flex h-view-header shrink-0 items-center gap-2.5 border-b border-border-primary px-4">
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-autopilot-subtle"><Navigation className="h-4 w-4 text-autopilot" aria-hidden="true" /></span>
       <h1 className="shrink-0 text-[15px] font-semibold text-text-primary">Autopilot</h1>
       <span className="hidden shrink-0 rounded px-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-autopilot-on-tint ring-1 ring-autopilot-border min-[1440px]:inline">Experimental</span>

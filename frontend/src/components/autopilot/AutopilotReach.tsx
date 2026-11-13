@@ -77,7 +77,7 @@ export function AutopilotReach({ snapshot }: { snapshot: AutopilotSnapshot }) {
   const waiting = notBroughtInCount(items, snapshot.stack, rendered);
   if (cantSee.length === 0 && offline.length === 0 && waiting === 0) return null;
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border-primary px-4 py-1.5 text-[12px] text-text-tertiary" data-testid="autopilot-reach">
+    <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border-primary px-4 py-1.5 text-caption text-text-tertiary" data-testid="autopilot-reach">
       {waiting > 0 && <span data-testid="autopilot-not-brought-in">{waiting} waiting, not brought in yet</span>}
       {cantSee.map((machine) => (
         <span key={machine.id} className="inline-flex min-w-0 items-center gap-1.5" data-testid="autopilot-cant-see">

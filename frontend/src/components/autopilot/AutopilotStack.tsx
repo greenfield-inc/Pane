@@ -165,7 +165,7 @@ export function AutopilotStack() {
 
   return (
     <section aria-label="Stack" className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary" data-testid="autopilot-stack">
-      <header className="flex h-[50px] shrink-0 items-center gap-2 border-b border-border-primary px-4">
+      <header className="flex h-view-header shrink-0 items-center gap-2 border-b border-border-primary px-4">
         <Layers className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden="true" />
         <h2 className="hidden shrink-0 text-[14px] font-semibold text-text-primary min-[1180px]:block">Stack</h2>
         <div className="flex shrink-0 items-center">
@@ -185,7 +185,7 @@ export function AutopilotStack() {
               onClick={() => moveAutopilotStack({ type: 'show', id: candidate.id })}
               title={candidate.title}
               className={cn(
-                'inline-flex h-7 min-w-16 max-w-[180px] items-center gap-1.5 rounded-lg border px-2 text-[12px]',
+                'inline-flex h-7 min-w-16 max-w-44 items-center gap-1.5 rounded-lg border px-2 text-caption',
                 candidate.id === entry?.id ? 'border-autopilot-border bg-autopilot-subtle text-text-primary' : 'border-border-secondary text-text-secondary hover:bg-surface-hover',
                 candidate.doneAt !== undefined && 'opacity-60',
               )}>
@@ -241,7 +241,7 @@ export function AutopilotStack() {
                     candidateIndex === tabIndex ? 'border-autopilot font-medium text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary',
                   )}>
                   <TabIcon tab={candidate} />
-                  <span className="max-w-[180px] truncate">{candidate.label}</span>
+                  <span className="max-w-44 truncate">{candidate.label}</span>
                 </button>
               ))}
             </div>
