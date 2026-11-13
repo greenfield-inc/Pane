@@ -77,7 +77,7 @@
   },
   "main/src/ipc/runpane.ts": {
     "reason": "Deferred terminal composer delivery, readiness and resume per agent.",
-    "count": 56
+    "count": 53
   },
   "main/src/ipc/runpaneComposerEvidence.ts": {
     "reason": "Deferred terminal composer delivery evidence per agent.",
@@ -113,7 +113,7 @@
   },
   "main/src/services/agents/opencodeLaunch.ts": {
     "reason": "Deferred terminal launch and resume for one agent.",
-    "count": 2
+    "count": 3
   },
   "main/src/services/claudePrompts/claudePromptQuestion.ts": {
     "reason": "Deferred terminal status: wording for Claude Code's own terminal permission prompts.",

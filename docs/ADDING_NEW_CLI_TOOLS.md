@@ -147,9 +147,11 @@ same input box. For an agent without `promptArgument`, `panels submit` (and so
 `agents send` and Notify's owed answers) types only when the manifest
 recognizes the input box, idle (`visibleIdle`) or mid-turn (`visibleWorking`),
 and nothing blocks it. So a typed-message agent needs a `visibleIdle` rule, and
-blocked rules for every prompt or selector that can replace its input box: pi's
-`live_selector` keys on the selector's `→ ` row between the last two border
-rows, since pi keeps its footer below a selector. Loops and handoff session
+blocked rules for every prompt or dialog that can replace its input box. Pi
+keeps its footer and widgets below a dialog, so pi's `live_dialog` scans the
+whole visible screen for a dialog frame: a border row, then the highlighted
+option (`→ `) or the key hint ending in `cancel`, then a border row. Such a
+frame anywhere reads blocked, which holds rather than guesses. Loops and handoff session
 carrying do not offer pi yet.
 
 `main/src/services/agents/agentResume.ts` → `resolveResumeId` maps the agent to the

@@ -851,7 +851,7 @@ describe('runpane IPC handlers', () => {
           panes: [{ path: worktreePath, name: 'Invalid Pi', tool: { agent: 'pi' }, resume }],
         }]);
 
-        expect(result).toMatchObject({ ok: false, items: [{ ok: false, error: { message: expect.stringMatching(/Pi --resume must be a Pi session id/) } }] });
+        expect(result).toMatchObject({ ok: false, items: [{ ok: false, error: { message: expect.stringMatching(/Pi --resume must be a session id matching/) } }] });
         expect(services.sessionManager.createSession).not.toHaveBeenCalled();
         expect(panelManager.createPanel).not.toHaveBeenCalled();
       },
@@ -871,7 +871,7 @@ describe('runpane IPC handlers', () => {
 
         expect(result).toMatchObject({
           ok: false,
-          items: [{ ok: false, error: { message: expect.stringMatching(/OpenCode.*ses_\*/i) } }],
+          items: [{ ok: false, error: { message: expect.stringMatching(/OpenCode --resume must be a session id matching \^ses_/) } }],
         });
         expect(services.sessionManager.createSession).not.toHaveBeenCalled();
         expect(panelManager.createPanel).not.toHaveBeenCalled();
@@ -889,7 +889,7 @@ describe('runpane IPC handlers', () => {
         repo: { id: project.id },
         dryRun,
         panes: [{ path: '/not-used', name: 'Invalid OpenCode', tool: { agent: 'opencode' }, resume }],
-      }])).rejects.toThrow(/OpenCode.*resume.*string.*ses_\*/i);
+      }])).rejects.toThrow(/OpenCode --resume must be a string matching \^ses_/);
 
       expect(services.sessionManager.createSession).not.toHaveBeenCalled();
       expect(panelManager.createPanel).not.toHaveBeenCalled();
@@ -3407,7 +3407,10 @@ describe('runpane IPC handlers', () => {
     const registry = createRegistry();
 
     const refused = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'owed answer' }]);
-    expect(refused).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'agent-prompt' } });
+    expect(refused).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'composer-unknown' } });
+    // A bare Enter would pick Yes too.
+    expect(await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: '' }])).toMatchObject({ ok: false, inputBytes: 0 });
+    expect(await registry.invoke('runpane:panels:submit-composer', [{ panelId: terminalPanel.id }])).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'composer-unknown' } });
     expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
 
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(piComposer(''), 'idle', 'pi'));

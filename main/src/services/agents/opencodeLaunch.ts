@@ -1,4 +1,4 @@
-export const OPENCODE_SESSION_ID_PATTERN = /^ses_[A-Za-z0-9]+(?![\s\S])/;
+import { isAgentSessionId } from '../../../../shared/agents';
 
 const MAX_COMMAND_LENGTH = 65_536;
 const MAX_TOKEN_COUNT = 4_096;
@@ -156,8 +156,9 @@ function requireValidSessionId(value: string, source: string): string {
   return value;
 }
 
+/** An id of the form OpenCode's `terminal.session.idPattern` gives (`ses_…`). */
 export function isValidOpenCodeSessionId(value: string): boolean {
-  return OPENCODE_SESSION_ID_PATTERN.test(value);
+  return isAgentSessionId('opencode', value);
 }
 
 /** The session id in the last OpenCode exit line of ANSI-free terminal text. */

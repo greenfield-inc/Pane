@@ -57,7 +57,7 @@ import {
 } from '../services/agentReport';
 import { workerCard } from '../services/notify/workerContext';
 import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
-import { assertDirectOpenCodeLaunchCommand, isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
+import { assertDirectOpenCodeLaunchCommand } from '../services/agents/opencodeLaunch';
 import { takesChosenSession } from '../services/agents/chosenSessionLaunch';
 import {
   bracketedPaste,
@@ -1793,13 +1793,8 @@ export function registerRunpaneHandlers(
       };
     }
 
-    // A typed-message agent (Pi, OpenCode) takes text only at its own input box: its manifest must
-    // recognize the composer, idle or working, and no prompt or selector, where Enter would choose an option.
-    if (stagedInput.length > 0 && typesStartingMessage(agentType) && !showsTypedComposer(beforeScreen, agentType)) {
-      return blocked(`Pane could not see ${agentLabel(agentType ?? '')}'s input box in this panel, so it sent nothing. A prompt or selector may be open; answer it in the tab, then submit again.`);
-    }
-
-    if (stagedInput.length > 0 && isComposerUnknown(panel, beforeScreen, agentType)) {
+    // A bare Enter to a typed-message agent is held to the same rule: in a dialog it picks an option.
+    if ((stagedInput.length > 0 || typesStartingMessage(agentType)) && isComposerUnknown(panel, beforeScreen, agentType)) {
       const suggestedCommand = panelScreenCommand(panel.id);
       return {
         ok: false,
@@ -1812,7 +1807,7 @@ export function registerRunpaneHandlers(
         sentAt: new Date().toISOString(),
         blocked: {
           kind: 'composer-unknown',
-          message: `Pane could not find the ${agentType === 'codex' ? 'Codex' : 'Claude'} composer in this panel, so it sent nothing. The agent may still be starting, or showing a view without its prompt. Check the screen, then submit again or use \`panels input\`.`,
+          message: `Pane could not find the ${agentLabel(agentType ?? '')} composer in this panel, so it sent nothing. The agent may still be starting, or showing a prompt, selector or other view in place of its input box. Check the screen, then submit again or use \`panels input\`.`,
           suggestedCommand,
         },
         ...promptFields,
@@ -4158,6 +4153,18 @@ async function submitComposerForPanel(
 ): Promise<RunpanePanelSubmitComposerResult> {
   const beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
   const agentType = screenAgentType(beforeScreen);
+  if (typesStartingMessage(agentType) && !showsTypedComposer(beforeScreen, agentType)) {
+    const suggestedCommand = panelScreenCommand(panel.id);
+    return {
+      ok: false, panelId: panel.id, paneId: panel.sessionId, inputBytes: 0, strategy: 'enter', sequenceName: 'enter-cr',
+      verifiedSubmitted: false, sentAt: new Date().toISOString(), nextCommand: suggestedCommand,
+      blocked: {
+        kind: 'composer-unknown',
+        message: `Pane could not find the ${agentLabel(agentType ?? '')} composer in this panel, so it pressed nothing. A prompt, selector or dialog may be open, where Enter would pick an option. Check the screen, or press keys with \`panels input\`.`,
+        suggestedCommand,
+      },
+    };
+  }
   let submit = resolveComposerSubmit(strategy, agentType, beforeScreen.state.activityStatus);
   const probeBase = composerDeliveryProbe(panel, delivery.cwd, agentType, delivery.text);
   const probe = probeBase ? { ...probeBase, sentAtMs: Date.now() } : undefined;
@@ -4476,6 +4483,9 @@ function isComposerUnknown(
   screen: RunpanePanelScreenResult,
   agentType: RunpaneAgentId | undefined,
 ): boolean {
+  // A typed-message agent (Pi, OpenCode) takes text only at its own input box: its manifest must
+  // recognize the composer, idle or mid-turn, with no prompt or dialog, where Enter picks an option.
+  if (typesStartingMessage(agentType)) return !showsTypedComposer(screen, agentType);
   if (agentType !== 'claude' && agentType !== 'codex') return false;
   if (screen.composer.isPresent) return false;
   if (agentType === 'claude' && screen.state.isAlternateScreen === true && !panelHasOutputWithin(panel.id, CLAUDE_UI_QUIET_MS)) {
@@ -5065,8 +5075,9 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
       const tool = parseRunpaneToolSpec(entry.tool, `Pane adopt item ${index}`);
       const resumeProvided = Object.prototype.hasOwnProperty.call(entry, 'resume');
       const resume = optionalString(entry.resume);
-      if (resumeProvided && 'agent' in tool && tool.agent === 'opencode' && resume === undefined) {
-        throw new Error('OpenCode --resume must be a string matching the required ses_* format (^ses_[A-Za-z0-9]+$).');
+      const resumeSession = 'agent' in tool && tool.agent ? agentConfig(tool.agent)?.terminal.session : undefined;
+      if (resumeProvided && resume === undefined && 'agent' in tool && tool.agent && resumeSession) {
+        throw new PaneError('ERR_RESUME_ID', `${configuredAgent(tool.agent).label} --resume must be a string matching ${resumeSession.idPattern}. Nothing was created.`, 'Pass the conversation id as text.');
       }
       const launch = optionalBoolean(entry.launch);
       if (tool.initialInput !== undefined && launch !== true) {
@@ -6606,14 +6617,11 @@ function assertResumableTool(tool: RunpaneResolvedTool, resume: string | undefin
   if (tool.launchMode === 'wrapped') {
     throw new Error('--resume needs a built-in agent command; a wrapper command resumes its own way.');
   }
-  if (tool.agent === 'opencode' && !isValidOpenCodeSessionId(resume)) {
-    throw new Error('OpenCode --resume must match the required ses_* format (^ses_[A-Za-z0-9]+$).');
-  }
   const session = tool.agent ? agentConfig(tool.agent)?.terminal.session : undefined;
   if (!tool.agent || !session) return;
   const label = configuredAgent(tool.agent).label;
   if (!isAgentSessionId(tool.agent, resume)) {
-    throw new PaneError('ERR_RESUME_ID', `${label} --resume must be a ${label} session id, matching ${session.idPattern}. Nothing was created.`, `Pass the id ${label} shows for the conversation, or leave out --resume to start a new one.`);
+    throw new PaneError('ERR_RESUME_ID', `${label} --resume must be a session id matching ${session.idPattern}. Nothing was created.`, `Pass the id ${label} shows for the conversation, or leave out --resume to start a new one.`);
   }
   if (session.paneChoosesId && !takesChosenSession(tool.command, tool.agent)) {
     throw new PaneError('ERR_RESUME_COMMAND', `--resume needs a plain ${label} command; this one picks its own conversation, runs a subcommand or uses shell syntax. Nothing was created.`, `Use \`--agent ${tool.agent}\` without a custom command, or resume inside ${label} itself.`);

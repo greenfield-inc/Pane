@@ -535,15 +535,17 @@ export const PI_MANIFEST: AgentManifest = {
       regex: [/(?:^|\n)[^\S\n]*Trust project folder\?[^\n]*\n(?:[^\n]*\n){0,40}?[^\S\n]*(?:[→>❯›][^\S\n]*)?Do not trust\b(?![\s\S]*(?:\d+(?:\.\d+)?%|\?)\/\d+(?:\.\d+)?[kMB]?\b)/u],
     },
     {
-      id: 'live_selector',
+      id: 'live_dialog',
       state: 'blocked',
       priority: 1000,
-      region: 'bottom_non_empty_lines(40)',
+      region: 'whole_recent',
       visibleBlocker: true,
-      // Pi draws a selector (an in-session trust menu, an extension's confirm or select) in
-      // place of its input box, between two border rows and above the footer, and marks the
-      // highlighted option `→ `. Its wording comes from the extension or the keybindings.
-      regex: [/(?:^|\n)[^\S\n]*─[^\n]*\n(?:(?![^\S\n]*─{3,})[^\n]*\n)*?[^\S\n]*→ \S[^\n]*\n(?:(?![^\S\n]*─{3,})[^\n]*\n)*[^\S\n]*─{3,}[^\S\n]*(?:\n(?![^\S\n]*─{3,})[^\n]*){0,3}$/u],
+      // Pi draws its dialogs (a selector or confirm, the in-session trust menu, an extension's
+      // input or editor) in place of its input box, between two border rows, and keeps the
+      // footer and any widgets below. Wherever such a frame shows, the screen is unsafe to type
+      // into: a border row, then the highlighted option (`→ `) or the key hint ending in
+      // `cancel` (its keys follow the person's keybindings, the word does not), then a border.
+      regex: [/(?:^|\n)[^\S\n]*─[^\n]*\n(?:(?![^\S\n]*─{3,})[^\n]*\n)*?(?:[^\S\n]*→ \S[^\n]*|[^\n]*\S[^\S\n]+cancel[^\S\n]*)\n(?:(?![^\S\n]*─{3,})[^\n]*\n)*[^\S\n]*─{3,}/u],
     },
     {
       id: 'status_in_composer',

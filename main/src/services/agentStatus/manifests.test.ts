@@ -860,37 +860,48 @@ describe('PI_MANIFEST', () => {
     expect(r).toMatchObject({ state: 'blocked', visibleBlocker: true, matchedRuleId: 'project_trust_prompt' });
   });
 
-  // Pi's ExtensionSelectorComponent replaces the input box and keeps the footer:
-  // border, title, options (the highlighted one marked `→ `), key hint, border.
-  const selector = (title: string, options: string[], hint = ' ↑↓ navigate  enter select  escape/ctrl+c cancel') => [
+  // Pi's dialogs replace the input box between two border rows and keep any below-editor
+  // widgets and the footer (two rows, three when an extension sets a status) under them.
+  const dialog = (body: string[], below: string[] = []) => [
     ...header,
     ' earlier answer from the model',
     '',
     rule(),
     '',
-    ` ${title}`,
-    '',
-    ...options.map((option, index) => (index === 0 ? ` → ${option}` : `   ${option}`)),
-    '',
-    hint,
+    ...body,
     '',
     rule(),
+    ...below,
     ...footer('↑30 ↓15 1.1%/128k (auto)'),
   ].join('\n');
+  const hint = ' ↑↓ navigate  enter select  escape/ctrl+c cancel';
+  const selector = (title: string, options: string[], keys = hint) =>
+    [` ${title}`, '', ...options.map((option, index) => (index === 0 ? ` → ${option}` : `   ${option}`)), '', keys];
+  const statusLine = 'deploy-guard: watching';
 
   it.each([
-    ['an in-session trust menu', selector('Trust project folder?', ['Trust', 'Trust parent folder', 'Do not trust'])],
-    ['an extension confirm', selector('Allow deploy?', ['Yes', 'No'])],
-    ['a selector with a reworded hint', selector('Pick a model', ['mock-1', 'mock-2'], ' j/k navigate  space select  q cancel')],
-  ])('blocks on %s shown above the footer', (_label, text) => {
+    ['an in-session trust menu', dialog(selector('Trust project folder?', ['Trust', 'Trust parent folder', 'Do not trust']))],
+    ['an extension confirm', dialog(selector('Allow deploy?', ['Yes', 'No']))],
+    ['a selector with a reworded hint', dialog(selector('Pick a model', ['mock-1', 'mock-2'], ' j/k navigate  space select  q cancel'))],
+    // Reported in review: a below-editor widget and an extension status line push the border up.
+    ['a confirm above a widget and a status line', dialog(selector('Allow deploy?', ['Yes', 'No']), [' ▸ deploy queue: 1 waiting', statusLine])],
+    ['a confirm above many widget lines', dialog(selector('Allow deploy?', ['Yes', 'No']), Array.from({ length: 10 }, (_, index) => ` widget line ${index}`))],
+    ['an extension input dialog', dialog([' Type the repo name to delete it', '', ' > ', '', ' enter submit  escape/ctrl+c cancel'])],
+  ])('blocks on %s', (_label, text) => {
     const r = detectAgentState(PI_MANIFEST, screen(text));
-    expect(r).toMatchObject({ state: 'blocked', visibleBlocker: true, matchedRuleId: 'live_selector' });
+    expect(r).toMatchObject({ state: 'blocked', visibleBlocker: true, matchedRuleId: 'live_dialog' });
     expect(r.visibleIdle).not.toBe(true);
   });
 
   it('reads arrows in the transcript above the input box as idle', () => {
-    const transcript = [' Plan:', ' → read the file', ' → explain it', '', rule(), ' → done', ''];
+    const transcript = [' Plan:', ' → read the file', ' → explain it', '', ' → done', ''];
     expect(detectAgentState(PI_MANIFEST, screen(piScreen(rule(), [], undefined, transcript)))).toMatchObject({ state: 'idle', visibleIdle: true });
+  });
+
+  it('holds when an arrow row sits between two border rows anywhere on screen', () => {
+    // Indistinguishable from a dialog frame, so it fails safe.
+    const transcript = [rule(), ' → step one', ''];
+    expect(detectAgentState(PI_MANIFEST, screen(piScreen(rule(), [], undefined, transcript))).state).toBe('blocked');
   });
 
   it('does not block on a trust prompt answered earlier in the transcript', () => {
