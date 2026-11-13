@@ -7,6 +7,7 @@ import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpT
 import { ProtocolError, ProtocolErrorCode, Server, serveStdio, type AuthInfo, type McpRequestContext } from './mcpSdk';
 import { getWrapperVersion } from './version';
 import type { RunpaneFailure } from './errors';
+import { agentsIntroForInstructions, scratchRule } from './paneIntro';
 
 // A type alias, unlike an interface, is assignable to the SDK's open result type.
 type ToolResult = {
@@ -26,8 +27,9 @@ const DOCS_URI_PREFIX = 'runpane-docs:';
 const INSTRUCTIONS = [
   RUNPANE_CONTRACT.agentContext.brief.summary,
   'Each tool runs the matching `runpane` command against the running Pane app and returns its `--json` output.',
-  '- A Session (`sessions_create`) holds a workstream: several features or agents orchestrated together. It is the default home for multi-part work.',
-  '- 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. A new Pane creates a worktree that installs and builds, so create one only when the work\'s branch has none; add later agents with `agents_start` or `panels_create` and `pane: <id>`.',
+  agentsIntroForInstructions(),
+  `- ${scratchRule()}`,
+  '- `sessions_create` starts a Session. A new Pane creates a worktree that installs and builds, so create one only when the work\'s branch has none; add later agents with `agents_start` or `panels_create` and `pane: <id>` (inside a Pane, `$PANE_SESSION_ID` is its id).',
   '- Prefer the composite tools: `agents_start` starts an agent on a task, `agents_status` checks on it, `agents_send` sends it a follow-up. To answer a menu or prompt in an agent\'s terminal, send named keys with `panels_input` `keys` (for example `down,enter`), then check `agents_status`. Ask the user before answering trust or permission prompts.',
   '- Discover before you change anything: ids come from `repos_list`, `panes_list`, `workspace_state` and `agents_start`.',
   '- Pass `yes: true` to a tool that changes state only when the user asked for that change or your Pane instructions authorize it; without it the call is refused and nothing happens.',

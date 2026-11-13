@@ -32,8 +32,8 @@ on mechanics where the two differ:
   completion and blocker signal; a READY without one is only a cue to look.
   `pane-orchestration` has the one wait primitive, the prompt line, and how to
   read a report and pair it with a status file.
-- **1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA
-  for it are tabs in that Pane.** A feature means one branch and its PR. A new
+- **One Pane per feature; its reviews, audits, fixes and QA are tabs in it**
+  (`runpane doctor` explains Pane's model). A feature means one branch and its PR. A new
   Pane creates a worktree that checks out, installs and often builds, so it is
   expensive. Create a Pane only when the work's branch has no Pane yet: new
   work, or an existing PR with no Pane. Every later agent for that branch

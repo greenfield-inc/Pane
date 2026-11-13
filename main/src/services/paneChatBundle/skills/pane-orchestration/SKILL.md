@@ -41,8 +41,9 @@ pass. If it fails, stop and say what failed; don't fall back to raw
 
 ## One Pane per feature
 
-**1 feature = 1 worktree = 1 branch = 1 Pane; every other agent for it
-(implementer, reviewer, follow-up reviewer, QA, fixer) is a tab in that Pane.**
+**One Pane per feature; every other agent for it (implementer, reviewer,
+follow-up reviewer, QA, fixer) is a tab in that Pane** (`runpane doctor`
+explains Pane's model).
 A new Pane creates a worktree that checks out, installs and often builds, so
 create one only when the work's branch has none. Split work across Panes only
 for independent packages, each with its own branch.

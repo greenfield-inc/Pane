@@ -73,8 +73,8 @@ While one workstream waits, continue the others.
 
 - Each workstream has one implementation authority. It owns every source edit,
   fix commit, rebase, push, and PR update.
-- 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA
-  for it are tabs in that Pane. A new Pane creates a worktree, so create one
+- One Pane per feature; its reviews, audits, fixes and QA are tabs in it
+  (`runpane doctor` explains Pane's model). A new Pane creates a worktree, so create one
   only when the work's branch has no Pane yet. Every later agent for that
   branch opens as a new agent tab in its Pane with
   `runpane panels create --pane <id>`, never as a new Pane. Before

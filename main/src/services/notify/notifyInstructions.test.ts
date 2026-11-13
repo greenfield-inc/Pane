@@ -171,16 +171,19 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     sync(true);
     const lines = text(claudeFile).split('\n');
 
-    expect(lines.slice(0, 5)).toEqual([
+    expect(lines.slice(0, 7)).toEqual([
       BEGIN,
       '## Pane',
       'When PANE_SESSION_ID is set, you are in a Pane terminal: load the `pane` skill before using Pane (worktrees, Panes, Sessions, asking the person).',
       expect.stringContaining('run `$PANE_RUNPANE_BIN` (Pane terminals set it'),
+      // Pane's model and where scratch goes, from the contract's intro and working rules.
+      expect.stringContaining('In Pane, work flows from a Session to Panes to tabs.'),
+      expect.stringContaining('- Scratch: in Pane, put temporary files'),
       '',
     ]);
-    expect(lines[5]).toBe('## Pane Notify');
+    expect(lines[7]).toBe('## Pane Notify');
     // Without the MCP tool, agents fall back to the CLI instead of giving up.
-    expect(lines[6]).toContain("If that tool isn't loaded, run `runpane notify --ui options|approve|ask|info --title <text>`");
+    expect(lines[8]).toContain("If that tool isn't loaded, run `runpane notify --ui options|approve|ask|info --title <text>`");
     expect(text(claudeFile)).not.toContain('ignore this');
   });
 

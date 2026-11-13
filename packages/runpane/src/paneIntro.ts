@@ -50,3 +50,18 @@ export function renderPaneIntro(intro: PaneIntro, rules: readonly string[] = [])
   if (rules.length > 0) lines.push('', 'Working in Pane:', ...rules.map((rule) => `- ${rule}`));
   return lines.join('\n');
 }
+
+/**
+ * The "For agents" part without its sentence about reaching the person, for instruction text that
+ * states its own asking rules (the CLAUDE.md/AGENTS.md block, the MCP server, the pane skill).
+ */
+export function agentsIntroForInstructions(): string {
+  return RUNPANE_CONTRACT.agentContext.intro.agents.sentences.filter((sentence) => sentence !== '{approvals}').join(' ');
+}
+
+/** The working rule for scratch files, which overrides an agent's own default of /tmp or a private scratchpad. */
+export function scratchRule(): string {
+  const rule = RUNPANE_CONTRACT.agentContext.workspaceRules.find((text) => text.startsWith('Scratch:'));
+  if (!rule) throw new Error('agentContext.workspaceRules has no "Scratch:" rule');
+  return rule;
+}
