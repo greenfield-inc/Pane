@@ -12067,7 +12067,7 @@ export const RUNPANE_CONTRACT = {
                 }
               },
               "additionalProperties": false,
-              "description": "$PANE_SCRATCH_DIR with everything in it (clones, test instances, node_modules), which archive deletes with the worktree; present when the folder exists."
+              "description": "$PANE_SCRATCH_DIR with everything in it (clones, test instances, node_modules), which archive deletes; present when the folder exists."
             }
           },
           "additionalProperties": false

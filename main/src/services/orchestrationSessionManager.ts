@@ -75,6 +75,7 @@ import { PaneError, reasonOf } from '../../../shared/paneError';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
 import { CONFIGURED_AGENT_IDS, agentConfig, agentTerminalCommand, configuredAgent, isConfiguredAgent } from '../../../shared/agents';
+import { removePaneScratch } from './paneScratch';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
@@ -414,6 +415,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         selectedSessionId,
       };
       this.store.write(nextData);
+      // The Session's tabs keep their scratch in its own Pane's folder; archiving the Session deletes it.
+      if (isArchiving) await removePaneScratch(current.internalSessionId);
       this.emitChanged(nextRecord, input.report ? 'report' : 'updated', selectedSessionId !== data.selectedSessionId);
       return this.withPaused(clone(nextRecord));
     });

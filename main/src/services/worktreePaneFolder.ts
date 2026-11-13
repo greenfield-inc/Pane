@@ -53,12 +53,8 @@ export async function worktreePaneFolder(
   return { root: path.normalize(top), directory };
 }
 
-/**
- * `<worktree>/<folder>/` and the bytes in it, without following links, or
- * undefined when it does not exist. The archive dry run reports it.
- */
-export async function worktreePaneFolderUsage(worktreePath: string, folder: string): Promise<{ path: string; bytes: number } | undefined> {
-  const directory = path.join(worktreePath, ...folder.split('/'));
+/** A folder and the bytes in it, without following links, or undefined when it does not exist. */
+export async function folderUsage(directory: string): Promise<{ path: string; bytes: number } | undefined> {
   if (!(await fs.lstat(directory).catch(() => undefined))?.isDirectory()) return undefined;
   let bytes = 0;
   const pending = [directory];

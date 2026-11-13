@@ -5,7 +5,7 @@ import { execFileSync } from 'child_process';
 import { describe, expect, it } from 'vitest';
 import { PANE_SCRATCH_FOLDER } from '../../../shared/constants/paneFolders';
 import { PaneError } from '../../../shared/paneError';
-import { worktreePaneFolder, worktreePaneFolderUsage } from './worktreePaneFolder';
+import { folderUsage, worktreePaneFolder } from './worktreePaneFolder';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' });
 
@@ -23,7 +23,7 @@ describe('Pane scratch folder', () => {
     fs.symlinkSync(path.join(repo, '.git'), path.join(folder!.directory, 'link'));
 
     expect(git(repo, 'status', '--porcelain', '--untracked-files=all')).toBe('');
-    const usage = await worktreePaneFolderUsage(repo, PANE_SCRATCH_FOLDER);
+    const usage = await folderUsage(folder!.directory);
     expect(usage?.path).toBe(folder!.directory);
     // 1000 + 24 file bytes, plus the link itself (its target path's length).
     expect(usage?.bytes).toBe(1024 + path.join(repo, '.git').length);

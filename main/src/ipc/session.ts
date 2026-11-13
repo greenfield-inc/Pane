@@ -33,6 +33,7 @@ import { RepositoryIdentities } from '../services/repositoryIdentity';
 import { comparePaneOrder } from '../../../shared/utils/paneOrder';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { removePaneScratch } from '../services/paneScratch';
 
 const DAEMON_SESSION_CHANNELS = [
   'sessions:get-all',
@@ -435,6 +436,7 @@ export function registerSessionHandlers(
     gitStatusManager.clearSessionCache(sessionId);
     await runCommandManager.retireRunCommandsForArchive(sessionId);
     sessionImageCounters.delete(sessionId);
+    await removePaneScratch(sessionId);
   };
   services.archiveCleanupManager?.setTeardownHandler(teardownArchivedSession);
 

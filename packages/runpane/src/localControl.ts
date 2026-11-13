@@ -694,7 +694,7 @@ interface PaneArchiveBulkItem {
   scratch?: PaneScratch;
 }
 
-/** `$PANE_SCRATCH_DIR`, which archive deletes with the worktree. */
+/** `$PANE_SCRATCH_DIR` with everything in it, which archive deletes. */
 interface PaneScratch {
   path: string;
   bytes: number;
@@ -5209,7 +5209,7 @@ function printPaneArchiveBulkResult(result: PaneArchiveBulkResult): void {
 }
 
 function describeScratch(scratch: PaneScratch): string {
-  return `Deletes the scratch folder ${scratch.path} (${(scratch.bytes / 1_048_576).toFixed(1)} MB) with the worktree.`;
+  return `Deletes the scratch folder ${scratch.path} (${(scratch.bytes / 1_048_576).toFixed(1)} MB).`;
 }
 
 function printArchiveSkipReason(

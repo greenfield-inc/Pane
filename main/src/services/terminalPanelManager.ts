@@ -2024,9 +2024,10 @@ export class TerminalPanelManager extends EventEmitter {
     delete inheritedEnv[PANE_MCP_TOKEN_ENV];
     delete inheritedEnv.PANE_SCRATCH_DIR;
     const sessionDirectoryEnv: Record<string, string> = {};
-    const scratchDirectory = panelCustomState.orchestrationSessionId ? undefined : await paneScratchDirectory(panel.sessionId);
+    // A Session terminal belongs to the Session's own Pane, so it gets that Pane's scratch folder.
+    const scratchDirectory = panelCustomState.sshHost ? undefined : await paneScratchDirectory(panel.sessionId);
     if (!panelManager.getPanel(panel.id) || this.terminals.has(panel.id)) return;
-    if (scratchDirectory) sessionDirectoryEnv.PANE_SCRATCH_DIR = scratchDirectory;
+    if (scratchDirectory) sessionDirectoryEnv.PANE_SCRATCH_DIR = isWSL && !scratchDirectory.startsWith('/') ? windowsPathToWSLMount(scratchDirectory) : scratchDirectory;
     // A Session terminal works in its folder; a worker reads the folder of the Session its Pane belongs to.
     const sessionDirectory = panelCustomState.orchestrationSessionId ? panelCustomState.orchestrationWorkspace : panelCustomState.sessionFolder;
     if (sessionDirectory) sessionDirectoryEnv.PANE_SESSION_DIR = isWSL && process.platform === 'win32' ? windowsPathToWSLMount(sessionDirectory) : sessionDirectory;

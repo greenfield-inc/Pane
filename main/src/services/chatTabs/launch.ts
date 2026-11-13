@@ -104,7 +104,7 @@ export class AgentChatLauncher implements ChatTabLauncher {
     const project = state.orchestrationSessionId ? { env: {}, warnings: [] } : await this.options.context.projectEnv(panel);
     for (const warning of project.warnings) console.warn(`[ChatTabs] ${panel.id}: ${warning}`);
     const env = chatTabEnv(panel, state, project.env);
-    const scratch = state.orchestrationSessionId ? undefined : await this.options.context.scratchDirectory?.(panel);
+    const scratch = await this.options.context.scratchDirectory?.(panel);
     if (scratch) env.PANE_SCRATCH_DIR = scratch;
     const agent = agentConfig(state.agent);
     if (!agent?.chat) return this.registryLaunch(state, env);

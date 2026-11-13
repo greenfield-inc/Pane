@@ -2860,7 +2860,7 @@ def print_pane_archive_bulk_result(result: Dict[str, Any]) -> None:
 
 def describe_scratch(scratch: Dict[str, Any]) -> str:
     megabytes = (scratch.get("bytes") or 0) / 1_048_576
-    return f"Deletes the scratch folder {scratch.get('path')} ({megabytes:.1f} MB) with the worktree."
+    return f"Deletes the scratch folder {scratch.get('path')} ({megabytes:.1f} MB)."
 
 
 def print_archive_skip_reason(safety_check: Dict[str, Any], file: Any = None) -> None:

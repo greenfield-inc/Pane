@@ -1017,7 +1017,7 @@ export interface RunpanePaneArchiveDryRunResult {
   scratch?: RunpanePaneScratch;
 }
 
-/** The Pane's `$PANE_SCRATCH_DIR` with everything in it, which archive deletes with the worktree. */
+/** The Pane's `$PANE_SCRATCH_DIR` with everything in it, which archive deletes. */
 export interface RunpanePaneScratch {
   path: string;
   bytes: number;
