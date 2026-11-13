@@ -2,7 +2,7 @@
  * The text caret blinks while someone is typing and holds steady once they stop.
  *
  * Chromium repaints a blinking caret every 500 ms, and on macOS each repaint
- * keeps the display link ticking for ~165 ms: about 60 GPU wakeups a second
+ * keeps the display link ticking for ~165 ms: 55-70 wakeups a second
  * while a focused field sits idle. A steady caret costs nothing. Linux GTK stops
  * the blink after a similar idle timeout.
  */
