@@ -12,8 +12,6 @@ import {
 import type { GitCommit } from './services/gitDiffManager';
 import type { Project } from './database/models';
 import type { GitStatus } from './types/session';
-import { resourceMonitorService } from './services/resourceMonitorService';
-import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { PaneEventArgument } from './core/eventSink';
 import type { AgentState } from '../../shared/types/agentStatus';
 
@@ -145,11 +143,6 @@ export function setupEventListeners(services: AppServices): void {
     panelManager.setAnalyticsManager(analyticsManager);
     terminalPanelManager.setAnalyticsManager(analyticsManager);
   }
-
-  // Bridge resource monitor events to renderer
-  resourceMonitorService.on('resource-update', (snapshot: ResourceSnapshot) => {
-    sendRendererEvent('resource-monitor:update', snapshot);
-  });
 
 
 

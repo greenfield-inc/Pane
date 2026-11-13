@@ -51,7 +51,6 @@ import type {
   OrchestrationSessionUpdateInput,
 } from '../../shared/types/orchestrationSession';
 import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
-import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
@@ -252,14 +251,6 @@ try {
       window.dispatchEvent(new CustomEvent('script-closing', { detail: data }));
     } catch (e) {
       console.error('Failed to dispatch script-closing to window:', e);
-    }
-  });
-
-  ipcRenderer.on('resource-monitor:update', (_event: Electron.IpcRendererEvent, data: ResourceSnapshot) => {
-    try {
-      window.dispatchEvent(new CustomEvent('resource-monitor:update', { detail: data }));
-    } catch (e) {
-      console.error('Failed to dispatch resource-monitor:update to window:', e);
     }
   });
 
@@ -1341,8 +1332,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Resource monitor
   resourceMonitor: {
     getSnapshot: (): Promise<IPCResponse> => invokeIpc('resource-monitor:get-snapshot'),
-    startActive: (): Promise<IPCResponse> => invokeIpc('resource-monitor:start-active'),
-    stopActive: (): Promise<IPCResponse> => invokeIpc('resource-monitor:stop-active'),
   },
 
   // Agent subscription usage

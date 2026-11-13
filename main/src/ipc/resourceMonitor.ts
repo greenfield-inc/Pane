@@ -5,8 +5,6 @@ import { resourceMonitorService } from '../services/resourceMonitorService';
 
 const DAEMON_RESOURCE_MONITOR_CHANNELS = [
   'resource-monitor:get-snapshot',
-  'resource-monitor:start-active',
-  'resource-monitor:stop-active',
 ] as const;
 
 export function registerResourceMonitorHandlers(
@@ -20,24 +18,6 @@ export function registerResourceMonitorHandlers(
       return { success: true, data: snapshot };
     } catch (error) {
       console.error('[IPC] Failed to get resource snapshot:', error);
-      return { success: false, error: (error instanceof Error) ? error.message : String(error) };
-    }
-  });
-
-  commandRegistry.register('resource-monitor:start-active', async () => {
-    try {
-      resourceMonitorService.startActivePolling();
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: (error instanceof Error) ? error.message : String(error) };
-    }
-  });
-
-  commandRegistry.register('resource-monitor:stop-active', async () => {
-    try {
-      resourceMonitorService.stopActivePolling();
-      return { success: true };
-    } catch (error) {
       return { success: false, error: (error instanceof Error) ? error.message : String(error) };
     }
   });
