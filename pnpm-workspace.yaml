@@ -5,6 +5,7 @@ packages:
   - 'native'
   - 'glasses'
   - 'packages/runpane'
+  - 'packages/pane-cloud-contract'
   - 'shared'
 onlyBuiltDependencies:
   - electron

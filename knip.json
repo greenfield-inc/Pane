@@ -100,6 +100,10 @@
         "mkfifo"
       ]
     },
+    "packages/pane-cloud-contract": {
+      "entry": ["src/index.ts", "src/stubs/index.ts", "src/testing/index.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
     "packages/runpane": {
       "entry": [
         "src/cli.ts",
