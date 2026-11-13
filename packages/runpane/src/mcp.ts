@@ -245,7 +245,7 @@ async function callTool(
   // contents and command output, which come back verbatim; only their errors are translated.
   const asWritten = (text: string) => text;
   const translate = tool.toolsets.includes('docs') ? asWritten : rewrite;
-  const translateOutput = tool.toolsets.includes('workspace') ? asWritten : translate;
+  const translateOutput = tool.toolsets.includes('workspace') ? asWritten : (text: string) => translateJsonStrings(text, translate);
   const failure = code !== 0 ? decodeFailure(stdout) : undefined;
   const text = failure
     ? translate([failure.message, ...(failure.next ? [`Next: ${failure.next}`] : []), `Code: ${failure.code}`].join('\n'))
@@ -257,6 +257,28 @@ async function callTool(
   const structuredContent = parseJsonObject(text);
   if (!structuredContent) return errorResult(`runpane ${tool.command} did not print JSON:\n${text}`);
   return { content: [{ type: 'text', text }], structuredContent };
+}
+
+/**
+ * Translates each string inside JSON output, so a hint that gains quotes (`--title "<text>"`, a
+ * toolset name) keeps the JSON valid. Text that isn't JSON is translated whole.
+ */
+function translateJsonStrings(text: string, translate: (text: string) => string): string {
+  let value: JsonValue;
+  try {
+    value = decodeBoundary(JSON.parse(text), boundary.json);
+  } catch {
+    return translate(text);
+  }
+  return JSON.stringify(value, (_key, item: JsonValue) => {
+    let string: string;
+    try {
+      string = decodeBoundary(item, boundary.string);
+    } catch {
+      return item;
+    }
+    return translate(string);
+  }, 2);
 }
 
 const failureSchema = boundary.object({

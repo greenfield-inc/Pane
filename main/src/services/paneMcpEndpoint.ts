@@ -262,10 +262,16 @@ export function withPaneMcpConfig(panelId: string, agentType: string | undefined
   return `${settings.command.slice(0, spans[0].end)} ${added}${settings.command.slice(spans[0].end)}`;
 }
 
-function writeIfChanged(file: string, value: object): void {
+function writeIfChanged(file: string, value: typeof MCP_CONFIG | typeof PANE_MCP_PLUGIN_DENY_SETTINGS): void {
   const content = `${JSON.stringify(value, null, 2)}\n`;
   mkdirSync(path.dirname(file), { recursive: true });
   if (!existsSync(file) || readFileSync(file, 'utf8') !== content) writeFileSync(file, content);
+}
+
+/** The command with the plugin deny merged into its own settings, or the settings word to add when it has none. */
+interface SettingsEdit {
+  command: string;
+  word: string | undefined;
 }
 
 /**
@@ -281,7 +287,7 @@ function denyPluginServer(
   flag: string,
   file: string,
   shellType: string | undefined,
-): { command: string; word: string | undefined } {
+): SettingsEdit {
   const at = tokens.findIndex(token => token === flag || token.startsWith(`${flag}=`));
   if (at === -1) return { command, word: quoteShellWord(`${flag}=${file}`, shellType) };
   const inline = tokens[at] !== flag;

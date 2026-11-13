@@ -856,6 +856,17 @@ test('server text describes the tools without steering the model away from its o
   }, { args: ['--toolsets', 'plugin'] });
 });
 
+test("doctor's report stays JSON when its text names tools this server does not serve", async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-doctor-json-'));
+  try {
+    const result = await withMcpClient((client) => client.callTool({ name: 'doctor', arguments: { paneDir } }), { args: ['--toolsets', 'plugin'] });
+    const report = result.structuredContent ?? JSON.parse(result.content[0].text);
+    assert.match(report.watchDefaults.follow.summary, /`watch` with follow: true \(in the "agents" toolset\)/);
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('with no Pane on this machine, a tool says where to get Pane', async () => {
   const paneDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-no-pane-')), 'never-ran');
   try {
