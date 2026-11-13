@@ -12,9 +12,6 @@ const { test } = require('node:test');
 const rootDir = path.resolve(__dirname, '..');
 const runpaneDir = path.join(rootDir, 'packages', 'runpane');
 const dist = (file) => path.join(runpaneDir, 'dist', file);
-// Claude Code shows a server's instructions, and a tool description it loads up front, only up to
-// this many characters, then "… [truncated]" (CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH, default 4096).
-const CLAUDE_CODE_MCP_TEXT_LIMIT = 4096;
 const sdk = (subpath) => require(require.resolve(`@modelcontextprotocol/sdk/${subpath}`, { paths: [runpaneDir] }));
 const { Client } = sdk('client/index.js');
 const { StdioClientTransport } = sdk('client/stdio.js');
@@ -600,6 +597,7 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
 });
 
 test('the instructions and every tool description fit within what Claude Code shows', async () => {
+  const { CLAUDE_CODE_MCP_TEXT_LIMIT } = require(dist('mcpTools.js'));
   for (const args of [[], ['--toolsets', 'all']]) {
     await withMcpClient(async (client) => {
       const served = `runpane mcp ${args.join(' ')}`.trim();

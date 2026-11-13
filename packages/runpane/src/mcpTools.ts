@@ -2,6 +2,12 @@ import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './bou
 import { RUNPANE_CONTRACT } from './generated/contract';
 
 /**
+ * Claude Code cuts a server's instructions and a tool description it loads up front after this many characters.
+ * @public scripts/test-runpane-mcp.js checks every served description against it.
+ */
+export const CLAUDE_CODE_MCP_TEXT_LIMIT = 4096;
+
+/**
  * The slice of the runpane contract that MCP tools are generated from. Every
  * command with result `jsonSchemas` becomes a tool; its inputs are the union of
  * the flags in its `usage` lines and its `agentContext` arguments, plus
@@ -202,12 +208,7 @@ function buildTool(
     words,
     confirmsInServer,
     toolsets: command.toolsets ?? [],
-    description: [
-      command.summary,
-      context?.details,
-      ...(context?.notes ?? []),
-      `Returns the JSON of \`runpane ${command.name} --json\`.`,
-    ].filter(Boolean).join('\n'),
+    description: describe(command.name, command.summary, context?.details, context?.notes ?? []),
     parameters,
     inputSchema,
     outputSchema: buildOutputSchema(command.jsonSchemas ?? [], schemas),
@@ -220,6 +221,18 @@ function buildTool(
       openWorldHint: command.openWorld === true,
     },
   };
+}
+
+/**
+ * The tool description: summary, details and notes. When the notes would take it past what Claude Code
+ * shows, it keeps the summary and details and points to the full reference instead.
+ */
+function describe(name: string, summary: string, details: string | undefined, notes: readonly string[]): string {
+  const returns = `Returns the JSON of \`runpane ${name} --json\`.`;
+  const full = [summary, details, ...notes, returns].filter(Boolean).join('\n');
+  if (full.length <= CLAUDE_CODE_MCP_TEXT_LIMIT) return full;
+  const pointer = `Before relying on anything not stated here, read the full reference with every note: \`runpane agent-context --command "${name}"\`.`;
+  return [summary, details, pointer, returns].filter(Boolean).join('\n');
 }
 
 /**
