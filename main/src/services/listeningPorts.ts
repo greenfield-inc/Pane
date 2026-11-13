@@ -32,6 +32,8 @@ const WEB_PROBE_TIMEOUT_MS = 500;
  * on later polls, this many times.
  */
 const SILENT_PORT_RETRIES = 10;
+/** Longest program name listed on Linux, where a command line can run to 128 KiB. */
+const MAX_LINUX_PROCESS_NAME = 64;
 /** Relays that exit after their first connection; probing one would end it. */
 const ONE_SHOT_LISTENERS = new Set(['nc', 'ncat', 'netcat', 'socat']);
 
@@ -310,19 +312,20 @@ async function readSsSockets(): Promise<ListeningSocket[]> {
 }
 
 /**
- * The thread name, unless the program renamed its thread: then the name it was started
- * by, as macOS reports it. A thread starts with its executable's name, cut to 15
- * characters. A program may also rewrite its command line, so a thread name matching
- * either the command line or the executable is kept.
+ * The thread name, unless the program renamed its thread: then the base name of the command
+ * line's first word, cut to MAX_LINUX_PROCESS_NAME characters. A thread starts with its
+ * executable's name, cut to 15 characters, and a program that sets its title rewrites both
+ * the thread name and the command line. So a thread name that starts either the command
+ * line's first word, its base name or the executable's name is kept.
  */
 async function programName(pid: number, threadName: string): Promise<string> {
   const [executable, commandLine] = await Promise.all([
     fs.readlink(`/proc/${pid}/exe`).then(target => path.basename(target.replace(/ \(deleted\)$/u, '')), () => ''),
-    fs.readFile(`/proc/${pid}/cmdline`, 'utf8').then(text => path.basename(text.split('\0')[0]), () => ''),
+    fs.readFile(`/proc/${pid}/cmdline`, 'utf8').then(text => text.split('\0')[0], () => ''),
   ]);
-  const startedAs = [commandLine, executable].filter(Boolean);
+  const startedAs = [commandLine, path.basename(commandLine), executable].filter(Boolean);
   if (startedAs.length === 0 || startedAs.some(name => name.startsWith(threadName))) return threadName;
-  return startedAs[0];
+  return (path.basename(commandLine) || executable).slice(0, MAX_LINUX_PROCESS_NAME);
 }
 
 /**
