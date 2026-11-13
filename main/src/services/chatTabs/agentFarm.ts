@@ -7,12 +7,14 @@ import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../sh
 import type { ChatAgentEnv, ChatProfileResolver } from './launch';
 import type { ResolvedLaunch } from './manager';
 import { hostCommand, type HostCommand } from '../agentChat/hostCommand';
+import { agentConfig } from '../../../../shared/agents';
 
 const execFileAsync = promisify(execFile);
 
 /** Agent Farm's `run --print-acp` output (CONFIGURATION.md, "ACP sessions"), the fields Pane uses. */
 const printedLaunch = boundary.object({
-  harness: boundary.enumeration('claude', 'codex'),
+  /** A configured agent whose chat runs through Pane's bundled adapter. */
+  harness: boundary.refine(boundary.string, id => !!agentConfig(id)?.chat?.adapter, 'expected an agent Pane runs through its bundled adapter'),
   argv: boundary.refine(boundary.array(boundary.string), argv => argv.length > 0, 'expected a command'),
   cwd: boundary.string,
   env: boundary.record(boundary.string),
@@ -41,8 +43,10 @@ export interface AgentFarmOptions {
  * script (a Windows npm shim's cli.js) cannot answer `--version` by itself, so PATH's stands in.
  */
 export function printedCli(agent: ChatAgent, env: ChatAgentEnv, lookup: (name: string) => string | null): string | null {
-  const selected = agent === 'claude' ? env.CLAUDE_CODE_EXECUTABLE : env.CODEX_PATH;
-  return selected && !/\.[cm]?js$/i.test(selected) ? selected : lookup(agent);
+  const config = agentConfig(agent);
+  const variable = config?.chat?.adapter?.executableEnv;
+  const selected = variable ? env[variable] : undefined;
+  return selected && !/\.[cm]?js$/i.test(selected) ? selected : lookup(config?.executables[0] ?? agent);
 }
 
 /**

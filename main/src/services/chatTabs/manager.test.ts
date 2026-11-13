@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ToolPanel } from '../../../../shared/types/panels';
-import { applyChatTabEvent, type ChatPanelState, type ChatTabEvent, type ChatTabView } from '../../../../shared/types/chatTab';
+import { applyChatTabEvent, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabEvent, type ChatTabView } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
 import type { PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import { ChatTabManager, type ChatTabLauncher, type ChatTabManagerOptions, type ChatTabStore } from './manager';
@@ -186,6 +186,34 @@ describe('chat tab manager', () => {
     expect(manager.view('p1').status).toBe('idle');
     expect(store.state('p1')?.acpSessionId).toBe(sessionId);
     expect(replyText(manager.view('p1'))).toContain('You said: hello');
+  });
+
+  it('gives an agent with no full-access mode a Full access setting that answers approvals with allow once (D-16)', async () => {
+    const { manager, store, directory } = harness();
+    // OpenCode's config names no full-access switch, so Pane answers for it.
+    store.add('p1', { agent: 'opencode', launch: { kind: 'agent' }, cwd: directory, status: 'starting' });
+    await manager.ensure('p1');
+    expect(manager.view('p1').controls.find(control => control.id === CHAT_FULL_ACCESS_CONTROL)).toMatchObject({ name: 'Full access', currentValue: 'off' });
+    await manager.configure('p1', CHAT_FULL_ACCESS_CONTROL, 'on');
+    expect(store.state('p1')?.launch).toEqual({ kind: 'agent', fullAccess: true });
+    manager.send('p1', { operationId: 'op-1', text: 'permission' });
+    await expect.poll(() => manager.receipt('p1', 'op-1')?.state).toBe('completed');
+    const view = manager.view('p1');
+    // The scripted agent's allow-once option is "allow"; its allow-always option is "always".
+    expect(replyText(view)).toBe('Permission: allow');
+    const step = view.transcript?.messages.flatMap(message => message.parts).find(part => part.type === 'tool');
+    expect(step).toMatchObject({ status: 'completed', approvedBy: 'pane' });
+    await manager.configure('p1', CHAT_FULL_ACCESS_CONTROL, 'off');
+    manager.send('p1', { operationId: 'op-2', text: 'permission' });
+    await expect.poll(() => manager.view('p1').permissions.length).toBe(1);
+  });
+
+  it('offers no Full access setting for an agent whose full access is its own permission mode', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    expect(manager.view('p1').controls.map(control => control.id)).not.toContain(CHAT_FULL_ACCESS_CONTROL);
+    await expect(manager.configure('p1', CHAT_FULL_ACCESS_CONTROL, 'on')).rejects.toMatchObject({ code: 'CHAT_CONFIG_UNSUPPORTED' });
   });
 
   it('explains a signed-out agent and does not retry by itself', async () => {

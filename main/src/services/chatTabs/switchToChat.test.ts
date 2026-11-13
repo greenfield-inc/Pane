@@ -5,6 +5,7 @@ import { PaneError } from '../../../../shared/paneError';
 import { switchToChat, terminalConversation, terminalRestored, type SessionAdoption, type SwitchToChatPorts, type TerminalConversation } from './switchToChat';
 import { withSessionFolderAccess } from '../agents/sessionFolderAccess';
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
+import { agentTerminalCommand } from '../../../../shared/agents';
 
 interface World {
   panels: Map<string, ToolPanel>;
@@ -194,7 +195,7 @@ describe('Switch to chat', () => {
 
   it.skipIf(process.platform === 'win32')('switches Claude in a Session\'s Pane, keeping its Session folder (D-161)', async () => {
     const folder = '/Users/me/.pane/sessions/s-1';
-    const command = withSessionFolderAccess({ title: 'Claude Code', command: RUNPANE_CONTRACT.agentTemplates.claude.command, agent: 'claude' }, folder).command;
+    const command = withSessionFolderAccess({ title: 'Claude Code', command: agentTerminalCommand('claude'), agent: 'claude' }, folder).command;
     const { world: w, ports } = world(terminal({ initialCommand: command, launchCommand: command, sessionFolder: folder }));
     await expect(switchToChat('term', ports)).resolves.toMatchObject({ terminalKept: false });
     expect(w.chats.get('chat-1')).toMatchObject({ launch: { kind: 'agent', mode: 'bypassPermissions' }, sessionFolder: folder });

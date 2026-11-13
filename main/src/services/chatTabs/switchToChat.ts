@@ -2,6 +2,18 @@ import type { ToolPanel, TerminalPanelState } from '../../../../shared/types/pan
 import type { ChatPanelState, ChatTabSwitchBanner, ChatTabSwitchResult } from '../../../../shared/types/chatTab';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { chatLaunchForTerminal } from './launch';
+import { agentConfig, agentLabel } from '../../../../shared/agents';
+
+/**
+ * Why a terminal running `agent` cannot switch to chat, or undefined when it can: its
+ * config must say a chat can load the conversations its terminal starts.
+ */
+export function terminalSwitchRefusal(agent: string): string | undefined {
+  const chat = agentConfig(agent)?.chat;
+  if (!chat) return `Chat tabs don't run ${agentLabel(agent)}.`;
+  if (!chat.terminalConversationsLoad) return `${agentLabel(agent)}'s chat can't open conversations started in its terminal.`;
+  return undefined;
+}
 
 /**
  * Who owns the Session after a switch tried to hand it over. `chat`: the chat does, or no Session
@@ -42,9 +54,8 @@ export function terminalConversation(
   currentLaunch: string | undefined,
   transcript: TranscriptLookup,
 ): TerminalConversation {
-  if (state.agentType === 'codex') return { sure: false, why: 'Codex terminals do not report their conversation' };
-  const report = state.conversationReport;
-  if (!report) return { sure: false, why: 'the terminal has not reported its conversation' };
+  const report = state.agentType && agentConfig(state.agentType)?.terminal.reportsConversation ? state.conversationReport : undefined;
+  if (!report) return { sure: false, why: `${state.agentType ? agentLabel(state.agentType) : 'the agent'}'s terminal has not reported its conversation` };
   if (!currentLaunch || report.launchId !== currentLaunch) return { sure: false, why: `its report (${report.id}) is from an earlier launch` };
   const found = transcript(report.id);
   if (found === 'ambiguous') return { sure: false, why: `two transcripts share its conversation ID ${report.id}` };
@@ -122,11 +133,12 @@ export async function prepareSwitch(panelId: string, ports: SwitchToChatPorts): 
   // SAFETY: terminal panels persist TerminalPanelState as their custom state; checked by type below.
   const state = (panel.type === 'terminal' ? panel.state.customState : undefined) as TerminalPanelState | undefined;
   const agent = state?.agentType;
-  if (!state || (agent !== 'claude' && agent !== 'codex')) {
-    throw new PaneError('CHAT_SWITCH_UNSUPPORTED', 'Only a terminal tab running Claude or Codex can switch to chat. Nothing was switched.', 'Open a chat tab from the + menu instead.');
+  const refusal = agent ? terminalSwitchRefusal(agent) : 'This tab is not running an agent.';
+  if (!state || !agent || refusal) {
+    throw new PaneError('CHAT_SWITCH_UNSUPPORTED', `${refusal} Nothing was switched.`, 'Open a chat tab from the + menu instead.');
   }
   if (await ports.terminal.busy(panelId)) {
-    throw new PaneError('CHAT_SWITCH_BUSY', `${agent === 'claude' ? 'Claude' : 'Codex'} is in the middle of a turn. Nothing was switched.`, 'Wait for it to finish, or stop it (Esc in the terminal), then switch again.');
+    throw new PaneError('CHAT_SWITCH_BUSY', `${agentLabel(agent)} is in the middle of a turn. Nothing was switched.`, 'Wait for it to finish, or stop it (Esc in the terminal), then switch again.');
   }
   const cwd = state.resumeDirectory ?? ports.paneDirectory(panel.sessionId);
   if (!cwd) throw new PaneError('CHAT_PANE_MISSING', 'The Pane for this tab was not found. Nothing was switched.', 'Open the Pane, then try again.');

@@ -3,16 +3,23 @@ import type { AgentChatConfigOption, AgentChatMessage, AgentChatPart, AgentChatP
 import type { TerminalAgentReport } from './panels';
 
 /**
- * Chat tabs: an agent tab that runs Claude or Codex through its ACP adapter,
- * with no terminal. The host owns the adapter process; desktop, the remote PWA
- * and the phone only relay the conversation (chat-tab:* commands and events).
+ * Chat tabs: an agent tab that runs any ACP agent, with no terminal. The host owns
+ * the agent process; desktop, the remote PWA and the phone only relay the
+ * conversation (chat-tab:* commands and events).
+ *
+ * An agent id: a configured agent (shared/agents.ts) or an ACP Registry agent
+ * installed on the host. Clients learn labels and icons from the host's catalog.
  */
-export type ChatAgent = 'claude' | 'codex';
+export type ChatAgent = string;
 
 /** How a chat tab is launched. Saved without env: env is rebuilt at every start. */
 export type ChatTabLaunch =
-  /** `mode`: the session mode to select at every start, such as bypassPermissions for a Session orchestrator. */
-  | { kind: 'agent'; mode?: string }
+  /**
+   * `mode`: the session mode to select at every start, such as a profile's permission mode.
+   * `fullAccess`: the agent acts without asking, through its own switch when its config names
+   * one, otherwise through Pane answering each approval with the agent's "allow once".
+   */
+  | { kind: 'agent'; mode?: string; fullAccess?: true }
   | { kind: 'profile'; profile: string; args?: Record<string, string> };
 
 /** Last known runtime state. `stopped` always carries a `problem` or an explicit stop. */
@@ -113,11 +120,11 @@ export interface ChatTabSwitchResult {
 }
 
 /**
- * Why a Session's terminal tab will not switch to chat: mid-turn, a plain Codex terminal that has
- * not reported its conversation, a launch chat cannot run, not a Claude or Codex agent, or another
- * refusal that `reason` spells out.
+ * Why a Session's terminal tab will not switch to chat: mid-turn, a terminal that has not reported
+ * its conversation, a launch chat cannot run, an agent chat cannot open, or another refusal that
+ * `reason` spells out.
  */
-export type SessionChatSwitchSkip = 'busy' | 'plain-codex' | 'no-conversation' | 'launch' | 'not-agent' | 'unconfirmed' | 'other';
+export type SessionChatSwitchSkip = 'busy' | 'no-conversation' | 'launch' | 'not-agent' | 'unconfirmed' | 'other';
 
 /** One terminal tab of a Session, and whether Switch to chat will move it. */
 export interface SessionChatSwitchItem {
@@ -286,6 +293,8 @@ export interface ChatTabClient {
   /** Closes the Switch to chat banner or note. */
   dismissBanner(panelId: string): Promise<void>;
   signIn(panelId: string): Promise<{ panelId: string }>;
+  /** The agents the host can open as chat tabs (its catalog). */
+  agents(): Promise<ChatAgentEntry[]>;
   onEvent(callback: (event: ChatTabEvent) => void): () => void;
   onState(callback: (view: ChatTabView) => void): () => void;
 }
@@ -294,8 +303,44 @@ export type ChatTabAnswer = { action: 'accept'; content: Record<string, JsonValu
 
 export interface ChatTabApplyResult { transcript: ChatTabTranscript; resync: boolean }
 
-/** Which agents have an API key set on a host; never the keys. */
-export interface ChatTabKeyStatus { claude: boolean; codex: boolean }
+/** Which agents have an API key set on a host, by agent id; never the keys. */
+export type ChatTabKeyStatus = Record<ChatAgent, boolean>;
+
+/**
+ * The composer setting Pane adds for an agent whose full access is not one of its own
+ * session modes: `on` and `off`. Changing it never reaches the agent as an ACP setting.
+ */
+export const CHAT_FULL_ACCESS_CONTROL = 'pane.full-access';
+
+/** What an agent's chat can do, from its ACP initialize reply. */
+export interface ChatAgentCapabilities { reopen: boolean; list: boolean; images: boolean }
+
+/**
+ * One agent this host can open as a chat tab, from main's catalog (chat-tab:agents). Clients
+ * render these and name no agent of their own; an id with no entry gets a generic label and icon.
+ */
+export interface ChatAgentEntry {
+  id: ChatAgent;
+  label: string;
+  /** A key into the clients' brand icons; unknown keys show the generic chat icon. */
+  icon: string;
+  /** An image for an agent the clients have no brand icon for (registry agents). */
+  iconUrl?: string;
+  description?: string;
+  /** `config`: a first-class agent from Pane's agents config. `registry`: installed from the ACP Registry. */
+  source: 'config' | 'registry';
+  /** Its CLI or package is on this host, so a chat can start. */
+  installed: boolean;
+  version?: string;
+  /** Known once Pane has started this agent's chat at this version. */
+  capabilities?: ChatAgentCapabilities;
+  /** `agent`: full access is the agent's own switch. `pane`: Pane answers each approval with allow once. */
+  fullAccess: 'agent' | 'pane';
+  /** Whether a terminal tab running this agent can switch to chat, and why not. */
+  switchFromTerminal: { ok: true } | { ok: false; reason: string };
+  /** Where to install it from, when it is not installed. */
+  installUrl?: string;
+}
 
 /** Apply one host event to a client's window. A gap or a new generation needs a fresh snapshot. */
 export function applyChatTabEvent(transcript: ChatTabTranscript, event: ChatTabEvent): ChatTabApplyResult {

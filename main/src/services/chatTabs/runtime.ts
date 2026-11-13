@@ -1,6 +1,6 @@
 import {
   client, methods, RequestError, type ClientConnection, type ContentBlock, type CreateElicitationRequest, type CreateElicitationResponse,
-  type InitializeResponse, type LoadSessionRequest, type LoadSessionResponse, type NewSessionRequest, type NewSessionResponse,
+  type ClientCapabilities, type InitializeResponse, type LoadSessionRequest, type LoadSessionResponse, type NewSessionRequest, type NewSessionResponse,
   type PromptResponse, type AnyMessage, type Stream, type RequestPermissionRequest, type SessionInfo, type SessionNotification, type RequestPermissionResponse, type SessionConfigOption, type SessionUpdate,
 } from '@agentclientprotocol/sdk';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
@@ -22,6 +22,14 @@ export interface ChatTabRuntimeOptions {
   /** The agent started or ended a turn of its own; ending says how. */
   onOwnTurn?: (outcome: 'started' | 'end_turn' | 'cancelled' | 'error') => void;
   onExit: (exit: RuntimeExit) => void;
+  /**
+   * Full access through Pane (D-16): answer each approval with the agent's own "allow once"
+   * option, never "allow always", and report it. A request with no such option shows as usual.
+   */
+  approveOnce?: () => boolean;
+  /** Tell the agent Pane can run its terminal sign-in (ACP `auth.terminal`); only for agents launched as their own CLI. */
+  terminalAuth?: boolean;
+  onApprovedOnce?: (request: RequestPermissionRequest) => void;
 }
 
 /** ACP's JSON-RPC code for "authentication required". */
@@ -143,6 +151,11 @@ export class ChatTabRuntime {
       })
       .onRequest(methods.client.session.requestPermission, ({ params, signal }) => {
         if (params.sessionId !== this.sessionId || signal.aborted) return { outcome: { outcome: 'cancelled' } };
+        const once = this.options.approveOnce?.() ? params.options.find(option => option.kind === 'allow_once') : undefined;
+        if (once) {
+          this.options.onApprovedOnce?.(params);
+          return { outcome: { outcome: 'selected', optionId: once.optionId } };
+        }
         const id = `${this.options.generation}:p${++this.sequence}`;
         return new Promise<RequestPermissionResponse>(resolve => {
           const abort = () => { this.permissionRequests.delete(id); resolve({ outcome: { outcome: 'cancelled' } }); this.options.onState(); };
@@ -173,13 +186,15 @@ export class ChatTabRuntime {
       this.options.onExit({ expected, message: `The agent ${reason}.`, stderr: this.process.stderrTail() });
     });
     try {
+      const clientCapabilities: ClientCapabilities = { elicitation: { form: {} }, _meta: { terminal_output_delta: true, jetbrains: { air: { version: 1, capabilities: ['asyncTasks'] } } } };
+      if (this.options.terminalAuth) clientCapabilities.auth = { terminal: true };
       this.initialization = await this.bounded(this.connection.agent.request(methods.agent.initialize, {
         protocolVersion: 1,
         clientInfo: { name: 'pane', version: '1' },
         // Form elicitation lets Claude ask AskUserQuestion and plan questions as cards.
         // terminal_output_delta: claude-agent-acp streams command output into the step's row.
         // asyncTasks: ACP has no session state, so this is the only sign that claude-agent-acp works on a turn of its own.
-        clientCapabilities: { elicitation: { form: {} }, _meta: { terminal_output_delta: true, jetbrains: { air: { version: 1, capabilities: ['asyncTasks'] } } } },
+        clientCapabilities,
       }));
     } catch (error) {
       const stderr = this.process.stderrTail().split('\n').filter(Boolean).at(-1);
@@ -187,6 +202,30 @@ export class ChatTabRuntime {
       throw stderr && failure.code === 'CHAT_ADAPTER_START_FAILED' ? new PaneError(failure.code, `${failure.message} Last output: ${stderr}`, failure.next) : failure;
     }
     return this.initialization;
+  }
+
+  /** The agent's reply to initialize: its capabilities, sign-in methods and name. */
+  get initialized(): InitializeResponse | undefined { return this.initialization; }
+
+  /**
+   * Signs in through the agent's own sign-in methods that need no terminal (ACP `authenticate`,
+   * for example a login the agent's CLI already holds). Returns whether one succeeded.
+   */
+  async authenticate(): Promise<boolean> {
+    for (const method of this.initialization?.authMethods ?? []) {
+      if ('type' in method && method.type === 'terminal') continue;
+      try { await this.bounded(this.agent().request(methods.agent.authenticate, { methodId: method.id })); return true; }
+      catch (error) { console.warn(`[ChatTabs] Sign-in method ${method.id} did not sign the agent in: ${reasonOf(error)}`); }
+    }
+    return false;
+  }
+
+  /** The agent's terminal sign-in (ACP terminal auth method): arguments for its own command. */
+  terminalSignIn(): { args: string[]; env?: Record<string, string> } | undefined {
+    for (const method of this.initialization?.authMethods ?? []) {
+      if ('type' in method && method.type === 'terminal') return method.env ? { args: method.args ?? [], env: method.env } : { args: method.args ?? [] };
+    }
+    return undefined;
   }
 
   async create(request: NewSessionRequest): Promise<NewSessionResponse> {
