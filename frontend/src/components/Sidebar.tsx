@@ -1,6 +1,6 @@
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { NewDialog } from './NewDialog';
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
@@ -11,6 +11,7 @@ import { Tooltip } from './ui/Tooltip';
 import { Kbd } from './ui/Kbd';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { useHotkeyStore } from '../stores/hotkeyStore';
+import { useHotkey } from '../hooks/useHotkey';
 import { Dropdown } from './ui/Dropdown';
 import type { DropdownItem } from './ui/Dropdown';
 import { useSessionStore } from '../stores/sessionStore';
@@ -51,6 +52,8 @@ import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
 import { useAnyLoopRunning } from './loops/loopRunView';
 import { useRestartToUpdateStore } from '../stores/restartToUpdateStore';
+import { RestoreRegionButton } from './RestoreRegionButton';
+import { useRegionActions } from '../hooks/useRegionNavigation';
 import { RESTART_PILL_LABELS, restartPillDescription, restartPillLabel } from './restartToUpdateCopy';
 
 // --- Collapsed sidebar tooltip content ---
@@ -113,6 +116,8 @@ function CompactSessionTooltip({
 }
 
 interface SidebarProps {
+  /** Spread across the main area (P4); the header shows a pressed restore button. */
+  maximized?: boolean;
   onAboutClick: () => void;
   onSettingsClick: () => void;
   onRemoteSettingsClick: () => void;
@@ -147,8 +152,15 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onAddMachineClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
+export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onAddMachineClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
+  // Maximize spreads the sidebar over the main area; minimize collapses it to its rail (P4).
+  const shellRef = useRef<HTMLDivElement>(null);
+  const setMaximizedRegion = useNavigationStore((s) => s.setMaximizedRegion);
+  useRegionActions(shellRef, {
+    toggleMaximize: () => setMaximizedRegion(maximized ? null : 'sidebar'),
+    minimize: () => { if (!collapsed) onToggleCollapse?.(); },
+  });
   const showFooterHomeLabel = width >= 230;
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
@@ -270,10 +282,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const machineName = activeMachine?.name;
   const machineOs = activeMachine?.os ?? null;
   const machineSlot = activeMachine?.slot ?? 0;
+  const machineLetters = activeMachine?.letters ?? '?';
   const machineLocal = activeMachine?.kind === 'local';
   useEffect(() => {
-    setActiveMachine(machineId && machineName ? { id: machineId, name: machineName, os: machineOs, slot: machineSlot, local: machineLocal } : null);
-  }, [machineId, machineName, machineOs, machineSlot, machineLocal, setActiveMachine]);
+    setActiveMachine(machineId && machineName ? { id: machineId, name: machineName, os: machineOs, slot: machineSlot, letters: machineLetters, local: machineLocal } : null);
+  }, [machineId, machineName, machineOs, machineSlot, machineLetters, machineLocal, setActiveMachine]);
   // Hidden only while no other machine is saved or on Tailscale.
   const switcherVisible = machines.length > 1 || remoteConnectionState.mode === 'remote';
   const paneSort = usePaneSort({ id: machineId, local: machineLocal });
@@ -284,7 +297,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   useEffect(() => { void useAllMachinesStore.getState().hydrate(); }, []);
   useEffect(() => {
     useAllMachinesStore.setState({
-      entries: machines.map(({ id, name, os, slot, active }) => ({ id, name, os, slot, active })),
+      entries: machines.map(({ id, name, os, slot, letters, active }) => ({ id, name, os, slot, letters, active })),
       menuShown: switcherVisible,
       switchMachine: async (machineId) => {
         const machine = machines.find((entry) => entry.id === machineId);
@@ -294,6 +307,41 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     });
   }, [machines, onMachinePasswordRequest, selectMachine, switcherVisible]);
   useEffect(() => (allMachines ? startAllMachinesFeed() : undefined), [allMachines]);
+  // Machines by key (P6): ⌘⌥O opens the switcher (then 0 or 1-9), ⌃⌘] and ⌃⌘[
+  // step through the machines in its order, skipping ones that cannot be
+  // picked, and ⌃⌘0 goes between All machines and the machine it shows.
+  const stepMachine = useCallback((delta: 1 | -1) => {
+    const pickable = machines.filter((machine) => machine.active || machine.action !== 'none');
+    if (pickable.length === 0) return;
+    const current = allMachines ? -1 : pickable.findIndex((machine) => machine.active);
+    const next = pickable[(current + delta + pickable.length) % pickable.length];
+    if (!next || (next.active && !allMachines)) return;
+    setAllMachines(false);
+    void selectMachine(next).then((outcome) => {
+      if (outcome.ok) return;
+      if (outcome.needsPassword) onMachinePasswordRequest(next.name);
+      else showActionError(`Could not switch to ${next.name}`, outcome.error);
+    });
+  }, [allMachines, machines, onMachinePasswordRequest, selectMachine, setAllMachines]);
+  useHotkey({
+    id: 'open-machine-switcher',
+    label: 'Open Machine Switcher',
+    category: 'machines',
+    enabled: () => switcherVisible,
+    action: () => {
+      const trigger = document.querySelector<HTMLElement>('[data-sidebar-key="machine-switcher"], [data-testid="compact-machine-switcher"]');
+      trigger?.click();
+    },
+  });
+  useHotkey({ id: 'next-machine', label: 'Next Machine', category: 'machines', enabled: () => switcherVisible, action: () => stepMachine(1) });
+  useHotkey({ id: 'previous-machine', label: 'Previous Machine', category: 'machines', enabled: () => switcherVisible, action: () => stepMachine(-1) });
+  useHotkey({
+    id: 'toggle-all-machines',
+    label: 'Toggle All Machines and Last Machine',
+    category: 'machines',
+    enabled: () => switcherVisible,
+    action: () => setAllMachines(!allMachines),
+  });
   const switcherLabel = allMachines ? 'Showing all machines. Switch machine' : `Agents run on ${activeMachine.name}. Switch machine`;
   const renderRemoteHostSwitcher = (trigger: React.ReactElement, position: 'bottom-left' | 'top-right') => (
     <RemoteHostSwitcher
@@ -318,12 +366,13 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     <button
       type="button"
       data-compact-rail-item
+      data-testid="compact-machine-switcher"
       onClick={switcherVisible ? undefined : onRemoteSettingsClick}
       aria-label={switcherVisible ? switcherLabel : remoteFooterStatus.ariaLabel}
       className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
     >
       {switcherVisible
-        ? <MachineMark os={activeMachine.os} slot={activeMachine.slot} presence={activeMachine.presence} size="rail" />
+        ? <MachineMark letters={activeMachine.letters} slot={activeMachine.slot} presence={activeMachine.presence} size="rail" />
         : <span className={`h-2.5 w-2.5 rounded-full ${remoteFooterStatus.dotClassName}`} />}
     </button>
   );
@@ -550,13 +599,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       {!collapsed && switcherVisible && renderRemoteHostSwitcher(
         <button
           type="button"
+          data-sidebar-item
+          data-sidebar-key="machine-switcher"
+          data-focus-region="sidebar"
           aria-label={switcherLabel}
           style={{ maxWidth: hostPillMaxWidth }}
           className="ml-1 flex h-6 min-w-0 shrink items-center gap-1.5 rounded-full border border-border-primary bg-surface-secondary pl-1 pr-1.5 text-[12px] font-medium text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
         >
           {allMachines
             ? <MachineMarkStack machines={savedMachines} />
-            : <MachineMark os={activeMachine.os} slot={activeMachine.slot} presence={activeMachine.presence} size="sm" className="rounded-full" />}
+            : <MachineMark letters={activeMachine.letters} slot={activeMachine.slot} presence={activeMachine.presence} size="sm" className="rounded-full" />}
           {showHostPillLabel && <span className="min-w-0 truncate">{allMachines ? 'All machines' : activeMachine.name}</span>}
           <ChevronDown className="h-3 w-3 shrink-0 text-text-tertiary" />
         </button>,
@@ -570,6 +622,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       <>
         <div
           data-testid="sidebar"
+          data-focus-region="sidebar"
           className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-secondary text-text-primary h-full flex flex-col flex-shrink-0"
           style={{ width: '48px' }}
         >
@@ -902,9 +955,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   return (
     <>
       <div
+        ref={shellRef}
         data-testid="sidebar"
+        data-focus-region="sidebar"
         className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
-        style={{ width: `${width}px` }}
+        style={{ width: maximized ? '100%' : `${width}px` }}
       >
         {/* Resize handle */}
         <div
@@ -916,6 +971,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           {/* Larger grab area */}
           <div className="absolute -left-2 -right-2 top-0 bottom-0" />
         </div>
+        {maximized && (
+          <div className="absolute right-2 top-1 z-20">
+            <RestoreRegionButton onRestore={() => setMaximizedRegion(null)} />
+          </div>
+        )}
         {titleBarControlsSlot
           ? createPortal(headerControls, titleBarControlsSlot)
           : (
@@ -926,6 +986,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
         <button
           type="button"
+          data-sidebar-item
+          data-sidebar-key="search"
           onClick={openSearch}
           className="mx-2 mt-1 flex h-[30px] flex-shrink-0 items-center gap-2 rounded-input border border-border-primary bg-surface-primary px-2 text-[13px] text-text-muted hover:border-border-hover hover:text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
         >
@@ -935,6 +997,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
         <button
           type="button"
+          data-sidebar-item
+          data-sidebar-key="new"
           onClick={() => setShowNewDialog(true)}
           className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
         >

@@ -311,7 +311,7 @@ function watchResult(generation) {
 
 function isExpectedClientDisconnect(error, socket) {
   if (error === null || error === undefined) return false;
-  if (error.code === 'EPIPE' && error.syscall === 'write') return true;
+  if ((error.code === 'EPIPE' || error.code === 'ENOTCONN') && error.syscall === 'write') return true;
   if (error.code === 'ECONNRESET' && error.syscall === 'read') return true;
   return error.code === 'ERR_STREAM_DESTROYED' && socket.destroyed;
 }
@@ -362,9 +362,15 @@ async function withFakeDaemon(paneDir, onRequest, action, onFrame = () => {}) {
             const reply = response.error
               ? { type: 'response', id: 1, ok: false, error: response.error }
               : { type: 'response', id: 1, ok: true, result: response.result };
-            socket.end(`${JSON.stringify(reply)}\n`, (error) => {
-              if (error) rememberSocketError(error, socket);
-            });
+            // macOS throws ENOTCONN here, instead of passing it to the
+            // callback, when the client hung up during the delay.
+            try {
+              socket.end(`${JSON.stringify(reply)}\n`, (error) => {
+                if (error) rememberSocketError(error, socket);
+              });
+            } catch (error) {
+              rememberSocketError(error, socket);
+            }
           }
         }, response.delayMs || 0);
         const timers = pendingResponseTimers.get(socket) ?? new Set();
@@ -459,6 +465,8 @@ function runCliOnce(runtime, args, paneDir, timeoutMs = 20_000, extraEnv = {}, i
     PANE_DIR: paneDir,
     PYTHONDONTWRITEBYTECODE: '1',
     PYTHONPATH: pythonSource,
+    // The suite reads output as UTF-8; a Windows runner's console code page would turn ` · ` into `�`.
+    PYTHONIOENCODING: 'utf-8',
     RUNPANE_TELEMETRY_DISABLED: '1',
   };
   delete env.PANE_PANEL_ID;
@@ -1183,6 +1191,205 @@ async function checkReportDeliveryLine() {
   }
 }
 
+/** Runs the CLI with its stdin held open until `holdMs` passes, and times the run. */
+function runCliHoldingStdin(runtime, args, paneDir, extraEnv, holdMs) {
+  const command = runtime === 'npm' ? process.execPath : findPython();
+  const commandArgs = runtime === 'npm' ? [npmCli, ...args] : ['-m', 'runpane', ...args];
+  const env = { ...process.env, PANE_DIR: paneDir, PYTHONDONTWRITEBYTECODE: '1', PYTHONPATH: pythonSource, RUNPANE_TELEMETRY_DISABLED: '1', ...extraEnv };
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const child = childProcess.spawn(command, commandArgs, { cwd: rootDir, env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const release = setTimeout(() => child.stdin.end(), holdMs);
+    const timer = setTimeout(() => { child.kill(); reject(new Error(`${runtime} ${args.join(' ')} did not exit. stdout=${stdout} stderr=${stderr}`)); }, holdMs + 20_000);
+    child.stdin.on('error', () => {});
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+    child.once('error', (error) => { clearTimeout(timer); clearTimeout(release); reject(error); });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      clearTimeout(release);
+      resolve({ code, stdout, stderr, elapsedMs: Date.now() - started });
+    });
+  });
+}
+
+async function checkPanelsConversation() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const localControl = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
+  const ajv = new Ajv({ allErrors: true });
+  ajv.addSchema({ jsonSchemas: contract.jsonSchemas }, 'contract');
+  const validResult = ajv.compile({ $ref: 'contract#/jsonSchemas/panelConversationResult' });
+  const validRequest = ajv.compile({ $ref: 'contract#/jsonSchemas/panelConversationRequest' });
+  const result = { ok: true, paneId: 'session-1', panelId: 'panel-1', conversationId: 'c0ffee00-1111-4222-8333-444455556666', source: 'resume', sure: true };
+  assert.ok(validResult(result), ajv.errorsText(validResult.errors));
+  assert.ok(validResult({ ...result, source: undefined, sure: false, generation: 7 }), ajv.errorsText(validResult.errors));
+  assert.ok(!validResult({ ...result, source: 'user' }), 'the result names only the hook sources');
+  assert.ok(!validResult({ ...result, sure: undefined }), 'the result says whether Pane is sure');
+  assert.ok(validRequest({ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'clear' }), ajv.errorsText(validRequest.errors));
+  assert.ok(!validRequest({ panelId: 'panel-1', conversationId: 'c', source: 'agent' }), 'the request names only the hook sources');
+
+  // Parsing: the shared --source takes the hook's sources here and keeps user|agent elsewhere.
+  const parsed = parseRunpaneArgs(['panels', 'conversation', '--conversation', result.conversationId, '--source', 'clear', '--panel', 'panel-1', '--json']);
+  assert.strictEqual(parsed.conversationId, result.conversationId);
+  assert.strictEqual(parsed.conversationSource, 'clear');
+  assert.strictEqual(parsed.source, undefined);
+  assert.strictEqual(parseRunpaneArgs(['panels', 'conversation', '--hook']).hook, true);
+  assert.strictEqual(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--agent', 'claude', '--source', 'agent', '--yes']).source, 'agent');
+  const parseErrors = [
+    [['panels', 'conversation'], /needs --conversation <id>, or --hook/],
+    [['panels', 'conversation', '--conversation', 'abc', '--source', 'user'], /--source must be one of: startup, resume, clear, compact/],
+    [['panels', 'conversation', '--conversation', 'has space'], /--conversation must be/],
+    [['panels', 'conversation', '--conversation', ''], /--conversation requires a value/],
+    [['panels', 'conversation', '--hook', '--conversation', 'abc'], /--hook reads the conversation from the hook's stdin/],
+    [['panels', 'conversation', '--hook', '--panel', 'panel-1'], /--hook reads the conversation from the hook's stdin/],
+    [['panels', 'submit', '--panel', 'p', '--text', 'x', '--hook', '--yes'], /--hook is only valid with runpane panels conversation/],
+    [['panels', 'submit', '--panel', 'p', '--text', 'x', '--conversation', 'abc', '--yes'], /--conversation is only valid with runpane panels conversation/],
+  ];
+  for (const [args, pattern] of parseErrors) {
+    assert.throws(() => parseRunpaneArgs(args), pattern, args.join(' '));
+  }
+  const pythonErrors = JSON.parse(runPythonSnippet(`
+import json
+import sys
+from runpane.cli import parse_args
+
+errors = []
+for args in json.loads(sys.stdin.read()):
+    try:
+        parse_args(args)
+        errors.append(None)
+    except Exception as error:
+        errors.append(str(error))
+print(json.dumps(errors))
+`, JSON.stringify(parseErrors.map(([args]) => args))));
+  parseErrors.forEach(([args, pattern], index) => {
+    assert.ok(pythonErrors[index] && pattern.test(pythonErrors[index]), `python ${args.join(' ')}: ${pythonErrors[index]}`);
+  });
+  const nodeError = (() => { try { parseRunpaneArgs(parseErrors[0][0]); } catch (error) { return error.message; } return null; })();
+  assert.strictEqual(pythonErrors[0], nodeError, 'both CLIs word the missing --conversation error the same');
+
+  // Identity: the same rule as runpane report.
+  const identity = async (args, env) => {
+    const originalInvoke = daemonClient.invokeDaemon;
+    const originalLog = console.log;
+    let request;
+    daemonClient.invokeDaemon = async (_channel, callArgs) => {
+      request = callArgs[0];
+      return result;
+    };
+    console.log = () => {};
+    try {
+      await localControl.runPanelsConversation(parseRunpaneArgs(['panels', 'conversation', '--conversation', 'abc', ...args]), env);
+    } finally {
+      daemonClient.invokeDaemon = originalInvoke;
+      console.log = originalLog;
+    }
+    return JSON.parse(JSON.stringify({ paneId: request.paneId, panelId: request.panelId }));
+  };
+  assert.deepStrictEqual(await identity([], { PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1' }), { paneId: 'session-1', panelId: 'panel-1' });
+  assert.deepStrictEqual(await identity(['--panel', 'panel-9'], { PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1' }), { panelId: 'panel-9' });
+  assert.deepStrictEqual(await identity(['--pane', 'session-2', '--panel', 'panel-9'], {}), { paneId: 'session-2', panelId: 'panel-9' });
+  await assert.rejects(identity([], {}), /cannot tell which panel/);
+  await assert.rejects(identity(['--pane', 'session-2'], { PANE_PANEL_ID: 'panel-1' }), /--pane also needs --panel/);
+  const pythonIdentity = JSON.parse(runPythonSnippet(`
+import json
+from runpane.cli import parse_args
+from runpane.local_control import resolve_conversation_identity
+
+def identity(args, env):
+    try:
+        return resolve_conversation_identity(parse_args(["panels", "conversation", "--conversation", "abc", *args]), env)
+    except Exception as error:
+        return {"error": str(error)}
+
+print(json.dumps([
+    identity([], {"PANE_SESSION_ID": "session-1", "PANE_PANEL_ID": "panel-1"}),
+    identity(["--panel", "panel-9"], {"PANE_SESSION_ID": "session-1", "PANE_PANEL_ID": "panel-1"}),
+    identity(["--pane", "session-2", "--panel", "panel-9"], {}),
+    identity([], {}),
+    identity(["--pane", "session-2"], {"PANE_PANEL_ID": "panel-1"}),
+]))
+`));
+  assert.deepStrictEqual(pythonIdentity.slice(0, 3), [
+    { paneId: 'session-1', panelId: 'panel-1' },
+    { panelId: 'panel-9' },
+    { paneId: 'session-2', panelId: 'panel-9' },
+  ]);
+  assert.match(pythonIdentity[3].error, /cannot tell which panel/);
+  assert.match(pythonIdentity[4].error, /--pane also needs --panel/);
+
+  const hookInput = (fields) => JSON.stringify({ hook_event_name: 'SessionStart', cwd: '/repo', transcript_path: '/t.jsonl', ...fields });
+  const paneEnv = { PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1' };
+  for (const runtime of ['npm', 'pip']) {
+    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-conversation-${runtime}-`));
+    try {
+      // Explicit report: the request, the human line, and --json.
+      let requests = [];
+      const answer = (response) => (frame) => { requests.push({ channel: frame.channel, request: frame.args[0] }); return response; };
+      let run = await withFakeDaemon(paneDir, answer({ result }),
+        () => runCliOnce(runtime, ['panels', 'conversation', '--conversation', result.conversationId, '--source', 'resume', '--pane', 'session-1', '--panel', 'panel-1'], paneDir));
+      assert.strictEqual(run.code, 0, `${runtime} explicit report exits 0. stderr=${run.stderr}`);
+      assert.strictEqual(lf(run.stdout), `Recorded conversation ${result.conversationId} for panel panel-1.\n`, `${runtime} human line`);
+      assert.deepStrictEqual(requests, [{ channel: 'runpane:panels:conversation', request: { panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'resume' } }]);
+      run = await withFakeDaemon(paneDir, answer({ result: { ...result, generation: 9 } }),
+        () => runCliOnce(runtime, ['panels', 'conversation', '--conversation', result.conversationId, '--json'], paneDir, 20_000, paneEnv));
+      assert.strictEqual(run.code, 0, `${runtime} --json exits 0. stderr=${run.stderr}`);
+      assert.deepStrictEqual(JSON.parse(run.stdout), { ...result, generation: 9 }, `${runtime} --json prints the daemon result`);
+      assert.deepStrictEqual(requests[1].request, { panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId });
+      run = await withFakeDaemon(paneDir, () => ({ error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'Unknown channel runpane:panels:conversation' } }),
+        () => runCliOnce(runtime, ['panels', 'conversation', '--conversation', 'abc', '--panel', 'panel-1'], paneDir));
+      assert.strictEqual(run.code, 1, `${runtime} explicit report fails loudly on an older daemon`);
+      assert.match(run.stderr, /Unknown channel/);
+
+      // --hook: silent and exit 0 whatever happens.
+      const hook = async (label, { env = paneEnv, input, respond = () => ({ result }), daemon = true }) => {
+        requests = [];
+        const call = () => runCliOnce(runtime, ['panels', 'conversation', '--hook'], paneDir, 20_000, env, input);
+        const hookRun = daemon ? await withFakeDaemon(paneDir, (frame) => { requests.push({ channel: frame.channel, request: frame.args[0] }); return respond(frame); }, call) : await call();
+        assert.strictEqual(hookRun.code, 0, `${runtime} --hook ${label} exits 0`);
+        assert.strictEqual(hookRun.stdout, '', `${runtime} --hook ${label} prints nothing on stdout`);
+        assert.strictEqual(hookRun.stderr, '', `${runtime} --hook ${label} prints nothing on stderr`);
+        return requests.map((item) => item.request);
+      };
+      assert.deepStrictEqual(await hook('reports', { input: hookInput({ session_id: result.conversationId, source: 'resume' }) }),
+        [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'resume' }]);
+      assert.deepStrictEqual(await hook('drops an unknown source', { env: { PANE_PANEL_ID: 'panel-1' }, input: hookInput({ session_id: 'abc', source: 'later' }) }),
+        [{ panelId: 'panel-1', conversationId: 'abc' }]);
+      assert.deepStrictEqual(await hook('outside Pane', { env: {}, input: hookInput({ session_id: 'abc', source: 'startup' }) }), []);
+      assert.deepStrictEqual(await hook('bad JSON', { input: '{not json' }), []);
+      assert.deepStrictEqual(await hook('no session_id', { input: hookInput({ source: 'startup' }) }), []);
+      assert.deepStrictEqual(await hook('a bad session_id', { input: hookInput({ session_id: 'a b\n' }) }), []);
+      assert.deepStrictEqual(await hook('another event', { input: hookInput({ hook_event_name: 'Stop', session_id: 'abc' }) }), []);
+      assert.deepStrictEqual(await hook('empty stdin', { input: '' }), []);
+      assert.deepStrictEqual(await hook('stdin over 64 KiB', { input: hookInput({ session_id: 'abc', padding: 'x'.repeat(70 * 1024) }) }), []);
+      assert.deepStrictEqual((await hook('an older daemon', {
+        input: hookInput({ session_id: 'abc' }),
+        respond: () => ({ error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'Unknown channel runpane:panels:conversation' } }),
+      })).length, 1);
+      assert.deepStrictEqual((await hook('a daemon that hangs up', { input: hookInput({ session_id: 'abc' }), respond: () => ({ destroy: true }) })).length, 1);
+      assert.deepStrictEqual((await hook('an unreadable result', { input: hookInput({ session_id: 'abc' }), respond: () => ({ result: { nope: true } }) })).length, 1);
+      await hook('Pane not running', { input: hookInput({ session_id: 'abc' }), daemon: false });
+      const extra = await runCliOnce(runtime, ['panels', 'conversation', '--hook', '--bogus'], paneDir, 20_000, paneEnv, hookInput({ session_id: 'abc' }));
+      assert.deepStrictEqual([extra.code, extra.stdout, extra.stderr], [0, '', ''], `${runtime} --hook with an unknown flag stays silent`);
+
+      // Bounded: stdin that never closes, and a daemon that never answers, both end well inside the hook's 5 s.
+      const held = await runCliHoldingStdin(runtime, ['panels', 'conversation', '--hook'], paneDir, paneEnv, 8_000);
+      assert.deepStrictEqual([held.code, held.stdout, held.stderr], [0, '', ''], `${runtime} --hook with open stdin stays silent`);
+      assert.ok(held.elapsedMs < 4_500, `${runtime} --hook stops reading stdin after 2 s (took ${held.elapsedMs} ms)`);
+      const started = Date.now();
+      const slow = await hook('a daemon that never answers', { input: hookInput({ session_id: 'abc' }), respond: () => ({ result, delayMs: 30_000 }) });
+      assert.strictEqual(slow.length, 1);
+      assert.ok(Date.now() - started < 4_800, `${runtime} --hook gives up on a slow daemon (took ${Date.now() - started} ms)`);
+    } finally {
+      fs.rmSync(paneDir, { recursive: true, force: true });
+    }
+  }
+}
+
 function spawnWatchCli(runtime, args, paneDir) {
   return runtime === 'npm'
     ? childProcess.spawnSync(process.execPath, [npmCli, ...args, '--pane-dir', paneDir], { encoding: 'utf8', timeout: 5000, env: { ...process.env, PANE_DIR: paneDir, RUNPANE_TELEMETRY_DISABLED: '1' } })
@@ -1206,7 +1413,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false, closed: false,
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
-  answerApprove: false, answerDeny: false,
+  answerApprove: false, answerDeny: false, hook: false,
 };
 
 function normalizeParsedArgs(value) {
@@ -2927,12 +3134,17 @@ async function checkChatTabCreateParity() {
   const cases = [
     ['panels', 'create', '--pane', 'pane-1', '--chat', '--agent', 'codex', '--initial-input', 'Fix it', '--yes'],
     ['panels', 'create', '--pane', 'pane-1', '--agent-farm', 'greenfield/implementer:opus', '--arg', 'docs=grain', '--arg', 'task=a=b', '--title', 'Implementer', '--source', 'agent', '--yes'],
+    ['panels', 'create', '--pane', 'pane-1', '--agent', 'opencode', '--chat', '--yes'],
   ];
   const npm = [];
   for (const args of cases) npm.push(JSON.parse(JSON.stringify(await buildPanelCreateRequest(parseRunpaneArgs(args)))));
   assert.deepStrictEqual(npm[0], { paneId: 'pane-1', type: 'chat', chat: { agent: 'codex', initialInput: 'Fix it' } });
   assert.deepStrictEqual(npm[1], { paneId: 'pane-1', type: 'chat', chat: { profile: 'greenfield/implementer:opus', args: { docs: 'grain', task: 'a=b' }, title: 'Implementer' }, noFocus: true, source: 'agent' });
-  await assert.rejects(buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--chat', '--agent', 'cursor', '--yes'])), /--chat opens Claude or Codex/);
+  // With --chat any agent id goes to the host, which refuses one it cannot run; without --chat --agent names a terminal agent.
+  assert.deepStrictEqual(npm[2], { paneId: 'pane-1', type: 'chat', chat: { agent: 'opencode' } });
+  assert.throws(() => parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--agent', 'goose', '--yes']), /Invalid --agent "goose"/);
+  assert.throws(() => parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--chat', '--agent', 'Not An Id', '--yes']), /Invalid --agent "Not An Id"/);
+  await assert.rejects(buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--chat', '--yes'])), /--chat needs --agent <id> or --agent-farm <profile>/);
   await assert.rejects(buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--agent', 'claude', '--arg', 'a=b', '--yes'])), /--arg is a launch argument for --agent-farm/);
   const python = JSON.parse(runPythonSnippet(`
 import json
@@ -2940,7 +3152,7 @@ import runpane.local_control as local_control
 from runpane.cli import parse_args
 built = [local_control.build_panel_create_request(parse_args(args)) for args in ${JSON.stringify(cases)}]
 refused = []
-for args in (["panels", "create", "--pane", "p", "--chat", "--agent", "cursor", "--yes"], ["panels", "create", "--pane", "p", "--agent", "claude", "--arg", "a=b", "--yes"]):
+for args in (["panels", "create", "--pane", "p", "--chat", "--yes"], ["panels", "create", "--pane", "p", "--agent", "claude", "--arg", "a=b", "--yes"], ["panels", "create", "--pane", "p", "--agent", "goose", "--yes"]):
     try:
         local_control.build_panel_create_request(parse_args(args))
     except ValueError as error:
@@ -2948,8 +3160,9 @@ for args in (["panels", "create", "--pane", "p", "--chat", "--agent", "cursor", 
 print(json.dumps({"built": built, "refused": refused}))
 `));
   assert.deepStrictEqual(python.built, npm);
-  assert.match(python.refused[0], /--chat opens Claude or Codex/);
+  assert.match(python.refused[0], /--chat needs --agent <id> or --agent-farm <profile>/);
   assert.match(python.refused[1], /--arg is a launch argument for --agent-farm/);
+  assert.match(python.refused[2], /Invalid --agent goose/);
 }
 
 async function checkDeliveryParity() {
@@ -5337,15 +5550,15 @@ async function checkAgentTemplateParity() {
 
   const agents = [...RUNPANE_CONTRACT.enums.agents].sort();
   assert.deepStrictEqual(agents, ['claude', 'codex', 'cursor', 'opencode']);
+  const { agentTerminalCommand } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'agents.js'));
   for (const agent of RUNPANE_CONTRACT.enums.agents) {
-    const template = RUNPANE_CONTRACT.agentTemplates[agent];
-    assert.ok(template, `agentTemplates missing entry for ${agent}`);
-    assert.ok(template.title.trim().length > 0, `agentTemplates.${agent}.title is empty`);
-    assert.ok(template.command.trim().length > 0, `agentTemplates.${agent}.command is empty`);
-    assert.ok(template.description.trim().length > 0, `agentTemplates.${agent}.description is empty`);
+    const entry = RUNPANE_CONTRACT.agents.entries[agent];
+    assert.ok(entry, `agents.entries missing entry for ${agent}`);
+    assert.ok(entry.title.trim().length > 0, `agents.entries.${agent}.title is empty`);
+    assert.ok(entry.description.trim().length > 0, `agents.entries.${agent}.description is empty`);
   }
-  assert.strictEqual(RUNPANE_CONTRACT.agentTemplates.cursor.command, 'cursor-agent --force --trust');
-  assert.strictEqual(RUNPANE_CONTRACT.agentTemplates.opencode.command, 'opencode --auto');
+  assert.strictEqual(agentTerminalCommand('cursor'), 'cursor-agent --force --trust');
+  assert.strictEqual(agentTerminalCommand('opencode'), 'opencode --auto');
 
   const originalInvokeDaemon = daemonClient.invokeDaemon;
   const originalConsoleLog = console.log;
@@ -5918,9 +6131,22 @@ async function checkNotifyParity() {
     [{ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' }, 'Saved as stripe/STRIPE_SECRET_KEY'],
     [{ status: 'declined' }, 'Declined'],
     [{ waiting: true, id: 'n-1', next: 'Call `runpane notify --resume n-1` now.' }, 'Still waiting (id n-1). Call `runpane notify --resume n-1` now.'],
+    // A typed reply may be an answer or a question; the reader says which with --took.
+    [{ reply: 'Only if it can be undone', picks: ['Yes', 'One train'], id: 'n-1', replyId: 'r-1', next: 'Run `runpane notify --took r-1 answer` if this answers it.' },
+      'Reply r-1 on n-1: "Only if it can be undone" (picked: Yes · One train). Run `runpane notify --took r-1 answer` if this answers it.'],
+    // A partial pick keeps its question's place (D-294 replies carry their own id).
+    [{ reply: 'Only the train', picks: ['', 'One train'], id: 'n-1', replyId: 'r-2', next: 'Run `runpane notify --took r-2 answer` if this answers it.' },
+      'Reply r-2 on n-1: "Only the train" (picked: — · One train). Run `runpane notify --took r-2 answer` if this answers it.'],
+    [{ answer: 'Yes · One train', answers: ['Yes', 'One train'] }, 'Answer: Yes · One train'],
+    [{ took: 'question', id: 'n-1' }, 'Taken as a question (id n-1).'],
   ];
   const links = [{ label: 'Notes', path: 'docs/RELEASE.md' }, { label: 'PR #812', url: 'https://github.com/org/repo/pull/812' }];
   const notifyLinks = JSON.stringify(links);
+  const questions = [
+    { title: 'Release notes', choices: [{ label: 'Ship', recommended: true }, { label: 'Hold' }] },
+    { title: 'Intel build', choices: [{ label: 'Include' }, { label: 'Skip', detail: 'Ships a day sooner' }] },
+  ];
+  const notifyQuestions = JSON.stringify(questions);
   const frames = { npm: [], pip: [] };
   try {
     for (const runtime of ['npm', 'pip']) {
@@ -5953,6 +6179,28 @@ async function checkNotifyParity() {
         return { result: { approved: true } };
       }, () => runCliOnce(runtime, ['notify', '--resume', 'n-1', '--json'], paneDir, 20_000, outsidePane));
       assert.deepStrictEqual(JSON.parse(resumed.stdout), { approved: true });
+      // --took takes its id and then answer or question; --update needs asked and whatChanged.
+      const took = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { took: 'answer', id: 'n-1' } };
+      }, () => runCliOnce(runtime, ['notify', '--took', 'Q-20', 'answer'], paneDir, 20_000, outsidePane));
+      assert.strictEqual(took.stdout.trim(), 'Taken as the answer (id n-1).', `${runtime} notify --took: ${took.stderr}`);
+      await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { took: 'question', id: 'n-1' } };
+      }, () => runCliOnce(runtime, ['notify', '--took=Q-20', 'question', '--status', 'Checking the logs', '--json'], paneDir, 20_000, outsidePane));
+      const updated = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { answer: 'Turn it on' } };
+      }, () => runCliOnce(runtime, [
+        'notify', '--update', 'Q-20', '--asked', 'Can it be undone?', '--what-changed', 'Added: Settings turns it off',
+        '--context', 'It can be undone.', '--choices', '[{"label":"Turn it on","was":"Yes"},{"label":"Wait"}]', '--links', '[{"label":"Q-19","approval":"Q-19"}]', '--json',
+      ], paneDir, 20_000, insidePane));
+      assert.deepStrictEqual(JSON.parse(updated.stdout), { answer: 'Turn it on' }, `${runtime} notify --update: ${updated.stderr}`);
+      await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { answer: 'Ship · Skip', answers: ['Ship', 'Skip'] } };
+      }, () => runCliOnce(runtime, ['notify', '--ui', 'options', '--title', 'Ship 2.5?', '--questions', notifyQuestions, '--json'], paneDir, 20_000, outsidePane));
 
       // No Pane is listening: an unavailable result, not an error, so the agent asks in its terminal.
       const offline = await runCliOnce(runtime, [...ask, '--json'], paneDir, 20_000, insidePane);
@@ -5968,18 +6216,39 @@ async function checkNotifyParity() {
     returnAfterMs: 50000,
     caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
   };
-  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 3).fill('runpane:notify'));
+  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 7).fill('runpane:notify'));
   assert.deepStrictEqual(frames.npm[0].args, [question]);
-  assert.deepStrictEqual(frames.npm.at(-3).args, [{ ui: 'info', title: 'Notes are ready', links, caller: { cwd: rootDir } }]);
-  assert.deepStrictEqual(frames.npm.at(-2).args, [{
+  assert.deepStrictEqual(frames.npm.at(-7).args, [{ ui: 'info', title: 'Notes are ready', links, caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-6).args, [{
     ui: 'approve', title: 'Drop the table?', detail: 'DROP TABLE t;', detailLabel: 'Show the SQL', caller: { cwd: rootDir },
   }]);
-  assert.deepStrictEqual(frames.npm.at(-1).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-5).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-4).args, [{ took: 'Q-20', tookAs: 'answer', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-3).args, [{ took: 'Q-20', tookAs: 'question', status: 'Checking the logs', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.npm.at(-2).args, [{
+    update: 'Q-20', asked: 'Can it be undone?', whatChanged: 'Added: Settings turns it off', context: 'It can be undone.',
+    choices: [{ label: 'Turn it on', was: 'Yes' }, { label: 'Wait' }], links: [{ label: 'Q-19', approval: 'Q-19' }],
+    returnAfterMs: 50000, caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
+  }]);
+  assert.deepStrictEqual(frames.npm.at(-1).args, [{ ui: 'options', title: 'Ship 2.5?', questions, caller: { cwd: rootDir } }]);
+  const Ajv = require(require.resolve('ajv', { paths: [rootDir] }));
+  const ajv = new Ajv({ allErrors: true });
+  const { $schema: _metaSchema, ...contractDocument } = contract;
+  ajv.addSchema(contractDocument, 'contract');
+  for (const frame of frames.npm) {
+    const valid = ajv.compile({ $ref: 'contract#/jsonSchemas/notifyRequest' });
+    assert.ok(valid(frame.args[0]), `notify sends what notifyRequest promises: ${ajv.errorsText(valid.errors)}`);
+  }
+  for (const [result] of results) {
+    const valid = ajv.compile({ $ref: 'contract#/jsonSchemas/notifyResult' });
+    assert.ok(valid(result), `notifyResult covers ${JSON.stringify(result)}: ${ajv.errorsText(valid.errors)}`);
+  }
   assert.deepStrictEqual(frames.pip.map((frame) => frame.args), frames.npm.map((frame) => frame.args), 'Python and Node notify sent different requests');
 
   // Invalid input fails before any request, naming the field, the same way in both wrappers.
   const sevenLinks = JSON.stringify(Array.from({ length: 7 }, (_, index) => ({ label: `l${index}`, path: `f${index}.md` })));
   const tenChoices = JSON.stringify(Array.from({ length: 10 }, (_, index) => ({ label: `c${index}` })));
+  const twoQuestions = '[{"title":"A","choices":[{"label":"a"}]},{"title":"B","choices":[{"label":"b"}]}]';
   const invalid = [
     ['ui', ['--title', 'x'], 'ui is required: options, approve, ask, or info.'],
     ['ui', ['--ui', 'poll', '--title', 'x'], 'ui must be options, approve, ask, or info; got "poll".'],
@@ -6003,12 +6272,42 @@ async function checkNotifyParity() {
     ['resume', ['--resume', 'n-1', '--links', '[{"label":"Notes","path":"a.md"}]'], 'resume keeps waiting on an earlier question, so it takes no other fields; remove links.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '{"label":"Notes","path":"a.md"}'], undefined],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', sevenLinks], 'links takes up to 6 links; got 7.'],
-    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":"a.md","url":"https://example.com"}]'], 'links[0] has both "path" and "url"; give one.'],
-    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes"}]'], 'links[0] needs one of "path" (a file) or "url" (a web page).'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":"a.md","url":"https://example.com"}]'], 'links[0] has more than one of "path", "url" and "approval"; give one.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","approval":"Q-1","url":"https://example.com"}]'], 'links[0] has more than one of "path", "url" and "approval"; give one.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes"}]'], 'links[0] needs one of "path" (a file), "url" (a web page) or "approval" (another approval\'s id or Q-n).'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Q-1","approval":" "}]'], 'links[0] approval must be another approval\'s id or Q-n.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":" "}]'], 'links[0] path must be non-empty text.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"PR","url":"https://example.com"},{"label":"Files","url":"file:///etc/hosts"}]'], 'links[1] url must start with http:// or https://.'],
-    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"","url":"https://example.com"}]'], 'links[0] must be an object with a non-empty "label" and one of "path" or "url".'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"","url":"https://example.com"}]'], 'links[0] must be an object with a non-empty "label" and one of "path", "url" or "approval".'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', `[{"label":"${'x'.repeat(81)}","path":"a.md"}]`], 'links[0] label takes up to 80 characters; got 81.'],
+    ['questions', ['--ui', 'ask', '--title', 'x', '--questions', twoQuestions], 'questions is only for ui options; this call is ui ask.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a"}]', '--questions', twoQuestions], 'questions asks several questions in place of choices; give choices or questions, not both.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', '[{"title":"A","choices":[{"label":"a"}]}]'], 'questions takes 2 to 4 questions; got 1. For one question, use choices.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', JSON.stringify(Array(5).fill({ title: 'A', choices: [{ label: 'a' }] }))], 'questions takes 2 to 4 questions; got 5. For one question, use choices.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', '{"title":"A"}'], undefined],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', '[{"title":"A","choices":[{"label":"a"}]},{"title":""}]'], 'questions[1] must be an object with a non-empty "title" and "choices", a JSON array of 1 to 9 choices.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', '[{"title":"A","choices":[{"label":"a"}]},{"title":"B","choices":[]}]'], 'questions[1].choices takes 1 to 9 choices; got 0.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', `[{"title":"A","choices":[{"label":"a"}]},{"title":"B","choices":${tenChoices}}]`], 'questions[1].choices takes 1 to 9 choices; got 10.'],
+    ['questions', ['--ui', 'options', '--title', 'x', '--questions', '[{"title":"A","choices":[{"label":"a"}]},{"title":"B","choices":[{"label":"b"},{"label":"b"}]}]'], 'questions[1].choices[1] repeats the label "b"; each choice needs its own label.'],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a","was":"b"}]'], 'choices[0] has "was", the old label of a reworded choice, which only --update takes.'],
+    ['took', ['--took', 'Q-20'], 'took needs answer or question after the id: answer if the reply answers the question, question if it asks one.'],
+    ['took', ['--took', 'Q-20', 'maybe'], 'took takes answer or question after the id; got "maybe".'],
+    ['took', ['--took', ' ', 'answer'], "took must be the approval's id or Q-n, such as --took Q-20 answer."],
+    ['took', ['--took', 'Q-20', 'answer', '--ui', 'ask', '--title', 'x'], 'took records how a reply was taken, so it takes no other fields; remove ui, title.'],
+    ['took', ['--took', 'Q-20', 'answer', '--update', 'Q-20'], 'took records how a reply was taken, so it takes no other fields; remove update.'],
+    ['tookAs', ['--took-as', 'answer'], 'tookAs goes with took: --took <id|Q-n> answer|question.'],
+    ['status', ['--took', 'Q-20', 'answer', '--status', 'Checking'], 'status says what you are doing about a question, so it goes with --took <id> question.'],
+    ['status', ['--took', 'Q-20', 'question', '--status', ' '], 'status must be non-empty text, such as "Checking the logs".'],
+    ['status', ['--ui', 'ask', '--title', 'x', '--status', 'Checking'], 'status goes with --took <id|Q-n> question.'],
+    ['update', ['--update', 'Q-20', '--ui', 'ask', '--asked', 'Why?', '--what-changed', 'x'], "update changes only title, context, choices, questions and links, and keeps the approval's ui; remove ui."],
+    ['update', ['--update', 'Q-20', '--detail', 'x', '--relays', 'in-1', '--asked', 'Why?', '--what-changed', 'x'], "update changes only title, context, choices, questions and links, and keeps the approval's ui; remove detail, relays."],
+    ['update', ['--update', ' ', '--asked', 'Why?', '--what-changed', 'x'], "update must be the approval's id or Q-n, such as --update Q-20."],
+    ['asked', ['--update', 'Q-20', '--what-changed', 'x'], "asked is required with update: the person's question, as they typed it."],
+    ['whatChanged', ['--update', 'Q-20', '--asked', 'Why?'], 'whatChanged is required with update: one line per change, such as "Added: it can be undone from Settings".'],
+    ['asked', ['--ui', 'ask', '--title', 'x', '--asked', 'Why?'], 'asked goes with --update <id|Q-n>, which saves a new version of an approval.'],
+    ['title', ['--update', 'Q-20', '--asked', 'Why?', '--what-changed', 'x', '--title', ' '], 'title must be non-empty text; leave it out to keep the current one.'],
+    ['questions', ['--update', 'Q-20', '--asked', 'Why?', '--what-changed', 'x', '--choices', '[{"label":"a"}]', '--questions', twoQuestions], 'questions asks several questions in place of choices; give choices or questions, not both.'],
+    ['resume', ['--resume', 'n-1', '--took', 'Q-20', 'answer'], 'resume keeps waiting on an earlier question, so it takes no other fields; remove took, tookAs.'],
   ];
   const { main } = require(npmCli);
   const nodeFailures = [];
@@ -6363,6 +6662,9 @@ async function checkAutopilotParity() {
     ['autopilot', 'close', 'n-1', '--because', 'D-1'],
     ['autopilot', 'answer', 'n-1', '--reason', 'Old'],
     ['notify', '--approve'],
+    ['panes', 'list', '--took', 'Q-20', 'answer'],
+    ['inbox', '--update', 'Q-20'],
+    ['notify', '--took', 'Q-20', 'answer', '--took-as', 'question'],
   ];
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
   const nodeErrors = invalid.map((args) => { try { parseRunpaneArgs(args); return 'accepted'; } catch (error) { return error.message; } });
@@ -6393,6 +6695,9 @@ print(json.dumps(errors))
     '--because is only valid with runpane autopilot answer.',
     '--reason is only valid with runpane secrets request or runpane autopilot close.',
     '--approve is only valid with runpane autopilot answer.',
+    '--took is only valid with runpane notify.',
+    '--update is only valid with runpane notify.',
+    'Say answer or question once: after --took <id|Q-n>, or as --took-as.',
   ]);
   // Every fixture above is what the published, closed schemas promise.
   for (const [name, value] of [
@@ -6405,6 +6710,10 @@ print(json.dumps(errors))
     ['autopilotCloseRequest', { id: 'n-1', reason: 'Old' }],
     ['autopilotRewriteRequest', { id: 'n-1', ui: 'ask', title: 'Which?', suggestions: ['main'] }],
     ['notifyRequest', { relays: 'in-1', aboutSession: 'Release', ui: 'ask', title: 'Which?', caller: {} }],
+    ['notifyRequest', { took: 'Q-20', tookAs: 'question', status: 'Checking', caller: {} }],
+    ['notifyRequest', { update: 'Q-20', asked: 'Why?', whatChanged: 'Added a choice', choices: [{ label: 'Wait', was: 'Hold' }], caller: {} }],
+    ['notifyResult', { took: 'answer', id: 'n-1', next: 'Done.' }],
+    ['notifyResult', { reply: 'Why?', id: 'n-1', replyId: 'r-1', next: 'Run --took.' }],
     ['inboxListResult', { ok: true, session: { id: 's-1', name: 'Release' }, items: [], answers: [{ id: 'n-7', title: 'Q', answer: 'Yes', by: 'you', worker: 'W', answeredAt: 'now', delivered: 'tab', decision: 'D-1' }] }],
     ['autopilotWaitingResult', { ok: true, items: [{ ...waitingItem('n-1', { quiet: true, stale: true, connected: { kind: 'session', id: 's-1', name: 'Release', paneId: 'p-1' } }) }], offline: ['A'], cantSee: ['B'] }],
   ]) {
@@ -6469,6 +6778,7 @@ async function runChecks() {
   await checkPanelsCloseParity();
   await checkArchiveClosedAndCallerPanel();
   await checkReportDeliveryLine();
+  await checkPanelsConversation();
   await checkNotifyParity();
   await checkAutopilotParity();
   await checkPaneCreateBlockedReadiness();

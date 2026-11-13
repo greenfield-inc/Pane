@@ -6,6 +6,7 @@ import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 import {
   answeredItems,
   approvalItems,
+  approvalLinkTarget,
   approvalKindLabel,
   approvalListOrder,
   approvalOrder,
@@ -16,7 +17,9 @@ import {
   connectedLink,
   groupApprovals,
   isStale,
+  isWithAgent,
   itemEntry,
+  linkIcon,
   machineOfflineLine,
   nextApproval,
   NO_PROJECT,
@@ -30,7 +33,11 @@ import {
   resolveSelection,
   sessionKey,
   sessionsByPane,
+  questionSubtitle,
+  startOfDay,
   staleItems,
+  summaryItemId,
+  summaryLoadAllowed,
   waitingCounts,
   type ApprovalSort,
 } from './approvals';
@@ -319,18 +326,26 @@ describe('stale items (D-147)', () => {
   });
 });
 
-describe('the Answered group', () => {
-  const now = 100 * 60 * 60 * 1000;
+describe('the Done today group', () => {
+  // 15:00 local, so a few hours back is still today wherever the tests run.
+  const now = new Date(2026, 10, 11, 15).getTime();
   const hoursAgo = (hours: number) => now - hours * 60 * 60 * 1000;
   const answered = item('answered', 1, { state: 'answered', resolvedAt: hoursAgo(2) });
   const closed = item('closed', 2, { state: 'expired', resolvedAt: hoursAgo(1), closed: { by: 'autopilot', reason: 'stale', at: hoursAgo(1) } });
   const old = item('old', 3, { state: 'answered', resolvedAt: hoursAgo(25) });
   const state = at(answered, closed, old, item('open', 4), item('fyi', 5, { state: 'info' }));
 
-  it('lists the last 24 hours\' answered and closed items, newest first', () => {
+  it('lists today\'s answered and closed items, newest first', () => {
     expect(answeredItems(state, now).map(entry => entry.id)).toEqual(['closed', 'answered']);
     expect(approvalListOrder(state, 'answered', now, 'recent')).toEqual(['closed', 'answered']);
     expect(answeredItems(undefined, now)).toEqual([]);
+  });
+
+  it('starts at local midnight, not 24 hours back', () => {
+    const lateLastNight = item('late', 6, { state: 'answered', resolvedAt: new Date(2026, 10, 10, 23, 30).getTime() });
+    const earlyToday = item('early', 7, { state: 'expired', resolvedAt: new Date(2026, 10, 11, 0, 5).getTime() });
+    expect(answeredItems(at(lateLastNight, earlyToday), now).map(entry => entry.id)).toEqual(['early']);
+    expect(startOfDay(now)).toBe(new Date(2026, 10, 11).getTime());
   });
 
   it('sorts by when each was answered, asked earlier or not, and groups the same way', () => {
@@ -349,6 +364,7 @@ describe('the Answered group', () => {
   it('reads a route\'s list, and anything else as Waiting', () => {
     expect(parseApprovalList('stale')).toBe('stale');
     expect(parseApprovalList('answered')).toBe('answered');
+    expect(parseApprovalList('agent')).toBe('agent');
     expect(parseApprovalList(undefined)).toBe('waiting');
     expect(parseApprovalList('nonsense')).toBe('waiting');
   });
@@ -420,5 +436,87 @@ describe('what an opened item is connected to (J32)', () => {
     expect(connectedLink(item('o', 1, { source: { ...source, paneId: 'p3' } }), 'Mac mini')).toMatchObject({ kind: 'pane', text: 'Pane · api-fix · Mac mini', target: { kind: 'pane', paneId: 'p3' } });
     expect(connectedLink(item('o', 1, { source: { ...source, autopilot: true } }), 'Mac mini').kind).toBe('autopilot');
     expect(connectedLink(item('o', 1, { source }), 'Mac mini')).toEqual({ kind: 'machine', text: 'Mac mini', target: null });
+  });
+});
+
+describe('a link to another approval', () => {
+  const now = 10 * 24 * 60 * 60 * 1000;
+  const answered = item('answered-q', now - 60_000, { state: 'answered', resolvedAt: now - 30_000 });
+  const old = item('old-q', 1_000, { state: 'answered', resolvedAt: 2_000 });
+  const links = at(loose, answered, old);
+
+  it('opens the item it names in the list that holds it, so Next steps through that list', () => {
+    expect(approvalLinkTarget(links, 'loose', now)).toEqual({ id: 'loose', list: 'waiting' });
+    expect(approvalLinkTarget(links, 'answered-q', now)).toEqual({ id: 'answered-q', list: 'answered' });
+  });
+
+  it('finds nothing for a Q-n or an item past a day, so the card says to open it on the computer', () => {
+    expect(approvalLinkTarget(links, 'Q-20', now)).toBeNull();
+    expect(approvalLinkTarget(links, 'old-q', now)).toBeNull();
+  });
+
+  it('gives each kind of link its own icon', () => {
+    expect(linkIcon({ label: 'Q-19', approval: 'Q-19' }).ios).toBe('checkmark.circle');
+    expect(linkIcon({ label: 'Build', url: 'http://localhost:5173/' }).ios).toBe('globe');
+    expect(linkIcon({ label: 'plan.md', path: '/repo/plan.md' }).ios).toBe('doc.text');
+  });
+});
+
+describe('Waiting on you and With the agent (P7)', () => {
+  const reply = (state: 'reading' | 'question' | 'unread', at = 5_000): NotifyItem['reply'] => ({ id: `r-${state}`, text: 'Why?', at, state, reader: { kind: 'asker', name: 'okta-sso-account' } });
+  const plain = item('plain', 1_000);
+  const reading = item('reading', 2_000, { ui: 'options', reply: reply('reading') });
+  const asking = item('asking', 3_000, { ui: 'options', reply: reply('question') });
+  const unread = item('unread', 4_000, { ui: 'options', reply: reply('unread') });
+  const ready = item('ready', 5_000, { ui: 'options', readyAgain: 6_000, version: 2 });
+  const state = at(plain, reading, asking, unread, ready, item('held', 7_000, { state: 'sent' }));
+
+  it('moves an approval to With the agent while its reply is read or asked about, and back once it is ready again', () => {
+    expect([plain, reading, asking, unread, ready].map(isWithAgent)).toEqual([false, true, true, false, false]);
+    expect(approvalListOrder(state, 'waiting', 0, 'recent')).toEqual(['held', 'ready', 'unread', 'plain']);
+    expect(approvalListOrder(state, 'agent', 0, 'recent')).toEqual(['asking', 'reading']);
+    // Answering from the approval screen steps through Waiting on you only.
+    expect(approvalOrder(state, 'recent')).toEqual(['held', 'ready', 'unread', 'plain']);
+  });
+
+  it('leaves the counts while the agent has it, and marks its entry', () => {
+    const entries = approvalItems(state).map(entry => itemEntry(entry, 'mac'));
+    expect(entries.filter(entry => entry.withAgent).map(entry => entry.item.id)).toEqual(['reading', 'asking']);
+    expect(waitingCounts(entries).total).toBe(3);
+    expect(itemEntry(reading, 'mac')).toMatchObject({ waiting: false, withAgent: true });
+    expect(itemEntry(plain, 'mac').withAgent).toBeUndefined();
+  });
+
+  it('keeps each list\'s sort: By project groups With the agent the same way', () => {
+    const inProject = (id: string, createdAt: number, project: string) => item(id, createdAt, { ui: 'options', reply: reply('reading'), source: { name: 'x', agent: 'Claude', project } });
+    const agentState = at(inProject('a', 1, 'Pane'), inProject('b', 2, 'Doozy'), inProject('c', 3, 'Pane'));
+    expect(approvalListOrder(agentState, 'agent', 0, 'project')).toEqual(['c', 'a', 'b']);
+  });
+
+  it('opens a linked approval in whichever list holds it', () => {
+    expect(approvalLinkTarget(state, 'reading', 0)).toEqual({ id: 'reading', list: 'agent' });
+    expect(approvalLinkTarget(state, 'plain', 0)).toEqual({ id: 'plain', list: 'waiting' });
+  });
+});
+
+describe('the subtitle and the Summary (P4)', () => {
+  it('shows the card\'s context as a row\'s subtitle, and nothing for a blank one', () => {
+    expect(questionSubtitle(item('a', 1, { context: '  Okta signs people out of every app at once.  ' }))).toBe('Okta signs people out of every app at once.');
+    expect(questionSubtitle(item('b', 1, { context: '   ' }))).toBeUndefined();
+    expect(questionSubtitle(item('c', 1))).toBeUndefined();
+  });
+
+  it('asks this machine for the Summary of its own approvals only', () => {
+    expect(summaryItemId(item('q1', 1))).toBe('q1');
+    expect(summaryItemId(item('q1', 1, { machineId: 'local' }))).toBe('q1');
+    expect(summaryItemId(item('studio:q1', 1, { machineId: 'studio' }))).toBeNull();
+  });
+
+  it('loads only the page it was handed, never a link', () => {
+    expect(summaryLoadAllowed('about:blank')).toBe(true);
+    expect(summaryLoadAllowed('https://example.com/')).toBe(false);
+    expect(summaryLoadAllowed('file:///etc/hosts')).toBe(false);
+    expect(summaryLoadAllowed('pane://open?pane=1')).toBe(false);
+    expect(summaryLoadAllowed('about:blank#top')).toBe(false);
   });
 });

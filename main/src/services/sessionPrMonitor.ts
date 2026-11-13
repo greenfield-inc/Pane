@@ -224,8 +224,13 @@ export class SessionPrMonitor {
     if (previousHead && previousHead !== pr.headRefOid) events.push(event('pr.head', 'The PR head changed. Recheck this commit and register its SHA before accepting success.'));
     // Baselines written before base tracking have no base; their first read records it silently.
     const previousBase = previous?.base;
+    // GitHub reports only the new base name, not why it changed, so the reason covers a stack
+    // merging bottom-up (no rebase) and any other retarget (rebase).
     if (previousBase !== undefined && previousBase !== pr.baseRefName) events.push({
-      ...event('pr.base_changed', `The base changed from ${previousBase} to ${pr.baseRefName}. Rebase onto ${pr.baseRefName}, resolve conflicts, and recheck CI.`),
+      ...event('pr.base_changed', `The base changed from ${previousBase} to ${pr.baseRefName}. If the PR for ${previousBase} merged into ${pr.baseRefName} `
+        + `with a merge commit (a stack merging bottom-up), the retarget is done: confirm the diff shows only this PR's commits and recheck `
+        + `required checks (gh pr checks ${pr.number} --required); do not rebase or push. Otherwise rebase onto ${pr.baseRefName}, `
+        + 'resolve conflicts, and recheck CI.'),
       base: { from: previousBase, to: pr.baseRefName },
     });
     if (previousBase !== undefined && !pr.baseRefExists && (previous?.baseExists !== false || previousBase !== pr.baseRefName)) events.push({

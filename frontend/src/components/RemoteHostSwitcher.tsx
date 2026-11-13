@@ -1,7 +1,8 @@
-import type { ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { Plus, Radio, Settings } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
+import { MachineMarkEditor } from './machines/MachineMarkEditor';
 import { showActionError } from '../stores/errorStore';
 import type { MachineEntry } from '../utils/machineList';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
@@ -29,6 +30,13 @@ function unpickable(machine: MachineEntry): boolean {
   return machine.action === 'none' && !machine.active;
 }
 
+/** A digit typed into a field, or anywhere in a dialog such as a machine's mark editor, is not a machine pick. */
+function typingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable
+    || target.closest('[role="dialog"]') !== null;
+}
+
 /** Picks which machine runs agents: this computer, a saved host, or any machine on Tailscale. */
 export function RemoteHostSwitcher({
   trigger,
@@ -54,8 +62,10 @@ export function RemoteHostSwitcher({
     id: machine.id,
     label: <span className="font-medium">{machine.name}</span>,
     description: machine.subtitle,
-    // A disabled row is dimmed as a whole, so its mark stays solid inside it.
-    leading: <MachineMark os={machine.os} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
+    // A disabled row dims its mark and name, so the mark stays solid inside it.
+    leading: <MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
+    // Its letters and colour can change on this computer, whether or not it can be picked now.
+    trailing: <MachineMarkEditor machine={machine} />,
     disabled: switching || unpickable(machine),
     onClick: () => void pick(machine),
   }));
@@ -71,6 +81,30 @@ export function RemoteHostSwitcher({
   }
   const active = machines.find((machine) => machine.active);
 
+  // While the switcher is open, 0 picks All machines and 1 to 9 the machines
+  // in its order (P6), by choosing that row as a click would.
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (typingTarget(event.target)) return;
+      const digit = /^(?:Digit|Numpad)([0-9])$/.exec(event.code)?.[1];
+      if (digit === undefined) return;
+      const index = digit === '0' ? (allMachines ? 0 : -1) : (allMachines ? 0 : -1) + Number(digit);
+      const row = items[index];
+      if (!row || row.disabled) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const menu = document.querySelector('[role="menu"][aria-label="Agents run on"]');
+      const element = menu?.querySelector<HTMLElement>(`[data-dropdown-item-index="${index}"]`);
+      if (element) element.click();
+      else row.onClick?.();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [open, items, allMachines]);
+
   return (
     <Dropdown
       trigger={trigger}
@@ -82,7 +116,7 @@ export function RemoteHostSwitcher({
       width="auto"
       menuClassName="w-[300px]"
       menuLabel="Agents run on"
-      onOpenChange={onOpenChange}
+      onOpenChange={(next) => { setOpen(next); onOpenChange?.(next); }}
       itemClassName="py-1.5"
       footer={({ close }) => (
         <>

@@ -28,6 +28,11 @@ export interface DropdownItem {
   separatorBefore?: boolean;
   /** Overrides the menu's `closeOnSelect` for this item. */
   closeOnSelect?: boolean;
+  /**
+   * A control beside the item, such as an edit button, shown while the item is hovered or
+   * focused. It sits left of the selection mark and is reached by the arrow keys after its item.
+   */
+  trailing?: ReactNode;
 }
 
 export interface DropdownProps {
@@ -439,19 +444,23 @@ export function Dropdown({
                         'flex items-center gap-2',
                         'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle',
                         'min-h-[1.75rem] group relative',
-                        item.disabled && 'opacity-50 cursor-not-allowed',
+                        // The icon and label fade; a description (why it's disabled) stays readable.
+                        item.disabled && 'cursor-not-allowed',
                         !item.disabled && !isSelected && variantStyles[variant],
                         isSelected && selectedVariantStyles[variant],
-                        itemClassName
+                        itemClassName,
+                        item.trailing !== undefined && 'pr-14',
                       )}
                     >
-                      {item.leading ?? (Icon && (
-                        <div className="flex items-center justify-center w-4 h-4 flex-shrink-0">
+                      {item.leading ? (
+                        <div className={cn('flex flex-shrink-0 items-center', item.disabled && 'opacity-50')}>{item.leading}</div>
+                      ) : (Icon && (
+                        <div className={cn('flex items-center justify-center w-4 h-4 flex-shrink-0', item.disabled && 'opacity-50')}>
                           <Icon className={cn('w-3.5 h-3.5', 'stroke-[1.5]', item.iconColor || 'text-current')} />
                         </div>
                       ))}
                       <div className="flex-1 min-w-0">
-                        <div className={cn('text-[13px] leading-tight truncate', 'group-hover:text-inherit')}>{item.label}</div>
+                        <div className={cn('text-[13px] leading-tight truncate', 'group-hover:text-inherit', item.disabled && 'opacity-50')}>{item.label}</div>
                         {item.description && !item.descriptionInTooltip && (
                           <div className={cn('text-[11px] mt-0.5 leading-tight', isSelected ? 'text-text-secondary' : 'text-text-tertiary group-hover:text-text-secondary')}>{item.description}</div>
                         )}
@@ -477,7 +486,14 @@ export function Dropdown({
                       <div className="h-2" />
                     )}
 
-                    {item.description && item.descriptionInTooltip
+                    {item.trailing !== undefined ? (
+                      <div className="group/item relative">
+                        {menuButton}
+                        <div className="absolute inset-y-0 right-8 flex items-center opacity-0 focus-within:opacity-100 group-hover/item:opacity-100 group-has-[[data-dropdown-item-index]:focus]/item:opacity-100">
+                          {item.trailing}
+                        </div>
+                      </div>
+                    ) : item.description && item.descriptionInTooltip
                       ? <Tooltip content={item.description} side="right" delay={250}>{menuButton}</Tooltip>
                       : menuButton}
                   </React.Fragment>

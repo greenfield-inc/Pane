@@ -1,4 +1,5 @@
 import { preferredMachineColorSlot } from '../../../shared/utils/machineColor';
+import { machineLetter } from '../../../shared/utils/machineMarks';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { MachineCommand, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
 import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
@@ -20,6 +21,7 @@ export interface NewMachine {
   name: string;
   os: MachineOs | null;
   slot: number;
+  letters: string;
   status: MachineState['status'];
   /** The machine the app is on now. */
   current: boolean;
@@ -55,7 +57,7 @@ export function newMachines(states: readonly MachineState[], entries: readonly M
     const entry = entries.find((candidate) => candidate.id === state.id);
     const name = entry?.name ?? state.label;
     const current = state.id === currentId;
-    return { id: state.id, name, os: entry?.os ?? null, slot: entry?.slot ?? preferredMachineColorSlot(name), status: current ? 'online' : state.status, current };
+    return { id: state.id, name, os: entry?.os ?? null, slot: entry?.slot ?? preferredMachineColorSlot(name), letters: entry?.letters ?? machineLetter(name), status: current ? 'online' : state.status, current };
   });
 }
 

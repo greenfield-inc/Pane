@@ -1,11 +1,26 @@
 import type { AppConfig } from '../types/config';
+import {
+  buildInterceptionSets,
+  normalizeKeyboardShortcutOverrides,
+  resolveEffectiveChord,
+  type InterceptionSets,
+} from '../../../shared/utils/keyboardBindings';
+import {
+  bindingSteps,
+  chordFromElectronInput,
+  isModifierOnlyKey,
+  keyPlatformFor,
+  type KeyPlatform,
+} from '../../../shared/utils/keyboardChords';
 import { areKeyboardShortcutsEnabled, shouldForwardCommandPaletteShortcut } from './keyboardShortcuts';
 
 /**
  * Which keys pressed inside an embedded <webview> page are re-sent to Pane's
  * window. Webviews are separate processes, so their key events never reach
  * the renderer's hotkey listener; main intercepts them in before-input-event.
- * Only Pane's own shortcuts are taken, so pages keep Ctrl+R, Ctrl+A and the rest.
+ * Only Pane's own keys are taken, read from the command catalog and the
+ * person's overrides (`forwardFromWebview`), so pages keep Ctrl+R, Ctrl+A and
+ * the rest.
  */
 export interface WebviewKeyInput {
   key: string;
@@ -16,69 +31,159 @@ export interface WebviewKeyInput {
   alt: boolean;
 }
 
+type WebviewKeyConfig = Pick<
+  AppConfig,
+  'keyboardShortcutsEnabled' | 'commandPaletteShortcutEnabled' | 'keyboardShortcutOverrides' | 'terminalShortcuts' | 'customCommands'
+>;
+
 export interface WebviewKeyContext {
-  config: Pick<AppConfig, 'keyboardShortcutsEnabled' | 'commandPaletteShortcutEnabled'>;
+  config: WebviewKeyConfig;
   /** The guest belongs to a browser tab (not the Docs dialog). */
   isBrowserTab: boolean;
   /** That browser tab's Pane find bar is open. */
   findActive: boolean;
+  /** Defaults to this computer's platform. */
+  platform?: KeyPlatform;
 }
 
-// mod+key (no extra modifiers):
-const PANE_HOTKEYS: ReadonlySet<string> = new Set([
-  'b', ',', 'n', 'a', 'd', 'w', 't', '`',
-  // mod+1..9 switch session, mod+Tab/ArrowDown cycle next
-  '1', '2', '3', '4', '5', '6', '7', '8', '9',
-  'tab', 'arrowdown', 'arrowup',
-]);
-// mod+shift+key — matched by physical key code (Digit/Key) because
-// input.key reports the shifted symbol (e.g. '!' for Shift+1) which
-// varies by keyboard layout.
-const PANE_SHIFT_CODES: ReadonlySet<string> = new Set([
-  'KeyE', 'KeyN', 'KeyK', 'KeyP', 'KeyZ', 'KeyL', 'KeyR', 'KeyM', 'KeyU',
-  'KeyB', 'KeyW', 'KeyD',
-  'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
-  'Digit6', 'Digit7', 'Digit8', 'Digit9',
-  'Tab', // mod+shift+Tab cycles prev session
-]);
+/** How long a page's ⌘K waits for a second step that makes it Pane's two-step key. */
+export const WEBVIEW_SEQUENCE_TIMEOUT_MS = 2000;
+
+const setsByConfig = new WeakMap<WebviewKeyConfig, Map<KeyPlatform, InterceptionSets>>();
+
+function interceptionSetsFor(config: WebviewKeyConfig, platform: KeyPlatform): InterceptionSets {
+  let byPlatform = setsByConfig.get(config);
+  if (!byPlatform) {
+    byPlatform = new Map();
+    setsByConfig.set(config, byPlatform);
+  }
+  let sets = byPlatform.get(platform);
+  if (!sets) {
+    sets = buildInterceptionSets({
+      overrides: config.keyboardShortcutOverrides,
+      terminalShortcuts: config.terminalShortcuts,
+      customCommands: config.customCommands,
+      keyPlatform: platform,
+    });
+    byPlatform.set(platform, sets);
+  }
+  return sets;
+}
+
+const FIND_COMMANDS = ['find-in-tab', 'find-next', 'find-previous'] as const;
+
+/** Pane's Find keys in browser tabs: single-step keys, and two-step keys by first step. */
+interface FindKeys {
+  single: Set<string>;
+  sequences: Map<string, Set<string>>;
+}
+
+const findKeysByConfig = new WeakMap<WebviewKeyConfig, Map<KeyPlatform, FindKeys>>();
 
 /**
- * Pane's find (Cmd/Ctrl+F, Cmd/Ctrl+G, Shift+Cmd/Ctrl+G) wins over a page's
- * own Cmd+F in browser tabs: Electron has no built-in find bar, so leaving
- * the key to the page did nothing on most pages.
+ * Pane's Find keys (⌘F, ⌘G, ⇧⌘G by default, or the person's remaps, two-step
+ * ones included) win over a page's own in browser tabs: Electron has no
+ * built-in find bar, so leaving the key to the page did nothing on most pages.
  */
-function isFindKey(input: WebviewKeyInput): boolean {
-  if (input.alt) return false;
-  if (input.code === 'KeyG') return true;
-  return !input.shift && input.code === 'KeyF';
+function findKeysFor(config: WebviewKeyConfig, platform: KeyPlatform): FindKeys {
+  let byPlatform = findKeysByConfig.get(config);
+  if (!byPlatform) {
+    byPlatform = new Map();
+    findKeysByConfig.set(config, byPlatform);
+  }
+  let keys = byPlatform.get(platform);
+  if (!keys) {
+    const { overrides } = normalizeKeyboardShortcutOverrides(config.keyboardShortcutOverrides);
+    keys = { single: new Set(), sequences: new Map() };
+    for (const id of FIND_COMMANDS) {
+      const binding = resolveEffectiveChord(id, overrides, platform);
+      if (!binding) continue;
+      const [first, second] = bindingSteps(binding);
+      if (!second) {
+        keys.single.add(first);
+        continue;
+      }
+      const seconds = keys.sequences.get(first) ?? new Set<string>();
+      seconds.add(second);
+      keys.sequences.set(first, seconds);
+    }
+    byPlatform.set(platform, keys);
+  }
+  return keys;
 }
 
-export function shouldForwardWebviewKey(input: WebviewKeyInput, context: WebviewKeyContext): boolean {
+/**
+ * Skip AltGr: on Windows/Linux international layouts, AltGr reports
+ * control+alt without meta. Only a letter, digit or slash under Ctrl+Alt is a
+ * Pane key there; anything else is character input (@, €, \).
+ */
+function isAltGrInput(input: WebviewKeyInput): boolean {
+  if (!input.control || !input.alt || input.meta) return false;
+  if (/^(Key[A-Z]|Digit[0-9]|Slash|Arrow(Left|Right|Up|Down))$/.test(input.code)) return false;
+  // Ctrl+Alt+Shift+[ and ] are the machine keys off macOS; AltGr brackets come without Shift.
+  return !(input.shift && /^Bracket(Left|Right)$/.test(input.code));
+}
+
+/** Remembers a page's first step of a two-step key, per guest. */
+export interface WebviewSequenceState {
+  pending: { input: WebviewKeyInput; chord: string; at: number } | null;
+}
+
+export function createWebviewSequenceState(): WebviewSequenceState {
+  return { pending: null };
+}
+
+/**
+ * The keys to send to Pane's window for this press, in order: none (the page
+ * keeps it), the press itself, or, for the second step of a two-step key,
+ * the remembered first step and then this one. The page keeps a first step
+ * (⌘K is many sites' search), so ⌘K alone still works there.
+ */
+export function webviewKeysToForward(
+  input: WebviewKeyInput,
+  context: WebviewKeyContext,
+  sequence: WebviewSequenceState = createWebviewSequenceState(),
+  now: number = Date.now(),
+): WebviewKeyInput[] {
   const shortcutsOn = areKeyboardShortcutsEnabled(context.config);
 
   // Escape closes an open find bar even while the page has focus; otherwise
   // the page keeps it (dialogs, full-screen video).
   if (input.key === 'Escape' && !input.control && !input.meta && !input.alt) {
-    return shortcutsOn && context.isBrowserTab && context.findActive;
+    sequence.pending = null;
+    return shortcutsOn && context.isBrowserTab && context.findActive ? [input] : [];
+  }
+  if (isModifierOnlyKey(input.key)) return [];
+
+  const platform = context.platform ?? keyPlatformFor(process.platform);
+  if (!shortcutsOn) {
+    return shouldForwardCommandPaletteShortcut(context.config, input, platform) ? [input] : [];
   }
 
-  const mod = input.control || input.meta;
-  if (!mod) return false;
-  if (!shortcutsOn && !shouldForwardCommandPaletteShortcut(context.config, input)) return false;
+  if (isAltGrInput(input)) return [];
+  const chord = chordFromElectronInput(input, platform);
+  if (!chord) return [];
+  const sets = interceptionSetsFor(context.config, platform);
+  // Find is Pane's only in browser tabs; the Docs dialog keeps every Find key.
+  const find: FindKeys = context.isBrowserTab
+    ? findKeysFor(context.config, platform)
+    : { single: new Set(), sequences: new Map() };
 
-  if (isFindKey(input)) return shortcutsOn && context.isBrowserTab;
+  const pending = sequence.pending;
+  sequence.pending = null;
+  if (pending && now - pending.at <= WEBVIEW_SEQUENCE_TIMEOUT_MS
+    && (sets.webviewSequences.get(pending.chord)?.has(chord) || find.sequences.get(pending.chord)?.has(chord))) {
+    return [pending.input, input];
+  }
+  if (find.single.has(chord)) return [input];
+  if (sets.webviewSequences.has(chord) || find.sequences.has(chord)) {
+    sequence.pending = { input, chord, at: now };
+    return [];
+  }
+  return sets.webviewForward.has(chord) ? [input] : [];
+}
 
-  // Skip AltGr: on Windows/Linux international layouts, AltGr reports
-  // control+alt simultaneously. We detect this as control+alt without
-  // meta, and only forward when the physical key is a letter, digit,
-  // or slash (the patterns used by Pane's mod+alt shortcuts). This
-  // prevents blocking character input like @, €, or \ on those layouts.
-  const isAltGr = input.control && input.alt && !input.meta
-    && !/^(Key[A-Z]|Digit[0-9]|Slash)$/.test(input.code);
-
-  // mod+alt combos are forwarded (user-configurable terminal shortcuts
-  // use mod+alt+<key>), but AltGr character input is excluded above.
-  return (input.alt && !isAltGr)
-    || (input.shift && !input.alt && PANE_SHIFT_CODES.has(input.code))
-    || (!input.shift && !input.alt && PANE_HOTKEYS.has(input.key.toLowerCase()));
+/** Whether a press is forwarded on its own (no two-step state). */
+export function shouldForwardWebviewKey(input: WebviewKeyInput, context: WebviewKeyContext): boolean {
+  return webviewKeysToForward(input, context).length > 0;
 }

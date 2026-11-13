@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { moveTargets, moveToHostPrompt, sessionHostFor } from './moveSessionToHost';
+import { moveBlockedReason, moveTargets, moveToHostPrompt, sessionHostFor, sessionHostForMachine } from './moveSessionToHost';
 import type { TailnetMachine, TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 
@@ -50,6 +50,47 @@ describe('sessionHostFor', () => {
     const host = sessionHostFor(config('remote', [profile]));
     expect(host.kind).toBe('paired');
     expect(host.kind === 'paired' && host.reason).toMatch(/pairing code.*Tailscale/);
+  });
+});
+
+describe('sessionHostForMachine', () => {
+  const profile: RemoteDaemonConfig['client']['profiles'][number] = { id: 'mini', label: 'Mini', baseUrl: 'https://mini:8443', token: '', transport: 'http+sse' };
+  // The window shows this computer; All machines rows still name their own machine.
+  const config = (profiles: RemoteDaemonConfig['client']['profiles']): Pick<RemoteDaemonConfig, 'client'> =>
+    ({ client: { mode: 'local', activeProfileId: null, profiles } });
+
+  it('is this computer for a row on this computer, whichever host the window shows', () => {
+    expect(sessionHostForMachine(config([{ ...profile, tailnetMachine: 'tylers-mac-mini' }]), 'local')).toEqual({ kind: 'local' });
+  });
+
+  it('is the Tailscale machine of the row\'s saved profile, not the host on screen', () => {
+    expect(sessionHostForMachine(config([{ ...profile, tailnetMachine: 'tylers-mac-mini' }]), 'mini'))
+      .toEqual({ kind: 'tailnet', machine: 'tylers-mac-mini' });
+  });
+
+  it('cannot be placed for a machine paired with a code or no longer saved, and says why', () => {
+    const paired = sessionHostForMachine(config([profile]), 'mini');
+    expect(paired.kind === 'paired' && paired.reason).toMatch(/^Mini is connected with a pairing code/);
+    const gone = sessionHostForMachine(config([]), 'mini');
+    expect(gone.kind === 'paired' && gone.reason).toMatch(/no longer has this machine saved/);
+  });
+});
+
+describe('moveBlockedReason', () => {
+  it('lets a Session on a placed, connected host move', () => {
+    expect(moveBlockedReason({ kind: 'local' })).toBeNull();
+    expect(moveBlockedReason({ kind: 'tailnet', machine: 'build-box' }, { name: 'build-box', status: 'online' })).toBeNull();
+  });
+
+  it('says why a paired host cannot move a Session', () => {
+    expect(moveBlockedReason({ kind: 'paired', reason: 'Paired.' }, { name: 'mini', status: 'online' })).toBe('Paired.');
+  });
+
+  it('says a machine that is not connected cannot be asked, and how to get it back', () => {
+    expect(moveBlockedReason({ kind: 'tailnet', machine: 'travel-laptop' }, { name: 'travel-laptop', status: 'offline' }))
+      .toBe('travel-laptop is offline, so its Session\'s agent can\'t be asked to hand off. Use Retry on travel-laptop, then try again once it is back.');
+    expect(moveBlockedReason({ kind: 'tailnet', machine: 'build-box' }, { name: 'build-box', status: 'connecting' }))
+      .toMatch(/^build-box is still connecting/);
   });
 });
 

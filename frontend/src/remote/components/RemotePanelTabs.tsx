@@ -1,10 +1,12 @@
-import { ChevronDown, Globe, Plus, Sprout, TerminalSquare, MessageSquare } from 'lucide-react';
+import { ChevronDown, Globe, Plus, Sprout, TerminalSquare } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { RemotePwaCustomCommand } from '../../../../shared/types/remoteDaemon';
 import { pausedMarkOf, type ToolPanel } from '../../../../shared/types/panels';
 import { AGENT_LAUNCH_PRESETS } from '../../../../shared/constants/agentLaunchPresets';
-import { getCliBrandIcon } from '../../components/ui/brandIconRegistry';
+import { agentIcon, getCliBrandIcon } from '../../components/ui/brandIconRegistry';
+import type { ChatAgentEntry } from '../../../../shared/types/chatTab';
+import { menuChatAgents } from '../../../../shared/chatAgentMenu';
 import { getPanelIcon } from '../../components/panels/panelIcon';
 import { PanelTabStatusDot } from '../../components/panels/PanelTabStatusDot';
 import { PausedGlyph } from '../../components/ui/AgentStatusDot';
@@ -14,7 +16,6 @@ import { phoneShows } from '../stores/remoteSessionStore';
 // The remote host executes these commands. Until its platform capabilities are
 // exposed here, the viewer's browser platform must not hide valid host tools.
 const agentPresets = AGENT_LAUNCH_PRESETS;
-const CHAT_AGENTS = [{ id: 'claude', title: 'Claude' }, { id: 'codex', title: 'Codex' }] as const;
 
 export interface RemoteTerminalCreateOptions {
   title?: string;
@@ -29,8 +30,10 @@ interface RemotePanelTabsProps {
   onSelectPanel: (panelId: string) => void;
   onCreateTerminal: (options?: RemoteTerminalCreateOptions) => void;
   onCreateBrowser: () => void;
-  /** Set when the host offers chat tabs (D-15): Claude and Codex chats come first. */
-  onCreateChat?: (agent: 'claude' | 'codex') => void;
+  /** Set when the host offers chat tabs (D-15): its installed chat agents come first. */
+  onCreateChat?: (agent: string) => void;
+  /** The host's agent catalog (chat-tab:agents), for `onCreateChat`. */
+  chatAgents?: readonly ChatAgentEntry[];
   /** Set with `onCreateChat`: asks for an Agent Farm profile and opens a chat tab running it. */
   onCreateProfileChat?: () => void;
 }
@@ -44,9 +47,10 @@ export function RemotePanelTabs({
   onCreateTerminal,
   onCreateBrowser,
   onCreateChat,
+  chatAgents: catalog,
   onCreateProfileChat,
 }: RemotePanelTabsProps) {
-  const chatAgents = onCreateChat ? CHAT_AGENTS : [];
+  const chatAgents = onCreateChat ? menuChatAgents(catalog) : [];
   const offset = chatAgents.length + (onCreateProfileChat ? 1 : 0);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -191,9 +195,9 @@ export function RemotePanelTabs({
               <AddToolMenuItem
                 key={`chat-${agent.id}`}
                 buttonRef={(element) => { menuItemRefs.current[index] = element; }}
-                icon={getCliBrandIcon(agent.id, 'h-4 w-4') ?? <MessageSquare className="h-4 w-4" />}
-                title={agent.title}
-                description={`Chat with ${agent.title} on the remote host`}
+                icon={agentIcon(agent, 'h-4 w-4')}
+                title={agent.label}
+                description={`Chat with ${agent.label} on the remote host`}
                 onClick={() => { onCreateChat?.(agent.id); setShowAddMenu(false); }}
               />
             ))}

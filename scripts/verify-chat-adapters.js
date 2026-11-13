@@ -25,10 +25,9 @@ const os = require('os');
 const { spawn } = require('child_process');
 const asar = require('@electron/asar');
 
-const ADAPTERS = [
-  { packageName: '@agentclientprotocol/claude-agent-acp', env: 'CLAUDE_CODE_EXECUTABLE' },
-  { packageName: '@agentclientprotocol/codex-acp', env: 'CODEX_PATH' },
-];
+// Every bundled adapter the agents config names (contracts/runpane/contract.json `agents`).
+const ADAPTERS = Object.values(require('../contracts/runpane/contract.json').agents.entries)
+  .flatMap(agent => agent.chat?.adapter ? [{ packageName: agent.chat.adapter.package, env: agent.chat.adapter.executableEnv }] : []);
 const FORBIDDEN = [/\/node_modules\/@anthropic-ai\/claude-agent-sdk-[^/]+\//, /\/node_modules\/@openai\/codex-[^/]+\//];
 const INITIALIZE_TIMEOUT_MS = 30_000;
 // codex-acp starts `codex app-server` before it answers initialize. This stand-in

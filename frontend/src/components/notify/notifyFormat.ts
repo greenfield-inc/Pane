@@ -1,4 +1,4 @@
-import type { NotifyItem, NotifyUi } from '../../../../shared/types/notify';
+import type { NotifyAnswer, NotifyItem, NotifyUi } from '../../../../shared/types/notify';
 import { originLine } from '../../../../shared/approvalReceipts';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { THIS_COMPUTER } from '../../utils/machineList';
@@ -145,3 +145,20 @@ export function acceleratorFromKeys(chord: KeyChord, mac: boolean): string | nul
   return [...modifiers, key].join('+');
 }
 
+
+/**
+ * What a card sends (the reply contract, P1): a pick alone is the answer; anything typed is a reply
+ * the asker's agent reads as an answer or a question. A permission prompt and a choice-only chat
+ * question take only their options, so their note stays a note.
+ */
+export function cardAnswer(item: NotifyItem, pick: { choice: string } | { approved: boolean } | null, typed: string): NotifyAnswer | null {
+  const text = typed.trim();
+  const legacy = item.agentPrompt !== undefined || item.optionsOnly === true;
+  if (!text || legacy) {
+    if (!pick) return null;
+    if ('approved' in pick) return text ? { approved: pick.approved, note: text } : { approved: pick.approved };
+    return text ? { choice: pick.choice, note: text } : { choice: pick.choice };
+  }
+  const picked = !pick ? '' : 'approved' in pick ? (pick.approved ? 'Approve' : 'Deny') : pick.choice;
+  return { picks: picked ? [picked] : [], text };
+}

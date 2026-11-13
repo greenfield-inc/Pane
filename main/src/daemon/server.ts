@@ -190,11 +190,15 @@ export class PaneDaemonServer {
       this.dropClient(clientId);
     }
 
-    if (server) {
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve());
-      });
+    if (!server) {
+      // Never listened: the socket file, if any, is another Pane's, and removing it would
+      // make the next Pane on this data directory believe it owns it.
+      return;
     }
+
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
 
     if (this.endpoint.transport === 'unix' && fs.existsSync(this.endpoint.path)) {
       fs.unlinkSync(this.endpoint.path);
@@ -417,4 +421,26 @@ async function probeUnixSocketPath(socketPath: string): Promise<'active' | 'stal
       reject(error);
     });
   });
+}
+
+const DAEMON_PROBE_TIMEOUT_MS = 1_000;
+
+/**
+ * Whether another Pane already serves this data directory's daemon endpoint.
+ * Anything but a clear "nobody is there" (an unexpected error, no answer within
+ * a second) counts as yes, so callers skip destructive work when unsure.
+ */
+export async function isPaneDaemonListening(appDirectory: string): Promise<boolean> {
+  const endpointPath = getPaneDaemonEndpoint(appDirectory).path;
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<'active'>((resolve) => {
+    timer = setTimeout(() => resolve('active'), DAEMON_PROBE_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([probeUnixSocketPath(endpointPath), timeout]) === 'active';
+  } catch {
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
 }

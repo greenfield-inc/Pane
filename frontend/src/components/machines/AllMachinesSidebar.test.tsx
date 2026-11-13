@@ -14,10 +14,12 @@ describe('MachineOfflineBanner', () => {
     const { MachineOfflineBanner } = await import('./AllMachinesSidebar');
     const markup = renderToStaticMarkup(
       // No zone suffix: parsed as local time, so it reads 9:14 in any time zone.
-      <MachineOfflineBanner machine={{ id: 'build', name: 'build-box', os: 'Linux', slot: 1 }} since="2026-10-30T09:14:00" onRetry={() => undefined} />,
+      <MachineOfflineBanner machine={{ id: 'build', name: 'build-box', os: 'Linux', slot: 1, letters: 'B' }} since="2026-10-30T09:14:00" onRetry={() => undefined} />,
     );
 
-    expect(text(markup)).toMatch(/^build-box went offline at 9:14\b.*Its rows are from then\.Retry$/);
+    // The machine's letter mark leads, hidden from screen readers.
+    expect(markup).toMatch(/<span aria-hidden="true"[^>]*data-testid="machine-mark"[^>]*><span[^>]*>B<\/span><\/span>/);
+    expect(text(markup)).toMatch(/^Bbuild-box went offline at 9:14\b.*Its rows are from then\.Retry$/);
   // The first import of the sidebar loads its whole store graph: 2-3 s when the full suite runs in parallel.
   }, 15_000);
 });

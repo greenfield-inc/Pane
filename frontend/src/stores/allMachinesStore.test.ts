@@ -139,7 +139,7 @@ describe('first looks in machine-menu order', () => {
     } } });
     useAllMachinesStore.setState({
       layout: { sessions: null, panes: {}, open: [], seeded: [] },
-      entries: [{ id: 'local', name: 'studio-mac', os: 'macOS', slot: 0, active: true }, { id: 'build', name: 'build-box', os: 'Linux', slot: 1, active: false }],
+      entries: [{ id: 'local', name: 'studio-mac', os: 'macOS', slot: 0, letters: 'S', active: true }, { id: 'build', name: 'build-box', os: 'Linux', slot: 1, letters: 'B', active: false }],
     });
     const stopFeed = startAllMachinesFeed();
     await vi.advanceTimersByTimeAsync(50);
@@ -221,8 +221,8 @@ describe('machineViews', () => {
       machines,
       snapshots: {},
       entries: [
-        { id: 'devbox', name: 'parsa-devbox', os: 'Linux', slot: 2, active: false },
-        { id: 'local', name: 'studio-mac', os: 'macOS', slot: 0, active: true },
+        { id: 'devbox', name: 'parsa-devbox', os: 'Linux', slot: 2, letters: 'P', active: false },
+        { id: 'local', name: 'studio-mac', os: 'macOS', slot: 0, letters: 'S', active: true },
       ],
     });
 

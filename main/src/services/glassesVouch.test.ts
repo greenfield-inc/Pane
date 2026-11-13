@@ -30,7 +30,7 @@ function computer(name: string, config: Partial<AppConfig> = {}) {
       return current;
     },
   };
-  const host = new PaneWorkspaceHostController(new PaneCommandRegistry(), configManager, true, async () => ({ ok: false, stdout: '', stderr: '' }));
+  const host = new PaneWorkspaceHostController(new PaneCommandRegistry(), configManager, { kind: 'allowed', onByDefault: true }, async () => ({ ok: false, stdout: '', stderr: '' }));
   hosts.push(host);
   return { name, host, registry: new PaneCommandRegistry(), configManager };
 }

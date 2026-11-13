@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import {
+  clearOuterPanelPreference,
   readOuterPanelPreference,
   resolveOuterPanelRenderPolicy,
   resolveOuterPanelSize,
@@ -34,6 +35,7 @@ export interface OuterResizeSeparatorHandlers {
   onPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => void;
   onLostPointerCapture: (event: React.PointerEvent<HTMLDivElement>) => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
+  onDoubleClick: (event: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 // Only one outer-panel drag may own the document's cursor and selection state
@@ -53,6 +55,8 @@ export function useOuterPanelResize({ config, containerPx, enabled }: UseOuterPa
     [activeTentativePreferredPx, config, containerPx, preferredPx],
   );
   const policy = useMemo(() => resolveOuterPanelRenderPolicy(config, size, enabled), [config, enabled, size]);
+  // A start-edge (left) panel grows as the pointer moves toward the end, so its displacement flips.
+  const growSign = config.edge === 'start' ? -1 : 1;
 
   const resetDocumentInteraction = useCallback((transaction: PointerTransaction) => {
     for (const type of RELEASE_FALLBACK_EVENTS) {
@@ -140,14 +144,14 @@ export function useOuterPanelResize({ config, containerPx, enabled }: UseOuterPa
     if (!transaction || transaction.pointerId !== event.pointerId) return;
     event.preventDefault();
     const coordinate = config.axis === 'width' ? event.clientX : event.clientY;
-    setTentativePreferredPx(transaction.startEffective + transaction.startCoordinate - coordinate);
-  }, [config.axis]);
+    setTentativePreferredPx(transaction.startEffective + growSign * (transaction.startCoordinate - coordinate));
+  }, [config.axis, growSign]);
 
   const onPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const transaction = transactionRef.current;
     if (!transaction || transaction.pointerId !== event.pointerId) return;
     const coordinate = config.axis === 'width' ? event.clientX : event.clientY;
-    const displacement = transaction.startCoordinate - coordinate;
+    const displacement = growSign * (transaction.startCoordinate - coordinate);
     const candidate = resolveOuterPanelSize(
       config,
       containerPx,
@@ -162,7 +166,7 @@ export function useOuterPanelResize({ config, containerPx, enabled }: UseOuterPa
     } else {
       setTentativePreferredPx(undefined);
     }
-  }, [commitValue, config, containerPx, resetDocumentInteraction]);
+  }, [commitValue, config, containerPx, growSign, resetDocumentInteraction]);
 
   const onPointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (transactionRef.current?.pointerId !== event.pointerId) return;
@@ -179,8 +183,8 @@ export function useOuterPanelResize({ config, containerPx, enabled }: UseOuterPa
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const step = event.shiftKey ? 50 : 10;
     let next: number | undefined;
-    if (config.axis === 'width' && event.key === 'ArrowLeft') next = size.effectivePx + step;
-    if (config.axis === 'width' && event.key === 'ArrowRight') next = size.effectivePx - step;
+    if (config.axis === 'width' && event.key === 'ArrowLeft') next = size.effectivePx + growSign * step;
+    if (config.axis === 'width' && event.key === 'ArrowRight') next = size.effectivePx - growSign * step;
     if (config.axis === 'height' && event.key === 'ArrowUp') next = size.effectivePx + step;
     if (config.axis === 'height' && event.key === 'ArrowDown') next = size.effectivePx - step;
     if (event.key === 'Home') next = size.floor;
@@ -189,7 +193,17 @@ export function useOuterPanelResize({ config, containerPx, enabled }: UseOuterPa
     event.preventDefault();
     const resolved = resolveOuterPanelSize(config, containerPx, next).effectivePx;
     if (resolved !== size.effectivePx && resolved > 0) commitValue(resolved);
-  }, [commitValue, config, containerPx, policy.separatorVisible, size]);
+  }, [commitValue, config, containerPx, growSign, policy.separatorVisible, size]);
+
+  // Double-click forgets the remembered size: the panel goes back to its default.
+  const onDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!policy.separatorVisible) return;
+    event.preventDefault();
+    rollback();
+    setTentativePreferredPx(undefined);
+    setPreferredPx(undefined);
+    clearOuterPanelPreference(config, window.localStorage);
+  }, [config, policy.separatorVisible, rollback]);
 
   useEffect(() => {
     if (!policy.separatorVisible) resetTransaction();
@@ -214,6 +228,7 @@ export function useOuterPanelResize({ config, containerPx, enabled }: UseOuterPa
       onPointerCancel,
       onLostPointerCapture,
       onKeyDown,
+      onDoubleClick,
     } satisfies OuterResizeSeparatorHandlers,
   };
 }

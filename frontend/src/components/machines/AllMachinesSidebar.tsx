@@ -1,13 +1,18 @@
 import { SessionApprovalsCount } from '../approvals/ApprovalsCount';
-import { useEffect, useState } from 'react';
-import { Archive, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Archive, ArrowRightLeft, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
 import { AgentStatusDot, PausedGlyph } from '../ui/AgentStatusDot';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
 import { PermissionDialog } from '../PermissionDialog';
-import { MachineBadge } from './MachineBadge';
-import { MachineMark } from './MachineMark';
+import { SessionSwitchMenuItem, SessionSwitchToChatDialog, useSessionSwitchPreview } from '../SessionSwitchToChat';
+import { MoveSessionToHostDialog, type MoveSessionTarget } from '../MoveSessionToHostDialog';
+import { useMoveToHostBlockedReason } from '../../hooks/useMoveToHostBlockedReason';
+import type { SessionChatSwitchPreview } from '../../../../shared/types/chatTab';
+import { MachineMark, MachineRowMark, machineMarkTitle } from './MachineMark';
+import { Tooltip } from '../ui/Tooltip';
+import { machineLetter } from '../../../../shared/utils/machineMarks';
 import { AutopilotNavRow } from '../autopilot/AutopilotNavRow';
 import {
   LoopsNavRow,
@@ -38,7 +43,7 @@ function formatClock(iso: string | null): string {
 export function MachineOfflineBanner({ machine, since, onRetry }: { machine: MachineRef; since: string | null; onRetry: () => void }) {
   return (
     <div role="status" className="mx-2 mt-2 flex items-center gap-2.5 rounded-md border border-border-primary bg-surface-primary px-2.5 py-2">
-      <MachineMark os={machine.os} slot={machine.slot} presence="dimmed" size="md" />
+      <MachineMark letters={machine.letters} slot={machine.slot} presence="dimmed" size="md" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-[12px] font-semibold text-text-primary">{machine.name} went offline at {formatClock(since)}</p>
         <p className="truncate text-[11px] text-text-tertiary">Its rows are from then.</p>
@@ -61,11 +66,13 @@ interface RowMenu {
   target: { kind: 'pane'; row: AllMachinesPane } | { kind: 'session'; row: AllMachinesSession };
 }
 
-/** Pin, rename, permission and archive for a row, run on the row's own machine without switching. */
-function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
+/** Pin, rename, permission, move and archive for a row, run on the row's own machine without switching. */
+function RowActionsMenu({ menu, onClose, onRename, onMove, onReviewPermission }: {
   menu: RowMenu | null;
   onClose: () => void;
   onRename: (menu: RowMenu) => void;
+  /** A Session's Move to machine…, which asks its agent on its own machine to hand it off. */
+  onMove: (target: MoveSessionTarget) => void;
   /** Allow opens the permission dialog, which shows what the agent will run. */
   onReviewPermission: (menu: RowMenu) => void;
 }) {
@@ -78,7 +85,16 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
   const noun = pane ? 'Pane' : 'Session';
   const act = (run: () => Promise<void>) => { onClose(); void run(); };
   const permission = pane?.permission ?? null;
-  return (
+  // A Session's own machine says whether any of its terminal agent tabs can switch to chat, and if not, why.
+  // The machine the app is on is this window's host, read and turned on like the Sessions sidebar does.
+  const onThisMachine = useAllMachinesStore(state => state.entries.find(entry => entry.active)?.id === machineId);
+  const switchMenu = useSessionSwitchPreview(onThisMachine ? { kind: 'here' } : { kind: 'machine', machineId }, session?.session.id ?? null, onThisMachine ? 'this machine' : menu?.machine.name || 'that machine');
+  const [switching, setSwitching] = useState<{ machineId: string; sessionName: string; preview: SessionChatSwitchPreview } | null>(null);
+  // Where focus was when the menu opened, so Turn on chat tabs, which only closes it, can hand focus back.
+  const opener = useRef<HTMLElement | null>(null);
+  useEffect(() => { if (menu) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }, [menu]);
+  const moveBlockedReason = useMoveToHostBlockedReason(menu ? { id: machineId, name: menu.machine.name } : undefined);
+  return (<>
     <TerminalPopover visible={menu !== null} x={menu?.x ?? 0} y={menu?.y ?? 0} onClose={onClose}>
       <div role="menu" aria-label={`${noun} actions`}>
         {permission && (
@@ -101,13 +117,33 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
         <PopoverButton role="menuitem" onClick={() => { if (menu) onRename(menu); onClose(); }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename {noun}…</span>
         </PopoverButton>
+        {session && (
+          <SessionSwitchMenuItem menu={switchMenu} onOpen={preview => { setSwitching({ machineId, sessionName: session.session.name || 'Session', preview }); onClose(); }} onClose={() => { opener.current?.focus(); onClose(); }} />
+        )}
+        {session && (
+          <PopoverButton
+            role="menuitem"
+            // Shown while unavailable, with its reason, as in the single-machine sidebar.
+            aria-disabled={moveBlockedReason !== null}
+            title={moveBlockedReason ?? undefined}
+            className={cn(moveBlockedReason && 'cursor-not-allowed opacity-50')}
+            onClick={() => {
+              if (moveBlockedReason) return;
+              onMove({ kind: 'machine', machineId, session: session.session });
+              onClose();
+            }}
+          >
+            <span className="flex items-center gap-2"><ArrowRightLeft className="h-4 w-4" />Move to machine…</span>
+          </PopoverButton>
+        )}
         <div className="my-1 border-t border-border-primary" />
         <PopoverButton role="menuitem" variant="danger" onClick={() => act(() => runOnMachine(machineId, { type: 'archive', target: ref }, `Could not archive the ${noun}`))}>
           <span className="flex items-center gap-2"><Archive className="h-4 w-4" />Archive</span>
         </PopoverButton>
       </div>
     </TerminalPopover>
-  );
+    {switching && <SessionSwitchToChatDialog where={{ kind: 'machine', machineId: switching.machineId }} sessionName={switching.sessionName} preview={switching.preview} onClose={() => setSwitching(null)} />}
+  </>);
 }
 
 /** A pinned row keeps its pin visible at rest, as today's sidebar does. */
@@ -119,19 +155,25 @@ function PinnedMark() {
   );
 }
 
-/** The badge, and on hover or keyboard focus the actions button in the same box, so neither shifts the row. */
-function BadgeSlot({ machine, label, onMenu }: { machine: MachineRef; label: string; onMenu: (x: number, y: number) => void }) {
+/**
+ * The machine's mark, and on hover or keyboard focus the actions button in the same 18px box,
+ * so neither shifts the row. Hovering or focusing the box names the machine and its OS.
+ */
+function MarkSlot({ machine, label, onMenu }: { machine: MachineRef; label: string; onMenu: (x: number, y: number) => void }) {
   return (
-    <span className="group/slot relative z-10 flex h-[18px] w-[60px] flex-none items-center">
-      <MachineBadge machine={machine} className="group-hover/row:invisible group-has-[:focus-visible]/slot:invisible" />
-      <button
-        type="button"
-        aria-label={`Actions for ${label}`}
-        onClick={(event) => { event.stopPropagation(); onMenu(event.clientX, event.clientY); }}
-        className="absolute inset-0 flex items-center justify-center rounded text-text-muted opacity-0 hover:bg-surface-hover hover:text-text-primary focus-visible:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive group-hover/row:opacity-100"
-      >
-        <MoreHorizontal className="h-3.5 w-3.5" />
-      </button>
+    <span data-testid="all-machines-mark-slot" className="group/slot relative z-10 flex h-[18px] w-[18px] flex-none items-center">
+      <MachineRowMark machine={machine} className="group-hover/row:invisible group-has-[:focus-visible]/slot:invisible" />
+      {/* The button covers the mark, so it carries the mark's tooltip for hover and keyboard focus. */}
+      <Tooltip content={machineMarkTitle(machine)} side="bottom">
+        <button
+          type="button"
+          aria-label={`Actions for ${label}`}
+          onClick={(event) => { event.stopPropagation(); onMenu(event.clientX, event.clientY); }}
+          className="absolute inset-0 flex items-center justify-center rounded text-text-muted opacity-0 hover:bg-surface-hover hover:text-text-primary focus-visible:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive group-hover/row:opacity-100"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </button>
+      </Tooltip>
     </span>
   );
 }
@@ -153,11 +195,14 @@ function PaneRow({ row, active, nested, onMenu, reorder }: { row: AllMachinesPan
         active ? 'bg-surface-selected' : 'hover:bg-surface-hover',
         row.offline && 'opacity-50',
       )}
+      data-sidebar-selected={active || undefined}
     >
       <DropLine edge={reorder?.indicator ?? null} />
       <button
         type="button"
         data-row-open
+        data-sidebar-item
+        data-sidebar-key={`machine-pane-${row.key}`}
         onClick={() => void openOnMachine(machine.id, { kind: 'pane', id: pane.id, name: label })}
         aria-current={active ? 'page' : undefined}
         aria-label={`${label} on ${machine.name}`}
@@ -181,7 +226,7 @@ function PaneRow({ row, active, nested, onMenu, reorder }: { row: AllMachinesPan
         />
       </div>
       {pane.isFavorite && <PinnedMark />}
-      <BadgeSlot machine={machine} label={label} onMenu={openMenu} />
+      <MarkSlot machine={machine} label={label} onMenu={openMenu} />
     </div>
   );
 }
@@ -202,6 +247,8 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
       <DropLine edge={reorder.indicator} />
       <div
         data-testid="all-machines-session-row"
+        data-sidebar-row
+        data-sidebar-selected={active || undefined}
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
         className={cn(
           'group/row relative mx-2 flex min-h-7 w-[calc(100%-1rem)] items-center gap-1.5 rounded-md py-0.5 pl-1 pr-2 transition-colors',
@@ -211,6 +258,8 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
         <button
           type="button"
           data-row-open
+          data-sidebar-item
+          data-sidebar-key={`machine-session-${row.key}`}
           onClick={() => void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name })}
           aria-current={active ? 'page' : undefined}
           aria-label={`Session ${session.name} on ${machine.name}`}
@@ -236,7 +285,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           otherwise={row.panes.length > 0 && <span className="text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
         />
         {session.isPinned && <PinnedMark />}
-        <BadgeSlot machine={machine} label={session.name} onMenu={openMenu} />
+        <MarkSlot machine={machine} label={session.name} onMenu={openMenu} />
       </div>
       {expanded && row.panes.map(renderPane)}
     </div>
@@ -262,7 +311,7 @@ function ProjectMachineMarks({ entries }: { entries: ReadonlyArray<{ machine: Ma
       className="flex flex-none items-center gap-1"
     >
       {machines.map(({ machine, offline }) => (
-        <MachineMark key={machine.id} os={machine.os} slot={machine.slot} size="logo" presence={offline ? 'dimmed' : 'solid'} />
+        <MachineMark key={machine.id} letters={machine.letters} slot={machine.slot} size="logo" presence={offline ? 'dimmed' : 'solid'} />
       ))}
     </span>
   );
@@ -271,7 +320,7 @@ function ProjectMachineMarks({ entries }: { entries: ReadonlyArray<{ machine: Ma
 function SectionHeader({ label, expanded, onToggle }: { label: string; expanded: boolean; onToggle: () => void }) {
   return (
     <div className={SIDEBAR_SECTION_ROW}>
-      <button type="button" onClick={onToggle} aria-expanded={expanded} className={SIDEBAR_SECTION_TOGGLE}>
+      <button type="button" data-sidebar-item onClick={onToggle} aria-expanded={expanded} className={SIDEBAR_SECTION_TOGGLE}>
         <span className={SIDEBAR_SECTION_LABEL}>{label}</span>
         <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
           {expanded ? <ChevronDown className="h-3.5 w-3.5 text-current" /> : <ChevronRight className="h-3.5 w-3.5 text-current" />}
@@ -303,6 +352,7 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [renaming, setRenaming] = useState<RowMenu | null>(null);
   const [reviewing, setReviewing] = useState<RowMenu | null>(null);
+  const [moving, setMoving] = useState<MoveSessionTarget | null>(null);
 
   const isActivePane = (row: AllMachinesPane) => row.machine.id === activeMachineId && activeView === 'sessions' && row.pane.id === activeSessionId;
   const renderPane = (nested: boolean) => (row: AllMachinesPane) => (
@@ -386,6 +436,8 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
               <div key={project.key} data-testid="all-machines-project">
                 <button
                   type="button"
+                  data-sidebar-item
+                  data-sidebar-key={`machine-project-${project.key}`}
                   onClick={() => toggleOpen(`project:${project.key}`)}
                   aria-expanded={expanded}
                   aria-label={`${expanded ? 'Collapse' : 'Expand'} project ${project.name}`}
@@ -416,7 +468,15 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
         </>
       )}
 
-      <RowActionsMenu menu={menu} onClose={() => setMenu(null)} onRename={setRenaming} onReviewPermission={setReviewing} />
+      <RowActionsMenu menu={menu} onClose={() => setMenu(null)} onRename={setRenaming} onMove={setMoving} onReviewPermission={setReviewing} />
+      <MoveSessionToHostDialog
+        target={moving}
+        onClose={() => setMoving(null)}
+        // Opens the Session on its machine, so the person can watch its agent hand it off.
+        onMoved={() => {
+          if (moving?.kind === 'machine') void openOnMachine(moving.machineId, { kind: 'session', id: moving.session.id, name: moving.session.name });
+        }}
+      />
       {review && (
         <PermissionDialog
           request={review.request}
@@ -463,11 +523,11 @@ export function MachineOfflineView({ onMachineDetails }: { onMachineDetails: () 
   }, [notice]);
   if (!notice) return null;
   const view = views.find((item) => item.machine.id === notice.machineId);
-  const machine = view?.machine ?? { id: notice.machineId, name: notice.machineId, os: null, slot: 0 };
+  const machine = view?.machine ?? { id: notice.machineId, name: notice.machineId, os: null, slot: 0, letters: machineLetter(notice.machineId) };
   const since = machines.find((state) => state.id === notice.machineId)?.offlineSince ?? null;
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-bg-primary px-8 text-center" data-testid="machine-offline-view">
-      <MachineMark os={machine.os} slot={machine.slot} presence="dimmed" size="lg" />
+      <MachineMark letters={machine.letters} slot={machine.slot} presence="dimmed" size="lg" />
       <h2 className="text-lg font-semibold text-text-primary">{machine.name} is offline</h2>
       <p className="max-w-md text-sm text-text-secondary">
         It stopped answering at {formatClock(since)}.

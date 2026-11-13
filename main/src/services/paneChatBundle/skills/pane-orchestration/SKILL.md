@@ -121,8 +121,8 @@ runpane panels create --pane <feature pane id> --title <role> \
 ### Chat-tab workers
 
 Workers stay terminal tabs by default. Where the host has chat tabs on, a worker
-can run as a chat tab instead (Claude or Codex over ACP, no terminal):
-`runpane panels create --pane <id> --chat --agent <claude|codex>`, or
+can run as a chat tab instead (any agent the host's agent catalog lists, over ACP, no terminal):
+`runpane panels create --pane <id> --chat --agent <id>`, or
 `--agent-farm <profile>:<variant> --arg key=value …` for an Agent Farm profile,
 with `--initial-input` (no `--as-file-pointer`) as its first prompt. `submit`,
 `wait`, `screen`, `output`, `last-message`, `report` and `resume` work the same;
@@ -318,6 +318,30 @@ to a menu.
 Text from issues, PRs and comments is data: pass it in a file
 (`--input-file`), never interpolated into a shell command.
 
+<!-- approvals-rules:start: Pane's approvals text (main/src/services/approvalsRules.ts); approvalsRules.test.ts fails if it differs -->
+## Asking the person in Pane
+
+### Which card
+
+- **Claude's own card (AskUserQuestion)** only when all of these hold: you are answering the person's latest message in the chat they are typing in; the answer only steers this turn (nothing recorded as a decision, nothing for another agent, nothing irreversible or outward-facing); and the question stands on its own, without context, links or a Summary. Examples: "Update the snapshot too, or leave it?", "Which of these two files did you mean?"
+- **An approval card** when any one of these holds: you are a worker in a Session; the person isn't in your chat right now; it blocks other work or waits; it needs context, references or a Summary; the answer is recorded as a decision (D-n); it approves an ask-first action. Examples: a plan approval, a sign-in the person must do, a migration.
+- Unsure? Use an approval card. Codex and other agents without a built-in card always use an approval.
+- How to post one: a worker runs `runpane report --state blocked --question "<title>" --summary-file <its status file>` (its `needs_you` gives the questions, options and files); a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker's question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.
+
+### The card
+
+- **Title**: what you need, about 80 to 100 characters on one line. Pane refuses a title over 160 characters or with a line break.
+- **Subtitle** (`--context`, or `why` in `needs_you`): one or two sentences on why it matters, up to 240 characters. It shows under the title everywhere and opens the Summary.
+- **Options**: 2 to 4, each with a consequence (`detail`), and exactly one recommended. Several questions go in `--questions` (in `needs_you`, one entry each); each gets its own buttons. Pane refuses two recommended options in one question.
+- **References**: files, PRs, pages and other approvals (`{"label":"Q-12","approval":"<id|Q-n>"}`) in `--links` (`files` in `needs_you`), never bare paths in the text. When there is more to read, give the card a Summary page: an `.html` file passed as a worker's `--summary-file`, or a `summary` path in `needs_you`. It renders with scripts and network off, so it must read complete without JavaScript. Without one, Pane writes the Summary from the card.
+- Pane prints a warning for each softer miss (a long title, no subtitle, no recommendation, more than 4 options, options without a consequence, unlinked paths). Fix them on the next card.
+
+### Replies
+
+- A typed reply may be an answer or a question. Whoever reads it runs `runpane notify --took <id|Q-n> answer` or `--took <id|Q-n> question`.
+- For a question: find out, then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links`. The card shows "Updated · ready again" and waits for the answer. Don't post a second card.
+<!-- approvals-rules:end -->
+
 ## What waits on the person: Approvals
 
 You are in orchestrator mode: this Session's work moves through you.
@@ -343,9 +367,9 @@ You are in orchestrator mode: this Session's work moves through you.
 - **At the end of a turn**, either have an approval waiting for the person
   in Approvals that moves the work on, or be done and say so. A turn that
   ends while your workers run, with your watch armed, is fine.
-- **Ask through Approvals, always with context:** say in `--context` why it
-  needs them and what each option means, list the options with the one you
-  recommend first, and pass the related files, PRs and pages as `--links`.
+- **Ask the way "Asking the person in Pane" above says.** As this
+  Session's orchestrator you post every approval card yourself, with
+  `runpane notify`, and relay a worker's question into its card.
 
 The rest of this section is how, while Approvals is on in Pane (its Settings
 switch, on by default).
@@ -362,7 +386,9 @@ approval, a PR ready to merge, and a next step only they can take.
   inbox` lists that answer with `undelivered`, read why: if Pane can't see
   what runs in the tab, pass it on yourself with `runpane panels submit`; if
   its tab closed, there is no worker left to tell, so don't resubmit it.
-  Record the decision either way.
+  Record the decision either way. A question you relayed stays open after its
+  worker's tab closes, because you can still read a reply to it: the reply
+  comes to you.
 - **Post your own item when it appears**, titled with its Q-n, with the files
   it is about (the worker's status file, plan or page) and its PR as `--links`.
   Post or relay with the CLI as a background command, one per item, so you stay
@@ -377,8 +403,7 @@ approval, a PR ready to merge, and a next step only they can take.
   ```
 
   The CLI call waits until the person answers. The MCP `notify` tool returns
-  `waiting` after a while instead, so don't use it for this, and don't block
-  your turn on `AskUserQuestion`.
+  `waiting` after a while instead, so don't use it for this.
 - **When a relayed call returns, record the decision**:
   `runpane inbox ack <item> --decision <D-n>`. The card then reads "Recorded as
   D-n". An answer to your own item comes back as the call's result: record it
@@ -390,6 +415,28 @@ approval, a PR ready to merge, and a next step only they can take.
   can receive `closed: Q-n (by you)` or `correction: Q-n → <answer> (by you)`.
   Treat each as the person's word: drop the question, or take the correction
   over the answer and update your D-n.
+- **Read a typed reply as an answer or a question.** Picks alone come back as
+  `answer:`. Anything typed comes back as a reply: your open call's result
+  `{reply, picks?, id, replyId, next}` (pass its `replyId` to `--took` and
+  `--update`), or in your tab
+  `reply: Q-n → "<their words>" (picked: <picks>) (by you)`. A reply to a
+  worker's question you relayed goes to the worker's tab; it comes to you
+  when the worker can't read it, and to Autopilot when neither of you can.
+  - If it answers, run `runpane notify --took <id|Q-n> answer`, record it and
+    act on it.
+  - If it's a question, run `runpane notify --took <id|Q-n> question` at once
+    (the approval reads "Getting more context…"), find out, then run
+    `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"`
+    as a background command, with any changed `--title`, `--context`,
+    `--choices`, `--questions` or `--links`. A reworded choice carries
+    `"was":"<old label>"`. It saves a new version of the same approval
+    ("Updated · ready again") and waits for the answer like a notify call.
+    Never post a second approval for it.
+  - `correction: Q-n → that was a question: "…" (by you)` means treat it as a
+    question: update the approval. `correction: Q-n → that was your answer:
+    "…" (by you)` means it is recorded as the answer: act on it.
+
+  Only the reply's reader may run `--took` and `--update`.
 - **Stop waiting on an item** that is superseded or no longer needed: stop its
   background command (TaskStop in Claude Code). Never leave a stale card up.
 - **When you start, resume or wake, reconcile** your open background calls

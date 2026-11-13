@@ -31,7 +31,7 @@ export function autopilotRowState(snapshot: AutopilotSnapshot): AutopilotRowStat
 /** Why Start can't run here, with the next step, or undefined when it can. */
 export function startBlocked(snapshot: AutopilotSnapshot): string | undefined {
   if (!snapshot.entitlement.entitled) return [snapshot.entitlement.reason, snapshot.entitlement.next].filter(Boolean).join(' ') || 'Autopilot is not available on this computer.';
-  if (!snapshot.chatTabsEnabled) return 'Autopilot runs as a chat tab, and chat tabs are off on this computer. Turn on Chat tabs in Settings › Advanced › Experimental there, then press Start.';
+  if (!snapshot.chatTabsEnabled) return 'Autopilot runs as a chat tab, and chat tabs are off on this computer. Turn on Chat tabs in Settings › AI & Agents there, then press Start.';
   return undefined;
 }
 
@@ -124,7 +124,8 @@ export function relatedDocs(item: NotifyItem, entry?: AutopilotStackEntry): Rela
   const page = (label: string, url: string) => add({ key: `url:${url}`, kind: 'url', label, url, icon: 'globe', detail: urlDetail(url) });
   for (const link of item.links ?? []) {
     if ('path' in link) file(link.label, link.path);
-    else page(link.label, link.url);
+    else if ('url' in link) page(link.label, link.url);
+    // Another approval isn't a document: its card opens it.
   }
   for (const tab of entry?.tabs ?? []) {
     if (tab.kind === 'file') file(tab.label, tab.path);

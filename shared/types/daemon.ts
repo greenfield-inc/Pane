@@ -151,6 +151,7 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'permission:respond',
   'notify:remote-snapshot',
   'notify:remote-command',
+  'notify:summary-page',
   'file:copy',
   'file:delete',
   'file:duplicate',

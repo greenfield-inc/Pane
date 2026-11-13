@@ -1,16 +1,18 @@
 import { createHash } from 'crypto';
 import path from 'path';
-import type { ContentBlock, McpServer, NewSessionRequest } from '@agentclientprotocol/sdk';
+import type { ContentBlock, InitializeResponse, McpServer, NewSessionRequest, SessionInfo } from '@agentclientprotocol/sdk';
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ToolPanel } from '../../../../shared/types/panels';
-import type { ChatPanelState, ChatTabEvent, ChatTabAnswer, ChatTabProblem, ChatTabQueuedPrompt, ChatTabSend, ChatTabStatus, ChatTabView } from '../../../../shared/types/chatTab';
+import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabView } from '../../../../shared/types/chatTab';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
 import { ChatTabRuntime, chatFailure, isAuthRequired, type RuntimeExit } from './runtime';
 import { ChatTranscript } from './transcript';
 import { QueuedBodies } from './queuedBodies';
+import { agentConfig, agentLabel } from '../../../../shared/agents';
+import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
 export interface ResolvedLaunch {
@@ -20,12 +22,23 @@ export interface ResolvedLaunch {
   mcpServers?: McpServer[];
   /** Session settings to apply once, on a new conversation. */
   initialSettings?: Record<string, string>;
-  /** The session mode to select after every session/new and session/load (an Agent Farm profile's permission mode). */
+  /** The session mode to select after every session/new and session/load (full access, or an Agent Farm profile's permission mode). */
   mode?: string;
+  /** Full access through Pane: approve each request with the agent's "allow once". */
+  approveOnce?: boolean;
+  /** The agent runs as its own CLI, so it may advertise a terminal sign-in Pane can run. */
+  ownCli?: boolean;
+  /** The installed version this launch runs, for an agent Pane installed (ACP Registry). */
+  agentVersion?: string;
 }
 
 /** Events a chat tab sends to every viewer. */
-type ChatTabChannel = 'chat-tab:event' | 'chat-tab:state' | 'panel:agentStatus';
+/**
+ * `chat-tab:view` carries every tab's view to clients that read the agent catalog. `chat-tab:state`
+ * is the same view for clients from before it, sent only for agents their decoder accepts
+ * (`chat.legacyClients`): one they reject would throw out of their event stream and drop the connection.
+ */
+type ChatTabChannel = 'chat-tab:event' | 'chat-tab:view' | 'chat-tab:state' | 'panel:agentStatus';
 
 export interface ChatTabLauncher {
   /** Throws a PaneError; `CHAT_NOT_SIGNED_IN`, `CHAT_AGENT_NOT_INSTALLED`, `CHAT_AGENT_OUTDATED`, `CHAT_ADAPTER_MISSING` and `CHAT_UNSUPPORTED_HOST` become their stopped states. */
@@ -50,8 +63,17 @@ export interface ChatTabManagerOptions {
   /** The tab was closed; nothing about it is published again (its Notify cards close). */
   onClosed?: (panelId: string) => void;
   windowMessages?: number;
+  /**
+   * Conversations open in Pane tabs on this machine other than `panelId` (and the terminal it replaced),
+   * by conversation ID. "Most recent" and the picker never open one of them (D-282).
+   */
+  openConversations?: (panelId: string) => Map<string, { panelId: string; title: string }>;
   /** How long closing, stopping or quitting waits for a tab's agent to end. Default 5 s. */
   stopTimeoutMs?: number;
+  /** An agent's name for messages; defaults to its config label, or its id. */
+  agentName?: (agent: string) => string;
+  /** Every initialize reply, for the agent catalog's capabilities. */
+  onInitialized?: (agent: string, response: InitializeResponse) => void;
 }
 
 interface Tab {
@@ -69,6 +91,12 @@ interface Tab {
   notice?: string;
   published?: AgentState;
   launch?: ResolvedLaunch;
+  /** /clear is replacing the agent with a fresh conversation; it has not stopped. */
+  clearing?: boolean;
+  /** Full access through Pane is on: each approval is answered with allow once. */
+  approveOnce?: boolean;
+  /** The terminal sign-in the agent last advertised, kept after it stops signed out. */
+  signIn?: { args: string[]; env?: Record<string, string> };
 }
 
 const DEFAULT_VIEW_LIMIT = 200;
@@ -86,8 +114,10 @@ export class ChatTabManager {
   private readonly tabs = new Map<string, Tab>();
   private lastGeneration = 0;
   private readonly bodies: QueuedBodies;
+  private readonly name: (agent: string) => string;
 
   constructor(private readonly options: ChatTabManagerOptions) {
+    this.name = options.agentName ?? agentLabel;
     this.bodies = new QueuedBodies(panelId => path.join(options.spoolDirectory, safeName(panelId), 'queue'));
   }
 
@@ -121,7 +151,22 @@ export class ChatTabManager {
     return toAgentState(this.snapshot(panelId, state, this.tab(panelId), 0));
   }
 
+  /** The terminal sign-in the tab's agent advertised, when it runs as its own CLI. */
+  terminalSignIn(panelId: string): { args: string[]; env?: Record<string, string> } | undefined { return this.tabs.get(panelId)?.signIn; }
+
   isRunning(panelId: string): boolean { return !!this.tabs.get(panelId)?.runtime?.isAlive(); }
+  /** /clear is starting a fresh conversation: the agent is between processes, not stopped. */
+  isClearing(panelId: string): boolean { return this.tabs.get(panelId)?.clearing === true; }
+  /** Tabs of `agent` that run it or are starting it: removing its files would break them. */
+  inUse(agent: string): number {
+    return [...this.tabs.entries()].filter(([panelId, tab]) => (tab.runtime?.isAlive() || tab.starting) && this.options.store.state(panelId)?.agent === agent).length;
+  }
+
+  /** The installed versions running tabs of `agent` launched from: their folders must stay. */
+  launchedVersions(agent: string): Set<string> {
+    return new Set([...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() && tab.launch?.agentVersion && this.options.store.state(panelId)?.agent === agent ? [tab.launch.agentVersion] : []));
+  }
+
   runningPanelIds(): string[] { return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() ? [panelId] : []); }
   processId(panelId: string): number | undefined { return this.tabs.get(panelId)?.runtime?.pid; }
   /** Adapter process IDs of a Pane's running chat tabs, for archive cleanup. */
@@ -168,7 +213,7 @@ export class ChatTabManager {
     }
     if (!request.operationId || request.operationId.length > 128) throw new PaneError('CHAT_PROMPT_INVALID', 'The message has no valid send ID. Nothing was sent.', 'Send it again.');
     if (!request.text.trim() && !request.images?.length) throw new PaneError('CHAT_PROMPT_EMPTY', 'The message is empty. Nothing was sent.', 'Type a message or attach an image.');
-    if (request.text.length + (request.images ?? []).reduce((sum, image) => sum + image.data.length, 0) > PROMPT_BYTES_LIMIT) {
+    if (promptSize(request) > PROMPT_BYTES_LIMIT) {
       throw new PaneError('CHAT_PROMPT_TOO_LARGE', 'The message is larger than 8 MiB. Nothing was sent.', 'Send a shorter message or a smaller image.');
     }
     if (request.images?.some(image => !/^image\/(png|jpeg|webp|gif)$/.test(image.mimeType) || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.data))) {
@@ -183,12 +228,81 @@ export class ChatTabManager {
     catch (error) { throw new PaneError('CHAT_PROMPT_NOT_SAVED', `The message could not be saved on this machine (${reasonOf(error)}). Nothing was sent.`, 'Check free disk space, then send it again.'); }
     const queued: ChatTabQueuedPrompt = { operationId: request.operationId, text: request.text.slice(0, QUEUE_PREVIEW), queuedAt: new Date().toISOString(), stored: true };
     if (request.images?.length) queued.imageCount = request.images.length;
-    try { this.update(panelId, current => ({ ...current, receipts: [...(current.receipts ?? []), receipt].slice(-RECEIPT_LIMIT), queue: [...(current.queue ?? []), queued] })); }
+    // Send now goes ahead of everything already waiting.
+    const queue = (current: ChatPanelState) => request.now ? [queued, ...(current.queue ?? [])] : [...(current.queue ?? []), queued];
+    try { this.update(panelId, current => ({ ...current, receipts: [...(current.receipts ?? []), receipt].slice(-RECEIPT_LIMIT), queue: queue(current) })); }
     catch (error) { this.bodies.remove(panelId, request.operationId); throw error; }
     this.publish(panelId);
-    if (tab.runtime?.isAlive()) this.drain(panelId);
-    else void this.ensure(panelId).catch(() => undefined);
+    if (!tab.runtime?.isAlive()) void this.ensure(panelId).catch(() => undefined);
+    else if (request.now) this.interruptForQueue(panelId);
+    else this.drain(panelId);
     return structuredClone(receipt);
+  }
+
+  /** Moves a queued message to the front and interrupts the running turn, so it is delivered next. */
+  sendNow(panelId: string, operationId: string): void {
+    const item = this.queued(panelId, operationId);
+    this.update(panelId, current => ({ ...current, queue: [item, ...(current.queue ?? []).filter(entry => entry.operationId !== operationId)] }));
+    this.publish(panelId);
+    if (this.tabs.get(panelId)?.runtime?.isAlive()) this.interruptForQueue(panelId);
+  }
+
+  /** Replaces a queued message's text and keeps its images. Its receipt is unchanged, so a retried send of the original still finds it. */
+  editQueued(panelId: string, operationId: string, text: string): void {
+    const item = this.queued(panelId, operationId);
+    const body = item.stored ? this.bodies.read(panelId, operationId) : { text: item.text, images: item.images };
+    if (!body) throw new PaneError('CHAT_QUEUED_COPY_MISSING', 'The saved copy of this queued message is missing, so it was not changed.', 'Remove it from the queue and send it again.');
+    const edited = { text, images: body.images };
+    if (!text.trim() && !edited.images?.length) throw new PaneError('CHAT_PROMPT_EMPTY', 'The edited message is empty. The queued message was not changed.', 'Type a message, or remove it from the queue.');
+    if (promptSize(edited) > PROMPT_BYTES_LIMIT) throw new PaneError('CHAT_PROMPT_TOO_LARGE', 'The edited message is larger than 8 MiB. The queued message was not changed.', 'Shorten the message.');
+    try { this.bodies.write(panelId, operationId, edited); }
+    catch (error) { throw new PaneError('CHAT_PROMPT_NOT_SAVED', `The edited message could not be saved on this machine (${reasonOf(error)}). The queued message was not changed.`, 'Check free disk space, then edit it again.'); }
+    const replacement: ChatTabQueuedPrompt = { operationId, text: text.slice(0, QUEUE_PREVIEW), queuedAt: item.queuedAt, stored: true };
+    if (edited.images?.length) replacement.imageCount = edited.images.length;
+    try {
+      this.update(panelId, current => ({ ...current, queue: current.queue?.map(entry => entry.operationId === operationId ? replacement : entry) }));
+    } catch (error) {
+      // The queue still shows the old text, so the delivered body must stay the old one too (review F-1).
+      try {
+        if (item.stored) this.bodies.write(panelId, operationId, body);
+        else this.bodies.remove(panelId, operationId);
+      } catch (restore) {
+        throw new PaneError('CHAT_QUEUED_EDIT_UNCERTAIN', `The edit could not be saved, and the original text could not be put back (${reasonOf(restore)}), so this queued message may send the edited text.`, 'Remove it from the queue and send it again.');
+      }
+      throw error;
+    }
+    this.publish(panelId);
+  }
+
+  /**
+   * /clear: ends the agent and starts a fresh conversation in the same tab, with the same launch
+   * and saved settings. What waits in the queue is sent into the new conversation.
+   */
+  async clear(panelId: string): Promise<void> {
+    this.refuseStopped(panelId, 'cleared');
+    const tab = this.tab(panelId);
+    tab.clearing = true;
+    try {
+      await tab.starting?.catch(() => undefined);
+      this.refuseStopped(panelId, 'cleared');
+      // The release clears the runtime at once; the state below is saved before anything can start again,
+      // so a send or a view during the stop starts the new conversation, never the old one.
+      const releasing = this.release(tab);
+      const interrupted = this.required(panelId).turn;
+      tab.notice = undefined;
+      tab.ownTurnStartedAt = undefined;
+      this.update(panelId, current => ({
+        ...current, acpSessionId: undefined, turn: undefined, clearedAt: new Date().toISOString(), status: 'starting', problem: undefined, notice: undefined, open: undefined, banner: undefined,
+        receipts: current.receipts?.map(receipt => receipt.operationId === interrupted?.operationId && receipt.state === 'accepted' ? { ...receipt, state: 'failed', error: 'Cleared before the turn finished.' } : receipt),
+      }));
+      await releasing;
+      await this.ensure(panelId);
+    } finally { tab.clearing = false; }
+  }
+
+  /** Stops one background task; the turn goes on. */
+  async stopTask(panelId: string, taskId: string): Promise<void> {
+    await this.liveRuntime(panelId).stopTask(taskId);
   }
 
   unqueue(panelId: string, operationId: string): void {
@@ -201,6 +315,33 @@ export class ChatTabManager {
     }));
     this.bodies.remove(panelId, operationId);
     this.publish(panelId);
+  }
+
+  private queued(panelId: string, operationId: string): ChatTabQueuedPrompt {
+    const item = this.required(panelId).queue?.find(entry => entry.operationId === operationId);
+    if (!item) throw new PaneError('CHAT_NOT_QUEUED', 'That message is no longer waiting; it was already sent or removed.', 'Look at the conversation for it.');
+    return item;
+  }
+
+  private refuseStopped(panelId: string, what: string): void {
+    const state = this.required(panelId);
+    if (state.status !== 'stopped') return;
+    throw new PaneError('CHAT_STOPPED', `This chat is stopped${state.problem ? `: ${state.problem.message}` : '.'} It was not ${what}.`, state.problem?.next ?? 'Press Restart to start it again.');
+  }
+
+  /**
+   * Send now: the message is first in the queue, so ending the running turn (a prompt, the
+   * agent's own turn, or one being delivered) makes drain deliver it next. Cancelling also
+   * withdraws an open approval or question, which ends a turn blocked on it.
+   */
+  private interruptForQueue(panelId: string): void {
+    const tab = this.tab(panelId);
+    const runtime = tab.runtime;
+    if (!runtime?.isAlive()) return;
+    if (!runtime.isRunning() && !runtime.isWorkingAlone() && !tab.delivering) { this.drain(panelId); return; }
+    void runtime.cancel().catch(error => {
+      console.warn(`[ChatTabs] Send now could not interrupt ${panelId}'s turn: ${reasonOf(error)}. The message is sent when the turn ends.`);
+    });
   }
 
   async cancel(panelId: string): Promise<void> {
@@ -217,10 +358,79 @@ export class ChatTabManager {
   }
 
   async configure(panelId: string, configId: string, value: string): Promise<void> {
+    if (configId === CHAT_FULL_ACCESS_CONTROL) { await this.setFullAccess(panelId, value === FULL_ACCESS_ON); return; }
     const runtime = this.liveRuntime(panelId);
     if (runtime.isRunning()) throw new PaneError('CHAT_CONFIG_BUSY', 'Settings cannot change while the agent is working. Nothing changed.', 'Wait for the turn to end, or press Stop.');
     await runtime.configure(configId, value);
     this.update(panelId, state => ({ ...state, settings: { ...state.settings, [configId]: value } }));
+    this.publish(panelId);
+  }
+
+  /**
+   * Turns full access on or off for an agent whose full access is not a session mode (D-16):
+   * Pane's allow once changes at once; an agent whose switch is a launch flag restarts on the
+   * same conversation with or without it.
+   */
+  private async setFullAccess(panelId: string, on: boolean): Promise<void> {
+    const state = this.required(panelId);
+    if (!fullAccessControlled(state)) throw new PaneError('CHAT_CONFIG_UNSUPPORTED', `${this.name(state.agent)} sets full access with its own permission setting. Nothing changed.`, 'Pick a permission mode in the composer instead.');
+    if (state.launch.kind !== 'agent' || (state.launch.fullAccess === true) === on) return;
+    const tab = this.tab(panelId);
+    if (tab.runtime?.isRunning() || tab.delivering) throw new PaneError('CHAT_CONFIG_BUSY', 'Full access cannot change while the agent is working. Nothing changed.', 'Wait for the turn to end, or press Stop.');
+    const launch = { ...state.launch };
+    if (on) launch.fullAccess = true; else delete launch.fullAccess;
+    this.update(panelId, current => ({ ...current, launch }));
+    console.log(`[ChatTabs] ${panelId}: full access ${on ? 'on' : 'off'}.`);
+    if (agentConfig(state.agent)?.chat?.fullAccess?.args) { await this.restart(panelId); return; }
+    tab.approveOnce = on;
+    this.publish(panelId);
+  }
+
+  /** The folder's past conversations for the picker, newest first, with this tab's and other tabs' marked. */
+  async conversations(panelId: string): Promise<ChatTabConversation[]> {
+    const state = this.required(panelId);
+    const runtime = this.liveRuntime(panelId);
+    const elsewhere = this.options.openConversations?.(panelId) ?? new Map();
+    const { sessions } = await runtime.list(state.cwd);
+    return newestFirst(sessions).map(session => {
+      const entry: ChatTabConversation = { sessionId: session.sessionId };
+      if (session.title) entry.title = session.title;
+      if (session.updatedAt) entry.updatedAt = session.updatedAt;
+      if (session.sessionId === state.acpSessionId) entry.current = true;
+      else {
+        const open = elsewhere.get(session.sessionId);
+        if (open) entry.openIn = open;
+      }
+      return entry;
+    });
+  }
+
+  /**
+   * Reloads the tab on another conversation of its folder (/resume, "Pick another"). Refused while the
+   * agent works, and for a conversation another Pane tab has open: two processes never write one.
+   */
+  async resume(panelId: string, sessionId: string): Promise<void> {
+    const state = this.required(panelId);
+    const tab = this.tab(panelId);
+    if (state.turn || tab.delivering || tab.runtime?.isRunning() || tab.runtime?.isWorkingAlone()) {
+      throw new PaneError('CHAT_RESUME_BUSY', 'The agent is in the middle of a turn, so the conversation was not changed.', 'Wait for it to finish, or press Stop, then pick again.');
+    }
+    if (sessionId === state.acpSessionId) return;
+    // A queued prompt was written for this conversation; it is never sent into another one (review F-3).
+    if (state.queue?.length) {
+      throw new PaneError('CHAT_RESUME_QUEUED', `${state.queue.length === 1 ? 'A message is' : `${state.queue.length} messages are`} waiting to be sent in this conversation, so the conversation was not changed.`, 'Remove the waiting messages from the queue, or let them send, then pick again.');
+    }
+    const open = this.options.openConversations?.(panelId).get(sessionId);
+    if (open) throw new PaneError('CHAT_RESUME_OPEN_ELSEWHERE', `That conversation is open in tab "${open.title}", so it was not opened here.`, 'Switch to that tab, or close it first and pick again.');
+    console.log(`[ChatTabs] ${panelId} continues conversation ${sessionId}${state.acpSessionId ? ` instead of ${state.acpSessionId}` : ''}.`);
+    this.update(panelId, current => ({ ...current, acpSessionId: sessionId, open: undefined, banner: undefined, clearedAt: undefined, turn: undefined }));
+    await this.restart(panelId);
+  }
+
+  /** Closes the Switch to chat banner or note. */
+  dismissBanner(panelId: string): void {
+    if (!this.required(panelId).banner) return;
+    this.update(panelId, current => ({ ...current, banner: undefined }));
     this.publish(panelId);
   }
 
@@ -278,7 +488,7 @@ export class ChatTabManager {
       launch = await this.options.launcher.resolve(panel, this.required(panelId));
     } catch (error) {
       const failure = chatFailure(error, { code: 'CHAT_LAUNCH_FAILED', next: 'Press Restart.' });
-      this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent));
+      this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent, this.name));
       throw failure;
     }
     // Closed or restarted while the launch resolved: start nothing.
@@ -301,20 +511,41 @@ export class ChatTabManager {
       onState: () => { if (tab.run === generation && !tab.loading) this.publish(panelId); },
       onOwnTurn: outcome => { if (tab.run === generation) this.ownTurn(panelId, tab, outcome); },
       onExit: exit => this.exited(panelId, generation, exit),
+      approveOnce: () => tab.approveOnce === true,
+      onApprovedOnce: request => {
+        if (tab.run !== generation) return;
+        const event = transcript.approvedByPane(request.toolCall.toolCallId, request.toolCall.title ?? 'Tool');
+        if (event && !tab.loading) this.options.send('chat-tab:event', event);
+      },
+      terminalAuth: launch.ownCli === true,
     });
     tab.runtime = runtime;
+    tab.approveOnce = launch.approveOnce === true;
     try {
-      await runtime.start();
+      const initialized = await runtime.start();
+      this.options.onInitialized?.(this.required(panelId).agent, initialized);
+      tab.signIn = launch.ownCli ? runtime.terminalSignIn() : undefined;
+      if (this.required(panelId).open === 'most-recent' && !this.required(panelId).acpSessionId) {
+        const listed = await this.listForSwitch(panelId, runtime);
+        if (tab.run !== generation) return;
+        // Chosen against who has which conversation now, and saved in the same step: with no await
+        // between, a tab or terminal that took one while the list loaded is seen (review F-2).
+        const chosen = this.mostRecent(panelId, listed);
+        this.update(panelId, current => ({ ...current, open: undefined, acpSessionId: chosen.sessionId, banner: chosen.banner }));
+      }
       const state = this.required(panelId);
       const request: NewSessionRequest = { cwd: state.cwd, mcpServers: launch.mcpServers ?? [] };
       if (launch.meta) request._meta = launch.meta;
-      if (state.acpSessionId) {
-        tab.loading = true;
-        try { await runtime.load({ ...request, sessionId: state.acpSessionId }); } finally { tab.loading = false; }
-      } else {
-        const created = await runtime.create(request);
-        this.update(panelId, current => ({ ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings } }));
-      }
+      const open = async () => {
+        if (state.acpSessionId) {
+          tab.loading = true;
+          try { await runtime.load({ ...request, sessionId: state.acpSessionId }); } finally { tab.loading = false; }
+        } else {
+          const created = await runtime.create(request);
+          this.update(panelId, current => ({ ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings } }));
+        }
+      };
+      await open();
       if (launch.mode) await runtime.setMode(launch.mode);
       await this.applySettings(panelId, runtime);
       const interrupted = this.required(panelId).turn;
@@ -339,9 +570,37 @@ export class ChatTabManager {
       tab.runtime = undefined;
       await runtime.stop().catch(() => undefined);
       const failure = chatFailure(error, { code: 'CHAT_START_FAILED', next: 'Press Restart. If it fails again, check the agent is installed and signed in on this machine.' });
-      this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent));
+      this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent, this.name));
       throw failure;
     }
+  }
+
+  /** The folder's conversations for Switch to chat, newest first, or why they could not be listed. */
+  private async listForSwitch(panelId: string, runtime: ChatTabRuntime): Promise<SwitchListing> {
+    try {
+      const listed = await runtime.list(this.required(panelId).cwd);
+      return { sessions: newestFirst(listed.sessions), complete: listed.complete };
+    } catch (error) {
+      console.warn(`[ChatTabs] ${panelId} could not list its folder's conversations, so it starts a new one: ${reasonOf(error)}`);
+      return { error: reasonOf(error).replace(/\.$/, '') };
+    }
+  }
+
+  /**
+   * Switch to chat when Pane wasn't sure of the terminal's conversation (D-282): the folder's newest
+   * conversation that no other Pane tab has open. None left, or no list, starts a new one, and says so.
+   * Synchronous, so the caller can save the choice before anything else claims it.
+   */
+  private mostRecent(panelId: string, listed: SwitchListing): SwitchChoice {
+    if ('error' in listed) return { banner: { kind: 'list-failed', reason: listed.error } };
+    const { sessions, complete } = listed;
+    const elsewhere = this.options.openConversations?.(panelId) ?? new Map();
+    const chosen = sessions.find(session => !elsewhere.has(session.sessionId));
+    console.log(`[ChatTabs] ${panelId} opens ${chosen ? `the folder's most recent conversation ${chosen.sessionId}` : 'a new conversation'}: ${sessions.length} listed${complete ? '' : ' (list cut short)'}, ${sessions.filter(session => elsewhere.has(session.sessionId)).length} open in other tabs.`);
+    if (chosen) return { sessionId: chosen.sessionId, banner: { kind: 'most-recent' } };
+    // Every listed one is taken, but the list stopped early: older ones may be free, so this is not "none".
+    if (!complete) return { banner: { kind: 'list-failed', reason: `Pane lists only the newest ${CHAT_CONVERSATION_LIMIT.toLocaleString('en-US')}, and every one of those is open in another tab` } };
+    return { banner: { kind: 'none' } };
   }
 
   private async applySettings(panelId: string, runtime: ChatTabRuntime): Promise<void> {
@@ -399,8 +658,10 @@ export class ChatTabManager {
     this.update(panelId, current => ({ ...current, queue: current.queue?.slice(1), turn: { operationId: next.operationId, startedAt }, status: 'working' }));
     this.bodies.remove(panelId, next.operationId);
     const finish = (outcome: 'completed' | 'failed', stopReason: string, error?: PaneError) => {
+      // A turn of a released runtime ends after the release: the next runtime's delivery is not its to end.
+      if (tab.run !== generation) return;
       tab.delivering = false;
-      if (tab.run !== generation || !this.options.store.state(panelId)) return;
+      if (!this.options.store.state(panelId)) return;
       const marker = tab.transcript?.endTurn({ type: 'pane_turn', stopReason, startedAt, endedAt: new Date().toISOString() });
       if (marker) this.options.send('chat-tab:event', marker);
       tab.notice = stopReason === 'refusal' ? 'The agent declined this request.' : stopReason === 'max_tokens' ? 'The reply hit the length limit.' : stopReason === 'max_turn_requests' ? 'The turn hit its step limit.' : undefined;
@@ -409,7 +670,7 @@ export class ChatTabManager {
         receipts: current.receipts?.map(receipt => receipt.operationId === next.operationId ? { ...receipt, state: outcome, error: error?.message } : receipt),
       }));
       if (error && isAuthRequired(error)) {
-        void this.release(tab).then(() => this.stopWith(panelId, signedOut(this.required(panelId).agent)));
+        void this.release(tab).then(() => this.stopWith(panelId, signedOut(this.required(panelId).agent, this.name)));
         return;
       }
       this.publish(panelId);
@@ -498,15 +759,18 @@ export class ChatTabManager {
       schema: 'requestedSchema' in question.request ? decodeBoundary(question.request.requestedSchema, boundary.json) : {},
       toolCallId: decodeOptionalBoundary(question.request, boundary.object({ toolCallId: boundary.optional(boundary.string) }))?.toolCallId,
     })) : [];
-    return {
+    const view: ChatTabView = {
       panelId, agent: state.agent, generation: tab.generation, status: this.status(state, tab), problem: state.problem, notice: tab.notice,
       canAttachImages: tab.runtime?.supportsImages() ?? false,
-      controls: runtime?.controls() ?? [], commands: runtime?.commands() ?? [],
+      controls: runtime ? [...runtime.controls(), ...fullAccessControl(state)] : [], commands: runtime?.commands() ?? [],
       permissions, questions, queue: state.queue ?? [],
       // While history replays the window is incomplete; viewers fetch it once the tab has started.
       transcript: tab.transcript && limit > 0 && !tab.loading && !tab.starting ? tab.transcript.snapshot(limit) : undefined,
       messageCount: tab.transcript?.count() ?? 0,
+      ...extras(state, runtime),
     };
+    if (state.banner) view.banner = state.banner;
+    return view;
   }
 
   private status(state: ChatPanelState, tab: Tab): ChatTabStatus {
@@ -521,7 +785,8 @@ export class ChatTabManager {
     if (!state) return;
     const tab = this.tab(panelId);
     const view = this.snapshot(panelId, state, tab, 0);
-    this.options.send('chat-tab:state', view);
+    this.options.send('chat-tab:view', view);
+    if (agentConfig(view.agent)?.chat?.legacyClients) this.options.send('chat-tab:state', view);
     this.options.onView?.(view);
     const agentState = toAgentState(view);
     if (tab.published === agentState) return;
@@ -561,19 +826,64 @@ function toAgentState(view: ChatTabView): AgentState {
   return view.status === 'idle' ? 'idle' : 'unknown';
 }
 
-function safeName(panelId: string): string { return createHash('sha256').update(panelId).digest('hex').slice(0, 32); }
-
-function signedOut(agent: ChatPanelState['agent']): ChatTabProblem {
-  const name = agent === 'claude' ? 'Claude Code' : 'Codex';
-  return { code: 'signed-out', message: `${name} is not signed in on this machine.`, next: `Sign in with ${agent === 'claude' ? 'claude auth login' : 'codex login'} in a terminal tab, then press Retry.`, action: 'sign-in' };
+function promptSize(body: Pick<ChatTabSend, 'text' | 'images'>): number {
+  return body.text.length + (body.images ?? []).reduce((sum, image) => sum + image.data.length, 0);
 }
 
-function problemFrom(error: PaneError, agent: ChatPanelState['agent']): ChatTabProblem {
-  if (isAuthRequired(error)) return signedOut(agent);
-  if (error.code === 'CHAT_AGENT_NOT_INSTALLED') return { code: 'not-installed', message: error.message, next: error.next ?? 'Install it, then press Retry.', action: 'install', url: agent === 'claude' ? 'https://docs.anthropic.com/en/docs/claude-code/setup' : 'https://developers.openai.com/codex/cli' };
+/** Context usage, background tasks and the last /clear, each only when there is one. */
+function extras(state: ChatPanelState, runtime: ChatTabRuntime | undefined): Pick<ChatTabView, 'context' | 'tasks' | 'clearedAt'> {
+  const result: Pick<ChatTabView, 'context' | 'tasks' | 'clearedAt'> = {};
+  const usage = runtime?.usage();
+  if (usage && usage.size > 0) result.context = usage;
+  const tasks = runtime?.tasks() ?? [];
+  if (tasks.length) result.tasks = tasks;
+  if (state.clearedAt) result.clearedAt = state.clearedAt;
+  return result;
+}
+
+/** Newest first by the agent's `updatedAt`, undated last; the agent's own order breaks ties. */
+function newestFirst(sessions: SessionInfo[]): SessionInfo[] {
+  const time = (session: SessionInfo) => { const at = session.updatedAt ? Date.parse(session.updatedAt) : Number.NaN; return Number.isNaN(at) ? -Infinity : at; };
+  return sessions.map((session, index) => ({ session, index, at: time(session) }))
+    .sort((a, b) => (a.at === b.at ? 0 : b.at > a.at ? 1 : -1) || a.index - b.index)
+    .map(entry => entry.session);
+}
+
+/** The folder's conversations for Switch to chat, newest first (`complete`: nothing was left out), or why there are none. */
+type SwitchListing = { sessions: SessionInfo[]; complete: boolean } | { error: string };
+
+/** The conversation Switch to chat opens, none for a new one, and the banner that says so. */
+interface SwitchChoice { sessionId?: string; banner: ChatTabSwitchBanner }
+
+function safeName(panelId: string): string { return createHash('sha256').update(panelId).digest('hex').slice(0, 32); }
+
+const FULL_ACCESS_ON = 'on';
+
+/** Whether Pane owns the tab's full-access switch: an agent launch whose agent has no full-access session mode. */
+function fullAccessControlled(state: ChatPanelState): boolean {
+  return state.launch.kind === 'agent' && !state.launch.mode && !agentConfig(state.agent)?.chat?.fullAccess?.mode;
+}
+
+/** Pane's Full access setting, beside the agent's own, for an agent whose full access is not one of its modes. */
+function fullAccessControl(state: ChatPanelState): AgentChatConfigOption[] {
+  if (!fullAccessControlled(state) || state.launch.kind !== 'agent') return [];
+  return [{ id: CHAT_FULL_ACCESS_CONTROL, name: 'Full access', currentValue: state.launch.fullAccess ? FULL_ACCESS_ON : 'off', options: [{ value: FULL_ACCESS_ON, name: 'On' }, { value: 'off', name: 'Off' }] }];
+}
+
+function signedOut(agent: ChatPanelState['agent'], name: (agent: string) => string): ChatTabProblem {
+  const config = agentConfig(agent);
+  const command = config ? ` (\`${[config.executables[0], ...config.signIn].join(' ')}\`)` : '';
+  return { code: 'signed-out', message: `${name(agent)} is not signed in on this machine.`, next: `Press Sign in to sign in${command} in a terminal tab, then press Retry.`, action: 'sign-in' };
+}
+
+function problemFrom(error: PaneError, agent: ChatPanelState['agent'], name: (agent: string) => string): ChatTabProblem {
+  if (isAuthRequired(error)) return signedOut(agent, name);
+  const install = agentConfig(agent)?.install.url;
+  const action = (next: string): ChatTabProblem => install ? { code: 'not-installed', message: error.message, next, action: 'install', url: install } : { code: 'not-installed', message: error.message, next };
+  if (error.code === 'CHAT_AGENT_NOT_INSTALLED') return action(error.next ?? 'Install it, then press Retry.');
   if (error.code === 'CHAT_UNSUPPORTED_HOST') return { code: 'unsupported-host', message: error.message, next: error.next ?? 'Open a terminal agent tab instead.' };
-  // #1236: the adapters ship with Pane and check the installed CLI. Too old a CLI is fixed by installing a newer one.
-  if (error.code === 'CHAT_AGENT_OUTDATED') return { code: 'not-installed', message: error.message, next: error.next ?? 'Update it, then press Retry.', action: 'install', url: agent === 'claude' ? 'https://docs.anthropic.com/en/docs/claude-code/setup' : 'https://developers.openai.com/codex/cli' };
+  // #1236: chat checks the installed CLI. Too old a CLI is fixed by installing a newer one.
+  if (error.code === 'CHAT_AGENT_OUTDATED') return action(error.next ?? 'Update it, then press Retry.');
   if (error.code === 'CHAT_ADAPTER_MISSING') return { code: 'adapter-setup', message: error.message, next: error.next ?? 'Reinstall Pane from runpane.com.' };
   return { code: 'failed', message: error.message, next: error.next ?? 'Press Restart.', action: 'restart' };
 }

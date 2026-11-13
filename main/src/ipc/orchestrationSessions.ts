@@ -11,7 +11,7 @@ import type {
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { previewOrchestrationSessionArchive, updateOrchestrationSession } from './runpane';
-import { clientShowsChatTabs } from './panels';
+import { clientShowsChatTab } from './panels';
 import {
   decodeOrchestrationSessionPayload,
   orchestrationExpectedRevisionSchema,
@@ -20,6 +20,7 @@ import {
   orchestrationTextArraySchema,
   orchestrationTextSchema,
 } from '../services/orchestrationSessionPayload';
+import { configuredAgentSchema } from '../../../shared/agents';
 
 const selectorSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
@@ -31,7 +32,7 @@ const createSchema = boundary.object({
   name: boundary.nonEmptyString,
   nameFromFirstMessage: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agent: boundary.optional(configuredAgentSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   openingPrompt: boundary.optional(orchestrationTextSchema),
@@ -48,7 +49,7 @@ const updateSchema = boundary.object({
   name: boundary.optional(orchestrationTextSchema),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agent: boundary.optional(configuredAgentSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   profile: boundary.optional(orchestrationTextSchema),
@@ -69,7 +70,7 @@ const archiveSelectionSchema = boundary.object({
 });
 const agentSchema = boundary.object({
   ...selectorSchemaFields(),
-  agent: boundary.enumeration('claude', 'codex', 'cursor', 'opencode'),
+  agent: configuredAgentSchema,
 });
 const associationSchema = boundary.object({
   ...selectorSchemaFields(),
@@ -124,7 +125,7 @@ export function registerOrchestrationSessionHandlers(
     return invokeSafely(() => requireManager().create(
       decodeOrchestrationSessionPayload(value, createSchema, 'create'),
       undefined,
-      { terminal: !clientShowsChatTabs(options) },
+      { terminal: agent => !clientShowsChatTab(options, agent) },
     ));
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:create');
@@ -132,7 +133,7 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry.register('orchestration-sessions:get', async (value: PaneCommandValue, options?: PaneCommandValue) => {
     return invokeSafely(async () => {
       const view = await requireManager().getView(decodeSelector(value));
-      if (view.panel.type === 'chat' && !clientShowsChatTabs(options)) {
+      if (view.panel.type === 'chat' && !clientShowsChatTab(options, view.agent)) {
         throw new PaneError('CHAT_TAB_CLIENT_OUTDATED', 'This Session runs as a chat, which this version of Pane on your phone can\'t open.', 'Update Pane on your phone, then open the Session again.');
       }
       return view;
@@ -176,7 +177,7 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry.register('orchestration-sessions:set-agent', async (value: PaneCommandValue, agent?: PaneCommandValue) => {
     const decoded = agent === undefined
       ? decodeBoundary(value, agentSchema)
-      : { ...decodeSelector(value), agent: decodeBoundary(agent, boundary.enumeration('claude', 'codex', 'cursor', 'opencode')) };
+      : { ...decodeSelector(value), agent: decodeBoundary(agent, configuredAgentSchema) };
     return invokeSafely(() => requireManager().setAgent(
       { sessionId: decoded.sessionId, name: decoded.name },
       decoded.agent,

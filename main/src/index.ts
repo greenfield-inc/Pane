@@ -20,7 +20,7 @@ const launchRemoteSetup = hasRemoteSetupLaunchArg();
 
 // Fix GTK 2/3 and GTK 4 conflict on Linux (Electron 36 issue)
 // This MUST be done before importing electron
-import { app, protocol } from 'electron';
+import { app, powerMonitor, protocol } from 'electron';
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'pane-media',
@@ -80,8 +80,15 @@ import * as path from 'path';
 import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
 import type { ConfigManager } from './services/configManager';
-import { areKeyboardShortcutsEnabled } from './utils/keyboardShortcuts';
-import { shouldForwardWebviewKey } from './utils/webviewKeyForwarding';
+import {
+  activePaneChords,
+  areKeyboardShortcutsEnabled,
+  createMenuKeyState,
+  isWindowCloseInput,
+  menuKeyTakenFromWindow,
+  settingsMenuAccelerator,
+} from './utils/keyboardShortcuts';
+import { createWebviewSequenceState, webviewKeysToForward } from './utils/webviewKeyForwarding';
 import {
   parseStoredOverlayColors,
   shouldEnableWindowControlsOverlay,
@@ -110,6 +117,7 @@ import type { AnalyticsManager } from './services/analyticsManager';
 import { readWebAttribution, resolveAnalyticsIdentity } from './services/analyticsIdentity';
 import { resourceMonitorService } from './services/resourceMonitorService';
 import { applyAppDirectoryOverrideFromArgs, isPackagedOnDefaultDirectory, migrateDataDirectory } from './utils/appDirectory';
+import { analyticsEnvironment } from './utils/analyticsEnvironment';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
 import { getUpdateCapabilities } from './utils/updateCapabilities';
@@ -620,14 +628,24 @@ async function createWindow() {
     // keys (Cmd/Ctrl+F, Cmd/Ctrl+G, Shift+Cmd/Ctrl+G) are taken from browser
     // tabs only, and Escape only while that tab's find bar is open; the Docs
     // dialog webview and every other key stay with the page.
+    // A page keeps the first step of a two-step key (⌘K is many sites' search);
+    // this remembers it so ⌘K ⌘M still reaches Pane (D-250).
+    // Clicks inside a page never reach Pane's DOM, so the split it sits in
+    // learns it is the active one from here (P3: keys act on the split you are in).
+    wvContents.on('focus', () => {
+      const context = webviewContextMap.get(wvContents.id);
+      if (context) mainWindow?.webContents.send('browser-panel:page-focused', { panelId: context.panelId });
+    });
+    const keySequence = createWebviewSequenceState();
     wvContents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
       const isBrowserTab = webviewContextMap.has(wvContents.id);
-      if (!shouldForwardWebviewKey(input, {
+      const forwarded = webviewKeysToForward(input, {
         config: configManager.getConfig(),
         isBrowserTab,
         findActive: isBrowserTab && findActiveWebviews.has(wvContents.id),
-      })) return;
+      }, keySequence);
+      if (forwarded.length === 0) return;
 
       event.preventDefault();
       if (input.key === 'Escape') {
@@ -636,14 +654,16 @@ async function createWindow() {
         if (context) mainWindow?.webContents.send('browser-panel:find-escape', { panelId: context.panelId });
         return;
       }
-      mainWindow?.webContents.send('synthetic-keydown', {
-        key: input.key,
-        code: input.code,
-        ctrlKey: input.control,
-        metaKey: input.meta,
-        shiftKey: input.shift,
-        altKey: input.alt,
-      });
+      for (const press of forwarded) {
+        mainWindow?.webContents.send('synthetic-keydown', {
+          key: press.key,
+          code: press.code,
+          ctrlKey: press.control,
+          metaKey: press.meta,
+          shiftKey: press.shift,
+          altKey: press.alt,
+        });
+      }
     });
 
     // Apply the same localhost header-stripping to the webview's session/partition.
@@ -743,11 +763,16 @@ async function createWindow() {
   } // end devToolsHandlersRegistered guard
 
   // Prevent Ctrl+W / Cmd+W from closing the Electron window so the renderer
-  // can use it to close tabs. We intercept at before-input-event and re-emit
-  // the key as a DOM keydown via IPC so the renderer's hotkey system sees it.
+  // can use it to close tabs, and take a macOS menu key a Pane command owns now
+  // (⌘H remapped, the ⌘M of ⌘K ⌘M) from the menu. We intercept at
+  // before-input-event, where preventDefault also stops menu shortcuts, and
+  // re-emit the key as a DOM keydown via IPC so the renderer's hotkey system sees it.
+  const menuKeys = createMenuKeyState();
   mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (!areKeyboardShortcutsEnabled(configManager.getConfig())) return;
-    if ((input.control || input.meta) && input.key.toLowerCase() === 'w' && input.type === 'keyDown') {
+    const config = configManager.getConfig();
+    if (!areKeyboardShortcutsEnabled(config)) return;
+    const takeFromMenu = menuKeyTakenFromWindow(input, config, menuKeys);
+    if (input.type === 'keyDown' && (isWindowCloseInput(input) || takeFromMenu)) {
       event.preventDefault();
       mainWindow?.webContents.send('synthetic-keydown', {
         key: input.key,
@@ -1161,6 +1186,9 @@ async function initializeServices() {
     invokeLocal: (channel, args) => commandRegistry.invoke(channel, args),
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
+  const machines = machineConnections;
+  powerMonitor.on('suspend', () => machines.suspend());
+  powerMonitor.on('resume', () => machines.resume());
   // The Notify inbox, badge and tray count cover every saved machine, in any mode.
   followSavedMachines(machineConnections);
 
@@ -1184,6 +1212,7 @@ async function initializeServices() {
       identity.appVersion = currentVersion;
       identity.platform = os.platform();
       identity.electronVersion = process.versions.electron;
+      identity.environment = analyticsEnvironment(app.isPackaged);
       identity.webAttributionPresent = webDistinctId !== undefined;
       identity.isFirstLaunch = isFirstLaunch;
       identity.previousVersion = previousVersion;
@@ -1306,7 +1335,19 @@ if (launchRemoteSetup) {
     if (process.platform === 'darwin') {
       app.dock?.setIcon(path.join(__dirname, '../assets/icon-macos.png'));
     }
-    installApplicationMenu({ isPackaged: app.isPackaged, onAction: sendMenuAction });
+    // The menu's keys follow Pane's: an item steps aside from a key a Pane
+    // command owns now, and Settings… shows Open Settings' current key. Config
+    // loads in initializeServices, so the menu starts on the default keys and
+    // is rebuilt from the person's once it has loaded.
+    const installMenu = (config: Parameters<typeof activePaneChords>[0] & Parameters<typeof settingsMenuAccelerator>[0]) => {
+      installApplicationMenu({
+        isPackaged: app.isPackaged,
+        onAction: sendMenuAction,
+        paneChords: activePaneChords(config),
+        settingsAccelerator: settingsMenuAccelerator(config),
+      });
+    };
+    installMenu({});
 
     // A second Pane launched only to open a link hands it to the running Pane and exits.
     if (pendingPaneLink && process.platform !== 'darwin' && await forwardPaneLinkToRunningPane(pendingPaneLink, getAppDirectory())) {
@@ -1322,7 +1363,9 @@ if (launchRemoteSetup) {
     // after the window opens reads the cache instead of blocking on the shell.
     void warmShellPath();
     await initializeServices();
-    if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
+    installMenu(configManager.getConfig());
+    configManager.on('config-updated', () => installMenu(configManager.getConfig()));
+    syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     void addRunpaneToUserPathBestEffort();
     if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') setTimeout(() => syncPaneMcpForApp({
       isPackaged: app.isPackaged,
@@ -1404,7 +1447,8 @@ if (launchRemoteSetup) {
     const lastVersion = databaseService.getLastAppVersion();
     const isFirstLaunch = lastVersion === null;
     // Runs in the background; it reads lastVersion before recordAppOpen below replaces it.
-    void removePaneFsmonitorConfig(lastVersion, databaseService.getAllProjects().flatMap(project => {
+    // Only the Pane that owns this data directory: it edits the repositories' git config.
+    if (paneDaemonHost?.duties.housekeeping) void removePaneFsmonitorConfig(lastVersion, databaseService.getAllProjects().flatMap(project => {
       const context = project.path ? sessionManager.getProjectContextByProjectId(project.id) : null;
       return context ? [{ path: project.path, commandRunner: context.commandRunner }] : [];
     }));
@@ -1468,6 +1512,8 @@ if (launchRemoteSetup) {
 
 // Initialize worktree pool — cleanup orphans and seed reserves
   setTimeout(async () => {
+    // Reserves belong to the Pane that owns this data directory; a second one would delete them.
+    if (!paneDaemonHost?.duties.housekeeping) return;
     try {
       const projects = databaseService.getAllProjects();
       // Cleanup leftover reserves from previous runs — await before seeding new ones

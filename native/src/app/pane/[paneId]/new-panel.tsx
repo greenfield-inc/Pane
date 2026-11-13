@@ -10,17 +10,20 @@ import type { ToolPanel } from '@shared/types/panels';
 
 import { useInvokeMutation } from '@/daemon';
 import { createPanelRequest, newPanelOptions, type NewPanelOption } from '@/features/terminal/panels';
+import { useChatAgents } from '@/features/chatTab/useChatTab';
 import { useAffordances } from '@/features/hosts/hostSettings';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Sheet, Text, TextField } from '@/ui';
 
-// Stand-ins for the web app's brand icons, which have no system symbol.
-const ICONS: Record<string, { ios: SFSymbol; android: AndroidSymbol }> = {
+// Stand-ins for the web app's brand icons, which have no system symbol, by the agents config's `icon` key.
+const BRAND_ICONS: Readonly<Record<string, { ios: SFSymbol; android: AndroidSymbol }>> = {
   claude: { ios: 'asterisk', android: 'asterisk' },
   codex: { ios: 'hexagon', android: 'hexagon' },
   cursor: { ios: 'cube', android: 'deployed_code' },
-  'chat-profile': { ios: 'leaf', android: 'eco' },
 };
+// An agent with no brand symbol: a chat or a terminal symbol.
+const CHAT_ICON = { ios: 'bubble.left', android: 'chat_bubble' } as const;
+const PROFILE_ICON = { ios: 'leaf', android: 'eco' } as const;
 const TERMINAL_ICON = { ios: 'apple.terminal', android: 'terminal' } as const;
 
 /** The web app's Add tool menu: opens a new terminal tab in the pane, a shell or an agent. */
@@ -30,6 +33,8 @@ export default function NewPanelSheet() {
   const theme = useTheme();
   const { colors } = theme;
   const affordances = useAffordances();
+  // Read on every open, so an agent installed since the last read shows at once.
+  const catalog = useChatAgents(true);
   const create = useInvokeMutation<[ReturnType<typeof createPanelRequest>], ToolPanel>('panels:create', {
     invalidates: ['panels:list'],
   });
@@ -67,8 +72,9 @@ export default function NewPanelSheet() {
   return (
     <Sheet title="Add tool" testID="new-panel-sheet">
       <View style={[styles.menu, { borderRadius: theme.radius.lg, borderColor: colors.border, backgroundColor: colors.surface }]}>
-        {newPanelOptions(affordances.data?.customCommands ?? [], affordances.data?.chatTabsEnabled === true).map(option => {
-          const icon = ICONS[option.chat ?? option.id] ?? TERMINAL_ICON;
+        {newPanelOptions(affordances.data?.customCommands ?? [], affordances.data?.chatTabsEnabled === true, catalog).map(option => {
+          const brand = option.iconKey && Object.hasOwn(BRAND_ICONS, option.iconKey) ? BRAND_ICONS[option.iconKey] : undefined;
+          const icon = brand ?? (option.chat ? CHAT_ICON : option.chatProfile ? PROFILE_ICON : TERMINAL_ICON);
           return (
             <Pressable
               key={option.id}

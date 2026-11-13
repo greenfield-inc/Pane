@@ -32,12 +32,12 @@ function snapshot(ports: ListeningPort[]): ListeningPortsSnapshot {
 
 async function startHost(
   tailscale: ReturnType<typeof createFakeTailscale>,
-  options: { paneDir?: string; enabled?: boolean; workspaces?: WorkspaceAccessConfig; onChange?: () => void } = {},
+  options: { paneDir?: string; enabled?: boolean; workspaces?: WorkspaceAccessConfig; onChange?: () => void; refused?: string } = {},
 ) {
   const workspace = new PaneWorkspaceHostController(
     new PaneCommandRegistry(),
     { getConfig: () => ({ workspaces: options.workspaces ?? { enabled: options.enabled ?? true } }), on: () => ({}), off: () => ({}) },
-    true,
+    options.refused ? { kind: 'refused', reason: options.refused } : { kind: 'allowed', onByDefault: true },
     tailscale.run,
   );
   const previews = new PhonePreviewHost({
@@ -166,6 +166,23 @@ describe('phone previews', () => {
     expect(Object.values(afterQuit).some(target => target.endsWith('/5173'))).toBe(false);
     expect(afterQuit['9999']).toBe('http://127.0.0.1:9');
     expect(Object.values(afterQuit).some(target => target.endsWith('/4000'))).toBe(true);
+  });
+
+  it('leaves Serve alone in a Pane that may not change it, even beside a Pane on the same data directory', async () => {
+    const tailscale = createFakeTailscale();
+    const installed = await startHost(tailscale);
+    await installed.previews.update(snapshot([port(5173)]));
+    await installed.previews.request(5173);
+    const before = await serveTargets(tailscale);
+
+    const second = await startHost(tailscale, { refused: 'another Pane already serves this data directory' });
+    await second.previews.update(snapshot([port(3000)]));
+    await second.previews.request(3000);
+    await second.stop();
+    cleanups.pop();
+
+    expect(await serveTargets(tailscale)).toEqual(before);
+    expect(second.previews.decorate(snapshot([port(3000)])).phone).toMatchObject({ state: 'off', reason: 'another Pane already serves this data directory' });
   });
 
   it('retries a Serve change that another client\'s write rejected', async () => {

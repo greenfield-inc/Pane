@@ -3,13 +3,20 @@ import { matchSorter } from 'match-sorter';
 import {
   Archive, Code, Command, Copy, CornerDownLeft, ExternalLink, FolderGit2, GitBranch, GitPullRequest, MessageSquare, MoreHorizontal,
   Pin, PinOff, Play, Plus, SquareArrowOutUpRight, X, type LucideIcon,
+  Keyboard, RotateCcw, ListTree,
 } from 'lucide-react';
 import { Modal } from './ui/Modal';
 import { Kbd } from './ui/Kbd';
 import { Tooltip } from './ui/Tooltip';
 import { AgentStatusDot } from './ui/AgentStatusDot';
 import { archiveOrchestrationSession, setOrchestrationSessionPinned } from './orchestrationSessionActions';
-import { useHotkeyStore } from '../stores/hotkeyStore';
+import { rendererKeyPlatform, useHotkeyStore } from '../stores/hotkeyStore';
+import { getCatalogEntry } from '../../../shared/constants/keyboardShortcuts';
+import { normalizeKeyboardShortcutOverrides, resolveDefaultChord } from '../../../shared/utils/keyboardBindings';
+import { buildShortcutMap, labelForId } from '../utils/shortcutMap';
+import { rendererPlatform } from '../utils/platformUtils';
+import { useKeyRecording } from '../hooks/useKeyRecording';
+import { useShortcutMapQueryStore } from './settings/KeyboardShortcutMap';
 import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -24,7 +31,7 @@ import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { formatTimeAgo } from '../utils/timestampUtils';
 import { API } from '../utils/api';
 import { cn } from '../utils/cn';
-import { MachineBadge } from './machines/MachineBadge';
+import { MachineRowMark, machineMarkTitle } from './machines/MachineMark';
 import { useAllMachinesTree } from '../hooks/useAllMachinesTree';
 import { isAllMachinesOn, useAllMachinesStore } from '../stores/allMachinesStore';
 import { openOnMachine, runOnMachine } from '../utils/machineRowActions';
@@ -48,6 +55,32 @@ interface LauncherAction {
   label: string;
   icon: LucideIcon;
   run: () => void;
+  /** Keep the launcher open (Change key… records in place). */
+  stay?: boolean;
+}
+
+/** What a command's Actions can do with its key (P7). */
+interface KeyActionContext {
+  onChangeKey: (id: string, label: string) => void;
+  onResetKey: (id: string) => void;
+  onShowInShortcuts: (label: string) => void;
+}
+
+interface ActionContext extends KeyActionContext {
+  onNewPane: (projectId: number) => void;
+  isRemote: boolean;
+}
+
+/** Change key…, Reset to default and Show in Keyboard Shortcuts, for a command in the catalog. */
+function keyActionsFor(id: string, label: string, context: KeyActionContext): LauncherAction[] {
+  if (!getCatalogEntry(id)) return [];
+  const { overrides } = normalizeKeyboardShortcutOverrides(useConfigStore.getState().config?.keyboardShortcutOverrides);
+  const customized = Object.prototype.hasOwnProperty.call(overrides, id);
+  return [
+    { id: 'change-key', label: 'Change key…', icon: Keyboard, stay: true, run: () => context.onChangeKey(id, label) },
+    ...(customized ? [{ id: 'reset-key', label: 'Reset to default', icon: RotateCcw, stay: true, run: () => context.onResetKey(id) }] : []),
+    { id: 'show-in-shortcuts', label: 'Show in Keyboard Shortcuts', icon: ListTree, run: () => context.onShowInShortcuts(label) },
+  ];
 }
 
 type Row =
@@ -131,7 +164,7 @@ function machineActionsFor(item: SearchItem, machine: MachineRef): LauncherActio
   }
 }
 
-function actionsFor(item: SearchItem, context: { onNewPane: (projectId: number) => void; isRemote: boolean }): LauncherAction[] {
+function actionsFor(item: SearchItem, context: ActionContext): LauncherAction[] {
   if (item.machine) return machineActionsFor(item, item.machine);
   switch (item.kind) {
     case 'pane': {
@@ -187,9 +220,41 @@ function actionsFor(item: SearchItem, context: { onNewPane: (projectId: number) 
       ];
     }
     case 'command':
-      return item.disabledReason !== null ? [] : [
-        { id: 'run', label: 'Run', icon: Play, run: () => setTimeout(() => item.command.action(), AFTER_CLOSE_MS) },
+      return [
+        ...(item.disabledReason !== null ? [] : [
+          { id: 'run', label: 'Run', icon: Play, run: () => setTimeout(() => item.command.action(), AFTER_CLOSE_MS) },
+        ]),
+        ...keyActionsFor(item.command.id, item.command.label, context),
       ];
+  }
+}
+
+/** What saving a key came to: saved, refused because another command has it, or not written. */
+type KeySaveResult = { kind: 'saved' } | { kind: 'conflict'; message: string } | { kind: 'failed' };
+
+/**
+ * Saves one command's key (undefined resets it to its default, null leaves it
+ * without one). A conflict is refused before anything is written; a failed
+ * write shows its error and is never reported as saved.
+ */
+async function saveKeyOverride(id: string, chord: string | null | undefined): Promise<KeySaveResult> {
+  const config = useConfigStore.getState().config;
+  const { overrides } = normalizeKeyboardShortcutOverrides(config?.keyboardShortcutOverrides);
+  const next = { ...overrides };
+  if (chord === undefined) delete next[id];
+  else next[id] = chord;
+  const sources = { terminalShortcuts: config?.terminalShortcuts, customCommands: config?.customCommands };
+  const map = buildShortcutMap({ overridesRaw: next, ...sources, environment: rendererPlatform(), keyPlatform: rendererKeyPlatform() });
+  const conflicts = map.rows.find(row => row.id === id)?.conflicts ?? [];
+  if (chord && conflicts.length > 0) {
+    return { kind: 'conflict', message: `${formatKeyDisplay(chord)} is already ${conflicts.map(other => labelForId(other, sources)).join(' and ')}` };
+  }
+  try {
+    await useConfigStore.getState().updateConfig({ keyboardShortcutOverrides: next });
+    return { kind: 'saved' };
+  } catch (cause) {
+    showActionError('Could not save the key', cause);
+    return { kind: 'failed' };
   }
 }
 
@@ -213,6 +278,71 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
   const selectedSessionId = useOrchestrationSessionStore(s => s.selectedSessionId);
   const hotkeys = useHotkeyStore(s => s.hotkeys);
   const isRemote = useConfigStore(s => s.config?.remoteDaemon?.client.mode === 'remote');
+
+  // Change key… records in place (P7, D-240), with the same recorder and
+  // conflict check as Settings › Keyboard Shortcuts.
+  const [recordingKey, setRecordingKey] = useState<{ id: string; label: string } | null>(null);
+  const recordingRef = useRef(recordingKey);
+  useEffect(() => { recordingRef.current = recordingKey; }, [recordingKey]);
+  const [keyStatus, setKeyStatus] = useState('');
+  // Closing the launcher ends any recording and clears its status, adjusted
+  // during render rather than in an effect, so a reopen never shows the old one.
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (wasOpen !== isOpen) {
+    setWasOpen(isOpen);
+    if (!isOpen) { setRecordingKey(null); setKeyStatus(''); }
+  }
+  const actionContext = useMemo<ActionContext>(() => ({
+    onNewPane,
+    isRemote,
+    onChangeKey: (id, label) => { setKeyStatus(''); setRecordingKey({ id, label }); },
+    onResetKey: (id) => {
+      void saveKeyOverride(id, undefined).then(result => {
+        if (result.kind !== 'saved') return;
+        setKeyStatus(`Reset to ${formatKeyDisplay(resolveDefaultChord(id, rendererKeyPlatform()) ?? '') || 'no key'}`);
+        setActionsKey(null);
+      });
+    },
+    onShowInShortcuts: (label) => {
+      useShortcutMapQueryStore.setState({ query: label });
+      setTimeout(() => useHotkeyStore.getState().hotkeys.get('open-shortcut-settings')?.action(), AFTER_CLOSE_MS);
+    },
+  }), [onNewPane, isRemote]);
+  const finishRecorded = (outcome: Promise<KeySaveResult>, done: string) => {
+    const target = recordingRef.current;
+    void outcome.then(result => {
+      if (result.kind === 'conflict' && target) {
+        setKeyStatus(`${result.message}. Press another key, or Esc.`);
+        setRecordingKey(target);
+        return;
+      }
+      // A failed write has shown its error; the key stays as it was.
+      if (result.kind === 'failed') {
+        setKeyStatus('The key was not saved.');
+        return;
+      }
+      setKeyStatus(done);
+      setActionsKey(null);
+    });
+  };
+  useKeyRecording({
+    recording: Boolean(recordingKey),
+    defaultChord: recordingKey ? resolveDefaultChord(recordingKey.id, rendererKeyPlatform()) : null,
+    finish: (message) => { setRecordingKey(null); if (message) setKeyStatus(message); },
+    setStatus: setKeyStatus,
+    onRecord: (chord) => {
+      const target = recordingRef.current;
+      if (target) finishRecorded(saveKeyOverride(target.id, chord), `${target.label}: ${formatKeyDisplay(chord)}`);
+    },
+    onUnassign: () => {
+      const target = recordingRef.current;
+      if (target) finishRecorded(saveKeyOverride(target.id, null), `${target.label}: no key`);
+    },
+    onReset: () => {
+      const target = recordingRef.current;
+      if (target) finishRecorded(saveKeyOverride(target.id, undefined), `${target.label}: back to its default`);
+    },
+  });
   // Read only while open, so status updates don't re-render a closed launcher.
   const agentStatus = usePanelStore(s => isOpen ? s.agentStatus : NO_STATUS);
   const agentStatusSession = usePanelStore(s => isOpen ? s.agentStatusSession : NO_SESSIONS);
@@ -257,9 +387,9 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
 
   const actions = useMemo(() => {
     if (!actionsItem) return [];
-    const all = actionsFor(actionsItem, { onNewPane, isRemote });
+    const all = actionsFor(actionsItem, actionContext);
     return actionQuery.trim() ? matchSorter(all, actionQuery.trim(), { keys: ['label'] }) : all;
-  }, [actionQuery, actionsItem, isRemote, onNewPane]);
+  }, [actionContext, actionQuery, actionsItem, isRemote, onNewPane]);
 
   const rows = useMemo(() => buildRows(results.sections, actionsItem ? actions : null), [actions, actionsItem, results.sections]);
   const selectable = useMemo(() => rows.filter((row): row is Exclude<Row, { type: 'header' }> => row.type !== 'header'), [rows]);
@@ -292,7 +422,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
   }, [selectedIndex, rows]);
 
   const runAction = (action: LauncherAction) => {
-    onClose();
+    if (!action.stay) onClose();
     action.run();
   };
 
@@ -307,7 +437,9 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
       runAction(row.action);
       return;
     }
-    const [main] = actionsFor(row.item, { onNewPane, isRemote });
+    // A disabled command offers its key actions, but Enter never runs them for it.
+    if (row.item.kind === 'command' && row.item.disabledReason) return;
+    const [main] = actionsFor(row.item, actionContext);
     if (main) runAction(main);
   };
 
@@ -351,7 +483,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
   };
 
   const mainAction = selectedItem
-    ? actionsFor(selectedItem, { onNewPane, isRemote })[0]?.label ?? null
+    ? actionsFor(selectedItem, actionContext)[0]?.label ?? null
     : selected?.type === 'more' ? `Show all ${selected.section.label}` : null;
   const footerLabel = actionsItem ? (selected?.type === 'action' ? selected.action.label : null) : mainAction;
   const activeOption = selected ? `${listboxId}-option-${selectedIndex}` : undefined;
@@ -467,6 +599,8 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
       <div className="flex h-11 flex-shrink-0 items-center gap-1 border-b border-border-primary px-5 pb-2 pt-1" role="group" aria-label="Filter">
         {actionsItem ? (
           <span className="px-1.5 text-[13px] text-text-tertiary">Actions for {actionsItem.title}</span>
+        ) : keyStatus && !recordingKey ? (
+          <span role="status" className="px-1.5 text-[13px] text-text-secondary" data-testid="palette-key-status">{keyStatus}</span>
         ) : SEARCH_FILTERS.map(entry => {
           const active = entry.id === results.filter;
           return (
@@ -502,7 +636,14 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
         className="relative min-h-0 overflow-y-auto py-2"
         style={{ height: 'min(520px, calc(100vh - 220px))' }}
       >
-        {selectable.length === 0 ? (
+        {recordingKey ? (
+          <div className="flex flex-col items-center gap-3 px-6 py-12 text-center" data-testid="palette-key-recorder">
+            <Keyboard className="h-6 w-6 text-text-tertiary" aria-hidden="true" />
+            <p className="text-sm text-text-primary">Press the new key for <span className="font-medium">{recordingKey.label}</span></p>
+            <p className="text-xs text-text-tertiary">A two-step key works too: press the second key right after. Esc cancels, Backspace clears.</p>
+            <p role="status" aria-live="polite" className="min-h-4 text-xs text-text-secondary">{keyStatus}</p>
+          </div>
+        ) : selectable.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-text-tertiary">
             {actionsItem ? 'No matching actions' : 'No results'}
           </div>
@@ -645,12 +786,17 @@ function ResultRow({ item, query, selected, attention }: { item: SearchItem; que
         {pinned && <Pin className="h-3 w-3 flex-shrink-0 self-center rotate-45 text-text-tertiary" aria-label="Pinned" />}
         {detail && <span className="min-w-0 truncate text-[13px] text-text-tertiary">{detail}</span>}
       </span>
-      {item.machine && <MachineBadge machine={item.machine} />}
+      {item.machine && (
+        <Tooltip content={machineMarkTitle(item.machine)} side="left">
+          <MachineRowMark machine={item.machine} />
+        </Tooltip>
+      )}
       {/* One fixed-height slot, so the hints and the metadata swap without moving the row. */}
       <span className="flex h-5 flex-shrink-0 items-center gap-3 text-[13px] text-text-tertiary">
         {selected ? (
           <>
-            {item.kind !== 'command' && <MoreHorizontal className="h-4 w-4" aria-label="Actions" />}
+            {/* A command keeps showing its key while selected (P7: find and change keys). */}
+            {item.kind === 'command' ? metadata(item) : <MoreHorizontal className="h-4 w-4" aria-label="Actions" />}
             {!isDisabled(item) && <CornerDownLeft className="h-4 w-4" aria-hidden="true" />}
           </>
         ) : metadata(item)}

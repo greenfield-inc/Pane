@@ -1,6 +1,7 @@
 /**
  * Machine colours, shared by the desktop and the phone so one machine looks the
  * same everywhere. Nothing is stored: the colour comes from the machine's name.
+ * A colour a person picks on one computer is saved there only (`machineMarks.ts`).
  */
 
 /** Slot names in palette order; slot n uses the `machine-<n+1>` theme colour. */

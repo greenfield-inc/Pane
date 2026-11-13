@@ -209,10 +209,19 @@ interface ElectronAPI {
   };
   chatTab: import('../../../shared/types/chatTab').ChatTabClient & {
     create(request: import('../../../shared/types/chatTab').ChatTabCreate): Promise<{ panelId: string }>;
-    /** Switch to chat: moves a terminal Claude or Codex tab into a chat tab. */
+    /** Switch to chat: moves a terminal agent tab into a chat tab, when the catalog says its agent can switch. */
     switch(panelId: string): Promise<import('../../../shared/types/chatTab').ChatTabSwitchResult>;
-    keys(): Promise<Record<'claude' | 'codex', boolean>>;
-    setKey(agent: 'claude' | 'codex', key: string | null): Promise<Record<'claude' | 'codex', boolean>>;
+    /** What switching every terminal agent tab of a Session would do; changes nothing. */
+    previewSessionSwitch(sessionId: string): Promise<import('../../../shared/types/chatTab').SessionChatSwitchPreview>;
+    /** Switches the confirmed tabs of a Session one by one. */
+    switchSession(sessionId: string, panelIds: string[]): Promise<import('../../../shared/types/chatTab').SessionChatSwitchResult>;
+    keys(): Promise<import('../../../shared/types/chatTab').ChatTabKeyStatus>;
+    setKey(agent: string, key: string | null): Promise<import('../../../shared/types/chatTab').ChatTabKeyStatus>;
+    /** Settings > Agents: the ACP Registry's agents; `refresh` reads the index again instead of the cached copy. */
+    registry(refresh?: boolean): Promise<import('../../../shared/types/agentRegistry').RegistryAgentList>;
+    /** Installs the registry's current version. A binary with no checksum is refused (AGENT_REGISTRY_UNVERIFIED) until `allowUnverified`. */
+    installAgent(id: string, options?: { allowUnverified?: boolean }): Promise<import('../../../shared/types/agentRegistry').RegistryAgentList>;
+    removeAgent(id: string): Promise<import('../../../shared/types/agentRegistry').RegistryAgentList>;
   };
 
   paneChat: {
@@ -557,6 +566,8 @@ interface ElectronAPI {
 
   // Event listeners for real-time updates
   events: {
+    /** Config changed in main (Settings, another window, or a hand edit of config.json). */
+    onConfigUpdated: (callback: (config: AppConfig) => void) => () => void;
     onPermissionRequest: (callback: (request: PanePermissionRequest) => void) => () => void;
     onPermissionResolved: (callback: (event: PanePermissionResolvedEvent) => void) => () => void;
     onSessionCreationFailed: (callback: (failure: { name: string; error: string }) => void) => () => void;
@@ -604,6 +615,8 @@ interface ElectronAPI {
     
     onTerminalOutput: (callback: (output: import('../../../shared/types/panels').TerminalOutputEvent) => void) => () => void;
     onTerminalCliReady: (callback: (data: { panelId: string }) => void) => () => void;
+    /** The panel's terminal started a new process in place (a failed Switch to chat, Resume); its view should redraw. */
+    onTerminalRelaunched: (callback: (data: { sessionId: string; panelId: string }) => void) => () => void;
     onTerminalExited: (callback: (data: { sessionId: string; panelId: string; exitCode: number; signal: number | null }) => void) => () => void;
     onTerminalAlternateScreen: (callback: (data: { panelId: string; active: boolean }) => void) => () => void;
     /**

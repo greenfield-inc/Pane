@@ -290,6 +290,14 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
+  // A browser tab's page took keyboard focus (a click inside it never reaches this DOM).
+  ipcRenderer.on('browser-panel:page-focused', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:page-focused', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:page-focused to window:', e);
+    }
+  });
   // Escape pressed in a browser tab's page while its Pane find bar is open.
   ipcRenderer.on('browser-panel:find-escape', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
     try {
@@ -475,28 +483,47 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     create: (request: ChatTabCreate) => invokeIpc('chat-tab:create', request),
     switch: (panelId: string) => invokeIpc('chat-tab:switch', panelId),
+    previewSessionSwitch: (sessionId: string) => invokeIpc('chat-tab:preview-session-switch', sessionId),
+    switchSession: (sessionId: string, panelIds: string[]) => invokeIpc('chat-tab:switch-session', sessionId, panelIds),
     get: (panelId: string, limit?: number) => invokeIpc('chat-tab:get', panelId, limit),
     history: (panelId: string, before: number, limit: number) => invokeIpc('chat-tab:history', panelId, before, limit),
     send: (panelId: string, request: ChatTabSend) => invokeIpc('chat-tab:send', panelId, request),
     receipt: (panelId: string, operationId: string) => invokeIpc('chat-tab:receipt', panelId, operationId).then(receipt => receipt ?? undefined),
     unqueue: (panelId: string, operationId: string) => invokeIpc('chat-tab:unqueue', panelId, operationId),
+    sendNow: (panelId: string, operationId: string) => invokeIpc('chat-tab:send-now', panelId, operationId),
+    editQueued: (panelId: string, operationId: string, text: string) => invokeIpc('chat-tab:edit-queued', panelId, operationId, text),
+    clear: (panelId: string) => invokeIpc('chat-tab:clear', panelId),
+    stopTask: (panelId: string, taskId: string) => invokeIpc('chat-tab:stop-task', panelId, taskId),
     configure: (panelId: string, configId: string, value: string) => invokeIpc('chat-tab:configure', panelId, configId, value),
     cancel: (panelId: string) => invokeIpc('chat-tab:cancel', panelId),
     permission: (panelId: string, requestId: string, optionId: string) => invokeIpc('chat-tab:permission', panelId, requestId, optionId),
     answer: (panelId: string, questionId: string, response: ChatTabAnswer) => invokeIpc('chat-tab:answer', panelId, questionId, response),
     restart: (panelId: string) => invokeIpc('chat-tab:restart', panelId),
+    conversations: (panelId: string) => invokeIpc('chat-tab:conversations', panelId),
+    resume: (panelId: string, sessionId: string) => invokeIpc('chat-tab:resume', panelId, sessionId),
+    dismissBanner: (panelId: string) => invokeIpc('chat-tab:dismiss-banner', panelId),
     signIn: (panelId: string) => invokeIpc('chat-tab:sign-in', panelId),
     keys: () => invokeIpc('chat-tab:keys'),
-    setKey: (agent: 'claude' | 'codex', key: string | null) => invokeIpc('chat-tab:set-key', agent, key),
+    setKey: (agent: string, key: string | null) => invokeIpc('chat-tab:set-key', agent, key),
+    agents: () => invokeIpc('chat-tab:agents'),
+    registry: (refresh?: boolean) => invokeIpc('chat-tab:registry', refresh ?? false),
+    installAgent: (id: string, options?: { allowUnverified?: boolean }) => invokeIpc('chat-tab:install-agent', id, options ?? {}),
+    removeAgent: (id: string) => invokeIpc('chat-tab:remove-agent', id),
     onEvent: (callback: (event: ChatTabEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, event: ChatTabEvent) => callback(event);
       ipcRenderer.on('chat-tab:event', listener);
       return () => ipcRenderer.removeListener('chat-tab:event', listener);
     },
     onState: (callback: (view: ChatTabView) => void) => {
+      // chat-tab:view carries every agent's view; a host from before it (remote mode) sends only
+      // chat-tab:state. A view seen on both is harmless: the viewer keeps the newest.
       const listener = (_event: Electron.IpcRendererEvent, view: ChatTabView) => callback(view);
+      ipcRenderer.on('chat-tab:view', listener);
       ipcRenderer.on('chat-tab:state', listener);
-      return () => ipcRenderer.removeListener('chat-tab:state', listener);
+      return () => {
+        ipcRenderer.removeListener('chat-tab:view', listener);
+        ipcRenderer.removeListener('chat-tab:state', listener);
+      };
     },
   },
   paneChat: {
@@ -513,8 +540,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runtimes: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:runtimes'),
     list: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:list'),
     select: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:select', selector),
-    create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input, { chatTabs: true }),
-    get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector, { chatTabs: true }),
+    create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input, { chatTabs: true, chatAgents: true }),
+    get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector, { chatTabs: true, chatAgents: true }),
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:update', selector, input),
     reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }),
     setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
@@ -911,6 +938,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Event listeners for real-time updates
   events: {
+    /** Config changed in main (Settings, another window, or a hand edit of config.json). */
+    onConfigUpdated: (callback: (config: AppConfig) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config);
+      ipcRenderer.on('config:updated', wrappedCallback);
+      return () => ipcRenderer.removeListener('config:updated', wrappedCallback);
+    },
     onPermissionRequest: (callback: (request: PermissionRequest) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, request: PermissionRequest) => callback(request);
       ipcRenderer.on('permission:request', wrappedCallback);
@@ -1099,6 +1132,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('terminal:output', wrappedCallback);
     },
 
+    onTerminalRelaunched: (callback: (data: { sessionId: string; panelId: string }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, data: { sessionId: string; panelId: string }) => callback(data);
+      ipcRenderer.on('terminal:relaunched', wrappedCallback);
+      return () => ipcRenderer.removeListener('terminal:relaunched', wrappedCallback);
+    },
+
     onTerminalCliReady: (callback: (data: { panelId: string }) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: { panelId: string }) => callback(data);
       ipcRenderer.on('terminal:cliReady', wrappedCallback);
@@ -1240,7 +1279,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   panels: {
     createPanel: (sessionId: string, type: string, name: string, config?: JsonObject): Promise<IPCResponse> =>
       invokeIpc('panels:create', { sessionId, type, title: name, initialState: config }),
-    getSessionPanels: (sessionId: string): Promise<IPCResponse> => invokeIpc('panels:list', sessionId, { chatTabs: true }),
+    getSessionPanels: (sessionId: string): Promise<IPCResponse> => invokeIpc('panels:list', sessionId, { chatTabs: true, chatAgents: true }),
     deletePanel: (panelId: string): Promise<IPCResponse> => invokeIpc('panels:delete', panelId),
     renamePanel: (panelId: string, name: string): Promise<IPCResponse> => invokeIpc('panels:update', panelId, { title: name }),
     setActivePanel: (sessionId: string, panelId: string): Promise<IPCResponse> => invokeIpc('panels:set-active', sessionId, panelId),

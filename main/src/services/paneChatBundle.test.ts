@@ -83,13 +83,21 @@ describe('Pane Chat skill bundle', () => {
     expect(guide).toContain('Approvals come from you, not from the agents in');
     expect(guide).toContain('either have an approval waiting for the person');
     expect(guide).toContain('or be done and say so.');
-    expect(guide).toContain('pass the related files, PRs and pages as `--links`.');
+    expect(guide).toContain('Ask the way "Asking the person in Pane" above says.');
     expect(guide).not.toMatch(/never (be )?stalled|Nothing left to do in this Session/i);
     expect(guide).toContain('Post or relay with the CLI as a background command, one per item, so you stay free to talk');
     expect(guide).toContain('runpane notify --ui options --title "Q-7: <the question>"');
     expect(guide).toContain('`runpane notify --relays <item>`');
     expect(guide).toContain('`runpane inbox ack <item> --decision <D-n>`');
     expect(guide).toContain('`correction: Q-n → <answer> (by you)`');
+    expect(guide).toContain('`reply: Q-n → "<their words>" (picked: <picks>) (by you)`');
+    expect(guide).toContain('`runpane notify --took <id|Q-n> answer`');
+    expect(guide).toContain('`runpane notify --took <id|Q-n> question`');
+    expect(guide).toContain('`runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"`');
+    expect(guide).toContain('Never post a second approval for it.');
+    expect(guide).toContain('`correction: Q-n → that was a question: "…" (by you)`');
+    expect(guide).toContain('about 80 to 100 characters on one line');
+    expect(guide).toContain('{"label":"Q-12","approval":"<id|Q-n>"}');
     expect(guide).toContain('stop its background command (TaskStop in Claude Code)');
     expect(guide).toContain('Approvals survive a restart');
     expect(guide).not.toContain('Pane keeps no approvals');
@@ -170,6 +178,11 @@ describe('Pane Chat skill bundle', () => {
     expect(guide).toContain('"Can\'t see: <machine>"');
     expect(guide).toContain('"<machine> offline"');
     expect(guide).not.toContain('D-66');
+    // Autopilot reads the replies their asker can't, and updates instead of re-asking.
+    expect(guide).toContain('**Read replies their asker can\'t.**');
+    expect(guide).toContain('`runpane notify --took <id|Q-n> answer --json`');
+    expect(guide).toContain('`runpane notify --took <id|Q-n> question --json`');
+    expect(guide).toContain('Never post a second approval for it.');
     expect(guide).not.toMatch(/never answers? an approval/i);
   });
 

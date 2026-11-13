@@ -7,6 +7,8 @@ export interface OuterResizeSeparatorProps extends OuterResizeSeparatorHandlers 
   minimum: number;
   maximum: number;
   className?: string;
+  /** Tooltip; by default says the separator drags and double-click resets. */
+  title?: string;
 }
 
 export function OuterResizeSeparator({
@@ -16,6 +18,7 @@ export function OuterResizeSeparator({
   minimum,
   maximum,
   className = '',
+  title = 'Drag to resize. Double-click to reset.',
   ...handlers
 }: OuterResizeSeparatorProps) {
   return (
@@ -27,6 +30,7 @@ export function OuterResizeSeparator({
       aria-valuemin={minimum}
       aria-valuemax={maximum}
       tabIndex={0}
+      title={title}
       className={`pane-outer-resize-separator pane-outer-resize-separator-${orientation} ${className}`}
       {...handlers}
     >

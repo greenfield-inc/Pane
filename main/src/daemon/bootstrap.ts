@@ -4,7 +4,7 @@ import { installRunpaneShimBestEffort } from '../services/runpaneShim';
 import os from 'os';
 import path from 'path';
 import { powerMonitor, type App, type BrowserWindow } from 'electron';
-import { startupPanelBufferMigration, startupRetentionResult } from '../services/database';
+import { runStartupRetentionSweep, startupPanelBufferMigration } from '../services/database';
 import { ConfigManager } from '../services/configManager';
 import { Logger } from '../utils/logger';
 import { DatabaseService } from '../database/database';
@@ -31,7 +31,8 @@ import { OrchestrationSessionManager } from '../services/orchestrationSessionMan
 import { TaskQueue } from '../services/taskQueue';
 import { registerIpcHandlers } from '../ipc';
 import { isLockOwnerLive } from '../ipc/runpane';
-import { PaneDaemonServer } from './server';
+import { isPaneDaemonListening, PaneDaemonServer } from './server';
+import { decideInstanceDuties, type InstanceDuties } from './instanceDuties';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
 import { PaneRemoteTransportController } from './remoteTransportController';
 import { PaneWorkspaceHostController } from './workspaceHost';
@@ -91,6 +92,7 @@ export interface PaneDaemonHost {
   paneDaemonServer: PaneDaemonServer | null;
   remoteHttpApiServer: PaneRemoteHttpApiServer | null;
   permissionIpcServer: PermissionIpcServer | null;
+  duties: InstanceDuties;
   shutdown(): Promise<void>;
 }
 
@@ -130,13 +132,22 @@ function megabytes(bytes: number | null): string {
 
 export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Promise<PaneDaemonHost> {
   const mode = options.mode ?? 'desktop';
-  const startRemoteTransport = options.startRemoteTransport ?? true;
+  // First, before anything reads panels: the retention sweep must trim them before they are cached.
+  const duties = decideInstanceDuties({
+    ownsDataDirectory: !(await isPaneDaemonListening(getAppDirectory())),
+    isPackaged: options.app.isPackaged,
+    mode,
+  });
+  const startupRetention = duties.housekeeping ? runStartupRetentionSweep() : null;
+  const startRemoteTransport = (options.startRemoteTransport ?? true) && duties.remoteTransport;
   const rendererEventSink = options.rendererEventSink ?? noopPaneEventSink;
   const headlessWebviewContextMap = new Map<number, PaneWebviewContext>();
   const getWebviewContextMap = options.getWebviewContextMap ?? (() => headlessWebviewContextMap);
 
   const configManager = new ConfigManager();
   await configManager.initialize();
+  // Outside edits to config.json (by hand, a script, an agent) reload at once.
+  configManager.startWatching();
   installPaneRuntime(rendererEventSink, configManager, options.getPtyHostRuntime, getWebviewContextMap);
 
   const logger = new Logger(configManager);
@@ -155,10 +166,16 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     );
   }
 
-  if (startupRetentionResult.error) {
-    logger.error('[ScrollbackRetention] Sweep failed', startupRetentionResult.error);
-  } else if (startupRetentionResult.result && startupRetentionResult.result.panelsCleared > 0) {
-    const result = startupRetentionResult.result;
+  if (!duties.housekeeping) {
+    logger.warn(
+      `[Pane] Another Pane already serves ${getAppDirectory()}: this one runs no cleanup on its data, ` +
+      'no remote host listener and no Tailscale Serve changes. Quit it and give it its own PANE_DIR.',
+    );
+  }
+  if (startupRetention?.error) {
+    logger.error('[ScrollbackRetention] Sweep failed', startupRetention.error);
+  } else if (startupRetention?.result && startupRetention.result.panelsCleared > 0) {
+    const result = startupRetention.result;
     logger.info(
       `[ScrollbackRetention] Cleared ${result.panelsCleared} panels across ` +
       `${result.sessionsTouched} sessions, freed ~${megabytes(result.bytesFreed)}`,
@@ -433,7 +450,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const workspaceHost = new PaneWorkspaceHostController(
     commandRegistry,
     configManager,
-    mode === 'desktop' && path.resolve(getAppDirectory()) === path.join(os.homedir(), '.pane'),
+    duties.serveRefusal
+      ? { kind: 'refused', reason: duties.serveRefusal }
+      : { kind: 'allowed', onByDefault: mode === 'desktop' && path.resolve(getAppDirectory()) === path.join(os.homedir(), '.pane') },
     runRemoteSetupCommand,
     isForwardedPort,
     options.app.getVersion(),
@@ -507,7 +526,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
-  archiveCleanupManager.start();
+  if (duties.housekeeping) archiveCleanupManager.start();
 
   const { logsManager } = await import('../services/panels/logPanel/logsManager');
   logsManager.setAnalyticsManager(analyticsManager);
@@ -548,6 +567,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       return remoteTransportController.getServer();
     },
     permissionIpcServer,
+    duties,
     async shutdown(): Promise<void> {
       prepareNotifyForQuit();
       // First, so no run starts while the services it needs are closing.

@@ -55,7 +55,6 @@ import {
   primaryGroup,
   allGroups,
   allPanelIds,
-  findGroupInDirection,
   updateSizes,
   findGroupContainingPanel,
   activatePanelInLayout,
@@ -63,9 +62,12 @@ import {
   mergeAllGroups,
   type DropZone,
 } from '../utils/panelLayout';
-import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, Sprout } from 'lucide-react';
+import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, Sprout, Boxes } from 'lucide-react';
 import { AgentFarmProfileDialog } from './chatTab/AgentFarmProfileDialog';
-import { getCliBrandIcon } from './ui/brandIconRegistry';
+import { agentIcon, getCliBrandIcon } from './ui/brandIconRegistry';
+import { useChatAgents } from '../stores/chatAgentsStore';
+import { menuChatAgents } from '../../../shared/chatAgentMenu';
+import { requestOpenSettings } from '../utils/openSettings';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
@@ -80,6 +82,10 @@ import { LoopsView } from './loops/LoopsView';
 import { LivePreviewPrompt } from './LivePreviewPrompt';
 import { ApprovalsView } from './approvals/ApprovalsView';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
+import { CUSTOM_COMMAND_KEYS, type CustomCommandId } from '../../../shared/constants/keyboardShortcuts';
+import { useRegionActions } from '../hooks/useRegionNavigation';
+import { announceTerminalReflow } from '../utils/terminalReflow';
+import { focusActiveTabSoon } from '../services/regionFocus';
 import { useLoopsStore } from '../stores/loopsStore';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
@@ -744,6 +750,9 @@ export const SessionView = memo(() => {
     localStorage.setItem('pane-loop-run-detail-panel-visible', String(loopRunDetailVisible));
   }, [loopRunDetailVisible]);
   const detailVisible = loopRun ? loopRunDetailVisible : paneDetailVisible;
+  // Maximized (P4), the right panel covers the splits and terminal, which keep their size.
+  const setMaximizedRegion = useNavigationStore(state => state.setMaximizedRegion);
+  const rightPanelMaximized = useNavigationStore(state => state.maximizedRegion === 'right-panel') && detailVisible;
   const setDetailVisible = loopRun ? setLoopRunDetailVisible : setPaneDetailVisible;
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(() => {
     const stored = localStorage.getItem('pane-inspector-tab');
@@ -759,6 +768,8 @@ export const SessionView = memo(() => {
   useEffect(() => {
     localStorage.setItem('pane-detail-collapsed', String(isDetailCollapsed));
   }, [isDetailCollapsed]);
+  // The swapped layout's bottom inspector maximizes over the work area above it (P4).
+  const bottomPanelMaximized = useNavigationStore(state => state.maximizedRegion === 'right-panel') && !isDetailCollapsed;
   /** Show the inspector on the given tab, whichever layout is active. */
   const openInspector = useCallback((tab: InspectorTab) => {
     setInspectorTab(tab);
@@ -805,13 +816,17 @@ export const SessionView = memo(() => {
   // Main-repo panes render ProjectView, which owns its own tabs and inspector;
   // the hotkeys below act on it through this bridge instead of this view's state.
   const isMainRepoPane = !!activeSession?.isMainRepo;
-  const projectActions = useCallback(
-    () => (isMainRepoPane ? useProjectViewActionsStore.getState().actions : null),
-    [isMainRepoPane],
-  );
+  // A Session's focused tile answers the same keys (P3).
+  const isSessionsView = activeView === 'pane-chat';
+  const projectActions = useCallback(() => {
+    const bridge = useProjectViewActionsStore.getState();
+    if (isSessionsView) return bridge.sessionActions;
+    return isMainRepoPane ? bridge.actions : null;
+  }, [isMainRepoPane, isSessionsView]);
 
   const cycleTab = useCallback((direction: 'next' | 'prev') => {
     const bridged = projectActions();
+    focusActiveTabSoon();
     if (bridged) { bridged.cycleTab(direction); return; }
     if (!activeSession || focusedGroupPanels.length < 2) return;
 
@@ -829,7 +844,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'cycle-tab-prev-a',
     label: 'Previous Tab',
-    keys: 'mod+a',
     category: 'tabs',
     enabled: () => (projectActions()?.tabCount() ?? focusedGroupPanels.length) > 1,
     action: () => cycleTab('prev'),
@@ -839,7 +853,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'cycle-tab-next-d',
     label: 'Next Tab',
-    keys: 'mod+d',
     category: 'tabs',
     enabled: () => (projectActions()?.tabCount() ?? focusedGroupPanels.length) > 1,
     action: () => cycleTab('next'),
@@ -853,15 +866,15 @@ export const SessionView = memo(() => {
     const name = p.type === 'diff' ? 'Review' : p.title;
     return `Switch to ${name}`;
   };
-  useHotkey({ id: 'panel-tab-1', label: panelLabel(0), keys: 'mod+shift+1', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 0 || !!focusedGroupPanels[0], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(0); return; } const p = focusedGroupPanels[0]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-2', label: panelLabel(1), keys: 'mod+shift+2', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 1 || !!focusedGroupPanels[1], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(1); return; } const p = focusedGroupPanels[1]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-3', label: panelLabel(2), keys: 'mod+shift+3', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 2 || !!focusedGroupPanels[2], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(2); return; } const p = focusedGroupPanels[2]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-4', label: panelLabel(3), keys: 'mod+shift+4', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 3 || !!focusedGroupPanels[3], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(3); return; } const p = focusedGroupPanels[3]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-5', label: panelLabel(4), keys: 'mod+shift+5', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 4 || !!focusedGroupPanels[4], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(4); return; } const p = focusedGroupPanels[4]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-6', label: panelLabel(5), keys: 'mod+shift+6', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 5 || !!focusedGroupPanels[5], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(5); return; } const p = focusedGroupPanels[5]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-7', label: panelLabel(6), keys: 'mod+shift+7', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 6 || !!focusedGroupPanels[6], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(6); return; } const p = focusedGroupPanels[6]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-8', label: panelLabel(7), keys: 'mod+shift+8', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 7 || !!focusedGroupPanels[7], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(7); return; } const p = focusedGroupPanels[7]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-9', label: panelLabel(8), keys: 'mod+shift+9', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 8 || !!focusedGroupPanels[8], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(8); return; } const p = focusedGroupPanels[8]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-1', label: panelLabel(0), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 0 || !!focusedGroupPanels[0], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(0); return; } const p = focusedGroupPanels[0]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-2', label: panelLabel(1), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 1 || !!focusedGroupPanels[1], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(1); return; } const p = focusedGroupPanels[1]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-3', label: panelLabel(2), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 2 || !!focusedGroupPanels[2], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(2); return; } const p = focusedGroupPanels[2]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-4', label: panelLabel(3), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 3 || !!focusedGroupPanels[3], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(3); return; } const p = focusedGroupPanels[3]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-5', label: panelLabel(4), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 4 || !!focusedGroupPanels[4], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(4); return; } const p = focusedGroupPanels[4]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-6', label: panelLabel(5), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 5 || !!focusedGroupPanels[5], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(5); return; } const p = focusedGroupPanels[5]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-7', label: panelLabel(6), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 6 || !!focusedGroupPanels[6], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(6); return; } const p = focusedGroupPanels[6]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-8', label: panelLabel(7), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 7 || !!focusedGroupPanels[7], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(7); return; } const p = focusedGroupPanels[7]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-9', label: panelLabel(8), category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 8 || !!focusedGroupPanels[8], action: () => { const bridged = projectActions(); focusActiveTabSoon(); if (bridged) { bridged.selectTab(8); return; } const p = focusedGroupPanels[8]; if (p) handlePanelSelect(p); } });
 
   // --- Add Tool commands (palette-only, no keybindings) ---
   // Only enabled in session view (not project view) to prevent hidden panel mutations
@@ -871,7 +884,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'add-tool-terminal',
     label: 'Add Terminal',
-    keys: 'mod+alt+1',
     category: 'tools',
     enabled: () => isInSessionView,
     action: () => { const bridged = projectActions(); if (bridged) bridged.addTerminal(); else void handlePanelCreate('terminal'); },
@@ -880,7 +892,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'add-tool-explorer',
     label: 'Show Files',
-    keys: 'mod+alt+2',
     category: 'tools',
     enabled: () => isInSessionView,
     action: () => { const bridged = projectActions(); if (bridged) bridged.showInspector('files'); else openInspector('files'); },
@@ -903,7 +914,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'close-active-tab',
     label: 'Close active tab',
-    keys: 'mod+w',
     category: 'tabs',
     enabled: closeTabEnabled,
     action: closeTabAction,
@@ -912,7 +922,6 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'archive-active-session',
     label: 'Archive Pane',
-    keys: 'mod+shift+w',
     category: 'session',
     enabled: () => !!activeSession && !activeSession.archived,
     action: () => hook.setShowArchiveConfirm(true),
@@ -923,13 +932,16 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'split-right',
     label: 'Split Right',
-    keys: 'mod+\\',
     category: 'tabs',
     enabled: () => {
+      const bridged = projectActions();
+      if (bridged) return bridged.canSplit?.() ?? false;
       if (!activeSession || !focusedGroup) return false;
       return focusedGroup.panelIds.length >= 2 && !!focusedGroup.activePanelId;
     },
     action: () => {
+      const bridged = projectActions();
+      if (bridged) { bridged.split?.('row'); return; }
       if (!activeSession || !focusedGroup || !focusedGroup.activePanelId) return;
       const sid = activeSession.id;
       const currentLayout = usePanelStore.getState().layouts[sid];
@@ -957,13 +969,16 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'split-down',
     label: 'Split Down',
-    keys: 'mod+shift+\\',
     category: 'tabs',
     enabled: () => {
+      const bridged = projectActions();
+      if (bridged) return bridged.canSplit?.() ?? false;
       if (!activeSession || !focusedGroup) return false;
       return focusedGroup.panelIds.length >= 2 && !!focusedGroup.activePanelId;
     },
     action: () => {
+      const bridged = projectActions();
+      if (bridged) { bridged.split?.('column'); return; }
       if (!activeSession || !focusedGroup || !focusedGroup.activePanelId) return;
       const sid = activeSession.id;
       const currentLayout = usePanelStore.getState().layouts[sid];
@@ -986,81 +1001,17 @@ export const SessionView = memo(() => {
     showInPalette: true,
   });
 
-  // Mod+Alt+Arrows: directional group focus
-  useHotkey({
-    id: 'focus-group-left',
-    label: 'Focus Group Left',
-    keys: 'mod+alt+ArrowLeft',
-    category: 'tabs',
-    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
-    action: () => {
-      if (!activeSession || !sessionLayout) return;
-      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'left');
-      if (target) handleFocusGroup(target);
-    },
-    showInPalette: true,
-  });
-  useHotkey({
-    id: 'focus-group-right',
-    label: 'Focus Group Right',
-    keys: 'mod+alt+ArrowRight',
-    category: 'tabs',
-    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
-    action: () => {
-      if (!activeSession || !sessionLayout) return;
-      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'right');
-      if (target) handleFocusGroup(target);
-    },
-    showInPalette: true,
-  });
-  useHotkey({
-    id: 'focus-group-up',
-    label: 'Focus Group Up',
-    keys: 'mod+alt+ArrowUp',
-    category: 'tabs',
-    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
-    action: () => {
-      if (!activeSession || !sessionLayout) return;
-      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'up');
-      if (target) handleFocusGroup(target);
-    },
-    showInPalette: true,
-  });
-  useHotkey({
-    id: 'focus-group-down',
-    label: 'Focus Group Down',
-    keys: 'mod+alt+ArrowDown',
-    category: 'tabs',
-    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
-    action: () => {
-      if (!activeSession || !sessionLayout) return;
-      const target = findGroupInDirection(sessionLayout.root, focusedGroupId, 'down');
-      if (target) handleFocusGroup(target);
-    },
-    showInPalette: true,
-  });
-
-  // Mod+Shift+Z: zoom toggle
-  useHotkey({
-    id: 'zoom-toggle',
-    label: 'Toggle Zoom',
-    keys: 'mod+shift+z',
-    category: 'tabs',
-    enabled: () => !!sessionLayout && allGroups(sessionLayout.root).length > 1,
-    action: () => {
-      if (!activeSession || !sessionLayout) return;
-      const sid = activeSession.id;
-      const currentLayout = usePanelStore.getState().layouts[sid];
-      if (!currentLayout) return;
-      const isZoomed = !!currentLayout.zoomedGroupId;
-      const next: SessionPanelLayout = {
-        ...currentLayout,
-        zoomedGroupId: isZoomed ? null : focusedGroupId,
-      };
-      applyLayout(sid, next);
-    },
-    showInPalette: true,
-  });
+  // Maximize a split over the others, or restore (P4). ⌘K ⌘M reaches it
+  // through the focused group (useRegionNavigation); its strip shows Restore.
+  const toggleGroupMaximize = useCallback((groupId: string) => {
+    if (!activeSession) return;
+    const sid = activeSession.id;
+    const currentLayout = usePanelStore.getState().layouts[sid];
+    if (!currentLayout || allGroups(currentLayout.root).length < 2) return;
+    const isZoomed = currentLayout.zoomedGroupId === groupId;
+    announceTerminalReflow();
+    applyLayout(sid, { ...currentLayout, focusedGroupId: groupId, zoomedGroupId: isZoomed ? null : groupId });
+  }, [activeSession, applyLayout]);
 
   const handlePanelClose = useCallback(
     async (panel: ToolPanel) => {
@@ -1334,6 +1285,8 @@ export const SessionView = memo(() => {
   }, [primaryGroupId, primaryGroupNode, activeSession, isSplitLayout, topBarPanels, applyLayout]);
 
   const chatTabs = useConfigStore((s) => isChatTabsEnabled(s.config));
+  const chatCatalog = useChatAgents(chatTabs ? window.electronAPI.chatTab : undefined);
+  const chatAgents = useMemo(() => menuChatAgents(chatCatalog), [chatCatalog]);
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
@@ -1349,14 +1302,17 @@ export const SessionView = memo(() => {
         <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Open</div>
         {[
           // Chat tabs on (D-15): agents open as chats first; their terminal versions follow.
-          ...(chatTabs && activeSession ? (['claude', 'codex'] as const).map(agent => ({
-            key: `chat-${agent}`,
-            label: agent === 'claude' ? 'Claude' : 'Codex',
-            icon: getCliBrandIcon(agent, 'h-3.5 w-3.5'),
+          ...(chatTabs && activeSession ? chatAgents.map(agent => ({
+            key: `chat-${agent.id}`,
+            label: agent.label,
+            icon: agentIcon(agent, 'h-3.5 w-3.5'),
             hotkeyId: '',
-            onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent }).catch(error => showActionError(`Could not open a ${agent === 'claude' ? 'Claude' : 'Codex'} chat`, error)); },
+            onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.label} chat`, error)); },
           })) : []),
-          ...(chatTabs && activeSession ? [{ key: 'chat-profile', label: 'Agent Farm profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) }] : []),
+          ...(chatTabs && activeSession ? [
+            { key: 'chat-profile', label: 'Agent Farm profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) },
+            { key: 'chat-more', label: 'More agents…', icon: <Boxes className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => requestOpenSettings({ category: 'agents' }) },
+          ] : []),
           { key: 'terminal', label: 'Terminal', icon: <Terminal className="h-3.5 w-3.5" />, hotkeyId: 'add-tool-terminal', onClick: () => handlePanelCreate('terminal') },
           ...agentPresets.map(preset => ({
             key: preset.id,
@@ -1393,7 +1349,7 @@ export const SessionView = memo(() => {
         />
       )}
     </div>
-  ), [activeSession, agentPresets, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen]);
+  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
@@ -1418,9 +1374,11 @@ export const SessionView = memo(() => {
         onStripDrop={handleStripDrop}
         getPanelTabPresentation={getPanelTabPresentation}
         emptyState={emptyStage}
+        onToggleMaximize={toggleGroupMaximize}
       />
     );
   }, [
+    toggleGroupMaximize,
     sessionLayout, activeSession, tabBarPanels, focusedGroupId,
     handleSizesChange, handleGroupPanelSelect, handlePanelClose, handleFocusGroup,
     isTabDragging, draggedPanelId, dropZones, handleDropZoneChange,
@@ -1440,7 +1398,6 @@ export const SessionView = memo(() => {
       registerHotkey({
         id: preset.hotkeyId,
         label: `Add ${preset.title}`,
-        keys: preset.hotkey,
         category: 'tools',
         enabled: () => isInSessionViewRef.current,
         action: () => handlePanelCreateRef.current('terminal', {
@@ -1453,18 +1410,18 @@ export const SessionView = memo(() => {
   }, [agentPresets, handlePanelCreateRef, isInSessionViewRef, registerHotkey, unregisterHotkey]);
 
   useEffect(() => {
-    const CUSTOM_CMD_START = 6; // mod+alt+3-5 stay reserved for built-in agents on every platform
-    const maxSlots = Math.min(customCommands.length, 10 - CUSTOM_CMD_START);
+    // Four slots, mod+alt+7, 8, 9 and 0 by default (CUSTOM_COMMAND_KEYS); 3 to 6 are the built-in agents.
+    const maxSlots = Math.min(customCommands.length, CUSTOM_COMMAND_KEYS.length);
     const ids: string[] = [];
 
     for (let i = 0; i < maxSlots; i++) {
       const cmd = customCommands[i];
-      const id = `add-tool-custom-${i}`;
+      // SAFETY: maxSlots bounds i to the catalog's four custom slots.
+      const id = `add-tool-custom-${i}` as CustomCommandId;
       ids.push(id);
       registerHotkey({
         id,
         label: `Add ${cmd.name}`,
-        keys: `mod+alt+${CUSTOM_CMD_START + i}`,
         category: 'tools',
         enabled: () => isInSessionViewRef.current,
         action: () => handlePanelCreateRef.current('terminal', {
@@ -1729,6 +1686,9 @@ export const SessionView = memo(() => {
   const toggleTerminalCollapse = useCallback(() => {
     setIsTerminalCollapsed(prev => !prev);
   }, []);
+  // ⌘⇧M with focus in the terminal dock collapses it to its strip (P4).
+  const terminalDockRef = useRef<HTMLDivElement>(null);
+  useRegionActions(terminalDockRef, { minimize: () => { if (!isTerminalCollapsed) toggleTerminalCollapse(); } });
 
   const sessionContentBox = useObservedContentBox<HTMLDivElement>();
   const centerColumnBox = useObservedContentBox<HTMLDivElement>();
@@ -1764,19 +1724,17 @@ export const SessionView = memo(() => {
   useHotkey({
     id: 'toggle-terminal',
     label: 'Toggle Terminal',
-    keys: 'mod+`',
     category: 'view',
-    enabled: () => isInSessionView,
-    action: toggleTerminalCollapse,
+    enabled: () => isInSessionView || Boolean(projectActions()?.toggleTerminal),
+    action: () => { const bridged = projectActions(); if (bridged?.toggleTerminal) bridged.toggleTerminal(); else toggleTerminalCollapse(); },
   });
 
   // Ctrl+Shift+B: toggle detail panel (right sidebar)
   useHotkey({
     id: 'toggle-detail-panel',
-    label: 'Toggle Detail Panel',
-    keys: 'mod+shift+b',
+    label: 'Toggle Right Panel',
     category: 'view',
-    enabled: () => isInSessionView && !immersiveMode,
+    enabled: () => (isInSessionView && !immersiveMode) || (isSessionsView && Boolean(projectActions())),
     action: () => { const bridged = projectActions(); if (bridged) bridged.toggleDetail(); else handleToggleDetailPanel(); },
   });
 
@@ -2043,19 +2001,22 @@ export const SessionView = memo(() => {
         />
 
         {/* Content area: center panels + right detail */}
-        <div ref={sessionContentBox.ref} className="pane-session-content flex-1 flex flex-row min-h-0 min-w-0">
+        <div ref={sessionContentBox.ref} className="pane-session-content relative flex-1 flex flex-row min-h-0 min-w-0">
           {swappedLayoutRendered && defaultTerminalPanel ? (
             <>
               {/* SWAPPED LAYOUT: Center column with panels on top, horizontal detail panel on bottom */}
-              <div ref={centerColumnBox.ref} className="pane-center-column flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+              <div ref={centerColumnBox.ref} className="pane-center-column relative flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
                 {/* Top: active panel content */}
-                <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
+                <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor" inert={bottomPanelMaximized ? true : undefined}>
                   {editorStageElement || emptyStage}
                   {livePreviewPrompt}
                 </div>
 
                 {/* Bottom: horizontal detail panel */}
                 <DetailPanel
+                  maximized={bottomPanelMaximized}
+                  onToggleMaximize={() => setMaximizedRegion(bottomPanelMaximized ? null : 'right-panel')}
+                  onMinimize={() => { setMaximizedRegion(null); if (!isDetailCollapsed) toggleDetailCollapse(); }}
                   isVisible={true}
                   onToggle={toggleDetailCollapse}
                   width={0}
@@ -2102,6 +2063,8 @@ export const SessionView = memo(() => {
                 )}
                 <div className="pane-terminal-rail-clip h-full overflow-hidden">
                   <div
+                    data-focus-region="terminal"
+                    data-region-open={rightTerminalResize.bodyActive}
                     className="pane-terminal-rail-shell bg-surface-primary flex flex-col h-full relative overflow-hidden"
                     style={{ width: `${rightTerminalResize.effectivePx}px` }}
                     aria-hidden={!rightTerminalResize.bodyActive}
@@ -2129,7 +2092,7 @@ export const SessionView = memo(() => {
           ) : (
             <>
               {/* DEFAULT LAYOUT: Center column with panels on top, terminal on bottom */}
-              <div ref={centerColumnBox.ref} className="pane-center-column flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
+              <div ref={centerColumnBox.ref} className="pane-center-column flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden" inert={rightPanelMaximized ? true : undefined}>
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
                   {editorStageElement || emptyStage}
@@ -2139,6 +2102,9 @@ export const SessionView = memo(() => {
                 {/* Bottom: persistent terminal (collapsible) */}
                 {defaultTerminalPanel && (
                   <div
+                    ref={terminalDockRef}
+                    data-focus-region="terminal"
+                    data-region-open={!isTerminalCollapsed && terminalResize.bodyActive}
                     className={`pane-terminal-dock flex-shrink-0 flex flex-col relative overflow-visible ${
                       !immersiveMode && (isTerminalCollapsed || terminalResize.renderedPx > 0)
                         ? 'border-t border-border-primary'
@@ -2203,6 +2169,9 @@ export const SessionView = memo(() => {
 
               {/* Right: detail panel */}
               <DetailPanel
+                maximized={rightPanelMaximized}
+                onToggleMaximize={() => setMaximizedRegion(rightPanelMaximized ? null : 'right-panel')}
+                onMinimize={() => { setMaximizedRegion(null); if (detailVisible) handleToggleDetailPanel(); }}
                 isVisible={detailVisible}
                 onToggle={() => setDetailVisible(v => !v)}
                 width={detailResize.renderedPx}

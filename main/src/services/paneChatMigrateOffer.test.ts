@@ -21,6 +21,7 @@ import { MIGRATE_OFFER_PREFERENCE } from './paneChatMigrateOffer';
 import { panelManager } from './panelManager';
 import type { SessionManager } from './sessionManager';
 import type { SkillCacheManager } from './skillCacheManager';
+import { agentTerminalCommand } from '../../../shared/agents';
 
 const SKILLS_ROOT = path.join(getAppDirectory(), 'skills', 'pane-chat', 'skills');
 
@@ -89,7 +90,7 @@ function fixture(agent: PaneChatAgent = 'claude') {
   const skillCacheManager = serviceStub<SkillCacheManager>({
     paneChatSkillsRoot: SKILLS_ROOT,
     ensurePaneChatGuide: vi.fn(async () => path.join(getAppDirectory(), 'guide.md')),
-    launchCommand: vi.fn((name: PaneChatAgent) => RUNPANE_CONTRACT.agentTemplates[name].command),
+    launchCommand: vi.fn((name: PaneChatAgent) => agentTerminalCommand(name)),
   });
   const paneChat = new PaneChatManager(configManager, sessionManager, skillCacheManager);
   return { paneChat, configManager, sessionManager, skillCacheManager };

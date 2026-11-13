@@ -19,8 +19,11 @@ export default defineConfig({
   forbidOnly: true,
   // No retries for minimal tests
   retries: 0,
-  // Use more workers for parallel execution
-  workers: 2,
+  // Over 3 Code Quality dispatch runs each (Oct 31), this suite took 206-209 s
+  // on 2 workers (runs 41161695357, 41162991850, 41164372909), 180-202 s on 3
+  // (41161697239, 41162994039, 41164374400) and 195-199 s on 4 (41161699481,
+  // 41162996098, 41164376197). 3 and 4 tie; 2 is slower.
+  workers: 3,
   // Reporter optimized for CI
   reporter: [
     ['list'],
@@ -56,15 +59,13 @@ export default defineConfig({
     },
   ],
 
-  // Run your local dev server before starting the tests
+  // The tests mock the Electron API (tests/electronApiMock.ts), so they need
+  // only the renderer from Vite, not the Electron app.
   webServer: {
-    command: 'pnpm electron-dev',
+    command: 'pnpm --filter frontend exec vite',
     port: devServerPort,
     reuseExistingServer: false,
     timeout: 45 * 1000,
-    env: getPlaywrightServerEnv(devServerPort, {
-      DISPLAY: ':99',
-      ELECTRON_DISABLE_SANDBOX: '1',
-    }),
+    env: getPlaywrightServerEnv(devServerPort),
   },
 });

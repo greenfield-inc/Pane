@@ -3,20 +3,17 @@ import { quoteShellWord } from '../agents/shellWord';
 import { existsSync, readFileSync } from 'fs';
 import path from 'path';
 
-/** Standard npm shims name their actual script. Resolve only that provider's
- * referenced entry; never substitute another installed CLI or infer a wrapper. */
-export function providerScript(executable: string, provider: 'claude' | 'codex'): string | undefined {
-  if (!/\.(cmd|bat)$/i.test(executable)) return;
-  const relative = provider === 'claude' ? '@anthropic-ai/claude-code/cli.js' : '@openai/codex/bin/codex.js';
+/**
+ * Standard npm shims name their actual script. Resolve only the script the agent's
+ * config names (`chat.adapter.npmShimScript`, relative to node_modules); never
+ * substitute another installed CLI or infer a wrapper.
+ */
+export function npmShimScript(executable: string, relative: string | undefined): string | undefined {
+  if (!relative || !/\.(cmd|bat)$/i.test(executable)) return;
   const wrapper = readFileSync(executable, 'utf8').replace(/\\/g, '/');
   if (!wrapper.includes(relative)) return;
   const candidates = [path.join(path.dirname(executable), 'node_modules', relative), path.join(path.dirname(executable), '..', relative)];
   return candidates.find(candidate => existsSync(candidate));
-}
-
-export function providerCommand(executable: string, args: string[], provider: 'claude' | 'codex'): HostCommand {
-  const script = providerScript(executable, provider);
-  return script ? { executable: process.execPath, args: [script, ...args] } : hostCommand(executable, args);
 }
 
 export function nativeCommand(executable: string, args: string[], shellType: string): string {

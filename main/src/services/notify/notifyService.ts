@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { app, BrowserWindow, globalShortcut } from 'electron';
 import { AUTOPILOT_OWNER_PANE_PREFIX } from '../../../../shared/types/autopilot';
 import { randomUUID } from 'crypto';
@@ -7,6 +8,7 @@ import type { ConfigManager } from '../configManager';
 import type { AppConfig } from '../../types/config';
 import {
   DEFAULT_NOTIFY_SETTINGS,
+  NOTIFY_LINKS_MAX,
   type NotifyCaller,
   type NotifyAgentAction,
   type NotifyCommand,
@@ -36,10 +38,10 @@ import type { RunpaneInboxItem } from '../../../../shared/types/runpaneOrchestra
 import type { ApprovalStore } from '../approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../../database/jsonStoreImport';
 import type { SessionInboxEnded } from '../sessionInbox';
-import { workerReportContext } from './workerContext';
+import { workerCard } from './workerContext';
+import { agentConfig } from '../../../../shared/agents';
 
-const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
-const agentName = (agentType: string | undefined): string => (agentType ? AGENT_NAMES.get(agentType) : undefined) ?? 'Agent';
+const agentName = (agentType: string | undefined): string => (agentType ? agentConfig(agentType)?.label : undefined) ?? 'Agent';
 
 export interface NotifyServiceDependencies {
   configManager: ConfigManager;
@@ -90,6 +92,10 @@ export interface NotifyServiceDependencies {
   typeIntoTab?: NotifyQueueEnvironment['typeIntoTab'];
   /** Seconds since the person last used this computer; Infinity while its screen is locked. Absent: in use. */
   idleSeconds?: () => number;
+  /** Where "Show cards on" leaves this machine (`cardsOnStatus`). Absent: whichever computer is in use. */
+  cardsOn?: NotifyQueueEnvironment['cardsOn'];
+  /** Whether a tab still exists. */
+  tabAlive?: (panelId: string) => boolean;
 }
 
 /** A computer rings only if used in the last 2 minutes (D-144). */
@@ -131,6 +137,10 @@ export class NotifyService {
   private readonly stoppers: Array<() => void> = [];
   private readonly timers: Array<ReturnType<typeof setInterval>> = [];
   private sweepTimer?: ReturnType<typeof setTimeout>;
+  /** Autopilot's chat tab while it's on (set once Autopilot starts): it reads replies no one else can. */
+  private autopilotReader?: () => { panelId: string } | undefined;
+  /** When each item last came back ready again, as the phone was last told. */
+  private readyAgainSeen = new Map<string, number>();
 
   constructor(private readonly deps: NotifyServiceDependencies) {
     this.lastSettings = this.settings();
@@ -142,6 +152,7 @@ export class NotifyService {
       shortcutRegistered: () => this.shortcutRegistered,
       instructionFiles: () => this.instructionFiles,
       machine: deps.machine,
+      machineId: deps.configManager.getConfig().machineId,
       secrets: deps.secrets,
       sessionOf: deps.sessionOf,
       savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.profiles ?? []).map(profile => profile.id),
@@ -149,7 +160,10 @@ export class NotifyService {
       store: deps.store,
       askerGone: (item) => this.askerGone(item),
       inUse: deps.idleSeconds ? () => (deps.idleSeconds?.() ?? 0) < IN_USE_SECONDS : undefined,
+      cardsOn: deps.cardsOn,
       typeIntoTab: deps.typeIntoTab,
+      tabAlive: deps.tabAlive,
+      autopilotReader: () => this.autopilotReader?.(),
       workerQuestionGone: (inboxId) => {
         try {
           deps.inbox?.ack?.([inboxId]);
@@ -184,6 +198,8 @@ export class NotifyService {
       const homeSkillChanged = homeSkill !== this.homeSkill;
       this.homeSkill = homeSkill;
       const instructionsChanged = this.applySettings(notifySettings(config));
+      // "Show cards on" moves the strip and the chime at once, not on the next poll.
+      this.queue.pollInUse();
       // The block names the `pane` skill only while it is installed.
       if (homeSkillChanged && !instructionsChanged && this.lastSettings.enabled) this.syncInstructions(true);
       // The floating windows read the palette when they load, so a new palette recreates them.
@@ -229,19 +245,27 @@ export class NotifyService {
       if (carded.has(once)) continue;
       carded.add(once);
       const session = this.deps.sessionRecord?.(entry.sessionId);
+      // The status file's needs_you, never its JSON: the question's why, its options and files.
+      // Tidied when the question is an old paragraph (P8); a report recorded before the check stays as sent.
+      const card = workerCard(entry.report?.summary, question, { quietly: true, summaryPath: entry.report?.summaryPath });
+      // D-81: the worker's status file, which its report named, opens beside the card.
+      const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
+      const links = [...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)].slice(0, NOTIFY_LINKS_MAX);
       const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: entry.paneName, agent: agentName(entry.agentType) };
       if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };
       this.queue.addWorkerQuestion({
         id: entry.id,
-        question,
+        question: card.title,
         source,
         at,
         // The Session it was filed in, even after the worker has moved or the Session closed.
         connected: { kind: 'session', id: entry.sessionId, name: session?.name ?? 'Closed Session', paneId: session?.paneId ?? '' },
-        // D-81: the worker's status file, which its report named, opens beside the card.
-        links: entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : undefined,
-        // What the worker was doing, in a line: a status file opens beside the card as its link.
-        context: workerReportContext(entry.report?.summary),
+        links: links.length ? links : undefined,
+        context: card.context,
+        choices: card.choices,
+        questions: card.questions,
+        asSent: card.asSent,
+        ...summaryFiles(entry.report?.summaryPath, card.summaryPage),
       });
     }
   }
@@ -275,10 +299,24 @@ export class NotifyService {
     return notifySettings(this.deps.configManager.getConfig());
   }
 
+  /** Autopilot tells Notify where it reads replies, once it's set up. */
+  setAutopilotReader(reader: () => { panelId: string } | undefined): void {
+    this.autopilotReader = reader;
+  }
+
   /** The `runpane:notify` daemon command. */
   ask(request: NotifyRequest, signal?: AbortSignal): Promise<NotifyResult> {
-    const { resume, relays, aboutSession, returnAfterMs, caller, ...question } = request;
+    const { resume, relays, aboutSession, returnAfterMs, caller, took, tookAs, status, update, asked, whatChanged, ...question } = request;
     const source = this.describeSource(caller);
+    // A reader saying how it took a reply, or updating the approval: not a new ask, so a worker may too.
+    const reader = { paneId: source.paneId, panelId: source.panelId };
+    if (took !== undefined) return Promise.resolve(this.queue.took(reader, took, tookAs ?? 'answer', status));
+    if (update !== undefined) {
+      return this.queue.update(reader, update, {
+        asked: asked ?? '', whatChanged: whatChanged ?? '',
+        title: question.title, context: question.context, choices: question.choices, questions: question.questions, links: question.links,
+      }, returnAfterMs, signal);
+    }
     // D-79: in a Pane Session only the orchestrator asks the person; a worker asks its orchestrator.
     // Claude's and chat tabs' own prompts (the tool asking) don't come through here, so they still reach you.
     const session = !resume && source.paneId ? this.deps.sessionOf?.(source.paneId, source.panelId) : undefined;
@@ -589,9 +627,9 @@ export class NotifyService {
     if (this.deps.headless || !settings.enabled || !settings.shortcut) return;
     try {
       // register() returns false when another app already holds the shortcut.
-      // While Pane is in front the shortcut opens Approvals; over other apps it opens the round.
+      // While Pane is in front the shortcut goes to Approvals and back (D-251); over other apps it opens the round.
       this.shortcutRegistered = globalShortcut.register(settings.shortcut, () => {
-        if (this.mainWindowFocused) this.navigate('inbox');
+        if (this.mainWindowFocused) this.navigate('toggle-inbox');
         else this.openRound();
       });
     } catch (error) {
@@ -603,7 +641,7 @@ export class NotifyService {
 
   private describeSource(caller: NotifyCaller): NotifySource {
     const pane = this.deps.findPane(caller);
-    const agent = caller.agent?.trim() || (pane?.agentType ? AGENT_NAMES.get(pane.agentType) : undefined) || 'Agent';
+    const agent = caller.agent?.trim() || (pane?.agentType ? agentConfig(pane.agentType)?.label : undefined) || 'Agent';
     if (pane) {
       const source: NotifySource = { paneId: pane.paneId, name: pane.name, agent };
       if (pane.panelId) source.panelId = pane.panelId;
@@ -668,6 +706,12 @@ export class NotifyService {
     const onQuestion = this.deps.onQuestion;
     for (const item of state.items) {
       if (item.state === 'info') continue;
+      // Ready again is a follow-up the person started: the phone hears only when no computer is in use (D-244).
+      if (item.readyAgain !== undefined && item.state === 'waiting' && this.readyAgainSeen.get(item.id) !== item.readyAgain) {
+        this.readyAgainSeen.set(item.id, item.readyAgain);
+        // An item first seen on this start was already told about before it.
+        if (previous.has(item.id) && !this.inUse()) onQuestion({ item, open: true });
+      }
       const open = ringing(item);
       if (open === previous.get(item.id)) continue;
       if (open) {
@@ -699,6 +743,11 @@ export class NotifyService {
     }
   }
 
+  private inUse(): boolean {
+    const idle = this.deps.idleSeconds?.();
+    return idle === undefined || idle < IN_USE_SECONDS;
+  }
+
   private sendToMainWindow(channel: string, ...args: unknown[]): void {
     const window = this.deps.getMainWindow();
     if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
@@ -719,4 +768,42 @@ function notifySettings(config: AppConfig): NotifySettings {
 
 function appearanceKey(config: AppConfig): string {
   return JSON.stringify([config.appearanceMode, config.theme, config.systemLightTheme, config.systemDarkTheme, config.highContrast]);
+}
+
+/**
+ * A worker card's Summary page and status file (P4): an .html passed as --summary-file is its
+ * Summary; any other file is its status file, whose needs_you may name a Summary page beside it.
+ */
+export interface WorkerSummaryFiles {
+  summaryPage?: string;
+  statusFile?: string;
+}
+
+export function summaryFiles(summaryPath: string | undefined, needsYouPage: string | undefined): WorkerSummaryFiles {
+  if (summaryPath && /\.html?$/iu.test(summaryPath)) return { summaryPage: summaryPath };
+  const files: WorkerSummaryFiles = {};
+  if (summaryPath) files.statusFile = summaryPath;
+  if (needsYouPage) files.summaryPage = path.isAbsolute(needsYouPage) || !summaryPath ? needsYouPage : besideStatusFile(summaryPath, needsYouPage);
+  return files;
+}
+
+/**
+ * A relative `summary` path, as a worker wrote it: from its working folder (usually the worktree,
+ * an ancestor of its status file) or from the status file's own folder. The nearest folder up from
+ * the status file that holds it wins; when none does, it reads from the status file's folder.
+ */
+function besideStatusFile(statusFile: string, page: string): string {
+  let folder = path.dirname(statusFile);
+  for (let depth = 0; depth < 6; depth += 1) {
+    const candidate = path.resolve(folder, page);
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(folder);
+    if (parent === folder) break;
+    folder = parent;
+  }
+  // Found nowhere: name it where the worker most likely meant. "tmp/x.html" beside a status file in
+  // tmp/ was written from the folder above, so the message names that path.
+  const folderName = path.basename(path.dirname(statusFile));
+  const first = page.split(/[\\/]/u)[0];
+  return path.resolve(first === folderName ? path.dirname(path.dirname(statusFile)) : path.dirname(statusFile), page);
 }

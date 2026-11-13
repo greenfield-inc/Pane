@@ -27,7 +27,7 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocalNetworkUsageDescription": "Pane connects to Pane on computers on your local network."
       },
-      "buildNumber": "19",
+      "buildNumber": "20",
       "appleTeamId": "FBM5YSF467"
     },
     "android": {
@@ -37,7 +37,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 6
+      "versionCode": 7
     },
     "plugins": [
       [
