@@ -37,6 +37,7 @@ function createRecord(overrides: Partial<OrchestrationSessionRecord> = {}): Orch
       codex: '__orchestration_panel_release_codex',
       cursor: '__orchestration_panel_release_cursor',
       opencode: '__orchestration_panel_release_opencode',
+      pi: '__orchestration_panel_release_pi',
     },
     goal: 'Review the release evidence.',
     context: 'Use the current branch and attached Panes.',
@@ -163,7 +164,7 @@ describe('OrchestrationSessionStore', () => {
     expect(fs.readFileSync(filePath, 'utf8')).not.toContain('foreign-panel');
   });
 
-  it('ignores inherited OpenCode mappings on direct writes and rejects inherited required mappings', () => {
+  it('ignores inherited panel ids on direct writes and derives the missing ones', () => {
     const filePath = createStorePath();
     const data = createData();
     const panelIds = data.sessions[0].panelIds;
@@ -176,8 +177,9 @@ describe('OrchestrationSessionStore', () => {
     const before = fs.readFileSync(filePath, 'utf8');
     expect(before).not.toContain('foreign-panel');
     Reflect.deleteProperty(panelIds, 'claude');
-    expect(() => store.write(data)).toThrow('panelIds.claude');
-    expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
+    store.write(data);
+    expect(store.read().sessions[0].panelIds.claude).toBe('__orchestration_panel_session-1_claude');
+    expect(fs.readFileSync(filePath, 'utf8')).not.toContain('foreign-panel');
   });
 
   it.each([

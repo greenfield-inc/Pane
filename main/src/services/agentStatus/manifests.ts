@@ -506,6 +506,72 @@ export const OPENCODE_MANIFEST: AgentManifest = {
   ],
 };
 
+/*
+ * Distilled from real pi 1.5.0 (@earendil-works/pi-coding-agent) screens. Pi
+ * runs full-screen with its composer boxed between two rules and a footer of
+ * the working folder and a stats row (`↑30 ↓15 0.0%/128k (auto)  model`).
+ * While a turn runs, a braille spinner and its message (`Working`, `Retrying
+ * (1/3) in 2s...`, `Auto-compacting...`) sit in the composer's top rule, or on
+ * a row of their own with `tuiMode: regular` or an extension editor. Pi never
+ * asks before a tool call; its one startup prompt is project trust, shown for
+ * a folder with `.pi` settings or project skills it has no saved decision for.
+ * The OSC title (`π - <folder>`) carries no status and is unused.
+ */
+const PI_SPINNER = '[\\u2800-\\u28FF]';
+const PI_STATUS_MESSAGE = '(?:Working|Retrying|Compacting|Auto-compacting|Context overflow|Summarizing)';
+
+export const PI_MANIFEST: AgentManifest = {
+  id: 'pi',
+  rules: [
+    {
+      id: 'project_trust_prompt',
+      state: 'blocked',
+      priority: 1000,
+      region: 'bottom_non_empty_lines(40)',
+      visibleBlocker: true,
+      // The question and its "Do not trust" option, with no composer footer below them, so an
+      // answered prompt in scrollback does not count. The key hint is not used: pi builds it from
+      // the person's keybindings.
+      regex: [/(?:^|\n)[^\S\n]*Trust project folder\?[^\n]*\n(?:[^\n]*\n){0,40}?[^\S\n]*(?:[→>❯›][^\S\n]*)?Do not trust\b(?![\s\S]*(?:\d+(?:\.\d+)?%|\?)\/\d+(?:\.\d+)?[kMB]?\b)/u],
+    },
+    {
+      id: 'live_dialog',
+      state: 'blocked',
+      priority: 1000,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      // Pi draws its dialogs (a selector or confirm, the in-session trust menu, an extension's
+      // input or editor) in place of its input box, between two border rows, and keeps the
+      // footer and any widgets below. Wherever such a frame shows, the screen is unsafe to type
+      // into: a border row, then the highlighted option (`→ `) or the key hint ending in
+      // `cancel` (its keys follow the person's keybindings, the word does not), then a border.
+      regex: [/(?:^|\n)[^\S\n]*─[^\n]*\n(?:(?![^\S\n]*─{3,})[^\n]*\n)*?(?:[^\S\n]*→ \S[^\n]*|[^\n]*\S[^\S\n]+cancel[^\S\n]*)\n(?:(?![^\S\n]*─{3,})[^\n]*\n)*[^\S\n]*─{3,}/u],
+    },
+    {
+      id: 'status_in_composer',
+      state: 'working',
+      priority: 700,
+      region: 'bottom_non_empty_lines(20)',
+      visibleWorking: true,
+      any: [
+        // `── ⠦ Working ────`; a narrow composer keeps only the spinner.
+        { lineRegex: [new RegExp(`^\\s*─{1,3}\\s*${PI_SPINNER}(?:\\s+\\S[^\\n]*?)?\\s*─{2,}`, 'u')] },
+        { lineRegex: [new RegExp(`^\\s*${PI_SPINNER}\\s+${PI_STATUS_MESSAGE}\\b`, 'u')] },
+      ],
+    },
+    {
+      id: 'idle_composer',
+      state: 'idle',
+      priority: 500,
+      region: 'bottom_non_empty_lines(5)',
+      visibleIdle: true,
+      // The composer's closing rule, then the footer ending in its stats row.
+      regex: [/(?:^|\n)\s*─{3,}\s*\n(?:[^\n]*\n){1,3}[^\n]*(?:\d+(?:\.\d+)?%|\?)\/\d+(?:\.\d+)?[kMB]?\b/u],
+      not: [{ contains: ['trust project folder?'] }],
+    },
+  ],
+};
+
 interface AgentManifestLookup {
   [agent: string]: AgentManifest;
 }
@@ -515,6 +581,7 @@ const MANIFESTS_BY_AGENT: AgentManifestLookup = {
   codex: CODEX_MANIFEST,
   cursor: CURSOR_MANIFEST,
   opencode: OPENCODE_MANIFEST,
+  pi: PI_MANIFEST,
 };
 
 /**

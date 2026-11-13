@@ -109,7 +109,7 @@ describe('followsHost', () => {
 });
 
 describe('sessionWorkspacePanels', () => {
-  const session = { panelIds: { claude: 'claude-chat', codex: 'codex-chat', cursor: 'cursor-chat', opencode: 'opencode-chat' } };
+  const session = { panelIds: { claude: 'claude-chat', codex: 'codex-chat', cursor: 'cursor-chat', opencode: 'opencode-chat', pi: 'pi-chat' } };
   const workspace = [panel('shell', 'terminal', 0), panel('codex-chat', 'terminal', 1), panel('claude-chat', 'terminal', 2), panel('server', 'terminal', 3)];
 
   it('puts the current agent’s chat first, then the workspace’s own terminals, hiding other agents’ chats', () => {

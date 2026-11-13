@@ -1060,6 +1060,9 @@ describe('TerminalPanelManager hidden output delivery', () => {
       },
     });
 
+    // An empty screen is no evidence of an input box; Codex shows its idle one as a title without a spinner.
+    terminal.screenEmulator?.write('\x1b]2;repo\x07');
+    await Promise.all([terminal.screenEmulator?.refresh(), vi.advanceTimersByTimeAsync(100)]);
     echoStagedWrites(terminal);
     manager.deliverPendingInitialInput(terminal.panelId);
     manager.pollAgentStatus();
@@ -1110,6 +1113,8 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(terminal.pty.write).not.toHaveBeenCalled();
     delete panel.state.customState.initialInputSentAt;
 
+    terminal.screenEmulator?.write(`${'─'.repeat(40)}\r\n❯ \r\n${'─'.repeat(40)}`);
+    await Promise.all([terminal.screenEmulator?.refresh(), vi.advanceTimersByTimeAsync(100)]);
     echoStagedWrites(terminal);
     manager.deliverPendingInitialInput(terminal.panelId);
     manager.pollAgentStatus();
@@ -1176,6 +1181,74 @@ describe('TerminalPanelManager hidden output delivery', () => {
         initialInputError: undefined,
       },
     });
+  });
+
+  it('opens a fresh Pi tab on a Pane-chosen --session-id and records it', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'pi', { agentType: 'pi' });
+
+    const sessionId = result.customState.agentSessionId;
+    expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+    expect(result.commandToRun).toBe(`pi --session-id ${sessionId}`);
+    expect(result.isCliCommand).toBe(true);
+    expect(result.customState).toMatchObject({ agentType: 'pi', agentDetection: 'command', isCliPanel: true, isCliReady: false, launchCommand: 'pi' });
+  });
+
+  it('reopens the same Pi session on every relaunch, interrupted or not', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const sessionId = '6f1d2c3a-1111-4222-8333-444455556666';
+
+    for (const wasInterrupted of [undefined, true]) {
+      const result = manager.resolveCliLaunchCommand('panel-1', 'pi', { agentType: 'pi', agentSessionId: sessionId, wasInterrupted });
+      expect(result.commandToRun).toBe(`pi --session-id ${sessionId}`);
+      expect(result.customState.agentSessionId).toBe(sessionId);
+      expect(result.customState.wasInterrupted).toBeUndefined();
+    }
+  });
+
+  it('types a Pi starting message instead of passing it as an argument', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    const result = manager.resolveCliLaunchCommand('panel-1', 'pi', {
+      agentType: 'pi', initialInput: '@src/app.ts explain this', initialInputMode: 'argument',
+    });
+
+    expect(result.commandToRun).toMatch(/^pi --session-id [0-9a-f-]{36}$/u);
+    expect(result.customState).toMatchObject({ initialInput: '@src/app.ts explain this' });
+    expect(result.customState.initialInputSentAt).toBeUndefined();
+  });
+
+  it('refuses a Claude update reopen that would start fresh on the recorded --session-id', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const sessionId = '6f1d2c3a-1111-4222-8333-444455556666';
+
+    // Without a known Claude session, the launch is `claude --session-id <id>`: a new conversation, not the recorded one.
+    expect(() => manager.resolveCliLaunchCommand('panel', 'claude', {
+      agentType: 'claude', agentSessionId: sessionId, updateResumeId: sessionId, wasInterrupted: true,
+    })).toThrowError(expect.objectContaining({ code: 'ERR_UPDATE_CONVERSATION' }));
+  });
+
+  it('runs a Pi command that picks its own session unchanged', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
+    expect(manager.resolveCliLaunchCommand('panel-1', 'pi --continue', { agentType: 'pi' }).commandToRun).toBe('pi --continue');
+    const chosen = manager.resolveCliLaunchCommand('panel-1', 'pi --session-id mine-1', { agentType: 'pi' });
+    expect(chosen.commandToRun).toBe('pi --session-id mine-1');
+    expect(chosen.customState.agentSessionId).toBe('mine-1');
+  });
+
+  it('resumes the exact recorded Pi update conversation without replaying input', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const sessionId = '6f1d2c3a-1111-4222-8333-444455556666';
+
+    const result = manager.resolveCliLaunchCommand('panel', 'pi', {
+      agentType: 'pi', agentSessionId: sessionId, updateResumeId: sessionId, wasInterrupted: true,
+      initialInput: 'Do not replay this prompt', initialInputMode: 'stdin',
+    });
+
+    expect(result.commandToRun).toBe(`pi --session-id ${sessionId}`);
+    expect(result.customState).toMatchObject({ agentSessionId: sessionId, initialInput: undefined, updateResumeId: undefined });
   });
 
   it('starts a fresh native OpenCode launch without a session selector', () => {
@@ -2135,6 +2208,47 @@ describe('TerminalPanelManager agent status poll', () => {
     expect(terminal.pty.write.mock.calls).toEqual([['/review']]);
     vi.setSystemTime(Date.now() + 400);
     await vi.waitFor(() => expect(terminal.pty.write.mock.calls).toEqual([['/review'], ['\r']]));
+
+    manager.destroyTerminal(terminal.panelId);
+    vi.useRealTimers();
+  });
+});
+
+describe('TerminalPanelManager held starting message', () => {
+  it('types nothing while the screen only reads idle, and sends once pi shows its input box', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const manager = testAccess<AgentStatusAccess & InitialInputAccess>(new TerminalPanelManager());
+    const screenEmulator = inProcessEmulatorHost().createEmulator(80, 12);
+    const terminal = createTerminal({ agentType: 'pi', screenEmulator });
+    manager.terminals.set(terminal.panelId, terminal);
+    manager.registerAgentStatusPanel(terminal);
+    vi.mocked(panelManager.getPanel).mockReturnValue({
+      id: terminal.panelId,
+      sessionId: terminal.sessionId,
+      type: 'terminal',
+      title: 'Pi',
+      state: { isActive: true, customState: { isCliReady: true, initialInput: 'explain this repo' } },
+      metadata: { createdAt: '2026-01-01T00:00:00.000Z', lastActiveAt: '2026-01-01T00:01:00.000Z', position: 0 },
+    });
+    const rule = '─'.repeat(60);
+
+    // A menu no rule knows (a reworded or future prompt) reads idle by fallback; Enter would choose its first option.
+    screenEmulator.write(' Allow this folder?\r\n → Allow\r\n   Deny\r\n');
+    await screenEmulator.refresh();
+    manager.deliverPendingInitialInput(terminal.panelId);
+    vi.setSystemTime(Date.now() + 3_000); // past the monitor's startup grace
+    manager.pollAgentStatus();
+    manager.pollAgentStatus();
+    await flushPromises();
+    expect(manager.getAgentStatus(terminal.panelId)).toBe('idle');
+    expect(terminal.pty.write).not.toHaveBeenCalled();
+
+    screenEmulator.write(`\x1b[2J\x1b[H${rule}\r\n\r\n${rule}\r\n/home/dev/repo\r\n0.0%/128k (auto)  (mock) mock-1`);
+    await screenEmulator.refresh();
+    echoStagedWrites(terminal);
+    manager.pollAgentStatus();
+    await flushPromises();
+    expect(terminal.pty.write.mock.calls[0]).toEqual(['explain this repo']);
 
     manager.destroyTerminal(terminal.panelId);
     vi.useRealTimers();

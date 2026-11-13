@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_CONTEXT_DEFAULTS_VERSION, ConfigManager } from './configManager';
+import { collectActiveBindings, findChordConflicts } from '../../../shared/utils/keyboardBindings';
 
 describe('ConfigManager appearance persistence', () => {
   let paneDir: string;
@@ -106,6 +107,13 @@ describe('ConfigManager appearance persistence', () => {
       ['t', 'Show it works'],
     ]);
     expect(saved).toMatchObject({ keepAwakeWhileSessionsActive: true, keepAwakeWhilePluggedIn: false });
+  });
+
+  it.each(['mac', 'other'] as const)('gives the default terminal shortcuts keys no default shortcut uses (%s)', async (keyPlatform) => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    const { terminalShortcuts } = manager.getConfig();
+    expect(findChordConflicts(collectActiveBindings({ keyPlatform, terminalShortcuts, customCommands: [{}, {}, {}, {}] }))).toEqual([]);
   });
 
   it('keeps an existing config\'s shortcuts and keeps it awake while plugged in when the setting predates it', async () => {

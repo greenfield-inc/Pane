@@ -158,3 +158,37 @@ describe('assessComposerEvidence', () => {
     })).toBe('unknown');
   });
 });
+
+// Pi 1.5.0 frames: the composer between two rules, then the folder and stats footer.
+describe('assessComposerEvidence for Pi', () => {
+  const rule = '─'.repeat(60);
+  const piFrame = (composer: string[], topRule = rule, transcript: string[] = []) => [
+    ' ▀▀█  v1.5.0', '', ...transcript, '', topRule, ...(composer.length ? composer : ['']), rule,
+    '/home/dev/repo (main)', '↑10 ↓5 0.0%/128k (auto)                       mock-model',
+  ].join('\n');
+
+  it('sees staged text in the composer, and the composer cleared once pi takes it', () => {
+    const staged = piFrame(['please go slow']);
+    expect(assessComposerEvidence({ beforeText: staged, afterText: staged, stagedText: 'please go slow', agentType: 'pi' })).toBe('staged');
+    const taken = piFrame([], '── ⠋ Working ' + '─'.repeat(47), [' please go slow']);
+    expect(assessComposerEvidence({ beforeText: staged, afterText: taken, stagedText: 'please go slow', agentType: 'pi' })).toBe('cleared');
+  });
+
+  it('reads a long paste by its marker', () => {
+    const text = Array.from({ length: 12 }, (_, i) => `paste line ${i}`).join('\n');
+    const staged = piFrame(['[paste #1 +12 lines]']);
+    expect(assessComposerEvidence({ beforeText: staged, afterText: staged, stagedText: text, agentType: 'pi' })).toBe('staged');
+    expect(assessComposerEvidence({ beforeText: staged, afterText: piFrame([]), stagedText: text, agentType: 'pi' })).toBe('cleared');
+  });
+
+  it('does not count the message echoed in the transcript as still staged', () => {
+    const staged = piFrame(['run a tool now']);
+    const after = piFrame([], rule, [' run a tool now', ' $ sleep 4; echo tool-ran']);
+    expect(assessComposerEvidence({ beforeText: staged, afterText: after, stagedText: 'run a tool now', agentType: 'pi' })).toBe('cleared');
+  });
+
+  it('is unknown without pi\'s footer, as on the trust prompt', () => {
+    const trust = [rule, ' Trust project folder?', ' → Trust', ' ↑↓ navigate  enter select  escape/ctrl+c cancel', rule].join('\n');
+    expect(assessComposerEvidence({ beforeText: trust, afterText: trust, stagedText: 'hello', agentType: 'pi' })).toBe('unknown');
+  });
+});

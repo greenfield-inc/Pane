@@ -18,6 +18,8 @@ export const AGENTS_CONFIG = {
           "--dangerously-skip-permissions"
         ],
         "hotkey": "mod+alt+3",
+        "promptArgument": true,
+        "configDir": ".claude",
         "reportsConversation": true
       },
       "install": {
@@ -68,7 +70,9 @@ export const AGENTS_CONFIG = {
         "fullAccessArgs": [
           "--yolo"
         ],
-        "hotkey": "mod+alt+4"
+        "hotkey": "mod+alt+4",
+        "promptArgument": true,
+        "configDir": ".codex"
       },
       "install": {
         "url": "https://developers.openai.com/codex/cli",
@@ -117,6 +121,8 @@ export const AGENTS_CONFIG = {
           "--force"
         ],
         "hotkey": "mod+alt+5",
+        "promptArgument": true,
+        "configDir": ".cursor",
         "platforms": [
           "darwin",
           "linux",
@@ -161,7 +167,12 @@ export const AGENTS_CONFIG = {
         "fullAccessArgs": [
           "--auto"
         ],
-        "hotkey": "mod+alt+6"
+        "hotkey": "mod+alt+6",
+        "session": {
+          "flag": "--session",
+          "minimumVersion": "2.0.19",
+          "idPattern": "^ses_[A-Za-z0-9]+$"
+        }
       },
       "install": {
         "url": "https://opencode.ai/docs",
@@ -181,6 +192,40 @@ export const AGENTS_CONFIG = {
           "opencode",
           "opencode-v2"
         ]
+      }
+    },
+    "pi": {
+      "title": "Pi",
+      "label": "Pi",
+      "icon": "pi",
+      "description": "Open a Pi terminal tab and allow the initial input to drive the agent.",
+      "executables": [
+        "pi"
+      ],
+      "terminal": {
+        "args": [],
+        "fullAccessArgs": [],
+        "hotkey": "mod+alt+shift+p",
+        "configDir": ".pi",
+        "session": {
+          "flag": "--session-id",
+          "minimumVersion": "0.76.0",
+          "idPattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$",
+          "paneChoosesId": true,
+          "selectors": [
+            "--session",
+            "--continue",
+            "-c",
+            "--resume",
+            "-r",
+            "--fork",
+            "--no-session"
+          ]
+        }
+      },
+      "install": {
+        "url": "https://pi.dev",
+        "command": "npm install -g @earendil-works/pi-coding-agent@latest"
       }
     }
   }

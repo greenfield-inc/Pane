@@ -1,10 +1,11 @@
-import { customCommandResumeSchema, effectiveCustomResume, type CustomCommandResume } from '../../../shared/types/customCommandResume';
 /**
  * Session management for Pane.
  * Note: "Sessions" are called "Panes" in the UI. Internally they remain
  * "sessions" in code, database, and IPC to avoid a massive refactor.
  */
 
+import { customCommandResumeSchema, effectiveCustomResume, type CustomCommandResume } from '../../../shared/types/customCommandResume';
+import { configuredAgentSchema, type ConfiguredAgentId } from '../../../shared/agents';
 import { randomUUID } from 'crypto';
 import { EventEmitter } from 'events';
 import { existsSync } from 'fs';
@@ -100,7 +101,7 @@ const terminalResumeStateSchema = boundary.object({
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
   wasInterrupted: boundary.optional(boundary.boolean),
   initialCommand: boundary.optional(boundary.string),
-  agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agentType: boundary.optional(configuredAgentSchema),
   agentSessionId: boundary.optional(boundary.string),
   hasClaudeSessionId: boundary.optional(boundary.boolean),
 });
@@ -148,7 +149,6 @@ import { detectGitBase } from './worktreeManager';
 import { panelManager } from './panelManager';
 import { ProjectEnvService, type ResolvedProjectEnv } from './projectEnvVars';
 import { teammatePaneCaller } from '../daemon/commandRegistry';
-import type { ConfiguredAgentId } from '../../../shared/agents';
 import type { AnalyticsManager } from './analyticsManager';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import { comparePaneOrder, type NewPanePlacement, type PaneOrderSettings } from '../../../shared/utils/paneOrder';

@@ -23,19 +23,44 @@ export interface AgentChatConfig {
   registryIds?: readonly string[];
 }
 
-export interface AgentConfig {
+/** How a CLI opens a saved conversation from the command line. */
+export interface AgentSessionConfig {
+  flag: string;
+  minimumVersion: string;
+  idPattern: string;
+  /** The flag also creates the conversation, so Pane picks the id and every launch runs the same command. */
+  paneChoosesId?: boolean;
+  /** Flags with which a command picks its own conversation; Pane runs that command unchanged. */
+  selectors?: readonly string[];
+}
+
+interface AgentConfigBase {
   title: string;
   label: string;
   icon: string;
   description?: string;
   executables: readonly string[];
-  terminal: { args: readonly string[]; fullAccessArgs: readonly string[]; hotkey: string; reportsConversation?: boolean; platforms?: readonly string[] };
+  terminal: {
+    args: readonly string[];
+    fullAccessArgs: readonly string[];
+    hotkey: string;
+    reportsConversation?: boolean;
+    platforms?: readonly string[];
+    /** Takes the starting message as an argument; otherwise Pane types it once the agent's input box is idle. */
+    promptArgument?: boolean;
+    configDir?: string;
+    session?: AgentSessionConfig;
+  };
   install: { url: string; command: string };
-  signIn: readonly string[];
   onboarding?: boolean;
   onboardingPanelId?: string;
-  chat?: AgentChatConfig;
 }
+
+/** A chat agent always says how to sign in; a terminal-only agent signs in inside its own CLI. */
+export type AgentConfig = AgentConfigBase & (
+  | { chat: AgentChatConfig; signIn: readonly string[] }
+  | { chat?: undefined; signIn?: readonly string[] }
+);
 
 const ENTRIES: Readonly<Record<string, AgentConfig>> = AGENTS_CONFIG.entries;
 
@@ -62,6 +87,18 @@ export function configuredAgent(id: ConfiguredAgentId): AgentConfig {
 export function agentTerminalCommand(id: ConfiguredAgentId): string {
   const agent = configuredAgent(id);
   return [agent.executables[0], ...agent.terminal.fullAccessArgs, ...agent.terminal.args].join(' ');
+}
+
+/** Whether Pane types this agent's starting message into its input box rather than passing it as an argument. */
+export function typesStartingMessage(id: string | null | undefined): boolean {
+  const config = id ? agentConfig(id) : undefined;
+  return config !== undefined && !config.terminal.promptArgument;
+}
+
+/** Whether `id` has the form the agent's session flag accepts. */
+export function isAgentSessionId(agent: string | null | undefined, id: string | null | undefined): id is string {
+  const session = agent ? agentConfig(agent)?.terminal.session : undefined;
+  return session !== undefined && id !== undefined && id !== null && new RegExp(session.idPattern, 'u').test(id);
 }
 
 /** First-class chat agents: those whose config says how chat starts. */

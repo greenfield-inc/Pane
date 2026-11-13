@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   extractOpenCodeSessionId,
   isValidOpenCodeSessionId,
-  OPENCODE_SESSION_ID_PATTERN,
   resolveOpenCodeLaunchCommand,
 } from './opencodeLaunch';
 
@@ -27,7 +26,7 @@ describe('OpenCode session ids', () => {
     'ses_trailing-paragraph-separator\u2029',
   ])('rejects the invalid id %s', (sessionId) => {
     expect(isValidOpenCodeSessionId(sessionId)).toBe(false);
-    expect(OPENCODE_SESSION_ID_PATTERN.test(sessionId)).toBe(false);
+    expect(isValidOpenCodeSessionId(sessionId)).toBe(false);
   });
 
   it('trims persisted input before validating and inserting it', () => {

@@ -180,10 +180,15 @@ function openCodeComposer(text: string): string {
   return `  ┃\n  ┃  ${text.replaceAll('\n', '\n  ┃  ')}\n  ┃\n  ┃  Build\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀\n  shift+tab agents  ctrl+p commands`;
 }
 
+/** Pi 1.5.0's composer between two rules, with its folder and stats footer. */
+function piComposer(text: string, topRule = '─'.repeat(40)): string {
+  return `${topRule}\n${text}\n${'─'.repeat(40)}\n/home/dev/repo (main)\n0.0%/128k (auto)          mock-model`;
+}
+
 function terminalSnapshot(
   text: string,
   activityStatus: 'active' | 'idle',
-  agentType: 'claude' | 'codex' | 'cursor' | 'opencode' = 'codex',
+  agentType: 'claude' | 'codex' | 'cursor' | 'opencode' | 'pi' = 'codex',
   lastActivityTime = '2026-01-01T00:02:00.000Z',
 ) {
   return {
@@ -805,6 +810,53 @@ describe('runpane IPC handlers', () => {
       );
     });
 
+    it('adopts a pi session id and opens it with --session-id', async () => {
+      const { repoPath, worktreePath } = createAdoptWorktree('pi-resume-adopt');
+      const services = adoptionServices(repoPath, worktreePath);
+      let createdPanel: ToolPanel | undefined;
+      vi.mocked(panelManager.createPanel).mockImplementation(async (request) => {
+        createdPanel = {
+          ...terminalPanel,
+          title: request.title ?? '',
+          // SAFETY: The create request is for a terminal panel, so its initial state is TerminalPanelState.
+          state: { isActive: false, customState: { ...(request.initialState as TerminalPanelState) } },
+        };
+        return createdPanel;
+      });
+      vi.mocked(panelManager.getPanel).mockImplementation(() => createdPanel);
+      terminalPanelStore.getPanel.mockImplementation(() => createdPanel);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+      const sessionId = '01a1c24e-73d0-7736-9703-bb8b6ac1bcf0';
+
+      const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        panes: [{ path: worktreePath, name: 'Pi existing', tool: { agent: 'pi' }, resume: sessionId }],
+      }]);
+
+      expect(result, JSON.stringify(result)).toMatchObject({ ok: true, items: [{ ok: true }] });
+      expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
+        initialState: expect.objectContaining({ agentType: 'pi', agentSessionId: sessionId, hasClaudeSessionId: false }),
+      }));
+    });
+
+    it.each(['-leading-dash', 'has space', 'semi;colon'])(
+      'rejects invalid pi resume %j before dry-run output or mutation',
+      async (resume) => {
+        const { repoPath, worktreePath } = createAdoptWorktree(`invalid-pi-${resume.length}`);
+        const services = adoptionServices(repoPath, worktreePath);
+
+        const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+          repo: { id: project.id },
+          dryRun: true,
+          panes: [{ path: worktreePath, name: 'Invalid Pi', tool: { agent: 'pi' }, resume }],
+        }]);
+
+        expect(result).toMatchObject({ ok: false, items: [{ ok: false, error: { message: expect.stringMatching(/Pi --resume must be a session id matching/) } }] });
+        expect(services.sessionManager.createSession).not.toHaveBeenCalled();
+        expect(panelManager.createPanel).not.toHaveBeenCalled();
+      },
+    );
+
     it.each(['', 'thread-1', 'ses_bad-value', ' ses_existing '])(
       'rejects invalid OpenCode resume %j before dry-run output or mutation',
       async (resume) => {
@@ -819,7 +871,7 @@ describe('runpane IPC handlers', () => {
 
         expect(result).toMatchObject({
           ok: false,
-          items: [{ ok: false, error: { message: expect.stringMatching(/OpenCode.*ses_\*/i) } }],
+          items: [{ ok: false, error: { message: expect.stringMatching(/OpenCode --resume must be a session id matching \^ses_/) } }],
         });
         expect(services.sessionManager.createSession).not.toHaveBeenCalled();
         expect(panelManager.createPanel).not.toHaveBeenCalled();
@@ -837,7 +889,7 @@ describe('runpane IPC handlers', () => {
         repo: { id: project.id },
         dryRun,
         panes: [{ path: '/not-used', name: 'Invalid OpenCode', tool: { agent: 'opencode' }, resume }],
-      }])).rejects.toThrow(/OpenCode.*resume.*string.*ses_\*/i);
+      }])).rejects.toThrow(/OpenCode --resume must be a string matching \^ses_/);
 
       expect(services.sessionManager.createSession).not.toHaveBeenCalled();
       expect(panelManager.createPanel).not.toHaveBeenCalled();
@@ -3347,6 +3399,26 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it('types nothing into a Pi selector, and submits once Pi\'s input box is back', async () => {
+    const rule = '─'.repeat(40);
+    // An extension's confirm in place of the input box, footer kept; Enter would choose Yes.
+    const confirm = `${rule}\n\n Allow deploy?\n\n → Yes\n   No\n\n ↑↓ navigate  enter select  escape/ctrl+c cancel\n\n${rule}\n/home/dev/repo (main)\n0.0%/128k (auto)          mock-model`;
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(confirm, 'idle', 'pi'));
+    const registry = createRegistry();
+
+    const refused = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'owed answer' }]);
+    expect(refused).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'composer-unknown' } });
+    // A bare Enter would pick Yes too.
+    expect(await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: '' }])).toMatchObject({ ok: false, inputBytes: 0 });
+    expect(await registry.invoke('runpane:panels:submit-composer', [{ panelId: terminalPanel.id }])).toMatchObject({ ok: false, inputBytes: 0, blocked: { kind: 'composer-unknown' } });
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(piComposer(''), 'idle', 'pi'));
+    const sent = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'owed answer' }]);
+    expect(sent).toMatchObject({ ok: true });
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'owed answer\r');
+  });
+
   it('stages text before submitting an idle Codex composer', async () => {
     vi.useFakeTimers();
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
@@ -5328,6 +5400,51 @@ describe('runpane IPC handlers', () => {
     expect(execAsync.mock.calls.every(([command]) => !command.includes('--continue'))).toBe(true);
   });
 
+  it.each([
+    // Lines copied from `pi --help`: 1.5.0 lists --session-id; 0.73.1 (the deprecated package) does not.
+    ['1.5.0', '  --session <path|id>            Open a session by file path or full/partial ID\n  --session-id <id>              Use the current directory\'s existing session with the ID, creating it otherwise\n', true],
+    ['0.73.1', '  --session <path|id>            Use specific session file or partial UUID\n  --no-session                   Don\'t save session (ephemeral)\n', false],
+  ])('checks that pi %s can open a session by --session-id', async (version, help, supported) => {
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    const executablePath = '/opt/homebrew/bin/pi';
+    const execAsync = vi.fn(async (command: string) => {
+      if (command === 'command -v pi') return { stdout: `${executablePath}\n`, stderr: '' };
+      if (command === 'pi --version') return { stdout: `${version}\n`, stderr: '' };
+      if (command === "'/opt/homebrew/bin/pi' --help") return { stdout: help, stderr: '' };
+      return { stdout: '', stderr: '' };
+    });
+    const base = createServices();
+    const services = createServices({
+      // SAFETY: This test fixture replaces only the command-runner seam used by the doctor unit.
+      sessionManager: {
+        ...base.sessionManager,
+        getProjectContextByProjectId: vi.fn(() => ({ commandRunner: { wslContext: null, execAsync } })),
+      } as never,
+    });
+
+    try {
+      const result = await createRegistry(services).invoke('runpane:agents:doctor', [{ agent: 'pi', repo: 'active' }]);
+
+      expect(result).toMatchObject({
+        ok: supported,
+        available: true,
+        agent: 'pi',
+        command: 'pi',
+        version,
+        checks: expect.arrayContaining([
+          expect.objectContaining({
+            name: 'session-capability',
+            ok: supported,
+            message: supported ? expect.stringContaining('--session-id') : expect.stringMatching(/upgrade pi to 0\.76\.0/i),
+          }),
+        ]),
+      });
+    } finally {
+      if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
+    }
+  });
+
   it('probes OpenCode through the WSL project command runner context', async () => {
     const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
     Object.defineProperty(process, 'platform', { value: 'win32' });
@@ -6318,6 +6435,77 @@ describe('runpane IPC handlers', () => {
         ok: true,
         readiness: { ok: true, state: { agentType: 'opencode' } },
         initialInput: { submitted: true, strategy: 'enter', sequenceName: 'enter-cr' },
+      }],
+    });
+  });
+
+  it('waits for pi\'s composer past its startup frames, then types the starting message and submits with Enter', async () => {
+    vi.useFakeTimers();
+    let screen: 'startup' | 'composer' = 'startup';
+    let staged = false;
+    let submitted = false;
+    let createdPanel: ToolPanel | undefined;
+    vi.mocked(panelManager.createPanel).mockImplementation(async (request) => {
+      createdPanel = {
+        ...terminalPanel,
+        title: request.title ?? '',
+        // SAFETY: The create request is for a terminal panel, so its initial state is TerminalPanelState.
+        state: { isActive: false, customState: { ...(request.initialState as TerminalPanelState) } },
+      };
+      return createdPanel;
+    });
+    vi.mocked(panelManager.getPanel).mockImplementation(() => createdPanel);
+    vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, input) => {
+      if (input === '\r') submitted = true;
+      else staged = true;
+    });
+    vi.mocked(terminalPanelManager.getOutputGeneration).mockImplementation(() => submitted ? 1 : 0);
+    const message = '@src/app.ts explain this';
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => ({
+      ...terminalSnapshot(
+        screen === 'startup'
+          // Pi's startup frame: no rule matches, so it reads idle, but there is no input box yet.
+          ? ` ▀▀█  v1.5.2\n █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit\n\n Loading extensions...`
+          : submitted
+            ? ` ${message}\n\n${piComposer('', `── ⠋ Working ${'─'.repeat(27)}`)}`
+            : piComposer(staged ? message : ''),
+        submitted ? 'active' : 'idle',
+        'pi',
+      ),
+      isCliReady: true,
+    }));
+
+    const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
+      repo: { id: project.id },
+      waitReady: true,
+      readyTimeoutMs: 2_000,
+      panes: [{ name: 'pi-input', tool: { agent: 'pi', initialInput: message } }],
+    }]);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+
+    screen = 'composer';
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
+      initialState: expect.objectContaining({
+        initialCommand: 'pi',
+        initialInput: message,
+        initialInputMode: 'stdin',
+        initialInputSubmitStrategy: 'enter',
+        agentType: 'pi',
+      }),
+    }));
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(1, terminalPanel.id, message);
+    expect(terminalPanelManager.writeToTerminal).toHaveBeenNthCalledWith(2, terminalPanel.id, '\r');
+    expect(result).toMatchObject({
+      ok: true,
+      items: [{
+        ok: true,
+        readiness: { ok: true, state: { agentType: 'pi' } },
+        initialInput: { submitted: true, verifiedSubmitted: true, strategy: 'enter' },
       }],
     });
   });

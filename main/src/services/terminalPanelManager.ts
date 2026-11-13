@@ -131,6 +131,8 @@ import { claudeFolderTrustKey, detectAgentComposer, detectAgentFromScreen } from
 import { readForegroundExecutablePath, readForegroundGroupMembers, readForegroundProcessGroup, type ForegroundGroup } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import { assertDirectOpenCodeLaunchCommand, extractOpenCodeSessionId, resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
+import { resolveChosenSessionLaunch } from './agents/chosenSessionLaunch';
+import { agentConfig, agentLabel } from '../../../shared/agents';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import { forgetClaudePrompts, withClaudePromptHooks } from './claudePrompts';
 import {
@@ -351,6 +353,8 @@ interface TerminalProcess {
   launchedCommand?: string;
   /** While no agent is identified: when the held starting message last had a reason to keep waiting. */
   initialInputHeldSince?: number;
+  /** The panel already says why its held starting message is waiting. */
+  initialInputHoldNoted?: boolean;
   /** Set only for direct OpenCode launches; status detection calls it on the idle composer frame. */
   onOpenCodeReady?: () => void;
   /**
@@ -517,7 +521,7 @@ export class TerminalPanelManager extends EventEmitter {
       const expectedCustom = custom?.config.resumeTemplate.replace(/\{command\}|\{sessionId\}/g, token => token === '{command}' ? initialCommand : this.quoteCommandArgument(id));
       const exact = expectedCustom
         ? resolution.commandToRun === expectedCustom
-        : resolution.commandToRun.includes(id) && /(?:--resume(?:=|\s)|\bresume\s|--session(?:=|\s))/.test(resolution.commandToRun);
+        : resolution.commandToRun.includes(id) && reopensConversation(resolution.commandToRun, resolution.customState.agentType);
       if (!exact || resolution.customState.agentSessionId !== id) {
         throw new PaneError('ERR_UPDATE_CONVERSATION', `Panel ${panelId} could not reopen its exact recorded conversation. No command or input was sent.`, 'Review the saved panel and resume the intended conversation manually.');
       }
@@ -623,7 +627,7 @@ export class TerminalPanelManager extends EventEmitter {
           ? this.resolveCursorLaunch(panelId, initialCommand, customState, nextState, shellType)
           : agentType === 'opencode'
             ? this.resolveOpenCodeLaunch(initialCommand, customState, nextState, isWSL ? 'bash' : shellType)
-          : undefined;
+          : this.resolveChosenSession(agentType, initialCommand, customState, nextState, isWSL);
 
     return resolution ?? { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
   }
@@ -657,6 +661,31 @@ export class TerminalPanelManager extends EventEmitter {
       if (customState.orchestrationSessionId) throw openCodeSessionLaunchError(cause);
       throw cause;
     }
+  }
+
+  /**
+   * An agent whose session flag also creates the conversation (`terminal.session.paneChoosesId`)
+   * opens a Pane-chosen id, so the first launch and every restart run the same command.
+   */
+  private resolveChosenSession(
+    agentType: CliAgentType,
+    initialCommand: string,
+    customState: TerminalPanelState,
+    nextState: TerminalPanelState,
+    isWSL: boolean,
+  ): CliLaunchResolution | undefined {
+    const launch = resolveChosenSessionLaunch({
+      agent: agentType,
+      baseCommand: initialCommand,
+      persistedSessionId: customState.agentSessionId,
+      allocate: randomUUID,
+      platform: isWSL ? 'linux' : process.platform,
+    });
+    if (!launch) return undefined;
+    nextState.wasInterrupted = undefined;
+    // A command that picks its own conversation replaces any id saved for an earlier command.
+    nextState.agentSessionId = launch.sessionId;
+    return { commandToRun: launch.commandToRun, customState: nextState, isCliCommand: true };
   }
 
   private resolveClaudeLaunch(
@@ -901,14 +930,16 @@ export class TerminalPanelManager extends EventEmitter {
     if (!terminal) return;
     terminal.initialInputHeld = true;
     terminal.initialInputHeldSince = Date.now();
+    terminal.initialInputHoldNoted = undefined;
   }
 
   /**
-   * Send held initial input once an identified agent's status is idle (ready
-   * at its composer), so it never lands in a wrapper, a shell, a trust or
-   * permission menu, or a startup frame. With no agent identified it waits,
-   * restarting the wait while a prompt blocks, and gives up without typing
-   * after HELD_INPUT_AGENT_WINDOW_MS.
+   * Send held initial input once an identified agent's own idle input box is
+   * on screen (its manifest's visible-idle rule or its composer signature), so it never lands in a
+   * wrapper, a shell, a trust or permission menu, or a startup frame. An idle
+   * status alone is not enough: a screen no rule recognizes also reads idle.
+   * With no agent identified it waits, restarting the wait while a prompt
+   * blocks, and gives up without typing after HELD_INPUT_AGENT_WINDOW_MS.
    */
   private releaseHeldInitialInput(terminal: TerminalProcess): void {
     if (!terminal.initialInputHeld) return;
@@ -927,9 +958,43 @@ export class TerminalPanelManager extends EventEmitter {
       this.markInitialInputError(terminal.panelId, message).catch(() => {});
       return;
     }
-    if (status !== 'idle') return;
+    if (status === 'blocked') terminal.initialInputHeldSince = Date.now();
+    if (status !== 'idle' || !this.showsInputBox(terminal)) {
+      this.noteHeldInitialInput(terminal);
+      return;
+    }
     terminal.initialInputHeld = false;
     this.sendInitialInputOnce(terminal.panelId);
+  }
+
+  /** Positive evidence the agent can take typed input: its idle rule matched, or its composer is on screen. */
+  private showsInputBox(terminal: TerminalProcess): boolean {
+    if (terminal.lastStatusScan?.detection.visibleIdle === true) return true;
+    return detectAgentComposer(terminal.screenEmulator?.state.screenText ?? '', terminal.agentType, {
+      typedText: this.getInputScreenText(terminal.panelId),
+      ghostText: this.getGhostScreenText(terminal.panelId),
+    }).isPresent;
+  }
+
+  /**
+   * Keep holding, and once the agent has gone HELD_INPUT_AGENT_WINDOW_MS without
+   * showing its input box, record why on the panel so `runpane` reports it. The
+   * message still goes once the input box appears.
+   */
+  private noteHeldInitialInput(terminal: TerminalProcess): void {
+    if (terminal.initialInputHoldNoted || terminal.initialInputHeldSince === undefined) return;
+    if (Date.now() - terminal.initialInputHeldSince < HELD_INPUT_AGENT_WINDOW_MS) return;
+    terminal.initialInputHoldNoted = true;
+    // A tab with no starting message has nothing held; a create that waits for readiness has
+    // claimed the message and reports it itself.
+    const panel = panelManager.getPanel(terminal.panelId);
+    const state = panel ? terminalCustomState(panel.state) : undefined;
+    if (!state?.initialInput || state.initialInputSentAt) return;
+    const label = agentLabel(terminal.agentType ?? '');
+    const message = `Pane is holding the starting message: ${label} has not shown its input box, so Pane will not type into what is on screen. `
+      + `It sends the message once the input box appears. To send it now, answer the prompt in the tab or use runpane panels submit.`;
+    console.warn(`[TerminalPanelManager] Starting message held for panel ${terminal.panelId}: ${label} input box not seen`);
+    this.markInitialInputError(terminal.panelId, message).catch(() => {});
   }
 
   private async writeInitialInput(
@@ -3663,4 +3728,14 @@ export const terminalPanelManager = new TerminalPanelManager();
  */
 export function relaunchLogDetail(state: Pick<TerminalPanelState, 'agentSessionId'>): string {
   return state.agentSessionId ? `on conversation ${state.agentSessionId}` : 'with no saved conversation';
+}
+
+/**
+ * Whether a launch command reopens a saved conversation: the agent's own session flag when its
+ * config names one that reopens (Claude's --session-id starts a new one), else a resume selector.
+ */
+function reopensConversation(command: string, agentType: CliAgentType | undefined): boolean {
+  const session = agentType ? agentConfig(agentType)?.terminal.session : undefined;
+  if (session?.paneChoosesId) return command.split(/\s+/).some(word => word === session.flag || word.startsWith(`${session.flag}=`));
+  return /(?:--resume(?:=|\s)|\bresume\s|--session(?:=|\s))/.test(command);
 }

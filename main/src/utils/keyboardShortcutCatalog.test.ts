@@ -52,7 +52,7 @@ describe('keyboard shortcut catalog', () => {
 
   it('matches agent defaults and platform gates', () => {
     expect(AGENT_LAUNCH_PRESETS.map(preset => getCatalogEntry(preset.hotkeyId)?.defaultChord))
-      .toEqual(['mod+alt+3', 'mod+alt+4', 'mod+alt+5', 'mod+alt+6']);
+      .toEqual(['mod+alt+3', 'mod+alt+4', 'mod+alt+5', 'mod+alt+6', 'mod+alt+shift+p']);
     expect(getCatalogEntry('add-tool-terminal-cursor')?.platforms).toEqual(['darwin', 'linux', 'wsl']);
   });
 
@@ -70,7 +70,7 @@ describe('keyboard shortcut catalog', () => {
     expect(releasedInTui).toEqual([
       'add-tool-custom-0', 'add-tool-custom-1', 'add-tool-custom-2', 'add-tool-custom-3',
       'add-tool-explorer', 'add-tool-terminal', 'add-tool-terminal-claude',
-      'add-tool-terminal-codex', 'add-tool-terminal-cursor', 'add-tool-terminal-opencode',
+      'add-tool-terminal-codex', 'add-tool-terminal-cursor', 'add-tool-terminal-opencode', 'add-tool-terminal-pi',
       'cycle-session-next-0', 'cycle-session-prev-0',
       // New navigation keys (D-236): they reach Pane from vim and agent interfaces.
       'cycle-sidebar-session-next', 'cycle-sidebar-session-prev',

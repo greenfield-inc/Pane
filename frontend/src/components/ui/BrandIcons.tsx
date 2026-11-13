@@ -51,6 +51,15 @@ export const OpenCodeIcon: React.FC<BrandIconProps> = ({ className = 'w-4 h-4' }
 );
 
 /**
+ * Pi brand icon: pi's own 4x4 pixel logo (`PI_LOGO_PIXELS` in pi 1.5.0), in one color.
+ */
+export const PiIcon: React.FC<BrandIconProps> = ({ className = 'w-4 h-4' }) => (
+  <svg viewBox="0 0 4 4" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M0 0h3v1H0zM0 1h1v3H0zM2 1h1v1H2zM1 2h1v1H1zM3 2h1v2H3z" />
+  </svg>
+);
+
+/**
  * Aider brand icon — stylized "A" mark (no official simple-icons entry)
  */
 export const AiderIcon: React.FC<BrandIconProps> = ({ className = 'w-4 h-4' }) => (

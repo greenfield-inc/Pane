@@ -57,7 +57,8 @@ import {
 } from '../services/agentReport';
 import { workerCard } from '../services/notify/workerContext';
 import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
-import { assertDirectOpenCodeLaunchCommand, isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
+import { assertDirectOpenCodeLaunchCommand } from '../services/agents/opencodeLaunch';
+import { takesChosenSession } from '../services/agents/chosenSessionLaunch';
 import {
   bracketedPaste,
   claudePromptWarnings,
@@ -270,7 +271,7 @@ import {
   type WorkspaceIdleCandidate,
   type WorkspaceIdleSchedule,
 } from '../services/workspaceIdleTracker';
-import { agentTerminalCommand, configuredAgent, isConfiguredAgent } from '../../../shared/agents';
+import { agentConfig, agentLabel, agentTerminalCommand, configuredAgent, configuredAgentSchema, isAgentSessionId, isConfiguredAgent, typesStartingMessage } from '../../../shared/agents';
 
 const RUNPANE_CHANNELS = [
   'runpane:doctor',
@@ -415,7 +416,7 @@ const orchestrationSessionCreateSchema = boundary.object({
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   name: boundary.nonEmptyString,
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agent: boundary.optional(configuredAgentSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
   resume: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(orchestrationTextSchema),
@@ -431,7 +432,7 @@ const orchestrationSessionUpdateSchema = boundary.object({
   name: boundary.optional(orchestrationTextSchema),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
+  agent: boundary.optional(configuredAgentSchema),
   launchCommand: boundary.optional(orchestrationTextSchema),
   profile: boundary.optional(orchestrationTextSchema),
   goal: boundary.optional(orchestrationTextSchema),
@@ -1792,7 +1793,8 @@ export function registerRunpaneHandlers(
       };
     }
 
-    if (stagedInput.length > 0 && isComposerUnknown(panel, beforeScreen, agentType)) {
+    // A bare Enter to a typed-message agent is held to the same rule: in a dialog it picks an option.
+    if ((stagedInput.length > 0 || typesStartingMessage(agentType)) && isComposerUnknown(panel, beforeScreen, agentType)) {
       const suggestedCommand = panelScreenCommand(panel.id);
       return {
         ok: false,
@@ -1805,7 +1807,7 @@ export function registerRunpaneHandlers(
         sentAt: new Date().toISOString(),
         blocked: {
           kind: 'composer-unknown',
-          message: `Pane could not find the ${agentType === 'codex' ? 'Codex' : 'Claude'} composer in this panel, so it sent nothing. The agent may still be starting, or showing a view without its prompt. Check the screen, then submit again or use \`panels input\`.`,
+          message: `Pane could not find the ${agentLabel(agentType ?? '')} composer in this panel, so it sent nothing. The agent may still be starting, or showing a prompt, selector or other view in place of its input box. Check the screen, then submit again or use \`panels input\`.`,
           suggestedCommand,
         },
         ...promptFields,
@@ -2792,7 +2794,7 @@ async function createTerminalPanelForSession(
   }
   if (useArgumentDelivery) {
     initialState.initialInputMode = 'argument';
-  } else if (tool.agent === 'opencode' && tool.initialInput) {
+  } else if (typesStartingMessage(tool.agent) && tool.initialInput) {
     initialState.initialInputMode = 'stdin';
   }
   if (initialInputFile) {
@@ -2975,7 +2977,7 @@ async function submitCreateInitialInput(
   const detection = tool.agent ? 'declared' : panelAgentDetection(panel) ?? 'detected';
 
   if (agent !== 'claude' && agent !== 'codex') {
-    const paste = agent === 'opencode' && isLongPrompt(text)
+    const paste = typesStartingMessage(agent) && isLongPrompt(text)
       && terminalPanelManager.isBracketedPasteEnabled(panel.id);
     logStartingMessage(panel.id, 'writing', { agent, detection, bytes: Buffer.byteLength(text, 'utf8'), submit: 'enter' });
     terminalPanelManager.writeToTerminal(panel.id, paste ? bracketedPaste(text) : text);
@@ -3082,9 +3084,10 @@ function shouldUseArgumentDelivery(tool: RunpaneResolvedTool): boolean {
   return Boolean(
     tool.initialInput &&
     tool.launchMode !== 'wrapped' &&
-    (tool.agent === 'claude' ||
-      tool.agent === 'cursor' ||
-      (tool.agent === 'codex' && !isSlashCommandInput(tool.initialInput))),
+    tool.agent &&
+    agentConfig(tool.agent)?.terminal.promptArgument &&
+    // Codex runs a slash command only when it is typed.
+    !(tool.agent === 'codex' && isSlashCommandInput(tool.initialInput)),
   );
 }
 
@@ -3949,6 +3952,9 @@ function isWaitConditionMatched(
       if (!screen.state.isCliPanel && !launched) return true;
       if (!screen.state.agentType) return false;
       if (screen.state.agentType === 'codex' && !hasConfiguredCodexScreen(screen.text)) return false;
+      // An agent that is typed its starting message can draw a trust prompt or startup frames before its input box.
+      if (typesStartingMessage(screen.state.agentType)
+        && detectAgentState(getManifestForAgent(screen.state.agentType), { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleIdle !== true) return false;
       // A composer alone is enough for Claude; Codex also has a provisional one.
       return screen.state.isCliReady === true
         && (screen.composer.isPresent || (screen.state.agentType !== 'claude' && screen.state.agentType !== 'codex'));
@@ -4147,6 +4153,18 @@ async function submitComposerForPanel(
 ): Promise<RunpanePanelSubmitComposerResult> {
   const beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
   const agentType = screenAgentType(beforeScreen);
+  if (typesStartingMessage(agentType) && !showsTypedComposer(beforeScreen, agentType)) {
+    const suggestedCommand = panelScreenCommand(panel.id);
+    return {
+      ok: false, panelId: panel.id, paneId: panel.sessionId, inputBytes: 0, strategy: 'enter', sequenceName: 'enter-cr',
+      verifiedSubmitted: false, sentAt: new Date().toISOString(), nextCommand: suggestedCommand,
+      blocked: {
+        kind: 'composer-unknown',
+        message: `Pane could not find the ${agentLabel(agentType ?? '')} composer in this panel, so it pressed nothing. A prompt, selector or dialog may be open, where Enter would pick an option. Check the screen, or press keys with \`panels input\`.`,
+        suggestedCommand,
+      },
+    };
+  }
   let submit = resolveComposerSubmit(strategy, agentType, beforeScreen.state.activityStatus);
   const probeBase = composerDeliveryProbe(panel, delivery.cwd, agentType, delivery.text);
   const probe = probeBase ? { ...probeBase, sentAtMs: Date.now() } : undefined;
@@ -4454,11 +4472,20 @@ function screenAgentType(screen: RunpanePanelScreenResult): RunpaneAgentId | und
  * full-screen menus and Pane's own shell prompt (the agent has exited) keep
  * the plain write.
  */
+/** The agent's manifest recognizes its own input box on this screen, idle or mid-turn, with nothing blocking it. */
+function showsTypedComposer(screen: RunpanePanelScreenResult, agentType: RunpaneAgentId | undefined): boolean {
+  const detection = detectAgentState(getManifestForAgent(agentType), { screen: screen.text, oscTitle: '', oscProgress: '' });
+  return detection.state !== 'blocked' && (detection.visibleIdle === true || detection.visibleWorking === true);
+}
+
 function isComposerUnknown(
   panel: ToolPanel,
   screen: RunpanePanelScreenResult,
   agentType: RunpaneAgentId | undefined,
 ): boolean {
+  // A typed-message agent (Pi, OpenCode) takes text only at its own input box: its manifest must
+  // recognize the composer, idle or mid-turn, with no prompt or dialog, where Enter picks an option.
+  if (typesStartingMessage(agentType)) return !showsTypedComposer(screen, agentType);
   if (agentType !== 'claude' && agentType !== 'codex') return false;
   if (screen.composer.isPresent) return false;
   if (agentType === 'claude' && screen.state.isAlternateScreen === true && !panelHasOutputWithin(panel.id, CLAUDE_UI_QUIET_MS)) {
@@ -4604,32 +4631,24 @@ async function runAgentDoctor(
   }
 
   let sessionCapabilityOk = true;
-  if (agent === 'opencode' && executablePath) {
+  // Pane reopens each tab's conversation with this flag, which older builds lack.
+  const sessionFlag = agentConfig(agent)?.terminal.session;
+  if (sessionFlag && executablePath) {
+    const { label, install } = configuredAgent(agent);
+    const upgrade = `Upgrade ${label} to ${sessionFlag.minimumVersion} or newer (${install.command}); Pane reopens each tab's conversation with ${sessionFlag.flag}.`;
     try {
       const helpCommand = `${quoteAgentDoctorExecutable(executablePath, environment)} --help`;
-      const result = await context.commandRunner.execAsync(helpCommand, repo.path, {
-        timeout: 5_000,
-        silent: true,
-      });
-      const helpOutput = `${result.stdout}\n${result.stderr}`;
-      const sessionFlagPattern = /(?:^|\s)--session(?:,|\s|$)/m;
-      sessionCapabilityOk = sessionFlagPattern.test(helpOutput)
-        && helpOutput.split(/\r?\n/u).some(line => /^\s*--session(?:,|\s|$)/u.test(line));
+      const result = await context.commandRunner.execAsync(helpCommand, repo.path, { timeout: 5_000, silent: true });
+      sessionCapabilityOk = `${result.stdout}\n${result.stderr}`.split(/\r?\n/u).some(line => line.trim().split(/[\s,]/u)[0] === sessionFlag.flag);
       checks.push({
         name: 'session-capability',
         ok: sessionCapabilityOk,
-        message: sessionCapabilityOk
-          ? 'OpenCode supports explicit sessions with --session.'
-          : 'Upgrade OpenCode to v2.0.19 or newer; Pane requires the --session flag for reliable resume.',
+        message: sessionCapabilityOk ? `${label} supports explicit sessions with ${sessionFlag.flag}.` : `${upgrade} Its --help does not list the flag.`,
       });
     } catch (error) {
       sessionCapabilityOk = false;
       warnings.push(commandErrorMessage(error, `${executable} --help failed.`));
-      checks.push({
-        name: 'session-capability',
-        ok: false,
-        message: 'Upgrade OpenCode to v2.0.19 or newer; Pane could not verify the required --session flag.',
-      });
+      checks.push({ name: 'session-capability', ok: false, message: `${upgrade} Pane could not run --help to check.` });
     }
   }
 
@@ -4821,7 +4840,7 @@ interface OrchestrationSessionAgentRequest {
 function parseOrchestrationSessionAgentRequest(value: PaneCommandValue): OrchestrationSessionAgentRequest {
   if (!isRecord(value)) throw new Error('Session agent request must be an object');
   const selector = parseOrchestrationSessionSelector(value.selector);
-  const agent = decodeBoundary(value.agent, boundary.enumeration('claude', 'codex', 'cursor', 'opencode'));
+  const agent = decodeBoundary(value.agent, configuredAgentSchema);
   return { selector, agent };
 }
 
@@ -5056,8 +5075,9 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
       const tool = parseRunpaneToolSpec(entry.tool, `Pane adopt item ${index}`);
       const resumeProvided = Object.prototype.hasOwnProperty.call(entry, 'resume');
       const resume = optionalString(entry.resume);
-      if (resumeProvided && 'agent' in tool && tool.agent === 'opencode' && resume === undefined) {
-        throw new Error('OpenCode --resume must be a string matching the required ses_* format (^ses_[A-Za-z0-9]+$).');
+      const resumeSession = 'agent' in tool && tool.agent ? agentConfig(tool.agent)?.terminal.session : undefined;
+      if (resumeProvided && resume === undefined && 'agent' in tool && tool.agent && resumeSession) {
+        throw new PaneError('ERR_RESUME_ID', `${configuredAgent(tool.agent).label} --resume must be a string matching ${resumeSession.idPattern}. Nothing was created.`, 'Pass the conversation id as text.');
       }
       const launch = optionalBoolean(entry.launch);
       if (tool.initialInput !== undefined && launch !== true) {
@@ -6597,8 +6617,14 @@ function assertResumableTool(tool: RunpaneResolvedTool, resume: string | undefin
   if (tool.launchMode === 'wrapped') {
     throw new Error('--resume needs a built-in agent command; a wrapper command resumes its own way.');
   }
-  if (tool.agent === 'opencode' && !isValidOpenCodeSessionId(resume)) {
-    throw new Error('OpenCode --resume must match the required ses_* format (^ses_[A-Za-z0-9]+$).');
+  const session = tool.agent ? agentConfig(tool.agent)?.terminal.session : undefined;
+  if (!tool.agent || !session) return;
+  const label = configuredAgent(tool.agent).label;
+  if (!isAgentSessionId(tool.agent, resume)) {
+    throw new PaneError('ERR_RESUME_ID', `${label} --resume must be a session id matching ${session.idPattern}. Nothing was created.`, `Pass the id ${label} shows for the conversation, or leave out --resume to start a new one.`);
+  }
+  if (session.paneChoosesId && !takesChosenSession(tool.command, tool.agent)) {
+    throw new PaneError('ERR_RESUME_COMMAND', `--resume needs a plain ${label} command; this one picks its own conversation, runs a subcommand or uses shell syntax. Nothing was created.`, `Use \`--agent ${tool.agent}\` without a custom command, or resume inside ${label} itself.`);
   }
 }
 

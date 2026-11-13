@@ -5549,7 +5549,7 @@ async function checkAgentTemplateParity() {
   const { runPanesCreate } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
 
   const agents = [...RUNPANE_CONTRACT.enums.agents].sort();
-  assert.deepStrictEqual(agents, ['claude', 'codex', 'cursor', 'opencode']);
+  assert.deepStrictEqual(agents, ['claude', 'codex', 'cursor', 'opencode', 'pi']);
   const { agentTerminalCommand } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'agents.js'));
   for (const agent of RUNPANE_CONTRACT.enums.agents) {
     const entry = RUNPANE_CONTRACT.agents.entries[agent];
