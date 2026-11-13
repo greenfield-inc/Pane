@@ -122,7 +122,9 @@ export class ClaudePromptBridge {
         PermissionRequest: hook(PROMPT_PATH, this.options.hookTimeoutSeconds),
         PostToolUse: release,
         PostToolUseFailure: release,
-        UserPromptSubmit: release,
+        // No UserPromptSubmit release: Claude would wait on it before every request (D-43). Its
+        // dialog holds the input, so a prompt it asked is settled by the hooks above, the
+        // transcript or the screen before the next prompt can be sent.
         Stop: release,
         SessionEnd: release,
       },
@@ -190,7 +192,6 @@ export class ClaudePromptBridge {
           if (sameCall(prompt, event.tool_name, event.tool_input)) this.options.queue.settle(prompt.id, ANSWERED_IN_TERMINAL);
         }
         return {};
-      case 'UserPromptSubmit':
       case 'Stop':
         for (const prompt of this.prompts(panelId, event.session_id)) this.options.queue.settle(prompt.id, ANSWERED_IN_TERMINAL);
         return {};
