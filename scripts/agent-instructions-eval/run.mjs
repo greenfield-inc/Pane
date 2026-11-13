@@ -27,6 +27,8 @@ const scenarios = SCENARIOS.filter((scenario) => !options.only || options.only.i
 const realHome = os.homedir();
 const offLimits = [path.join(realHome, '.claude'), path.join(realHome, '.pane'), path.join(realHome, 'Library', 'Keychains'), path.join(root, 'variants')];
 const login = loginMode();
+// Attempts per run before a run that keeps reading outside its version counts as an error.
+const VOID_ATTEMPTS = 3;
 
 let variants;
 let results;
@@ -111,9 +113,9 @@ function prepareVariant(label, ref) {
   bundle(renderEntry, path.join(dir, 'render.cjs'));
   const tools = require(path.join(dir, 'mcpTools.cjs')).buildMcpTools();
   fs.writeFileSync(path.join(dir, 'examples.json'), JSON.stringify(examples(tools)));
-  checkScripts(tools, label);
+  checkScripts(tools, label, new Set(JSON.parse(fs.readFileSync(path.join(source, 'contracts/runpane/contract.json'), 'utf8')).commands.map((command) => command.name)));
   const commit = ref === 'WORKTREE' ? `${execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim()}+worktree` : execFileSync('git', ['rev-parse', '--short', ref], { cwd: repoRoot, encoding: 'utf8' }).trim();
-  return { label, ref, commit, dir };
+  return { label, ref, commit, dir, source };
 }
 
 function validator(schema) {
@@ -143,12 +145,12 @@ function examples(tools) {
 }
 
 /** Fails before any session when a scripted answer would not pass the MCP tool's output schema. */
-function checkScripts(tools, label) {
+function checkScripts(tools, label, commands) {
   const problems = scenarios.flatMap((scenario) => {
     const script = scenario.script({ repo: '/eval/repo', sessionDir: '/eval/session', runDir: '/eval/run', worktree: '/eval/worktree' });
     return Object.entries(script).flatMap(([command, answer]) => {
       const tool = tools.find((candidate) => candidate.command === command);
-      if (!tool) return [];
+      if (!tool) return commands.has(command) || command === 'gh' ? [] : [`${scenario.id}: "${command}" names no runpane command, so the stub would never serve it`];
       const validate = validator(tool.outputSchema);
       return [answer].flat().filter((one) => !validate(one))
         .map((one) => `${scenario.id}: ${command} answer ${JSON.stringify(one).slice(0, 120)} fails ${tool.name}'s output schema (${validate.errors?.map((e) => `${e.dataPath} ${e.message}`).join('; ')})`);
@@ -160,15 +162,15 @@ function checkScripts(tools, label) {
   }
 }
 
-/** Runs one scenario run, starting again when a session is void, up to three times the run count. */
+/** Runs one scenario run, starting again when a session is void, up to VOID_ATTEMPTS times. */
 async function runJob({ scenario, variant, run }) {
-  for (let attempt = 0; attempt < options.runs * 3; attempt += 1) {
+  for (let attempt = 0; attempt < VOID_ATTEMPTS; attempt += 1) {
     const runDir = path.join(root, 'runs', scenario.id, `${variant.label}-${run}${attempt > 0 ? `-a${attempt}` : ''}`);
     await runSession(scenario, variant, runDir);
     const outcome = grade(scenario, variant.label, run, runDir);
     if (!outcome.void) return { ...outcome, voids: attempt };
   }
-  return { scenario: scenario.id, variant: variant.label, run, pass: false, error: true, why: 'every attempt was void', voids: options.runs * 3 };
+  return { scenario: scenario.id, variant: variant.label, run, pass: false, error: true, why: 'every attempt was void', voids: VOID_ATTEMPTS };
 }
 
 /** Stages one session (repo, HOME with the version's instructions, Pane role, stub) and runs claude -p in it. */
@@ -177,7 +179,9 @@ async function runSession(scenario, variant, runDir) {
   const sessionDir = path.join(runDir, 'session');
   const home = path.join(runDir, 'home');
   const bin = path.join(runDir, 'bin');
-  for (const dir of [repo, sessionDir, home, bin, path.join(runDir, 'pane-dir')]) fs.mkdirSync(dir, { recursive: true });
+  for (const dir of [repo, sessionDir, home, bin]) fs.mkdirSync(dir, { recursive: true });
+  // The Pane Chat skills Pane installs in its data folder, which `runpane docs` reads.
+  fs.cpSync(path.join(variant.source, 'main/src/services/paneChatBundle'), path.join(runDir, 'pane-dir', 'skills', 'pane-chat'), { recursive: true });
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
   const extra = scenario.setup({ repo, sessionDir, runDir }) ?? {};
   execFileSync('git', ['add', '-A'], { cwd: repo });
@@ -270,8 +274,15 @@ function observe(transcript, log, runDir) {
     ...[...text.matchAll(/(?<![\w.$}/)~-])(?:\/private)?\/(?:tmp|var\/folders)\/[^\s'"`;|&)}]+/g)].map((m) => m[0]).filter((p) => !allowed.some((dir) => normalize(p).startsWith(dir))),
     ...[...text.matchAll(/\$\{?TMPDIR\}?|\bmktemp\b|tempfile\.|os\.tmpdir\(\)/g)].map((m) => m[0]),
   ]);
-  const reachedOut = offLimits.filter((dir) => touched.some((text) => normalize(text).includes(normalize(dir))));
+  // Other sessions' folders hold the other version's instructions.
+  const otherRuns = [...new Set(touched.flatMap((text) => [...normalize(text).matchAll(new RegExp(`${escapeRegExp(normalize(path.join(root, 'runs')))}/[^/"\\s]+/[^/"\\s]+`, 'g'))].map((m) => m[0])))]
+    .filter((dir) => !normalize(runDir).startsWith(dir));
+  const reachedOut = [...offLimits.filter((dir) => touched.some((text) => normalize(text).includes(normalize(dir)))), ...otherRuns];
   return { calls, tools, bash, writes, tempPaths, reachedOut, text: result.result ?? '', cost: result.total_cost_usd ?? 0, seconds: Math.round((result.duration_ms ?? 0) / 1000), model: init.model, error: result.is_error === true || !result.type };
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function pool(items, size, worker) {

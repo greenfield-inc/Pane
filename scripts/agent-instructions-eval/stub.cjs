@@ -67,7 +67,7 @@ function notify(replies, nth) {
 /** The longest command name (one or two words) the arguments start with. */
 function commandName(examples) {
   const two = args.slice(0, 2).join(' ');
-  return examples[two] || ['secrets exec', 'inbox list'].includes(two) || /^[a-z]/.test(args[1] ?? '') ? two : args[0];
+  return examples[two] || two === 'secrets exec' || (/^[a-z]/.test(args[1] ?? '') && !examples[args[0]]) ? two : args[0];
 }
 
 function optionValue(name) {

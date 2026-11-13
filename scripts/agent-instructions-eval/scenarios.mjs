@@ -134,7 +134,7 @@ export const SCENARIOS = [
     setup: ({ repo }) => pkg(repo),
     prompt: () => "You orchestrate this Pane Session. Worker 'rename' reported blocked; its question is inbox item it-7: it needs the person to choose the npm name, ledger-core or @acme/ledger, before it commits (a published name can't be taken back). Get the person's answer to the worker and record it.",
     script: () => ({
-      'inbox list': { items: [{ id: 'it-7', kind: 'question', paneName: 'rename', title: 'Which npm name: ledger-core or @acme/ledger?', state: 'waiting', options: ['ledger-core', '@acme/ledger'] }] },
+      inbox: { ok: true, session: { id: 's-eval', name: 'settings' }, items: [{ id: 'it-7', sessionId: 's-eval', kind: 'report', at: '2026-11-13T09:00:00.000Z', paneId: 'p-rename', paneName: 'rename', panelId: 'pl-rename', report: { state: 'blocked', question: 'Which npm name should the package be published under: ledger-core or @acme/ledger? A published name cannot be taken back.', reportedAt: '2026-11-13T09:00:00.000Z' } }] },
       'inbox ack': { ok: true, acknowledged: ['it-7'], unknown: [] },
       notify: [{ answer: '@acme/ledger' }],
     }),

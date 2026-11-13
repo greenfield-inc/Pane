@@ -22,22 +22,27 @@ working tree, uncommitted changes included), `--runs` (default 5),
 `--regrade <run root>` grades the sessions an earlier run saved (the folder it
 prints last) with the current scenarios, at no cost.
 
-Each session gets its own HOME holding exactly what Pane installs for that
-version (the Notify block, the `pane` skill, the MCP server), its own git
-repository, Pane role (`PANE_SESSION_ID`, `PANE_SESSION_DIR`,
-`PANE_ORCHESTRATION_SESSION_ID`) and `PANE_DIR`, all in a temporary folder.
+Each session gets its own HOME holding what Pane installs for that version
+(the Notify block, the `pane` skill, the MCP server), its own `PANE_DIR` with
+that version's Pane Chat skills (which `runpane docs` reads), its own git
+repository and Pane role (`PANE_SESSION_ID`, `PANE_SESSION_DIR`,
+`PANE_ORCHESTRATION_SESSION_ID`), all in a temporary folder. The repository's
+managed `AGENTS.md` block is not written.
 It logs in with `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` when set, and
 otherwise, on macOS, through your existing Claude Code login in the keychain.
-A session that reads your real `~/.claude`, `~/.pane` or keychain folder, or
-the other version's files, is void and runs again; the report gives the void
-rate.
+A session whose tool calls name an absolute path in your real `~/.claude`,
+`~/.pane` or keychain folder, the versions' bundles, or another session's
+folder is void and runs again, up to 3 attempts; the report gives the void
+rate. Relative paths that climb out of the run folder are not detected.
 
 A stub stands in for Pane on both the CLI and the MCP server. It logs every
 call; answers with the scenario's script or, for anything unscripted, a
 minimal valid example of the command's result; and passes `--help`,
 `agent-context` and `docs` to the version under test, so no card, Pane or
 secret is touched. Before the first session, every scripted answer is checked
-against the MCP tool's output schema. Scenarios grade only what the agent did:
+against the MCP tool's output schema, and a script key that names no runpane
+command fails the run. `runpane doctor` has no scripted answer, so agents that
+run it see an error in both versions. Scenarios grade only what the agent did:
 its `runpane` and `pane` MCP calls, Bash commands and written files.
 `scenarios.mjs` lists them. The run fails (exit 1) when the head passes any
 scenario fewer times than the base. Results go to
