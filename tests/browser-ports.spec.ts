@@ -79,6 +79,18 @@ test('an open browser tab counts a port that started elsewhere within a minute',
   await expect(trigger).toContainText('2');
 });
 
+test('an open browser tab reads ports again when the window comes back on screen', async ({ page }) => {
+  await openBrowserPanel(page, 'http://localhost:5173');
+  await answerConnectionState(page, 'local');
+  await answerPortsList(page, snapshot(5173));
+  const trigger = page.getByRole('button', { name: /Ports/ });
+  await expect(trigger).toContainText('1');
+
+  await answerPortsList(page, snapshot(5173, 5175));
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(trigger).toContainText('2');
+});
+
 test('the Ports menu works from the keyboard', async ({ page }) => {
   await openBrowserPanel(page, 'http://localhost:5173');
   await answerConnectionState(page, 'local');
