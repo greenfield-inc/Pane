@@ -357,7 +357,7 @@ export const SCENARIOS = [
     noSkill: true,
     setup: ({ repo }) => pkg(repo),
     prompt: () => 'Run `runpane doctor`. Then, without doing anything else, answer in two short lines: where would you run a rerun of this feature\'s review, and where would you put a repository you clone for research?',
-    script: () => ({ realDoctor: true }),
+    script: () => ({}),
     grade: (run) => verdict([
       [has(run, 'doctor'), 'never ran runpane doctor'],
       [/\btab\b|panels create/i.test(run.text), 'did not say the rerun is a tab in this Pane'],
