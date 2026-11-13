@@ -53,8 +53,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Terminal',
     description: 'Terminal display, selection, references, shell, and power behavior.',
     icon: Terminal,
-    settingIds: ['terminal-font-family', 'terminal-font-size', 'terminal-power-mode', 'terminal-copy-on-select', 'terminal-reference-paste-mode', 'terminal-reference-line-count', 'terminal-shell'],
-    aliases: ['font', 'shell', 'scrollback', 'gpu', 'battery', 'copy', 'select', 'selection', 'clipboard', 'popover'],
+    settingIds: ['terminal-font-family', 'terminal-font-size', 'terminal-power-mode', 'terminal-copy-on-select', 'terminal-references-enabled', 'terminal-reference-paste-mode', 'terminal-reference-line-count', 'terminal-shell'],
+    aliases: ['font', 'shell', 'scrollback', 'gpu', 'battery', 'copy', 'select', 'selection', 'clipboard', 'popover', '@', 'mention', 'picker'],
   },
   {
     id: 'ai-agents',

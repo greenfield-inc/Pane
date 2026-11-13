@@ -99,6 +99,7 @@ export interface SetupPreferenceConfig {
   keyboardShortcutOverrides?: Record<string, string | null>;
   kittyKeyboardEnabled?: boolean;
   terminalCopyOnSelect?: boolean;
+  terminalReferencesEnabled?: boolean;
   htmlFileOpenMode?: 'preview' | 'source';
   enableCommitFooter?: boolean;
   gitAttributionEnabled?: boolean;

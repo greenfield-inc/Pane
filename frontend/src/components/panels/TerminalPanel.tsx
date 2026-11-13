@@ -1788,6 +1788,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
               const allPanels = usePanelStore.getState().getSessionPanels(effectiveSessionId);
               return allPanels.filter(p => p.type === 'terminal' && p.id !== panel.id).length > 0;
             },
+            isEnabled: () => useConfigStore.getState().config?.terminalReferencesEnabled !== false,
             onCopy: handleCopy,
             onStateChange: () => interceptor.notifyStateChange(),
             onForceCancel: () => interceptor.forceCancel(),

@@ -27,13 +27,16 @@ function render(config: AppConfig = {}): string {
   return renderToStaticMarkup(<TerminalSettings persistence={createPersistence(config)} systemMonoFonts={[]} />);
 }
 
-function copyOnSelectSwitch(markup: string): string {
-  const match = /<button[^>]*role="switch"[^>]*aria-label="Copy on select"[^>]*>/.exec(markup);
+function toggle(markup: string, label: string): string {
+  const match = new RegExp(`<button[^>]*role="switch"[^>]*aria-label="${label}"[^>]*>`).exec(markup);
   if (!match) {
-    throw new Error('Copy on select switch not rendered');
+    throw new Error(`${label} switch not rendered`);
   }
   return match[0];
 }
+
+const copyOnSelectSwitch = (markup: string) => toggle(markup, 'Copy on select');
+const referencesSwitch = (markup: string) => toggle(markup, 'Reference terminals with @');
 
 describe('TerminalSettings Copy on select', () => {
   it('registers terminal-copy-on-select under Terminal, found by searching for copy', () => {
@@ -61,5 +64,47 @@ describe('TerminalSettings Copy on select', () => {
     expect(toggle).toContain('aria-checked="true"');
     expect(toggle).toContain('disabled=""');
     expect(markup).toContain('Always on while connected to a remote Pane');
+  });
+});
+
+const REFERENCE_GROUPS = ['Default terminal reference paste mode', 'Default terminal reference line count'];
+
+function radios(markup: string, groupLabel: string) {
+  const group = markup.match(new RegExp(`role="radiogroup" aria-label="${groupLabel}"[^>]*>(.*?)</div>`))?.[1] ?? '';
+  const buttons = group.match(/<button[^>]*role="radio"[^>]*>/g) ?? [];
+  return { count: buttons.length, disabled: buttons.filter((button) => button.includes('disabled=""')).length };
+}
+
+describe('TerminalSettings terminal references switch', () => {
+  it('registers terminal-references-enabled under Terminal', () => {
+    const terminal = SETTINGS_CATEGORIES.find((category) => category.id === 'terminal');
+    expect(terminal?.settingIds).toContain('terminal-references-enabled');
+  });
+
+  it('is on when absent, with paste mode and line count available', () => {
+    const markup = renderToStaticMarkup(<TerminalSettings persistence={createPersistence()} systemMonoFonts={[]} />);
+
+    expect(markup).toContain(`id="${settingDomId('terminal-references-enabled')}"`);
+    expect(referencesSwitch(markup)).toContain('aria-checked="true"');
+    for (const label of REFERENCE_GROUPS) {
+      expect(radios(markup, label)).toMatchObject({ disabled: 0 });
+      expect(radios(markup, label).count).toBeGreaterThan(0);
+    }
+  });
+
+  it('disables paste mode and line count when turned off', () => {
+    const markup = renderToStaticMarkup(
+      <TerminalSettings persistence={createPersistence({ terminalReferencesEnabled: false })} systemMonoFonts={[]} />,
+    );
+
+    expect(referencesSwitch(markup)).toContain('aria-checked="false"');
+    for (const label of REFERENCE_GROUPS) {
+      const { count, disabled } = radios(markup, label);
+      expect(count).toBeGreaterThan(0);
+      expect(disabled).toBe(count);
+    }
+    const powerMode = radios(markup, 'Terminal power mode');
+    expect(powerMode.count).toBeGreaterThan(0);
+    expect(powerMode.disabled).toBe(0);
   });
 });

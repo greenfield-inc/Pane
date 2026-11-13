@@ -38,6 +38,7 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
   const fontOptions = [...new Set([fontFamily, ...systemMonoFonts.filter((font) => !font.startsWith('.'))])];
   const fontSize = config.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
   const isRemoteMode = config.remoteDaemon?.client.mode === 'remote';
+  const referencesEnabled = config.terminalReferencesEnabled !== false;
 
   return (
     <SettingsPage title="Terminal" description="Defaults for terminal panels across all projects.">
@@ -141,15 +142,29 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection title="Terminal references" description="Defaults used when @ references scrollback from another terminal in the same pane.">
+      <SettingsSection title="Terminal references" description="Type @ in a terminal to paste scrollback from another terminal in the same pane.">
+        <SettingRow
+          settingId="terminal-references-enabled"
+          label="Reference terminals with @"
+          description="Typing @ opens a picker of the pane's other terminals. When off, @ is typed like any other character."
+          saveState={persistence.saveStates['terminal-references-enabled']}
+        >
+          <ImmediateToggle
+            label="Reference terminals with @"
+            value={referencesEnabled}
+            onSave={(value) => persistence.saveConfig('terminal-references-enabled', { terminalReferencesEnabled: value })}
+          />
+        </SettingRow>
         <SettingRow
           settingId="terminal-reference-paste-mode"
           label="Paste mode"
           description="Paste clean scrollback text directly or write it to a file and insert a reference."
           saveState={persistence.saveStates['terminal-reference-paste-mode']}
+          disabled={!referencesEnabled}
         >
           <SegmentedControl
             label="Default terminal reference paste mode"
+            disabled={!referencesEnabled}
             value={persistence.preferences.atTerminalPasteMode}
             options={[{ id: 'raw', label: 'Raw paste' }, { id: 'embed', label: 'Embed file' }]}
             onChange={(value) => void persistence.savePreference('atTerminalPasteMode', value)}
@@ -160,9 +175,11 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
           label="Line count"
           description="Default number of scrollback lines to include."
           saveState={persistence.saveStates['terminal-reference-line-count']}
+          disabled={!referencesEnabled}
         >
           <SegmentedControl
             label="Default terminal reference line count"
+            disabled={!referencesEnabled}
             value={persistence.preferences.atTerminalLineCount}
             columns={4}
             options={AT_TERMINAL_LINE_COUNT_PRESETS.map((value) => ({ id: value, label: value === -1 ? 'All' : String(value) }))}
