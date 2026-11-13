@@ -21,8 +21,6 @@ import type { AppConfig } from '../../types/config';
 import { DEFAULT_UPDATE_IDLE_TIMING, UpdateIdleGate, type UpdateIdleTiming } from './updateIdleGate';
 import { discardRestoreNote, takeRestoreNote, writeRestoreNote } from './restoreNote';
 
-const TICK_MS = 15_000;
-
 interface RestartToUpdateDeps {
   getMainWindow: () => BrowserWindow | null;
   configManager: ConfigManager;
@@ -101,7 +99,9 @@ export function startRestartToUpdate({ getMainWindow, configManager, readNavigat
     if (isBusyAgentState(event.state)) idleGate.markBusy();
     else idleGate.tick();
   });
-  setInterval(() => idleGate.tick(), TICK_MS).unref();
+  // Scripts and archives end without an agent-status event; note when, so the quiet clock is right without polling.
+  scriptExecutionTracker.on('script-stopped', () => idleGate.markBusy());
+  archiveProgressManager?.on('archive-progress', () => idleGate.markBusy());
 }
 
 function requireGate(): UpdateIdleGate {

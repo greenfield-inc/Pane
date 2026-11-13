@@ -3,6 +3,8 @@ import type { RestartToUpdateState, UpdateBusyState } from '../../../../shared/t
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
+/** How often the gate re-checks its clocks while an update, a Later or Tonight is pending. */
+const TICK_MS = 15_000;
 
 export interface UpdateIdleTiming {
   /** Nothing ran for this long before the idle toast shows. */
@@ -54,6 +56,7 @@ export class UpdateIdleGate extends EventEmitter {
   private tonightFired = false;
   private enabled = true;
   private published = '';
+  private clock: NodeJS.Timeout | null = null;
 
   constructor(options: UpdateIdleGateOptions) {
     super();
@@ -106,6 +109,7 @@ export class UpdateIdleGate extends EventEmitter {
       this.options.restartTonight();
     }
     this.publish();
+    this.syncClock();
   }
 
   getState(): RestartToUpdateState {
@@ -132,6 +136,18 @@ export class UpdateIdleGate extends EventEmitter {
       && hour < this.timing.tonightEndHour
       && now - this.lastBusyAt >= this.timing.tonightQuietMs
       && this.options.systemIdleSeconds() * 1000 >= this.timing.tonightInputIdleMs;
+  }
+
+  /** Ticks on a timer only while a clock can run out; with nothing pending, events drive the gate. */
+  private syncClock(): void {
+    const pending = this.readyVersion !== null || this.availableVersion !== null || this.snoozedUntil !== null || this.tonight;
+    if (pending && !this.clock) {
+      this.clock = setInterval(() => this.tick(), TICK_MS);
+      this.clock.unref();
+    } else if (!pending && this.clock) {
+      clearInterval(this.clock);
+      this.clock = null;
+    }
   }
 
   private publish(): void {

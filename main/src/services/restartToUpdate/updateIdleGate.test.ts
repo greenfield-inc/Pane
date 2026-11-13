@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UpdateIdleGate } from './updateIdleGate';
 import type { UpdateBusyState } from '../../../../shared/types/updater';
 
@@ -198,5 +198,39 @@ describe('UpdateIdleGate Tonight', () => {
     t.advance(4 * HOUR);
     expect(t.restartTonight).not.toHaveBeenCalled();
     expect(t.gate.getState().tonight).toBe(false);
+  });
+});
+
+describe('UpdateIdleGate clock', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  function realClockGate() {
+    vi.useFakeTimers({ now: afternoon });
+    const gate = new UpdateIdleGate({ now: Date.now, readBusy: () => null, systemIdleSeconds: () => 0, restartTonight: vi.fn() });
+    const states: boolean[] = [];
+    gate.on('state', state => states.push(state.idleToastDue));
+    return { gate, states };
+  }
+
+  it('sets no timer while no update is pending', () => {
+    const { gate } = realClockGate();
+    gate.tick();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('shows the idle toast on its own 5 quiet minutes after an update is ready', () => {
+    const { gate, states } = realClockGate();
+    gate.setReady('2.4.203');
+    vi.advanceTimersByTime(5 * MINUTE);
+    expect(states.at(-1)).toBe(true);
+  });
+
+  it('keeps ticking through Later and stops once nothing is pending', () => {
+    const { gate } = realClockGate();
+    gate.snooze();
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(4 * HOUR + MINUTE);
+    expect(gate.getState().snoozedUntil).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
