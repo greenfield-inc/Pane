@@ -7,7 +7,7 @@ import { remoteEventStreams } from '../daemon/remoteEventStreams';
 
 export type BackgroundActivityProfile = NonNullable<AppConfig['backgroundActivity']>;
 
-export const DEFAULT_BACKGROUND_ACTIVITY: BackgroundActivityProfile = 'balanced';
+const DEFAULT_BACKGROUND_ACTIVITY: BackgroundActivityProfile = 'balanced';
 
 /** A Low Power Mode read is reused this long, so switching apps doesn't start a process each time. */
 const LOW_POWER_CACHE_MS = 60_000;

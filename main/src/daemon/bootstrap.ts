@@ -247,7 +247,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     skipValidation: true,
   });
   const gitDiffManager = new GitDiffManager(logger, analyticsManager);
-  const gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, logger, databaseService);
+  // Desktop only: a headless host has no window or person to wait for, so it keeps today's behaviour.
+  const backgroundActivity = mode === 'desktop' ? new BackgroundActivity(configManager, { logger }) : null;
+  const gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, logger, databaseService, undefined, {
+    // A focus fetch waits out Low Power Mode, and battery under Battery saver.
+    shouldSkipFocusFetch: () => backgroundActivity?.isConstrained() ?? false,
+  });
   // Every fetch into a project (focus, Fetch button, dashboard, branch list, new worktree, an agent's own) updates its Panes' ahead/behind.
   onFetch(projectPath => void gitStatusManager.refreshProjectAfterFetch(projectPath));
   const executionTracker = new ExecutionTracker(sessionManager, gitDiffManager);
@@ -395,8 +400,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   const archiveCleanupManager = new ArchiveCleanupManager(databaseService, sessionManager, archiveProgressManager);
   worktreeManager.setArchivePathGuard(target => archiveCleanupManager.assertPathAvailable(target));
-  // Desktop only: a headless host has no window or person to wait for, so it keeps today's behaviour.
-  const backgroundActivity = mode === 'desktop' ? new BackgroundActivity(configManager, { logger }) : null;
   const daemonServices: DaemonHostServices = {
     configManager,
     databaseService,
