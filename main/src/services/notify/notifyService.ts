@@ -100,7 +100,7 @@ export interface NotifyServiceDependencies {
 
 /** A computer rings only if used in the last 2 minutes (D-144). */
 const IN_USE_SECONDS = 120;
-/** How often Pane re-reads that, while something waits. */
+/** How often Pane re-reads that, while it matters (`inUseMatters`). */
 const IN_USE_POLL_MS = 5_000;
 const SWEEP_MS = 60_000;
 /** Bursts of Pane and Session events settle before one sweep. */
@@ -137,6 +137,7 @@ export class NotifyService {
   private readonly stoppers: Array<() => void> = [];
   private readonly timers: Array<ReturnType<typeof setInterval>> = [];
   private sweepTimer?: ReturnType<typeof setTimeout>;
+  private inUseTimer?: ReturnType<typeof setInterval>;
   /** Autopilot's chat tab while it's on (set once Autopilot starts): it reads replies no one else can. */
   private autopilotReader?: () => { panelId: string } | undefined;
   /** When each item last came back ready again, as the phone was last told. */
@@ -191,7 +192,10 @@ export class NotifyService {
       openInbox: () => this.navigate('inbox'),
       openSettings: () => this.navigate('settings'),
     });
-    this.queue.on('change', () => this.scheduleBroadcast());
+    this.queue.on('change', () => {
+      this.scheduleBroadcast();
+      this.syncInUsePoll();
+    });
     this.queue.on('chime', () => this.sendToMainWindow('notify:chime'));
     deps.configManager.on('config-updated', (config: AppConfig) => {
       const homeSkill = isPaneHomeSkillEnabled(config);
@@ -225,7 +229,6 @@ export class NotifyService {
       if (stop) this.stoppers.push(stop);
     }
     this.timers.push(setInterval(() => this.queue.sweep(), SWEEP_MS));
-    this.timers.push(setInterval(() => this.queue.pollInUse(), IN_USE_POLL_MS));
     for (const timer of this.timers) timer.unref?.();
     this.queue.sweep();
     this.scheduleBroadcast();
@@ -284,6 +287,21 @@ export class NotifyService {
       if (session.archived) return 'Session archived';
     }
     return this.deps.askerPaneGone?.(item);
+  }
+
+  /** Polls in use only while it changes what shows, starting from the state as it is now. */
+  private syncInUsePoll(): void {
+    const wanted = this.queue.inUseMatters();
+    if (wanted === (this.inUseTimer !== undefined)) return;
+    if (!wanted) {
+      clearInterval(this.inUseTimer);
+      this.inUseTimer = undefined;
+      return;
+    }
+    this.inUseTimer = setInterval(() => this.queue.pollInUse(), IN_USE_POLL_MS);
+    this.inUseTimer.unref?.();
+    // The person may have come or gone while nothing polled.
+    this.queue.pollInUse();
   }
 
   private scheduleSweep(): void {
@@ -513,6 +531,7 @@ export class NotifyService {
     for (const stop of this.stoppers) stop();
     for (const timer of this.timers) clearInterval(timer);
     clearTimeout(this.sweepTimer);
+    clearInterval(this.inUseTimer);
     for (const timer of this.pushTimers.values()) clearTimeout(timer);
     this.queue.dispose();
     if (this.shortcut) globalShortcut.unregister(this.shortcut);
