@@ -597,14 +597,19 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
 });
 
 test('the instructions and every tool description fit within what Claude Code shows', async () => {
-  const { CLAUDE_CODE_MCP_TEXT_LIMIT } = require(dist('mcpTools.js'));
+  const { CLAUDE_CODE_MCP_TEXT_LIMIT, CLAUDE_CODE_TOOL_SEARCH_DESCRIPTION_LIMIT } = require(dist('mcpTools.js'));
   for (const args of [[], ['--toolsets', 'all']]) {
     await withMcpClient(async (client) => {
       const served = `runpane mcp ${args.join(' ')}`.trim();
       const instructions = client.getInstructions() ?? '';
       assert.ok(instructions.length <= CLAUDE_CODE_MCP_TEXT_LIMIT, `${served}: instructions are ${instructions.length} characters; Claude Code cuts them at ${CLAUDE_CODE_MCP_TEXT_LIMIT}`);
       for (const tool of (await client.listTools()).tools) {
-        assert.ok(tool.description.length <= CLAUDE_CODE_MCP_TEXT_LIMIT, `${served}: ${tool.name}'s description is ${tool.description.length} characters; Claude Code cuts it at ${CLAUDE_CODE_MCP_TEXT_LIMIT}`);
+        const { description } = tool;
+        assert.ok(description.length <= CLAUDE_CODE_TOOL_SEARCH_DESCRIPTION_LIMIT, `${served}: ${tool.name}'s description is ${description.length} characters; Claude Code cuts it at ${CLAUDE_CODE_TOOL_SEARCH_DESCRIPTION_LIMIT}`);
+        if (description.length <= CLAUDE_CODE_MCP_TEXT_LIMIT) continue;
+        // Past the up-front cut, the pointer to the full reference must survive it.
+        const pointerEnd = description.indexOf('\n', description.indexOf('runpane agent-context --command'));
+        assert.ok(pointerEnd > 0 && pointerEnd <= CLAUDE_CODE_MCP_TEXT_LIMIT, `${served}: ${tool.name}'s description is ${description.length} characters and its pointer to the full reference ends at ${pointerEnd}, past Claude Code's ${CLAUDE_CODE_MCP_TEXT_LIMIT}-character cut`);
       }
     }, { args });
   }
