@@ -5,9 +5,12 @@ description: Use whenever you work with Pane (the desktop app that runs coding a
 
 # Pane
 
-Pane runs agents in terminal panels grouped into Panes, each Pane with its own
-worktree. Sessions are orchestrator conversations that own Panes. You drive all
-of it through the `runpane` CLI.
+In Pane, work flows from a Session to Panes to tabs. A Session is a workstream: the person or an orchestrator opens it, and every Pane it starts stays attached to it. Each feature gets one Pane, a git worktree on its own branch, and everything for that feature (the agent that builds it, its reviews, QA and fixes) runs as tabs inside it. Scratch files go in $PANE_SCRATCH_DIR inside the Pane. When the feature is done, archive the Pane and Pane cleans up its worktree, tabs and scratch files.
+
+- Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. When the feature is done, archive the Pane and Pane cleans it up.
+
+You drive all of it through the `runpane` CLI. `runpane doctor` prints the
+full working rules.
 
 ## Establish the control surface
 
@@ -30,11 +33,10 @@ of it through the `runpane` CLI.
 ## Common commands
 
 - Find a repository: `runpane repos list --json`
-- 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane.
 - First check whether the work's branch already has a Pane: `runpane panes list --repo <repo> --json`, matching the PR's head branch against `git -C <worktreePath> branch --show-current`. If it does, use the tab command below.
 - Start work whose branch has no Pane yet in a new Pane:
   `runpane panes create --repo <repo> --name <name> --agent <codex|claude|cursor> --prompt "<task>" --source agent --no-focus --wait-ready --yes --json`
-- For work that already has a Pane (review, audit, fixes, QA), open a new agent tab in that Pane, never a new Pane:
+- For work that already has a Pane (review, audit, fixes, QA), open a new agent tab in that Pane, never a new Pane. Inside a Pane, `$PANE_SESSION_ID` is that Pane's id:
   `runpane panels create --pane <pane-id> --agent <codex|claude|cursor> --initial-input "<task>" --source agent --no-focus --wait-ready --yes --json`
 - When `runpane agent-context --command "panels open" --json` lists the
   command, show the user a page or file with
