@@ -194,7 +194,7 @@ export const AGENTS_CONFIG = {
       "terminal": {
         "args": [],
         "fullAccessArgs": [],
-        "hotkey": "mod+alt+p"
+        "hotkey": "mod+alt+shift+p"
       },
       "install": {
         "url": "https://pi.dev",
