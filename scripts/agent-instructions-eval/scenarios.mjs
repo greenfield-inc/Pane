@@ -40,6 +40,13 @@ function wellFormedCard(argv) {
   ];
 }
 
+/** Multi-part work inside a Session: Panes created (Pane associates them with the caller's Session), no new Session, no opt-out. */
+const joinsSession = (run) => [
+  [run.calls.some(({ argv }) => (argv[0] === 'panes' && argv[1] === 'create') || (argv[0] === 'agents' && argv[1] === 'start' && !argv.includes('--pane'))), 'never created a Pane'],
+  [!has(run, 'sessions', 'create'), 'created a new Session'],
+  [!run.calls.some(({ argv }) => argv.includes('--no-associate')), 'opted out of joining the Session with --no-associate'],
+];
+
 const pkg = (repo, extra = {}) => write(path.join(repo, 'package.json'), `${JSON.stringify({ name: 'ledger', version: '0.1.0', scripts: { test: 'node test.js' }, ...extra }, null, 2)}\n`);
 
 export const SCENARIOS = [
@@ -183,6 +190,31 @@ export const SCENARIOS = [
     grade: (run) => verdict([
       [has(run, 'sessions', 'create'), 'never created a Session'],
     ]),
+  },
+  {
+    id: 'orchestrator-multipart-joins-session',
+    title: "A Session orchestrator asked for multi-part work creates Panes in its own Session, not a new Session",
+    role: 'orchestrator',
+    setup: ({ repo }) => pkg(repo),
+    prompt: () => 'Kick off the settings overhaul: three parts that can run in parallel, (1) migrate the settings schema, (2) rebuild the settings UI, (3) write the docs. Use a few agents; I will check in later.',
+    script: () => ({}),
+    grade: (run) => verdict(joinsSession(run)),
+  },
+  {
+    id: 'session-pane-multipart-joins-session',
+    title: "An agent in a Pane that belongs to a Session, asked for multi-part work, creates Panes in that Session, not a new Session",
+    // The worker role is a tab in a Pane that belongs to a Session: PANE_SESSION_DIR set, no PANE_ORCHESTRATION_SESSION_ID.
+    role: 'worker',
+    setup({ repo }) {
+      pkg(repo);
+      write(path.join(repo, 'src', 'tokens.css'), ':root {\n  --bg: #ffffff;\n  --fg: #111111;\n  --accent: #2255ee;\n}\n');
+      write(path.join(repo, 'src', 'components', 'Button.js'), "module.exports = (label) => `<button style=\"background:#2255ee;color:#fff\">${label}</button>`;\n");
+      write(path.join(repo, 'src', 'components', 'Card.js'), "module.exports = (body) => `<div style=\"background:#fff;color:#111\">${body}</div>`;\n");
+      write(path.join(repo, 'docs', 'components.md'), '# Components\n\n![Button](screenshots/button.png)\n![Card](screenshots/card.png)\n');
+    },
+    prompt: () => 'We need dark mode: new colour tokens, every component updated to use them, and fresh screenshots for the docs. Get it going with a few agents.',
+    script: () => ({}),
+    grade: (run) => verdict(joinsSession(run)),
   },
   {
     id: 'new-feature-gets-a-pane',
