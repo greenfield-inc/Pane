@@ -56,7 +56,9 @@ let catalog: ChatAgentCatalog | undefined;
 
 /** The agents this host can open as chat tabs (chat-tab:agents), with what each supports. */
 export function getChatAgentCatalog(): ChatAgentCatalog {
-  catalog ??= new ChatAgentCatalog({ file: path.join(getAppDirectory(), 'chat-agent-capabilities.json'), findExecutable: findExecutableInPath });
+  // With the scripted test agent (development and end-to-end tests only), it stands in for every agent.
+  const scripted = process.env.PANE_CHAT_TEST_AGENT && !app.isPackaged ? process.env.PANE_CHAT_TEST_AGENT : undefined;
+  catalog ??= new ChatAgentCatalog({ file: path.join(getAppDirectory(), 'chat-agent-capabilities.json'), findExecutable: scripted ? () => scripted : findExecutableInPath });
   return catalog;
 }
 let context: ChatLaunchContext = { unsupportedHost: () => undefined, projectEnv: async () => ({ env: {}, warnings: [] }) };
