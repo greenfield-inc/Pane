@@ -30,12 +30,12 @@ const INSTRUCTIONS = [
   `- ${scratchRule()}`,
   'Each tool runs the matching `runpane` command against the running Pane app and returns its `--json` output.',
   '- `sessions_create` starts a Session, where a workstream lives. A new Pane creates a worktree that installs and builds, so create one only when the work\'s branch has none; add later agents with `agents_start` or `panels_create` and `pane: <id>` (inside a Pane, `$PANE_SESSION_ID` is its id).',
-  '- Prefer the composite tools: `agents_start` starts an agent on a task, `agents_status` checks on it, `agents_send` sends it a follow-up. To answer a menu or prompt in an agent\'s terminal, send named keys with `panels_input` `keys` (for example `down,enter`), then check `agents_status`. Ask the user before answering trust or permission prompts.',
-  '- Discover before you change anything: ids come from `repos_list`, `panes_list`, `workspace_state` and `agents_start`.',
+  '- `agents_start` starts an agent on a task, `agents_status` checks on it, and `agents_send` sends it a follow-up. `panels_input` sends named keys (for example `down,enter`) to answer a menu or prompt in an agent\'s terminal. Ask the user before answering trust or permission prompts.',
+  '- Ids come from `repos_list`, `panes_list`, `workspace_state` and `agents_start`.',
   '- Pass `yes: true` to a tool that changes state only when the user asked for that change or your Pane instructions authorize it; without it the call is refused and nothing happens.',
-  '- Show the user a page, report, file or local dev server with `panels_open`, as a tab beside the agent, not the system browser.',
-  '- Before guessing how Pane works, call `docs_search`, then `docs_read`.',
-  '- When you need the person (a choice, an approval, a short answer), call `notify` instead of asking in the terminal; its description says how to write the card.',
+  '- `panels_open` shows the user a page, report, file or local dev server as a tab beside the agent.',
+  '- `docs_search` and `docs_read` answer how Pane works.',
+  '- `notify` asks the person something (a choice, an approval, a short answer) through Pane, on screen even when they are in another app, and waits for the answer; its description says how to write the card.',
 ].join('\n');
 
 // The lists only change with a new runpane version, which restarts this server.

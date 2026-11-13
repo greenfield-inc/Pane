@@ -319,6 +319,17 @@ full working rules.
 - Workers end with \`runpane report --state <ready|blocked|failed|done> --summary-file <path>\`
   (\`--question\` when blocked, \`--pr\` and \`--head\` when there is a PR).
 
+## With the pane MCP tools
+
+When the \`pane\` MCP tools are loaded, use them for the jobs above:
+\`agents_start\` starts an agent on a task, \`agents_status\` checks on it, and
+\`agents_send\` sends it a follow-up, each in one call. Answer a menu in an
+agent's terminal with \`panels_input\` \`keys\`, then check \`agents_status\`.
+Show the user a page or file with \`panels_open\` rather than the system
+browser. Before guessing how Pane works, call \`docs_search\`, then
+\`docs_read\`. When you need the person, use \`notify\` as the next section says
+rather than asking in the terminal.
+
 ${APPROVALS_RULES}
 
 ### Posting an approval card

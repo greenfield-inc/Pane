@@ -58,9 +58,10 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 | `repos` | the repository tools, including `repos_get` and `repos_update` (a repo's Project Settings: build, run and archive scripts, worktree folder) |
 | `secrets` | `secrets_list`, `secrets_delete`. No tool sets or reads a value: agents use secrets through `runpane secrets exec` ([Pane secrets](PANE_SECRETS.md)) |
 | `docs`, `links`, `admin` | documentation, deep-link, and diagnostic tools |
+| `plugin` | `core` without the four `workspace` tools: what the [Claude plugin](#claude-plugin) serves |
 | `all` / `read` | every tool / every read-only tool |
 
-Choose with `runpane mcp --toolsets core,git` (comma-separated). `--read-only` keeps only read-only tools from whatever is selected. The Pane app registers `core` by default; **Settings → AI & Agents → Pane tools to register** switches it to `all`. Each command's toolsets live in the contract's `toolsets` field.
+Choose with `runpane mcp --toolsets core,git` (comma-separated). `--read-only` keeps only read-only tools from whatever is selected. The Pane app registers `core` by default; **Settings → AI & Agents → Pane tools to register** switches it to `all`. Each command's toolsets live in the contract's `toolsets` field. A command's `cliOnlyFlags` stay out of its tool: over MCP, `doctor` diagnoses only, and `--fix` and `--report` run from the CLI.
 
 ## The three agent jobs
 
