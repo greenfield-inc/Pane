@@ -19,3 +19,17 @@ actions.
 
 The xterm link-provider line number is one-based; the terminal buffer's
 `getLine` index is zero-based.
+
+## Custom links
+
+Settings › Links turns text matching your own regular expressions into links,
+such as issue keys opening your tracker. Each entry has a pattern and a URL
+template that must start with `http://` or `https://`; `$0` inserts the whole
+match and `$1` to `$9` insert capture groups, URL-encoded. Cmd-click (Ctrl-click
+on Windows and Linux) opens the link. File, URL and git links keep working
+alongside. Entries travel with Settings › Import & Export.
+
+Patterns run in a web worker (`frontend/src/utils/customLinkMatcher.ts`), one
+terminal row at a time with trailing padding trimmed. A row that takes longer
+than `CUSTOM_LINK_MATCH_TIMEOUT_MS` stops the worker and gets no custom links,
+so a pattern that backtracks badly can't freeze the window.

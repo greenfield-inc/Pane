@@ -5,6 +5,7 @@ import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../shared/types/appearance';
 import { DEFAULT_AUTO_PAUSE_HOURS } from '../../../shared/types/autoPause';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import { customLinkSchema, type CustomLink } from '../../../shared/types/customLinks';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../shared/types/worktreeFileSync';
 import fs from 'fs/promises';
@@ -56,6 +57,17 @@ const machineMarksSchema = boundary.record(boundary.object({
   letters: boundary.optional(boundary.string),
   color: boundary.optional(boundary.enumeration(...MACHINE_COLOR_NAMES)),
 }));
+
+/** customLinks as Settings › Links can show them: hand-edited entries missing a field are dropped and logged. */
+function decodeCustomLinks(saved: CustomLink[]): CustomLink[] {
+  const entries: readonly unknown[] = Array.isArray(saved) ? saved : [saved];
+  const links = entries.flatMap((entry) => decodeOptionalBoundary(entry, customLinkSchema) ?? []);
+  const dropped = entries.length - links.length;
+  if (dropped > 0) {
+    console.warn(`[ConfigManager] customLinks: ignored ${dropped} malformed entries in config.json. Each needs enabled, id, label, pattern and urlTemplate; add them again in Settings › Links.`);
+  }
+  return links;
+}
 
 /** Machine marks as saved: only the known parts, and no entry left with nothing in it. */
 function decodeMachineMarks(update: MachineMarkOverrides): MachineMarkOverrides {
@@ -334,6 +346,7 @@ export class ConfigManager extends EventEmitter {
       // Configs saved before this setting existed kept the machine awake while plugged in.
       keepAwakeWhilePluggedIn: loadedConfig.keepAwakeWhilePluggedIn ?? true,
       remoteDaemon: normalizeRemoteDaemonConfig(loadedConfig.remoteDaemon),
+      ...(loadedConfig.customLinks !== undefined && { customLinks: decodeCustomLinks(loadedConfig.customLinks) }),
       // Use !== undefined to distinguish "user cleared all entries" (empty array → preserve)
       // from "field absent in config file" (→ use defaults)
       worktreeFileSync: loadedConfig.worktreeFileSync !== undefined
