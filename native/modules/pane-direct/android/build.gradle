@@ -1,0 +1,37 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.panedirect'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.panedirect"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+  sourceSets {
+    main.jniLibs.srcDirs += "${projectDir}/../build/android/jniLibs"
+  }
+}
+
+// Builds libpane_direct.so from the direct/ crate with cargo-ndk for the ABIs
+// this build targets (reactNativeArchitectures) that pane-direct supports.
+// Without Rust the app still builds, and the module reports it is unavailable.
+def paneDirectAbis = ['arm64-v8a', 'x86_64']
+def buildPaneDirect = tasks.register('buildPaneDirect', Exec) {
+  def requested = (findProperty('reactNativeArchitectures') ?: paneDirectAbis.join(',')).split(',').collect { it.trim() }
+  def abis = requested.findAll { paneDirectAbis.contains(it) }
+  onlyIf { !abis.isEmpty() }
+  workingDir projectDir
+  commandLine 'bash', "${projectDir}/../scripts/build-android.sh", *abis
+  doFirst {
+    environment 'ANDROID_NDK_HOME', android.ndkDirectory.absolutePath
+    environment 'PANE_DIRECT_MIN_SDK', String.valueOf(android.defaultConfig.minSdk ?: 24)
+  }
+  // Cargo decides what is stale.
+  outputs.upToDateWhen { false }
+}
+preBuild.dependsOn buildPaneDirect

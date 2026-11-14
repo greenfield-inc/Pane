@@ -13,6 +13,8 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import { secureStore } from '@/auth/secureStore';
 import { demoConnection, isDemoProfile } from '@/features/demo/demoHost';
 
+import { routedFetch } from './direct/directRoute';
+
 // expo/fetch streams response bodies, which the /events stream needs.
 export const streamingFetch = expoFetch;
 
@@ -33,13 +35,14 @@ export function getRuntimeId(): Promise<string> {
 }
 
 export function createDaemonClient(profile: RemotePaneConnectionProfile): RemoteDaemonClient {
+  // A relay computer's requests take its direct connection while that path is picked.
+  const fetch = routedFetch(profile, streamingFetch);
   return new RemoteDaemonClient({
-    // A relay computer's address is picked per connection (the networking module adds same-network addresses).
     profile: { ...profile, baseUrl: relayBaseUrl(profile) },
     // The demo's sample computers answer in the app, whichever screen builds the client.
     ...(isDemoProfile(profile)
       ? demoConnection()
-      : { transport: createFetchEventStreamTransport(streamingFetch), fetch: streamingFetch }),
+      : { transport: createFetchEventStreamTransport(fetch), fetch }),
     runtimeId: getRuntimeId,
     clientLabel: CLIENT_LABEL,
     deviceLabel: DEVICE_LABEL,

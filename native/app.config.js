@@ -5,7 +5,8 @@
 //
 // PANE_UPDATES_URL points a local build at another update server, such as one
 // running on this computer (native/README.md, "Over-the-air updates"). An
-// http:// URL also allows plain HTTP on Android, for that build only.
+// http:// URL also allows plain HTTP on Android, for that build only
+// (plugins/withLoopbackHttp.js allows it to 127.0.0.1 in every build).
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -21,8 +22,11 @@ module.exports = ({ config }) => ({
     ...(fs.existsSync(googleServicesFile) ? { googleServicesFile: './google-services.json' } : {}),
   },
   plugins: cleartext
-    ? config.plugins.map(plugin => (Array.isArray(plugin) && plugin[0] === 'expo-build-properties'
-      ? [plugin[0], { ...plugin[1], android: { ...plugin[1].android, usesCleartextTraffic: true } }]
-      : plugin))
+    ? config.plugins.map((plugin) => {
+      if (plugin === './plugins/withLoopbackHttp') return [plugin, { cleartext: true }];
+      return Array.isArray(plugin) && plugin[0] === 'expo-build-properties'
+        ? [plugin[0], { ...plugin[1], android: { ...plugin[1].android, usesCleartextTraffic: true } }]
+        : plugin;
+    })
     : config.plugins,
 });

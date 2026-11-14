@@ -115,7 +115,8 @@
           }
         }
       ],
-      "./plugins/withQuietDevMenu"
+      "./plugins/withQuietDevMenu",
+      "./plugins/withLoopbackHttp"
     ],
     "experiments": {
       "typedRoutes": true,

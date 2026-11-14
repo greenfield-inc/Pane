@@ -52,7 +52,7 @@ While Autopilot is on for the computer, home shows an **Autopilot** row above Ap
 
 The app opens on the camera the first time: scan the code that **Pair a phone** shows in Pane on your computer. The QR is `https://runpane.net/pair#s=<secret>&c=<computer>&n=<name>`, a universal link (iOS) and app link (Android), so the phone's own camera opens the app too, on **Pair with <computer>**, where one tap pairs. The phone trades the one-time secret at `https://<computer>.runpane.net/pair/exchange` for its own token and saves that computer and every computer linked with it, then links the new computer with the phone's other relay computers, with no prompt (`shared/remoteClient/relay.ts`). Each connection to the computer refreshes the list: it saves computers linked since. Under the camera: **Paste a connection code**, **Use Tailscale instead** and **Try a demo**. **Settings → Add a machine** opens **Add a computer**: **Scan a QR code**, or **Paste a connection code** and **Use Tailscale**. Errors say "This code was already used", "This code expired" or "Can't reach <computer>".
 
-A relay computer reconnects like any other (the 10-second grace and the one-line bar), but the app never stops retrying while it is open, at most 30 s apart. When the relay says the computer is asleep, the bar says "Asleep since 9:40". A computer that removed the phone is the one hard stop: the bar says so, with **Pair again**. Pages on a relay computer load through the one-time address it hands out (`relay:client:preview-address`). The connection goes through Pane's servers until the native networking module adds same-network and direct paths; `relayBaseUrl` is where it picks the address.
+A relay computer reconnects like any other (the 10-second grace and the one-line bar), but the app never stops retrying while it is open, at most 30 s apart. When the relay says the computer is asleep, the bar says "Asleep since 9:40". A computer that removed the phone is the one hard stop: the bar says so, with **Pair again**. Pages on a relay computer load through the one-time address it hands out (`relay:client:preview-address`). A relay computer's saved address is always its relay address, which `relayBaseUrl` (`shared/remoteClient/relay.ts`) returns.
 
 For your computers over Tailscale, sign in to Tailscale on the phone and computer, then tap **Use Tailscale instead** on the welcome screen (or **Settings → Add a machine → Use Tailscale** after connecting). Enter the **Address** shown in desktop **Settings → Remote Access → Access**, tap **Find computers**, then **Connect**. Enter the computer's password when asked. **Use another computer** lets you change the address if that computer is unavailable or you switch tailnets. Saved profiles stay bound to their original tailnet.
 
@@ -72,6 +72,14 @@ PANE_DIR=$D pnpm exec electron ./main/dist/main/src/daemon/headless.js --pane-di
 The simulator reaches `http://127.0.0.1:42157` directly. For the Android emulator, forward the port first: `adb reverse tcp:42157 tcp:42157`. Non-loopback hosts must use HTTPS (Tailscale Serve or an HTTPS proxy), and a phone reaches them over Tailscale, an SSH tunnel or that proxy.
 
 To add projects and panes to the dev host, use the RunPane CLI against its data directory, for example `node packages/runpane/dist/cli.js repos add --path <repo> --yes --pane-dir $D`.
+
+## Direct connections
+
+When a computer runs `pane-direct serve` (`direct/`), its `relay:client:computer` answer carries `direct: {nodeId, addrs, relayUrls}`, which the phone saves per computer. While the app is connected to that computer, `modules/pane-direct` runs pane-direct's `connect` in the app. It opens one QUIC connection to the computer: directly across the internet when both networks allow it, to the computer's local addresses on the same Wi-Fi (no internet or DNS needed), and otherwise through the iroh relays in `relayUrls`. It listens on a loopback port. The app sends plain HTTP there, and the module opens TLS to the computer's own name and accepts only the key fingerprint the phone saved at pairing, so the computer's server and its auth see the same connection as through the relay. The web view's pages still load through the relay.
+
+`src/daemon/direct/` routes the app's requests: it probes `/health` through the relay and the direct connection (every second for the first five probes after the connection opens or the app returns to the foreground, then every 15 s) and moves to the other path only when it was clearly faster (a quarter quicker and at least 10 ms) for three probes in a row, or at once when the current path stops answering. Requests already in flight finish on their path, so a switch never interrupts what is on screen.
+
+Building it needs Rust (rustup): `rustup target add aarch64-apple-ios aarch64-apple-ios-sim` for iOS, which an Xcode script phase builds for the platform being built. iOS builds fail without them, and build arm64 only (devices and Apple silicon simulators); `cargo install cargo-ndk` and `rustup target add aarch64-linux-android x86_64-linux-android` for Android, which a Gradle task builds for `arm64-v8a` and `x86_64`. An Android build without them, or for another ABI, still works and reaches computers through the relay only.
 
 ## Test it
 
@@ -260,6 +268,7 @@ Launch the app once to download the update and again to run it. `PANE_UPDATES_UR
 | `src/theme/` | Colors (light and dark, from the desktop app's default themes), spacing, radius, typography. `useTheme()`. |
 | `src/daemon/` | Connection to the active host: `DaemonProvider`, `useDaemon()`, `useInvokeQuery`, `useInvokeMutation`, `useDaemonEvent`, the TanStack Query client. |
 | `src/auth/` | Saved hosts in secure storage (`useHostsStore`), pairing verification. |
+| `modules/` | Local Expo modules with native code. `pane-direct` runs the `direct/` Rust crate's `connect` in the app. |
 | `../shared/` | Types and logic shared with the desktop app and the PWA. Import as `@shared/...`. |
 
 See `AGENTS.md` for conventions.
