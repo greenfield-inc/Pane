@@ -1,5 +1,5 @@
-import { execFileSync } from 'child_process';
-import { mkdtempSync, realpathSync, rmSync, utimesSync } from 'fs';
+import { execFileSync, spawn } from 'child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
@@ -52,6 +52,7 @@ function fixture(options: GitStatusManagerOptions = {}) {
   git(other, 'checkout', '-q', '-b', 'main');
   git(other, 'commit', '-q', '--allow-empty', '-m', 'A');
   git(other, 'push', '-q', 'origin', 'main');
+  git(other, 'push', '-q', 'origin', 'main:side');
   const project = join(root, 'project');
   git(root, 'clone', '-q', remote, project);
   git(project, 'fetch', '-q', 'origin');
@@ -77,7 +78,7 @@ function fixture(options: GitStatusManagerOptions = {}) {
 
   const lines: string[] = [];
   const record = (message: string) => { lines.push(message); };
-  const logger = partial<Logger>({ info: record, warn: record, error: record, verbose: () => undefined, debug: () => undefined });
+  const logger = partial<Logger>({ info: record, warn: record, error: record, verbose: record, debug: () => undefined });
   const manager = new GitStatusManager(sessionManager, new WorktreeManager(), new GitDiffManager(), logger, undefined, undefined, options);
   const stopListening = onFetch(projectPath => { if (projectPath === project) void manager.refreshProjectAfterFetch(projectPath); });
   cleanups.push(() => { stopListening(); manager.stopPolling(); });
@@ -91,7 +92,8 @@ function fixture(options: GitStatusManagerOptions = {}) {
   const behind = (id: string) => manager.getCachedStatus(id)?.status.behind ?? 0;
   const loadStatuses = () => Promise.all(sessions.map(session => manager.getGitStatus(session.id)));
   const logged = (text: string) => lines.some(line => line.includes(text));
-  return { project, sessions, manager, fetches, advanceRemote, behind, loadStatuses, logged, lines };
+  const tip = (ref: string) => git(project, 'rev-parse', ref);
+  return { root, remote, project, sessions, manager, fetches, advanceRemote, behind, loadStatuses, logged, lines, tip };
 }
 
 describe('fetching the active Pane\'s base on focus', () => {
@@ -107,12 +109,12 @@ describe('fetching the active Pane\'s base on focus', () => {
       expect(f.behind('b')).toBe(1);
     }, { timeout: 10_000 });
     expect(f.fetches()).toHaveLength(1);
-    expect(f.logged('Focus fetch fetched')).toBe(true);
+    expect(f.tip('origin/main')).toBe(git(f.remote, 'rev-parse', 'main'));
     const fetchedAt = Date.parse(f.manager.getCachedStatus('b')?.status.lastFetchedAt ?? '');
     expect(Date.now() - fetchedAt).toBeLessThan(10_000);
   }, 20_000);
 
-  it('does not fetch when a Pane\'s worktree fetched within 5 minutes, even before Pane started', async () => {
+  it('does not fetch when a Pane\'s worktree fetched the base within 5 minutes, even before Pane started', async () => {
     const f = fixture();
     git(f.sessions[0].worktreePath ?? '', 'fetch', '-q', 'origin');
     await f.loadStatuses();
@@ -126,6 +128,20 @@ describe('fetching the active Pane\'s base on focus', () => {
     expect(f.behind('b')).toBe(0);
   }, 20_000);
 
+  it('still fetches the base when only another branch, or nothing, was fetched lately', async () => {
+    const f = fixture();
+    git(f.sessions[0].worktreePath ?? '', 'fetch', '-q', 'origin', 'side');
+    // A failed fetch leaves an empty FETCH_HEAD behind.
+    writeFileSync(join(f.project, '.git', 'worktrees', 'b', 'FETCH_HEAD'), '');
+    await f.loadStatuses();
+    f.advanceRemote();
+
+    f.manager.setActiveSession('a');
+
+    await vi.waitFor(() => expect(f.behind('a')).toBe(1), { timeout: 10_000 });
+    expect(f.fetches()).toHaveLength(1);
+  }, 20_000);
+
   it('shares one fetch between focus events that arrive together', async () => {
     const f = fixture();
     await f.loadStatuses();
@@ -136,8 +152,8 @@ describe('fetching the active Pane\'s base on focus', () => {
     f.manager.handleVisibilityChange(false);
     f.manager.handleVisibilityChange(false);
 
-    // Each focus decides once; any that finds the fetch already done reports it fresh.
-    await vi.waitFor(() => expect(f.lines.filter(line => /Focus fetch (fetched|skipped-fresh)/.test(line))).toHaveLength(3), { timeout: 10_000 });
+    await vi.waitFor(() => expect(f.behind('a')).toBe(1), { timeout: 10_000 });
+    await new Promise(resolve => setTimeout(resolve, 500));
     expect(f.fetches()).toHaveLength(1);
   }, 20_000);
 
@@ -153,18 +169,69 @@ describe('fetching the active Pane\'s base on focus', () => {
     expect(f.behind('a')).toBe(0);
   }, 20_000);
 
-  it('updates other Panes when an agent fetches inside the active Pane', async () => {
+  it('does not fetch from an SSH remote, where an SSH agent may ask for a touch each time', async () => {
+    const f = fixture();
+    git(f.project, 'remote', 'set-url', 'origin', 'ssh://git@example.invalid/team/repo.git');
+    await f.loadStatuses();
+
+    f.manager.setActiveSession('a');
+
+    await vi.waitFor(() => expect(f.logged('Focus fetch skipped')).toBe(true), { timeout: 10_000 });
+    expect(f.fetches()).toHaveLength(0);
+  }, 20_000);
+
+  it('leaves FETCH_HEAD to the person: a terminal fetch of a pull request stays checkable', async () => {
+    const f = fixture();
+    git(f.project, 'fetch', '-q', 'origin', 'side');
+    const fetchHead = join(f.project, '.git', 'FETCH_HEAD');
+    utimesSync(fetchHead, TEN_MINUTES_AGO(), TEN_MINUTES_AGO());
+    const before = readFileSync(fetchHead, 'utf8');
+    await f.loadStatuses();
+    f.advanceRemote();
+
+    f.manager.setActiveSession('a');
+
+    await vi.waitFor(() => expect(f.behind('a')).toBe(1), { timeout: 10_000 });
+    expect(readFileSync(fetchHead, 'utf8')).toBe(before);
+  }, 20_000);
+
+  it('never makes a git pull running in a Pane fail, and leaves origin/main to it', async () => {
+    const f = fixture();
+    await f.loadStatuses();
+    f.advanceRemote();
+    // A hook holds the pull inside its ref update, after it read origin/main: the moment a
+    // fetch that moved origin/main underneath it would make it fail with "cannot lock ref".
+    const hooks = join(f.root, 'slow-hooks');
+    mkdirSync(hooks);
+    writeFileSync(join(hooks, 'reference-transaction'), '#!/bin/sh\n[ "$1" = preparing ] && sleep 3\ncat >/dev/null\nexit 0\n');
+    chmodSync(join(hooks, 'reference-transaction'), 0o755);
+    const worktree = f.sessions[1].worktreePath ?? '';
+    const pull = spawn('git', ['-c', `core.hooksPath=${hooks}`, '-c', 'user.name=Pane', '-c', 'user.email=pane@example.test', 'pull', '-q', '--no-rebase', 'origin', 'main'], { cwd: worktree });
+    let pullErrors = '';
+    pull.stderr.on('data', chunk => { pullErrors += String(chunk); });
+    const pulled = new Promise<number | null>(resolve => pull.on('close', resolve));
+    // The hook holds it for 3 s; give it a moment to get there.
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    f.manager.setActiveSession('a');
+
+    await vi.waitFor(() => expect(f.logged('Focus fetch busy')).toBe(true), { timeout: 10_000 });
+    expect(await pulled).toBe(0);
+    expect(pullErrors).toBe('');
+    expect(git(worktree, 'rev-parse', 'HEAD')).toBe(git(f.remote, 'rev-parse', 'main'));
+  }, 20_000);
+
+  it('updates other Panes when an agent fetches inside the active Pane for the first time', async () => {
     const f = fixture({ shouldSkipFocusFetch: () => true });
     await f.loadStatuses();
     f.manager.setActiveSession('a');
     await vi.waitFor(() => expect(f.logged('Started file watching for session a')).toBe(true), { timeout: 10_000 });
+    await new Promise(resolve => setTimeout(resolve, 500));
     f.advanceRemote();
 
-    // The metadata watcher may still be settling; an agent fetching again is harmless.
-    await vi.waitFor(() => {
-      git(f.sessions[0].worktreePath ?? '', 'fetch', '-q', 'origin');
-      expect(f.behind('b')).toBe(1);
-    }, { timeout: 10_000, interval: 1_000 });
+    git(f.sessions[0].worktreePath ?? '', 'fetch', '-q', 'origin');
+
+    await vi.waitFor(() => expect(f.behind('b')).toBe(1), { timeout: 10_000 });
     expect(f.fetches()).toHaveLength(0);
   }, 20_000);
 });

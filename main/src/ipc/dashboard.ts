@@ -4,7 +4,7 @@ import type { AppServices } from './types';
 import fs from 'fs';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { PathResolver } from '../utils/pathResolver';
-import { recordFetch, recordProjectFetch } from '../services/worktreeBaseRefresh';
+import { noteFetch, recordProjectFetch } from '../services/worktreeBaseRefresh';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 interface MainBranchStatus {
@@ -380,7 +380,7 @@ async function getRemoteStatuses(
 
     // Only a fetch of every remote stands in for `git fetch --all` when creating a Pane.
     if (fetchedRemotes > 0 && fetchedRemotes === remotesMap.size) recordProjectFetch(projectPath);
-    else if (fetchedRemotes > 0) recordFetch(projectPath);
+    else if (fetchedRemotes > 0) noteFetch(projectPath);
 
     // Sort remotes: upstream first, then origin, then others
     remoteStatuses.sort((a, b) => {

@@ -1,3 +1,4 @@
+import type { ChildProcessWithoutNullStreams } from 'child_process';
 import { commandExecutor } from './commandExecutor';
 import type { ExecFileAsyncOptions, ExecFileResult } from './commandExecutor';
 import { getWSLContextFromProject, type WSLContext } from './wslUtils';
@@ -23,6 +24,11 @@ export class CommandRunner {
       ...options,
       env: options?.env ? { ...process.env, ...options.env } : undefined,
     }, this.wslContext);
+  }
+
+  /** Starts `file` in `cwd` with piped stdio, in WSL when the project is there. */
+  spawnFile(file: string, args: readonly string[], cwd: string): ChildProcessWithoutNullStreams {
+    return commandExecutor.spawnFile(file, args, cwd, this.wslContext);
   }
 
   async execFile(file: string, args: readonly string[], cwd: string, options?: ExecFileAsyncOptions): Promise<ExecFileResult> {
