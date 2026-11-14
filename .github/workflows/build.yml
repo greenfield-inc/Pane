@@ -403,7 +403,11 @@ jobs:
             echo "$id is already on npm"
             continue
           fi
-          (cd "$dir" && npm publish --provenance --access public)
+          # A package npm refuses (no @runpane organisation or trusted publisher yet) must not stop
+          # runpane itself from publishing: pin lists only what npm has.
+          if ! (cd "$dir" && npm publish --provenance --access public); then
+            echo "::warning::$id did not publish; see RUNBOOK.md for the npm setup the relay packages need."
+          fi
         done
     - name: List the relay packages as runpane's optional dependencies
       run: node scripts/runpane-relay-packages.js pin

@@ -110,9 +110,14 @@ Windows installers, and publishes the draft release. `publish-npm` and `publish-
 supports; Linux binaries link musl statically. `validate-runpane-packages`
 packs each `@runpane/relay-<platform>-<arch>` package without publishing and
 runs `runpane relay` on the Linux binary. `publish-npm` publishes those six
-packages first, skipping any this version already has, then lists them as
-runpane's `optionalDependencies` and publishes runpane
-(`scripts/runpane-relay-packages.js`).
+packages first, skipping any this version already has, then lists the ones npm
+has as runpane's `optionalDependencies` and publishes runpane
+(`scripts/runpane-relay-packages.js`). A relay package npm refuses is a warning,
+not a failed release: runpane still publishes, and `runpane relay` says the
+binary is not installed on that platform. The packages need the npm
+organisation `runpane`, and a trusted publisher (this repository, `build.yml`)
+on each package once it exists; the first publish needs `NPM_TOKEN` with
+rights on `@runpane`.
 
 `publish-release` (`scripts/publish-github-release.sh`) fills an empty draft's
 notes from GitHub's generated notes and keeps a hand-written body. Either way it

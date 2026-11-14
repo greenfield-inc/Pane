@@ -7,7 +7,7 @@
 //   build <platform> <outDir>     cargo build the release binary into <outDir>/<platform>/
 //   stage <binariesDir> <outDir>  write every package from <binariesDir>/<platform>/ into <outDir>/<platform>/
 //                                 and check that npm packs its binary, executable
-//   pin                           list the packages as optionalDependencies in packages/runpane/package.json
+//   pin                           list the packages npm has at runpane's version as its optionalDependencies
 //                                 (the release does this just before it publishes runpane)
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -93,11 +93,27 @@ function checkPack(dir, platform) {
   console.log(`${packed.id}: ${packed.files.length} files, ${packed.size} bytes packed`);
 }
 
+function onNpm(id) {
+  try {
+    execFileSync('npm', ['view', id, 'version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Lists only the packages npm has at this version, so runpane never names one npm lacks; on a
+// platform whose package is missing, `runpane relay` says how to run the relay another way.
 function pin() {
   const manifest = JSON.parse(fs.readFileSync(RUNPANE_MANIFEST, 'utf8'));
-  manifest.optionalDependencies = Object.fromEntries(Object.keys(TARGETS).map((platform) => [packageName(platform), manifest.version]));
+  const names = Object.keys(TARGETS).map((platform) => packageName(platform));
+  const published = names.filter((name) => onNpm(`${name}@${manifest.version}`));
+  for (const name of names.filter((n) => !published.includes(n))) {
+    console.log(`::warning::${name}@${manifest.version} is not on npm, so runpane ${manifest.version} does not list it; runpane relay is unavailable on that platform.`);
+  }
+  manifest.optionalDependencies = Object.fromEntries(published.map((name) => [name, manifest.version]));
   fs.writeFileSync(RUNPANE_MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`runpane ${manifest.version} optionalDependencies: ${Object.keys(manifest.optionalDependencies).join(', ')}`);
+  console.log(`runpane ${manifest.version} optionalDependencies: ${published.join(', ') || 'none'}`);
 }
 
 const [command, ...args] = process.argv.slice(2);
