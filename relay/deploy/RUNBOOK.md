@@ -19,8 +19,8 @@ Merging the PR to `main` does not release the desktop app.
 | Buy `runpane.net` (two years, for the Public Suffix List) | A registrar account and payment |
 | Name servers and glue at the registrar | Registrar access after purchase |
 | Public Suffix List entry for `runpane.net` | A pull request to publicsuffix/list, plus a `_psl` TXT record |
-| Run `relay-deploy.yml` | GitHub repository variables `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT`, `PANE_RELAY_ACME_EMAIL`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID` and `PANE_RELAY_ANDROID_CERT_SHA256`, and a GitHub environment `production` whose required reviewers approve each run |
-| Limit who can deploy | The Workload Identity provider's attribute condition accepts only `refs/heads/main` for the `production` environment, so a run from another branch gets no credentials |
+| Run `relay-deploy.yml` | GitHub repository variables `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT`, `PANE_RELAY_ACME_EMAIL`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID` and `PANE_RELAY_ANDROID_CERT_SHA256`. The GitHub environment `production` exists, with `parsakhaz` as required reviewer and deploys only from `main`. The workflow fails unless `github.actor` and `github.triggering_actor` are both `parsakhaz` |
+| Limit who can deploy | In GCP, the Workload Identity provider's attribute condition accepts only `refs/heads/main` for the `production` environment, so a run from another branch gets no credentials (Parsa sets this) |
 | Create the VMs, addresses, firewall and uptime checks | The deploy service account needs `roles/compute.admin`, `roles/secretmanager.admin`, `roles/monitoring.editor`, `roles/serviceusage.serviceUsageAdmin`, and `roles/iam.serviceAccountUser` on `pane-push-sender` |
 | Three e2-small VMs and three static IPv4 addresses | Billing on `pane-pwa-preview`, about $45 to $55 a month |
 | Store the APNs key in Secret Manager (once) | The Pane app's `.p8` key, and `gcloud` signed in as an account with Secret Manager admin on the project |
