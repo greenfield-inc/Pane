@@ -133,7 +133,8 @@ const app = agent()
     session.cancelled = false;
     const text = params.prompt.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
     const send = async update => { session.updates.push(update); persist(id); await client.notify(methods.client.session.update, { sessionId: id, update }); };
-    const say = async reply => { for (const chunk of reply.match(/[\s\S]{1,12}/g) ?? []) await send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } }); };
+    // Each reply carries its own message id, as claude-agent-acp's live and replayed updates do.
+    const say = async reply => { const messageId = randomUUID(); for (const chunk of reply.match(/[\s\S]{1,12}/g) ?? []) await send({ sessionUpdate: 'agent_message_chunk', messageId, content: { type: 'text', text: chunk } }); };
     await send({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text } });
     const [word, ...rest] = text.trim().split(/\s+/);
     if (word === 'signout') throw RequestError.authRequired();

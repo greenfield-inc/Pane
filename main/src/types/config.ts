@@ -106,6 +106,8 @@ export interface AppConfig {
   autoPauseAfterHours?: number;
   // Days Pane keeps archived Session folders and Pane-owned scratch before deleting them (default ARCHIVE_RETENTION_DAYS)
   archiveRetentionDays?: number;
+  // Under the same switch: stop a chat tab's agent after this many idle minutes (default 30; whole minutes 5 to 1440)
+  chatIdleReleaseMinutes?: number;
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
@@ -270,6 +272,7 @@ export interface UpdateConfigRequest {
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
   archiveRetentionDays?: number;
+  chatIdleReleaseMinutes?: number;
   appearanceMode?: AppearanceMode;
   theme?: Theme;
   systemLightTheme?: Theme;

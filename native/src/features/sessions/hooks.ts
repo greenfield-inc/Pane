@@ -75,7 +75,7 @@ export function useSetSessionPaused() {
     });
     const result = await (paused ? pause : resume).mutateAsync([{ sessionId }]);
     if (!result.ok) throw new Error(result.message);
-    // Chat tabs can't pause yet (D-187): what the person must know, for the caller to show.
+    // Pause leaves chat tabs running (D-187): what the person must know, for the caller to show.
     return result.chatTabsNotPaused ? result.message : undefined;
   };
 }

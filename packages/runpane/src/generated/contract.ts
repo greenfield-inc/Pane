@@ -2924,7 +2924,7 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--no-associate",
-        "description": "Inside a Session orchestrator, do not associate the created pane with that Session."
+        "description": "Do not associate the created pane with the caller's Session."
       },
       {
         "name": "--force",
@@ -3592,7 +3592,7 @@ export const RUNPANE_CONTRACT = {
         "  --focus                        Explicitly focus the created pane",
         "  --pinned                       Request pinning at creation; first Session association clears it",
         "  --no-pinned                    Create unpinned (the UI's favorite/pin star)",
-        "  --no-associate                 Inside a Session orchestrator, do not associate the new pane with that Session",
+        "  --no-associate                 Do not associate the new pane with the caller's Session",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
@@ -4955,7 +4955,7 @@ export const RUNPANE_CONTRACT = {
         "Pauses one terminal tab: stops its process and marks it paused until",
         "`runpane panels resume --panel <panel-id>`, or its Pane or Session, resumes it.",
         "Stopping works the way quitting Pane does, without asking, even while an agent is working.",
-        "Each agent's conversation is kept. A paused tab stays stopped through clicks, app restarts",
+        "Each agent's conversation is kept. A paused terminal tab stays stopped through clicks, app restarts",
         "and updates, and `panels resume --session` and `--all-stopped` skip it.",
         "`runpane watch` reports each tab as panel.paused under --follow, to a Session-scoped watch, or when --kinds lists it.",
         "",
@@ -4972,7 +4972,7 @@ export const RUNPANE_CONTRACT = {
         "Pauses every terminal tab of a Pane, run scripts included, until `runpane panes resume`",
         "resumes it. A Pane is paused while all of its terminal tabs are; `panes list` reports it.",
         "Stopping works the way quitting Pane does, without asking, even while an agent is working.",
-        "Each agent's conversation is kept. A paused tab stays stopped through clicks, app restarts",
+        "Each agent's conversation is kept. A paused terminal tab stays stopped through clicks, app restarts",
         "and updates, and `panels resume --session` and `--all-stopped` skip it.",
         "`runpane watch` reports each tab as panel.paused under --follow, to a Session-scoped watch, or when --kinds lists it.",
         "",
@@ -5000,10 +5000,10 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane sessions pause --session <id|name> [--json] [--pane-dir <path>]",
         "",
-        "Pauses the terminal tabs of a Session's chat and of every Pane in it that is not archived (a chat tab can't pause yet: its agent keeps running, and the result says so),",
+        "Pauses the terminal tabs of a Session's chat and of every Pane in it that is not archived (Pause leaves a chat tab running: its agent keeps running, and the result says so),",
         "until `runpane sessions resume` resumes them.",
         "Stopping works the way quitting Pane does, without asking, even while an agent is working.",
-        "Each agent's conversation is kept. A paused tab stays stopped through clicks, app restarts",
+        "Each agent's conversation is kept. A paused terminal tab stays stopped through clicks, app restarts",
         "and updates, and `panels resume --session` and `--all-stopped` skip it.",
         "`runpane watch` reports each tab as panel.paused under --follow, to a Session-scoped watch, or when --kinds lists it.",
         "",
@@ -5548,7 +5548,7 @@ export const RUNPANE_CONTRACT = {
         "  --focus                        Explicitly focus the created pane",
         "  --pinned                       Request pinning at creation; first Session association clears it",
         "  --no-pinned                    Create unpinned (the UI's favorite/pin star)",
-        "  --no-associate                 Inside a Session orchestrator, do not associate the new pane with that Session",
+        "  --no-associate                 Do not associate the new pane with the caller's Session",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without creating panes",
@@ -6825,7 +6825,7 @@ export const RUNPANE_CONTRACT = {
         "Pauses one terminal tab: stops its process and marks it paused until",
         "`runpane panels resume --panel <panel-id>`, or its Pane or Session, resumes it.",
         "Stopping works the way quitting Pane does, without asking, even while an agent is working.",
-        "Each agent's conversation is kept. A paused tab stays stopped through clicks, app restarts",
+        "Each agent's conversation is kept. A paused terminal tab stays stopped through clicks, app restarts",
         "and updates, and `panels resume --session` and `--all-stopped` skip it.",
         "`runpane watch` reports each tab as panel.paused under --follow, to a Session-scoped watch, or when --kinds lists it.",
         "",
@@ -6842,7 +6842,7 @@ export const RUNPANE_CONTRACT = {
         "Pauses every terminal tab of a Pane, run scripts included, until `runpane panes resume`",
         "resumes it. A Pane is paused while all of its terminal tabs are; `panes list` reports it.",
         "Stopping works the way quitting Pane does, without asking, even while an agent is working.",
-        "Each agent's conversation is kept. A paused tab stays stopped through clicks, app restarts",
+        "Each agent's conversation is kept. A paused terminal tab stays stopped through clicks, app restarts",
         "and updates, and `panels resume --session` and `--all-stopped` skip it.",
         "`runpane watch` reports each tab as panel.paused under --follow, to a Session-scoped watch, or when --kinds lists it.",
         "",
@@ -6870,10 +6870,10 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane sessions pause --session <id|name> [--json] [--pane-dir <path>]",
         "",
-        "Pauses the terminal tabs of a Session's chat and of every Pane in it that is not archived (a chat tab can't pause yet: its agent keeps running, and the result says so),",
+        "Pauses the terminal tabs of a Session's chat and of every Pane in it that is not archived (Pause leaves a chat tab running: its agent keeps running, and the result says so),",
         "until `runpane sessions resume` resumes them.",
         "Stopping works the way quitting Pane does, without asking, even while an agent is working.",
-        "Each agent's conversation is kept. A paused tab stays stopped through clicks, app restarts",
+        "Each agent's conversation is kept. A paused terminal tab stays stopped through clicks, app restarts",
         "and updates, and `panels resume --session` and `--all-stopped` skip it.",
         "`runpane watch` reports each tab as panel.paused under --follow, to a Session-scoped watch, or when --kinds lists it.",
         "",
@@ -7047,7 +7047,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines only. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
-      "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
+      "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. New Panes join the caller's Session automatically: the orchestrator's Session (`PANE_ORCHESTRATION_SESSION_ID`), or the open Session the calling tab's Pane belongs to; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
       "For `panes create --wait-ready` (and `panels create`, `panes adopt --launch`), ready means an identified agent at its own input box: declared with `--agent`, or detected from the command, its foreground process or its screen. A `--tool-command` that never shows a supported agent is not ready: `readiness.ok` is false with `readiness.reason.code` `no-agent-detected` after the timeout, or `command-exited` as soon as the command exits back to the shell, and nothing is typed into it. `agent-not-ready` means the agent was detected but its input box was not ready in time. CLI readiness is confirmed on consecutive polls. Codex also requires a recognized configured model or context footer below its live composer; its provisional startup composer is not ready. Hidden or unrecognized Codex status lines conservatively time out rather than prove readiness. Startup prompts return blocked with the prompt's own text in blocked.message and a suggestedCommand, and Pane never answers them, apart from Claude's folder trust for a Session's own folder: first-run trust and daemon dialogs and Agent Farm's `Trust this repository workspace? [y/N]` as blocked.kind=first-run-dialog; Codex's security setup banner and any other prompt, including a wrapper's or shell's `[y/N]` before the agent appears, as agent-prompt. A starting message blocked this way is held and sent once the prompt is answered and the agent's input box is ready. Every create with a starting message returns `initialInput`. Pane stages the text in the composer, presses the agent's submit key separately (Ctrl+Enter for Codex, declared or detected), and checks where it went: `initialInput.delivery` is `taken` or `queued` (from the agent's transcript or its screen), `in-composer`, or `unknown` (`argv` means a prompt was routed at launch; Pane gives the transcript up to 10 seconds before settling on unknown). `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`, and the create's `ok` is false unless a Claude or Codex starting message is verified. Cursor, OpenCode and Pi have no acceptance probe: their delivery stays `unknown` with a delivery.message saying so, `verification: unverifiable`, and `ok` follows readiness. Without `--wait-ready` the create returns at once with `initialInput.verifiedSubmitted: false`, a delivery.message saying the call did not wait, and a `panels wait` nextCommand; Pane still sends the message once the agent is identified and at its input box, and gives up without typing it if no supported agent appears within 30 seconds.",
       "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane. Archive refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless `--force` is used, and the Session sweep skips it. Add `--closed` to the sweep to also archive Panes whose PR closed without merging.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
@@ -7083,7 +7083,7 @@ export const RUNPANE_CONTRACT = {
       "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. A send with --no-expect-report is a reply (an answer, or an addition to the current work): it is delivered while a report is outstanding and leaves that expectation in place. Then watch for the original result.",
       "`runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on), plus `answers`, what its workers were told, kept 7 days; an answer with no `decision` still needs its D-n. `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items, and `runpane inbox ack <item-id>... --decision <D-n>` records the D-n, even on an item already cleared. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.",
       "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`, Agent Farm `agent-farm run <profile> --resume <id>` with the ID Agent Farm printed; the result's `agentSessionId` names it), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`); one whose agent exited back to its shell is stopped, and resume runs its saved command again in that shell (`action: \"resumed\"`). If that command exits at once, `--wait-ready` returns `ok: false` with `reason.code: \"command-exited\"` and the error line it printed. `--panel` also resumes a paused tab. `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope and skips paused ones, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, or once an agent exits back to its shell, stopped panels report `running: false` (`initialized` stays true while the shell lives) in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
-      "`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does, without asking, keeps its agent's conversation, and marks it paused. A chat tab can't pause yet: `panels pause --panel` on one fails with `ERR_RUNPANE_CHAT_NOT_PAUSABLE`, and `panes pause` and `sessions pause` leave its agent running and count it in `chatTabsNotPaused`. A paused tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, chatTabsNotPaused, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: \"manual\" | \"auto\", idleHours? }`) and `inactiveSince`, the latest terminal output or input in its tabs or the last time the person selected it; `panels list` reports each tab's `paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.",
+      "`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does, without asking, keeps its agent's conversation, and marks it paused. Pause leaves a chat tab running: `panels pause --panel` on one fails with `ERR_RUNPANE_CHAT_NOT_PAUSABLE`, and `panes pause` and `sessions pause` leave its agent running and count it in `chatTabsNotPaused`. A paused terminal tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, chatTabsNotPaused, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: \"manual\" | \"auto\", idleHours? }`) and `inactiveSince`, the latest terminal output or input or chat agent activity in its tabs, or the last time the person selected it; `panels list` reports each tab's `paused`. Auto-pause also stops the agent of a chat tab idle for `chatIdleReleaseMinutes` (30 by default); opening the tab or sending it a message resumes it, and it reports no `panel.paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.",
       "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
       "`runpane panels conversation --conversation <id> [--source startup|resume|clear|compact]` records which conversation a terminal panel's agent is on (daemon action `runpane:panels:conversation`, request `{ panelId, paneId?, conversationId, source? }`, result `{ ok: true, paneId, panelId, conversationId, source?, sure }`; `sure` is true when the report came since the panel's agent started). It is not an `agent.report` event. The panel comes from `--panel` (with an optional `--pane`), else `PANE_PANEL_ID` and `PANE_SESSION_ID`, as for `runpane report`. `runpane panels conversation --hook` is the command for a Claude Code `SessionStart` hook: it reads the hook's JSON from stdin (`session_id`, `source`; at most 64 KiB, for at most 2 seconds), reports it for `PANE_PANEL_ID`, prints nothing on stdout or stderr, and always exits 0: outside Pane, on bad input, when Pane is not running, and with a Pane that predates the action. Without `--hook` it prints `Recorded conversation <id> for panel <panel-id>.` and fails like any other command.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
@@ -10280,6 +10280,10 @@ export const RUNPANE_CONTRACT = {
           "type": "string",
           "description": "Session id to associate each created Pane with; the CLI sets it from PANE_ORCHESTRATION_SESSION_ID unless --no-associate."
         },
+        "noAssociate": {
+          "type": "boolean",
+          "description": "Without associateSession, Pane associates each created Pane with the open Session the calling tab's Pane belongs to; true skips that. The CLI sets it for --no-associate."
+        },
         "expectReport": {
           "type": "boolean",
           "description": "true or false decides whether Pane waits for a `runpane report`; omitted, it waits unless source is user (and, for a submit, only on an agent's panel)."
@@ -10789,7 +10793,7 @@ export const RUNPANE_CONTRACT = {
               },
               "inactiveSince": {
                 "type": "string",
-                "description": "When the Pane was last used: the latest terminal output or input in its tabs, or the last time the person selected it (ISO 8601)."
+                "description": "When the Pane was last used: the latest terminal output or input or chat agent activity in its tabs, or the last time the person selected it (ISO 8601)."
               },
               "paused": {
                 "$ref": "#/jsonSchemas/pausedMark",
@@ -17506,7 +17510,7 @@ export const RUNPANE_CONTRACT = {
         },
         "chatTabsNotPaused": {
           "type": "number",
-          "description": "On a pause: chat tabs in scope, which can't pause yet, so their agents keep running."
+          "description": "On a pause: chat tabs in scope, which Pause leaves running."
         },
         "unchanged": {
           "type": "number",
@@ -17560,7 +17564,7 @@ export const RUNPANE_CONTRACT = {
         "title": "For agents",
         "sentences": [
           "In Pane, work flows from a Session to Panes to tabs.",
-          "A Session is a workstream: the person or an orchestrator opens it, and every Pane it starts stays attached to it.",
+          "A Session is a workstream: the person or an orchestrator opens it, and every Pane created or adopted from inside it joins it. When you are in one ($PANE_SESSION_DIR is set: you orchestrate it or your Pane belongs to it), start new Panes from there (each result's `association` names the Session they joined); when you are in none, work with several parts starts a new Session.",
           "Each feature gets one Pane, a git worktree on its own branch, and everything for that feature (the agent that builds it, its reviews, QA and fixes) runs as tabs inside it.",
           "Scratch files go in $PANE_SCRATCH_DIR inside the Pane.",
           "When the feature is done, archive the Pane and Pane cleans up its worktree, tabs and scratch files.",
@@ -19050,7 +19054,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--no-associate",
             "required": false,
-            "description": "Inside a Session orchestrator, do not associate the created pane with that Session (associated automatically by default)."
+            "description": "Do not associate the created pane with the caller's Session: the orchestrator's, or the open one the calling tab's Pane belongs to (associated automatically by default)."
           },
           {
             "name": "--yes",
@@ -19128,7 +19132,7 @@ export const RUNPANE_CONTRACT = {
           "`panes create` is for user-visible Pane orchestration, not the agent's default private delegation mechanism. Before creating a Pane, find the feature's Pane with `runpane panes list --repo <repo> --json` by matching the PR's head branch (`gh pr view <n> --json headRefName`) against `git -C <worktreePath> branch --show-current`, and add a tab with `panels create --pane <id>` when it exists.",
           "Register the saved base repository once. Pane creates and owns the worktree/branch for each new Pane.",
           "`panes create --base <ref> --branch <name> --prompt-file <file>` replaces `git worktree add` plus `panes adopt`: Pane creates the worktree on exactly that branch name. `--branch` is checked with `git check-ref-format --branch` and fails if the branch already exists; `--worktree-name` still names the directory.",
-          "Agent-created Panes should pass `--source agent --no-focus --wait-ready --yes --json` unless the user explicitly wants focus moved. `panes create` pins the new Pane by default, so a follow-up `panes pin` call is unnecessary; pass `--no-pinned` for throwaway shells or bulk imports. `--pinned` is still accepted and is now a no-op. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
+          "Agent-created Panes should pass `--source agent --no-focus --wait-ready --yes --json` unless the user explicitly wants focus moved. `panes create` pins the new Pane by default, so a follow-up `panes pin` call is unnecessary; pass `--no-pinned` for throwaway shells or bulk imports. `--pinned` is still accepted and is now a no-op. New Panes join the caller's Session automatically: the orchestrator's Session (`PANE_ORCHESTRATION_SESSION_ID`), or the open Session the calling tab's Pane belongs to; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
           "The built-in agent templates come from the runpane contract; custom terminal commands can pass agent-specific flags when requested by the user.",
           "Use --initial-input-file for multi-line prompts or shell-sensitive initial input. A long or multi-line prompt is never typed into the shell: on bash, zsh or sh the agent launches with `\"$(cat '<prompt file>')\"` reading a private copy under `<pane-dir>/prompts/<pane-id>/`; on PowerShell, cmd, fish or WSL the prompt is pasted into the agent's composer once it is ready.",
           "`--as-file-pointer` writes the text to a prompt file readable only by you, inside the Pane's git worktree at `.pane/prompts/` (hidden by the repository's `.git/info/exclude`, never committed) when it has one, otherwise under `<pane-dir>/prompts/<pane-id>/`, so an agent limited to its working directories reads it without a permission prompt, and sends the one line `Read and follow <path>`, with the path relative to the worktree (where the agent starts) when the file is inside it; the result's `promptFile` is always absolute. Prefer it for long prompts.",
@@ -19234,7 +19238,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--no-associate",
             "required": false,
-            "description": "Inside a Session orchestrator, do not associate the adopted pane with that Session (associated automatically by default)."
+            "description": "Do not associate the adopted pane with the caller's Session: the orchestrator's, or the open one the calling tab's Pane belongs to (associated automatically by default)."
           },
           {
             "name": "--dry-run",
@@ -19474,7 +19478,7 @@ export const RUNPANE_CONTRACT = {
       "panes pause": {
         "name": "panes pause",
         "summary": "Pause a Pane: stop every terminal tab and keep their conversations until the Pane is resumed.",
-        "details": "Pauses every terminal tab of a Pane, run scripts included, until `panes resume` resumes it. A chat tab can't pause yet, so its agent keeps running and the result counts it in `chatTabsNotPaused`. A Pane reads as paused (`panes list` `paused`) while all of its terminal tabs are. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
+        "details": "Pauses every terminal tab of a Pane, run scripts included, until `panes resume` resumes it. Pause leaves a chat tab running, so its agent keeps running and the result counts it in `chatTabsNotPaused`. A Pane reads as paused (`panes list` `paused`) while all of its terminal tabs are. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused terminal tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -19508,7 +19512,7 @@ export const RUNPANE_CONTRACT = {
           "pauseResult"
         ],
         "notes": [
-          "Find idle Panes with `panes list --json`: `inactiveSince` is the latest terminal output or input in its tabs, or the last time the person selected it.",
+          "Find idle Panes with `panes list --json`: `inactiveSince` is the latest terminal output or input or chat agent activity in its tabs, or the last time the person selected it.",
           "Leave paused workers paused unless the person asks to resume them."
         ]
       },
@@ -20136,7 +20140,7 @@ export const RUNPANE_CONTRACT = {
       "panels pause": {
         "name": "panels pause",
         "summary": "Pause a terminal tab: stop its process and keep its agent's conversation until it is resumed.",
-        "details": "Pauses one terminal tab until `panels resume --panel <panel-id>`, or its Pane or Session, resumes it. A chat tab can't pause yet: pausing one fails with `ERR_RUNPANE_CHAT_NOT_PAUSABLE` and changes nothing. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
+        "details": "Pauses one terminal tab until `panels resume --panel <panel-id>`, or its Pane or Session, resumes it. Pause leaves a chat tab running: pausing one fails with `ERR_RUNPANE_CHAT_NOT_PAUSABLE` and changes nothing. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused terminal tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -22082,7 +22086,7 @@ export const RUNPANE_CONTRACT = {
       "sessions associate": {
         "name": "sessions associate",
         "summary": "Associate a user-visible Pane with a named Session.",
-        "details": "Associate a user-visible Pane with a named Session. `panes create` and `panes adopt` already do this automatically when run inside a Session orchestrator; use this for existing Panes or after `--no-associate`.",
+        "details": "Associate a user-visible Pane with a named Session. `panes create` and `panes adopt` already do this automatically when run inside a Session orchestrator or from a tab whose Pane belongs to an open Session; use this for existing Panes or after `--no-associate`.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -22663,7 +22667,7 @@ export const RUNPANE_CONTRACT = {
       "sessions pause": {
         "name": "sessions pause",
         "summary": "Pause a Session: stop the terminal tabs of its chat and every Pane in it, keeping their conversations. Chat tabs keep running.",
-        "details": "Pauses the terminal tabs of a Session's chat and of every Pane in it that is not archived; a chat tab can't pause yet, so its agent keeps running and the result counts it in `chatTabsNotPaused`, until `sessions resume` resumes them. A Session reads as paused (`sessions get` `session.paused`) while its chat and all of its Panes are. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
+        "details": "Pauses the terminal tabs of a Session's chat and of every Pane in it that is not archived; Pause leaves a chat tab running, so its agent keeps running and the result counts it in `chatTabsNotPaused`, until `sessions resume` resumes them. A Session reads as paused (`sessions get` `session.paused`) while its chat and all of its Panes are. Pane stops each terminal tab the way quitting does, without asking, even mid-turn, keeps its agent's conversation, and marks it paused. A paused terminal tab stays stopped through clicks, app restarts and updates; `panels resume --session` and `--all-stopped` skip it. `watch` reports each tab as `panel.paused`.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [

@@ -2507,7 +2507,9 @@ async function checkCreateAssociationSource() {
     assert.strictEqual((await request()).associateSession, 'explicit-session');
     process.env.PANE_ORCHESTRATION_SESSION_ID = 'current-session';
     assert.strictEqual((await request()).associateSession, 'current-session');
-    assert.strictEqual((await request('--no-associate')).associateSession, undefined);
+    const optedOut = await request('--no-associate');
+    assert.strictEqual(optedOut.associateSession, undefined);
+    assert.strictEqual(optedOut.noAssociate, true, '--no-associate also stops the app joining the caller\'s Session');
   } finally {
     if (previousSession === undefined) delete process.env.PANE_ORCHESTRATION_SESSION_ID;
     else process.env.PANE_ORCHESTRATION_SESSION_ID = previousSession;
@@ -2519,7 +2521,7 @@ import json
 import os
 import tempfile
 from runpane.cli import parse_args
-from runpane.local_control import build_pane_create_request
+from runpane.local_control import build_pane_adopt_request, build_pane_create_request
 
 with tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8") as handle:
     json.dump({"repo": "active", "panes": [{"name": "child", "tool": {"command": "echo ready"}}], "associateSession": "explicit-session"}, handle)
@@ -2529,7 +2531,11 @@ try:
     assert build_pane_create_request(parse_args(args))["associateSession"] == "explicit-session"
     os.environ["PANE_ORCHESTRATION_SESSION_ID"] = "current-session"
     assert build_pane_create_request(parse_args(args))["associateSession"] == "current-session"
-    assert "associateSession" not in build_pane_create_request(parse_args(args + ["--no-associate"]))
+    opted_out = build_pane_create_request(parse_args(args + ["--no-associate"]))
+    assert "associateSession" not in opted_out and opted_out["noAssociate"] is True
+    adopted = build_pane_adopt_request(parse_args(["panes", "adopt", "--from-json", handle.name, "--no-associate"]))
+    assert "associateSession" not in adopted and adopted["noAssociate"] is True
+    assert build_pane_adopt_request(parse_args(["panes", "adopt", "--from-json", handle.name]))["associateSession"] == "current-session"
 finally:
     os.unlink(handle.name)
 `);
@@ -4036,6 +4042,8 @@ async function checkPaneAdoptOverrides() {
     });
     await runPanesAdopt(parseRunpaneArgs(['panes', 'adopt', '--from-json', inputPath, '--yes', '--json']));
     assert.deepStrictEqual(requests.pop(), payload, 'absent flags preserve the JSON request');
+    await runPanesAdopt(parseRunpaneArgs(['panes', 'adopt', '--from-json', inputPath, '--no-associate', '--yes', '--json']));
+    assert.strictEqual(requests.pop().noAssociate, true, '--no-associate also stops the app joining the caller\'s Session');
 
     fs.writeFileSync(inputPath, JSON.stringify({
       ...payload, noFocus: false, focus: true, source: 'user',

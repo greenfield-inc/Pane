@@ -590,11 +590,12 @@ worktree; archive it then.
 ## Pane association before delegation
 
 Management is a Pane-level relationship; tabs inherit the relationship and
-share the Pane's worktree. Panes the orchestrator creates or adopts with
-`runpane panes create` or `panes adopt` are associated with its Session in the
-same call: the CLI reads `PANE_ORCHESTRATION_SESSION_ID`, each result item
-reports `association: { sessionId, ok, error? }`, and `--no-associate` opts
-out. A failed association never undoes the new Pane. Before delegating to an
+share the Pane's worktree. Panes created or adopted with `runpane panes
+create` or `panes adopt` from inside a Session are associated with it in the
+same call: from the orchestrator (the CLI reads `PANE_ORCHESTRATION_SESSION_ID`)
+or from any tab in a Pane that belongs to the open Session (Pane looks up the
+calling tab, `$PANE_PANEL_ID`). Each result item reports `association: {
+sessionId, ok, error? }`, and `--no-associate` opts out. A failed association never undoes the new Pane. Before delegating to an
 existing Pane, or when automatic association failed, the orchestrator
 associates it explicitly. The supported command is:
 
@@ -1026,21 +1027,26 @@ Pause stops a tab's process the way quitting Pane does, without asking, and
 keeps its panel and conversation: `runpane panels pause --panel <panel-id>
 --yes`, `runpane panes pause --pane <pane-id> --yes`, or `runpane sessions
 pause --session <session-id>` for the terminal tabs of the Session's chat and
-every Pane in it. A chat tab can't pause yet: its agent keeps running, the
-result counts it in `chatTabsNotPaused` and says so, and `panels pause` refuses
-one. A Session whose orchestrator is a chat tab therefore never reads as paused.
-A paused tab stays stopped through clicks, app restarts and updates until
+every Pane in it. Pause leaves a chat tab running: the result counts it in
+`chatTabsNotPaused` and says so, and `panels pause` refuses one. Auto-pause
+(Settings > Pause) does stop the agent of a chat tab idle for
+`chatIdleReleaseMinutes` (30 by default), outside the Pane on screen and never
+while it works, holds a queued message or waits on the person. Opening the tab
+or sending it a message resumes it in its conversation, and it reports no
+`panel.paused`. A Session whose orchestrator is a chat tab therefore never reads as paused.
+A paused terminal tab stays stopped through clicks, app restarts and updates until
 `runpane panels resume --panel <panel-id>`, `runpane panes resume --pane
 <pane-id> --yes` or `runpane sessions resume --session <session-id>` restarts
 it in its conversation. The watch reports each paused tab once as
 `panel.paused` (`PAUSED <pane-name> pane <pane-id> panel <panel-id>`) and each
 resumed one as `panel.unpaused` (`UNPAUSED ...`), followed by its usual ready
 signal. An orchestrator leaves paused workers paused unless the person asks.
-Any other start of a paused tab (opening it, a retry, another machine) fails
-with `ERR_PANEL_PAUSED` and starts nothing.
+Any other start of a paused terminal tab (opening it, a retry, another machine)
+fails with `ERR_PANEL_PAUSED` and starts nothing.
 `runpane panes list --json` reports each Pane's `paused` mark (`{ at, by:
 "manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal
-output or input in its tabs or the last time the person selected it;
+output or input or chat agent activity in its tabs or the last time the person
+selected it;
 `runpane panels list` reports each tab's `paused`.
 
 If a stopped panel's previous shell or agent process is still exiting, resume

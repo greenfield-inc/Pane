@@ -28,7 +28,7 @@ Object.assign(env, {
 });
 const authored = { 'AGENTS.md': '# Authored instructions\nKeep this file unchanged.\n', 'CLAUDE.md': '# Authored Claude instructions\nNative QA fixture.\n' };
 function git(args, cwd = repo) { return execFileSync('git', args, { cwd, env, encoding: 'utf8' }).trim(); }
-fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ analytics: { enabled: false }, onboardingCompleted: true, autoCheckUpdates: false, notesEnabled: true }));
+fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ analytics: { enabled: false }, onboardingCompleted: true, keymapNotice: 'seen', autoCheckUpdates: false, notesEnabled: true }));
 git(['init', '-b', 'main']);
 fs.writeFileSync(path.join(repo, '.gitignore'), 'worktrees/\n');
 for (const [file, content] of Object.entries(authored)) fs.writeFileSync(path.join(repo, file), content);
@@ -97,13 +97,20 @@ async function addCanvasText(text, x, y) {
 }
 (async () => {
   await launch();
+  // A fresh install opens first-run setup. Each Skip moves it to its next step
+  // (agent, then project), and the last hands off to the Onboarding Session.
+  // Finish it before the project exists, then return Home.
+  const firstRun = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Skip', exact: true }) });
+  await expect(firstRun).toBeVisible({ timeout: 30000 });
+  await expect(async () => {
+    if (await firstRun.isVisible()) await firstRun.getByRole('button', { name: 'Skip', exact: true }).click({ timeout: 2000 });
+    await expect(firstRun).toHaveCount(0, { timeout: 2000 });
+  }).toPass({ timeout: 30000 });
+  // Then it ends on the phone step.
+  await page.getByRole('button', { name: 'Skip for now', exact: true }).click({ timeout: 10000 });
+  await page.getByRole('button', { name: 'Home', exact: true }).click();
   const project = await page.evaluate(repo => window.electronAPI.projects.create({ name: 'Native Notes QA', path: repo }), repo);
   assert(project.success, JSON.stringify(project));
-  if (await page.getByRole('button', { name: 'Skip', exact: true }).isVisible()) {
-    await page.getByRole('button', { name: 'Skip', exact: true }).click();
-    // Onboarding ends on the phone step.
-    await page.getByRole('button', { name: 'Skip for now', exact: true }).click({ timeout: 10_000 });
-  }
   await page.evaluate(id => window.electronAPI.projects.activate(String(id)), project.data.id);
   const created = await page.evaluate(id => window.electronAPI.sessions.create({ prompt: 'Native Notes QA', worktreeTemplate: 'notes-qa', count: 1, projectId: id, toolType: 'none' }), project.data.id);
   assert(created.success, JSON.stringify(created));
