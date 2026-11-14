@@ -12,7 +12,7 @@ import { errorDetail, errorTitle } from './RelayPairPrompt';
 import { usePairing } from './usePairing';
 
 /** A pairing QR (`https://<domain>/pair#…`) or a pane-remote:// connection code. */
-export function isPairingCode(data: string): boolean {
+function isPairingCode(data: string): boolean {
   return data.startsWith('pane-remote://') || parseRelayPairingLink(data) !== null;
 }
 
