@@ -1,0 +1,136 @@
+# Pane relay protocol, version 1
+
+The relay gives every Pane computer an https address that works from any
+network. It passes each client's TLS connection to the computer still
+encrypted: the relay reads only the requested name (TLS SNI). The computer
+holds its own private key and certificate and ends TLS itself.
+
+One binary, `pane-relay`, runs two roles:
+
+- **relay**: accepts TLS on port 443, routes by SNI, keeps one control
+  connection per computer, and serves its own small https API.
+- **helper** (`--dns`): authoritative DNS for the domain, and the registry of
+  which region each computer is connected to.
+
+## Names
+
+`<D>` is the relay domain (production: picked in P0; development: any test
+domain). Every computer has an id derived from its public key:
+
+```
+id = lowercase base32 (RFC 4648, no padding) of the first 10 bytes of
+     sha256(SubjectPublicKeyInfo DER of the computer's P-256 key)
+```
+
+That gives 16 characters from `a-z2-7`. Only the key holder can use the id,
+so the relay needs no name registration and no database of owners.
+
+| Name | Resolves to | Served by |
+| --- | --- | --- |
+| `<D>` | relay apex addresses | relay API, pairing landing page, app-link files |
+| `<region>.relay.<D>` | that region's relay | relay API, agent control and data connections |
+| `<id>.<D>` | the relay the computer is connected to | the computer's Pane server |
+| `p<port>.<id>.<D>` | same | the computer's dev server on `localhost:<port>` |
+| `files.<id>.<D>` | same | the computer's preview files |
+| `l<a>-<b>-<c>-<d>.<id>.<D>` | `a.b.c.d` (private ranges only) | the computer's local https listener |
+| `_acme-challenge.<id>.<D>` TXT | values the computer set | Let's Encrypt DNS-01 |
+
+The computer's certificate covers `<id>.<D>` and `*.<id>.<D>`.
+
+Local address names answer only for RFC 1918 (`10/8`, `172.16/12`,
+`192.168/16`) and CGNAT (`100.64/10`) addresses; anything else is NXDOMAIN.
+
+## Control connection (computer to relay)
+
+The computer opens TLS to `<region>.relay.<D>:443` (certificate checked
+normally) and sends:
+
+```
+GET /v1/agent HTTP/1.1
+Host: <region>.relay.<D>
+Upgrade: pane-relay/1
+Connection: Upgrade
+```
+
+The relay answers `101 Switching Protocols`. From then on both sides send
+newline-delimited JSON frames, one object per line, at most 64 KiB each.
+Every frame has a `t` field. Unknown frame types are ignored.
+
+### Handshake
+
+1. relay: `{"t":"challenge","nonce":"<base64url 32 bytes>"}`
+2. computer: `{"t":"hello","v":1,"spki":"<base64url SPKI DER>","sig":"<base64url DER ECDSA-SHA256 signature>","local":["192.168.1.20"],"name":"Studio Mac"}`
+   The signature covers the ASCII bytes `pane-relay-v1:` followed by the
+   nonce string exactly as received. `local` lists the computer's private
+   IPv4 addresses (may be empty). `name` is the display name shown on the
+   landing page (at most 60 characters).
+3. relay: `{"t":"welcome","id":"<id>","domain":"<D>","region":"us"}`, or
+   `{"t":"error","code":"<code>","message":"<text>"}` and close.
+
+A second control connection for the same id replaces the first, which gets
+`{"t":"close","code":"replaced"}`.
+
+### Frames after the handshake
+
+| From | Frame | Meaning |
+| --- | --- | --- |
+| relay | `{"t":"open","conn":"<base64url 16 bytes>","peer":"<ip>"}` | A client connected for one of this computer's names. Open a data connection for `conn` within 10 s. |
+| computer | `{"t":"txt","req":"<n>","values":["..."]}` | Set the TXT values of `_acme-challenge.<id>.<D>` (empty list clears). |
+| relay | `{"t":"ok","req":"<n>"}` / `{"t":"error","req":"<n>","code","message"}` | Answer to a request frame carrying `req`. |
+| computer | `{"t":"local","local":["..."]}` | The computer's private addresses changed. |
+| computer | `{"t":"sleep"}` | The computer is about to sleep; the relay reports it as asleep until it reconnects. |
+| computer | `{"t":"alert","req":"<n>","to":[<push target>],"alert":{...}}` | Forward a push alert (P6). |
+| either | `{"t":"ping"}` / `{"t":"pong"}` | Keepalive. The computer pings every 25 s; the relay closes a control connection silent for 75 s. |
+| relay | `{"t":"close","code":"<code>","message":"<text>"}` | The relay is cutting the computer off (`replaced`, `blocked`, `over-limit`, `shutdown`). |
+
+## Data connection
+
+For each `open`, the computer opens a new TLS connection to the same relay:
+
+```
+GET /v1/data/<conn> HTTP/1.1
+Host: <region>.relay.<D>
+Upgrade: pane-relay/1
+Connection: Upgrade
+```
+
+After `101 Switching Protocols` the stream carries the client's bytes
+unchanged, starting with its TLS ClientHello, in both directions. An unknown
+or expired `conn` gets `404` and close. The computer then ends the client's
+TLS with its own certificate.
+
+## Relay API (https on `<D>` and `<region>.relay.<D>`)
+
+| Request | Answer |
+| --- | --- |
+| `GET /healthz` | `200 {"ok":true,"region":"us","computers":<n>}` |
+| `GET /v1/relays` | `{"relays":[{"region":"us","host":"us.relay.<D>"},...]}` |
+| `GET /v1/status/<id>` | `{"state":"online" \| "asleep" \| "offline","since":"<ISO time or null>"}` |
+| `GET /pair` | The pairing landing page (the QR's address; the secret stays in the `#fragment`). |
+| `GET /.well-known/apple-app-site-association` | iOS universal links for `/pair`. |
+| `GET /.well-known/assetlinks.json` | Android app links for `/pair`. |
+
+## Registry (helper)
+
+With `--dns`, the process answers DNS for `<D>` and keeps the registry: for
+each id, its region, local addresses, TXT values and last-seen time. Relays in
+other regions update it with
+`POST /v1/registry` (header `authorization: Bearer <registry secret>`), body
+`{"id","region","local":[...],"txt":[...]|null,"online":true|false}`. A relay
+that also runs the helper updates it in memory.
+
+## Limits (starting values, all flags)
+
+- Per computer: 50 MB and 100 new client connections a minute. Over the
+  limit the relay slows the computer's connections, and past twice the limit
+  it closes them with `over-limit`.
+- Total open client connections (`--max-connections`, default 20,000); new
+  ones beyond it are refused.
+- Idle client connections close after 10 minutes with no bytes either way.
+- Blocked ids: a file (`--blocklist`), one id per line, reread when it
+  changes. A blocked id's control connection gets `close` `blocked`.
+
+## Privacy
+
+The relay never logs or stores payload bytes, tokens or URLs. Logs carry
+ids, client IPs, byte counts, timing and close reasons.
