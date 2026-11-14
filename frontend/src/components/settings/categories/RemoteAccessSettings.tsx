@@ -430,22 +430,29 @@ function AddMachine({ controller, startAdding }: { controller: RemoteAccessContr
   );
 }
 
-/** "Removed from A and B." plus, for computers that didn't answer, how to finish there. */
-function everywhereResult(subject: string, result: { removed: string[]; notReached: string[] }): string {
+/**
+ * "Removed from A and B." plus, for computers that didn't answer, how to finish there. `unlinked`
+ * names the computer being unlinked, which can itself be one that didn't answer.
+ */
+function everywhereResult(subject: string, result: { removed: string[]; notReached: string[] }, unlinked?: string): string {
   const join = (names: string[]) => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
   const done = result.removed.length > 0 ? `${subject} from ${join(result.removed)}.` : '';
-  const one = result.notReached.length === 1;
-  const left = result.notReached.length > 0
-    ? ` ${join(result.notReached)} didn't answer and still ${one ? 'has' : 'have'} it. Remove it there in Settings › Remote Access once ${one ? "it's" : "they're"} back online.`
+  const others = result.notReached.filter((name) => name !== unlinked);
+  const one = others.length === 1;
+  const left = others.length > 0
+    ? ` ${join(others)} didn't answer and still ${one ? 'has' : 'have'} it. Remove it there in Settings › Remote Access once ${one ? "it's" : "they're"} back online.`
     : '';
-  return (done + left).trim();
+  const itself = unlinked && result.notReached.includes(unlinked)
+    ? ` ${unlinked} didn't answer, so it may still list your other computers. Unlink them there in Settings › Remote Access once it's back online.`
+    : '';
+  return (done + left + itself).trim();
 }
 
 /** Runs an "everywhere" command, then reloads the list; returns the line to show under the list. */
-async function runEverywhere(controller: RemoteAccessController, channel: string, args: { clientId: string } | { computerId: string }, subject: string): Promise<string> {
+async function runEverywhere(controller: RemoteAccessController, channel: string, args: { clientId: string } | { computerId: string }, subject: string, unlinked?: string): Promise<string> {
   try {
     const result: { removed: string[]; notReached: string[] } = await window.electronAPI.invoke(channel, args);
-    return everywhereResult(subject, result);
+    return everywhereResult(subject, result, unlinked);
   } catch (cause) {
     return `Nothing was removed: ${ipcErrorMessage(cause, "Pane couldn't reach your other computers")}. Try again.`;
   } finally {
@@ -576,7 +583,7 @@ function LinkedComputerRow({ computer, controller, onOutcome }: { computer: Remo
               onClick: () => {
                 setBusy(true);
                 onOutcome(null);
-                void runEverywhere(controller, 'relay:unlink-computer-everywhere', { computerId }, `Unlinked ${computer.label}`).then((line) => {
+                void runEverywhere(controller, 'relay:unlink-computer-everywhere', { computerId }, `Unlinked ${computer.label}`, computer.label).then((line) => {
                   setBusy(false);
                   onOutcome(line);
                 });

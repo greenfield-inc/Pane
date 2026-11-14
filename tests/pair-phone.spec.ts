@@ -164,6 +164,15 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
+test('Unlinking a computer that is off says to finish on that computer', async ({ page }) => {
+  await openRemoteAccess(page, { relay: { everywhere: { removed: ['devbox'], notReached: ['Travel Laptop'] } } });
+  await page.getByRole('button', { name: 'Unlink Travel Laptop' }).click();
+  await page.getByRole('menuitem', { name: /Unlink from all your computers/ }).click();
+  const status = page.getByRole('status').filter({ hasText: 'Unlinked Travel Laptop from devbox.' });
+  await expect(status).toContainText("Travel Laptop didn't answer, so it may still list your other computers.");
+  await expect(status).not.toContainText('still has it');
+});
+
 test('Relay address saves on Enter or leaving the field, and a bad one says how to fix it', async ({ page }) => {
   await openRemoteAccess(page);
   const field = page.getByRole('textbox', { name: 'Relay address' });
