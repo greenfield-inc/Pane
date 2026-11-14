@@ -20,6 +20,7 @@ jobs:
     outputs:
       runpane: ${{ steps.filter.outputs.runpane }}
       main: ${{ steps.filter.outputs.main }}
+      relay: ${{ steps.filter.outputs.relay }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -45,6 +46,10 @@ jobs:
             - 'scripts/test-runpane-handoff.js'
             - 'scripts/test-runpane-managed-cli.js'
             - 'scripts/fixtures/**'
+            - '.github/workflows/quality.yml'
+          relay:
+            - 'relay/**'
+            - 'main/src/daemon/relay/**'
             - '.github/workflows/quality.yml'
           main:
             - 'main/**'
@@ -442,11 +447,75 @@ jobs:
       shell: bash
       run: scripts/ci-background.sh wait typecheck
 
+  # The relay (Rust) and the computer side of QR pairing against it: a real relay
+  # with its DNS helper, and Pebble validating certificates through that DNS.
+  relay-tests:
+    name: Relay Tests
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.relay == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal --component rustfmt,clippy && rustup default stable
+
+    - name: Cache cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          relay/target
+        key: relay-${{ runner.os }}-${{ hashFiles('relay/Cargo.lock') }}
+
+    - name: Check formatting and lints
+      working-directory: relay
+      run: cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
+
+    - name: Run relay tests
+      working-directory: relay
+      run: cargo test --locked
+
+    - name: Build the relay
+      working-directory: relay
+      run: cargo build --locked
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: stable
+        cache: false
+
+    - name: Install Pebble
+      run: |
+        GOBIN="$RUNNER_TEMP/bin" go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.8.0
+        echo "PEBBLE_BIN=$RUNNER_TEMP/bin/pebble" >> "$GITHUB_ENV"
+        echo "PEBBLE_DIR=$(go env GOMODCACHE)/github.com/letsencrypt/pebble/v2@v2.8.0" >> "$GITHUB_ENV"
+        echo "PANE_RELAY_BIN=$GITHUB_WORKSPACE/relay/target/debug/pane-relay" >> "$GITHUB_ENV"
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    - name: Fetch Electron
+      uses: ./.github/actions/fetch-electron
+
+    - name: Rebuild native modules for Node tests
+      run: pnpm rebuild better-sqlite3-multiple-ciphers
+
+    - name: Run the computer side against the relay
+      run: pnpm --filter main exec vitest run src/daemon/relay
+
   # The one check branch protection requires. Skipped jobs pass; failed or
   # cancelled ones fail it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, typecheck-lint, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests]
+    needs: [changes, quality-checks, typecheck-lint, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-tests]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
