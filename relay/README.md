@@ -55,9 +55,10 @@ Every flag also reads the environment variable in brackets.
 | `--public-ip` [`PANE_RELAY_PUBLIC_IP`] | | IPv4 that DNS returns for `<D>` and for regions without `--region-ip` |
 | `--region-ip` [`PANE_RELAY_REGION_IP`] | | `us=1.2.3.4,eu=5.6.7.8`: each region's public IPv4 |
 | `--dns` [`PANE_RELAY_DNS`] | off | Helper role: answer DNS on this address, UDP and TCP |
-| `--ns` [`PANE_RELAY_NS`] | `ns1.<D>` | Name servers for the zone's NS and SOA records |
+| `--ns` [`PANE_RELAY_NS`] | `ns1.<D>,ns2.<D>` | Name servers for the zone's NS and SOA records |
+| `--ns-ip` [`PANE_RELAY_NS_IP`] | | `ns1=1.2.3.4,ns2=5.6.7.8`: each name server's IPv4 by its first label; others get `--public-ip` |
 | `--registry-secret` [`PANE_RELAY_REGISTRY_SECRET`] | | Bearer secret for `POST /v1/registry` |
-| `--registry-url` [`PANE_RELAY_REGISTRY_URL`] | | Helper's `https://<D>/v1/registry`, for relays without `--dns` |
+| `--registry-url` [`PANE_RELAY_REGISTRY_URL`] | | Comma-separated `https://<host>/v1/registry` of every helper other than this relay; each gets every update and a full re-post every 60 s |
 | `--direct-quic` [`PANE_RELAY_DIRECT_QUIC`] | off | UDP address for QUIC address discovery on direct paths; clients expect port 7842, such as `0.0.0.0:7842` |
 | `--blocklist` [`PANE_RELAY_BLOCKLIST`] | | File of blocked ids, one per line, reread every 5 s when it changes |
 | `--max-connections` | 20000 | Total open client connections |

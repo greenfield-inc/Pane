@@ -42,11 +42,21 @@ struct Env {
     dir: PathBuf,
 }
 
+/// One certificate for every test relay, so relays can trust each other
+/// (`--provider-ca {dir}/cert.pem`) and reach each other at 127.0.0.1.
+fn relay_cert() -> &'static rcgen::CertifiedKey<rcgen::KeyPair> {
+    static CERT: std::sync::OnceLock<rcgen::CertifiedKey<rcgen::KeyPair>> =
+        std::sync::OnceLock::new();
+    CERT.get_or_init(|| {
+        let names = vec![D.to_string(), format!("*.relay.{D}"), "127.0.0.1".into()];
+        rcgen::generate_simple_self_signed(names).unwrap()
+    })
+}
+
 impl Env {
     async fn start(extra: &[&str]) -> Env {
         let dir = scratch_dir();
-        let ck = rcgen::generate_simple_self_signed(vec![D.to_string(), format!("*.relay.{D}")])
-            .unwrap();
+        let ck = relay_cert();
         std::fs::write(dir.join("cert.pem"), ck.cert.pem()).unwrap();
         std::fs::write(dir.join("key.pem"), ck.signing_key.serialize_pem()).unwrap();
         let mut args = vec![
@@ -577,6 +587,70 @@ async fn dns_answers_for_computer_names() {
     );
 }
 
+/// Polls `server` until `name` has A records, then returns them.
+async fn resolves(server: SocketAddr, name: String) -> Vec<Ipv4Addr> {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let ips = a_records(&dns_query(server, name.clone(), RecordType::A, false).await);
+        if !ips.is_empty() || Instant::now() > deadline {
+            return ips;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn helper(region: &str) -> Env {
+    Env::start(&[
+        "--region",
+        region,
+        "--dns",
+        "127.0.0.1:0",
+        "--public-ip",
+        "203.0.113.10",
+        "--region-ip",
+        "us=203.0.113.10,eu=198.51.100.7,ap=192.0.2.44",
+        "--ns-ip",
+        "ns1=203.0.113.10,ns2=198.51.100.7",
+        "--registry-secret",
+        "s3cret",
+    ])
+    .await
+}
+
+#[tokio::test]
+async fn two_helpers_answer_for_a_computer_on_a_third_region() {
+    let (us, eu) = (helper("us").await, helper("eu").await);
+    let registry = |env: &Env| format!("https://127.0.0.1:{}/v1/registry", env.addr().port());
+    let urls = format!("{},{}", registry(&us), registry(&eu));
+    let ap = Env::start(&[
+        "--region",
+        "ap",
+        "--registry-url",
+        &urls,
+        "--registry-secret",
+        "s3cret",
+        "--provider-ca",
+        "{dir}/cert.pem",
+    ])
+    .await;
+    let agent = Agent::connect(&ap, &SigningKey::generate()).await;
+
+    let ap_ip = Ipv4Addr::new(192, 0, 2, 44);
+    for helper in [&us, &eu] {
+        assert_eq!(
+            resolves(helper.dns(), format!("{}.{D}.", agent.id)).await,
+            vec![ap_ip]
+        );
+        // Both answer the same NS set with glue-matching addresses.
+        let ns = dns_query(helper.dns(), format!("{D}."), RecordType::NS, false).await;
+        assert_eq!(ns.answers.len(), 2);
+        assert_eq!(
+            resolves(helper.dns(), format!("ns2.{D}.")).await,
+            vec![Ipv4Addr::new(198, 51, 100, 7)]
+        );
+    }
+}
+
 #[tokio::test]
 async fn new_connections_past_the_limit_are_slowed_then_cut() {
     let env = Env::start(&["--limit-conns-per-min", "2"]).await;
@@ -961,7 +1035,7 @@ async fn android_alerts_reach_fcm_with_an_access_token() {
     }
 }
 
-/// A fake GCE metadata server: answers every request with an access token and
+/// A fake GCE metadata server: answers token requests with an access token and
 /// sends each request head to the returned channel.
 async fn metadata_server() -> (String, mpsc::UnboundedReceiver<String>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -973,6 +1047,10 @@ async fn metadata_server() -> (String, mpsc::UnboundedReceiver<String>) {
     tokio::spawn(async move {
         while let Ok((mut tcp, _)) = listener.accept().await {
             let head = read_head(&mut tcp).await;
+            // Other local programs probe loopback ports; only the relay asks for this path.
+            if !head.contains("/computeMetadata/") {
+                continue;
+            }
             let _ = tx.send(head);
             let body = r#"{"access_token":"ya29.keyless","expires_in":3599,"token_type":"Bearer"}"#;
             let reply = format!(

@@ -10,7 +10,8 @@ One binary, `pane-relay`, runs two roles:
 - **relay**: accepts TLS on port 443, routes by SNI, keeps one control
   connection per computer, and serves its own small https API.
 - **helper** (`--dns`): authoritative DNS for the domain, and the registry of
-  which region each computer is connected to.
+  which region each computer is connected to. Two relays run it (say `us`
+  and `eu`), so the zone has two name servers.
 
 ## Names
 
@@ -162,11 +163,18 @@ Any iroh endpoint may use the relay. Limits apply per client IP (below).
 ## Registry (helper)
 
 With `--dns`, the process answers DNS for `<D>` and keeps the registry: for
-each id, its region, local addresses, TXT values and last-seen time. Relays in
-other regions update it with
+each id, its region, local addresses, TXT values and last-seen time. Every
+relay sends each update to every helper in its `--registry-url` list with
 `POST /v1/registry` (header `authorization: Bearer <registry secret>`), body
-`{"id","region","local":[...],"txt":[...]|null,"online":true|false}`. A relay
-that also runs the helper updates it in memory.
+`{"id","region","local":[...],"txt":[...]|null,"online":true|false}`, and
+re-posts its connected computers every 60 s. A helper updates its own registry
+in memory and lists only the other helpers, so both helpers answer the same
+records, and a helper that restarts relearns them within a minute. A TXT
+update succeeds once one helper has it.
+
+The zone's name servers are `ns1.<D>` and `ns2.<D>` (`--ns`); each answers
+with its `--ns-ip` address, so the A records match the glue at the
+registrar.
 
 ## Limits (starting values, all flags)
 

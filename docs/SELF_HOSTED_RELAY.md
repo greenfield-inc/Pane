@@ -42,8 +42,31 @@ pane-relay \
 path to each other; without it they still connect.
 
 `pane-relay --help` and [relay/README.md](../relay/README.md) list every
-flag, including connection and byte limits, the blocklist, and several
-regions sharing one DNS helper (`--registry-url`, `--registry-secret`).
+flag, including connection and byte limits and the blocklist.
+
+## Two name servers
+
+Registrars usually want two name servers, and a second DNS helper keeps
+names resolving while one machine is down. Run `--dns` on two relays, say
+`us` at 203.0.113.10 and `eu` at 198.51.100.7, and give each the other's
+registry address and the same secret:
+
+```sh
+# on us; on eu, swap the --region and the --registry-url host
+pane-relay --domain relay.example.com --region us \
+  --cert ... --key ... --dns 0.0.0.0:53 --public-ip 203.0.113.10 \
+  --region-ip us=203.0.113.10,eu=198.51.100.7 \
+  --ns-ip ns1=203.0.113.10,ns2=198.51.100.7 \
+  --registry-url https://eu.relay.relay.example.com/v1/registry \
+  --registry-secret "$SECRET"
+```
+
+At the registrar, delegate `relay.example.com` to `ns1.relay.example.com`
+and `ns2.relay.example.com` with those two addresses as glue. A region
+without `--dns` lists both helpers:
+`--registry-url https://us.relay.relay.example.com/v1/registry,https://eu.relay.relay.example.com/v1/registry`.
+Every relay sends each change to every helper and re-posts its computers
+every minute, so both answer the same records.
 
 Check it:
 

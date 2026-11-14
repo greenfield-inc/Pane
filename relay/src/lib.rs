@@ -69,7 +69,11 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         }
         _ => return Err("pass --cert and --key (or --dev for a self-signed certificate)".into()),
     };
-    let registry = registry::Registry::new(cfg.registry_url.clone(), cfg.registry_secret.clone());
+    let registry = registry::Registry::new(
+        &cfg.registry_url,
+        cfg.registry_secret.clone(),
+        cfg.provider_ca.as_deref(),
+    )?;
     let listener = TcpListener::bind(cfg.listen_addr()).await?;
     let https_addr = listener.local_addr()?;
     let dns_sockets = match cfg.dns {
@@ -235,7 +239,7 @@ async fn maintenance(state: Arc<State>, blocklist: Option<PathBuf>, mut mtime: O
         state.prune_usage();
         state.alerts.prune();
         // Re-send connected computers so a restarted helper relearns them.
-        if state.cfg.registry_url.is_some() && last_resync.elapsed() >= REGISTRY_RESYNC {
+        if !state.cfg.registry_url.is_empty() && last_resync.elapsed() >= REGISTRY_RESYNC {
             last_resync = tokio::time::Instant::now();
             for id in state.connected_ids() {
                 if let Some(e) = state.registry.get(&id) {

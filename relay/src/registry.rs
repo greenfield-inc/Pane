@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -33,38 +34,49 @@ type Push = (Update, Option<oneshot::Sender<Result<(), String>>>);
 
 pub struct Registry {
     entries: Mutex<HashMap<String, Entry>>,
-    push: Option<mpsc::UnboundedSender<Push>>,
+    /// One ordered queue per helper URL, so a helper that is down delays only itself.
+    push: Vec<mpsc::UnboundedSender<Push>>,
 }
 
 impl Registry {
-    /// A registry that also forwards every update to the helper at `url`, in order.
-    pub fn new(url: Option<String>, secret: Option<String>) -> Self {
-        let push = url.map(|url| {
-            let (tx, mut rx) = mpsc::unbounded_channel::<Push>();
-            tokio::spawn(async move {
-                while let Some((update, reply)) = rx.recv().await {
-                    let body = serde_json::to_vec(&update).unwrap_or_default();
-                    let result = tokio::time::timeout(
-                        Duration::from_secs(10),
-                        post(&url, secret.as_deref(), &body),
-                    )
-                    .await
-                    .map_err(|_| "registry did not answer in 10 s".to_string())
-                    .and_then(|r| r);
-                    if let Err(e) = &result {
-                        tracing::warn!(id = %update.id, error = %e, "registry update failed");
+    /// A registry that also forwards every update to each helper in `urls`, in order.
+    /// `extra_ca` adds PEM roots trusted for the helpers' certificates.
+    pub fn new(
+        urls: &[String],
+        secret: Option<String>,
+        extra_ca: Option<&Path>,
+    ) -> Result<Self, crate::Error> {
+        let tls = client_config(extra_ca)?;
+        let push = urls
+            .iter()
+            .map(|url| {
+                let (tx, mut rx) = mpsc::unbounded_channel::<Push>();
+                let (url, secret, tls) = (url.clone(), secret.clone(), tls.clone());
+                tokio::spawn(async move {
+                    while let Some((update, reply)) = rx.recv().await {
+                        let body = serde_json::to_vec(&update).unwrap_or_default();
+                        let result = tokio::time::timeout(
+                            Duration::from_secs(10),
+                            post(&url, secret.as_deref(), &body, tls.clone()),
+                        )
+                        .await
+                        .map_err(|_| format!("registry {url} did not answer in 10 s"))
+                        .and_then(|r| r.map_err(|e| format!("registry {url}: {e}")));
+                        if let Err(e) = &result {
+                            tracing::warn!(id = %update.id, error = %e, "registry update failed");
+                        }
+                        if let Some(reply) = reply {
+                            let _ = reply.send(result);
+                        }
                     }
-                    if let Some(reply) = reply {
-                        let _ = reply.send(result);
-                    }
-                }
-            });
-            tx
-        });
-        Self {
+                });
+                tx
+            })
+            .collect();
+        Ok(Self {
             entries: Mutex::default(),
             push,
-        }
+        })
     }
 
     pub fn apply(&self, u: &Update) {
@@ -89,26 +101,50 @@ impl Registry {
         self.entries.lock().unwrap().get(id).cloned()
     }
 
-    /// Applies the update here and, with a helper URL, there. TXT updates wait for the helper.
+    /// Applies the update here and sends it to every helper. TXT updates wait for
+    /// the helpers and succeed when at least one took them: a helper that is down
+    /// answers no DNS, so resolvers ask the other.
     pub async fn publish(&self, update: Update) -> Result<(), String> {
         self.apply(&update);
-        let Some(push) = &self.push else {
+        if update.txt.is_none() {
+            for push in &self.push {
+                let _ = push.send((update.clone(), None));
+            }
             return Ok(());
-        };
-        if update.txt.is_some() {
-            let (tx, rx) = oneshot::channel();
-            push.send((update, Some(tx)))
-                .map_err(|_| "registry push stopped".to_string())?;
-            rx.await.map_err(|_| "registry push stopped".to_string())?
-        } else {
-            let _ = push.send((update, None));
-            Ok(())
         }
+        let mut replies = Vec::new();
+        for push in &self.push {
+            let (tx, rx) = oneshot::channel();
+            if push.send((update.clone(), Some(tx))).is_ok() {
+                replies.push(rx);
+            }
+        }
+        if self.push.is_empty() {
+            return Ok(());
+        }
+        let mut first_err = None;
+        for rx in replies {
+            match rx.await {
+                Ok(Ok(())) => return Ok(()),
+                Ok(Err(e)) => {
+                    first_err.get_or_insert(e);
+                }
+                Err(_) => {
+                    first_err.get_or_insert("registry push stopped".to_string());
+                }
+            }
+        }
+        Err(first_err.unwrap_or_else(|| "registry push stopped".to_string()))
     }
 }
 
 /// POSTs JSON to an http(s) URL and succeeds on a 2xx answer.
-async fn post(url: &str, secret: Option<&str>, body: &[u8]) -> Result<(), String> {
+async fn post(
+    url: &str,
+    secret: Option<&str>,
+    body: &[u8],
+    tls_config: Arc<rustls::ClientConfig>,
+) -> Result<(), String> {
     let (tls, rest) = if let Some(r) = url.strip_prefix("https://") {
         (true, r)
     } else if let Some(r) = url.strip_prefix("http://") {
@@ -138,7 +174,7 @@ async fn post(url: &str, secret: Option<&str>, body: &[u8]) -> Result<(), String
     if tls {
         let name = rustls::pki_types::ServerName::try_from(host.to_string())
             .map_err(|_| "bad registry host")?;
-        let mut s = tokio_rustls::TlsConnector::from(client_config())
+        let mut s = tokio_rustls::TlsConnector::from(tls_config)
             .connect(name, tcp)
             .await
             .map_err(|e| format!("tls: {e}"))?;
@@ -167,22 +203,24 @@ async fn post(url: &str, secret: Option<&str>, body: &[u8]) -> Result<(), String
     }
 }
 
-fn client_config() -> Arc<rustls::ClientConfig> {
-    static CONFIG: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
-    CONFIG
-        .get_or_init(|| {
-            let mut roots = rustls::RootCertStore::empty();
-            for cert in rustls_native_certs::load_native_certs().certs {
-                let _ = roots.add(cert);
-            }
-            let provider = Arc::new(rustls::crypto::ring::default_provider());
-            Arc::new(
-                rustls::ClientConfig::builder_with_provider(provider)
-                    .with_safe_default_protocol_versions()
-                    .expect("ring supports the default TLS versions")
-                    .with_root_certificates(roots)
-                    .with_no_client_auth(),
-            )
-        })
-        .clone()
+fn client_config(extra_ca: Option<&Path>) -> Result<Arc<rustls::ClientConfig>, crate::Error> {
+    use rustls::pki_types::{CertificateDer, pem::PemObject};
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in rustls_native_certs::load_native_certs().certs {
+        let _ = roots.add(cert);
+    }
+    if let Some(path) = extra_ca {
+        for cert in CertificateDer::pem_file_iter(path)
+            .map_err(|e| format!("reading --provider-ca {}: {e}", path.display()))?
+        {
+            roots.add(cert?)?;
+        }
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    Ok(Arc::new(
+        rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()?
+            .with_root_certificates(roots)
+            .with_no_client_auth(),
+    ))
 }

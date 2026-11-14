@@ -25,7 +25,10 @@ enum Lookup {
 
 fn ns_names(state: &State) -> Vec<String> {
     if state.cfg.ns.is_empty() {
-        vec![format!("ns1.{}", state.domain)]
+        vec![
+            format!("ns1.{}", state.domain),
+            format!("ns2.{}", state.domain),
+        ]
     } else {
         state
             .cfg
@@ -90,7 +93,10 @@ fn lookup(state: &State, qname: &str, qtype: RecordType) -> Lookup {
             };
             return Lookup::Found(records);
         }
-        _ if ns_names(state).contains(&qname) => (a(state.cfg.public_ip), None),
+        [ns, ..] if ns_names(state).contains(&qname) => {
+            let ip = state.cfg.ns_ip.get(ns).and_then(|ip| ip.parse().ok());
+            (a(ip.or(state.cfg.public_ip)), None)
+        }
         [region, "relay"] if known_region(state, region) => {
             (a(state.cfg.region_addr(region)), None)
         }

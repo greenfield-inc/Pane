@@ -73,17 +73,23 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_DNS")]
     pub dns: Option<SocketAddr>,
 
-    /// Name server names for the zone's NS and SOA records. Defaults to ns1.<D>.
+    /// Name server names for the zone's NS and SOA records. Defaults to ns1.<D>,ns2.<D>.
     #[arg(long, env = "PANE_RELAY_NS", value_delimiter = ',')]
     pub ns: Vec<String>,
+
+    /// Each name server's IPv4 address by its first label, such as `ns1=1.2.3.4,ns2=5.6.7.8`.
+    /// A name server without one gets --public-ip.
+    #[arg(long, env = "PANE_RELAY_NS_IP", value_parser = parse_pairs, default_value = "")]
+    pub ns_ip: Pairs,
 
     /// Bearer secret that POST /v1/registry requires.
     #[arg(long, env = "PANE_RELAY_REGISTRY_SECRET", hide_env_values = true)]
     pub registry_secret: Option<String>,
 
-    /// Helper's registry endpoint (https://<D>/v1/registry) for relays that do not run --dns.
-    #[arg(long, env = "PANE_RELAY_REGISTRY_URL")]
-    pub registry_url: Option<String>,
+    /// Every other helper's registry endpoint (https://<host>/v1/registry), comma-separated.
+    /// Each update and a full re-post every 60 s go to all of them.
+    #[arg(long, env = "PANE_RELAY_REGISTRY_URL", value_delimiter = ',')]
+    pub registry_url: Vec<String>,
 
     /// UDP address for QUIC address discovery, which direct-path clients use to learn
     /// their public address. Clients expect port 7842. Off unless set.
@@ -177,7 +183,7 @@ pub struct Config {
     #[arg(long, hide = true)]
     pub fcm_token_url: Option<String>,
 
-    /// Extra PEM root certificates trusted for push providers (tests).
+    /// Extra PEM root certificates trusted for push providers and registry helpers (tests).
     #[arg(long, hide = true)]
     pub provider_ca: Option<PathBuf>,
 }
