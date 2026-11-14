@@ -31,9 +31,18 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Required reviewers on this environment approve every run; the Workload
+    # Identity provider gives credentials only to main in this environment.
+    environment: production
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
+
+      - name: Apply only from main
+        if: inputs.apply && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Deploying changes runs only from main; this run is on ${GITHUB_REF}."
+          exit 1
 
       - uses: google-github-actions/auth@v3
         with:

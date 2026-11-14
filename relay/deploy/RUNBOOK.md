@@ -14,18 +14,19 @@ Merging the PR to `main` does not release the desktop app.
 
 ## What each step needs
 
-| Step | Needs | On this Mac (2026-11-14) |
-| --- | --- | --- |
-| Buy `runpane.net` (two years, for the Public Suffix List) | A registrar account and payment | Not bought |
-| Name servers and glue at the registrar | Registrar access after purchase | Not set |
-| Public Suffix List entry for `runpane.net` | A pull request to publicsuffix/list, plus a `_psl` TXT record | Not submitted |
-| Run `relay-deploy.yml` | GitHub repository variables `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT` (exist), plus `PANE_RELAY_ACME_EMAIL`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID`, `PANE_RELAY_ANDROID_CERT_SHA256` (to add) | Deploy variables exist; the four relay variables are missing |
-| Create the VMs, addresses, firewall and uptime checks | The deploy service account needs `roles/compute.admin`, `roles/secretmanager.admin`, `roles/monitoring.editor`, `roles/serviceusage.serviceUsageAdmin`, and `roles/iam.serviceAccountUser` on `pane-push-sender` | Not checked: reading IAM needs a fresh `gcloud` sign-in |
-| Three e2-small VMs and three static IPv4 addresses | Billing on `pane-pwa-preview`, about $45 to $55 a month | Not created |
-| Store the APNs key in Secret Manager (once) | The Pane app's `.p8` key, and `gcloud` signed in as `parsa@dcouple.ai` | The key file is on this Mac (`PANE_APNS_KEY_PATH`); the `gcloud` sign-in has expired |
-| Android app links (`assetlinks.json`) | The SHA-256 of the Play app signing certificate (Play Console › App integrity) | Not on this Mac |
-| iOS universal links | Team id and bundle id `com.dcouple.pane.mobile` | Team id is on this Mac (`PANE_APNS_TEAM_ID`) |
-| Android alerts | `pane-push-sender` with Firebase Cloud Messaging send rights (has it today) | Exists |
+| Step | Needs |
+| --- | --- |
+| Buy `runpane.net` (two years, for the Public Suffix List) | A registrar account and payment |
+| Name servers and glue at the registrar | Registrar access after purchase |
+| Public Suffix List entry for `runpane.net` | A pull request to publicsuffix/list, plus a `_psl` TXT record |
+| Run `relay-deploy.yml` | GitHub repository variables `GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SERVICE_ACCOUNT`, `PANE_RELAY_ACME_EMAIL`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID` and `PANE_RELAY_ANDROID_CERT_SHA256`, and a GitHub environment `production` whose required reviewers approve each run |
+| Limit who can deploy | The Workload Identity provider's attribute condition accepts only `refs/heads/main` for the `production` environment, so a run from another branch gets no credentials |
+| Create the VMs, addresses, firewall and uptime checks | The deploy service account needs `roles/compute.admin`, `roles/secretmanager.admin`, `roles/monitoring.editor`, `roles/serviceusage.serviceUsageAdmin`, and `roles/iam.serviceAccountUser` on `pane-push-sender` |
+| Three e2-small VMs and three static IPv4 addresses | Billing on `pane-pwa-preview`, about $45 to $55 a month |
+| Store the APNs key in Secret Manager (once) | The Pane app's `.p8` key, and `gcloud` signed in as an account with Secret Manager admin on the project |
+| Android app links (`assetlinks.json`) | The SHA-256 of the Play app signing certificate (Play Console › App integrity) |
+| iOS universal links | Team id and bundle id `com.dcouple.pane.mobile` |
+| Android alerts | `pane-push-sender` with Firebase Cloud Messaging send rights, and `roles/artifactregistry.reader` on the `pane-preview` repository so the VMs can pull the relay image |
 
 ## Steps
 
@@ -35,8 +36,8 @@ Merging the PR to `main` does not release the desktop app.
 3. **Store the APNs key once**, from a Mac that has it:
 
    ```sh
-   gcloud auth login parsa@dcouple.ai
-   gcloud --account=parsa@dcouple.ai --project=pane-pwa-preview \
+   gcloud auth login <account>
+   gcloud --account=<account> --project=pane-pwa-preview \
      secrets create pane-relay-apns-key --data-file="$PANE_APNS_KEY_PATH"
    ```
 

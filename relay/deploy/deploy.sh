@@ -136,6 +136,8 @@ EOF
     gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata "startup-script=$startup"
     gc compute instances reset "pane-relay-$name" --zone "$zone"
   else
+    # Secret Manager accepts only the cloud-platform scope, so the scope stays
+    # broad; the service account's IAM roles (FCM send, secret access) are the limit.
     gc compute instances create "pane-relay-$name" --zone "$zone" --machine-type "$MACHINE" \
       --image-family cos-stable --image-project cos-cloud --tags pane-relay \
       --address "pane-relay-$name" --service-account "$SA" --scopes cloud-platform \

@@ -14,7 +14,7 @@ computer, on any network. No account, no Tailscale, no port forwarding.
 The phone shows the computer's sessions a few seconds later. The code works
 once and expires after 10 minutes; the dialog shows a new one after each use.
 
-Inside the Pane app you can also scan from **Settings › Add a computer**.
+Inside the Pane app you can also scan from **Settings › Add a machine**.
 The app still accepts `pane-remote://` connection codes.
 
 ## What works
@@ -68,13 +68,13 @@ A teammate scans a fresh code from your computer, as you do. Their phone gets
 its own sign-in, listed under **Devices** by its name, and can do what yours
 does there, pairing glasses included. Because computers are linked, it also
 reaches every computer linked with this one, and links this computer with any
-computer their phone already paired. **Remove from this computer** signs out
+computer their phone already paired. **Remove from Studio Mac** (the button names this computer) signs out
 only their phone, only here; **Remove from all your computers** signs it out
 of every computer it reached through yours.
 
 ## Remove a phone or a computer
 
-- **Remove from this computer** signs a phone out of this computer only.
+- **Remove from Studio Mac** (the button names this computer) signs a phone out of this computer only.
 - **Remove from all your computers** signs it out everywhere. Its open
   connections close within seconds. The Pane app shows **Pair again**; a
   browser says the computer removed it and to scan a new code on that
