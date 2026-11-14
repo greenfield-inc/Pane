@@ -88,6 +88,10 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
     });
   };
 
+  // Same-network phones arrive from their own address. `pane-direct serve` pipes every direct-path
+  // stream in from 127.0.0.1 and does not report the QUIC peer, so direct-path clients share one
+  // pairing lockout: five wrong codes over the direct path pause direct pairing for 15 minutes,
+  // while pairing through the relay and on the same network still works.
   server.on('secureConnection', (socket: tls.TLSSocket) => forward(socket, (socket.remoteAddress ?? '').replace(/^::ffff:/u, '')));
   server.on('tlsClientError', clientError);
 
