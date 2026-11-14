@@ -13,6 +13,7 @@ import { firstRunPage, pairingFailedPage } from '../../../src/screens';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PhoneCommand, PhoneComputer, PhoneState } from '../channels';
 import { glanceText } from './glance';
+import { Notifier, meetingAt } from './notifier';
 import { ListFocus, capturedList, renderPage, scrollableText } from './render';
 import { tierOf, type Tier } from './tier';
 import { TouchMapper } from './touch';
@@ -21,6 +22,9 @@ import { glasslyDictation } from './transcription';
 const RUNTIME_KEY = 'pane.glasses.runtimeId';
 const SESSION_COMPUTER_KEY = 'pane.glasses.lastSessionComputer';
 const AMBIENT_KEY = 'pane.glasses.ambient';
+/** How often the calendar is read for a meeting under way, and how often its end is checked. */
+const CALENDAR_READ_MS = 5 * 60_000;
+const MEETING_CHECK_MS = 60_000;
 /**
  * The Origin the Glassly build sends on every request. Pane computers admit the Even app's
  * http://127.0.0.1 without an Allow, and Glassly's native fetch sends whatever the app sets.
@@ -130,6 +134,37 @@ registerMiniapp(async (session) => {
   const polling = new PollClock(later, () => session.visibility === 'foreground');
   let target: (gesture: Gesture) => void = () => {};
 
+  // ---------- notifications ----------
+  // Posted through the request a newer Glassly App takes (SDK 0.4.0 has no `post`); an older
+  // App refuses it and Pane carries on without notifications.
+  const notifier = new Notifier({
+    post: (notification) => session.sendRequest({ type: 'miniapp_notification_post', ...notification }),
+    dismiss: (id) => session.sendRequest({ type: 'miniapp_notification_dismiss', id }),
+  }, (message) => console.warn(message));
+  let events: Array<{ title: string; startsAt: string; endsAt: string; allDay: boolean }> = [];
+  const readCalendar = () => {
+    const now = Date.now();
+    session.phone.calendar.listEvents({ startsAt: new Date(now - 12 * 3_600_000), endsAt: new Date(now + MEETING_CHECK_MS), limit: 50 })
+      .then((result) => { events = result.events; }, () => { events = []; });
+  };
+  const notify = () => {
+    if (!source || source.demo) return;
+    notifier.update({
+      asked: source.cards().filter((card) => card.waiting).map((card) => ({ key: card.key, title: card.title, from: `${card.machine} · ${card.paneName}` })),
+      inFront: session.visibility === 'foreground' && tier.kind === 'full',
+      inUse: hub?.inUse() ?? false,
+      meeting: meetingAt(events, Date.now()),
+    });
+  };
+  readCalendar();
+  every(readCalendar, CALENDAR_READ_MS);
+  every(notify, MEETING_CHECK_MS);
+  /** Pane came to the front: show the question its newest notification asked. */
+  const openNotified = () => {
+    const key = notifier.opened();
+    if (key && tier.kind === 'full') app?.showCard(key);
+  };
+
   const publish = () => {
     const computers: PhoneComputer[] = (source?.computers() ?? []).map((computer) => ({
       name: computer.name,
@@ -178,6 +213,7 @@ registerMiniapp(async (session) => {
     stopSource = next.subscribe(() => {
       glance = glanceText(next);
       if (tier.kind === 'glance') draw();
+      notify();
       publish();
     });
     glance = glanceText(next);
@@ -252,9 +288,11 @@ registerMiniapp(async (session) => {
     target({ type: visibility === 'foreground' ? 'foreground' : 'background' });
     if (visibility === 'foreground') {
       polling.now();
+      openNotified();
       draw();
     }
   });
+  session.on('launch', () => openNotified());
   session.on('resume', () => {
     polling.now();
     hub?.retry();

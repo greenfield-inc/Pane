@@ -1137,6 +1137,18 @@ export class GlassesApp {
   // ---------- ambient ----------
 
   /** Turns ambient mode on or off now; off wakes the glasses and stops the timer. */
+  /**
+   * Opens a waiting card as a press on its row does: what opening Pane from a notification
+   * shows. A card no longer waiting leaves the screen as it is.
+   */
+  showCard(key: string): void {
+    const card = this.card(key);
+    if (!card?.waiting) return;
+    this.endQuiet();
+    this.touched();
+    this.openCard(card);
+  }
+
   setAmbient(on: boolean): void {
     this.ambient = on;
     if (on) this.touched();

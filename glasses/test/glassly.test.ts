@@ -14,6 +14,7 @@ import { ListFocus, renderPage, scrollableText } from '../glassly/src/background
 import { tierOf } from '../glassly/src/background/tier';
 import { TouchMapper } from '../glassly/src/background/touch';
 import { glasslyDictation } from '../glassly/src/background/transcription';
+import { Notifier, SUMMARY_ID, meetingAt, type Asked, type Poster } from '../glassly/src/background/notifier';
 
 /** Every device profile Glassly 0.4.0 ships, by file name, read from the pinned engine tarball. */
 const profiles = new Map<string, GlassesCapabilities>();
@@ -155,5 +156,72 @@ describe("Glassly's speech-to-text", () => {
     expect(previews.at(-1)).toBe('approve the nightly backup and run');
     expect(await dictation.finish()).toBe('approve the nightly backup and run');
     expect(stopped).toBe(true);
+  });
+});
+
+describe('notifications', () => {
+  const asked = (key: string): Asked => ({ key, title: `question ${key}`, from: 'studio-mac · fix-login' });
+  const away = { inFront: false, inUse: false, meeting: null };
+  function notifier() {
+    const calls: string[] = [];
+    const poster: Poster = {
+      post: async (notification) => { calls.push(`post ${notification.id}: ${notification.title}`); },
+      dismiss: async (id) => { calls.push(`dismiss ${id}`); },
+    };
+    return { calls, notifier: new Notifier(poster) };
+  }
+
+  it('posts each new question once while you are away, and withdraws it once answered anywhere', () => {
+    const { calls, notifier: n } = notifier();
+    n.update({ ...away, asked: [asked('old')] });
+    n.update({ ...away, asked: [asked('q1'), asked('old')] });
+    n.update({ ...away, asked: [asked('q1'), asked('old')] });
+    n.update({ ...away, asked: [asked('old')] });
+    expect(calls).toEqual(['post q1: question q1', 'dismiss q1']);
+  });
+
+  it('stays quiet while you use a computer or Pane is in front, and does not post those questions later', () => {
+    const { calls, notifier: n } = notifier();
+    n.update({ ...away, asked: [] });
+    n.update({ ...away, inUse: true, asked: [asked('typing')] });
+    n.update({ ...away, inFront: true, asked: [asked('front'), asked('typing')] });
+    n.update({ ...away, asked: [asked('later'), asked('front'), asked('typing')] });
+    expect(calls).toEqual(['post later: question later']);
+  });
+
+  it('holds questions during a meeting, then says how many waited and where you were', () => {
+    const { calls, notifier: n } = notifier();
+    n.update({ ...away, asked: [] });
+    n.update({ ...away, meeting: { title: 'Design review' }, asked: [asked('a')] });
+    n.update({ ...away, meeting: { title: 'Design review' }, asked: [asked('b'), asked('a')] });
+    expect(calls).toEqual([]);
+    n.update({ ...away, asked: [asked('b'), asked('a')] });
+    expect(calls).toEqual([`post ${SUMMARY_ID}: 2 questions waited while you were in Design review`]);
+  });
+
+  it('opens on the newest question it posted', () => {
+    const { notifier: n } = notifier();
+    n.update({ ...away, asked: [] });
+    n.update({ ...away, asked: [asked('q1')] });
+    n.update({ ...away, asked: [asked('q2'), asked('q1')] });
+    expect(n.opened()).toBe('q2');
+    expect(n.opened()).toBeNull();
+  });
+
+  it('stops trying after a Glassly App that cannot post refuses once', async () => {
+    let posts = 0;
+    const n = new Notifier({ post: async () => { posts += 1; throw new Error('unknown request'); }, dismiss: async () => {} });
+    n.update({ ...away, asked: [] });
+    n.update({ ...away, asked: [asked('q1')] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    n.update({ ...away, asked: [asked('q2'), asked('q1')] });
+    expect(posts).toBe(1);
+  });
+
+  it('counts only timed events as meetings', () => {
+    const at = Date.parse('2026-11-14T10:30:00Z');
+    expect(meetingAt([{ title: 'Offsite', startsAt: '2026-11-14T00:00:00Z', endsAt: '2026-11-15T00:00:00Z', allDay: true }], at)).toBeNull();
+    expect(meetingAt([{ title: 'Design review', startsAt: '2026-11-14T10:00:00Z', endsAt: '2026-11-14T11:00:00Z', allDay: false }], at)).toEqual({ title: 'Design review' });
+    expect(meetingAt([{ title: 'Design review', startsAt: '2026-11-14T10:00:00Z', endsAt: '2026-11-14T10:30:00Z', allDay: false }], at)).toBeNull();
   });
 });

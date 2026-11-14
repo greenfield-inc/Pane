@@ -126,6 +126,15 @@ describe('answering', () => {
     expect(text().slice(0, 3)).toEqual(['Answered fix-login: Loosen retry', '   + New Session on studio-mac · hold to say it', '> studi  token-refresh · needs you']);
   });
 
+  it('opens a waiting card from outside, as opening Pane from its notification does', async () => {
+    const { app, text, source } = start();
+    const card = source.cards().find((candidate) => candidate.paneName === 'token-refresh');
+    if (!card) throw new Error('the demo has token-refresh');
+    app.showCard(card.key);
+    await settle();
+    expect(text().at(-1)).toBe('Stub the clock | Loosen retry to 2 s | Mock the endpoint | Read the whole question | Something else (hold to say it)');
+  });
+
   it('takes an answer back with a double press on the undo screen, and sends nothing', async () => {
     const { text, press, source, clock } = start();
     await press({ type: 'down' });
