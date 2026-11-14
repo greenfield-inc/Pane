@@ -67,8 +67,10 @@ install heartbeat. It is off when any of these holds:
   locks the switch with a note. config.json keeps its own value.
 - config.json exists but Pane has not read it since launch, because it is not
   JSON or a field fails to decode. Pane can't know whether it holds an off, so
-  analytics stay off in memory until the file reads, and the file is left
-  alone.
+  analytics stay off until the file reads, and the renderer receives
+  `enabled: false`. The off is never saved: analytics writes made meanwhile
+  (the install ID, identity) are dropped, so once the file reads, its
+  analytics settings stand as they were.
 
 ## Required Event Context
 

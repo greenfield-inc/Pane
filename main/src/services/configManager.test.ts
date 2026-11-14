@@ -397,8 +397,26 @@ describe('ConfigManager analytics gate', () => {
     await fs.writeFile(configPath, text);
     const manager = await load();
     expect(manager.isAnalyticsEnabled()).toBe(false);
-    expect(manager.getConfig().analytics?.enabled).toBe(false);
     expect(await fs.readFile(configPath, 'utf8')).toBe(text);
+  });
+
+  it.each([true, false])('keeps the saved analytics settings (enabled: %s) once a broken config.json is fixed', async (enabled) => {
+    const saved = { enabled, installId: 'install_1111', distinctId: 'person_1', posthogApiKey: 'phc_saved', posthogHost: 'http://127.0.0.1:9' };
+    await fs.writeFile(configPath, `${JSON.stringify({ analytics: saved, theme: 'folio' })},`);
+    const manager = await load();
+    // What every launch writes, while the file still does not parse.
+    const installId = await manager.getOrCreateAnalyticsInstallId();
+    await manager.setAnalyticsIdentity({ distinctId: 'person_2', identitySource: 'anonymous', installId });
+    await manager.setAnalyticsDistinctId('person_2');
+    await manager.updateConfig({ theme: 'light' });
+
+    await fs.writeFile(configPath, JSON.stringify({ analytics: saved, theme: 'folio' }));
+    await manager.updateConfig({});
+
+    const file = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    expect(file.analytics).toEqual(saved);
+    expect(file.theme).toBe('light');
+    expect(manager.isAnalyticsEnabled()).toBe(enabled);
   });
 
   it('turns analytics on for a new install and a readable config that does not mention it', async () => {
