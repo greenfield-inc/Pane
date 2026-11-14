@@ -43,8 +43,8 @@ so a certificate issued for the same name to anyone else is refused.
 
 ## Your computers
 
-Every computer a phone pairs with is linked to the other computers that
-phone has paired with, with no prompt. After that:
+Every computer the Pane app pairs with is linked to the other computers that
+app has paired with, with no prompt. After that:
 
 - a new phone that scans any one of them gets all of them;
 - the computers list each other under **Switch to**, for ports and
@@ -56,6 +56,11 @@ and says which phone linked a computer ("Linked by Ana's iPhone").
 
 Scanning someone else's computer links it with yours, and theirs with yours.
 Undo it with **Unlink from all your computers**.
+
+Linking happens in the Pane app. A browser reaches the computer whose code
+it scanned, plus the computers the Pane app already linked with it. Scanning
+a second computer in a browser doesn't link the two: each computer's browser
+app keeps its own list.
 
 ## Share a computer with a teammate
 
@@ -71,7 +76,9 @@ of every computer it reached through yours.
 
 - **Remove from this computer** signs a phone out of this computer only.
 - **Remove from all your computers** signs it out everywhere. Its open
-  connections close within seconds and the phone shows "Pair again".
+  connections close within seconds. The Pane app shows **Pair again**; a
+  browser says the computer removed it and to scan a new code on that
+  computer.
 - **Unlink from all your computers**, on a linked computer's row, removes
   that computer from every phone's list and from **Switch to** everywhere,
   and the phones you paired through it lose access to it.

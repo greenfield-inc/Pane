@@ -154,7 +154,7 @@ Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine wh
 
 ### Pair a phone with a QR code
 
-On the computer, open Pane and choose **Use Pane on your phone** on Home. Point your phone's camera at the code and tap the link: it opens the Pane app, or Pane in the phone's browser. It works on any network, with terminals, alerts and dev server previews. Every computer a phone pairs with links to its other computers, so they reach each other for **Switch to**, ports and `runpane workspace`. Pane's servers pass the encrypted connection along without reading it, or you can [run your own relay](docs/SELF_HOSTED_RELAY.md). See [Pair a phone with a QR code](docs/QR_PAIRING.md).
+On the computer, open Pane and choose **Use Pane on your phone** on Home. Point your phone's camera at the code and tap the link: it opens the Pane app, or Pane in the phone's browser. It works on any network, with terminals, alerts and dev server previews. Every computer the Pane app pairs with links to its other computers, so they reach each other for **Switch to**, ports and `runpane workspace`; a phone's browser reaches the computer whose code it scanned. Pane's servers pass the encrypted connection along without reading it, or you can [run your own relay](docs/SELF_HOSTED_RELAY.md). See [Pair a phone with a QR code](docs/QR_PAIRING.md).
 
 ### Connect with a code or Tailscale
 

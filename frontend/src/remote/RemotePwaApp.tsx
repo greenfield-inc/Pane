@@ -34,8 +34,7 @@ import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
 import { pairingErrorText, pairThisBrowser, takePairingSecret } from './runtime/relayBrowserPairing';
 import { RelayConnectionBar } from './components/RelayConnectionBar';
-import { getClientLabel, getRuntimeId, RemoteDaemonBrowserClient } from './runtime/remoteDaemonBrowserClient';
-import { linkWithSavedRelayComputers } from '../../../shared/remoteClient/relay';
+import { getClientLabel, getRuntimeId } from './runtime/remoteDaemonBrowserClient';
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
 import { findFirstSessionId, phoneShows, useRemoteSessionStore, visibleTabs } from './stores/remoteSessionStore';
@@ -595,15 +594,14 @@ export function RemotePwaApp() {
         phoneId: getRuntimeId(),
       });
       if (!computer) return;
-      const before = savedProfiles;
+      // Computers the Pane app already linked with this one come along. The browser links none itself:
+      // each computer's browser app has its own storage, so it never sees the others.
       setSavedProfiles(previous => [...previous.filter(profile => !linked.some(added => added.id === profile.id || added.baseUrl === profile.baseUrl)), ...linked]);
       await connectProfile(computer);
-      void linkWithSavedRelayComputers(computer, linked, before, profile => new RemoteDaemonBrowserClient(profile))
-        .catch(error => console.warn('[relay] linking failed', error));
     } catch (error) {
       setLastError(error instanceof Error ? pairingErrorText(error) : 'Pairing failed.');
     }
-  }, [connectProfile, savedProfiles, setLastError]);
+  }, [connectProfile, setLastError]);
 
   // Reconnects to the last used host once on open; a notification tap picks its own host instead.
   useEffect(() => {
