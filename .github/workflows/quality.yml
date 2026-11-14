@@ -474,18 +474,6 @@ jobs:
           direct/target
         key: relay-${{ runner.os }}-${{ hashFiles('relay/Cargo.lock', 'direct/Cargo.lock') }}
 
-    - name: Check formatting and lints
-      working-directory: relay
-      run: cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
-
-    - name: Run relay tests
-      working-directory: relay
-      run: cargo test --locked
-
-    - name: Build the relay
-      working-directory: relay
-      run: cargo build --locked
-
     - name: Check, test and build pane-direct
       working-directory: direct
       run: |
@@ -506,6 +494,18 @@ jobs:
         echo "PEBBLE_BIN=$RUNNER_TEMP/bin/pebble" >> "$GITHUB_ENV"
         echo "PEBBLE_DIR=$(go env GOMODCACHE)/github.com/letsencrypt/pebble/v2@v2.8.0" >> "$GITHUB_ENV"
         echo "PANE_RELAY_BIN=$GITHUB_WORKSPACE/relay/target/debug/pane-relay" >> "$GITHUB_ENV"
+
+    - name: Check formatting and lints
+      working-directory: relay
+      run: cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
+
+    - name: Run relay tests
+      working-directory: relay
+      run: cargo test --locked
+
+    - name: Build the relay
+      working-directory: relay
+      run: cargo build --locked
 
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm

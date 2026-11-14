@@ -90,13 +90,18 @@ done
 REGION_IPS="us=${IP_us},eu=${IP_eu},asia=${IP_asia}"
 RELAY_HOSTS="us=us.relay.$DOMAIN,eu=eu.relay.$DOMAIN,asia=asia.relay.$DOMAIN"
 NS_IPS="ns1=${IP_us},ns2=${IP_eu}"
-HELPERS="https://us.relay.$DOMAIN/v1/registry,https://eu.relay.$DOMAIN/v1/registry"
 
 # 3. The VMs. The startup script reads secrets from Secret Manager with the VM's
 #    own identity and (re)starts the container; rerunning it updates the image.
 for line in "${RELAYS[@]}"; do
   read -r name region zone ns <<<"$line"
+  # A helper updates itself in memory, so it lists only the other helper.
   dns_flag=""
+  case "$name" in
+    us) helpers="https://eu.relay.$DOMAIN/v1/registry" ;;
+    eu) helpers="https://us.relay.$DOMAIN/v1/registry" ;;
+    *) helpers="https://us.relay.$DOMAIN/v1/registry,https://eu.relay.$DOMAIN/v1/registry" ;;
+  esac
   if [ -n "$ns" ]; then dns_flag="--dns 0.0.0.0:53"; fi
   startup=$(cat <<EOF
 #!/bin/bash
@@ -121,7 +126,7 @@ docker run -d --name pane-relay --restart always \
   "$IMAGE" \
   --domain $DOMAIN --region $name --listen 0.0.0.0:443 \
   --relays $RELAY_HOSTS --region-ip $REGION_IPS --public-ip ${IP_us} \
-  --ns-ip $NS_IPS --registry-url $HELPERS $dns_flag \
+  --ns-ip $NS_IPS --registry-url $helpers $dns_flag \
   --direct-quic 0.0.0.0:7842 \
   --acme-email $ACME_EMAIL --acme-cache /data/acme \
   --fcm-project $PROJECT \${apns} ${ANDROID_SHA:+--android-cert-sha256 $ANDROID_SHA}
