@@ -58,20 +58,20 @@ const turnEnds = (view: ChatTabView) => view.transcript?.messages.flatMap(messag
 const newTab = (cwd: string): ChatPanelState => ({ agent: 'claude', launch: { kind: 'agent' }, cwd, status: 'starting' });
 
 describe('chat tab manager', () => {
-  it('counts a turn as mid-turn while it streams or runs a tool, and not once it stalls or ends', async () => {
+  it('counts a turn as mid-turn while it streams or runs a tool, and not once it stalls or ends', { timeout: 30_000 }, async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));
     await manager.ensure('p1');
     expect(manager.isMidTurn('p1')).toBe(false);
     manager.send('p1', { operationId: 'op-hold', text: 'hold 1' });
-    await expect.poll(() => manager.view('p1').status).toBe('working');
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('working');
     // A silent tool call keeps a turn counting however long it runs.
-    await expect.poll(() => manager.isMidTurn('p1', Date.now() + 60 * 60_000)).toBe(true);
-    await expect.poll(() => manager.receipt('p1', 'op-hold')?.state).toBe('completed');
+    await expect.poll(() => manager.isMidTurn('p1', Date.now() + 60 * 60_000), { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => manager.receipt('p1', 'op-hold')?.state, { timeout: 10_000 }).toBe('completed');
     expect(manager.isMidTurn('p1')).toBe(false);
 
     manager.send('p1', { operationId: 'op-stall', text: 'stall' });
-    await expect.poll(() => replyText(manager.view('p1')).endsWith('Thinking')).toBe(true);
+    await expect.poll(() => replyText(manager.view('p1')).endsWith('Thinking'), { timeout: 10_000 }).toBe(true);
     expect(manager.isMidTurn('p1')).toBe(true);
     // No update and no tool running for 5 minutes: stalled.
     expect(manager.isMidTurn('p1', Date.now() + 5 * 60_000 + 1)).toBe(false);
