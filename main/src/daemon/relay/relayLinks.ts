@@ -60,6 +60,9 @@ export interface RelayLinksDeps {
   log?(line: string): void;
 }
 
+/** The longest a call to a linked computer may take, start to finish. */
+const CALL_DEADLINE_MS = 30_000;
+
 function newToken() {
   const token = randomBytes(32).toString('base64url');
   return { token, tokenHash: createHash('sha256').update(token).digest('hex') };
@@ -349,7 +352,7 @@ export function createComputerCaller(options: { dial?: { host: string; port: num
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${profile.token}`, host: url.host },
       ca: options.extraCa ? [...tls.rootCertificates, options.extraCa] : undefined,
-      checkServerIdentity: fingerprint ? pinnedServerIdentity(fingerprint, profile.label) : undefined,
+      checkServerIdentity: fingerprint ? pinnedServerIdentity(fingerprint, profile.label) : tls.checkServerIdentity,
       timeout: 15_000,
     }, (response) => {
       let text = '';
@@ -364,7 +367,14 @@ export function createComputerCaller(options: { dial?: { host: string; port: num
           reject(new Error(`${profile.label} answered HTTP ${response.statusCode}.`));
         }
       });
+      // A computer that sleeps or drops off mid-reply ends the response with no 'end' or 'error'.
+      response.on('close', () => {
+        if (!response.complete) reject(new Error(`${profile.label} stopped answering partway through its reply.`));
+      });
     });
+    // The socket timeout restarts with every byte; this bounds the whole call.
+    const deadline = setTimeout(() => request.destroy(new Error(`${profile.label} did not finish answering within ${CALL_DEADLINE_MS / 1000} seconds.`)), CALL_DEADLINE_MS);
+    request.on('close', () => clearTimeout(deadline));
     request.on('timeout', () => request.destroy(new Error(`${profile.label} did not answer within 15 seconds.`)));
     request.on('error', reject);
     request.end(JSON.stringify({ channel, args }));
