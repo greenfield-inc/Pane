@@ -103,15 +103,37 @@ would send it itself:
   FCM v1 `message` (with its `token`), sent with the app's sender account:
   a service account key file, or with no key the service account attached to
   the relay's Google Compute Engine VM (`--fcm-project`). A
-  message without a device `token`, or with a `topic` or `condition`, gets
-  `bad-request`.
+  message without a device `token` gets `bad-request`.
+
+The relay accepts only the fields Pane sends, and each string at most
+1024 bytes; anything else gets `bad-request`:
+
+- iOS `payload`: `eventId`, `hostProfileId`, `notifyId`, `paneId`,
+  `sessionPaneId`, `panelId`, `notifyUi` (strings), `notifyClear` (boolean),
+  `notifyChoices` (up to 3 strings), and `aps` with `alert` (`title`,
+  `body`), `sound`, `thread-id`, `category`, and `mutable-content` or
+  `content-available` set to 1.
+- Android `message`: `token`, `notification` (`title`, `body`), `android`
+  (`priority` `"high"`, `notification.tag`), and `data` with string values
+  under `eventId`, `hostProfileId`, `notifyId`, `paneId`, `sessionPaneId`,
+  `panelId`, `notifyTag`, `notifyUi`, `notifyTitle`, `notifyBody`,
+  `notifyChoices` and `notifyClear`.
 
 The relay answers `{"t":"ok","req":"<n>","status":<provider HTTP status>,"body":"<provider body, at most 2 KiB>"}`
 when the provider answered, whatever its status, or
 `{"t":"error","req":"<n>","code":"throttled"|"unconfigured"|"bad-request"|"provider","message":"..."}`.
-Each computer may send 60 alerts an hour (`--limit-alerts-per-hour`); past
-that the relay answers `throttled` and logs one line per computer per hour.
-Payloads and device tokens are never logged.
+Each computer may send 60 alerts an hour (`--limit-alerts-per-hour`), and
+each device token may get 30 an hour from all computers together
+(`--limit-alerts-per-token-per-hour`). Past either, the relay answers
+`throttled` and logs one line per computer or device per hour. Payloads and
+device tokens are never logged.
+
+The relay does not check that a computer was paired with the device it
+alerts. Pairing runs end to end between the phone and the computer, so the
+relay never sees it, and proving it would need the phone to sign a grant
+the relay can check. The per-device limit bounds what any number of
+computers can send one phone, and the per-address limit on new computers
+bounds how many ids one sender can make.
 
 ## Data connection
 

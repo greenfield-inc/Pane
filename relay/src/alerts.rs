@@ -30,6 +30,8 @@ pub struct Alerts {
     fcm: Option<Fcm>,
     http: Http,
     limit: usize,
+    token_limit: usize,
+    /// Sliding hours by `id <id>` and `token <device token>`.
     windows: Mutex<HashMap<String, Window>>,
 }
 
@@ -84,6 +86,73 @@ fn bad(message: &str) -> Value {
     json!({"t": "error", "code": "bad-request", "message": message})
 }
 
+/// The longest string an alert field may hold.
+const MAX_FIELD: usize = 1024;
+
+fn short_str(v: &Value) -> bool {
+    v.as_str().is_some_and(|s| s.len() <= MAX_FIELD)
+}
+
+/// An object whose every field passes `check`.
+fn only(v: &Value, check: impl Fn(&str, &Value) -> bool) -> bool {
+    v.as_object()
+        .is_some_and(|o| o.iter().all(|(k, v)| check(k, v)))
+}
+
+fn title_body(v: &Value) -> bool {
+    only(v, |k, v| matches!(k, "title" | "body") && short_str(v))
+}
+
+/// The fields Pane puts in an iOS payload (main/src/daemon/mobilePushSender.ts).
+fn ios_payload_ok(payload: &Value) -> bool {
+    only(payload, |k, v| match k {
+        "eventId" | "hostProfileId" | "notifyId" | "paneId" | "sessionPaneId" | "panelId"
+        | "notifyUi" => short_str(v),
+        "notifyClear" => v.is_boolean(),
+        "notifyChoices" => v
+            .as_array()
+            .is_some_and(|a| a.len() <= 3 && a.iter().all(short_str)),
+        "aps" => only(v, |k, v| match k {
+            "alert" => title_body(v),
+            "sound" | "thread-id" | "category" => short_str(v),
+            "mutable-content" | "content-available" => *v == 1,
+            _ => false,
+        }),
+        _ => false,
+    })
+}
+
+/// The fields Pane puts in an FCM message (main/src/daemon/mobilePushSender.ts).
+fn android_message_ok(message: &Value) -> bool {
+    only(message, |k, v| match k {
+        "token" => short_str(v),
+        "notification" => title_body(v),
+        "android" => only(v, |k, v| match k {
+            "priority" => *v == "high",
+            "notification" => only(v, |k, v| k == "tag" && short_str(v)),
+            _ => false,
+        }),
+        "data" => only(v, |k, v| {
+            matches!(
+                k,
+                "eventId"
+                    | "hostProfileId"
+                    | "notifyId"
+                    | "paneId"
+                    | "sessionPaneId"
+                    | "panelId"
+                    | "notifyTag"
+                    | "notifyUi"
+                    | "notifyTitle"
+                    | "notifyBody"
+                    | "notifyChoices"
+                    | "notifyClear"
+            ) && short_str(v)
+        }),
+        _ => false,
+    })
+}
+
 fn parse(v: &Value) -> Result<Request<'_>, Value> {
     match v["platform"].as_str() {
         Some("ios") => {
@@ -103,8 +172,10 @@ fn parse(v: &Value) -> Result<Request<'_>, Value> {
                 Value::String(s) if s.len() <= 64 => Some(s.as_str()),
                 _ => return Err(bad("collapseId must be a string of at most 64 bytes")),
             };
-            if !v["payload"].is_object() {
-                return Err(bad("payload must be a JSON object"));
+            if !ios_payload_ok(&v["payload"]) {
+                return Err(bad(
+                    "payload must hold only the fields Pane sends, each string at most 1024 bytes",
+                ));
             }
             Ok(Request::Ios {
                 token,
@@ -116,8 +187,13 @@ fn parse(v: &Value) -> Result<Request<'_>, Value> {
         Some("android") => {
             let message = &v["message"];
             let to_device = message["token"].as_str().is_some_and(|t| !t.is_empty());
-            if !to_device || !message["topic"].is_null() || !message["condition"].is_null() {
+            if !to_device {
                 return Err(bad("message must be an FCM v1 message with a device token"));
+            }
+            if !android_message_ok(message) {
+                return Err(bad(
+                    "message must hold only the fields Pane sends, each string at most 1024 bytes",
+                ));
             }
             Ok(Request::Android { message })
         }
@@ -234,6 +310,7 @@ impl Alerts {
             fcm,
             http: Http::new(cfg.provider_ca.as_deref())?,
             limit: cfg.limit_alerts_per_hour,
+            token_limit: cfg.limit_alerts_per_token_per_hour,
             windows: Mutex::default(),
         })
     }
@@ -244,17 +321,20 @@ impl Alerts {
             Ok(r) => r,
             Err(answer) => return answer,
         };
-        let (platform, configured) = match request {
-            Request::Ios { .. } => ("ios", self.apns.is_some()),
-            Request::Android { .. } => ("android", self.fcm.is_some()),
+        let (platform, configured, token) = match &request {
+            Request::Ios { token, .. } => ("ios", self.apns.is_some(), *token),
+            Request::Android { message } => (
+                "android",
+                self.fcm.is_some(),
+                message["token"].as_str().unwrap_or(""),
+            ),
         };
         if !configured {
             return json!({"t": "error", "code": "unconfigured",
                 "message": format!("This relay has no {platform} push keys.")});
         }
-        if !self.admit(id) {
-            return json!({"t": "error", "code": "throttled",
-                "message": format!("At most {} alerts an hour per computer.", self.limit)});
+        if let Err(message) = self.admit(id, &format!("{platform} {token}")) {
+            return json!({"t": "error", "code": "throttled", "message": message});
         }
         let sent = tokio::time::timeout(TIMEOUT, async {
             match request {
@@ -293,26 +373,35 @@ impl Alerts {
         }
     }
 
-    /// Counts an alert against the computer's sliding hour; false when it is over the limit.
-    fn admit(&self, id: &str) -> bool {
+    /// Counts an alert against the computer's and the device's sliding hours;
+    /// an error names the limit it is over, and nothing is counted then.
+    fn admit(&self, id: &str, device: &str) -> Result<(), String> {
         let now = Instant::now();
         let mut windows = self.windows.lock().unwrap();
-        let w = windows.entry(id.to_string()).or_default();
-        while w.sent.front().is_some_and(|t| now - *t >= HOUR) {
-            w.sent.pop_front();
+        let checks = [
+            (format!("id {id}"), self.limit, "computer"),
+            (format!("token {device}"), self.token_limit, "device"),
+        ];
+        for (key, limit, what) in &checks {
+            let w = windows.entry(key.clone()).or_default();
+            while w.sent.front().is_some_and(|t| now - *t >= HOUR) {
+                w.sent.pop_front();
+            }
+            if w.sent.len() >= *limit {
+                if w.logged.is_none_or(|t| now - t >= HOUR) {
+                    w.logged = Some(now);
+                    tracing::warn!(id, limit, per = what, "alerts throttled");
+                }
+                return Err(format!("At most {limit} alerts an hour per {what}."));
+            }
         }
-        if w.sent.len() < self.limit {
-            w.sent.push_back(now);
-            return true;
+        for (key, _, _) in &checks {
+            windows.entry(key.clone()).or_default().sent.push_back(now);
         }
-        if w.logged.is_none_or(|t| now - t >= HOUR) {
-            w.logged = Some(now);
-            tracing::warn!(id, limit = self.limit, "alerts throttled");
-        }
-        false
+        Ok(())
     }
 
-    /// Forgets computers with no alerts in the last hour.
+    /// Forgets computers and devices with no alerts in the last hour.
     pub fn prune(&self) {
         let now = Instant::now();
         self.windows.lock().unwrap().retain(|_, w| {

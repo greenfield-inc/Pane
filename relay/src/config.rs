@@ -223,6 +223,14 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_LIMIT_ALERTS_PER_HOUR", default_value_t = 60)]
     pub limit_alerts_per_hour: usize,
 
+    /// Per device token, across all computers: push alerts an hour before answering `throttled`.
+    #[arg(
+        long,
+        env = "PANE_RELAY_LIMIT_ALERTS_PER_TOKEN_PER_HOUR",
+        default_value_t = 30
+    )]
+    pub limit_alerts_per_token_per_hour: usize,
+
     #[arg(long, hide = true, default_value = "https://api.push.apple.com")]
     pub apns_url: String,
 

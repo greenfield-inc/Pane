@@ -1210,7 +1210,9 @@ async fn ios_alerts_reach_apns_with_a_signed_provider_token() {
     let (env, key) = apns_env(&apns).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
 
-    let payload = json!({"aps": {"content-available": 1}, "paneEvent": "x"});
+    // A Notify clear, as Pane sends it (mobilePushSender.ts).
+    let payload = json!({"aps": {"content-available": 1}, "notifyClear": true,
+        "eventId": "e1", "hostProfileId": "h1", "notifyId": "n1"});
     agent
         .send(
             json!({"t": "alert", "req": "7", "platform": "ios", "token": "abcdef0123",
@@ -1245,7 +1247,7 @@ async fn ios_alerts_reach_apns_with_a_signed_provider_token() {
     agent
         .send(
             json!({"t": "alert", "req": "8", "platform": "ios", "token": "abcdef0123",
-            "pushType": "alert", "payload": {"aps": {"alert": "hi"}}}),
+            "pushType": "alert", "payload": {"aps": {"alert": {"title": "Build", "body": "Build is blocked"}}}}),
         )
         .await;
     assert_eq!(agent.next().await["t"], "ok");
@@ -1364,7 +1366,7 @@ async fn android_alerts_reach_fcm_with_an_access_token() {
     let (env, mut fcm) = fcm_env(&[]).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
 
-    let message = json!({"token": "fcm-device-token", "data": {"paneEvent": "x"},
+    let message = json!({"token": "fcm-device-token", "data": {"eventId": "e1", "notifyClear": "1"},
         "android": {"priority": "high"}});
     for req in ["1", "2"] {
         agent
@@ -1518,6 +1520,107 @@ async fn alerts_past_the_hourly_limit_are_throttled() {
         fcm.next().await;
     }
     assert!(fcm.received.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn alerts_to_one_device_are_capped_across_computers() {
+    let (env, _fcm) = fcm_env(&["--limit-alerts-per-token-per-hour", "2"]).await;
+    let mut a = Agent::connect(&env, &SigningKey::generate()).await;
+    let mut b = Agent::connect(&env, &SigningKey::generate()).await;
+    let alert = |req: &str, token: &str| {
+        json!({"t": "alert", "req": req, "platform": "android",
+        "message": {"token": token, "data": {"eventId": "e1"}}})
+    };
+    for req in ["1", "2"] {
+        a.send(alert(req, "phone-1")).await;
+        assert_eq!(a.next().await["t"], "ok");
+    }
+    // Another computer, same phone: over the phone's limit.
+    b.send(alert("3", "phone-1")).await;
+    assert_eq!(b.next().await["code"], "throttled");
+    b.send(alert("4", "phone-2")).await;
+    assert_eq!(b.next().await["t"], "ok");
+}
+
+#[tokio::test]
+async fn alerts_carry_only_the_fields_pane_sends() {
+    // Without push keys, a frame that passes the checks answers `unconfigured`.
+    let env = Env::start(&[]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let ios = |payload: Value| {
+        json!({"t": "alert", "req": "1", "platform": "ios", "token": "abcd",
+            "pushType": "alert", "collapseId": "c1", "payload": payload})
+    };
+    let android = |message: Value| json!({"t": "alert", "req": "1", "platform": "android", "message": message});
+    let long = "a".repeat(1025);
+    let cases = [
+        // A Notify question with its buttons.
+        (
+            ios(
+                json!({"eventId": "e1", "hostProfileId": "h1", "notifyId": "n1", "paneId": "p1",
+            "sessionPaneId": "p1", "panelId": "t1", "notifyUi": "options",
+            "notifyChoices": ["Yes", "No"],
+            "aps": {"alert": {"title": "Build", "body": "Build has a question"}, "sound": "default",
+                "thread-id": "p1", "category": "options", "mutable-content": 1}}),
+            ),
+            "unconfigured",
+        ),
+        (
+            ios(json!({"aps": {}, "url": "https://example.com"})),
+            "bad-request",
+        ),
+        (
+            ios(json!({"aps": {"alert": {"title": "x", "launch-image": "x"}}})),
+            "bad-request",
+        ),
+        (
+            ios(json!({"aps": {"alert": {"title": long}}})),
+            "bad-request",
+        ),
+        (
+            ios(json!({"aps": {}, "notifyChoices": ["a", "b", "c", "d"]})),
+            "bad-request",
+        ),
+        // An agent alert, and a data-only Notify question.
+        (
+            android(
+                json!({"token": "t", "notification": {"title": "Build", "body": "Build is blocked"},
+            "android": {"notification": {"tag": "c1"}}, "data": {"eventId": "e1", "paneId": "p1"}}),
+            ),
+            "unconfigured",
+        ),
+        (
+            android(json!({"token": "t", "android": {"priority": "high"},
+            "data": {"notifyTitle": "Build", "notifyBody": "Build has a question",
+                "notifyChoices": "[\"Yes\",\"No\"]", "notifyTag": "c1"}})),
+            "unconfigured",
+        ),
+        (
+            android(json!({"token": "t", "data": {"link": "https://example.com"}})),
+            "bad-request",
+        ),
+        (
+            android(json!({"token": "t", "data": {"eventId": 7}})),
+            "bad-request",
+        ),
+        (
+            android(json!({"token": "t", "notification": {"title": "x", "image": "https://x"}})),
+            "bad-request",
+        ),
+        (android(json!({"token": "t", "webpush": {}})), "bad-request"),
+        (
+            android(json!({"token": "t", "android": {"priority": "high", "ttl": "0s"}})),
+            "bad-request",
+        ),
+        (
+            android(json!({"token": "t", "data": {"notifyBody": long}})),
+            "bad-request",
+        ),
+    ];
+    for (frame, want) in cases {
+        agent.send(frame.clone()).await;
+        assert_eq!(agent.next().await["code"], want, "{frame}");
+    }
 }
 
 #[tokio::test]

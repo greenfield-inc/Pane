@@ -88,6 +88,7 @@ Every flag also reads the environment variable in brackets.
 | `--fcm-service-account` [`PANE_RELAY_FCM_SERVICE_ACCOUNT`] | | Firebase service account JSON key |
 | `--fcm-project` [`PANE_RELAY_FCM_PROJECT`] | | Firebase project id. Alone, Android alerts use the access token of the service account attached to the Google Compute Engine VM, from the metadata server, with no key file. With `--fcm-service-account`, overrides that key's project. With neither flag, Android alerts answer `unconfigured` |
 | `--limit-alerts-per-hour` | 60 | Per computer, over a sliding hour; then `throttled` |
+| `--limit-alerts-per-token-per-hour` | 30 | Per device token across all computers, over a sliding hour; then `throttled` |
 
 `pane-relay --help` lists the remaining environment variable names.
 
