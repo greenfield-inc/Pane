@@ -369,7 +369,7 @@ export class GlassesAccess {
     this.lastUsedWrites.set(id, now);
     const lastUsedAt = new Date(now).toISOString();
     void this.write((clients) => clients.map((client) => (client.id === id ? { ...client, lastUsedAt } : client)))
-      .catch((error) => this.log(`[Pane glasses] could not save last use: ${error instanceof Error ? error.message : String(error)}`));
+      .catch((error) => this.log(`[Pane devices] could not save when a device was last used: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   /** Milliseconds left on this source's lockout, or 0. */
