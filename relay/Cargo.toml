@@ -8,11 +8,15 @@ license = "AGPL-3.0-only"
 publish = false
 
 [dependencies]
+bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 data-encoding = "2.11.1"
 getrandom = "0.4.3"
+h2 = "0.4.19"
 hickory-proto = { version = "0.26.3", default-features = false, features = ["std"] }
+http = "1.5.0"
 p256 = { version = "0.14.0", features = ["ecdsa", "pkcs8"] }
+ring = "0.17.14"
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-native-certs = "0.8.5"

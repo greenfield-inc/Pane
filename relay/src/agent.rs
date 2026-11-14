@@ -215,9 +215,12 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
                 let _ = tx.send(Out::Frame(frame(answer)));
             }
             "alert" => {
-                let answer = json!({"t": "error", "req": req, "code": "unsupported",
-                    "message": "This relay does not forward push alerts yet."});
-                let _ = tx.send(Out::Frame(frame(answer)));
+                let (state, tx, id) = (state.clone(), tx.clone(), id.clone());
+                tokio::spawn(async move {
+                    let mut answer = state.alerts.deliver(&id, &v).await;
+                    answer["req"] = req;
+                    let _ = tx.send(Out::Frame(frame(answer)));
+                });
             }
             _ => {}
         }

@@ -112,6 +112,55 @@ pub struct Config {
     /// SHA-256 fingerprints of the Android app's signing certificate, for assetlinks.json.
     #[arg(long, env = "PANE_RELAY_ANDROID_CERT_SHA256", value_delimiter = ',')]
     pub android_cert_sha256: Vec<String>,
+
+    /// APNs auth key (.p8) for the Pane app; with --apns-key-id and --apns-team-id.
+    #[arg(long, env = "PANE_RELAY_APNS_KEY_PATH")]
+    pub apns_key_path: Option<PathBuf>,
+
+    /// Key id of --apns-key-path.
+    #[arg(long, env = "PANE_RELAY_APNS_KEY_ID")]
+    pub apns_key_id: Option<String>,
+
+    /// Apple developer team id that owns --apns-key-path.
+    #[arg(long, env = "PANE_RELAY_APNS_TEAM_ID")]
+    pub apns_team_id: Option<String>,
+
+    /// The Pane app's bundle id, sent as apns-topic.
+    #[arg(
+        long,
+        env = "PANE_RELAY_APNS_TOPIC",
+        default_value = "com.dcouple.pane.mobile"
+    )]
+    pub apns_topic: String,
+
+    /// Firebase service account JSON key for the Pane app's FCM sender.
+    #[arg(long, env = "PANE_RELAY_FCM_SERVICE_ACCOUNT")]
+    pub fcm_service_account: Option<PathBuf>,
+
+    /// Per computer: push alerts an hour before answering `throttled`.
+    #[arg(long, env = "PANE_RELAY_LIMIT_ALERTS_PER_HOUR", default_value_t = 60)]
+    pub limit_alerts_per_hour: usize,
+
+    #[arg(long, hide = true, default_value = "https://api.push.apple.com")]
+    pub apns_url: String,
+
+    #[arg(
+        long,
+        hide = true,
+        default_value = "https://api.sandbox.push.apple.com"
+    )]
+    pub apns_sandbox_url: String,
+
+    #[arg(long, hide = true, default_value = "https://fcm.googleapis.com")]
+    pub fcm_url: String,
+
+    /// Overrides the service account's token_uri.
+    #[arg(long, hide = true)]
+    pub fcm_token_url: Option<String>,
+
+    /// Extra PEM root certificates trusted for push providers (tests).
+    #[arg(long, hide = true)]
+    pub provider_ca: Option<PathBuf>,
 }
 
 impl Config {

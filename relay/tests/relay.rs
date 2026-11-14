@@ -8,6 +8,7 @@ use p256::ecdsa::{DerSignature, SigningKey, signature::Signer};
 use p256::elliptic_curve::Generate;
 use p256::pkcs8::{DecodePrivateKey, EncodePublicKey};
 use pane_relay::{Config, Relay};
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use serde_json::{Value, json};
 use std::net::{Ipv4Addr, SocketAddr};
@@ -603,5 +604,413 @@ async fn new_connections_past_the_limit_are_slowed_then_cut() {
     assert_eq!(
         (close["t"].as_str(), close["code"].as_str()),
         (Some("close"), Some("over-limit"))
+    );
+}
+
+/// One request a fake push provider received.
+struct Received {
+    path: String,
+    headers: http::HeaderMap,
+    body: Vec<u8>,
+}
+
+type Respond = Arc<dyn Fn(&str, &[u8]) -> (u16, String) + Send + Sync>;
+
+/// A fake push provider: HTTP/2 over TLS on loopback with a self-signed certificate
+/// written to `ca`, answering each request with `respond(path, body)`.
+struct Provider {
+    url: String,
+    ca: PathBuf,
+    received: mpsc::UnboundedReceiver<Received>,
+}
+
+impl Provider {
+    async fn start(
+        respond: impl Fn(&str, &[u8]) -> (u16, String) + Send + Sync + 'static,
+    ) -> Provider {
+        let respond: Respond = Arc::new(respond);
+        let ck = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()]).unwrap();
+        let ca = scratch_dir().join("provider.pem");
+        std::fs::write(&ca, ck.cert.pem()).unwrap();
+        let mut tls = rustls::ServerConfig::builder_with_provider(provider())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![ck.cert.der().clone()],
+                PrivateKeyDer::try_from(ck.signing_key.serialize_der()).unwrap(),
+            )
+            .unwrap();
+        tls.alpn_protocols = vec![b"h2".to_vec()];
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "https://127.0.0.1:{}",
+            listener.local_addr().unwrap().port()
+        );
+        let (tx, received) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let (acceptor, respond, tx) = (acceptor.clone(), respond.clone(), tx.clone());
+                tokio::spawn(async move {
+                    let tls = acceptor.accept(tcp).await.unwrap();
+                    let mut conn = h2::server::handshake(tls).await.unwrap();
+                    while let Some(Ok((req, mut answer))) = conn.accept().await {
+                        let (respond, tx) = (respond.clone(), tx.clone());
+                        tokio::spawn(async move {
+                            let (parts, mut body) = req.into_parts();
+                            let mut bytes = Vec::new();
+                            while let Some(chunk) = body.data().await {
+                                let chunk = chunk.unwrap();
+                                let _ = body.flow_control().release_capacity(chunk.len());
+                                bytes.extend_from_slice(&chunk);
+                            }
+                            let path = parts.uri.path().to_string();
+                            let (status, text) = respond(&path, &bytes);
+                            let _ = tx.send(Received {
+                                path,
+                                headers: parts.headers,
+                                body: bytes,
+                            });
+                            let head = http::Response::builder().status(status).body(()).unwrap();
+                            let mut stream = answer.send_response(head, false).unwrap();
+                            stream.send_data(bytes::Bytes::from(text), true).unwrap();
+                        });
+                    }
+                });
+            }
+        });
+        Provider { url, ca, received }
+    }
+
+    async fn next(&mut self) -> Received {
+        tokio::time::timeout(WAIT, self.received.recv())
+            .await
+            .expect("provider request in time")
+            .unwrap()
+    }
+}
+
+impl Drop for Provider {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(self.ca.parent().unwrap());
+    }
+}
+
+fn header<'a>(r: &'a Received, name: &str) -> Option<&'a str> {
+    r.headers.get(name).map(|v| v.to_str().unwrap())
+}
+
+/// Splits a JWT and returns its decoded header, claims, signing input and signature.
+fn split_jwt(token: &str) -> (Value, Value, String, Vec<u8>) {
+    let parts: Vec<&str> = token.split('.').collect();
+    assert_eq!(parts.len(), 3, "{token}");
+    let decode = |s: &str| BASE64URL_NOPAD.decode(s.as_bytes()).unwrap();
+    (
+        serde_json::from_slice(&decode(parts[0])).unwrap(),
+        serde_json::from_slice(&decode(parts[1])).unwrap(),
+        format!("{}.{}", parts[0], parts[1]),
+        decode(parts[2]),
+    )
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
+/// Starts a relay with APNs keys pointing at `apns` (sandbox at `<url>/sandbox`); returns it
+/// with the key the relay signs with.
+async fn apns_env(apns: &Provider) -> (Env, SigningKey) {
+    let kp = rcgen::KeyPair::generate().unwrap();
+    let key_path = apns.ca.with_file_name("apns.p8");
+    std::fs::write(&key_path, kp.serialize_pem()).unwrap();
+    let sandbox = format!("{}/sandbox", apns.url);
+    let env = Env::start(&[
+        "--apns-key-path",
+        key_path.to_str().unwrap(),
+        "--apns-key-id",
+        "KEY1234567",
+        "--apns-team-id",
+        "TEAM123456",
+        "--apns-url",
+        &apns.url,
+        "--apns-sandbox-url",
+        &sandbox,
+        "--provider-ca",
+        apns.ca.to_str().unwrap(),
+    ])
+    .await;
+    (
+        env,
+        SigningKey::from_pkcs8_der(&kp.serialize_der()).unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn ios_alerts_reach_apns_with_a_signed_provider_token() {
+    let mut apns = Provider::start(|_, _| (200, String::new())).await;
+    let (env, key) = apns_env(&apns).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+
+    let payload = json!({"aps": {"content-available": 1}, "paneEvent": "x"});
+    agent
+        .send(
+            json!({"t": "alert", "req": "7", "platform": "ios", "token": "abcdef0123",
+            "pushType": "background", "collapseId": "session-1", "payload": payload}),
+        )
+        .await;
+    assert_eq!(
+        agent.next().await,
+        json!({"t": "ok", "req": "7", "status": 200, "body": ""})
+    );
+    let r = apns.next().await;
+    assert_eq!(r.path, "/3/device/abcdef0123");
+    assert_eq!(header(&r, "apns-topic"), Some("com.dcouple.pane.mobile"));
+    assert_eq!(header(&r, "apns-push-type"), Some("background"));
+    assert_eq!(header(&r, "apns-priority"), Some("5"));
+    assert_eq!(header(&r, "apns-collapse-id"), Some("session-1"));
+    assert_eq!(serde_json::from_slice::<Value>(&r.body).unwrap(), payload);
+
+    let token = header(&r, "authorization")
+        .unwrap()
+        .strip_prefix("bearer ")
+        .unwrap();
+    let (head, claims, input, sig) = split_jwt(token);
+    assert_eq!(head, json!({"alg": "ES256", "kid": "KEY1234567"}));
+    assert_eq!(claims["iss"], "TEAM123456");
+    assert!((claims["iat"].as_i64().unwrap() - unix_now()).abs() < 60);
+    let sig = p256::ecdsa::Signature::from_slice(&sig).unwrap();
+    use p256::ecdsa::signature::Verifier;
+    key.verifying_key().verify(input.as_bytes(), &sig).unwrap();
+
+    // An alert push has the default priority and no collapse id, and reuses the token.
+    agent
+        .send(
+            json!({"t": "alert", "req": "8", "platform": "ios", "token": "abcdef0123",
+            "pushType": "alert", "payload": {"aps": {"alert": "hi"}}}),
+        )
+        .await;
+    assert_eq!(agent.next().await["t"], "ok");
+    let r2 = apns.next().await;
+    assert_eq!(header(&r2, "apns-push-type"), Some("alert"));
+    assert_eq!(header(&r2, "apns-priority"), None);
+    assert_eq!(header(&r2, "apns-collapse-id"), None);
+    assert_eq!(header(&r2, "authorization"), header(&r, "authorization"));
+}
+
+#[tokio::test]
+async fn bad_device_token_retries_the_apns_sandbox_once() {
+    let mut apns = Provider::start(|path, _| match path {
+        p if p.starts_with("/sandbox/") && p.ends_with("/dead") => {
+            (410, r#"{"reason":"Unregistered"}"#.to_string())
+        }
+        p if p.starts_with("/sandbox/") => (200, String::new()),
+        _ => (400, r#"{"reason":"BadDeviceToken"}"#.to_string()),
+    })
+    .await;
+    let (env, _) = apns_env(&apns).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+
+    agent
+        .send(
+            json!({"t": "alert", "req": "1", "platform": "ios", "token": "beef",
+            "pushType": "alert", "payload": {"aps": {}}}),
+        )
+        .await;
+    assert_eq!(
+        agent.next().await,
+        json!({"t": "ok", "req": "1", "status": 200, "body": ""})
+    );
+    assert_eq!(apns.next().await.path, "/3/device/beef");
+    assert_eq!(apns.next().await.path, "/sandbox/3/device/beef");
+
+    // The provider's refusal comes back as `ok` with its status and body.
+    agent
+        .send(
+            json!({"t": "alert", "req": "2", "platform": "ios", "token": "dead",
+            "pushType": "alert", "payload": {"aps": {}}}),
+        )
+        .await;
+    assert_eq!(
+        agent.next().await,
+        json!({"t": "ok", "req": "2", "status": 410, "body": r#"{"reason":"Unregistered"}"#})
+    );
+}
+
+const FCM_KEY: &str = r"-----BEGIN PRIVATE KEY-----
+MIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQDbav2ROk/KqS7Y
+7m7IUh2in5933pgk3i7tn4XmJtZ4MEKB499UD1rhThN5hv6Iv7+LItJ+mTsVhfQd
+QKbendmLE8qCMlLghTXaYLctB9SGF8Ie8hGU/VDfx+ouUXXB/QPcwVHIW1+bsZ6w
+WPdYs1vsoZfJiaFCLsBTS9lgdfbuCWgiLxHmGvM8hBag5nUT8c8b2AeNibaFuryE
+Jnimq1gFdKSkx2Ro8p1VUQ3JWq5Jh3AP4M8KGeJX3f+Frv9LN3GladRzeEsab0zO
+CrFACLsW9r6sV5kz2+BJAYEsFEEtLo7fHf5TCMp5fCeEP1O2cTX4mDL9U4cJGa3l
+mBValddxAgMBAAECgf8XC7oGqQBjwXzx/qjBlSKHtlCQ6Yln8naDp1SzmghI0H8m
+Qt4QBdaE3qRZNIR4ycTQ3PIo1Ue24iZvwcKw2hGIjM7TDAINuaK/bVTZM077OMI4
+q+bWSlD2kcd0kzVjD/Yd4FUGy3LKXIftrpiHHN88j62xxEENWwQ7xoc0KTcYT5rk
+KyIf47pHz5dHe5zyuduj5S/LtRX6xRpAxZ5F0gmHx6Iu2hXRJjx2To1YzCrTOxPw
+/pdpyCLSooicYMGogZnRJYpmNtk6VYAmWfa7oZu0g0e6tRIskO+E8eFccX7M6ZZE
+WQB2YFEFadNTq7shoUfu/I+zujtTMcZuTLI8ncMCgYEA728br9tEPZM4MQlnojnq
+CIRW2+xq7IYDcv5agAFw89t0+IuHieo9sw48hDhHytHw7cz5K1ZI5wS8EA1crdf2
+ePMxDjRif1HchV8ns8bKBYDIzyu/h3UZRmnzFB4aARwnUeCw3DyWr8vrau2smu7U
+ZFgzNgCCAaF9bx1MqCwYHecCgYEA6plauefB0khZ9q3o65WhB6Jhs3Oe5/duYU/I
+4bgrE6oC1nliSXViUVQYehiVgr+5iu5GZdb2ZARRd8xiep0aVup2giujNSHDOMZ/
+I4HThSSO7V5CkiNXN9Q1MNh71wDIXrtOmAd57bqmtgUouSf5D1FWlaXardTGaOmg
+EyzixOcCgYAlbtN/TOKAVfHlCLlhDXjfWAFUZMPasqD7a3SuqosENP02lmncT/jR
+c5pWeY4P0X6/TtptwhGnvH/CarRgoXDxO+QhemMj0KKPX28PljajYZ0Ddq18+fu3
+nHzaWlJqdgJXtK8x328XkOP/VaU0m74s6fUnrjClHKBFrOj9KdejZQKBgH+V62uT
+iSuNwa+QoU4OUEdQnoXz6YYKYPN3aq6ndHX7ThPKbBO7TT8h1zX/zMAQ+R1/vLWC
+FPoMByp580zvx/VhChZ9GQO6WuuzuE1dO+X7HegmDVpg8fwg4tSvx5oEiPRMNdAk
+sMEDc8smPyGDhcY43DgCvU0wnL9N34rOLH4dAoGBALQ0PpYkPg6TZTyNIaZh3G3u
+r1LvvFm7p9ZhRc93NdbkUgNS5qCeJJP43QVkdUARJ/7YHN2IR5MgqoNbXGTQ4jAB
+5XWhBqACkvkVsOfkoU3S2ZgzxfhVQNbo0wFeAWy43inV2W3eCFu8ONT8NPPNLamd
+SXWY4mwchNxCE1PQ96IH
+-----END PRIVATE KEY-----
+";
+
+/// Starts a fake FCM (token endpoint at /token) and a relay using it.
+async fn fcm_env(extra: &[&str]) -> (Env, Provider) {
+    let fcm = Provider::start(|path, _| match path {
+        "/token" => (
+            200,
+            r#"{"access_token":"ya29.test","expires_in":3600,"token_type":"Bearer"}"#.to_string(),
+        ),
+        "/v1/projects/pane-test/messages:send" => (
+            200,
+            r#"{"name":"projects/pane-test/messages/1"}"#.to_string(),
+        ),
+        _ => (404, String::new()),
+    })
+    .await;
+    let sa = json!({"type": "service_account", "project_id": "pane-test",
+        "private_key": FCM_KEY, "client_email": "sender@pane-test.iam.gserviceaccount.com",
+        "token_uri": "https://oauth2.googleapis.com/token"});
+    let sa_path = fcm.ca.with_file_name("sa.json");
+    std::fs::write(&sa_path, sa.to_string()).unwrap();
+    let token_url = format!("{}/token", fcm.url);
+    let mut args = vec![
+        "--fcm-service-account",
+        sa_path.to_str().unwrap(),
+        "--fcm-url",
+        &fcm.url,
+        "--fcm-token-url",
+        &token_url,
+        "--provider-ca",
+        fcm.ca.to_str().unwrap(),
+    ];
+    args.extend_from_slice(extra);
+    (Env::start(&args).await, fcm)
+}
+
+#[tokio::test]
+async fn android_alerts_reach_fcm_with_an_access_token() {
+    let (env, mut fcm) = fcm_env(&[]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+
+    let message = json!({"token": "fcm-device-token", "data": {"paneEvent": "x"},
+        "android": {"priority": "high"}});
+    for req in ["1", "2"] {
+        agent
+            .send(json!({"t": "alert", "req": req, "platform": "android", "message": message}))
+            .await;
+        assert_eq!(
+            agent.next().await,
+            json!({"t": "ok", "req": req, "status": 200,
+                "body": r#"{"name":"projects/pane-test/messages/1"}"#})
+        );
+    }
+
+    // One token request (cached for the second alert), then the two sends.
+    let t = fcm.next().await;
+    assert_eq!(t.path, "/token");
+    let form = String::from_utf8(t.body).unwrap();
+    let assertion = form
+        .strip_prefix("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=")
+        .unwrap();
+    let (head, claims, input, sig) = split_jwt(assertion);
+    assert_eq!(head["alg"], "RS256");
+    assert_eq!(claims["iss"], "sender@pane-test.iam.gserviceaccount.com");
+    assert_eq!(
+        claims["scope"],
+        "https://www.googleapis.com/auth/firebase.messaging"
+    );
+    assert_eq!(claims["aud"], format!("{}/token", fcm.url));
+    assert_eq!(
+        claims["exp"].as_i64().unwrap() - claims["iat"].as_i64().unwrap(),
+        3600
+    );
+    let der = PrivateKeyDer::from_pem_slice(FCM_KEY.as_bytes()).unwrap();
+    let kp = ring::signature::RsaKeyPair::from_pkcs8(der.secret_der()).unwrap();
+    ring::signature::UnparsedPublicKey::new(
+        &ring::signature::RSA_PKCS1_2048_8192_SHA256,
+        kp.public().as_ref(),
+    )
+    .verify(input.as_bytes(), &sig)
+    .unwrap();
+
+    for _ in 0..2 {
+        let send = fcm.next().await;
+        assert_eq!(send.path, "/v1/projects/pane-test/messages:send");
+        assert_eq!(header(&send, "authorization"), Some("Bearer ya29.test"));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&send.body).unwrap(),
+            json!({"message": message})
+        );
+    }
+}
+
+#[tokio::test]
+async fn alerts_past_the_hourly_limit_are_throttled() {
+    let (env, mut fcm) = fcm_env(&["--limit-alerts-per-hour", "2"]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let alert = |req: &str| {
+        json!({"t": "alert", "req": req, "platform": "android",
+        "message": {"token": "fcm-device-token", "data": {}}})
+    };
+    for req in ["1", "2"] {
+        agent.send(alert(req)).await;
+        assert_eq!(agent.next().await["t"], "ok");
+    }
+    agent.send(alert("3")).await;
+    let answer = agent.next().await;
+    assert_eq!(
+        (answer["req"].as_str(), answer["code"].as_str()),
+        (Some("3"), Some("throttled"))
+    );
+
+    // A token request and two sends; the throttled alert never reached FCM.
+    for _ in 0..3 {
+        fcm.next().await;
+    }
+    assert!(fcm.received.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn alerts_without_keys_or_with_bad_frames_are_refused() {
+    let env = Env::start(&[]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    agent
+        .send(
+            json!({"t": "alert", "req": "1", "platform": "ios", "token": "abcd",
+            "pushType": "alert", "payload": {}}),
+        )
+        .await;
+    assert_eq!(agent.next().await["code"], "unconfigured");
+    agent
+        .send(json!({"t": "alert", "req": "2", "platform": "android",
+            "message": {"token": "t", "data": {}}}))
+        .await;
+    assert_eq!(agent.next().await["code"], "unconfigured");
+    // A message to a topic instead of one device is refused.
+    agent
+        .send(json!({"t": "alert", "req": "3", "platform": "android",
+            "message": {"topic": "everyone", "data": {}}}))
+        .await;
+    let answer = agent.next().await;
+    assert_eq!(
+        (answer["req"].as_str(), answer["code"].as_str()),
+        (Some("3"), Some("bad-request"))
     );
 }

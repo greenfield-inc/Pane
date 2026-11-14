@@ -1,4 +1,5 @@
 import { decodeUpdateIntent } from '../../../../shared/remoteClient/updateIntent';
+import { pinnedServerIdentity } from '../relay/keyPinning';
 import { EventEmitter } from 'events';
 import { lookup as defaultLookup, Resolver } from 'dns';
 import http, { type IncomingMessage, type RequestOptions } from 'http';
@@ -186,6 +187,7 @@ export type HostHealthCheck =
 
 type RemoteRequestOptions = RequestOptions & {
   servername?: string;
+  checkServerIdentity?: ReturnType<typeof pinnedServerIdentity>;
 };
 
 export class RemotePaneClient {
@@ -348,6 +350,7 @@ export class RemotePaneClient {
     const lookup = createTailscaleFallbackLookup(this.profile, endpoint, this.dnsLookup);
     const options: ClientOptions & { lookup?: LookupFunction } = { headers: this.authorizationHeader() };
     if (lookup) options.lookup = lookup;
+    if (this.profile.relay) options.agent = new https.Agent({ checkServerIdentity: pinnedServerIdentity(this.profile.relay.fingerprint, this.profile.label) });
     endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:';
     return new WebSocket(endpoint, options);
   }
@@ -792,6 +795,7 @@ export class RemotePaneClient {
     }
     if (endpoint.protocol === 'https:') {
       requestOptions.servername = endpoint.hostname;
+      if (this.profile.relay) requestOptions.checkServerIdentity = pinnedServerIdentity(this.profile.relay.fingerprint, this.profile.label);
     }
     return requestOptions;
   }

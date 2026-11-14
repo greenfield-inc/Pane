@@ -1,6 +1,7 @@
 //! Pane relay: routes TLS by SNI to connected Pane computers (see PROTOCOL.md).
 
 mod agent;
+mod alerts;
 mod api;
 mod client;
 pub mod config;
@@ -80,7 +81,8 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         .map(|(u, _)| u.local_addr())
         .transpose()?;
     let blocklist = cfg.blocklist.clone();
-    let state = Arc::new(State::new(cfg, domain, registry));
+    let alerts = alerts::Alerts::load(&cfg)?;
+    let state = Arc::new(State::new(cfg, domain, registry, alerts));
     let mut blocklist_mtime = None;
     if let Some(path) = &blocklist {
         reload_blocklist(&state, path, &mut blocklist_mtime).await;
@@ -214,6 +216,7 @@ async fn maintenance(state: Arc<State>, blocklist: Option<PathBuf>, mut mtime: O
             reload_blocklist(&state, path, &mut mtime).await;
         }
         state.prune_usage();
+        state.alerts.prune();
         // Re-send connected computers so a restarted helper relearns them.
         if state.cfg.registry_url.is_some() && last_resync.elapsed() >= REGISTRY_RESYNC {
             last_resync = tokio::time::Instant::now();

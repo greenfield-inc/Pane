@@ -57,6 +57,10 @@ Every flag also reads the environment variable in brackets.
 | `--limit-conns-per-min` | 100 | Per computer; slowed above it, cut above twice it |
 | `--idle-timeout-secs` | 600 | Close client connections idle this long |
 | `--android-cert-sha256` | | App signing fingerprints for `assetlinks.json` |
+| `--apns-key-path`, `--apns-key-id`, `--apns-team-id` [`PANE_RELAY_APNS_KEY_PATH`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID`] | | The Pane app's APNs auth key (.p8), its key id and team id; without them iOS alerts answer `unconfigured` |
+| `--apns-topic` [`PANE_RELAY_APNS_TOPIC`] | `com.dcouple.pane.mobile` | The app's bundle id, sent as `apns-topic` |
+| `--fcm-service-account` [`PANE_RELAY_FCM_SERVICE_ACCOUNT`] | | Firebase service account JSON key; without it Android alerts answer `unconfigured` |
+| `--limit-alerts-per-hour` | 60 | Per computer, over a sliding hour; then `throttled` |
 
 `pane-relay --help` lists the remaining environment variable names.
 

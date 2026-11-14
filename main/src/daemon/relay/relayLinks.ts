@@ -1,4 +1,5 @@
-import { createHash, randomBytes, randomUUID, X509Certificate } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
+import { pinnedServerIdentity } from './keyPinning';
 import https from 'https';
 import tls from 'tls';
 import { PaneError } from '../../../../shared/paneError';
@@ -280,15 +281,7 @@ export function createComputerCaller(options: { dial?: { host: string; port: num
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${profile.token}`, host: url.host },
       ca: options.extraCa ? [...tls.rootCertificates, options.extraCa] : undefined,
-      checkServerIdentity: (host, certificate) => {
-        const identity = tls.checkServerIdentity(host, certificate);
-        if (identity) return identity;
-        if (!fingerprint) return undefined;
-        const key = new X509Certificate(certificate.raw).publicKey.export({ format: 'der', type: 'spki' });
-        return createHash('sha256').update(key).digest('base64url') === fingerprint
-          ? undefined
-          : new Error(`${profile.label} presented a key it did not pair with.`);
-      },
+      checkServerIdentity: fingerprint ? pinnedServerIdentity(fingerprint, profile.label) : undefined,
       timeout: 15_000,
     }, (response) => {
       let text = '';

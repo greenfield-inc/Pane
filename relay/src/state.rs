@@ -1,5 +1,6 @@
 //! Shared relay state: connected computers, pending data connections, status, limits.
 
+use crate::alerts::Alerts;
 use crate::config::Config;
 use crate::io::BoxStream;
 use crate::registry::{Registry, Update};
@@ -58,6 +59,7 @@ pub struct State {
     pub cfg: Config,
     pub domain: String,
     pub registry: Registry,
+    pub alerts: Alerts,
     pub shutdown: CancellationToken,
     pub tracker: TaskTracker,
     agents: Mutex<HashMap<String, AgentHandle>>,
@@ -89,11 +91,12 @@ pub fn close_frame(code: &str, message: &str) -> Out {
 }
 
 impl State {
-    pub fn new(cfg: Config, domain: String, registry: Registry) -> Self {
+    pub fn new(cfg: Config, domain: String, registry: Registry, alerts: Alerts) -> Self {
         Self {
             cfg,
             domain,
             registry,
+            alerts,
             shutdown: CancellationToken::new(),
             tracker: TaskTracker::new(),
             agents: Mutex::default(),
