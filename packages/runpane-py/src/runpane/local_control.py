@@ -1116,6 +1116,13 @@ def build_pane_adopt_request(parsed: Any) -> Dict[str, Any]:
             raise ValueError("--from-json payload must be an object.")
         if not payload.get("panes"):
             raise ValueError("--from-json payload must include at least one pane.")
+        if parsed.no_associate:
+            payload.pop("associateSession", None)
+            payload["noAssociate"] = True
+        else:
+            payload.update(optional_value("associateSession", resolve_associate_session(parsed)))
+        payload.pop("callerPanelId", None)
+        payload.update(optional_value("callerPanelId", resolve_caller_panel_id()))
         return payload
 
     if not parsed.repo or not parsed.repo_path or not parsed.name:
@@ -1138,6 +1145,9 @@ def build_pane_adopt_request(parsed: Any) -> Dict[str, Any]:
         **optional_value("noFocus", True if parsed.no_focus else None),
         **optional_value("focus", True if parsed.focus else None),
         **optional_value("source", parsed.source if parsed.source in ("user", "agent") else None),
+        **optional_value("callerPanelId", resolve_caller_panel_id()),
+        **optional_value("associateSession", resolve_associate_session(parsed)),
+        **optional_value("noAssociate", True if parsed.no_associate else None),
     }
 
 

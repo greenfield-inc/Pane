@@ -590,11 +590,12 @@ worktree; archive it then.
 ## Pane association before delegation
 
 Management is a Pane-level relationship; tabs inherit the relationship and
-share the Pane's worktree. Panes the orchestrator creates or adopts with
-`runpane panes create` or `panes adopt` are associated with its Session in the
-same call: the CLI reads `PANE_ORCHESTRATION_SESSION_ID`, each result item
-reports `association: { sessionId, ok, error? }`, and `--no-associate` opts
-out. A failed association never undoes the new Pane. Before delegating to an
+share the Pane's worktree. Panes created or adopted with `runpane panes
+create` or `panes adopt` from inside a Session are associated with it in the
+same call: from the orchestrator (the CLI reads `PANE_ORCHESTRATION_SESSION_ID`)
+or from any tab in a Pane that belongs to the open Session (Pane looks up the
+calling tab, `$PANE_PANEL_ID`). Each result item reports `association: {
+sessionId, ok, error? }`, and `--no-associate` opts out. A failed association never undoes the new Pane. Before delegating to an
 existing Pane, or when automatic association failed, the orchestrator
 associates it explicitly. The supported command is:
 

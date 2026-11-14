@@ -1048,8 +1048,7 @@ export function registerRunpaneHandlers(
         throw new Error('Task queue not initialized');
       }
 
-      const associateSession = normalized.associateSession
-        ?? (normalized.noAssociate ? undefined : await callerSessionId(services, normalized.callerPanelId));
+      const associateSession = joinedSessionId(services, normalized);
       const items = await mapSequentially(
         normalized.panes,
         async (item, index) => {
@@ -1082,6 +1081,7 @@ export function registerRunpaneHandlers(
       const repo = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
       const repoSummary = projectToRepoSummary(repo, sessionManager.getSessionsForProject(repo.id).length);
       const items: RunpanePaneCreateResultItem[] = [];
+      const associateSession = joinedSessionId(services, normalized);
 
       for (const [index, item] of normalized.panes.entries()) {
         let createdSessionId: string | undefined;
@@ -1126,7 +1126,7 @@ export function registerRunpaneHandlers(
           await sessionManager.updateSession(session.id, { status: 'stopped' });
           const stoppedSession = sessionManager.getSession(session.id);
           if (!stoppedSession) throw new Error(`Created session ${session.id} was not found after status update`);
-          const association = await associateCreatedPane(services, normalized.associateSession, session.id);
+          const association = await associateCreatedPane(services, associateSession, session.id);
           await Promise.all([
             panelManager.ensureExplorerPanel(session.id),
             panelManager.ensureDiffPanel(session.id),
@@ -2707,8 +2707,8 @@ async function prepareInitialInput(
  * when that folder exists. Workers read it (dispatch notes, plans) and never
  * write it; the Session's orchestrator is its only writer.
  */
-async function workerSessionFolder(services: AppServices, paneId: string, wslContext: WSLContext | null): Promise<string | undefined> {
-  const sessionId = await services.orchestrationSessionManager?.sessionIdForPane(paneId);
+function workerSessionFolder(services: AppServices, paneId: string, wslContext: WSLContext | null): string | undefined {
+  const sessionId = services.orchestrationSessionManager?.approvalSession(paneId)?.id;
   if (!sessionId) return undefined;
   const folder = sessionWorkspacePath(sessionId);
   if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return undefined;
@@ -2758,7 +2758,7 @@ async function createTerminalPanelForSession(
   options: TerminalPanelCreateOptions,
 ): Promise<TerminalPanelCreateResult> {
   const wslContext = sessionWslContext(services, session.id);
-  const sessionFolder = await workerSessionFolder(services, session.id, wslContext);
+  const sessionFolder = workerSessionFolder(services, session.id, wslContext);
   const prepared = await prepareInitialInput(
     session,
     sessionFolder ? withSessionFolderAccess(requestedTool, sessionFolder) : requestedTool,
@@ -5106,19 +5106,29 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
     noFocus: optionalBoolean(value.noFocus),
     focus: optionalBoolean(value.focus),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    callerPanelId: optionalString(value.callerPanelId)?.trim() || undefined,
     associateSession: optionalString(value.associateSession)?.trim() || undefined,
+    noAssociate: optionalBoolean(value.noAssociate),
   };
 }
 
-/** The Session the calling tab's Pane belongs to, so a Pane created from inside a Session joins it. */
-async function callerSessionId(services: AppServices, callerPanelId: string | undefined): Promise<string | undefined> {
-  const paneId = callerPanelId ? panelManager.getPanel(callerPanelId)?.sessionId : undefined;
-  return paneId ? services.orchestrationSessionManager?.sessionIdForPane(paneId, callerPanelId) : undefined;
+/**
+ * The Session new Panes join: the one named, else the open Session the calling
+ * tab is in by the rule Approvals uses, unless the caller opted out.
+ */
+function joinedSessionId(
+  services: AppServices,
+  request: { associateSession?: string; noAssociate?: boolean; callerPanelId?: string },
+): string | undefined {
+  if (request.associateSession) return request.associateSession;
+  if (request.noAssociate || !request.callerPanelId) return undefined;
+  const paneId = panelManager.getPanel(request.callerPanelId)?.sessionId;
+  return paneId ? services.orchestrationSessionManager?.approvalSession(paneId, request.callerPanelId)?.id : undefined;
 }
 
 /**
- * Panes created from inside a Session orchestrator become that Session's
- * children in the same call, so agents cannot forget `sessions associate`.
+ * Panes created or adopted from inside a Session become its children in the
+ * same call, so agents cannot forget `sessions associate`.
  * A failed association is reported on the item and never undoes the Pane.
  */
 async function associateCreatedPane(

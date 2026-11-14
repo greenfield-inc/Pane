@@ -978,7 +978,7 @@ describe('runpane IPC handlers', () => {
       execFileSync('git', ['worktree', 'add', '-b', 'associate-adopt', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const associate = vi.fn(async () => ({}));
       // SAFETY: The handler only calls associate on the Sessions manager.
-      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never };
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, approvalSession: () => undefined } as never };
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
       vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async () => {
         expect(associate).toHaveBeenCalledWith({ sessionId: 'orchestrator-1' }, { paneId: session.id });
@@ -1012,7 +1012,7 @@ describe('runpane IPC handlers', () => {
       execFileSync('git', ['worktree', 'add', '-b', 'associate-missing', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const associate = vi.fn(async () => { throw new PaneError('ERR_SESSION_NOT_FOUND', 'Session typo not found'); });
       // SAFETY: The handler only calls associate on the Sessions manager.
-      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never };
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, approvalSession: () => undefined } as never };
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
 
       const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
@@ -1034,7 +1034,7 @@ describe('runpane IPC handlers', () => {
       execFileSync('git', ['worktree', 'add', '-b', 'no-associate-adopt', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const associate = vi.fn(async () => ({}));
       // SAFETY: The handler only calls associate on the Sessions manager.
-      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never };
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, approvalSession: () => undefined } as never };
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
       vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
 
@@ -1045,6 +1045,26 @@ describe('runpane IPC handlers', () => {
 
       expect(associate).not.toHaveBeenCalled();
       expect(result, JSON.stringify(result)).toMatchObject({ ok: true, items: [expect.not.objectContaining({ association: expect.anything() })] });
+    });
+
+    it("joins a Pane adopted from a tab in a Session's Pane to that Session, unless noAssociate", async () => {
+      const { repoPath, worktreePath } = createAdoptWorktree('caller-adopt');
+      const callerTab = { ...terminalPanel, id: 'worker-tab', sessionId: 'worker-pane' };
+      vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) => [callerTab, terminalPanel].find(panel => panel.id === panelId));
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
+      const associate = vi.fn(async () => ({}));
+      const approvalSession = (paneId: string) => (paneId === 'worker-pane' ? { id: 'session-a' } : undefined);
+      // SAFETY: The handler only calls associate and approvalSession on the Sessions manager.
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, approvalSession } as never };
+      const request = { repo: { id: project.id }, callerPanelId: callerTab.id, panes: [{ path: worktreePath, name: 'Adopted', tool: { agent: 'codex' } }] };
+
+      const joined = await createRegistry(services).invoke('runpane:panes:adopt', [request]);
+      expect(joined, JSON.stringify(joined)).toMatchObject({ items: [{ ok: true, association: { sessionId: 'session-a', ok: true } }] });
+
+      associate.mockClear();
+      await createRegistry(services).invoke('runpane:panes:adopt', [{ ...request, noAssociate: true }]);
+      expect(associate).not.toHaveBeenCalled();
     });
 
     function createAdoptWorktree(name: string) {
@@ -5682,7 +5702,7 @@ describe('runpane IPC handlers', () => {
 
     const associate = vi.fn(async () => ({}));
     // SAFETY: The handler only calls associate on the Sessions manager.
-    const services = createServices({ orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never });
+    const services = createServices({ orchestrationSessionManager: { associate, approvalSession: () => undefined } as never });
     vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async () => {
       expect(associate).toHaveBeenCalledWith({ sessionId: 'orchestrator-1' }, { paneId: session.id });
     });
@@ -5755,12 +5775,13 @@ describe('runpane IPC handlers', () => {
     const callerTab = { ...terminalPanel, id: 'worker-tab', sessionId: 'worker-pane' };
     vi.mocked(panelManager.getPanel).mockImplementation((panelId: string) => (panelId === callerTab.id ? callerTab : undefined));
     const associate = vi.fn(async () => ({}));
-    const sessionIdForPane = vi.fn(async (paneId: string) => (paneId === 'worker-pane' ? 'session-a' : undefined));
-    // SAFETY: The handler only calls associate and sessionIdForPane on the Sessions manager.
-    const registry = createRegistry(createServices({ orchestrationSessionManager: { associate, sessionIdForPane } as never }));
+    const approvalSession = vi.fn((paneId: string) => (paneId === 'worker-pane' ? { id: 'session-a' } : undefined));
+    // SAFETY: The handler only calls associate and approvalSession on the Sessions manager.
+    const registry = createRegistry(createServices({ orchestrationSessionManager: { associate, approvalSession } as never }));
     const request = { repo: { id: project.id }, callerPanelId: callerTab.id, panes: [{ name: 'csv-export', tool: { agent: 'codex' } }] };
 
     const joined = await registry.invoke('runpane:panes:create', [request]);
+    expect(approvalSession).toHaveBeenCalledWith('worker-pane', 'worker-tab');
     expect(associate).toHaveBeenCalledWith({ sessionId: 'session-a' }, { paneId: session.id });
     expect(joined).toMatchObject({ items: [{ ok: true, association: { sessionId: 'session-a', ok: true } }] });
 
@@ -7318,8 +7339,8 @@ describe('runpane IPC handlers', () => {
       const services = createServices({
         // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
         sessionManager: { ...base.sessionManager, getSession: vi.fn(() => ({ ...session, worktreePath: worktree })) } as never,
-        // SAFETY: The handler under test reads only sessionIdForPane from the Sessions manager.
-        orchestrationSessionManager: { sessionIdForPane: async () => 'orch-1' } as never,
+        // SAFETY: The handler under test reads only approvalSession from the Sessions manager.
+        orchestrationSessionManager: { approvalSession: () => ({ id: 'orch-1' }) } as never,
       });
       vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
 

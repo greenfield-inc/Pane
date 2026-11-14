@@ -580,7 +580,11 @@ export interface RunpanePaneAdoptRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;
+  /** The calling tab ($PANE_PANEL_ID); its open Session is the one adopted Panes join. */
+  callerPanelId?: string;
   associateSession?: string;
+  /** Without associateSession, Pane joins adopted Panes to the caller's Session; true skips that. */
+  noAssociate?: boolean;
 }
 
 export type RunpanePaneAdoptResult = RunpanePaneCreateResult;
