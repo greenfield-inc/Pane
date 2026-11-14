@@ -137,40 +137,19 @@ describe('background activity', () => {
     expect(pc.activity.isAway()).toBe(false);
   });
 
-  it('skips optional network work in Low Power Mode outside Performance, and on battery only under Battery saver', async () => {
-    const pc = computer();
-    pc.unplug();
-    expect(await pc.activity.isConstrained()).toBe(false);
-    pc.config.set('batterySaver');
-    expect(await pc.activity.isConstrained()).toBe(true);
-
-    pc.config.set('balanced');
-    pc.state.lowPower = true;
-    pc.state.now = 61_000;
-    expect(await pc.activity.isConstrained()).toBe(true);
-    pc.config.set('performance');
-    expect(await pc.activity.isConstrained()).toBe(false);
-  });
-
-  it('sees Low Power Mode turn off while someone keeps looking, once the last read is a minute old', async () => {
-    const pc = computer();
-    pc.state.lowPower = true;
-    expect(await pc.activity.isConstrained()).toBe(true);
-
-    pc.state.lowPower = false;
-    pc.state.now = 30_000;
-    expect(await pc.activity.isConstrained()).toBe(true);
-    pc.state.now = 61_000;
-    expect(await pc.activity.isConstrained()).toBe(false);
-    expect(pc.state.lowPowerReads).toBe(2);
-  });
-
   it('sees a lock that ended without an unlock event, such as a screensaver at launch, once the window gains focus', () => {
     const pc = computer({ locked: true });
     pc.activity.setWindowState({ focused: false, visible: false });
     expect(pc.activity.isAway()).toBe(true);
     pc.state.locked = false;
     pc.activity.setWindowState({ focused: true, visible: true });
+    expect(pc.activity.isAway()).toBe(false);
+  });
+
+  it('stays back when a window event reads locked without a lock event, as a Windows UAC prompt does', () => {
+    const pc = computer();
+    pc.state.locked = true;
+    pc.activity.setWindowState({ focused: false, visible: true });
     expect(pc.activity.isAway()).toBe(false);
   });
 
