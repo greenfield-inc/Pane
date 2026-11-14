@@ -10,6 +10,8 @@ import { boundary, decodeBoundary, type JsonValue } from '../../../shared/valida
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
 import { RecentWrites } from './recentWrites';
 import { PairingExchange } from './relay/pairingExchange';
+import { GlassesAccess } from './glassesAccess';
+import type { AppConfig } from '../types/config';
 import { readingMachines } from './readingMachines';
 import { PaneError } from '../../../shared/paneError';
 
@@ -411,6 +413,40 @@ describe('PaneRemoteHttpApiServer', () => {
       .resolves.toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'travel-laptop' } } });
     await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:machine:info', args: [] }, 'secret-token'))
       .resolves.toMatchObject({ statusCode: 403, body: { ok: false, error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } } });
+  });
+
+  it('records when a paired phone last reached this computer, saving it at most once a minute', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('sessions:get-all', async () => []);
+    let config: Pick<AppConfig, 'remoteDaemon'> = { remoteDaemon: createEnabledRemoteConfig() };
+    const store = {
+      getConfig: () => config,
+      updateConfigWith: async (update: (current: AppConfig) => Partial<AppConfig>) => {
+        // SAFETY: the server and the glasses store read and write only remoteDaemon here.
+        config = { ...config, ...update(config as AppConfig) };
+        return config;
+      },
+    };
+    let now = Date.parse('2026-11-14T08:00:00.000Z');
+    const server = new PaneRemoteHttpApiServer(registry, store, { glasses: new GlassesAccess(store, { now: () => now, env: {}, log: () => {} }) });
+    activeServers.push(server);
+    await server.start();
+    const lastUsed = () => config.remoteDaemon?.host.clients.find((client) => client.id === 'client-1')?.lastUsedAt;
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+    await requestJson(server, 'POST', '/invoke', { channel: 'sessions:get-all', args: [] }, 'secret-token');
+    await settle();
+    expect(lastUsed()).toBe('2026-11-14T08:00:00.000Z');
+
+    now += 30_000;
+    await requestJson(server, 'POST', '/invoke', { channel: 'sessions:get-all', args: [] }, 'secret-token');
+    await settle();
+    expect(lastUsed()).toBe('2026-11-14T08:00:00.000Z');
+
+    now += 31_000;
+    await requestJson(server, 'POST', '/invoke', { channel: 'sessions:get-all', args: [] }, 'secret-token');
+    await settle();
+    expect(lastUsed()).toBe('2026-11-14T08:01:01.000Z');
   });
 
   it('gives a teammate who scans a fresh QR code a token of their own, which removing them here revokes alone', async () => {

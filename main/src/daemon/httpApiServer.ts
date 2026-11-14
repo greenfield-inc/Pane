@@ -1437,11 +1437,14 @@ export class PaneRemoteHttpApiServer {
       };
     }
 
-    return authenticateRemoteDaemonBearerToken(
+    const auth = authenticateRemoteDaemonBearerToken(
       getAuthorizationHeaderForRequest(request, token),
       // Glasses tokens are admitted only on the workspace listener, with their narrow scope.
       remoteConfig.host.clients.filter((client) => client.kind !== 'glasses'),
     );
+    // Settings › Devices shows when each phone last reached this computer; the same throttled write records glasses.
+    if (auth.ok && auth.client) this.glasses?.touch(auth.client.id);
+    return auth;
   }
 
   private async readInvokeRequest(
