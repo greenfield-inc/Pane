@@ -3,7 +3,7 @@
 // with a "> " on the highlighted row and keeps the highlight here (see ListFocus).
 import type { RenderElement } from '@glassly/miniapp';
 import { LIST_PAD, TEXT_PAD, listItems, textContent, type Box, type Brightness, type ListBox, type Page, type TextBox } from '../../../src/page';
-import { LINE_H } from '../../../src/text';
+import { LINE_H, fitLine, textWidth } from '../../../src/text';
 
 /** What one Glassly display takes per frame. */
 export interface Budget {
@@ -39,7 +39,9 @@ function listLines(box: ListBox, selected: number): string[] {
   const rows = Math.max(1, Math.floor((box.h - 2 * LIST_PAD) / LINE_H));
   const at = Math.max(0, Math.min(selected, items.length - 1));
   const first = Math.max(0, Math.min(at - rows + 1, items.length - rows));
-  return items.slice(first, first + rows).map((item, index) => `${first + index === at ? '> ' : '   '}${item}`);
+  // Each row gives up the room its "> " mark takes, so the text is cut with "…", not by the glasses.
+  const room = box.w - 2 * LIST_PAD - textWidth('> ') - 8;
+  return items.slice(first, first + rows).map((item, index) => `${first + index === at ? '> ' : '   '}${fitLine(item, room)}`);
 }
 
 function textElement(box: TextBox | ListBox, text: string, brightness: Brightness): RenderElement {
@@ -92,7 +94,11 @@ function fitBudget(boxes: Stacked[], maxText: number): Stacked[] {
 export function renderPage(page: Page, selection: ListSelection, budget: Budget): RenderElement[] {
   const texts: Stacked[] = [];
   const lists: RenderElement[] = [];
-  for (const box of page.boxes) {
+  const images = page.boxes.filter((box) => box.kind === 'image');
+  for (const original of page.boxes) {
+    // Images aren't drawn here, so a text box beside one (home's rows next to their logos) takes its room.
+    const beside = original.kind === 'text' ? images.find((image) => image.x + image.w <= original.x && original.x - (image.x + image.w) <= 8 && image.y < original.y + original.h && original.y < image.y + image.h) : undefined;
+    const box = original.kind === 'text' && beside ? { ...original, x: beside.x, w: original.w + original.x - beside.x } : original;
     if (box.kind === 'text') {
       // Even's firmware scrolls a text box longer than the screen; here the swipes move this window.
       const lines = textContent(box).split('\n');

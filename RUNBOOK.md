@@ -205,7 +205,7 @@ developer org. Submitting is public, so ask first.
 
 1. Raise `version` in `glasses/glassly/miniapp.json`. Set `minHostVersion` to the first Glassly
    app release that posts notifications, once Glassly ships it.
-2. `pnpm --filter @pane/glasses-glassly pack` builds, checks and writes
+2. `pnpm --filter @pane/glasses-glassly run pack` builds, checks and writes
    `glasses/glassly/build/com.runpane.glasses-<version>.zip`.
 3. In `glasses/glassly`: `bun x glassly login` once, then `bun x glassly publish`. It signs the
    bundle with this computer's key, uploads it and submits it for Glassly's review.

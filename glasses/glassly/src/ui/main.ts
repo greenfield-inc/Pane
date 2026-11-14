@@ -26,6 +26,7 @@ const ui = {
   ambient: element('ambient', HTMLInputElement),
   forget: element('forget', HTMLButtonElement),
   mirror: element('mirror', HTMLPreElement),
+  mirrorSection: element('mirror-section', HTMLElement),
 };
 const command = (value: PhoneCommand) => bus?.send('command', value);
 
@@ -35,6 +36,7 @@ function render(state: PhoneState): void {
   ui.forget.hidden = state.paired === 0;
   ui.ambient.checked = state.ambient;
   ui.mirror.textContent = state.mirror;
+  ui.mirrorSection.hidden = !state.mirror;
   ui.computers.replaceChildren(...state.computers.map((computer) => {
     const row = document.createElement('li');
     const name = document.createElement('span');

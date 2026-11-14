@@ -14,7 +14,7 @@
     .muted { color: var(--muted); font-size: 14px; }
     textarea { width: 100%; min-height: 72px; font: 14px ui-monospace, monospace; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--fg); }
     button { font: inherit; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--fg); }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; }
+    button.primary { background: #2f6fed; border-color: #2f6fed; color: #ffffff; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
     ul { list-style: none; padding: 0; margin: 8px 0; }
     li { padding: 8px 0; border-bottom: 1px solid var(--line); }
@@ -39,10 +39,12 @@
     </div>
   </section>
   <ul id="computers"></ul>
-  <label><input id="ambient" type="checkbox"> Ambient mode: the glasses go quiet after 30 s and show new cards as banners</label>
+  <label><input id="ambient" type="checkbox"> Ambient mode: the glasses go quiet after 30&nbsp;s and show new cards as banners</label>
   <div class="row"><button id="forget" hidden>Forget these computers</button></div>
-  <p class="muted">On the glasses</p>
-  <pre id="mirror"></pre>
+  <section id="mirror-section" hidden>
+    <p class="muted">On the glasses</p>
+    <pre id="mirror"></pre>
+  </section>
   <script src="./main.js"></script>
 </body>
 </html>
