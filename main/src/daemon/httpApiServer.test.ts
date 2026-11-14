@@ -9,6 +9,7 @@ import { boundary, decodeBoundary, type JsonValue } from '../../../shared/valida
 
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
 import { RecentWrites } from './recentWrites';
+import { PairingExchange } from './relay/pairingExchange';
 import { readingMachines } from './readingMachines';
 import { PaneError } from '../../../shared/paneError';
 
@@ -410,6 +411,34 @@ describe('PaneRemoteHttpApiServer', () => {
       .resolves.toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'travel-laptop' } } });
     await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:machine:info', args: [] }, 'secret-token'))
       .resolves.toMatchObject({ statusCode: 403, body: { ok: false, error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } } });
+  });
+
+  it('gives a teammate who scans a fresh QR code a token of their own, which removing them here revokes alone', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('sessions:get-all', async () => []);
+    const config = createEnabledRemoteConfig();
+    const exchange = new PairingExchange({ addClient: async (record) => { config.host.clients.push(record); } });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config), {
+      pairing: { exchange: async ({ secret, label, phoneId }) => exchange.exchange(secret, label, phoneId) },
+    });
+    activeServers.push(server);
+    await server.start();
+    const scan = async (label: string, phoneId: string) => {
+      const { body } = await requestJson(server, 'POST', '/pair/exchange', { secret: exchange.createSecret().secret, label, phoneId });
+      const answer = decodeBoundary(body, boundary.object({ token: boundary.nonEmptyString, clientId: boundary.nonEmptyString }));
+      return { ...answer, sessions: () => requestJson(server, 'POST', '/invoke', { channel: 'sessions:get-all', args: [] }, answer.token) };
+    };
+
+    const owner = await scan('Ana\'s iPhone', 'pane-native-ana');
+    const teammate = await scan('Ben\'s Pixel', 'pane-native-ben');
+    expect(teammate.token).not.toBe(owner.token);
+    expect(teammate.clientId).not.toBe(owner.clientId);
+    await expect(teammate.sessions()).resolves.toMatchObject({ statusCode: 200 });
+
+    // Remove from this computer: Settings deletes that one record (remote-daemon:delete-client-record).
+    config.host.clients = config.host.clients.filter((client) => client.id !== teammate.clientId);
+    await expect(teammate.sessions()).resolves.toMatchObject({ statusCode: 403, body: { error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID' } } });
+    await expect(owner.sessions()).resolves.toMatchObject({ statusCode: 200 });
   });
 
   it('accepts browser invoke auth metadata from a simple request body', async () => {

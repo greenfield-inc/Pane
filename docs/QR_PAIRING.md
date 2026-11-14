@@ -57,6 +57,16 @@ and says which phone linked a computer ("Linked by Ana's iPhone").
 Scanning someone else's computer links it with yours, and theirs with yours.
 Undo it with **Unlink from all your computers**.
 
+## Share a computer with a teammate
+
+A teammate scans a fresh code from your computer, as you do. Their phone gets
+its own sign-in, listed under **Devices** by its name, and can do what yours
+does there, pairing glasses included. Because computers are linked, it also
+reaches every computer linked with this one, and links this computer with any
+computer their phone already paired. **Remove from this computer** signs out
+only their phone, only here; **Remove from all your computers** signs it out
+of every computer it reached through yours.
+
 ## Remove a phone or a computer
 
 - **Remove from this computer** signs a phone out of this computer only.
