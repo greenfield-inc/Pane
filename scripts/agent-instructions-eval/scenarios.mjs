@@ -49,11 +49,23 @@ const uiRepo = (repo) => {
   write(path.join(repo, 'docs', 'components.md'), '# Components\n\n![Button](screenshots/button.png)\n![Card](screenshots/card.png)\n');
 };
 
-/** Multi-part work inside a Session: Panes created (Pane associates them with the caller's Session), no new Session, no opt-out. */
+/** Pane inside Session s-eval: the repo is registered, and each new Pane is created and joins the Session. */
+const paneInSession = ({ repo }) => {
+  const repoSummary = { id: 1, name: 'ledger', path: repo, active: true, sessionCount: 1 };
+  return {
+    'repos list': { ok: true, repos: [repoSummary] },
+    'panes create': { ok: true, repo: repoSummary, items: [{ ok: true, index: 0, name: '$NAME', pinned: false, sessionId: 'p-$NAME', panelId: 'pl-$NAME', worktreePath: `${repo}-$NAME`, association: { sessionId: 's-eval', ok: true } }] },
+    'agents start': { ok: true, paneId: 'p-$NAME', panelId: 'pl-$NAME', name: '$NAME', worktreePath: `${repo}-$NAME`, link: 'pane://pane/p-$NAME', ready: true, promptDelivered: true },
+  };
+};
+
+/** Multi-part work inside a Session: Panes created (each joins the Session), no new Session or opt-out, and the agent carries on instead of reporting a problem. */
 const joinsSession = (run) => [
   [run.calls.some(({ argv }) => (argv[0] === 'panes' && argv[1] === 'create') || (argv[0] === 'agents' && argv[1] === 'start' && !argv.includes('--pane'))), 'never created a Pane'],
   [!has(run, 'sessions', 'create'), 'created a new Session'],
   [!run.calls.some(({ argv }) => argv.includes('--no-associate')), 'opted out of joining the Session with --no-associate'],
+  [!run.calls.some(({ argv }) => argv[0] === 'report' && flagValue(argv, '--state') === 'blocked'), 'reported blocked although every create succeeded'],
+  [cards(run).every(({ argv }) => flagValue(argv, '--ui') === 'info'), 'asked the person a question although every create succeeded'],
 ];
 
 const pkg = (repo, extra = {}) => write(path.join(repo, 'package.json'), `${JSON.stringify({ name: 'ledger', version: '0.1.0', scripts: { test: 'node test.js' }, ...extra }, null, 2)}\n`);
@@ -206,7 +218,7 @@ export const SCENARIOS = [
     role: 'orchestrator',
     setup: ({ repo }) => pkg(repo),
     prompt: () => 'Kick off the settings overhaul: three parts that can run in parallel, (1) migrate the settings schema, (2) rebuild the settings UI, (3) write the docs. Use a few agents; I will check in later.',
-    script: () => ({}),
+    script: paneInSession,
     grade: (run) => verdict(joinsSession(run)),
   },
   {
@@ -216,7 +228,7 @@ export const SCENARIOS = [
     role: 'worker',
     setup: ({ repo }) => uiRepo(repo),
     prompt: () => 'We need dark mode: new colour tokens, every component updated to use them, and fresh screenshots for the docs. Get it going with a few agents.',
-    script: () => ({}),
+    script: paneInSession,
     grade: (run) => verdict(joinsSession(run)),
   },
   {
