@@ -100,13 +100,19 @@ export class BackgroundActivity extends EventEmitter {
     return this.lowPower;
   }
 
-  /** The main window's focus and whether it is on screen (not minimized or fully covered). */
+  /**
+   * The main window's focus and whether it is on screen (not minimized or fully covered). The lock
+   * is read again here on every platform, since a lock can end without an unlock event (a
+   * screensaver or secure desktop running when Pane launched).
+   */
   setWindowState(state: { focused?: boolean; visible?: boolean }): void {
     const focused = state.focused ?? this.windowFocused;
     const visible = state.visible ?? this.windowVisible;
-    if (focused === this.windowFocused && visible === this.windowVisible) return;
+    const locked = this.env.isLocked();
+    if (focused === this.windowFocused && visible === this.windowVisible && locked === this.locked) return;
     this.windowFocused = focused;
     this.windowVisible = visible;
+    this.locked = locked;
     this.evaluate(focused || visible ? 'the Pane window came on screen' : 'the Pane window left the screen');
   }
 

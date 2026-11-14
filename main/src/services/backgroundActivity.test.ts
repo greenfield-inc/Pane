@@ -15,10 +15,10 @@ class Config extends EventEmitter {
 }
 
 /** A computer: lock, sleep, battery, Low Power Mode and remote apps, as the OS reports them. */
-function computer(options: { lockEvents?: boolean } = {}) {
+function computer(options: { lockEvents?: boolean; locked?: boolean } = {}) {
   const power = new EventEmitter();
   const remoteStreams = Object.assign(new EventEmitter(), { open: 0, count() { return this.open; } });
-  const state = { locked: false, onBattery: false, lowPower: false, now: 0, lowPowerReads: 0 };
+  const state = { locked: options.locked ?? false, onBattery: false, lowPower: false, now: 0, lowPowerReads: 0 };
   const config = new Config();
   const activity = new BackgroundActivity(config, {
     power,
@@ -162,6 +162,15 @@ describe('background activity', () => {
     pc.state.now = 61_000;
     expect(await pc.activity.isConstrained()).toBe(false);
     expect(pc.state.lowPowerReads).toBe(2);
+  });
+
+  it('sees a lock that ended without an unlock event, such as a screensaver at launch, once the window gains focus', () => {
+    const pc = computer({ locked: true });
+    pc.activity.setWindowState({ focused: false, visible: false });
+    expect(pc.activity.isAway()).toBe(true);
+    pc.state.locked = false;
+    pc.activity.setWindowState({ focused: true, visible: true });
+    expect(pc.activity.isAway()).toBe(false);
   });
 
   it('on Linux, where no lock event fires, sees the lock when asked to look again', () => {
