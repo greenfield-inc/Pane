@@ -1,4 +1,5 @@
 import { getChatTabManager } from '../services/chatTabs';
+import { decodeChatPanelState } from '../services/chatTabs/state';
 import { createChatTab } from './chatTabs';
 import { chatTabLastMessage, chatTabNoTerminal, chatTabOutput, chatTabScreen, submitChatTab, waitForChatTab } from './runpaneChatTabs';
 import { paneCommandSignal } from '../daemon/commandRegistry';
@@ -272,6 +273,8 @@ import {
   type WorkspaceIdleSchedule,
 } from '../services/workspaceIdleTracker';
 import { agentConfig, agentLabel, agentTerminalCommand, configuredAgent, configuredAgentSchema, isAgentSessionId, isConfiguredAgent, typesStartingMessage } from '../../../shared/agents';
+import { paneScratchUsage } from '../services/paneScratch';
+import { archiveRetentionDays } from '../services/archiveExpiry';
 
 const RUNPANE_CHANNELS = [
   'runpane:doctor',
@@ -1046,6 +1049,7 @@ export function registerRunpaneHandlers(
         throw new Error('Task queue not initialized');
       }
 
+      const associateSession = joinedSessionId(services, normalized);
       const items = await mapSequentially(
         normalized.panes,
         async (item, index) => {
@@ -1054,7 +1058,7 @@ export function registerRunpaneHandlers(
             waitReady: normalized.waitReady,
             readyTimeoutMs: normalized.readyTimeoutMs,
             activate: resolvePaneCreateActivation(normalized, item),
-            associateSession: normalized.associateSession,
+            associateSession,
             expectReport: normalized.expectReport,
             source: normalized.source,
             callerPanelId: normalized.callerPanelId,
@@ -1078,6 +1082,7 @@ export function registerRunpaneHandlers(
       const repo = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
       const repoSummary = projectToRepoSummary(repo, sessionManager.getSessionsForProject(repo.id).length);
       const items: RunpanePaneCreateResultItem[] = [];
+      const associateSession = joinedSessionId(services, normalized);
 
       for (const [index, item] of normalized.panes.entries()) {
         let createdSessionId: string | undefined;
@@ -1122,7 +1127,7 @@ export function registerRunpaneHandlers(
           await sessionManager.updateSession(session.id, { status: 'stopped' });
           const stoppedSession = sessionManager.getSession(session.id);
           if (!stoppedSession) throw new Error(`Created session ${session.id} was not found after status update`);
-          const association = await associateCreatedPane(services, normalized.associateSession, session.id);
+          const association = await associateCreatedPane(services, associateSession, session.id);
           await Promise.all([
             panelManager.ensureExplorerPanel(session.id),
             panelManager.ensureDiffPanel(session.id),
@@ -1213,6 +1218,7 @@ export function registerRunpaneHandlers(
                 safetyCheck,
               }
             : undefined,
+          scratch: await paneScratchUsage(pane.id, worktreeCleanupApplicable ? pane.worktreePath : undefined, archiveRetentionDays(services.configManager.getConfig())),
         };
       }
 
@@ -1502,7 +1508,7 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:pause', async (request: PaneCommandValue): Promise<RunpanePauseResult> => {
     return withRunpaneAction(services, 'panels:pause', {}, async () => {
       const target = resolvePanel(parsePauseTarget(request, 'panelId', 'Panel pause'));
-      if (target.type === 'chat') throw new PaneError('ERR_RUNPANE_CHAT_NOT_PAUSABLE', `Panel ${target.id} is a chat tab, and chat tabs can't pause yet, so nothing was paused. Its agent keeps running.`, `Press Stop in the tab to end its turn, or close the tab: runpane panels close --panel ${target.id}.`);
+      if (target.type === 'chat') throw new PaneError('ERR_RUNPANE_CHAT_NOT_PAUSABLE', `Panel ${target.id} is a chat tab, and Pause leaves chat tabs running, so nothing was paused. Its agent keeps running.`, `Press Stop in the tab to end its turn, or close the tab: runpane panels close --panel ${target.id}.`);
       const panel = resolveTerminalPanel(target.id);
       return pauseTabs(services, { kind: 'panel', panelId: panel.id, paneId: panel.sessionId }, [panel.id], 0, mark => terminalPanelManager.pausePanels([panel.id], mark));
     }, pauseActionMetrics);
@@ -1566,7 +1572,8 @@ export function registerRunpaneHandlers(
         });
       }
 
-      // A paused tab stays paused until someone resumes it by name: `--panel`, or its Pane or Session.
+      // A paused terminal tab stays paused until someone resumes it by name: `--panel`, or its Pane or Session.
+      // An auto-paused chat tab is left too: it resumes when opened or sent a message.
       candidates = candidates.filter(candidate => !isPanelPaused(candidate.panelId));
       const exited = await Promise.all(candidates.map(candidate => terminalPanelManager.hasLaunchCommandExited(candidate.panelId)));
       const stopped = candidates.filter((candidate, index) => !candidate.running || exited[index]);
@@ -2308,7 +2315,7 @@ function sessionToPaneSummary(session: Session, project: Project): RunpanePaneSu
     createdAt: toIsoString(session.createdAt),
     lastActivity: toIsoString(session.lastActivity),
     inactiveSince: paneInactiveSince({ createdAt: session.createdAt, lastViewedAt: session.lastViewedAt, panels },
-      panelId => terminalPanelManager.getLastActivity(panelId)).toISOString(),
+      panelId => terminalPanelManager.getLastActivity(panelId) ?? getChatTabManager().lastActivity(panelId)).toISOString(),
     paused: session.paused,
     archived: session.archived || undefined,
     ownership: session.worktreeOwnership ?? 'pane',
@@ -2702,8 +2709,8 @@ async function prepareInitialInput(
  * when that folder exists. Workers read it (dispatch notes, plans) and never
  * write it; the Session's orchestrator is its only writer.
  */
-async function workerSessionFolder(services: AppServices, paneId: string, wslContext: WSLContext | null): Promise<string | undefined> {
-  const sessionId = await services.orchestrationSessionManager?.sessionIdForPane(paneId);
+function workerSessionFolder(services: AppServices, paneId: string, wslContext: WSLContext | null): string | undefined {
+  const sessionId = services.orchestrationSessionManager?.approvalSession(paneId)?.id;
   if (!sessionId) return undefined;
   const folder = sessionWorkspacePath(sessionId);
   if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return undefined;
@@ -2753,7 +2760,7 @@ async function createTerminalPanelForSession(
   options: TerminalPanelCreateOptions,
 ): Promise<TerminalPanelCreateResult> {
   const wslContext = sessionWslContext(services, session.id);
-  const sessionFolder = await workerSessionFolder(services, session.id, wslContext);
+  const sessionFolder = workerSessionFolder(services, session.id, wslContext);
   const prepared = await prepareInitialInput(
     session,
     sessionFolder ? withSessionFolderAccess(requestedTool, sessionFolder) : requestedTool,
@@ -3594,6 +3601,7 @@ async function resumeTabs(services: AppServices, registry: PaneCommandRegistry, 
 
 function isPanelPaused(panelId: string): boolean {
   const panel = panelManager.getPanel(panelId);
+  if (panel?.type === 'chat') return !!decodeChatPanelState(panel.state.customState)?.paused;
   return !!panel && !!pausedMarkOf(panel);
 }
 
@@ -5052,6 +5060,7 @@ function parsePaneCreateRequest(value: PaneCommandValue): RunpanePaneCreateReque
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
     callerPanelId: optionalString(value.callerPanelId)?.trim() || undefined,
     associateSession: optionalString(value.associateSession)?.trim() || undefined,
+    noAssociate: optionalBoolean(value.noAssociate),
     expectReport: optionalBoolean(value.expectReport),
   };
 }
@@ -5100,13 +5109,29 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
     noFocus: optionalBoolean(value.noFocus),
     focus: optionalBoolean(value.focus),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    callerPanelId: optionalString(value.callerPanelId)?.trim() || undefined,
     associateSession: optionalString(value.associateSession)?.trim() || undefined,
+    noAssociate: optionalBoolean(value.noAssociate),
   };
 }
 
 /**
- * Panes created from inside a Session orchestrator become that Session's
- * children in the same call, so agents cannot forget `sessions associate`.
+ * The Session new Panes join: the one named, else the open Session the calling
+ * tab is in by the rule Approvals uses, unless the caller opted out.
+ */
+function joinedSessionId(
+  services: AppServices,
+  request: { associateSession?: string; noAssociate?: boolean; callerPanelId?: string },
+): string | undefined {
+  if (request.associateSession) return request.associateSession;
+  if (request.noAssociate || !request.callerPanelId) return undefined;
+  const paneId = panelManager.getPanel(request.callerPanelId)?.sessionId;
+  return paneId ? services.orchestrationSessionManager?.approvalSession(paneId, request.callerPanelId)?.id : undefined;
+}
+
+/**
+ * Panes created or adopted from inside a Session become its children in the
+ * same call, so agents cannot forget `sessions associate`.
  * A failed association is reported on the item and never undoes the Pane.
  */
 async function associateCreatedPane(
@@ -6198,7 +6223,8 @@ async function archiveSessionPanes(
         continue;
       }
       if (request.dryRun) {
-        items.push({ ...base, outcome: 'would-archive', pr, safetyCheck });
+        const scratch = await paneScratchUsage(pane.id, removesWorktree ? pane.worktreePath : undefined, archiveRetentionDays(services.configManager.getConfig()));
+        items.push({ ...base, outcome: 'would-archive', pr, safetyCheck, scratch });
         continue;
       }
       const cleanup = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, removesWorktree);

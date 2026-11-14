@@ -45,6 +45,7 @@ import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
+import { onOpenFirstRunRequest } from './utils/openFirstRun';
 import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { useRegionNavigation } from './hooks/useRegionNavigation';
 import { KeySequenceHint } from './components/KeySequenceHint';
@@ -103,6 +104,8 @@ function App() {
   const [currentPermissionRequest, setCurrentPermissionRequest] = useState<PanePermissionRequest | null>(null);
   const [hasResolvedStartupDialogs, setHasResolvedStartupDialogs] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  /** The first-run screen was reopened from Home's "Start a Session". */
+  const [onboardingFromHome, setOnboardingFromHome] = useState(false);
   const [isSupportPaneOpen, setIsSupportPaneOpen] = useState(false);
   const [hasCheckedOnboarding, setHasCheckedOnboarding] = useState(false);
   const [completedOnboardingThisSession, setCompletedOnboardingThisSession] = useState(false);
@@ -208,6 +211,10 @@ function App() {
   }, []);
   // Menus deep in the window, such as the + menu's More agents…, open Settings here.
   useEffect(() => onOpenSettingsRequest(openSettings), [openSettings]);
+  useEffect(() => onOpenFirstRunRequest(() => {
+    setOnboardingFromHome(true);
+    setIsOnboardingOpen(true);
+  }), []);
   useEffect(() => window.electronAPI?.notify?.onNavigate((target) => {
     if (target === 'settings') {
       openSettings({ category: 'notify' });
@@ -415,7 +422,9 @@ function App() {
     await captureAppFirstOpened(identity);
   }, []);
 
-  // Apply the default-on experiment only when no explicit legacy choice exists.
+  // Apply the default-on experiment only to an undecided install whose config
+  // doesn't store analytics off. A stored false stays off: a fresh install's
+  // default is true, and builds before 2026-08-31 stored false by default.
   useEffect(() => {
     if (!appConfig || hasCheckedAnalyticsDefault || analyticsCheckStarted.current) return;
     analyticsCheckStarted.current = true;
@@ -435,35 +444,34 @@ function App() {
         const hasLegacyChoice = legacyConsentResult === 'true';
         const hasAppliedDefault = defaultAppliedResult === 'true';
 
-        if (!hasLegacyChoice && !hasAppliedDefault) {
-          const identity = await resolveAnalyticsIdentity();
-          // A config change during the identity lookup restarts this effect;
-          // only the latest run captures and aliases.
-          if (cancelled) return;
-
-          initPostHog({
-            enabled: true,
-            posthogApiKey: appConfig.analytics?.posthogApiKey,
-            posthogHost: appConfig.analytics?.posthogHost,
-            identity,
-          }, { flushPendingEvents: false });
-
-          aliasInstallIdentity(identity);
-          if (identity?.webDistinctId) {
-            aliasWebVisitor(identity.webDistinctId, identity.distinctId);
-            void window.electronAPI?.analytics?.redeemAttribution?.();
-          }
-
-          await captureUnconditionally('analytics_default_enabled', { experiment: 'analytics_default_on' }, identity);
-          await captureFirstOpenOnce(identity);
-          flushPendingEvents();
+        // The environment's off is not a choice to record: once it is gone, the default applies.
+        if (hasLegacyChoice || hasAppliedDefault || appConfig.analytics?.disabledByEnvironment) return;
+        if (appConfig.analytics?.enabled === false) {
           await API.preferences.set('analytics_default_applied', 'true');
-          if (appConfig.analytics?.enabled !== true) {
-            await useConfigStore.getState().updateConfig({
-              analytics: { ...appConfig.analytics, enabled: true },
-            });
-          }
+          return;
         }
+        const identity = await resolveAnalyticsIdentity();
+        // A config change during the identity lookup restarts this effect;
+        // only the latest run captures and aliases.
+        if (cancelled) return;
+
+        initPostHog({
+          enabled: true,
+          posthogApiKey: appConfig.analytics?.posthogApiKey,
+          posthogHost: appConfig.analytics?.posthogHost,
+          identity,
+        }, { flushPendingEvents: false });
+
+        aliasInstallIdentity(identity);
+        if (identity?.webDistinctId) {
+          aliasWebVisitor(identity.webDistinctId, identity.distinctId);
+          void window.electronAPI?.analytics?.redeemAttribution?.();
+        }
+
+        await captureUnconditionally('analytics_default_enabled', { experiment: 'analytics_default_on' }, identity);
+        await captureFirstOpenOnce(identity);
+        flushPendingEvents();
+        await API.preferences.set('analytics_default_applied', 'true');
       } catch (error) {
         console.error('[App] Error applying analytics default:', error);
       } finally {
@@ -1031,9 +1039,11 @@ function App() {
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}
+          fromHome={onboardingFromHome}
           onClose={() => {
             setCompletedOnboardingThisSession(true);
             setIsOnboardingOpen(false);
+            setOnboardingFromHome(false);
             window.dispatchEvent(new Event('project-changed'));
           }}
         />

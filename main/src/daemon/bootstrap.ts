@@ -77,6 +77,8 @@ import { NamedLockStore } from '../services/namedLockStore';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { startArchiveExpiry } from '../services/archiveExpiry';
+import { ARCHIVE_EXPIRY_START_DELAY_MS } from '../../../shared/constants/archiveRetention';
 
 interface PaneDaemonHostOptions {
   app: App;
@@ -444,22 +446,28 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const commandRegistry = registerIpcHandlers(services);
   const autoPauser = new AutoPauser({
     now: () => Date.now(),
-    settings: () => ({ enabled: configManager.getConfig().autoPauseEnabled, hours: configManager.getConfig().autoPauseAfterHours }),
+    settings: () => ({ enabled: configManager.getConfig().autoPauseEnabled, hours: configManager.getConfig().autoPauseAfterHours, chatMinutes: configManager.getConfig().chatIdleReleaseMinutes }),
     panes: () => databaseService.getAllSessions(undefined, { includeHidden: true }).map(row => {
       const pane = sessionManager.getSession(row.id);
       return { id: row.id, archived: pane?.archived ?? true, createdAt: pane?.createdAt ?? new Date(), lastViewedAt: pane?.lastViewedAt };
     }),
     panels: paneId => panelManager.getPanelsForSession(paneId),
-    liveActivity: panelId => terminalPanelManager.getLastActivity(panelId),
-    agentState: panelId => terminalPanelManager.getAgentStatus(panelId),
+    liveActivity: panelId => terminalPanelManager.getLastActivity(panelId) ?? getChatTabManager().lastActivity(panelId),
+    agentState: panelId => panelManager.getPanel(panelId)?.type === 'chat' ? getChatTabManager().agentState(panelId) : terminalPanelManager.getAgentStatus(panelId),
     hasOpenNotify: panelIds => services.notifyService?.queue.hasOpenFor(panelIds) ?? false,
     focusedPaneId: () => (options.getMainWindow()?.isFocused() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined),
+    shownPaneId: () => {
+      const window = options.getMainWindow();
+      return window?.isVisible() && !window.isMinimized() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined;
+    },
     heldByUpdate: panel => {
       // SAFETY: auto-pause only passes terminal panels; their custom state is TerminalPanelState.
       const hold = (panel.state.customState as TerminalPanelState | undefined)?.updateResumeHold;
       return !!hold && updateHoldIsLive(hold);
     },
     pause: (paneId, mark) => pausePanes(commandRegistry, [paneId], mark),
+    chatRunning: panelId => getChatTabManager().isRunning(panelId),
+    pauseChats: (panelIds, mark) => getChatTabManager().pause(panelIds, mark),
     testThresholdMs: Number(process.env.PANE_AUTO_PAUSE_TEST_THRESHOLD_MS) || undefined,
   });
   configManager.on('config-updated', () => autoPauser.sync());
@@ -579,6 +587,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   sessionPrMonitor.start();
   loopManager.start();
   autoPauser.sync();
+  // Delete archived folders past their retention, keeping their agent logs; deferred so startup stays fast.
+  let stopArchiveExpiry: (() => void) | undefined;
+  const archiveExpiryTimer = setTimeout(() => { stopArchiveExpiry = startArchiveExpiry(); }, ARCHIVE_EXPIRY_START_DELAY_MS);
+  archiveExpiryTimer.unref();
   listeningPortMonitor.start();
   if (mode === 'desktop') {
     versionChecker.startPeriodicCheck();
@@ -617,6 +629,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       // First, so no run starts while the services it needs are closing.
       loopManager.stop();
       autoPauser.stop();
+      clearTimeout(archiveExpiryTimer);
+      stopArchiveExpiry?.();
       await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();

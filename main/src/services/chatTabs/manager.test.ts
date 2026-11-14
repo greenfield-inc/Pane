@@ -632,6 +632,207 @@ describe('chat tab manager', () => {
     await expect.poll(() => manager.view('p1').tasks).toBeUndefined();
   });
 
+  it('pauses an idle tab and resumes it on the next message, with its time rows and controls', async () => {
+    const { manager, store, directory, states } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    const sessionId = store.state('p1')?.acpSessionId;
+    const controls = manager.view('p1').controls.map(control => control.id);
+    expect(controls.length).toBeGreaterThan(0);
+
+    const outcome = await manager.pause(['p1'], { at: '2026-11-13T00:00:00.000Z', by: 'auto' });
+    expect(outcome).toEqual({ paused: ['p1'], failed: [] });
+    expect(manager.isRunning('p1')).toBe(false);
+    expect(store.state('p1')?.paused).toEqual({ at: '2026-11-13T00:00:00.000Z', by: 'auto' });
+    // Paused looks like idle: same conversation on screen, same composer controls.
+    const paused = manager.view('p1', 200, false);
+    expect(paused.status).toBe('idle');
+    expect(replyText(paused)).toBe('You said: hello');
+    expect(paused.controls.map(control => control.id)).toEqual(controls);
+
+    const sentBefore = states().length;
+    manager.send('p1', { operationId: 'b', text: 'again' });
+    // While it restarts, every view keeps the composer's controls.
+    await expect.poll(() => manager.receipt('p1', 'b')?.state).toBe('completed');
+    expect(states().slice(sentBefore).filter(view => view.panelId === 'p1').every(view => view.controls.length > 0)).toBe(true);
+    expect(store.state('p1')?.paused).toBeUndefined();
+    expect(store.state('p1')?.acpSessionId).toBe(sessionId);
+    const resumed = manager.view('p1');
+    expect(replyText(resumed)).toBe('You said: hello|You said: again');
+    expect(turnEnds(resumed)).toEqual(['end_turn', 'end_turn']);
+  });
+
+  const MARK = { at: '2026-11-13T00:00:00.000Z', by: 'auto' as const };
+
+  it.each([
+    ['a turn running', 'slow', false, (view: ChatTabView) => view.status === 'working'],
+    ['an approval waiting', 'permission', false, (view: ChatTabView) => view.permissions.length === 1],
+    ['a question waiting', 'question', false, (view: ChatTabView) => view.questions.length === 1],
+    ['a background task running', 'task', true, (view: ChatTabView) => view.tasks?.length === 1 && view.status === 'idle'],
+    ['the agent working on its own', 'background', true, (view: ChatTabView) => view.status === 'working'],
+  ])('never pauses a tab with %s', async (_name, prompt, afterPrompt, reached) => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: prompt });
+    // The prompt's own turn has ended, so only the condition named keeps the tab busy.
+    if (afterPrompt) await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    await expect.poll(() => reached(manager.view('p1'))).toBe(true);
+    const outcome = await manager.pause(['p1'], MARK);
+    expect(outcome.paused).toEqual([]);
+    expect(outcome.failed.map(item => item.panelId)).toEqual(['p1']);
+    expect(manager.isRunning('p1')).toBe(true);
+    expect(store.state('p1')?.paused).toBeUndefined();
+  });
+
+  it('never pauses a tab with a message waiting in its queue', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    // A message saved in the queue, which the agent has not taken yet.
+    store.commit('p1', { ...store.state('p1')!, queue: [{ operationId: 'q', text: 'later', queuedAt: '2026-11-13T00:00:00.000Z' }] });
+    const outcome = await manager.pause(['p1'], MARK);
+    expect(outcome.paused).toEqual([]);
+    expect(manager.isRunning('p1')).toBe(true);
+  });
+
+  it('delivers a message sent while a pause stops the agent, in the same conversation', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    const sessionId = store.state('p1')?.acpSessionId;
+    const pausing = manager.pause(['p1'], MARK);
+    manager.send('p1', { operationId: 'b', text: 'are you there' });
+    manager.view('p1');
+    expect(await pausing).toEqual({ paused: ['p1'], failed: [] });
+    await expect.poll(() => manager.receipt('p1', 'b')?.state).toBe('completed');
+    expect(manager.view('p1').status).toBe('idle');
+    expect(store.state('p1')?.paused).toBeUndefined();
+    expect(store.state('p1')?.acpSessionId).toBe(sessionId);
+    expect(replyText(manager.view('p1'))).toBe('You said: hello|You said: are you there');
+  });
+
+  it('serves a paused tab\'s conversation to readers without starting it', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    await manager.pause(['p1'], MARK);
+    expect([...manager.messages('p1')].map(message => message.role)).toEqual(['user', 'assistant', 'assistant', 'assistant']);
+    expect(manager.history('p1', 4, 100)).toHaveLength(4);
+    const lastReply = () => manager.lastMessage('p1', 'assistant', message => message.parts.some(part => part.type === 'text'))?.parts;
+    expect(lastReply()).toEqual([{ type: 'text', text: 'You said: hello' }]);
+    expect(manager.isRunning('p1')).toBe(false);
+    // Opening it resumes it; while the agent replays its history, readers still get the conversation.
+    manager.view('p1');
+    expect(lastReply()).toEqual([{ type: 'text', text: 'You said: hello' }]);
+    expect([...manager.messages('p1')]).toHaveLength(4);
+    expect(manager.history('p1', 4, 100)).toHaveLength(4);
+    await manager.ensure('p1');
+    expect(lastReply()).toEqual([{ type: 'text', text: 'You said: hello' }]);
+  });
+
+  it('opens a tab paused before Pane restarted with its conversation and controls, reading idle while it resumes', async () => {
+    const store = new MemoryStore();
+    const directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-manager-'));
+    const before = harness(store, {}, directory);
+    store.add('p1', newTab(directory));
+    await before.manager.ensure('p1');
+    before.manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => before.manager.receipt('p1', 'a')?.state).toBe('completed');
+    const controls = before.manager.view('p1').controls.map(control => control.id);
+    await before.manager.pause(['p1'], MARK);
+    await before.manager.stopAll();
+
+    const after = harness(store, {}, directory);
+    const reopened = after.manager.view('p1');
+    expect(reopened.status).toBe('starting');
+    expect(replyText(reopened)).toBe('You said: hello');
+    expect(reopened.controls.map(control => control.id)).toEqual(controls);
+    expect(after.manager.agentState('p1')).toBe('idle');
+    await expect.poll(() => after.manager.view('p1').status).toBe('idle');
+    expect(turnEnds(after.manager.view('p1'))).toEqual(['end_turn']);
+    expect(store.state('p1')?.paused).toBeUndefined();
+  });
+
+  it('reads as working, not idle, while it restarts after a crash', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    manager.send('p1', { operationId: 'b', text: 'crash' });
+    await expect.poll(() => manager.view('p1').status).toBe('stopped');
+    const restarting = manager.restart('p1');
+    await expect.poll(() => manager.view('p1', 0, false).status).toBe('starting');
+    expect(manager.agentState('p1')).toBe('working');
+    await restarting;
+  });
+
+  it('shows nothing of the old conversation while /clear starts a fresh one', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    const clearing = manager.clear('p1');
+    await expect.poll(() => manager.view('p1', 0, false).status).toBe('starting');
+    expect(manager.view('p1', 200, false).transcript).toBeUndefined();
+    await clearing;
+    expect(replyText(manager.view('p1'))).toBe('');
+  });
+
+  it('keeps time rows across a restart (history replay drops them otherwise)', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'one' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    manager.send('p1', { operationId: 'b', text: 'two' });
+    await expect.poll(() => manager.receipt('p1', 'b')?.state).toBe('completed');
+    const before = manager.view('p1').transcript!.messages.map(message => message.role === 'user' ? 'user' : message.parts[0]?.type === 'content' ? 'time' : message.parts[0]?.type);
+    expect(before).toEqual(['user', 'tool', 'text', 'time', 'user', 'tool', 'text', 'time']);
+    await manager.restart('p1');
+    const after = manager.view('p1').transcript!.messages.map(message => message.role === 'user' ? 'user' : message.parts[0]?.type === 'content' ? 'time' : message.parts[0]?.type);
+    expect(after).toEqual(before);
+  });
+
+  it('changes a paused tab\'s model and lists its conversations, resuming its agent first', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    const sessionId = store.state('p1')?.acpSessionId;
+    await manager.pause(['p1'], MARK);
+
+    await manager.configure('p1', 'model', 'fast');
+    expect(manager.view('p1', 0, false).controls.find(control => control.id === 'model')?.currentValue).toBe('fast');
+    expect(store.state('p1')?.paused).toBeUndefined();
+    expect(store.state('p1')?.acpSessionId).toBe(sessionId);
+
+    await manager.pause(['p1'], MARK);
+    expect((await manager.conversations('p1')).find(entry => entry.current)?.sessionId).toBe(sessionId);
+  });
+
+  it('leaves a paused tab that Autopilot then stopped stopped when its controls are used', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    await manager.pause(['p1'], MARK);
+    await manager.stop('p1', { message: 'Autopilot is off.', next: 'Turn Autopilot on.' });
+
+    await expect(manager.configure('p1', 'model', 'fast')).rejects.toThrow();
+    await expect(manager.conversations('p1')).rejects.toThrow();
+    expect(store.state('p1')?.status).toBe('stopped');
+    expect(manager.isRunning('p1')).toBe(false);
+  });
+
   it('keeps chosen settings across a restart', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));

@@ -41,8 +41,9 @@ pass. If it fails, stop and say what failed; don't fall back to raw
 
 ## One Pane per feature
 
-**1 feature = 1 worktree = 1 branch = 1 Pane; every other agent for it
-(implementer, reviewer, follow-up reviewer, QA, fixer) is a tab in that Pane.**
+**One Pane per feature; every other agent for it (implementer, reviewer,
+follow-up reviewer, QA, fixer) is a tab in that Pane** (`runpane doctor`
+explains Pane's model).
 A new Pane creates a worktree that checks out, installs and often builds, so
 create one only when the work's branch has none. Split work across Panes only
 for independent packages, each with its own branch.
@@ -476,8 +477,11 @@ file and continue."
 
 A paused worker is reported once as `PAUSED` (`panel.paused`). The person
 paused it, or auto-pause did after hours without use. Its panel and
-conversation are intact. Leave it paused unless the person asks you to resume
-it, then resume it by name:
+conversation are intact. A chat-tab worker is the exception: auto-pause stops
+its idle agent after 30 minutes with no `PAUSED` event, and sending it a
+message or reading its screen resumes it, so message it as usual. Leave any
+other paused worker paused unless the person asks you to resume it, then
+resume it by name:
 
 ```sh
 runpane panels resume --panel <panel id> --wait-ready --yes --json   # one tab
@@ -487,7 +491,8 @@ runpane sessions resume --session <S> --json                         # the Sessi
 
 `UNPAUSED` (`panel.unpaused`) means it was resumed; `READY` follows as usual.
 `runpane panes list --json` shows each Pane's `paused` mark and
-`inactiveSince` (its last terminal output, input or selection).
+`inactiveSince` (its last terminal output or input, chat agent activity or
+selection).
 
 A worker cut off by sleep or a network error usually ends its turn on an API
 error and sits at its prompt. That turn end is a READY, with a MISSING REPORT

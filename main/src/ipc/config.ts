@@ -8,6 +8,7 @@ import { SHORTCUT_LETTER, sharedShortcutLetter } from '../../../shared/utils/ter
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import { ShellDetector } from '../utils/shellDetector';
 import { machineOs } from '../services/workspaceMachine';
+import { analyticsDisabledByEnvironment, type ConfigManager } from '../services/configManager';
 import { syncAutoStartOnBoot } from '../utils/autoStart';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import { syncPaneMcpForApp } from '../services/paneMcpRegistration';
@@ -22,6 +23,13 @@ import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { VOICE_KEY_FIELDS, voiceKeyProblem, type VoiceKeyField } from '../../../shared/voice/voiceKeys';
 import { isConfiguredAgent } from '../../../shared/agents';
 
+/** The config the renderer sees: analytics off whenever main has it off (the environment, an unread config.json), so it sends nothing. */
+function rendererConfig(config: AppConfig, configManager: ConfigManager): AppConfig {
+  const disabledByEnvironment = analyticsDisabledByEnvironment();
+  if (configManager.isAnalyticsEnabled() || (!disabledByEnvironment && config.analytics?.enabled === false)) return config;
+  return { ...config, analytics: { ...config.analytics, enabled: false, ...(disabledByEnvironment && { disabledByEnvironment: true }) } };
+}
+
 export function registerConfigHandlers(
   ipcMain: IpcMain,
   { app, configManager, claudeCodeManager, databaseService, getMainWindow, sessionManager }: AppServices,
@@ -30,7 +38,7 @@ export function registerConfigHandlers(
   // The renderer follows config edits made outside it (keyboard overrides from a
   // hand-edited config.json, a second window), not only its own updates.
   configManager.on('config-updated', (config: AppConfig) => {
-    getMainWindow()?.webContents.send('config:updated', config);
+    getMainWindow()?.webContents.send('config:updated', rendererConfig(config, configManager));
   });
 
   if (commandRegistry) {
@@ -89,7 +97,7 @@ export function registerConfigHandlers(
     try {
       // Always reload from disk to pick up external changes (e.g., from setup scripts)
       const config = await configManager.reloadFromDisk();
-      return { success: true, data: config };
+      return { success: true, data: rendererConfig(config, configManager) };
     } catch (error) {
       console.error('Failed to get config:', error);
       return { success: false, error: 'Failed to get config' };
@@ -175,7 +183,7 @@ export function registerConfigHandlers(
       }
 
       notifySettingsChanged();
-      return { success: true, data: updatedConfig };
+      return { success: true, data: rendererConfig(updatedConfig, configManager) };
     } catch (error) {
       console.error('Failed to update config:', error);
       if (error instanceof AppearanceValidationError) {

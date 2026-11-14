@@ -112,9 +112,13 @@ when Pane quits has no saved id yet and starts fresh. Loops run Claude, Codex or
 Cursor, so the Loop editor doesn't offer OpenCode Sessions.
 
 Each Session owns a stable folder at `<PANE_DIR>/sessions/<session-id>/` for
-notes, plans, attachments, generated instructions, and artifacts. Renaming,
-reopening, and archiving retain this folder. These folders are not Git
-worktrees or security sandboxes and do not expire with OS temporary files.
+notes, plans, attachments, generated instructions, and artifacts. Renaming
+and reopening keep this folder. Archiving keeps it for 14 days (**Settings →
+Worktrees & Git → Keep archived folders**), then Pane deletes it, first moving
+any agent logs inside it to `<pane-dir>/agent-logs/` (see
+[The scratch folder](#the-scratch-folder)); restoring the Session before then
+keeps it. A Session archived before this retention existed counts its 14 days
+from the first launch of the Pane version that added it. These folders are not Git worktrees or security sandboxes.
 Project implementation belongs in an appropriate Pane/worktree.
 
 ## Windows and WSL runtimes
@@ -550,7 +554,7 @@ sharing of other conversations.
 
 ## One Pane per feature
 
-**1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane.**
+**Each feature has one Pane, and its reviews, audits, fixes and QA are tabs in it.** `runpane doctor` prints the full working rules.
 
 A feature here means one branch and its PR. A new Pane creates a worktree that
 checks out the repository, installs dependencies and often builds, so it is
@@ -586,11 +590,12 @@ worktree; archive it then.
 ## Pane association before delegation
 
 Management is a Pane-level relationship; tabs inherit the relationship and
-share the Pane's worktree. Panes the orchestrator creates or adopts with
-`runpane panes create` or `panes adopt` are associated with its Session in the
-same call: the CLI reads `PANE_ORCHESTRATION_SESSION_ID`, each result item
-reports `association: { sessionId, ok, error? }`, and `--no-associate` opts
-out. A failed association never undoes the new Pane. Before delegating to an
+share the Pane's worktree. Panes created or adopted with `runpane panes
+create` or `panes adopt` from inside a Session are associated with it in the
+same call: from the orchestrator (the CLI reads `PANE_ORCHESTRATION_SESSION_ID`)
+or from any tab in a Pane that belongs to the open Session (Pane looks up the
+calling tab, `$PANE_PANEL_ID`). Each result item reports `association: {
+sessionId, ok, error? }`, and `--no-associate` opts out. A failed association never undoes the new Pane. Before delegating to an
 existing Pane, or when automatic association failed, the orchestrator
 associates it explicitly. The supported command is:
 
@@ -737,6 +742,44 @@ write it; the orchestrator is its only writer. What each built-in template gets:
 
 The flag is fixed when the tab is created: a tab opened before its Pane was
 associated has no `PANE_SESSION_DIR` until a new tab is created.
+
+### The scratch folder
+
+Every tab Pane starts gets `PANE_SCRATCH_DIR`, a folder for the agent's
+temporary files, clones, captures, downloads, logs and test instances (an
+isolated `PANE_DIR` and `HOME` for QA), so nothing lands in `/tmp` where
+archive never reaches it. Pane creates it when the first tab starts:
+
+| Pane | `PANE_SCRATCH_DIR` | Deleted |
+| --- | --- | --- |
+| A worktree Pane created (archive removes the worktree) | `<worktree>/.pane/scratch/`, hidden by the repository's `.git/info/exclude` | With the worktree, on archive |
+| A Pane on the main checkout or an adopted worktree | `<pane-dir>/scratch/<pane-id>/` | 14 days after archive |
+| A Session's own tabs | `<pane-dir>/scratch/<session-pane-id>/` | 14 days after the Session is archived |
+| A WSL project, or a WSL terminal of a worktree Pane created | `<pane-dir>/scratch/<pane-id>/`, as a `/mnt/c/...` path inside WSL | 14 days after archive |
+
+Tabs on an SSH host get no `PANE_SCRATCH_DIR`: a folder on this machine means
+nothing on the remote one.
+
+Pane never deletes a main checkout or an adopted worktree. The 14 days come
+from **Settings → Worktrees & Git → Keep archived folders**; restoring before
+then keeps the folder. A permanently deleted Pane's scratch goes at the next
+expiry pass. Pane records each archive time in
+`<pane-dir>/scratch/.archived/<pane-id>`, outside the folders agents write, and
+checks again right before each delete that the Pane or Session is still archived. Scratch never blocks archive: its files are hidden from
+git, so they are neither untracked nor uncommitted. `runpane panes archive
+--dry-run` lists the folder with its size, and the date it will be deleted when
+it is kept.
+
+Before deleting a scratch or Session folder, Pane moves every agent log inside
+it (an agent run with its home there) to
+`<pane-dir>/agent-logs/<agent>/<pane-id>/`, finding them by each agent's
+`transcriptDirs` in the agents config. If a move fails, nothing is deleted.
+Usage & Limits reads `<pane-dir>/agent-logs/` beside `~/.claude/projects` and
+`~/.codex/sessions`. Pane only reads, moves or deletes a folder that sits
+exactly where Pane put it: a scratch folder that is a symbolic link or a
+Windows junction, or is reached through one, is left alone (a link is only
+unlinked), so Pane never moves or deletes anything in the agents' own folders
+in your home.
 
 Write the folder's absolute path into the brief rather than
 `$PANE_SESSION_DIR`. Under `blockReadsOutsideWorkingDirectories` Claude Code
@@ -984,21 +1027,26 @@ Pause stops a tab's process the way quitting Pane does, without asking, and
 keeps its panel and conversation: `runpane panels pause --panel <panel-id>
 --yes`, `runpane panes pause --pane <pane-id> --yes`, or `runpane sessions
 pause --session <session-id>` for the terminal tabs of the Session's chat and
-every Pane in it. A chat tab can't pause yet: its agent keeps running, the
-result counts it in `chatTabsNotPaused` and says so, and `panels pause` refuses
-one. A Session whose orchestrator is a chat tab therefore never reads as paused.
-A paused tab stays stopped through clicks, app restarts and updates until
+every Pane in it. Pause leaves a chat tab running: the result counts it in
+`chatTabsNotPaused` and says so, and `panels pause` refuses one. Auto-pause
+(Settings > Pause) does stop the agent of a chat tab idle for
+`chatIdleReleaseMinutes` (30 by default), outside the Pane on screen and never
+while it works, holds a queued message or waits on the person. Opening the tab
+or sending it a message resumes it in its conversation, and it reports no
+`panel.paused`. A Session whose orchestrator is a chat tab therefore never reads as paused.
+A paused terminal tab stays stopped through clicks, app restarts and updates until
 `runpane panels resume --panel <panel-id>`, `runpane panes resume --pane
 <pane-id> --yes` or `runpane sessions resume --session <session-id>` restarts
 it in its conversation. The watch reports each paused tab once as
 `panel.paused` (`PAUSED <pane-name> pane <pane-id> panel <panel-id>`) and each
 resumed one as `panel.unpaused` (`UNPAUSED ...`), followed by its usual ready
 signal. An orchestrator leaves paused workers paused unless the person asks.
-Any other start of a paused tab (opening it, a retry, another machine) fails
-with `ERR_PANEL_PAUSED` and starts nothing.
+Any other start of a paused terminal tab (opening it, a retry, another machine)
+fails with `ERR_PANEL_PAUSED` and starts nothing.
 `runpane panes list --json` reports each Pane's `paused` mark (`{ at, by:
 "manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal
-output or input in its tabs or the last time the person selected it;
+output or input or chat agent activity in its tabs or the last time the person
+selected it;
 `runpane panels list` reports each tab's `paused`.
 
 If a stopped panel's previous shell or agent process is still exiting, resume

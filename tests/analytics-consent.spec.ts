@@ -127,7 +127,7 @@ test('bundled analytics preserves identity and opt-out without remote code, conf
     analyticsIdentity: identity,
     initialConfig: {
       analytics: {
-        enabled: false,
+        enabled: true,
         posthogApiKey: 'phc_test',
         posthogHost: POSTHOG_HOST,
         installId: identity.installId,
@@ -202,7 +202,10 @@ test('bundled analytics preserves identity and opt-out without remote code, conf
   expect(remoteScripts).toEqual([]);
 });
 
-test('an explicit existing opt-out stays disabled and receives no default-on events', async ({ page }) => {
+for (const [name, analyticsConsentShown] of [
+  ['under the legacy dialog', true],
+  ['in config before the default-on check ran', false],
+] as const) test(`an explicit opt-out made ${name} stays disabled and receives no default-on events`, async ({ page }) => {
   const identity = {
     distinctId: 'install:install_existing_opt_out_e2e',
     installId: 'install_existing_opt_out_e2e',
@@ -229,7 +232,8 @@ test('an explicit existing opt-out stays disabled and receives no default-on eve
   });
 
   await installElectronApiMock(page, {
-    analyticsConsentShown: true,
+    analyticsConsentShown,
+    initialPreferences: { analytics_default_applied: 'false' },
     analyticsIdentity: identity,
     initialConfig: {
       analytics: {
@@ -255,4 +259,30 @@ test('an explicit existing opt-out stays disabled and receives no default-on eve
   await page.getByRole('button', { name: 'Privacy', exact: true }).click();
   await expect(page.getByRole('switch', { name: 'Allow product analytics' })).not.toBeChecked();
   expect(requests.map((request) => request.url)).toEqual([]);
+});
+
+test('DO_NOT_TRACK in the environment sends nothing and locks the Settings switch off', async ({ page }) => {
+  const requests: string[] = [];
+  await page.route(`${POSTHOG_HOST}/**`, async (route) => {
+    requests.push(route.request().url());
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+  });
+
+  await installElectronApiMock(page, {
+    analyticsConsentShown: false,
+    initialPreferences: { analytics_default_applied: 'false' },
+    initialConfig: {
+      analytics: { enabled: false, disabledByEnvironment: true, posthogApiKey: 'phc_test', posthogHost: POSTHOG_HOST },
+    },
+    mainAnalyticsEvents: [{ eventName: 'app_opened', properties: { is_first_launch: true } }],
+  });
+
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.getByRole('button', { name: 'Settings' }).first().click();
+  await page.getByRole('button', { name: 'Privacy', exact: true }).click();
+  await expect(page.getByText('DO_NOT_TRACK or RUNPANE_TELEMETRY_DISABLED is set')).toBeVisible();
+  const toggle = page.getByRole('switch', { name: 'Allow product analytics' });
+  await expect(toggle).not.toBeChecked();
+  await expect(toggle).toBeDisabled();
+  expect(requests).toEqual([]);
 });

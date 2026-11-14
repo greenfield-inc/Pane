@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 
 from .daemon_client import get_pane_daemon_endpoint, invoke_daemon, resolve_pane_directory
 from .workspaces import read_workspace_summary
+from .pane_intro import pane_intro, render_pane_intro
 from .generated_contract import RUNPANE_CONTRACT
 from .installers import resolve_existing_pane_path
 from .platforms import PanePlatform, detect_platform
@@ -248,6 +249,8 @@ def build_doctor_report(parsed, source: str) -> Dict[str, Any]:
     add_remote_daemon_health_diagnostic(remote_setup, remote_daemon_service)
 
     return {
+        "intro": pane_intro(pane_dir),
+        "workspaceRules": RUNPANE_CONTRACT["agentContext"]["workspaceRules"],
         "ok": bool(release["ok"] and daemon["reachable"] and remote_setup["ready"]),
         "source": source,
         "wrapper": {
@@ -682,6 +685,8 @@ def format_watch_defaults(defaults: Dict[str, Any]) -> str:
 
 
 def render_doctor_text(report: Dict[str, Any]) -> None:
+    print(render_pane_intro(report["intro"], report["workspaceRules"]))
+    print("")
     platform = report.get("platform")
     if platform:
         print(f"Platform: {platform['os']}/{platform['arch']}")

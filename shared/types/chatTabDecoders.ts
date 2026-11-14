@@ -1,6 +1,6 @@
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../validation/boundaryDecoder';
 import type { AgentChatMessage, AgentChatPart, AgentChatReceipt } from './agentChat';
-import type { ChatAgentEntry, ChatTabConversation, ChatTabEvent, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt, ChatTabSwitchBanner, ChatTabView, ChatToolPatch } from './chatTab';
+import type { ChatAgentEntry, ChatTabConversation, ChatTabEvent, ChatTabProblem, ChatTabQuestion, ChatTabQueuedPrompt, ChatTabSwitchBanner, ChatTabTranscript, ChatTabView, ChatToolPatch } from './chatTab';
 
 const status = boundary.enumeration('pending', 'in_progress', 'completed', 'failed');
 const part: BoundarySchema<AgentChatPart> = boundary.union(
@@ -44,16 +44,18 @@ const conversation: BoundarySchema<ChatTabConversation> = boundary.object({
   sessionId: boundary.string, title: boundary.optional(boundary.string), updatedAt: boundary.optional(boundary.string),
   current: boundary.optional(boundary.literal(true)), openIn: boundary.optional(boundary.object({ panelId: boundary.string, title: boundary.string })),
 });
+const controls: BoundarySchema<ChatTabView['controls']> = boundary.array(boundary.object({ id: boundary.string, name: boundary.string, category: boundary.optional(boundary.string), currentValue: boundary.string, options: boundary.array(boundary.object({ value: boundary.string, name: boundary.string })) }));
+const commands: BoundarySchema<ChatTabView['commands']> = boundary.array(boundary.object({ name: boundary.string, description: boundary.optional(boundary.string), hint: boundary.optional(boundary.string) }));
+const transcript: BoundarySchema<ChatTabTranscript> = boundary.object({ panelId: boundary.string, generation: boundary.number, revision: boundary.number, start: boundary.number, messages: boundary.array(chatMessageSchema) });
 const view: BoundarySchema<ChatTabView> = boundary.object({
   panelId: boundary.string, agent: boundary.string, generation: boundary.number,
   status: boundary.enumeration('starting', 'idle', 'working', 'blocked', 'stopped'),
   problem: boundary.optional(problem), notice: boundary.optional(boundary.string), canAttachImages: boundary.boolean,
-  controls: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, category: boundary.optional(boundary.string), currentValue: boundary.string, options: boundary.array(boundary.object({ value: boundary.string, name: boundary.string })) })),
-  commands: boundary.array(boundary.object({ name: boundary.string, description: boundary.optional(boundary.string), hint: boundary.optional(boundary.string) })),
+  controls, commands,
   permissions: boundary.array(boundary.object({ id: boundary.string, generation: boundary.number, title: boundary.string, toolCall: boundary.json, options: boundary.array(boundary.object({ optionId: boundary.string, name: boundary.string, kind: boundary.string })) })),
   questions: boundary.array(question),
   queue: boundary.array(queued),
-  transcript: boundary.optional(boundary.object({ panelId: boundary.string, generation: boundary.number, revision: boundary.number, start: boundary.number, messages: boundary.array(chatMessageSchema) })),
+  transcript: boundary.optional(transcript),
   messageCount: boundary.number,
   context: boundary.optional(boundary.object({ used: boundary.number, size: boundary.number })),
   tasks: boundary.optional(boundary.array(boundary.object({ id: boundary.string, kind: boundary.string, title: boundary.optional(boundary.string), startedAt: boundary.string, canStop: boundary.optional(boundary.literal(false)) }))),
@@ -105,6 +107,13 @@ export function decodeChatAgents(value: unknown): ChatAgentEntry[] {
 }
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the view schema.
 export function decodeChatTabView(value: unknown): ChatTabView { return decodeBoundary(value, view); }
+
+/** What a paused chat tab saved to show until its agent is back: its conversation's newest window and the composer's controls. */
+export interface ChatPausedView { sessionId: string; held: ChatTabTranscript; shown?: Pick<ChatTabView, 'controls' | 'commands' | 'canAttachImages'> }
+export const chatPausedViewSchema: BoundarySchema<ChatPausedView> = boundary.object({
+  sessionId: boundary.string, held: transcript,
+  shown: boundary.optional(boundary.object({ controls, commands, canAttachImages: boundary.boolean })),
+});
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the event schema.
 export function decodeChatTabEvent(value: unknown): ChatTabEvent { return decodeBoundary(value, event); }
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Remote chat tab data is decoded immediately with the message schema.

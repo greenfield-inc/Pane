@@ -15,7 +15,7 @@ const fs: typeof nodeFs = process.versions.electron
  * snapshot copies these and every top-level file (config, databases, journals).
  */
 export const PANE_STATE_FOLDERS = [
-  'agent-chat', 'artifacts', 'autopilot', 'images', 'logs', 'mcp', 'migrate-to-pane', 'notes',
+  'agent-chat', 'agent-logs', 'artifacts', 'autopilot', 'images', 'logs', 'mcp', 'migrate-to-pane', 'notes',
   'prompts', 'remote-daemon', 'sessions', 'skills', 'uploads',
 ] as const;
 
@@ -32,6 +32,8 @@ export const PANE_UNSNAPSHOTTED_FOLDERS = [
   'sockets', 'updates',
   // Repositories Pane clones for the person; no update migrates them.
   'projects',
+  // Agents' temporary files ($PANE_SCRATCH_DIR), which can hold whole clones; archive retention deletes them.
+  'scratch',
 ] as const;
 
 const stateFolders = new Set<string>(PANE_STATE_FOLDERS);

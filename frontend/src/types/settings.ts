@@ -32,6 +32,8 @@ export type SettingsSettingId =
   | 'resume-paused-on-open'
   | 'auto-pause'
   | 'auto-pause-hours'
+  | 'archive-retention'
+  | 'chat-idle-release-minutes'
   | 'html-file-open-mode'
   | 'theme'
   | 'appearance-mode'
@@ -109,7 +111,8 @@ export type SettingsSettingId =
   | 'chat-tabs'
   | 'autopilot'
   | 'autopilot-instructions'
-  | 'notes';
+  | 'notes'
+  | 'usage-leaderboard';
 
 export interface SettingsTarget {
   category: SettingsCategoryId;

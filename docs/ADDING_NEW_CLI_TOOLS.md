@@ -47,6 +47,7 @@ same ids. The schema is `$defs/agent` and `$defs/agentChat` in
 | `terminal.configDir` | The CLI's project config folder (`.claude`), copied into new worktrees by default |
 | `terminal.session` | How the CLI opens a saved conversation: `flag`, `minimumVersion` (the doctor checks `--help` for the flag), `idPattern`, `selectors` (flags with which a command picks its own conversation) and `paneChoosesId` (the flag also creates the conversation, so Pane picks the id) |
 | `install` | Install page `url` and install `command`, shown when the CLI is missing or too old |
+| `transcriptDirs` | Folders, relative to the home the CLI runs with, that hold its session transcripts. Before Pane deletes a folder it owns, it moves these out of it into `<pane-dir>/agent-logs/<agent>/` ([The scratch folder](SESSIONS.md#the-scratch-folder)) |
 | `signIn` | Arguments to the CLI that sign it in, run in a terminal tab when a chat agent advertises no terminal sign-in of its own; required with `chat` |
 | `onboarding` | Offered on the first-run screen |
 | `chat` | Present when chat tabs run the agent (below) |

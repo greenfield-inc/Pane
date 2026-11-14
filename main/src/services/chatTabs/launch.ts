@@ -34,6 +34,8 @@ export interface ChatLaunchContext {
   unsupportedHost(panel: ToolPanel): string | undefined;
   /** The variables of the project that owns the tab's Pane, for whoever opened the tab. */
   projectEnv(panel: ToolPanel): Promise<ResolvedProjectEnv>;
+  /** The tab's `$PANE_SCRATCH_DIR`, created on first use; undefined when its Pane has none. */
+  scratchDirectory?(panel: ToolPanel): Promise<string | undefined>;
 }
 
 /** The agent process's environment: string values only, rebuilt at every start and never saved. */
@@ -50,6 +52,7 @@ export function chatTabEnv(panel: ToolPanel, state: ChatPanelState, projectEnv: 
   delete inherited.PANE_SESSION_DIR;
   delete inherited[PANE_MCP_URL_ENV];
   delete inherited[PANE_MCP_TOKEN_ENV];
+  delete inherited.PANE_SCRATCH_DIR;
   delete inherited.PANE_AUTOPILOT_RUN_ID;
   delete inherited.PANE_AUTOPILOT_DIR;
   const config = getRuntimeConfigManager().getConfig();
@@ -101,6 +104,8 @@ export class AgentChatLauncher implements ChatTabLauncher {
     const project = state.orchestrationSessionId ? { env: {}, warnings: [] } : await this.options.context.projectEnv(panel);
     for (const warning of project.warnings) console.warn(`[ChatTabs] ${panel.id}: ${warning}`);
     const env = chatTabEnv(panel, state, project.env);
+    const scratch = await this.options.context.scratchDirectory?.(panel);
+    if (scratch) env.PANE_SCRATCH_DIR = scratch;
     const agent = agentConfig(state.agent);
     if (!agent?.chat) return this.registryLaunch(state, env);
     const chat = agent.chat;

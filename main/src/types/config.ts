@@ -107,6 +107,10 @@ export interface AppConfig {
   // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
+  // Days Pane keeps archived Session folders and Pane-owned scratch before deleting them (default ARCHIVE_RETENTION_DAYS)
+  archiveRetentionDays?: number;
+  // Under the same switch: stop a chat tab's agent after this many idle minutes (default 30; whole minutes 5 to 1440)
+  chatIdleReleaseMinutes?: number;
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
@@ -191,6 +195,8 @@ export interface AppConfig {
   // PostHog analytics settings
   analytics?: {
     enabled: boolean;
+    // Set only on config sent to the renderer: DO_NOT_TRACK or RUNPANE_TELEMETRY_DISABLED turned analytics off. Never saved.
+    disabledByEnvironment?: boolean;
     posthogApiKey?: string;
     posthogHost?: string;
     installId?: string;
@@ -269,6 +275,8 @@ export interface UpdateConfigRequest {
   resumePausedOnOpen?: boolean;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
+  archiveRetentionDays?: number;
+  chatIdleReleaseMinutes?: number;
   appearanceMode?: AppearanceMode;
   theme?: Theme;
   systemLightTheme?: Theme;

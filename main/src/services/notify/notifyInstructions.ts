@@ -6,6 +6,7 @@ import { promisify } from 'util';
 import type { NotifyInstructionsFile } from '../../../../shared/types/notify';
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 import { linuxToUNCPath, windowsPathToWSLMount } from '../../utils/wslUtils';
+import { agentsIntroForInstructions, scratchRule } from '../../../../packages/runpane/src/paneIntro';
 
 /**
  * A few lines in the agents' user-level instruction files (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md)
@@ -47,6 +48,8 @@ function renderBlock(options: NotifyInstructionsOptions, fallback: string): stri
   return [
     NOTIFY_BLOCK_BEGIN,
     '## Pane',
+    agentsIntroForInstructions(),
+    `- ${scratchRule()}`,
     options.homeSkill
       ? 'When PANE_SESSION_ID is set, you are in a Pane terminal: load the `pane` skill before using Pane (worktrees, Panes, Sessions, asking the person).'
       : 'When PANE_SESSION_ID is set, you are in a Pane terminal: `runpane agent-context --json` lists what you can do with Pane (worktrees, Panes, Sessions, asking the person).',

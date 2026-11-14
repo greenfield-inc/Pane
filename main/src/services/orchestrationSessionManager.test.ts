@@ -983,6 +983,15 @@ describe('OrchestrationSessionManager', () => {
     })).rejects.toThrow(/OpenCode.*custom resume/i);
   });
 
+  it('starts the retention period at upgrade for a Session archived before archive retention existed', async () => {
+    const before = Date.now();
+    const record = { ...orchestrationRecord('archived-before-retention', 'Old archived'), archived: true };
+    const fixture = createFixture('claude', { version: 1, sessions: [record] });
+    await fixture.manager.initialize();
+    const archivedAt = fixture.store.read().sessions.find(item => item.id === record.id)?.archivedAt;
+    expect(Date.parse(archivedAt ?? '')).toBeGreaterThanOrEqual(before);
+  });
+
   it.each(['bash -lc "opencode --auto"', 'opencode --auto'])('guards persisted OpenCode restoration without creating an unused panel: %s', async launchCommand => {
     const record = orchestrationRecord('invalid-opencode-restoration', 'Invalid saved OpenCode');
     record.agent = 'opencode';

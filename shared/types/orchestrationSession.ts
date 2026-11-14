@@ -100,6 +100,8 @@ export interface OrchestrationSessionRecord {
   nameIsDefault?: boolean;
   /** Durable UI archive marker. Older records omit this field and read as active. */
   archived?: boolean;
+  /** When the Session was archived; Pane deletes its folder the retention period later. Startup sets it for Sessions archived before it existed. */
+  archivedAt?: string;
   /** Durable UI pin marker. Older records omit this field and read as unpinned. */
   isPinned?: boolean;
   /** Set while the Session's chat and every Pane in it are paused. Computed when read, never stored. */

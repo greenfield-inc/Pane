@@ -9,6 +9,7 @@ import type { Project } from '../database/models';
 import { syncPaneHomeSkill } from './paneHomeSkill';
 import { keepSessionTidySection } from './sessionTidyRules';
 import { APPROVALS_RULES } from './approvalsRules';
+import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 
 // Every skill Pane installs for its agents ships with Pane.
 const PANE_CHAT_BUNDLE_ROOT = path.join(__dirname, 'paneChatBundle');
@@ -640,8 +641,7 @@ When a pane finishes something a human will read, have it run the
 4. After the ticket is ready and the user explicitly authorizes implementation,
    dispatch an implementation session as a tab in the feature's existing Pane,
    or create a Pane only when the feature's branch has none yet
-   (1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA
-   for it are tabs in that Pane). Choose the agent and the skills that fit the
+   (${paneAndTabRules()}). Choose the agent and the skills that fit the
    work, usually \`tdd\`, \`quick-verify\`, \`prepare-pr\`, and
    \`babysit-pr\`, and name them by absolute path (see \`runpane\`). Pass the
    ticket, the stable Session ID, and the associated Pane and tab IDs so

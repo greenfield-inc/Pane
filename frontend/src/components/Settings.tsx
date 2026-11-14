@@ -20,7 +20,7 @@ import { PrivacySettings } from './settings/categories/PrivacySettings';
 import { ImportExportSettings } from './settings/categories/ImportExportSettings';
 import { AdvancedSettings } from './settings/categories/AdvancedSettings';
 import { AutopilotSettings } from './settings/categories/AutopilotSettings';
-import { UsageView } from './usage/UsageView';
+import { UsageView, type UsageTab } from './usage/UsageView';
 import { RemoteAccessWorkflows } from './settings/RemoteAccessWorkflows';
 import { MachineDetails } from './settings/MachineDetails';
 import { useSettingsPersistence } from './settings/useSettingsPersistence';
@@ -66,6 +66,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
   const [systemMonoFonts, setSystemMonoFonts] = useState<string[]>([]);
   const [remoteSubview, setRemoteSubview] = useState<RemoteAccessSubviewId | undefined>();
   const [addCodeRequest, setAddCodeRequest] = useState<number>();
+  /** Usage & Limits opens on this tab; a request for its leaderboard sets it. */
+  const [usageTab, setUsageTab] = useState<UsageTab>('usage');
   // Remote Access › Machine details: the machine shown, while open.
   const [remoteMachineId, setRemoteMachineId] = useState<string>();
   const [passwordRequest, setPasswordRequest] = useState<{ machine: string; nonce: number }>();
@@ -119,6 +121,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       setRemoteSubview(openRequest.target.subview);
       setRemoteMachineId(undefined);
       if (openRequest.target.setting === 'remote-add-code') setAddCodeRequest(openRequest.nonce);
+      setUsageTab(openRequest.target.setting === 'usage-leaderboard' ? 'leaderboard' : 'usage');
       if (openRequest.target.machine) askMachinePassword(openRequest.target.machine);
       // A machine's password field takes focus itself once its row is listed.
       if (!openRequest.target.machine) focusSetting(openRequest.target.setting);
@@ -132,6 +135,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       setRemoteSubview(undefined);
       setRemoteMachineId(undefined);
       clearRemoteRequests();
+      setUsageTab('usage');
       onCategoryChange(nextCategory);
     });
   }, [category, clearRemoteRequests, onCategoryChange, remoteMachineId, remoteSubview, requestTransition]);
@@ -197,7 +201,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       case 'agents':
         return <AgentsSettings />;
       case 'usage':
-        return <UsageView />;
+        return <UsageView key={usageTab} initialTab={usageTab} />;
       case 'worktrees-git':
         return <WorktreesGitSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'notify':

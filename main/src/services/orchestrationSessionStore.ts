@@ -84,6 +84,7 @@ const sessionSchema = boundary.object({
   name: boundary.nonEmptyString,
   nameIsDefault: boundary.optional(boundary.boolean),
   archived: boundary.optional(boundary.boolean),
+  archivedAt: boundary.optional(boundary.string),
   isPinned: boundary.optional(boundary.boolean),
   agent: paneChatAgentSchema,
   launchCommand: boundary.optional(boundary.string),

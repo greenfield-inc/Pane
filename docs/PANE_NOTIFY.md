@@ -600,7 +600,11 @@ on by default. It has two parts:
   PowerShell, cmd and Git Bash all run it), and
   `/mnt/c/Users/<you>/.pane/bin/runpane` in WSL. The path is always the
   default data folder's, so a dev build with its own `PANE_DIR` never points
-  your agents at its copy.
+  your agents at its copy. Then comes Pane's model, the "For agents" part of
+  the intro `runpane doctor` prints (Session, Pane, tab, `$PANE_SCRATCH_DIR`),
+  and the rule to put scratch files in `$PANE_SCRATCH_DIR` rather than `/tmp`
+  or the agent's own scratchpad. Both come from `agentContext.intro` and
+  `agentContext.workspaceRules` in `contracts/runpane/contract.json`.
 - **Pane Notify:** call the `pane` MCP's `notify`, or `runpane notify` when
   that tool isn't loaded (for example under Agent Farm's strict MCP mode). It
   says which card to use (Claude's own card only for a quick question in the

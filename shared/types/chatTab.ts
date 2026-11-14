@@ -1,6 +1,6 @@
 import type { JsonValue } from '../validation/boundaryDecoder';
 import type { AgentChatConfigOption, AgentChatMessage, AgentChatPart, AgentChatPermission, AgentChatReceipt } from './agentChat';
-import type { TerminalAgentReport } from './panels';
+import type { TerminalAgentReport, TerminalPausedMark } from './panels';
 
 /**
  * Chat tabs: an agent tab that runs any ACP agent, with no terminal. The host owns
@@ -73,7 +73,14 @@ export interface ChatPanelState {
   banner?: ChatTabSwitchBanner;
   /** When /clear last started a fresh conversation in this tab; shown as a divider at its start. */
   clearedAt?: string;
+  /** Pause stopped this tab's agent (by hand or auto-pause). Opening the tab or sending to it starts it again. */
+  paused?: TerminalPausedMark;
+  /** How recent turns of `sessionId` ended, so the time rows survive the history replay of a restart. */
+  turnTimes?: { sessionId: string; turns: ChatTurnTime[] };
 }
+
+/** A turn's time row, saved after the id of the last message the turn created. */
+export interface ChatTurnTime { after: string; stopReason: string; startedAt: string; endedAt: string }
 
 /**
  * The one-shot message a chat opened by Switch to chat carries (D-282, D-278 style 3).

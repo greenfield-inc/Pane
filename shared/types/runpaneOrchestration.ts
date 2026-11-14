@@ -554,6 +554,8 @@ export interface RunpanePaneCreateRequest {
   callerPanelId?: string;
   /** Session to associate each new Pane with (the calling orchestrator's PANE_ORCHESTRATION_SESSION_ID). */
   associateSession?: string;
+  /** Without associateSession, Pane joins new Panes to the Session the caller's Pane belongs to; true skips that. */
+  noAssociate?: boolean;
   /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
   expectReport?: boolean;
 }
@@ -578,7 +580,11 @@ export interface RunpanePaneAdoptRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;
+  /** The calling tab ($PANE_PANEL_ID); its open Session is the one adopted Panes join. */
+  callerPanelId?: string;
   associateSession?: string;
+  /** Without associateSession, Pane joins adopted Panes to the caller's Session; true skips that. */
+  noAssociate?: boolean;
 }
 
 export type RunpanePaneAdoptResult = RunpanePaneCreateResult;
@@ -1014,6 +1020,15 @@ export interface RunpanePaneArchiveDryRunResult {
   forced: boolean;
   safetyCheck: RunpanePaneArchiveSafetyCheck;
   blocked?: RunpanePaneArchiveBlockReason;
+  scratch?: RunpanePaneScratch;
+}
+
+/** The Pane's `$PANE_SCRATCH_DIR` with everything in it, which archive deletes. */
+export interface RunpanePaneScratch {
+  path: string;
+  bytes: number;
+  /** For scratch under the Pane directory: when archive retention deletes it. Absent: deleted with the worktree. */
+  deletedAt?: string;
 }
 
 export type RunpanePaneArchiveResult =
@@ -1047,6 +1062,7 @@ export interface RunpanePaneArchiveBulkItem {
   worktreeCleanup?: RunpaneWorktreeCleanupState;
   trashDeletion?: RunpaneWorktreeTrashDeletion;
   worktreePath?: string;
+  scratch?: RunpanePaneScratch;
 }
 
 export interface RunpanePaneArchiveBulkResult {

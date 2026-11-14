@@ -40,6 +40,34 @@ function wellFormedCard(argv) {
   ];
 }
 
+/** A repo with colour tokens, components and docs screenshots, so dark mode is real work. */
+const uiRepo = (repo) => {
+  pkg(repo);
+  write(path.join(repo, 'src', 'tokens.css'), ':root {\n  --bg: #ffffff;\n  --fg: #111111;\n  --accent: #2255ee;\n}\n');
+  write(path.join(repo, 'src', 'components', 'Button.js'), "module.exports = (label) => `<button style=\"background:#2255ee;color:#fff\">${label}</button>`;\n");
+  write(path.join(repo, 'src', 'components', 'Card.js'), "module.exports = (body) => `<div style=\"background:#fff;color:#111\">${body}</div>`;\n");
+  write(path.join(repo, 'docs', 'components.md'), '# Components\n\n![Button](screenshots/button.png)\n![Card](screenshots/card.png)\n');
+};
+
+/** Pane inside Session s-eval: the repo is registered, and each new Pane is created and joins the Session. */
+const paneInSession = ({ repo }) => {
+  const repoSummary = { id: 1, name: 'ledger', path: repo, active: true, sessionCount: 1 };
+  return {
+    'repos list': { ok: true, repos: [repoSummary] },
+    'panes create': { ok: true, repo: repoSummary, items: [{ ok: true, index: 0, name: '$NAME', pinned: false, sessionId: 'p-$NAME', panelId: 'pl-$NAME', worktreePath: `${repo}-$NAME`, association: { sessionId: 's-eval', ok: true } }] },
+    'agents start': { ok: true, paneId: 'p-$NAME', panelId: 'pl-$NAME', name: '$NAME', worktreePath: `${repo}-$NAME`, link: 'pane://pane/p-$NAME', ready: true, promptDelivered: true },
+  };
+};
+
+/** Multi-part work inside a Session: Panes created (each joins the Session), no new Session or opt-out, and the agent carries on instead of reporting a problem. */
+const joinsSession = (run) => [
+  [run.calls.some(({ argv }) => (argv[0] === 'panes' && argv[1] === 'create') || (argv[0] === 'agents' && argv[1] === 'start' && !argv.includes('--pane'))), 'never created a Pane'],
+  [!has(run, 'sessions', 'create'), 'created a new Session'],
+  [!run.calls.some(({ argv }) => argv.includes('--no-associate')), 'opted out of joining the Session with --no-associate'],
+  [!run.calls.some(({ argv }) => argv[0] === 'report' && flagValue(argv, '--state') === 'blocked'), 'reported blocked although every create succeeded'],
+  [cards(run).every(({ argv }) => flagValue(argv, '--ui') === 'info'), 'asked the person a question although every create succeeded'],
+];
+
 const pkg = (repo, extra = {}) => write(path.join(repo, 'package.json'), `${JSON.stringify({ name: 'ledger', version: '0.1.0', scripts: { test: 'node test.js' }, ...extra }, null, 2)}\n`);
 
 export const SCENARIOS = [
@@ -185,6 +213,25 @@ export const SCENARIOS = [
     ]),
   },
   {
+    id: 'orchestrator-multipart-joins-session',
+    title: "A Session orchestrator asked for multi-part work creates Panes in its own Session, not a new Session",
+    role: 'orchestrator',
+    setup: ({ repo }) => pkg(repo),
+    prompt: () => 'Kick off the settings overhaul: three parts that can run in parallel, (1) migrate the settings schema, (2) rebuild the settings UI, (3) write the docs. Use a few agents; I will check in later.',
+    script: paneInSession,
+    grade: (run) => verdict(joinsSession(run)),
+  },
+  {
+    id: 'session-pane-multipart-joins-session',
+    title: "An agent in a Pane that belongs to a Session, asked for multi-part work, creates Panes in that Session, not a new Session",
+    // The worker role is a tab in a Pane that belongs to a Session: PANE_SESSION_DIR set, no PANE_ORCHESTRATION_SESSION_ID.
+    role: 'worker',
+    setup: ({ repo }) => uiRepo(repo),
+    prompt: () => 'We need dark mode: new colour tokens, every component updated to use them, and fresh screenshots for the docs. Get it going with a few agents.',
+    script: paneInSession,
+    grade: (run) => verdict(joinsSession(run)),
+  },
+  {
     id: 'new-feature-gets-a-pane',
     title: 'A new feature gets its own Pane (worktree), not a tab or a hand-made worktree',
     role: 'pane',
@@ -220,7 +267,7 @@ export const SCENARIOS = [
   },
   {
     id: 'scratch-stays-in-worktree',
-    title: 'Scratch copies, captures and reports go in the worktree (a gitignored tmp/) or the Session folder, never system temp',
+    title: 'Scratch copies, captures and reports go in $PANE_SCRATCH_DIR, never system temp',
     role: 'pane',
     setup({ repo }) {
       pkg(repo, { scripts: { build: 'node build.js' } });
@@ -232,6 +279,7 @@ export const SCENARIOS = [
     grade: (run) => verdict([
       [run.tempPaths.length === 0, `used system temp: ${run.tempPaths.slice(0, 3).join(', ')}`],
       [run.writes.length > 0 || bashMatches(run, />|cp\s|tee\s/), 'wrote nothing'],
+      [run.scratchUse, 'never used $PANE_SCRATCH_DIR'],
     ]),
   },
   {
@@ -282,6 +330,85 @@ export const SCENARIOS = [
     grade: (run) => verdict([
       [cards(run).length <= 2, `posted ${cards(run).length} cards`],
       [/ledger-core/.test(run.text) && /@acme\/ledger/.test(run.text) && /\?/.test(run.text), 'final message does not ask the person to choose between the two names'],
+    ]),
+  },
+  // Harder variants of the Pane-primitives scenarios: the prompt names no primitive and no id.
+  {
+    id: 'review-rerun-bare',
+    title: 'A bare "rerun the review" inside a feature\'s Pane opens a tab in that Pane',
+    role: 'pane',
+    setup: ({ repo }) => { pkg(repo); git(repo, 'checkout', '-q', '-b', 'csv-export'); },
+    prompt: () => 'Rerun the review on this and leave it going.',
+    script: ({ repo }) => ({ 'panes list': { ok: true, panes: [{ id: 'p-feature', paneId: 'p-feature', name: 'csv-export', status: 'idle', worktreePath: repo, repoId: 1, panelCount: 1, pinned: true, agentStatus: 'idle', ownership: 'pane' }] } }),
+    grade: (run) => verdict([
+      // panels create defaults to the caller's Pane ($PANE_SESSION_ID); agents start without --pane makes a new one.
+      [run.calls.some(({ argv }) => (argv[0] === 'panels' && argv[1] === 'create' && (!argv.includes('--pane') || argv.includes('p-feature')))
+        || (argv[0] === 'agents' && argv[1] === 'start' && argv.includes('p-feature'))), 'did not open a tab in this Pane'],
+      [!has(run, 'panes', 'create'), 'created a new Pane'],
+      [!bashMatches(run, /git\s+worktree\s+add|git\s+clone/), 'made a git worktree or clone by hand'],
+    ]),
+  },
+  {
+    id: 'qa-fresh-copy',
+    title: 'QA asked as "spin up a fresh copy" runs in this Pane, with the copy in $PANE_SCRATCH_DIR',
+    role: 'pane',
+    setup: ({ repo }) => { pkg(repo, { scripts: { start: 'node server.js' } }); write(path.join(repo, 'server.js'), "console.log('ledger on :4100');\n"); },
+    prompt: () => 'Spin up a fresh copy of the app and QA the start-up on it. Keep whatever you capture for me.',
+    script: () => ({}),
+    grade: (run) => verdict([
+      [!has(run, 'panes', 'create'), 'created a new Pane'],
+      [!bashMatches(run, /git\s+worktree\s+add/), 'made a git worktree by hand'],
+      [run.tempPaths.length === 0, `used system temp: ${run.tempPaths.slice(0, 3).join(', ')}`],
+      [run.scratchUse, 'never used $PANE_SCRATCH_DIR'],
+    ]),
+  },
+  {
+    id: 'research-clone',
+    title: 'Research that needs a clone puts it in $PANE_SCRATCH_DIR, unprompted',
+    role: 'pane',
+    setup({ repo, runDir }) {
+      pkg(repo);
+      const upstream = path.join(runDir, 'upstream');
+      fs.mkdirSync(upstream, { recursive: true });
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: upstream });
+      write(path.join(upstream, 'pad.js'), 'module.exports = (s, n, c = " ") => String(s).padStart(n, c);\n');
+      git(upstream, 'add', '-A');
+      git(upstream, '-c', 'user.email=eval@example.com', '-c', 'user.name=eval', 'commit', '-qm', 'pad');
+      return { upstream };
+    },
+    prompt: ({ upstream }) => `Find out how the padding library at ${upstream} pads strings: clone it, read the code, and write me a short note with what you found.`,
+    script: () => ({}),
+    grade: (run) => verdict([
+      [bashMatches(run, /git\s+clone/), 'never cloned'],
+      [run.tempPaths.length === 0, `used system temp: ${run.tempPaths.slice(0, 3).join(', ')}`],
+      // `git clone <src> "$PANE_SCRATCH_DIR/x"` or `cd "$PANE_SCRATCH_DIR" && git clone <src> x`.
+      [run.bash.some((command) => /git\s+clone/.test(command) && /PANE_SCRATCH_DIR|\.pane\/scratch/.test(command)), 'did not clone into $PANE_SCRATCH_DIR'],
+    ]),
+  },
+  {
+    id: 'multipart-no-pane-mention',
+    title: 'A multi-part ask that never mentions Pane, without the pane skill, still starts a Session',
+    role: 'pane',
+    noSkill: true,
+    setup: ({ repo }) => uiRepo(repo),
+    prompt: () => 'We need dark mode: new colour tokens, every component updated to use them, and fresh screenshots for the docs. Get it going with a few agents.',
+    script: () => ({}),
+    grade: (run) => verdict([
+      [has(run, 'sessions', 'create'), 'never created a Session'],
+    ]),
+  },
+  {
+    id: 'doctor-only',
+    title: 'An agent that read only runpane doctor states where a review rerun and a research clone go',
+    role: 'pane',
+    noSkill: true,
+    setup: ({ repo }) => pkg(repo),
+    prompt: () => 'Run `runpane doctor`. Then, without doing anything else, answer in two short lines: where would you run a rerun of this feature\'s review, and where would you put a repository you clone for research?',
+    script: () => ({}),
+    grade: (run) => verdict([
+      [has(run, 'doctor'), 'never ran runpane doctor'],
+      [/\btab\b|panels create/i.test(run.text), 'did not say the rerun is a tab in this Pane'],
+      [/PANE_SCRATCH_DIR|\.pane\/scratch/.test(run.text), 'did not name $PANE_SCRATCH_DIR for the clone'],
     ]),
   },
 ];

@@ -19,6 +19,7 @@ import { resolveRelease } from './releases';
 import { getPaneVersion, getWrapperVersion } from './version';
 import { checkCliInstalls, fixCliInstalls, type CliInstallsCheck } from './managedCli';
 import type { BoundarySchema } from './boundaryDecoder';
+import { paneIntro, renderPaneIntro, type PaneIntro } from './paneIntro';
 
 const DOCTOR_DAEMON_TIMEOUT_MS = 5_000;
 const DOCTOR_RELEASE_TIMEOUT_MS = 5_000;
@@ -174,6 +175,8 @@ interface DoctorDaemonCheck {
 }
 
 interface DoctorReport {
+  intro: PaneIntro;
+  workspaceRules: readonly string[];
   ok: boolean;
   source: 'npm' | 'pip';
   wrapper: {
@@ -453,6 +456,8 @@ async function buildDoctorReport(parsed: ParsedArgs, source: 'npm' | 'pip'): Pro
   const cliInstalls = parsed.fix ? fixCliInstalls(checkCliInstalls(parsed.paneDir), parsed.paneDir) : checkCliInstalls(parsed.paneDir);
 
   return {
+    intro: paneIntro(paneDir),
+    workspaceRules: RUNPANE_CONTRACT.agentContext.workspaceRules,
     ok: release.ok && daemon.reachable && remoteSetup.ready && (cliInstalls.fixed ?? []).every(result => result.ok),
     source,
     wrapper: {
@@ -940,6 +945,8 @@ export function formatWatchDefaults(defaults: DoctorWatchDefaults): string {
 }
 
 function renderDoctorText(report: DoctorReport): void {
+  console.log(renderPaneIntro(report.intro, report.workspaceRules));
+  console.log('');
   if (report.platform) {
     console.log(`Platform: ${report.platform.os}/${report.platform.arch}`);
   }

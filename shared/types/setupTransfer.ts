@@ -114,6 +114,7 @@ export interface SetupPreferenceConfig {
   resumePausedOnOpen?: boolean;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
+  chatIdleReleaseMinutes?: number;
   terminalPowerMode?: 'performance' | 'batterySaver';
   retention?: Partial<SessionRetention>;
   voiceTranscriptionMode?: VoiceTranscriptionMode;

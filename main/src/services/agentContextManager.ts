@@ -6,6 +6,7 @@ import type { AppConfig } from '../types/config';
 import { PathResolver } from '../utils/pathResolver';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
+import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 
 export const PANE_AGENT_CONTEXT_START = '<!-- pane-agent-context:start -->';
 export const PANE_AGENT_CONTEXT_END = '<!-- pane-agent-context:end -->';
@@ -84,7 +85,8 @@ async function applyManagedAgentsMdSettingNow<P extends Pick<Project, 'path' | '
 function renderManagedAgentContextBlock(): string {
   return [
     PANE_AGENT_CONTEXT_START,
-    ...RUNPANE_CONTRACT.agentContext.managedBlock,
+    // The Pane and Tab rules come from workspaceRules, the one place the contract states them.
+    ...RUNPANE_CONTRACT.agentContext.managedBlock.map(line => line.replace('{{paneAndTabRules}}', paneAndTabRules())),
     PANE_AGENT_CONTEXT_END,
     ''
   ].join('\n');

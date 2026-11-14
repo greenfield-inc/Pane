@@ -1141,7 +1141,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const readyTimeoutMs = parsed.readyTimeoutMs ?? (resumedId ? CARRIED_READY_TIMEOUT_MS : undefined);
   // A resumed session already knows its work; it gets the note with the "moved" message after the check.
   const prompt = resumedId ? undefined : `Read the handoff note at ${notePath} and continue the work it describes. Start with its "Receiver instructions" section.`;
-  // 1 feature = 1 worktree = 1 branch = 1 Pane: on this machine, from inside the
+  // One Pane per feature: on this machine, from inside the
   // Pane that owns this checkout, the receiver opens as a new tab in that Pane.
   // Otherwise (another machine, or a checkout the sender's Pane does not own) it
   // gets a new Pane.

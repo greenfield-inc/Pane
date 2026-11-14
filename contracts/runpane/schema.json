@@ -504,6 +504,14 @@
             "minLength": 1
           }
         },
+        "transcriptDirs": {
+          "description": "Folders, relative to the home the CLI runs with (POSIX separators), that hold its session transcripts. Before Pane deletes a folder it owns, it moves these out of it into <pane-dir>/agent-logs/<agent>/.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "terminal": {
           "type": "object",
           "required": [
@@ -1272,9 +1280,27 @@
       "required": [
         "brief",
         "commands",
-        "managedBlock"
+        "managedBlock",
+        "intro",
+        "workspaceRules"
       ],
       "properties": {
+        "intro": {
+          "type": "object",
+          "required": ["humans", "agents"],
+          "properties": {
+            "humans": { "$ref": "#/$defs/agentContextIntroPart" },
+            "agents": { "$ref": "#/$defs/agentContextIntroPart" }
+          },
+          "additionalProperties": false,
+          "description": "What Pane is and how to work in it, people first, then agents. The surfaces agents and people read first render it."
+        },
+        "workspaceRules": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Where work goes in Pane: Session, Pane, tab and scratch."
+        },
         "brief": {
           "$ref": "#/$defs/agentContextBrief"
         },
@@ -1303,6 +1329,26 @@
       "required": ["rules"],
       "properties": {
         "rules": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      },
+      "additionalProperties": false
+    },
+    "agentContextIntroPart": {
+      "type": "object",
+      "required": ["title", "sentences", "approvals"],
+      "properties": {
+        "title": { "type": "string" },
+        "sentences": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "One entry is the literal \"{approvals}\", replaced by approvals.on or approvals.off from the live Approvals setting."
+        },
+        "approvals": {
+          "type": "object",
+          "required": ["on", "off"],
+          "properties": { "on": { "type": "string" }, "off": { "type": "string" } },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },
