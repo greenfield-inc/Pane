@@ -248,7 +248,15 @@ interface PaneRemoteHttpApiServerOptions {
   deepgramListenEndpoint?: string;
   /** Sent to signed-in clients on the ready event. */
   paneVersion?: string;
+  /** QR pairing's `POST /pair/exchange`: trades a one-time secret for a client token. */
+  pairing?: PairingRoute;
 }
+
+export interface PairingRoute {
+  exchange(secret: string, label: string): Promise<{ ok: true; token: string; client: { id: string } } & JsonObjectLike | { ok: false; status: number; code: string; message: string }>;
+}
+
+type JsonObjectLike = Record<string, unknown>;
 
 interface WorkspaceIdentityOptions {
   listenPort: number;
@@ -307,6 +315,7 @@ export class PaneRemoteHttpApiServer {
   private readonly glassesAdmissions = new WeakMap<IncomingMessage, GlassesAdmission>();
   private stopWatchingGlassesRevokes: (() => void) | null = null;
   private readonly paneVersion?: string;
+  private readonly pairing?: PairingRoute;
 
   constructor(
     private readonly commandRegistry: PaneCommandRegistry,
@@ -319,6 +328,7 @@ export class PaneRemoteHttpApiServer {
     this.isForwardedPort = options.isForwardedPort ?? (() => false);
     this.deepgramListenEndpoint = options.deepgramListenEndpoint ?? DEEPGRAM_LISTEN_ENDPOINT;
     this.paneVersion = options.paneVersion;
+    this.pairing = options.pairing;
     this.daemonEventSink = createFanoutEventSink([
       {
         send: (channel, ...args) => {
@@ -736,6 +746,11 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
+    if (url.pathname === '/pair/exchange' && this.pairing && !this.workspace) {
+      await this.handlePairingExchange(request, response, this.pairing);
+      return;
+    }
+
     if (url.pathname === '/invoke') {
       await this.handleInvokeRequest(request, response);
       return;
@@ -770,6 +785,32 @@ export class PaneRemoteHttpApiServer {
         code: 'ERR_REMOTE_DAEMON_HTTP_NOT_FOUND',
       },
     });
+  }
+
+  /** The only unauthenticated route: a one-time QR secret for a client token, behind a lockout. */
+  private async handlePairingExchange(request: IncomingMessage, response: ServerResponse, pairing: PairingRoute): Promise<void> {
+    if (request.method !== 'POST') {
+      this.writeMethodNotAllowed(response, 'POST');
+      return;
+    }
+    let body: { secret?: unknown; label?: unknown };
+    try {
+      body = JSON.parse(await readRequestBody(request, MAX_UNAUTHENTICATED_REQUEST_BODY_BYTES)) as typeof body;
+    } catch {
+      this.writeJson(response, 400, { ok: false, error: { code: 'ERR_PAIRING_BAD_REQUEST', message: 'Send {"secret","label"} as JSON.' } });
+      return;
+    }
+    if (typeof body.secret !== 'string' || body.secret.length === 0 || body.secret.length > 200) {
+      this.writeJson(response, 400, { ok: false, error: { code: 'ERR_PAIRING_BAD_REQUEST', message: 'The pairing code is missing.' } });
+      return;
+    }
+    const result = await pairing.exchange(body.secret, typeof body.label === 'string' ? body.label : '');
+    if (!result.ok) {
+      this.writeJson(response, result.status, { ok: false, error: { code: result.code, message: result.message } });
+      return;
+    }
+    const { client, ...rest } = result;
+    this.writeJson(response, 200, { ...rest, clientId: client.id });
   }
 
   private async handleInvokeRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -1585,6 +1626,13 @@ export class PaneRemoteHttpApiServer {
         );
       }
       // The second argument is server-owned, even if the client supplied extra args.
+      return [args[0] ?? null, { clientId: auth.client.id }];
+    }
+    if (invokeRequest.channel.startsWith('relay:client:')) {
+      if (!auth.client) {
+        throw new RemoteDaemonBadRequestError('ERR_RELAY_PAIRING_REQUIRED', 'This needs a phone or computer paired with a QR code.', 403);
+      }
+      // Server-owned, like push registration: the caller is the paired client its token names.
       return [args[0] ?? null, { clientId: auth.client.id }];
     }
     if (invokeRequest.channel === 'notify:remote-command') {

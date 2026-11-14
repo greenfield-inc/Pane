@@ -262,6 +262,14 @@ export interface RemoteDaemonClientSettings {
 export interface RemoteDaemonConfig {
   host: RemoteDaemonHostSettings;
   client: RemoteDaemonClientSettings;
+  /** Phone access through Pane's relays (QR pairing). Absent: off. */
+  relay?: RemoteRelaySettings;
+}
+
+export interface RemoteRelaySettings {
+  enabled: boolean;
+  /** "Relay address": a self-hosted relay's `host[:port]`. Absent: Pane's relays. */
+  relayAddress?: string;
 }
 
 export interface RemoteDaemonConnectionPair {
@@ -737,6 +745,8 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
     hostSettings.access = access;
   }
 
+  const relay = readJsonObject(config.relay);
+  const relayAddress = relay ? readOptionalString(relay.relayAddress)?.trim() : undefined;
   return {
     host: hostSettings,
     client: {
@@ -744,6 +754,7 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
       activeProfileId,
       mode: activeProfileId && client.mode === 'remote' ? 'remote' : 'local',
     },
+    ...(relay ? { relay: { enabled: readBoolean(relay.enabled, false), ...(relayAddress ? { relayAddress } : {}) } } : {}),
   };
 }
 

@@ -10,7 +10,7 @@ import {
 import { getRemoteDaemonHostConfigValidationError } from '../../../shared/types/remoteDaemon';
 import type { RemoteDaemonHostConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneCommandRegistry } from './commandRegistry';
-import { PaneRemoteHttpApiServer } from './httpApiServer';
+import { PaneRemoteHttpApiServer, type PairingRoute } from './httpApiServer';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 import { getMobilePushSender, type MobilePushSender } from './mobilePushSender';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -66,6 +66,7 @@ export class PaneRemoteTransportController {
     private readonly analyticsManager?: Pick<AnalyticsManager, 'track'>,
     private readonly isForwardedPort?: (port: number) => boolean,
     private readonly paneVersion?: string,
+    private readonly pairing?: PairingRoute,
   ) {
     this.mobilePushSender = getMobilePushSender(configManager);
   }
@@ -131,6 +132,7 @@ export class PaneRemoteTransportController {
         analyticsSink: createRemotePaneAnalyticsSink(this.analyticsManager),
         isForwardedPort: this.isForwardedPort,
         paneVersion: this.paneVersion,
+        pairing: this.pairing,
       });
       try {
         await remoteHttpApiServer.start();

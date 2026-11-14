@@ -35,7 +35,8 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
     },
     ALPNProtocols: ['http/1.1'],
   });
-  server.on('secureConnection', (socket: tls.TLSSocket) => {
+  // Node sets `servername` on server-side sockets from the ClientHello; its typings omit it.
+  server.on('secureConnection', (socket: tls.TLSSocket & { servername?: string | false }) => {
     const servername = typeof socket.servername === 'string' ? socket.servername : '';
     const name = parseComputerName(servername, options.id, options.domain);
     const port = name ? options.target(name) : null;
