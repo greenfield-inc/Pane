@@ -1,6 +1,6 @@
 # Workspaces: reach all your machines with runpane
 
-`runpane workspace` lets your Macs, Windows PCs, and Linux machines read files, write files, run commands, and drive each other's Pane over the Tailscale network you already use. There is no SSH, no keys, and no pairing code: each request is trusted because Tailscale says which login it comes from. Your own login is always let in; a teammate's machine lets you in when its owner shares it with everyone on the tailnet.
+`runpane workspace` lets your Macs, Windows PCs, and Linux machines read files, write files, run commands, and drive each other's Pane over the Tailscale network you already use, or through Pane's servers to computers linked by [QR pairing](QR_PAIRING.md). There is no SSH and no keys: on Tailscale each request is trusted because Tailscale says which login it comes from, and a linked computer is trusted by the token it got when a phone linked the two. Your own login is always let in; a teammate's machine lets you in when its owner shares it with everyone on the tailnet.
 
 The same listener powers codeless desktop remote mode: the sidebar's machine menu and Settings → Remote Access → **Switch to** list the machines on your tailnet, including ones you have never connected to (a teammate's machine that accepts only its owner shows as "Owner only" and can't be picked), and picking one switches the desktop app to that machine with no `pane-remote://` code. `runpane workspace` reaches the same machines. Who may connect is set under **Access** → **Who can connect** (see [Who is trusted](#who-is-trusted)).
 
@@ -14,7 +14,7 @@ runpane workspace <machine> exec -- <command>     # runs in that machine's shell
 runpane workspace <machine> <runpane command>     # e.g. sessions list --json
 ```
 
-`<machine>` is the Tailscale machine name (`parsa-devbox`), a unique prefix (`devbox`), the MagicDNS name, or a Tailscale IP.
+`<machine>` is the Tailscale machine name (`parsa-devbox`), a unique prefix (`devbox`), the MagicDNS name, or a Tailscale IP. A computer linked by QR pairing goes by its name in lower case with dashes (`travel-laptop`) and works with Tailscale off; when the same name is also on your tailnet, the Tailscale entry is used.
 
 `runpane workspace list` shows your own machines first, then other people's machines on the tailnet labeled with their owner's login (`tylers-mac-mini (macOS, online, owner tbrownio@github)`). Each machine decides who it lets in. A machine set to "Only me" refuses other logins, and the error says how its owner can change that. A path shaped like another OS's (`C:\...` on a Mac) routes only to your own machines; reach someone else's machine by name.
 
@@ -128,7 +128,7 @@ Workspaces and the [self-hosted remote daemon](SELF_HOSTED_REMOTE_DAEMON.md) bot
 | Port | 8443 | 443 |
 | Setup | None | `runpane setup` on the host, then paste the code |
 
-Machine commands (`read`, `write`, `exec`) are served only to workspace identity, never to pairing tokens.
+Machine commands (`read`, `write`, `exec`) are served to workspace identity and to computers linked by QR pairing, never to a phone's or a `pane-remote://` code's token. A linked computer's requests go to its `<id>.runpane.net` address, and `runpane workspace` checks the computer's key on each one.
 
 ## Troubleshooting
 

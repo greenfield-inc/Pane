@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 
 import type { ListeningPortsSnapshot } from '@shared/types/listeningPorts';
-import { phonePage } from '@shared/utils/phonePage';
+import { phonePage, relayPreview, relayPreviewSrc } from '@shared/utils/phonePage';
 
 /**
  * What a page tab shows. `web` loads `src` in the page view (and in Safari); `file` loads an HTML
@@ -53,6 +53,28 @@ export function browserPage(url: string, read: PortsRead, panelId: string): Brow
     case 'invalid':
       return { kind: 'invalid', address };
   }
+}
+
+/**
+ * A page tab on a computer reached through a relay: pages on the computer load through the
+ * one-time address it hands out (`ticketUrl`, null until it answers), not through Tailscale.
+ */
+export function relayBrowserPage(url: string, read: PortsRead, panelId: string, host: string, ticketUrl: string | null): BrowserPage {
+  if (!url) return { kind: 'empty', address: '' };
+  let preview;
+  try {
+    preview = relayPreview(url, panelId);
+  } catch {
+    return { kind: 'invalid', address: url };
+  }
+  if (!preview) return { kind: 'web', src: url, address: url };
+  const { ask, address } = preview;
+  if ('port' in ask && read.ports) {
+    const listening = read.ports.ports.find(candidate => candidate.port === ask.port);
+    if (!listening) return { kind: 'refused', address, host, port: ask.port };
+    if (listening.kind !== 'web') return { kind: 'not-web', address, host, port: ask.port };
+  }
+  return ticketUrl ? { kind: 'web', src: relayPreviewSrc(ticketUrl, preview), address } : { kind: 'loading', address, host };
 }
 
 /** The address's host and the rest, so the row can show the path dimmed. A scheme is dropped. */

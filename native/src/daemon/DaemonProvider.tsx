@@ -8,7 +8,8 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import { requestSharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
 import { requestPushRegistration } from '@/features/notifications/usePushSetup';
 
-import { createDaemonClient } from './createClient';
+import { createDaemonClient, streamingFetch } from './createClient';
+import { startDirectRoute } from './direct/directRoute';
 
 interface DaemonContextValue {
   client: RemoteDaemonClient;
@@ -59,6 +60,9 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
       client.disconnect();
     };
   }, [client, profile.id, queryClient]);
+
+  // A relay computer's direct connection lives as long as its client.
+  useEffect(() => startDirectRoute(binding.profile, client, streamingFetch), [binding.profile, client]);
 
   // Any client saved settings on the host (shortcuts, voice keys): refetch them once, and share any new key.
   useEffect(() => client.onEvent(event => {

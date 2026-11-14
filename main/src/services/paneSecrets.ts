@@ -226,7 +226,7 @@ function electronSecretEncryption(): SecretEncryption {
 }
 
 /** The value store for this host: the keychain on macOS, the file elsewhere. */
-function systemSecretBackend(appDirectory: string, platform: string = process.platform): SecretValueBackend {
+export function systemSecretBackend(appDirectory: string, platform: string = process.platform): SecretValueBackend {
   if (platform === 'darwin') return keychainSecretBackend(systemKeychain(platform), paneKeychainService(appDirectory));
   return fileSecretBackend(path.join(appDirectory, 'secrets.json'), electronSecretEncryption());
 }

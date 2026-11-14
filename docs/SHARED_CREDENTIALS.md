@@ -17,7 +17,7 @@ values stay in each host's keychain or secret file rather than `config.json`.
 
 ## How keys travel
 
-Hosts never contact each other on their own. A device that has more than one host saved, whether found over Tailscale or paired with a code, carries the keys between them:
+Hosts never contact each other on their own. A device that has more than one host saved, whether found over Tailscale, paired with a code or paired by [QR code](QR_PAIRING.md), carries the keys between them:
 
 - **The iPhone app** syncs whenever it opens or returns to the foreground, after you save a key from the phone, and when a host reports that its settings changed. It relays the keys and keeps no copy.
 - **A desktop with another host saved** syncs when it starts, when a key changes on it, and when a saved host reports a change. Computers on your Tailscale login are saved the first time you switch to them, from the sidebar's machine menu or Settings → Remote Access → Switch to. To pair with a code instead, create a connection code on the other host (Settings → Remote Access → More → Set Up Host) and paste it under Settings → Remote Access → Switch to → Add a machine.

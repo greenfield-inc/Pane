@@ -140,7 +140,7 @@ function listMachines({ connectionState, profiles, tailnet, localName, localOs, 
     const active = entry.profile !== undefined && entry.profile.id === activeProfileId;
     // An active machine that now wants a password asks for it instead of retrying the stored one.
     const needsPassword = active && connectionState.status !== 'connected' && idle.action === 'password';
-    const prefix = entry.kind === 'code' ? 'Added with a code' : null;
+    const prefix = entry.kind === 'code' ? codeHostPrefix(entry.profile) : null;
     const stateText = needsPassword ? idle.stateText : active ? activeStateText(connectionState) : idle.stateText;
     return {
       ...entry,
@@ -208,4 +208,11 @@ export function getHostingSummary(hostState: Pick<RemoteDaemonHostRuntimeState, 
   const clientCount = hostState.connectedClients.length;
   if (hostState.status === 'live') return `Hosting · ${clientCount} ${clientCount === 1 ? 'client' : 'clients'} connected`;
   return hostState.status === 'error' ? 'Hosting offline' : null;
+}
+
+/** How a machine outside the tailnet was added: linked by a phone, paired by QR, or a connection code. */
+function codeHostPrefix(profile: RemotePaneConnectionProfile | undefined): string {
+  const relay = profile?.relay;
+  if (!relay) return 'Added with a code';
+  return relay.linkedBy ? `Linked by ${relay.linkedBy}` : 'Paired with a QR code';
 }

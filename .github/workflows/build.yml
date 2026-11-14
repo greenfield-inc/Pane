@@ -118,6 +118,10 @@ jobs:
     # On macOS, electron-builder rebuilds the native modules for each target
     # arch while packaging (npmRebuild), so the install-time rebuild for the
     # host arch is skipped there.
+    # afterPack builds the pane-direct helper (direct/) for each packaged arch.
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal && rustup default stable
+
     - run: pnpm install ${{ runner.os == 'macOS' && '--ignore-scripts' || '' }}
 
     - name: Patch electron-builder temporary keychain password handling
@@ -287,8 +291,46 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # pane-relay for each platform runpane's npm package ships it on, one
+  # @runpane/relay-<platform>-<arch> package each (scripts/runpane-relay-packages.js).
+  # Runs on every build, so the release branch check catches a broken cross build.
+  build-relay:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: darwin-arm64, os: macos-latest }
+          - { platform: darwin-x64, os: macos-latest }
+          - { platform: linux-x64, os: ubuntu-latest }
+          - { platform: linux-arm64, os: ubuntu-24.04-arm }
+          - { platform: win32-x64, os: windows-2022 }
+          - { platform: win32-arm64, os: windows-2022 }
+    name: build-relay (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      with:
+        node-version: '22.23.4'
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal && rustup default stable
+    # Linux binaries link musl statically, so they run on any distribution.
+    - name: Install musl
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y musl-tools
+    - run: node scripts/runpane-relay-packages.js build ${{ matrix.platform }} relay-bin
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: pane-relay-${{ matrix.platform }}-${{ env.RELEASE_TAG }}
+        path: relay-bin
+        if-no-files-found: error
+        retention-days: ${{ env.ARTIFACT_DAYS }}
+
   validate-runpane-packages:
     if: github.ref_type == 'tag' || inputs.publish == true
+    needs: build-relay
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -310,6 +352,17 @@ jobs:
     - run: pnpm run test:runpane-managed-cli
     - run: pnpm run test:runpane-telemetry
     - run: pnpm run test:runpane-package-smoke
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: pane-relay-*-${{ env.RELEASE_TAG }}
+        path: relay-bin
+        merge-multiple: true
+    - name: Check that every relay package packs its binary, without publishing
+      run: node scripts/runpane-relay-packages.js stage relay-bin "$RUNNER_TEMP/relay-npm"
+    - name: Run runpane relay on this release's Linux binary
+      run: node --test scripts/test-runpane-relay.js
+      env:
+        PANE_RELAY_BIN: ${{ github.workspace }}/relay-bin/linux-x64/pane-relay
 
   publish-npm:
     if: github.ref_type == 'tag' || inputs.publish == true
@@ -331,6 +384,33 @@ jobs:
       run: npm install -g npm@^11.5.1
     - run: pnpm install --filter runpane --ignore-scripts
     - run: pnpm --filter runpane build
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: pane-relay-*-${{ env.RELEASE_TAG }}
+        path: relay-bin
+        merge-multiple: true
+    # The relay packages go first, so runpane never names a version npm lacks.
+    # A recovery run skips the ones this version already published.
+    - name: Publish the relay packages to npm
+      run: |
+        node scripts/runpane-relay-packages.js stage relay-bin "$RUNNER_TEMP/relay-npm"
+        if [[ -n "$NPM_TOKEN" ]]; then
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+        fi
+        for dir in "$RUNNER_TEMP"/relay-npm/*/; do
+          id="$(cd "$dir" && node -p "const p = require('./package.json'); p.name + '@' + p.version")"
+          if npm view "$id" version >/dev/null 2>&1; then
+            echo "$id is already on npm"
+            continue
+          fi
+          # A package npm refuses (no @runpane organisation or trusted publisher yet) must not stop
+          # runpane itself from publishing: pin lists only what npm has.
+          if ! (cd "$dir" && npm publish --provenance --access public); then
+            echo "::warning::$id did not publish; see RUNBOOK.md for the npm setup the relay packages need."
+          fi
+        done
+    - name: List the relay packages as runpane's optional dependencies
+      run: node scripts/runpane-relay-packages.js pin
     - name: Publish runpane to npm with token fallback
       if: ${{ env.NPM_TOKEN != '' }}
       working-directory: packages/runpane
@@ -397,6 +477,10 @@ jobs:
           ~/AppData/Local/electron-builder/Cache
         key: windows-${{ matrix.arch }}-electron-${{ hashFiles('**/pnpm-lock.yaml') }}
         restore-keys: windows-${{ matrix.arch }}-electron-
+    # afterPack builds the pane-direct helper (direct/) for each packaged arch.
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal && rustup default stable
+
     - run: pnpm install
 
     - name: Build Windows artifact

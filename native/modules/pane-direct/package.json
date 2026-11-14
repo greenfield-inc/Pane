@@ -1,0 +1,8 @@
+{
+  "name": "pane-direct",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Runs pane-direct's connect in the Pane app: a loopback port to a computer over a direct QUIC path",
+  "license": "Apache-2.0",
+  "main": "index.ts"
+}

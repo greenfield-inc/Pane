@@ -4,7 +4,8 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
-import { MobilePushSender, STABLE_IDLE_MS, type MobilePushTransport } from './mobilePushSender';
+import { MobilePushSender, setRelayPushChannel, STABLE_IDLE_MS, type MobilePushTransport } from './mobilePushSender';
+import type { RelayAlert } from './relay/relayAgent';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { encodePaneRemoteConnection } from '../../../shared/types/remoteDaemon';
 import { ConfigManager } from '../services/configManager';
@@ -132,6 +133,38 @@ describe('MobilePushSender', () => {
     await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'working', reason: 'working', agentType: 'claude' });
     await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
     expect(requests).toHaveLength(2);
+  });
+
+  it('sends through the relay when this computer has no push keys, and revokes a token the provider refused', async () => {
+    setEnvironment({});
+    const config = createDefaultRemoteDaemonConfig();
+    config.host.clients = [{ id: 'client-1', label: 'Phone', tokenHash: 'hash', createdAt: '2026-11-14T00:00:00.000Z' }];
+    const manager = new ConfigManagerStub(config);
+    const providers: MobilePushTransport = {
+      apns: async () => { throw new Error('no direct APNs without keys'); },
+      fcm: async () => { throw new Error('no direct FCM without keys'); },
+    };
+    const sent: RelayAlert[] = [];
+    let answer = { status: 200, body: '' };
+    setRelayPushChannel({ available: () => true, send: async (alert) => { sent.push(alert); return answer; } });
+    try {
+      const sender = new MobilePushSender(manager, providers);
+      expect(sender.getStatus('client-1', 'ios', 'install-1')).toMatchObject({ provider: 'ready', message: 'Alerts go through Pane\'s servers.' });
+      await sender.register('client-1', { platform: 'ios', token: 'apns-token', installationId: 'install-1', hostProfileId: 'relay-studio' });
+      await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
+      expect(sent).toEqual([expect.objectContaining({
+        platform: 'ios', token: 'apns-token', pushType: 'alert',
+        payload: expect.objectContaining({ paneId: 'pane-1', aps: expect.objectContaining({ alert: expect.objectContaining({ body: expect.stringContaining('is blocked') }) }) }),
+      })]);
+
+      answer = { status: 410, body: '{"reason":"Unregistered"}' };
+      await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'working', reason: 'working', agentType: 'claude' });
+      await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
+      expect(sent).toHaveLength(2);
+      expect(manager.config.host.mobilePush.registrations[0]?.revokedAt).toBeDefined();
+    } finally {
+      setRelayPushChannel(null);
+    }
   });
 
   describe('attention timing and copy', () => {

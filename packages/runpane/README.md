@@ -47,6 +47,23 @@ codex mcp add pane -- npx --yes runpane@latest mcp
 
 See [docs/PANE_MCP.md](https://github.com/greenfield-inc/Pane/blob/main/docs/PANE_MCP.md).
 
+## Run Your Own Relay
+
+`runpane relay` runs `pane-relay`, the relay that gives your computers
+addresses on your own domain for QR pairing. Its flags, output, signals and
+exit code pass straight through:
+
+```bash
+npx --yes runpane@latest relay --help
+npx --yes runpane@latest relay --domain relay.example.com --acme-cache /var/lib/pane-relay/acme \
+  --dns 0.0.0.0:53 --public-ip 203.0.113.10
+```
+
+npm installs the binary as one optional dependency,
+`@runpane/relay-<platform>-<arch>`, on macOS, Linux and Windows (x64 and
+arm64). Pane's built-in `runpane` and the Python package do not include it.
+See [docs/SELF_HOSTED_RELAY.md](https://github.com/greenfield-inc/Pane/blob/main/docs/SELF_HOSTED_RELAY.md).
+
 ## Developing This Repository
 
 When debugging RunPane from a Pane repository checkout, prefer the built local
@@ -113,6 +130,7 @@ runpane install daemon
 runpane update
 runpane version
 runpane doctor
+runpane relay --help
 runpane --help
 ```
 
@@ -505,3 +523,9 @@ shared installer behavior:
 This package should be published through npm Trusted Publishing from GitHub
 Actions. Token-based `NPM_TOKEN` publishing is a fallback for first package
 reservation or manual publication only.
+
+The release publishes the six `@runpane/relay-<platform>-<arch>` packages first,
+at runpane's version, then lists them as runpane's `optionalDependencies`
+(`scripts/runpane-relay-packages.js pin`) and publishes runpane. The committed
+`package.json` leaves them out, so this repository's pnpm install never asks
+npm for a version that is not published yet.

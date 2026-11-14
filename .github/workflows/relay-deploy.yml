@@ -1,0 +1,69 @@
+name: Deploy Pane relays
+
+# Manual only: creates or updates the three relay VMs on Google Compute Engine.
+# It spends money and changes production, so run it only with Parsa's go-ahead.
+# Runbook: relay/deploy/RUNBOOK.md
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Make the changes (otherwise print them)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: relay-deploy
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'pane-pwa-preview' }}
+  GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY || 'pane-preview' }}
+  PANE_RELAY_ACME_EMAIL: ${{ vars.PANE_RELAY_ACME_EMAIL }}
+  PANE_RELAY_ANDROID_CERT_SHA256: ${{ vars.PANE_RELAY_ANDROID_CERT_SHA256 }}
+  PANE_RELAY_APNS_KEY_ID: ${{ vars.PANE_RELAY_APNS_KEY_ID }}
+  PANE_RELAY_APNS_TEAM_ID: ${{ vars.PANE_RELAY_APNS_TEAM_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Required reviewers on this environment approve every run; the Workload
+    # Identity provider gives credentials only to main in this environment.
+    environment: production
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Apply only from main
+        if: inputs.apply && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Deploying changes runs only from main; this run is on ${GITHUB_REF}."
+          exit 1
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Build and push the relay image
+        id: image
+        run: |
+          set -euo pipefail
+          image="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/pane-relay:${GITHUB_SHA}"
+          gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+          docker build -t "$image" relay/
+          if [ "${{ inputs.apply }}" = true ]; then docker push "$image"; fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update the relays
+        run: |
+          set -euo pipefail
+          apply=""
+          if [ "${{ inputs.apply }}" = true ]; then apply="--apply"; fi
+          relay/deploy/deploy.sh --image "${{ steps.image.outputs.image }}" $apply
