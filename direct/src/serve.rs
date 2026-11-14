@@ -11,7 +11,7 @@ use n0_future::StreamExt;
 use serde_json::json;
 use tokio::net::TcpStream;
 
-use crate::{emit, pipe};
+use crate::{Emit, pipe};
 
 /// "direct" or "relay" for the path the connection currently sends on.
 pub fn selected_path(paths: &PathList<'_>) -> Option<(&'static str, Duration)> {
@@ -25,7 +25,7 @@ fn ip_addrs(endpoint: &Endpoint) -> Vec<String> {
     endpoint.addr().ip_addrs().map(|a| a.to_string()).collect()
 }
 
-pub async fn run(endpoint: Endpoint, target: SocketAddr) -> Result<(), String> {
+pub async fn run(endpoint: Endpoint, target: SocketAddr, emit: Emit) -> Result<(), String> {
     // Give interface discovery a moment so `ready` lists real addresses.
     let mut updates = endpoint.watch_addr().stream();
     let first_ip = async {
@@ -42,31 +42,33 @@ pub async fn run(endpoint: Endpoint, target: SocketAddr) -> Result<(), String> {
     emit(json!({ "t": "ready", "nodeId": endpoint.id().to_string(), "addrs": addrs }));
 
     let watch_endpoint = endpoint.clone();
+    let watch_emit = emit.clone();
     tokio::spawn(async move {
         while updates.next().await.is_some() {
             let now = ip_addrs(&watch_endpoint);
             if now != addrs {
                 addrs = now;
-                emit(json!({ "t": "addrs", "addrs": addrs }));
+                watch_emit(json!({ "t": "addrs", "addrs": addrs }));
             }
         }
     });
 
     while let Some(incoming) = endpoint.accept().await {
+        let emit = emit.clone();
         tokio::spawn(async move {
             // A handshake fails here when the peer asks for another ALPN.
             let Ok(accepting) = incoming.accept() else {
                 return;
             };
             if let Ok(conn) = accepting.await {
-                handle(conn, target).await;
+                handle(conn, target, emit).await;
             }
         });
     }
     Err("endpoint closed".into())
 }
 
-async fn handle(conn: Connection, target: SocketAddr) {
+async fn handle(conn: Connection, target: SocketAddr, emit: Emit) {
     let node_id = conn.remote_id().to_string();
     let watched = conn.clone();
     let path_task = tokio::spawn(async move {

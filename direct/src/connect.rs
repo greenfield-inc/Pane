@@ -1,5 +1,8 @@
 //! Client side: a local TCP listener whose connections each become a
-//! bidirectional stream on one shared QUIC connection to the computer.
+//! bidirectional stream on one shared QUIC connection to the computer. With
+//! [`PinnedTls`], each connection is plain on the listener and TLS to the
+//! computer's name on the stream (the Pane app); without it, the listener
+//! carries the client's own TLS bytes (the CLI).
 
 use std::{net::SocketAddr, time::Duration};
 
@@ -12,7 +15,7 @@ use tokio::{
     time::{Instant, sleep, timeout},
 };
 
-use crate::{ALPN, emit, emit_error, pipe, serve::selected_path};
+use crate::{ALPN, Emit, emit_error, pinned_tls::PinnedTls, pipe, serve::selected_path};
 
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 const DIAL_TIMEOUT: Duration = Duration::from_secs(15);
@@ -25,11 +28,10 @@ pub async fn run(
     node_id: EndpointId,
     direct_addrs: Vec<SocketAddr>,
     relay_urls: Vec<RelayUrl>,
-    listen: SocketAddr,
+    listener: TcpListener,
+    tls: Option<PinnedTls>,
+    emit: Emit,
 ) -> Result<(), String> {
-    let listener = TcpListener::bind(listen)
-        .await
-        .map_err(|e| format!("--listen {listen}: {e}"))?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
     let mut addr = EndpointAddr::new(node_id);
@@ -40,33 +42,59 @@ pub async fn run(
         addr = addr.with_relay_url(url);
     }
     let (conn_tx, conn_rx) = watch::channel::<Option<Connection>>(None);
-    tokio::spawn(keep_connected(endpoint, addr, conn_tx));
 
     emit(json!({ "t": "ready", "port": port }));
-    loop {
-        let (tcp, _) = listener.accept().await.map_err(|e| e.to_string())?;
-        tokio::spawn(forward(tcp, conn_rx.clone()));
+    let accept = async {
+        loop {
+            let (tcp, _) = listener.accept().await.map_err(|e| e.to_string())?;
+            tokio::spawn(forward(tcp, conn_rx.clone(), tls.clone()));
+        }
+    };
+    tokio::select! {
+        result = accept => result,
+        () = keep_connected(endpoint, addr, conn_tx, emit.clone()) => unreachable!(),
     }
 }
 
-async fn forward(tcp: TcpStream, mut conn_rx: watch::Receiver<Option<Connection>>) {
+async fn forward(
+    mut tcp: TcpStream,
+    mut conn_rx: watch::Receiver<Option<Connection>>,
+    tls: Option<PinnedTls>,
+) {
     let live = |c: &Option<Connection>| c.as_ref().is_some_and(|c| c.close_reason().is_none());
     let wait = async { conn_rx.wait_for(live).await.ok().and_then(|c| c.clone()) };
     let Ok(Some(conn)) = timeout(STREAM_WAIT, wait).await else {
         return;
     };
-    if let Ok((send, recv)) = conn.open_bi().await {
-        tcp.set_nodelay(true).ok();
-        pipe(tcp, send, recv).await;
+    let Ok((send, recv)) = conn.open_bi().await else {
+        return;
+    };
+    tcp.set_nodelay(true).ok();
+    let Some(tls) = tls else {
+        return pipe(tcp, send, recv).await;
+    };
+    let stream = tokio::io::join(recv, send);
+    // A key mismatch or a failed handshake drops the local connection, so the
+    // app sees a network error and never talks to the wrong server.
+    if let Ok(Ok(mut stream)) = timeout(
+        STREAM_WAIT,
+        tls.connector.connect(tls.server_name.clone(), stream),
+    )
+    .await
+    {
+        tokio::io::copy_bidirectional(&mut tcp, &mut stream)
+            .await
+            .ok();
     }
 }
 
 /// Holds one connection to the computer open, redialing with backoff, for as
-/// long as the process runs.
+/// long as `run` runs.
 async fn keep_connected(
     endpoint: Endpoint,
     addr: EndpointAddr,
     conn_tx: watch::Sender<Option<Connection>>,
+    emit: Emit,
 ) {
     let mut backoff = Duration::from_secs(1);
     loop {
@@ -74,15 +102,15 @@ async fn keep_connected(
             Ok(Ok(conn)) => {
                 let started = Instant::now();
                 conn_tx.send_replace(Some(conn.clone()));
-                let reason = report_paths(&conn).await;
+                let reason = report_paths(&conn, &emit).await;
                 conn_tx.send_replace(None);
-                emit_error(format!("connection lost: {reason}"));
+                emit_error(&emit, format!("connection lost: {reason}"));
                 if started.elapsed() > MAX_BACKOFF {
                     backoff = Duration::from_secs(1);
                 }
             }
-            Ok(Err(e)) => emit_error(format!("connect failed: {e}")),
-            Err(_) => emit_error("connect timed out"),
+            Ok(Err(e)) => emit_error(&emit, format!("connect failed: {e}")),
+            Err(_) => emit_error(&emit, "connect timed out"),
         }
         sleep(backoff).await;
         backoff = (backoff * 2).min(MAX_BACKOFF);
@@ -90,7 +118,7 @@ async fn keep_connected(
 }
 
 /// Emits `path` events until the connection closes, then returns why it did.
-async fn report_paths(conn: &Connection) -> String {
+async fn report_paths(conn: &Connection, emit: &Emit) -> String {
     let mut last: Option<(&str, Duration)> = None;
     let mut snapshots = conn.paths_stream();
     let mut tick = tokio::time::interval(RTT_CHECK);

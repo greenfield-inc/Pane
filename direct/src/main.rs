@@ -1,26 +1,20 @@
 //! `pane-direct`: carries a Pane computer's TLS byte stream over an iroh QUIC
 //! connection. See README.md for the stdin/stdout protocol.
 
-mod connect;
-mod serve;
-
 use std::{
-    future::Future, net::SocketAddr, path::PathBuf, pin::Pin, process::ExitCode, time::Duration,
+    future::Future, net::SocketAddr, path::PathBuf, pin::Pin, process::ExitCode, sync::Arc,
+    time::Duration,
 };
 
-use iroh::{
-    Endpoint, EndpointId, RelayMode, RelayUrl, SecretKey,
-    endpoint::{RecvStream, SendStream, presets},
-};
+use iroh::{EndpointId, RelayUrl, SecretKey};
+use pane_direct::{ALPN, Emit, bind_endpoint, connect, serve};
 use serde_json::{Value, json};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::TcpStream,
+    io::{AsyncBufReadExt, BufReader},
+    net::TcpListener,
 };
 
 type RunFuture = Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
-
-pub const ALPN: &[u8] = b"pane/direct/1";
 
 const USAGE: &str = "usage:
   pane-direct serve --secret-key-file <path> --target <ip:port> [--bind <ip:port>] [--relay-url <url>]...
@@ -28,11 +22,11 @@ const USAGE: &str = "usage:
 
 /// Writes one JSON line to stdout. `println!` locks stdout per call, so lines
 /// from concurrent tasks never interleave.
-pub fn emit(event: Value) {
+fn emit(event: Value) {
     println!("{event}");
 }
 
-pub fn emit_error(message: impl std::fmt::Display) {
+fn emit_error(message: impl std::fmt::Display) {
     emit(json!({ "t": "error", "message": message.to_string() }));
 }
 
@@ -126,51 +120,6 @@ fn load_or_create_key(path: &PathBuf) -> std::io::Result<SecretKey> {
     Ok(key)
 }
 
-async fn bind_endpoint(
-    secret_key: Option<SecretKey>,
-    alpns: Vec<Vec<u8>>,
-    bind: Option<SocketAddr>,
-    relay_urls: &[RelayUrl],
-) -> Result<Endpoint, String> {
-    // Builder::new starts with no address lookup and relays disabled; relays
-    // are only the ones Pane names, never n0's public defaults.
-    let mut builder = Endpoint::builder(presets::Minimal).alpns(alpns);
-    if !relay_urls.is_empty() {
-        builder = builder.relay_mode(RelayMode::custom(relay_urls.iter().cloned()));
-    }
-    if let Some(key) = secret_key {
-        builder = builder.secret_key(key);
-    }
-    if let Some(addr) = bind {
-        builder = builder
-            .clear_ip_transports()
-            .bind_addr(addr)
-            .map_err(|e| format!("--bind {addr}: {e}"))?;
-    }
-    builder
-        .bind()
-        .await
-        .map_err(|e| format!("bind failed: {e}"))
-}
-
-/// Pipes a TCP connection and a QUIC bidirectional stream both ways, passing
-/// half-closes through. Any error resets the QUIC stream and drops the socket.
-pub async fn pipe(tcp: TcpStream, mut send: SendStream, mut recv: RecvStream) {
-    let (mut tcp_read, mut tcp_write) = tcp.into_split();
-    let up = async {
-        tokio::io::copy(&mut tcp_read, &mut send).await?;
-        send.finish().map_err(std::io::Error::other)
-    };
-    let down = async {
-        tokio::io::copy(&mut recv, &mut tcp_write).await?;
-        tcp_write.shutdown().await
-    };
-    if tokio::try_join!(up, down).is_err() {
-        send.reset(0u32.into()).ok();
-        recv.stop(0u32.into()).ok();
-    }
-}
-
 /// Resolves when stdin reaches end of file (or fails). Lines are ignored.
 async fn stdin_closed() {
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
@@ -192,6 +141,7 @@ async fn run_main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let stdout: Emit = Arc::new(emit);
     let (endpoint, run) = match args.mode {
         Mode::Serve {
             secret_key_file,
@@ -216,7 +166,7 @@ async fn run_main() -> ExitCode {
                         return ExitCode::FAILURE;
                     }
                 };
-            let run = serve::run(endpoint.clone(), target);
+            let run = serve::run(endpoint.clone(), target, stdout);
             (endpoint, Box::pin(run) as RunFuture)
         }
         Mode::Connect {
@@ -224,6 +174,13 @@ async fn run_main() -> ExitCode {
             direct_addrs,
             listen,
         } => {
+            let listener = match TcpListener::bind(listen).await {
+                Ok(listener) => listener,
+                Err(e) => {
+                    emit_error(format!("--listen {listen}: {e}"));
+                    return ExitCode::FAILURE;
+                }
+            };
             let endpoint = match bind_endpoint(None, Vec::new(), None, &args.relay_urls).await {
                 Ok(endpoint) => endpoint,
                 Err(e) => {
@@ -236,7 +193,9 @@ async fn run_main() -> ExitCode {
                 node_id,
                 direct_addrs,
                 args.relay_urls,
-                listen,
+                listener,
+                None,
+                stdout,
             );
             (endpoint, Box::pin(run) as RunFuture)
         }
