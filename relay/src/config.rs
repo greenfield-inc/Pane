@@ -142,6 +142,11 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_FCM_SERVICE_ACCOUNT")]
     pub fcm_service_account: Option<PathBuf>,
 
+    /// Firebase project for FCM. Alone, it sends keyless with the VM's attached
+    /// service account (GCE metadata server); with --fcm-service-account it overrides that key's project.
+    #[arg(long, env = "PANE_RELAY_FCM_PROJECT")]
+    pub fcm_project: Option<String>,
+
     /// Per computer: push alerts an hour before answering `throttled`.
     #[arg(long, env = "PANE_RELAY_LIMIT_ALERTS_PER_HOUR", default_value_t = 60)]
     pub limit_alerts_per_hour: usize,
@@ -158,6 +163,15 @@ pub struct Config {
 
     #[arg(long, hide = true, default_value = "https://fcm.googleapis.com")]
     pub fcm_url: String,
+
+    /// The metadata server's token URL for keyless FCM (tests).
+    #[arg(
+        long,
+        hide = true,
+        env = "PANE_RELAY_FCM_METADATA_URL",
+        default_value = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+    )]
+    pub fcm_metadata_url: String,
 
     /// Overrides the service account's token_uri.
     #[arg(long, hide = true)]

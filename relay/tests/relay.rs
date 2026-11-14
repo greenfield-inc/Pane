@@ -961,6 +961,80 @@ async fn android_alerts_reach_fcm_with_an_access_token() {
     }
 }
 
+/// A fake GCE metadata server: answers every request with an access token and
+/// sends each request head to the returned channel.
+async fn metadata_server() -> (String, mpsc::UnboundedReceiver<String>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!(
+        "http://127.0.0.1:{}/computeMetadata/v1/instance/service-accounts/default/token",
+        listener.local_addr().unwrap().port()
+    );
+    let (tx, rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok((mut tcp, _)) = listener.accept().await {
+            let head = read_head(&mut tcp).await;
+            let _ = tx.send(head);
+            let body = r#"{"access_token":"ya29.keyless","expires_in":3599,"token_type":"Bearer"}"#;
+            let reply = format!(
+                "HTTP/1.0 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = tcp.write_all(reply.as_bytes()).await;
+        }
+    });
+    (url, rx)
+}
+
+#[tokio::test]
+async fn android_alerts_without_a_key_use_the_metadata_server_token() {
+    let mut fcm = Provider::start(|path, _| match path {
+        "/v1/projects/pane-keyless/messages:send" => (200, "{}".to_string()),
+        _ => (404, String::new()),
+    })
+    .await;
+    let (metadata_url, mut metadata) = metadata_server().await;
+    let env = Env::start(&[
+        "--fcm-project",
+        "pane-keyless",
+        "--fcm-metadata-url",
+        &metadata_url,
+        "--fcm-url",
+        &fcm.url,
+        "--provider-ca",
+        fcm.ca.to_str().unwrap(),
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    for req in ["1", "2"] {
+        agent
+            .send(json!({"t": "alert", "req": req, "platform": "android",
+                "message": {"token": "fcm-device-token", "data": {}}}))
+            .await;
+        assert_eq!(agent.next().await["status"], 200);
+    }
+
+    // One metadata request (the token is cached for the second alert).
+    let head = tokio::time::timeout(WAIT, metadata.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        head.starts_with("GET /computeMetadata/v1/instance/service-accounts/default/token HTTP/1."),
+        "{head}"
+    );
+    assert!(
+        head.to_ascii_lowercase()
+            .contains("metadata-flavor: google"),
+        "{head}"
+    );
+    assert!(metadata.try_recv().is_err());
+    for _ in 0..2 {
+        let send = fcm.next().await;
+        assert_eq!(send.path, "/v1/projects/pane-keyless/messages:send");
+        assert_eq!(header(&send, "authorization"), Some("Bearer ya29.keyless"));
+    }
+}
+
 #[tokio::test]
 async fn alerts_past_the_hourly_limit_are_throttled() {
     let (env, mut fcm) = fcm_env(&["--limit-alerts-per-hour", "2"]).await;

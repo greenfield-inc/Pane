@@ -1,6 +1,6 @@
 //! Push alerts that computers send through the relay with the Pane app's keys
 //! (PROTOCOL.md, Alerts): APNs over HTTP/2 with an ES256 token, FCM v1 with an
-//! OAuth2 token from a service account.
+//! OAuth2 token from a service account key or, keyless, from the GCE metadata server.
 
 use crate::Error;
 use crate::config::Config;
@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -49,12 +50,22 @@ struct Apns {
 }
 
 struct Fcm {
-    key: ring::signature::RsaKeyPair,
-    email: String,
+    auth: FcmAuth,
     project: String,
-    token_url: String,
     url: String,
     token: tokio::sync::Mutex<Option<(String, Instant)>>,
+}
+
+/// Where FCM access tokens come from.
+enum FcmAuth {
+    /// A service account key file: sign a JWT and trade it at `token_url`.
+    Key {
+        key: Box<ring::signature::RsaKeyPair>,
+        email: String,
+        token_url: String,
+    },
+    /// The VM's attached service account, through the GCE metadata server.
+    Metadata { url: String },
 }
 
 enum Request<'a> {
@@ -173,7 +184,14 @@ impl Alerts {
             }
         };
         let fcm = match &cfg.fcm_service_account {
-            None => None,
+            None => cfg.fcm_project.as_ref().map(|project| Fcm {
+                auth: FcmAuth::Metadata {
+                    url: cfg.fcm_metadata_url.clone(),
+                },
+                project: project.clone(),
+                url: cfg.fcm_url.trim_end_matches('/').to_string(),
+                token: tokio::sync::Mutex::new(None),
+            }),
             Some(path) => {
                 let what = "--fcm-service-account";
                 let text = std::fs::read_to_string(path)
@@ -195,11 +213,17 @@ impl Alerts {
                     .clone()
                     .or_else(|| field("token_uri").ok())
                     .unwrap_or_else(|| FCM_DEFAULT_TOKEN_URL.to_string());
+                let project = match &cfg.fcm_project {
+                    Some(p) => p.clone(),
+                    None => field("project_id")?,
+                };
                 Some(Fcm {
-                    key,
-                    email: field("client_email")?,
-                    project: field("project_id")?,
-                    token_url,
+                    auth: FcmAuth::Key {
+                        key: Box::new(key),
+                        email: field("client_email")?,
+                        token_url,
+                    },
+                    project,
                     url: cfg.fcm_url.trim_end_matches('/').to_string(),
                     token: tokio::sync::Mutex::new(None),
                 })
@@ -376,32 +400,14 @@ impl Fcm {
         {
             return Ok(token.clone());
         }
-        let iat = now_secs();
-        let assertion = jwt(
-            json!({"alg": "RS256", "typ": "JWT"}),
-            json!({"iss": self.email, "scope": FCM_SCOPE, "aud": self.token_url,
-                "iat": iat, "exp": iat + 3600}),
-            |input| {
-                let mut sig = vec![0; self.key.public().modulus_len()];
-                self.key
-                    .sign(
-                        &ring::signature::RSA_PKCS1_SHA256,
-                        &ring::rand::SystemRandom::new(),
-                        input,
-                        &mut sig,
-                    )
-                    .map_err(|_| "signing the FCM token request failed".to_string())?;
-                Ok(sig)
-            },
-        )?;
-        let form = format!(
-            "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={assertion}"
-        );
-        let headers = [(
-            "content-type",
-            "application/x-www-form-urlencoded".to_string(),
-        )];
-        let (status, body) = http.post(&self.token_url, &headers, form.into()).await?;
+        let (status, body) = match &self.auth {
+            FcmAuth::Key {
+                key,
+                email,
+                token_url,
+            } => key_token(http, key, email, token_url).await?,
+            FcmAuth::Metadata { url } => metadata_get(url).await?,
+        };
         if status != 200 {
             return Err(format!("the FCM token endpoint answered {status}"));
         }
@@ -418,6 +424,71 @@ impl Fcm {
         ));
         Ok(token)
     }
+}
+
+/// Trades a JWT signed with the service account key for an access token.
+async fn key_token(
+    http: &Http,
+    key: &ring::signature::RsaKeyPair,
+    email: &str,
+    token_url: &str,
+) -> Result<(u16, Bytes), String> {
+    let iat = now_secs();
+    let assertion = jwt(
+        json!({"alg": "RS256", "typ": "JWT"}),
+        json!({"iss": email, "scope": FCM_SCOPE, "aud": token_url,
+            "iat": iat, "exp": iat + 3600}),
+        |input| {
+            let mut sig = vec![0; key.public().modulus_len()];
+            key.sign(
+                &ring::signature::RSA_PKCS1_SHA256,
+                &ring::rand::SystemRandom::new(),
+                input,
+                &mut sig,
+            )
+            .map_err(|_| "signing the FCM token request failed".to_string())?;
+            Ok(sig)
+        },
+    )?;
+    let form = format!(
+        "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={assertion}"
+    );
+    let headers = [(
+        "content-type",
+        "application/x-www-form-urlencoded".to_string(),
+    )];
+    http.post(token_url, &headers, form.into()).await
+}
+
+/// GETs a token from the GCE metadata server (plain HTTP/1.0 on the VM's link).
+async fn metadata_get(url: &str) -> Result<(u16, Bytes), String> {
+    let rest = url
+        .strip_prefix("http://")
+        .ok_or("--fcm-metadata-url must start with http://")?;
+    let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    let fetch = async {
+        let mut tcp = TcpStream::connect(authority).await?;
+        let req =
+            format!("GET {path} HTTP/1.0\r\nhost: {authority}\r\nmetadata-flavor: Google\r\n\r\n");
+        tcp.write_all(req.as_bytes()).await?;
+        let mut out = Vec::new();
+        tcp.take(MAX_READ_BODY as u64).read_to_end(&mut out).await?;
+        Ok::<_, std::io::Error>(out)
+    };
+    let out = tokio::time::timeout(TIMEOUT, fetch)
+        .await
+        .map_err(|_| "the metadata server timed out".to_string())?
+        .map_err(|e| format!("the metadata server at {authority}: {e}"))?;
+    let split = out
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or("the metadata server answered no HTTP head")?;
+    let status = std::str::from_utf8(&out[..split])
+        .ok()
+        .and_then(|head| head.split(' ').nth(1))
+        .and_then(|code| code.parse().ok())
+        .ok_or("the metadata server answered no status")?;
+    Ok((status, Bytes::copy_from_slice(&out[split + 4..])))
 }
 
 /// A minimal HTTP/2 client that keeps one connection per provider host.

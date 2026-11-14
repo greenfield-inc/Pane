@@ -64,8 +64,14 @@ new scan.
 
 To deliver alerts to phones from computers that have no push keys, give the
 relay the Pane app's keys: `--apns-key-path`, `--apns-key-id`,
-`--apns-team-id` and `--fcm-service-account`. Without them, set the keys on
-each computer instead ([Native mobile](NATIVE_MOBILE.md)).
+`--apns-team-id`, and `--fcm-service-account` (a service account JSON key).
+Without them, set the keys on each computer instead
+([Native mobile](NATIVE_MOBILE.md)).
+
+On Google Compute Engine, Android alerts need no key file: attach the sender
+service account to the VM, give the VM the `cloud-platform` access scope, and
+pass `--fcm-project <project id>`. The relay gets its tokens from the VM's
+metadata server.
 
 ## Direct paths
 

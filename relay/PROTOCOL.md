@@ -93,7 +93,9 @@ would send it itself:
   The relay sends it to APNs with the app's topic, production first and the
   sandbox once on `BadDeviceToken`.
 - Android: `{"t":"alert","req":"<n>","platform":"android","message":{...}}`, an
-  FCM v1 `message` (with its `token`), sent with the app's sender account. A
+  FCM v1 `message` (with its `token`), sent with the app's sender account:
+  a service account key file, or with no key the service account attached to
+  the relay's Google Compute Engine VM (`--fcm-project`). A
   message without a device `token`, or with a `topic` or `condition`, gets
   `bad-request`.
 
