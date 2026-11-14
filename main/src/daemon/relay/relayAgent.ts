@@ -70,12 +70,16 @@ type ComputerFrame =
 const PING_INTERVAL_MS = 25_000;
 const SILENCE_TIMEOUT_MS = 75_000;
 const MAX_FRAME_BYTES = 64 * 1024;
-const RETRY_MS = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
+/**
+ * Reconnect delays, each jittered down to half so computers spread out after a relay restart. The
+ * 10 s cap has every computer back well inside the 30 s phones get to reconnect.
+ */
+const RETRY_MS = [1_000, 2_000, 4_000, 8_000, 10_000];
 
 /**
  * The computer's one outgoing control connection to its relay (relay/PROTOCOL.md): proves the
  * computer's key, then opens a data connection for each client the relay announces. Reconnects
- * with backoff up to 30 seconds and never gives up while running.
+ * with backoff up to 10 seconds and never gives up while running.
  */
 export class RelayAgent {
   private control: tls.TLSSocket | null = null;
@@ -305,7 +309,7 @@ export class RelayAgent {
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
       this.connect();
-    }, delay * (0.8 + Math.random() * 0.4));
+    }, delay * (0.5 + Math.random() * 0.5));
     this.retryTimer.unref();
   }
 }
