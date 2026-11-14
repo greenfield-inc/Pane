@@ -78,6 +78,7 @@ function createServicesStub(projects: Project[]): AppServices {
     configManager: {
       on: vi.fn(),
       getConfig: () => config,
+      isAnalyticsEnabled: () => true,
       reloadFromDisk: async () => config,
       updateConfig: async (updates: UpdateConfigRequest) => {
         config = {
@@ -234,6 +235,43 @@ describe('config IPC handlers', () => {
     })).resolves.toMatchObject({ success: true });
     expect(configUpdatedCount).toBe(1);
     expect(nativeTheme.themeSource).toBe('dark');
+  });
+
+  it('serves analytics off, marked as set by the environment, while DO_NOT_TRACK=1, and saves nothing', async () => {
+    vi.stubEnv('DO_NOT_TRACK', '1');
+    try {
+      const configManager = await createTempConfigManager();
+      await configManager.initialize();
+      const services = createServicesStub([]);
+      services.configManager = configManager;
+      const ipcMain = createIpcMainStub();
+      // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
+      registerConfigHandlers(ipcMain as IpcMain, services);
+
+      await expect(ipcMain.handlers.get('config:get')?.({})).resolves.toMatchObject({
+        success: true, data: { analytics: { enabled: false, disabledByEnvironment: true } },
+      });
+      expect(configManager.getConfig().analytics).toMatchObject({ enabled: true });
+      expect(configManager.getConfig().analytics).not.toHaveProperty('disabledByEnvironment');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('serves analytics off while config.json has not been readable since launch', async () => {
+    const configManager = await createTempConfigManager();
+    await fs.writeFile(path.join(tempDirs[tempDirs.length - 1], 'config.json'), '{"analytics": {"enabled": true}');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await configManager.initialize();
+    const services = createServicesStub([]);
+    services.configManager = configManager;
+    const ipcMain = createIpcMainStub();
+    // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
+    registerConfigHandlers(ipcMain as IpcMain, services);
+
+    await expect(ipcMain.handlers.get('config:get')?.({})).resolves.toMatchObject({
+      success: true, data: { analytics: { enabled: false } },
+    });
   });
 
   describe('remote:settings:update', () => {

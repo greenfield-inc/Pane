@@ -52,6 +52,8 @@ export interface AnalyticsIdentity {
 
 interface AnalyticsConfig {
   enabled: boolean;
+  // DO_NOT_TRACK or RUNPANE_TELEMETRY_DISABLED turned analytics off; the Settings toggle can't change that.
+  disabledByEnvironment?: boolean;
   posthogApiKey?: string;
   posthogHost?: string;
   installId?: string;

@@ -45,6 +45,11 @@ const DEFAULT_POSTHOG_HOST = 'https://runpane.com/api/c';
 /** Bump when agentContext defaults change for existing configs (2: repo AGENTS.md off). */
 export const AGENT_CONTEXT_DEFAULTS_VERSION = 2;
 
+/** DO_NOT_TRACK=1 or a non-empty RUNPANE_TELEMETRY_DISABLED turns off all analytics, whatever config.json says. */
+export function analyticsDisabledByEnvironment(): boolean {
+  return process.env.DO_NOT_TRACK === '1' || Boolean(process.env.RUNPANE_TELEMETRY_DISABLED);
+}
+
 function defaultAnalyticsConfig(): NonNullable<AppConfig['analytics']> {
   return {
     enabled: true,
@@ -127,6 +132,8 @@ export class ConfigManager extends EventEmitter {
   private lastConfigJson: string = '';
   private saveConfigQueue: Promise<void> = Promise.resolve();
   private hasReadConfigFile = false;
+  /** config.json exists but Pane has never read it, so its analytics settings are unknown. */
+  private configUnreadSinceLaunch = false;
   private diskCheckTimer: ReturnType<typeof setTimeout> | null = null;
   /** Keys changed in memory while config.json did not parse; saved once it does. */
   private pendingKeys = new Set<ConfigKey>();
@@ -256,11 +263,15 @@ export class ConfigManager extends EventEmitter {
       if (disk.kind === 'invalid') {
         // Do NOT overwrite the file (user might want to recover it)
         this.logInvalidConfig(disk.reason);
+        this.configUnreadSinceLaunch = true;
         return unchanged;
       }
       if (this.hasReadConfigFile && disk.text === this.lastConfigJson) return unchanged;
       const loaded = this.tryLoadConfigText(disk.text);
-      if (!loaded) return unchanged;
+      if (!loaded) {
+        this.configUnreadSinceLaunch = true;
+        return unchanged;
+      }
       const { persist, emit } = loaded;
       if (persistMigration && persist && await this.commitConfig(this.config, disk) === 'conflict' && attempt < MAX_COMMIT_ATTEMPTS) continue;
       return { changed: true, restamped: emit };
@@ -595,7 +606,9 @@ export class ConfigManager extends EventEmitter {
   }
 
   /** The file does not parse: apply the change in memory only, and save it once the file is fixed. */
-  private holdUpdate(known: AppConfig, updates: Partial<AppConfig>): AppConfig {
+  private holdUpdate(known: AppConfig, rawUpdates: Partial<AppConfig>): AppConfig {
+    // Before the file was ever read, an analytics write builds on defaults, not the person's settings: drop it.
+    const updates = this.hasReadConfigFile ? rawUpdates : { ...rawUpdates, analytics: known.analytics };
     // SAFETY: Object.keys of a Partial<AppConfig> are AppConfig keys.
     const changedKeys = Object.keys(pickChanged(known, updates)) as ConfigKey[];
     if (changedKeys.length > 0) {
@@ -790,8 +803,10 @@ export class ConfigManager extends EventEmitter {
     return this.config.analytics || defaultAnalyticsConfig();
   }
 
+  /** Off while the environment opts out, or while a config.json that may hold analytics off has never been read. */
   isAnalyticsEnabled(): boolean {
-    return this.config.analytics?.enabled ?? true;
+    const unread = this.configUnreadSinceLaunch && !this.hasReadConfigFile;
+    return !analyticsDisabledByEnvironment() && !unread && (this.config.analytics?.enabled ?? true);
   }
 
   getAnalyticsDistinctId(): string | undefined {

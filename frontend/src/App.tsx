@@ -422,7 +422,9 @@ function App() {
     await captureAppFirstOpened(identity);
   }, []);
 
-  // Apply the default-on experiment only when no explicit legacy choice exists.
+  // Apply the default-on experiment only to an undecided install whose config
+  // doesn't store analytics off. A stored false stays off: a fresh install's
+  // default is true, and builds before 2026-08-31 stored false by default.
   useEffect(() => {
     if (!appConfig || hasCheckedAnalyticsDefault || analyticsCheckStarted.current) return;
     analyticsCheckStarted.current = true;
@@ -442,35 +444,34 @@ function App() {
         const hasLegacyChoice = legacyConsentResult === 'true';
         const hasAppliedDefault = defaultAppliedResult === 'true';
 
-        if (!hasLegacyChoice && !hasAppliedDefault) {
-          const identity = await resolveAnalyticsIdentity();
-          // A config change during the identity lookup restarts this effect;
-          // only the latest run captures and aliases.
-          if (cancelled) return;
-
-          initPostHog({
-            enabled: true,
-            posthogApiKey: appConfig.analytics?.posthogApiKey,
-            posthogHost: appConfig.analytics?.posthogHost,
-            identity,
-          }, { flushPendingEvents: false });
-
-          aliasInstallIdentity(identity);
-          if (identity?.webDistinctId) {
-            aliasWebVisitor(identity.webDistinctId, identity.distinctId);
-            void window.electronAPI?.analytics?.redeemAttribution?.();
-          }
-
-          await captureUnconditionally('analytics_default_enabled', { experiment: 'analytics_default_on' }, identity);
-          await captureFirstOpenOnce(identity);
-          flushPendingEvents();
+        // The environment's off is not a choice to record: once it is gone, the default applies.
+        if (hasLegacyChoice || hasAppliedDefault || appConfig.analytics?.disabledByEnvironment) return;
+        if (appConfig.analytics?.enabled === false) {
           await API.preferences.set('analytics_default_applied', 'true');
-          if (appConfig.analytics?.enabled !== true) {
-            await useConfigStore.getState().updateConfig({
-              analytics: { ...appConfig.analytics, enabled: true },
-            });
-          }
+          return;
         }
+        const identity = await resolveAnalyticsIdentity();
+        // A config change during the identity lookup restarts this effect;
+        // only the latest run captures and aliases.
+        if (cancelled) return;
+
+        initPostHog({
+          enabled: true,
+          posthogApiKey: appConfig.analytics?.posthogApiKey,
+          posthogHost: appConfig.analytics?.posthogHost,
+          identity,
+        }, { flushPendingEvents: false });
+
+        aliasInstallIdentity(identity);
+        if (identity?.webDistinctId) {
+          aliasWebVisitor(identity.webDistinctId, identity.distinctId);
+          void window.electronAPI?.analytics?.redeemAttribution?.();
+        }
+
+        await captureUnconditionally('analytics_default_enabled', { experiment: 'analytics_default_on' }, identity);
+        await captureFirstOpenOnce(identity);
+        flushPendingEvents();
+        await API.preferences.set('analytics_default_applied', 'true');
       } catch (error) {
         console.error('[App] Error applying analytics default:', error);
       } finally {

@@ -64,15 +64,12 @@ app:
   listener, leaves Tailscale Serve alone, and on quit leaves the other Pane's
   daemon socket in place. It logs `Another Pane already serves <dir>` at startup. Quit it and
   give it its own `PANE_DIR`.
-- **Analytics** are on by default in a fresh data directory. Setting
-  `analytics.enabled: false` in config alone does not prevent the first-render
-  default policy from enabling analytics when neither `analytics_consent_shown`
-  nor `analytics_default_applied` records a choice. Native QA must establish an
-  explicit analytics choice and its persisted preference before the first UI
-  render, or isolate analytics with a test-runtime guard. Instances with their
+- **Analytics** are on by default in a fresh data directory. To keep a QA
+  instance quiet, write `analytics.enabled: false` to its `config.json` before
+  the first launch, or launch it with `RUNPANE_TELEMETRY_DISABLED=1`; either
+  stops all analytics, error reports and the heartbeat. Instances with their
   own `PANE_DIR` or `--pane-dir`, and unpackaged builds, send no install
-  heartbeat. Packaged QA on the default data directory should set
-  `RUNPANE_TELEMETRY_DISABLED=1`.
+  heartbeat.
 - **Pane data** (`sessions.db`, `config.json`, skills): a dev (unpackaged)
   build with neither `PANE_DIR` nor `--pane-dir` uses `~/.pane_dev`, never the
   installed app's `~/.pane`, and says so at startup. `~/.pane_dev` lasts across
