@@ -37,7 +37,8 @@ function blockLanguage(node: HastNode | undefined): string | undefined {
   return language?.slice('language-'.length);
 }
 
-const Markdown = memo(({ text }: { text: string }) => {
+/** `live`: the turn is still writing. Its text parses block by block, so each token re-parses only the block being written; finished text parses whole, which mounts faster. */
+const Markdown = memo(({ text, live }: { text: string; live: boolean }) => {
   const { blocks } = useContext(ChatBlocksContext);
   const components = useMemo<Components>(() => ({
     a: ({ children, ...props }: ComponentProps<'a'>) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a>,
@@ -47,8 +48,7 @@ const Markdown = memo(({ text }: { text: string }) => {
       return render ? <>{render(hastText(node).replace(/\n$/, ''))}</> : <CodeBlock {...props}>{children}</CodeBlock>;
     },
   }), [blocks]);
-  // Each block parses on its own, so a streaming reply re-parses only the block being written.
-  const parts = markdownBlocks(text);
+  const parts = live ? markdownBlocks(text) : [text];
   return <div className="chat-markdown">{parts.map((block, index) => <MarkdownBlock key={index} text={block} components={components} />)}</div>;
 });
 Markdown.displayName = 'Markdown';
@@ -124,9 +124,9 @@ function TodoList({ entries }: { entries: PlanEntry[] }) {
   </section>;
 }
 
-function Item({ item, waiting, actions }: { item: TurnItem; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
+function Item({ item, waiting, actions, live }: { item: TurnItem; waiting: ReadonlySet<string>; actions: ChatTurnActions; live: boolean }) {
   switch (item.type) {
-    case 'text': return <div data-anchor-id={item.id}><Markdown text={item.text} /></div>;
+    case 'text': return <div data-anchor-id={item.id}><Markdown text={item.text} live={live} /></div>;
     case 'thought': return <details className="chat-thought"><summary><Brain aria-hidden="true" />Thinking</summary><div className="whitespace-pre-wrap">{item.text}</div></details>;
     case 'image': return <img className="chat-image" alt="Sent by the agent" src={`data:${item.mimeType};base64,${item.data}`} />;
     case 'plan': return <TodoList entries={item.entries} />;
@@ -184,13 +184,13 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
         {open ? <ChevronDown className="chat-fold-chevron" /> : <ChevronRight className="chat-fold-chevron" />}
       </button>
       : <p className="chat-fold">{icon}<span className="chat-fold-label">{row.label}</span></p>}
-    {open && <div className="chat-fold-body">{activity.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>}
+    {open && <div className="chat-fold-body">{activity.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>}
   </div>;
   return <div className="chat-turn" data-anchor-id={turn.id} data-running={turn.running}>
     <UserMessage turn={turn} />
-    <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>
+    <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {fold}
-    <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>
+    <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {!turn.running && (responseText(turn) || (latest && !activity.length && ended)) && <div className="chat-message-actions chat-response-actions">
       {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}
       {latest && !activity.length && ended && <span className="chat-turn-time" title={ended.full}>{ended.short}</span>}

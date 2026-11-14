@@ -455,7 +455,8 @@ loads the same conversation.
   `shared/constants/streamCadence.ts`, also the terminals' output interval when
   no one is typing), and its markdown is parsed block by block, so an update
   re-parses only the block being written. A reply with link definitions,
-  footnotes or a raw HTML block that can span blank lines is parsed whole.
+  footnotes or a raw HTML block that can span blank lines is parsed whole, and
+  so is every reply once its turn ends, which keeps opening a long chat fast.
 - A queued message keeps only a preview in the tab's saved state; its full text
   and images wait in a file beside it until they are sent.
 - A tool step's update sends only the fields that changed; command output is sent
