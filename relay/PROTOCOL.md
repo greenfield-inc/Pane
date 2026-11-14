@@ -102,7 +102,9 @@ the relay, which holds the keys. A computer alerts only a phone that confirmed
 it, with a grant:
 
 1. When a phone registers its device token, the computer sends `grant` with
-   that token and the phone's id for the computer (`hostProfileId`).
+   that token and the phone's id for the computer (`hostProfileId`). The phone
+   registers on every connect, so the computer asks again for the same
+   registration and token at most every 10 minutes while it waits.
 2. The relay pushes the token a silent message holding the grant,
    `<computer id>.<base64url HMAC-SHA256 over "<id>\n<platform>\n<token>">`:
    on iOS a `background` push with `{"aps":{"content-available":1},"paneGrant":"<grant>","hostProfileId":"<id>"}`,

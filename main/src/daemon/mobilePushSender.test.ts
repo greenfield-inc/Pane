@@ -200,6 +200,11 @@ describe('MobilePushSender', () => {
       await blocked(sender);
       expect(sent).toEqual([]);
 
+      // The phone re-registers on every connect; that doesn't spend its hourly grant pushes.
+      await register(sender, 'fcm-token');
+      await register(sender, 'fcm-token');
+      expect(grants).toHaveLength(1);
+
       // A grant for another computer is refused; this computer's is kept and goes with each alert.
       expect(await sender.confirmGrant('client-1', { platform: 'android', installationId: 'install-1', grant: 'laptop.sig' })).toEqual({ ok: false });
       expect(await sender.confirmGrant('client-1', { platform: 'android', installationId: 'install-1', grant: 'studio2.sig' })).toEqual({ ok: false });
@@ -228,6 +233,19 @@ describe('MobilePushSender', () => {
     } finally {
       setRelayPushChannel(null);
     }
+  });
+
+  it('says the relay is reconnecting, not that keys are missing, while its connection is down', () => {
+    setEnvironment({});
+    const config = createDefaultRemoteDaemonConfig();
+    const sender = new MobilePushSender(new ConfigManagerStub(config));
+    setRelayPushChannel({ available: () => false, id: () => 'studio', send: async () => ({ status: 200, body: '' }), grant: async () => ({ status: 200, body: '' }) });
+    try {
+      expect(sender.getStatus('client-1', 'ios', 'install-1')).toMatchObject({ provider: 'unavailable', code: 'PUSH_RELAY_RECONNECTING' });
+    } finally {
+      setRelayPushChannel(null);
+    }
+    expect(sender.getStatus('client-1', 'ios', 'install-1')).toMatchObject({ provider: 'missing-config', code: 'ERR_APNS_NOT_CONFIGURED' });
   });
 
   describe('attention timing and copy', () => {

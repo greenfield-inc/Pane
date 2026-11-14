@@ -120,7 +120,8 @@ function Details({ machine }: { machine: Machine }) {
 /** One word for the Notifications row; the Notifications screen explains anything else. */
 function alertText(result: PushSetupResult | undefined): string {
   if (!result) return 'Checking…';
-  return result.state === 'registered' ? 'On' : 'Not set up';
+  if (result.state !== 'registered') return 'Not set up';
+  return result.status.code === 'PUSH_AWAITING_PHONE' ? 'Waiting' : 'On';
 }
 
 /** Slow first answer with many tries: the network. Quick first answer, slow connect: the machine. */

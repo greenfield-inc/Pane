@@ -56,6 +56,11 @@ class UnboundGrantError extends ProviderDeliveryError {}
 const MAX_RECENT_EVENTS = 64;
 /** A relay grant is `<16-character computer id>.<43-character signature>`; anything far longer is not one. */
 const MAX_GRANT_LENGTH = 100;
+/**
+ * The phone registers on every connect, and the relay allows 10 grant pushes per phone an hour, so a
+ * registration still waiting for its grant asks again only this long after it last asked.
+ */
+const GRANT_RETRY_MS = 10 * 60_000;
 /** Phones one owner login keeps registered on a host; registering one more drops the oldest. */
 const MAX_OWNER_REGISTRATIONS = 10;
 /**
@@ -103,6 +108,8 @@ export class MobilePushSender {
   private readonly finishTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Each Notify question's waits so far, and whether it waits now: Undo makes it wait, and alert, again. */
   private readonly questionRounds = new Map<string, { round: number; open: boolean }>();
+  /** When each registration last asked the relay for a grant, by `<registration id> <token>`. */
+  private readonly grantAsked = new Map<string, number>();
 
   constructor(
     private readonly configManager: MobilePushConfigManager,
@@ -157,7 +164,11 @@ export class MobilePushSender {
     registrations.push(registration);
     await this.save(configWithRegistrations(config, withinOwnerLimit(registrations, clientId)));
     const relay = relayFor(registration.platform, this.configManager.getConfig().apns);
-    if (relay && !registration.relayGrant) requestGrant(relay, { platform: registration.platform, token: registration.token, hostProfileId: registration.hostProfileId });
+    const asked = `${registration.id} ${registration.token}`;
+    if (relay && !registration.relayGrant && Date.now() - (this.grantAsked.get(asked) ?? -Infinity) >= GRANT_RETRY_MS) {
+      this.grantAsked.set(asked, Date.now());
+      requestGrant(relay, { platform: registration.platform, token: registration.token, hostProfileId: registration.hostProfileId });
+    }
     return this.getStatus(clientId, request.platform, request.installationId);
   }
 
@@ -491,6 +502,8 @@ export class MobilePushSender {
   }
 
   private async dropGrant(id: string): Promise<void> {
+    // The relay refused the grant, so the next registration asks for a new one at once.
+    for (const key of this.grantAsked.keys()) if (key.startsWith(`${id} `)) this.grantAsked.delete(key);
     const config = this.config();
     await this.save(configWithRegistrations(config, config.host.mobilePush.registrations.map(item => {
       if (item.id !== id) return item;
@@ -547,8 +560,10 @@ function relayForPush(): RelayPushChannel | null {
 }
 /** The relay path for a platform this computer has no keys for. */
 function relayFor(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): RelayPushChannel | null {
-  const hasKeys = platform === 'ios' ? readApnsCredentials(apns) !== null : readFcmCredentials() !== null;
-  return hasKeys ? null : relayForPush();
+  return hasKeys(platform, apns) ? null : relayForPush();
+}
+function hasKeys(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): boolean {
+  return platform === 'ios' ? readApnsCredentials(apns) !== null : readFcmCredentials() !== null;
 }
 /** Has the relay push the phone a grant for this computer; the phone hands it back with `mobile:push-grant`. */
 function requestGrant(relay: RelayPushChannel, request: RelayGrantRequest): void {
@@ -582,6 +597,9 @@ export function getMobilePushSender(configManager: MobilePushConfigManager, opti
 
 function providerReadiness(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): Pick<RemoteMobilePushStatus, 'provider' | 'code' | 'message'> {
   if (relayFor(platform, apns)) return { provider: 'ready', code: 'PUSH_READY', message: 'Alerts go through Pane\'s servers.' };
+  if (relayPush && !hasKeys(platform, apns)) {
+    return { provider: 'unavailable', code: 'PUSH_RELAY_RECONNECTING', message: 'This computer is reconnecting to Pane\'s servers. Alerts start again when it is back.' };
+  }
   if (platform === 'ios') return readApnsCredentials(apns)
     ? { provider: 'ready', code: 'PUSH_READY', message: 'APNs delivery is configured.' }
     : { provider: 'missing-config', code: 'ERR_APNS_NOT_CONFIGURED', message: 'This host has no valid APNs configuration.' };
