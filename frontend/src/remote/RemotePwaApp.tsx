@@ -33,7 +33,7 @@ import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
 import { pairingErrorText, pairThisBrowser, takePairingSecret } from './runtime/relayBrowserPairing';
-import { RelayOfflineBanner } from './components/RelayOfflineBanner';
+import { RelayConnectionBar } from './components/RelayConnectionBar';
 import { getClientLabel, getRuntimeId, RemoteDaemonBrowserClient } from './runtime/remoteDaemonBrowserClient';
 import { linkWithSavedRelayComputers } from '../../../shared/remoteClient/relay';
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
@@ -931,6 +931,20 @@ export function RemotePwaApp() {
 
   useEffect(() => adapter ? subscribeRemotePanelStatus(adapter) : undefined, [adapter]);
 
+  // Back online or back in view: retry now instead of waiting out the backoff. The Pane app's shell suspends and resumes instead.
+  useEffect(() => {
+    if (!adapter || isNativeMobile()) return;
+    const retry = () => {
+      if (document.visibilityState === 'visible' && adapter.getStatus().status === 'reconnecting') adapter.retryNow();
+    };
+    window.addEventListener('online', retry);
+    document.addEventListener('visibilitychange', retry);
+    return () => {
+      window.removeEventListener('online', retry);
+      document.removeEventListener('visibilitychange', retry);
+    };
+  }, [adapter]);
+
   useEffect(() => {
     if (!adapter || !activeProfile || !isNativeMobile()) return;
     let cancelled = false;
@@ -1022,8 +1036,8 @@ export function RemotePwaApp() {
     void loadPanels(selectedSessionId, adapter);
   }, [adapter, loadPanels, selectedSessionId]);
 
-  const offlineBanner = (
-    <RelayOfflineBanner relay={(activeProfile ?? reconnectingProfile ?? savedProfiles[0])?.relay !== undefined} connected={connectionStatus === 'connected'} />
+  const connectionBar = (
+    <RelayConnectionBar profile={activeProfile ?? reconnectingProfile ?? savedProfiles[0]} status={connectionStatus} lastError={lastError} />
   );
   if (profilesLoading) return <main className="flex min-h-dvh items-center justify-center bg-bg-primary text-text-secondary">Loading saved connections…</main>;
   if (reconnectingProfile && (!adapter || !activeProfile)) {
@@ -1043,7 +1057,7 @@ export function RemotePwaApp() {
   if (!adapter || !activeProfile) {
     return (
       <>
-        {offlineBanner}
+        <div className="fixed inset-x-0 top-0 z-[60]">{connectionBar}</div>
         <RemoteConnectionScreen
           savedProfiles={savedProfiles}
           error={lastError}
@@ -1058,7 +1072,6 @@ export function RemotePwaApp() {
 
   return (
     <div className="flex h-dvh min-h-dvh w-full overflow-hidden bg-bg-primary text-text-primary">
-      {offlineBanner}
       <ErrorDialog
         isOpen={creationFailure !== null}
         onClose={() => setCreationFailure(null)}
@@ -1120,6 +1133,7 @@ export function RemotePwaApp() {
           onDisconnect={disconnect}
           onOpenSidebar={openSidebar}
         />
+        {connectionBar}
 
         {isNativeMobile() && (
           <details className="border-b border-border-primary bg-surface-secondary px-3 py-2 text-sm">
