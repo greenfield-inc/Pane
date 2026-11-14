@@ -118,6 +118,10 @@ jobs:
     # On macOS, electron-builder rebuilds the native modules for each target
     # arch while packaging (npmRebuild), so the install-time rebuild for the
     # host arch is skipped there.
+    # afterPack builds the pane-direct helper (direct/) for each packaged arch.
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal && rustup default stable
+
     - run: pnpm install ${{ runner.os == 'macOS' && '--ignore-scripts' || '' }}
 
     - name: Patch electron-builder temporary keychain password handling
@@ -397,6 +401,10 @@ jobs:
           ~/AppData/Local/electron-builder/Cache
         key: windows-${{ matrix.arch }}-electron-${{ hashFiles('**/pnpm-lock.yaml') }}
         restore-keys: windows-${{ matrix.arch }}-electron-
+    # afterPack builds the pane-direct helper (direct/) for each packaged arch.
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal && rustup default stable
+
     - run: pnpm install
 
     - name: Build Windows artifact

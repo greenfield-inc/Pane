@@ -347,7 +347,9 @@ Agents merge only when the person asks for that pull request.
 Test UI and packaging changes in a packaged build for your platform
 (`pnpm build:mac`, `pnpm build:linux:x64` on x64 Linux,
 `pnpm build:linux:arm64` on ARM64 Linux, or `pnpm build:win:x64`; output in
-`dist-electron/`). The x64 Linux build scans native modules with `objdump`
+`dist-electron/`). Packaging builds the `pane-direct` helper (`direct/`) with
+Rust, so install it first from https://rustup.rs. The x64 Linux build scans
+native modules with `objdump`
 (from binutils) and fails if one needs a CPU newer than generic x86-64; if your
 compiler defaults higher, export `CFLAGS` and `CXXFLAGS` as
 `-march=x86-64 -mtune=generic` before `pnpm install`. The packaged app can show problems that development mode

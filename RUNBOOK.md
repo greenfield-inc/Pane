@@ -82,6 +82,14 @@ from source and fails if one uses AVX, BMI, MOVBE, LZCNT or POPCNT instructions
 outside SQLite's runtime-dispatched AEGIS cipher code, since those crash older
 CPUs with SIGILL. It also fails if objdump prints no instructions for a module.
 
+Every installer carries `pane-direct`, the Rust helper for direct paths to linked
+computers (`direct/`). `scripts/after-pack.js` builds it in release mode for each
+packaged platform and arch (`scripts/build-pane-direct.js`, which adds the Rust
+target with rustup) and copies it into the app's resources folder, where main
+finds it. A universal macOS app merges the two copies. Packaging therefore needs
+Rust: every packaging job installs the stable toolchain first, and a local
+package build needs it too (https://rustup.rs).
+
 ```
 build (macOS arm64,   ─┐
   macOS x64, Linux)    │                        ┌─ notify-website

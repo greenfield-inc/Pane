@@ -49,6 +49,7 @@ jobs:
             - '.github/workflows/quality.yml'
           relay:
             - 'relay/**'
+            - 'direct/**'
             - 'main/src/daemon/relay/**'
             - '.github/workflows/quality.yml'
           main:
@@ -449,6 +450,7 @@ jobs:
 
   # The relay (Rust) and the computer side of QR pairing against it: a real relay
   # with its DNS helper, and Pebble validating certificates through that DNS.
+  # Also the direct-path helper (direct/), and a desktop reaching a computer over it.
   relay-tests:
     name: Relay Tests
     needs: changes
@@ -469,7 +471,8 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           relay/target
-        key: relay-${{ runner.os }}-${{ hashFiles('relay/Cargo.lock') }}
+          direct/target
+        key: relay-${{ runner.os }}-${{ hashFiles('relay/Cargo.lock', 'direct/Cargo.lock') }}
 
     - name: Check formatting and lints
       working-directory: relay
@@ -482,6 +485,14 @@ jobs:
     - name: Build the relay
       working-directory: relay
       run: cargo build --locked
+
+    - name: Check, test and build pane-direct
+      working-directory: direct
+      run: |
+        cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
+        cargo test --locked
+        cargo build --locked
+        echo "PANE_DIRECT_BIN=$GITHUB_WORKSPACE/direct/target/debug/pane-direct" >> "$GITHUB_ENV"
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -508,7 +519,7 @@ jobs:
     - name: Rebuild native modules for Node tests
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
-    - name: Run the computer side against the relay
+    - name: Run the computer side against the relay, and the direct path
       run: pnpm --filter main exec vitest run src/daemon/relay
 
   # The one check branch protection requires. Skipped jobs pass; failed or
