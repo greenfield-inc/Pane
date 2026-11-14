@@ -341,6 +341,12 @@ const config = {
       ringColor: {
         'focus-ring-subtle': 'var(--color-focus-ring-subtle)',
       },
+      ringWidth: {
+        // `ring-status`: the halo that marks a status dot needing the person
+        // (a blocked agent, a waiting Notify question). It stays inside the
+        // dot's fixed box, so adding it never shifts the row.
+        status: '3px',
+      },
     },
   },
   plugins: [],
