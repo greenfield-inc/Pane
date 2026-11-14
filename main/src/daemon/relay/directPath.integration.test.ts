@@ -9,6 +9,7 @@ import path from 'path';
 import tls from 'tls';
 import { DirectPath } from './directPath';
 import { PaneDirectProcess } from './paneDirect';
+import { integrationEnvSet } from './__fixtures__/integrationEnv';
 
 /**
  * The direct path end to end: `pane-direct serve` in front of a TLS server holding the
@@ -50,7 +51,7 @@ function get(url: URL, agent: https.Agent): Promise<{ status: number; body: stri
   });
 }
 
-describe.skipIf(!DIRECT_BIN)('a desktop reaches a computer over the direct path (integration)', () => {
+describe.skipIf(!integrationEnvSet(['PANE_DIRECT_BIN']))('a desktop reaches a computer over the direct path (integration)', () => {
   const folder = mkdtempSync(path.join(tmpdir(), 'pane-direct-it-'));
   const cert = readFileSync(path.join(FIXTURES, 'computer.pem'));
   const fingerprint = createHash('sha256').update(new X509Certificate(cert).publicKey.export({ format: 'der', type: 'spki' })).digest('base64url');

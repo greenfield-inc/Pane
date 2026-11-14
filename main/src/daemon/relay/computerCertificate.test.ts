@@ -7,6 +7,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { loadComputerKey, type KeyStore } from './computerKey';
 import { ComputerCertificate } from './computerCertificate';
+import { integrationEnvSet } from './__fixtures__/integrationEnv';
 
 /**
  * Runs against Pebble, Let's Encrypt's ACME test server, with validation switched off: the
@@ -30,7 +31,7 @@ async function freePort(): Promise<number> {
   });
 }
 
-describe.skipIf(!PEBBLE_BIN || !PEBBLE_DIR)('computer certificate (Pebble)', () => {
+describe.skipIf(!integrationEnvSet(['PEBBLE_BIN', 'PEBBLE_DIR']))('computer certificate (Pebble)', () => {
   let pebble: ChildProcess;
   let directoryUrl = '';
   let acmeCa = '';

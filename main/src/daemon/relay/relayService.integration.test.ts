@@ -15,6 +15,7 @@ import { RelayService } from './relayService';
 import { createComputerCaller, RelayLinks, relayComputerSchema } from './relayLinks';
 import { registerRelayCommands } from './relayCommands';
 import { RelayPreviews } from './relayPreviews';
+import { integrationEnvSet } from './__fixtures__/integrationEnv';
 import type { AppConfig } from '../../types/config';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
@@ -60,7 +61,7 @@ async function until<T>(read: () => T | null | undefined | false, label: string,
   }
 }
 
-describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through the relay (integration)', () => {
+describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR']))('phone access through the relay (integration)', () => {
   const children: ChildProcess[] = [];
   let relayPort = 0;
   let relayCa = '';
