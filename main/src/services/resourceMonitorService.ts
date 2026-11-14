@@ -1,4 +1,3 @@
-import { EventEmitter } from 'events';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as os from 'os';
@@ -96,16 +95,11 @@ interface ResourceMonitorInitializationOptions {
   getSessionWslDistro?: (sessionId: string) => string | null;
 }
 
-export class ResourceMonitorService extends EventEmitter {
+export class ResourceMonitorService {
   private app: App | null = null;
   private getSessionById: ((sessionId: string) => { name?: string; initial_prompt?: string } | undefined) | null = null;
   private getSessionWslDistro: ((sessionId: string) => string | null) | null = null;
-  private idleTimer: ReturnType<typeof setInterval> | null = null;
-  private activeTimer: ReturnType<typeof setInterval> | null = null;
-  private isActivePolling = false;
-  private pollInProgress = false;
   private previousCpuSamples = new Map<string, CpuSample>();
-  private isHidden = false;
   private needsCpuWarmup = false;
   private wslScanFailedDistros = new Set<string>();
 
@@ -481,72 +475,11 @@ export class ResourceMonitorService extends EventEmitter {
     };
   }
 
-  startIdlePolling(): void {
-    if (this.isHidden) return;
-    this.stopAllPolling();
-    const poll = async (): Promise<void> => {
-      if (this.pollInProgress) return;
-      this.pollInProgress = true;
-      try {
-        const snapshot = await this.getSnapshot();
-        this.emit('resource-update', snapshot);
-      } catch (error) {
-        console.error('[ResourceMonitor] Poll error:', error);
-      } finally {
-        this.pollInProgress = false;
-      }
-    };
-    void poll();
-    this.idleTimer = setInterval(() => void poll(), 180_000);
-  }
-
-  startActivePolling(): void {
-    if (this.isHidden) {
-      this.isActivePolling = true;
-      return;
-    }
-    this.stopAllPolling();
-    this.isActivePolling = true;
-    const poll = async (): Promise<void> => {
-      if (this.pollInProgress) return;
-      this.pollInProgress = true;
-      try {
-        const snapshot = await this.getSnapshot();
-        this.emit('resource-update', snapshot);
-      } catch (error) {
-        console.error('[ResourceMonitor] Poll error:', error);
-      } finally {
-        this.pollInProgress = false;
-      }
-    };
-    this.activeTimer = setInterval(() => void poll(), 5_000);
-  }
-
-  stopActivePolling(): void {
-    if (this.isActivePolling) {
-      this.isActivePolling = false;
-      this.stopAllPolling();
-    }
-  }
-
+  /** After the window hides, the next snapshot seeds CPU samples again rather than average over the hidden time. */
   handleVisibilityChange(hidden: boolean): void {
-    this.isHidden = hidden;
-    if (hidden) {
-      this.stopAllPolling();
-      this.previousCpuSamples.clear();
-      this.needsCpuWarmup = true;
-    } else if (this.isActivePolling) {
-      this.startActivePolling();
-    }
-  }
-
-  private stopAllPolling(): void {
-    if (this.idleTimer) { clearInterval(this.idleTimer); this.idleTimer = null; }
-    if (this.activeTimer) { clearInterval(this.activeTimer); this.activeTimer = null; }
-  }
-
-  stop(): void {
-    this.stopAllPolling();
+    if (!hidden) return;
+    this.previousCpuSamples.clear();
+    this.needsCpuWarmup = true;
   }
 }
 

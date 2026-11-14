@@ -1251,6 +1251,12 @@ export class NotifyQueue extends EventEmitter {
     this.changed();
   }
 
+  /** Whether in use and "Show cards on" change what shows: a strip, or a picked machine's status in Settings. */
+  inUseMatters(): boolean {
+    const picked = this.env.settings().cardsOn;
+    return this.strip() !== null || (picked?.id !== undefined && picked.id !== this.env.machineId);
+  }
+
   /** The phone push for this item went out, so a restart doesn't send it again. */
   markPushed(id: string): void {
     const entry = this.entries.get(id);
