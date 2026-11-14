@@ -23,8 +23,9 @@ function memory(initial: string | null = null): KeyStore & { value: string | nul
 async function freePort(): Promise<number> {
   return new Promise((resolve) => {
     const server = net.createServer().listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => resolve(typeof address === 'object' && address ? address.port : 0));
+      // SAFETY: a server listening on a host and port reports an AddressInfo.
+      const { port } = server.address() as net.AddressInfo;
+      server.close(() => resolve(port));
     });
   });
 }

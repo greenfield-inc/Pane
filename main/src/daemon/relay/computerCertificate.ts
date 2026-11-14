@@ -5,7 +5,6 @@ import * as acme from 'acme-client';
 import type { ComputerKey, KeyStore } from './computerKey';
 
 export const LETS_ENCRYPT_DIRECTORY = 'https://acme-v02.api.letsencrypt.org/directory';
-export const LETS_ENCRYPT_STAGING_DIRECTORY = 'https://acme-staging-v02.api.letsencrypt.org/directory';
 
 /** Renew once a third of the lifetime is left: 30 days of 90 today, about 21 of 64 from 2027. */
 const RENEW_FRACTION_LEFT = 1 / 3;

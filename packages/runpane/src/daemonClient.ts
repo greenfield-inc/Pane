@@ -215,11 +215,13 @@ export async function invokeRemoteDaemon<T>(
   const body: RemoteInvokeBody = { channel, args };
   const caller = daemonCaller();
   if (caller) body.caller = caller;
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  if (target.token) headers.set('Authorization', `Bearer ${target.token}`);
   let response: Response;
   try {
     response = await fetch(`${target.baseUrl}/invoke`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(target.token ? { Authorization: `Bearer ${target.token}` } : {}) },
+      headers,
       body: JSON.stringify(body),
       signal: Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined,
     });

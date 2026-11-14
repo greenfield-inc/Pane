@@ -33,7 +33,7 @@ function base32(bytes: Buffer): string {
   return out;
 }
 
-export function computerIdFromSpki(spki: Buffer): string {
+function computerIdFromSpki(spki: Buffer): string {
   return base32(createHash('sha256').update(spki).digest().subarray(0, 10));
 }
 

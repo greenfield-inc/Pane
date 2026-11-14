@@ -1,5 +1,6 @@
 import tls from 'tls';
 import type { Duplex } from 'stream';
+import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../shared/validation/boundaryDecoder';
 import { signRelayChallenge, type ComputerKey } from './computerKey';
 
 export type RelayAgentState =
@@ -24,7 +25,25 @@ export interface RelayAgentOptions {
   log?(line: string): void;
 }
 
-type Frame = { t: string; [field: string]: unknown };
+/** A string field, or undefined when it is absent or not a string. */
+const text: BoundarySchema<string | undefined> = { decode: (current) => decodeOptionalBoundary(current.value, boundary.string) };
+
+/** A frame from the relay (relay/PROTOCOL.md), with the fields the computer reads. */
+const relayFrameSchema = boundary.object({
+  t: boundary.string,
+  req: text,
+  nonce: text,
+  id: text,
+  region: text,
+  domain: text,
+  conn: text,
+  peer: text,
+  code: text,
+  message: text,
+  status: { decode: (current) => decodeOptionalBoundary(current.value, boundary.number) } satisfies BoundarySchema<number | undefined>,
+  body: text,
+});
+type RelayFrame = ReturnType<typeof relayFrameSchema.decode>;
 
 /** A request the relay refused, with its code (`throttled`, `unconfigured`, ...). */
 export class RelayRequestError extends Error {
@@ -37,6 +56,16 @@ export class RelayRequestError extends Error {
 export type RelayAlert =
   | { platform: 'ios'; token: string; pushType: 'alert' | 'background'; collapseId?: string; payload: object }
   | { platform: 'android'; message: object };
+
+/** A request to the relay; its answer is an `ok` or `error` frame with the same `req`. */
+type RelayRequest = { t: 'txt'; values: string[] } | ({ t: 'alert' } & RelayAlert);
+
+/** A frame the computer sends to the relay (relay/PROTOCOL.md). */
+type ComputerFrame =
+  | { t: 'sleep' | 'ping' | 'pong' }
+  | { t: 'local'; local: string[] }
+  | { t: 'hello'; v: 1; spki: string; sig: string; local: string[]; name: string }
+  | (RelayRequest & { req: string });
 
 const PING_INTERVAL_MS = 25_000;
 const SILENCE_TIMEOUT_MS = 75_000;
@@ -56,7 +85,7 @@ export class RelayAgent {
   private pingTimer: NodeJS.Timeout | null = null;
   private lastHeard = 0;
   private nextRequest = 1;
-  private readonly requests = new Map<string, { resolve(frame: Frame): void; reject(error: Error): void }>();
+  private readonly requests = new Map<string, { resolve(frame: RelayFrame): void; reject(error: Error): void }>();
   private state: RelayAgentState = { status: 'stopped' };
 
   constructor(private readonly options: RelayAgentOptions) {}
@@ -106,7 +135,7 @@ export class RelayAgent {
   /** Delivers a push alert with the Pane app's keys held by the relay (relay/PROTOCOL.md, Alerts). */
   async sendAlert(alert: RelayAlert): Promise<{ status: number; body: string }> {
     const answer = await this.request({ t: 'alert', ...alert });
-    return { status: Number(answer.status ?? 0), body: typeof answer.body === 'string' ? answer.body : '' };
+    return { status: answer.status ?? 0, body: answer.body ?? '' };
   }
 
   isOnline(): boolean {
@@ -114,7 +143,7 @@ export class RelayAgent {
   }
 
   /** Sends a request frame and waits for its `ok`. */
-  request(frame: Frame): Promise<Frame> {
+  request(frame: RelayRequest): Promise<RelayFrame> {
     if (this.state.status !== 'online') return Promise.reject(new Error('The relay is not connected yet.'));
     const req = String(this.nextRequest++);
     return new Promise((resolve, reject) => {
@@ -171,21 +200,21 @@ export class RelayAgent {
         const line = buffered.slice(0, newline).trim();
         buffered = buffered.slice(newline + 1);
         if (!line) continue;
-        let frame: Frame;
+        let frame: RelayFrame | undefined;
         try {
-          frame = JSON.parse(line) as Frame;
+          frame = decodeOptionalBoundary(JSON.parse(line), relayFrameSchema);
         } catch {
           continue;
         }
-        this.onFrame(frame);
+        if (frame) this.onFrame(frame);
       }
     });
   }
 
-  private onFrame(frame: Frame): void {
+  private onFrame(frame: RelayFrame): void {
     switch (frame.t) {
       case 'challenge': {
-        const nonce = typeof frame.nonce === 'string' ? frame.nonce : '';
+        const nonce = frame.nonce ?? '';
         this.send({
           t: 'hello',
           v: 1,
@@ -198,12 +227,12 @@ export class RelayAgent {
       }
       case 'welcome':
         this.attempt = 0;
-        this.setState({ status: 'online', region: String(frame.region ?? ''), domain: String(frame.domain ?? '') });
+        this.setState({ status: 'online', region: frame.region ?? '', domain: frame.domain ?? '' });
         this.options.log?.(`[relay] connected to ${this.options.relayHost} as ${String(frame.id)}`);
         this.startPings();
         return;
       case 'open':
-        if (typeof frame.conn === 'string') this.openData(frame.conn, typeof frame.peer === 'string' ? frame.peer : '');
+        if (frame.conn !== undefined) this.openData(frame.conn, frame.peer ?? '');
         return;
       case 'ok':
         this.settle(frame, null);
@@ -223,7 +252,7 @@ export class RelayAgent {
     }
   }
 
-  private settle(frame: Frame, error: Error | null): void {
+  private settle(frame: RelayFrame, error: Error | null): void {
     const pending = this.requests.get(String(frame.req));
     if (!pending) return;
     this.requests.delete(String(frame.req));
@@ -249,7 +278,7 @@ export class RelayAgent {
     this.pingTimer.unref();
   }
 
-  private send(frame: Frame): void {
+  private send(frame: ComputerFrame): void {
     if (this.control && !this.control.destroyed) this.control.write(`${JSON.stringify(frame)}\n`);
   }
 

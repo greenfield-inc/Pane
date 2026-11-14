@@ -516,8 +516,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       isForwardedPort,
       files: phonePreviewFiles,
       log: line => logger.info(line),
-    }).catch((error: unknown) => {
-      logger.error('[Pane relay] Failed to start', error instanceof Error ? error : new Error(String(error)));
+    }).catch((cause: unknown) => {
+      logger.error('[Pane relay] Failed to start', cause instanceof Error ? cause : new Error(String(cause)));
       return null;
     })
     : null;

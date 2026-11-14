@@ -28,6 +28,7 @@ import {
   type GlassesFailureReason,
 } from './glassesAccess';
 import { GLASSES_COMMANDS, GLASSES_TOKEN_PREFIX, GLASSES_WEBSOCKET_PROTOCOL } from '../../../shared/types/glasses';
+import type { RelayComputer, RelayComputerGrant } from '../../../shared/types/relay';
 import {
   createDefaultRemoteDaemonConfig,
   getRemoteDaemonHostConfigValidationError,
@@ -254,11 +255,26 @@ interface PaneRemoteHttpApiServerOptions {
   pairing?: PairingRoute;
 }
 
-export interface PairingRoute {
-  exchange(request: { secret: string; label: string; phoneId?: string }): Promise<{ ok: true; token: string; client: { id: string } } & JsonObjectLike | { ok: false; status: number; code: string; message: string }>;
+interface PairingRequest {
+  secret: string;
+  label: string;
+  phoneId?: string;
 }
 
-type JsonObjectLike = Record<string, unknown>;
+/** The phone's new token, what it stores about this computer, and the computers it may now reach. */
+type PairingRouteResult =
+  | { ok: true; token: string; client: { id: string }; computer?: RelayComputer; linked?: RelayComputerGrant[] }
+  | { ok: false; status: number; code: string; message: string };
+
+export interface PairingRoute {
+  exchange(request: PairingRequest): Promise<PairingRouteResult>;
+}
+
+const pairingBodySchema = boundary.object({
+  secret: boundary.optional(boundary.json),
+  label: boundary.optional(boundary.json),
+  phoneId: boundary.optional(boundary.json),
+});
 
 interface WorkspaceIdentityOptions {
   listenPort: number;
@@ -795,22 +811,22 @@ export class PaneRemoteHttpApiServer {
       this.writeMethodNotAllowed(response, 'POST');
       return;
     }
-    let body: { secret?: unknown; label?: unknown; phoneId?: unknown };
+    let body: ReturnType<typeof pairingBodySchema.decode>;
     try {
-      body = JSON.parse(await readRequestBody(request, MAX_UNAUTHENTICATED_REQUEST_BODY_BYTES)) as typeof body;
+      body = decodeBoundary(JSON.parse(await readRequestBody(request, MAX_UNAUTHENTICATED_REQUEST_BODY_BYTES)), pairingBodySchema);
     } catch {
       this.writeJson(response, 400, { ok: false, error: { code: 'ERR_PAIRING_BAD_REQUEST', message: 'Send {"secret","label"} as JSON.' } });
       return;
     }
-    if (typeof body.secret !== 'string' || body.secret.length === 0 || body.secret.length > 200) {
+    const secret = decodeOptionalBoundary(body.secret, boundary.string);
+    if (!secret || secret.length > 200) {
       this.writeJson(response, 400, { ok: false, error: { code: 'ERR_PAIRING_BAD_REQUEST', message: 'The pairing code is missing.' } });
       return;
     }
-    const result = await pairing.exchange({
-      secret: body.secret,
-      label: typeof body.label === 'string' ? body.label : '',
-      ...(typeof body.phoneId === 'string' && body.phoneId ? { phoneId: body.phoneId } : {}),
-    });
+    const exchangeRequest: PairingRequest = { secret, label: decodeOptionalBoundary(body.label, boundary.string) ?? '' };
+    const phoneId = decodeOptionalBoundary(body.phoneId, boundary.string);
+    if (phoneId) exchangeRequest.phoneId = phoneId;
+    const result = await pairing.exchange(exchangeRequest);
     if (!result.ok) {
       this.writeJson(response, result.status, { ok: false, error: { code: result.code, message: result.message } });
       return;

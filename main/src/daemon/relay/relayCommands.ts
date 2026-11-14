@@ -1,14 +1,14 @@
-import { isRemotePaneCommand, type PaneCommandRegistry } from '../commandRegistry';
-import { boundary, decodeBoundary, type BoundarySchema } from '../../../../shared/validation/boundaryDecoder';
+import { isRemotePaneCommand, type PaneCommandRegistry, type PaneCommandValue } from '../commandRegistry';
+import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../../shared/paneError';
-import { normalizeRemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
+import { normalizeRemoteDaemonConfig, type RemoteRelaySettings } from '../../../../shared/types/remoteDaemon';
 import type { ConfigManager } from '../../services/configManager';
 import type { RelayService } from './relayService';
 import type { RelayPreviews } from './relayPreviews';
-import { RELAY_COMPUTER_COMMANDS, type RelayLinks } from './relayLinks';
-import { RELAY_CLIENT_COMMANDS, RELAY_DEVICE_COMMANDS, type RelayComputer } from '../../../../shared/types/relay';
+import { RELAY_COMPUTER_COMMANDS, relayComputerSchema, type RelayLinks } from './relayLinks';
+import { RELAY_CLIENT_COMMANDS, RELAY_DEVICE_COMMANDS } from '../../../../shared/types/relay';
 
-export const RELAY_COMMANDS = {
+const RELAY_COMMANDS = {
   status: 'relay:status',
   setEnabled: 'relay:set-enabled',
   setAddress: 'relay:set-address',
@@ -23,15 +23,7 @@ const previewTargetSchema = boundary.union(
   boundary.object({ files: boundary.nonEmptyString }),
 );
 
-const computerSchema: BoundarySchema<RelayComputer> = boundary.object({
-  id: boundary.nonEmptyString,
-  name: boundary.nonEmptyString,
-  domain: boundary.nonEmptyString,
-  address: boundary.nonEmptyString,
-  local: boundary.array(boundary.string),
-  fingerprint: boundary.nonEmptyString,
-});
-const peerRequestSchema = boundary.object({ peer: computerSchema });
+const peerRequestSchema = boundary.object({ peer: relayComputerSchema });
 
 function onThisComputerOnly(): void {
   if (isRemotePaneCommand()) {
@@ -53,7 +45,7 @@ export function registerRelayCommands(
   registry.register(RELAY_COMMANDS.status, () => relay.getStatus());
 
   // Turning phone access on also turns on the pairing listener the relay forwards to.
-  registry.register(RELAY_COMMANDS.setEnabled, async (enabled: unknown) => {
+  registry.register(RELAY_COMMANDS.setEnabled, async (enabled: PaneCommandValue) => {
     onThisComputerOnly();
     const on = decodeBoundary(enabled, boundary.boolean);
     await configManager.updateConfigWith((current) => {
@@ -69,7 +61,7 @@ export function registerRelayCommands(
     return relay.getStatus();
   });
 
-  registry.register(RELAY_COMMANDS.setAddress, async (address: unknown) => {
+  registry.register(RELAY_COMMANDS.setAddress, async (address: PaneCommandValue) => {
     onThisComputerOnly();
     const value = decodeBoundary(address, boundary.nullable(boundary.string))?.trim() || undefined;
     if (value && !/^[a-z0-9.-]+(:\d{1,5})?$/iu.test(value)) {
@@ -77,8 +69,9 @@ export function registerRelayCommands(
     }
     await configManager.updateConfigWith((current) => {
       const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
-      const enabled = remote.relay?.enabled ?? false;
-      return { remoteDaemon: { ...remote, relay: { enabled, ...(value ? { relayAddress: value } : {}) } } };
+      const relaySettings: RemoteRelaySettings = { enabled: remote.relay?.enabled ?? false };
+      if (value) relaySettings.relayAddress = value;
+      return { remoteDaemon: { ...remote, relay: relaySettings } };
     });
     return relay.getStatus();
   });
@@ -89,32 +82,32 @@ export function registerRelayCommands(
   });
 
   // Called by paired phones and linked computers; the HTTP server supplies the caller.
-  const caller = (value: unknown) => decodeBoundary(value, callerSchema).clientId;
-  registry.register(RELAY_CLIENT_COMMANDS.previewAddress, (target: unknown, from: unknown) => (
+  const caller = (value: PaneCommandValue) => decodeBoundary(value, callerSchema).clientId;
+  registry.register(RELAY_CLIENT_COMMANDS.previewAddress, (target: PaneCommandValue, from: PaneCommandValue) => (
     { url: previews.address(decodeBoundary(target, previewTargetSchema), caller(from)) }
   ));
   registry.register(RELAY_CLIENT_COMMANDS.computer, () => relay.computerInfo() ?? null);
-  registry.register(RELAY_CLIENT_COMMANDS.computers, (request: unknown, from: unknown) => {
+  registry.register(RELAY_CLIENT_COMMANDS.computers, (request: PaneCommandValue, from: PaneCommandValue) => {
     const { known } = decodeBoundary(request ?? { known: [] }, boundary.object({ known: boundary.array(boundary.string) }));
     return links.computersFor(caller(from), known);
   });
-  registry.register(RELAY_CLIENT_COMMANDS.mintLink, (request: unknown, from: unknown) => (
+  registry.register(RELAY_CLIENT_COMMANDS.mintLink, (request: PaneCommandValue, from: PaneCommandValue) => (
     links.mintLink(decodeBoundary(request, peerRequestSchema).peer, caller(from))
   ));
-  registry.register(RELAY_CLIENT_COMMANDS.saveLink, async (request: unknown, from: unknown) => {
-    const { peer, token } = decodeBoundary(request, boundary.object({ peer: computerSchema, token: boundary.nonEmptyString }));
+  registry.register(RELAY_CLIENT_COMMANDS.saveLink, async (request: PaneCommandValue, from: PaneCommandValue) => {
+    const { peer, token } = decodeBoundary(request, boundary.object({ peer: relayComputerSchema, token: boundary.nonEmptyString }));
     await links.saveLink(peer, token, caller(from));
     return null;
   });
-  registry.register(RELAY_COMPUTER_COMMANDS.grantPhone, (request: unknown, from: unknown) => {
+  registry.register(RELAY_COMPUTER_COMMANDS.grantPhone, (request: PaneCommandValue, from: PaneCommandValue) => {
     const phone = decodeBoundary(request, boundary.object({ label: boundary.string, phoneId: boundary.optional(boundary.string) }));
     return links.grantPhone(phone, caller(from));
   });
-  registry.register(RELAY_COMPUTER_COMMANDS.removePhone, async (request: unknown, from: unknown) => {
+  registry.register(RELAY_COMPUTER_COMMANDS.removePhone, async (request: PaneCommandValue, from: PaneCommandValue) => {
     await links.removePhone(decodeBoundary(request, boundary.object({ phoneId: boundary.nonEmptyString })).phoneId, caller(from));
     return null;
   });
-  registry.register(RELAY_COMPUTER_COMMANDS.forgetComputer, async (request: unknown, from: unknown) => {
+  registry.register(RELAY_COMPUTER_COMMANDS.forgetComputer, async (request: PaneCommandValue, from: PaneCommandValue) => {
     await links.forgetComputer(decodeBoundary(request, boundary.object({ computerId: boundary.nonEmptyString })).computerId, caller(from));
     return null;
   });
@@ -135,11 +128,11 @@ export function registerRelayCommands(
     onThisComputerOnly();
     return links.devices();
   });
-  registry.register(RELAY_DEVICE_COMMANDS.removePhoneEverywhere, (request: unknown) => {
+  registry.register(RELAY_DEVICE_COMMANDS.removePhoneEverywhere, (request: PaneCommandValue) => {
     onThisComputerOnly();
     return links.removePhoneEverywhere(decodeBoundary(request, boundary.object({ clientId: boundary.nonEmptyString })).clientId);
   });
-  registry.register(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, (request: unknown) => {
+  registry.register(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, (request: PaneCommandValue) => {
     onThisComputerOnly();
     return links.unlinkComputerEverywhere(decodeBoundary(request, boundary.object({ computerId: boundary.nonEmptyString })).computerId);
   });

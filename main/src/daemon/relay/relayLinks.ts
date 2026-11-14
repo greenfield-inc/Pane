@@ -10,6 +10,7 @@ import {
   type RemotePaneConnectionProfile,
 } from '../../../../shared/types/remoteDaemon';
 import type { RelayComputer, RelayComputerGrant, RelayDevice } from '../../../../shared/types/relay';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../../types/config';
 
 /** Commands only a linked computer may call, with its link token. */
@@ -22,13 +23,31 @@ export const RELAY_COMPUTER_COMMANDS = {
   forgetComputer: 'relay:client:forget-computer',
 } as const;
 
-export interface RelayLinksConfig {
+interface RelayLinksConfig {
   getConfig(): Pick<AppConfig, 'remoteDaemon'>;
   updateConfigWith(update: (current: AppConfig) => Partial<AppConfig>): Promise<object>;
 }
 
-/** Calls a linked computer's `/invoke` with its link token; the key fingerprint is checked. */
-export type CallComputer = (profile: RemotePaneConnectionProfile, channel: string, args: unknown[]) => Promise<unknown>;
+/** Calls a linked computer's `/invoke` with its link token; the key fingerprint is checked. Resolves with its JSON result. */
+export type CallComputer = (profile: RemotePaneConnectionProfile, channel: string, args: unknown[]) => Promise<JsonValue | undefined>;
+
+export const relayComputerSchema: BoundarySchema<RelayComputer> = boundary.object({
+  id: boundary.nonEmptyString,
+  name: boundary.nonEmptyString,
+  domain: boundary.nonEmptyString,
+  address: boundary.nonEmptyString,
+  local: boundary.array(boundary.string),
+  fingerprint: boundary.nonEmptyString,
+});
+
+/** A linked computer's `/invoke` answer. */
+const invokeAnswerSchema = boundary.object({
+  ok: boundary.optional(boundary.json),
+  result: boundary.optional(boundary.json),
+  error: boundary.optional(boundary.json),
+});
+const invokeErrorSchema = boundary.object({ message: boundary.string });
+const grantedTokenSchema = boundary.object({ token: boundary.string });
 
 export interface RelayLinksDeps {
   config: RelayLinksConfig;
@@ -41,7 +60,7 @@ export interface RelayLinksDeps {
   log?(line: string): void;
 }
 
-function newToken(): { token: string; tokenHash: string } {
+function newToken() {
   const token = randomBytes(32).toString('base64url');
   return { token, tokenHash: createHash('sha256').update(token).digest('hex') };
 }
@@ -137,10 +156,10 @@ export class RelayLinks {
       label: phone.label.slice(0, 60) || 'Phone',
       createdAt: new Date().toISOString(),
       tokenHash,
-      ...(phone.phoneId ? { phoneId: phone.phoneId } : {}),
       linkedBy: granter.label,
       grantedBy: granter.computerId,
     };
+    if (phone.phoneId) record.phoneId = phone.phoneId;
     const replaced = phone.phoneId
       ? this.remote().host.clients.filter((client) => client.kind === undefined && client.phoneId === phone.phoneId).map((client) => client.id)
       : [];
@@ -160,9 +179,9 @@ export class RelayLinks {
           this.deps.call(profile, RELAY_COMPUTER_COMMANDS.grantPhone, [phone]),
           this.deps.call(profile, 'relay:client:computer', []),
         ]);
-        const token = (result as { token?: unknown } | null)?.token;
-        const info = computer as RelayComputer | null;
-        if (typeof token !== 'string' || !info || info.id !== profile.relay.computerId) return null;
+        const token = decodeOptionalBoundary(result, grantedTokenSchema)?.token;
+        const info = decodeOptionalBoundary(computer, relayComputerSchema);
+        if (token === undefined || !info || info.id !== profile.relay.computerId) return null;
         return { computer: info, token };
       } catch (error) {
         this.deps.log?.(`[relay] ${profile.label} did not hand out a token: ${error instanceof Error ? error.message : String(error)}`);
@@ -192,15 +211,18 @@ export class RelayLinks {
 
   devices(): RelayDevice[] {
     const connected = this.deps.connectedClientIds();
-    return this.remote().host.clients.filter((client) => client.kind !== 'glasses').map((client) => ({
-      clientId: client.id,
-      kind: client.kind === 'computer' ? 'computer' : 'phone',
-      label: client.label,
-      ...(client.linkedBy ? { linkedBy: client.linkedBy } : {}),
-      ...(client.computerId ? { computerId: client.computerId } : {}),
-      connected: connected.has(client.id),
-      createdAt: client.createdAt,
-    }));
+    return this.remote().host.clients.filter((client) => client.kind !== 'glasses').map((client) => {
+      const device: RelayDevice = {
+        clientId: client.id,
+        kind: client.kind === 'computer' ? 'computer' : 'phone',
+        label: client.label,
+        connected: connected.has(client.id),
+        createdAt: client.createdAt,
+      };
+      if (client.linkedBy) device.linkedBy = client.linkedBy;
+      if (client.computerId) device.computerId = client.computerId;
+      return device;
+    });
   }
 
   /** "Remove from all your computers" on a phone's row. */
@@ -289,9 +311,9 @@ export function createComputerCaller(options: { dial?: { host: string; port: num
       response.on('data', (chunk: string) => { text += chunk; });
       response.on('end', () => {
         try {
-          const body = JSON.parse(text) as { ok?: boolean; result?: unknown; error?: { message?: string } };
+          const body = decodeBoundary(JSON.parse(text), invokeAnswerSchema);
           if (body.ok) resolve(body.result);
-          else reject(new Error(body.error?.message ?? `HTTP ${response.statusCode}`));
+          else reject(new Error(decodeOptionalBoundary(body.error, invokeErrorSchema)?.message ?? `HTTP ${response.statusCode}`));
         } catch {
           reject(new Error(`${profile.label} answered HTTP ${response.statusCode}.`));
         }

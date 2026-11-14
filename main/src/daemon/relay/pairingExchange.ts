@@ -57,7 +57,7 @@ export class PairingExchange {
     this.now = deps.now ?? Date.now;
   }
 
-  createSecret(): { secret: string; expiresAt: string } {
+  createSecret() {
     const now = this.now();
     this.prune(now);
     const live = this.pending.filter((entry) => entry.spentAt === null);
@@ -99,8 +99,8 @@ export class PairingExchange {
       label: cleanLabel(label),
       createdAt: new Date(now).toISOString(),
       tokenHash: sha256(token).toString('hex'),
-      ...(phoneId ? { phoneId: phoneId.slice(0, 100) } : {}),
     };
+    if (phoneId) client.phoneId = phoneId.slice(0, 100);
     await this.deps.addClient(client);
     for (const listener of this.listeners) listener({ clientId: client.id, label: client.label });
     return { ok: true, token, client };

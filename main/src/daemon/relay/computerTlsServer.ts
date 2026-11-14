@@ -37,7 +37,7 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
   });
   // Node sets `servername` on server-side sockets from the ClientHello; its typings omit it.
   server.on('secureConnection', (socket: tls.TLSSocket & { servername?: string | false }) => {
-    const servername = typeof socket.servername === 'string' ? socket.servername : '';
+    const servername = socket.servername || '';
     const name = parseComputerName(servername, options.id, options.domain);
     const port = name ? options.target(name) : null;
     if (port === null) {
@@ -67,8 +67,8 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
         server.once('error', reject);
         server.listen(port, host, () => {
           server.off('error', reject);
-          const address = server.address();
-          resolve(typeof address === 'object' && address ? address.port : port);
+          // SAFETY: a server listening on a host and port reports an AddressInfo.
+          resolve((server.address() as net.AddressInfo).port);
         });
       });
     },

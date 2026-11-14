@@ -16,7 +16,9 @@ afterEach(async () => { while (closers.length) await closers.pop()?.(); });
 
 function get(port: number, host: string, path: string, cookie?: string) {
   return new Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
-    http.get({ host: '127.0.0.1', port, path, headers: { host, ...(cookie ? { cookie } : {}) } }, (response) => {
+    const headers: http.OutgoingHttpHeaders = { host };
+    if (cookie) headers.cookie = cookie;
+    http.get({ host: '127.0.0.1', port, path, headers }, (response) => {
       let body = '';
       response.on('data', (chunk) => { body += chunk; });
       response.on('end', () => resolve({ status: response.statusCode ?? 0, body, headers: response.headers }));
@@ -28,6 +30,7 @@ async function setup() {
   const dev = http.createServer((request, response) => response.end(`vite ${request.url}`));
   await new Promise<void>((resolve) => dev.listen(0, '127.0.0.1', resolve));
   closers.push(() => new Promise((resolve) => dev.close(() => resolve())));
+  // SAFETY: the server listens on a host and port, so it reports an AddressInfo.
   const devPort = (dev.address() as AddressInfo).port;
   const active = new Set(['phone-1']);
   const previews = new RelayPreviews({

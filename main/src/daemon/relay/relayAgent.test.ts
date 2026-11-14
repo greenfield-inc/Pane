@@ -8,6 +8,7 @@ import tls from 'tls';
 import { loadComputerKey } from './computerKey';
 import { createComputerTlsServer } from './computerTlsServer';
 import { RelayAgent } from './relayAgent';
+import { boundary, decodeBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 
 const fixture = (name: string) => readFileSync(join(__dirname, '__fixtures__', name));
 const DOMAIN = 'relay.test';
@@ -21,7 +22,7 @@ const RELAY_HOST = `us.relay.${DOMAIN}`;
 async function startFakeRelay() {
   const agents: tls.TLSSocket[] = [];
   const waiting = new Map<string, net.Socket>();
-  const hellos: Array<Record<string, unknown>> = [];
+  const hellos: JsonObject[] = [];
   const verified: boolean[] = [];
   const control = tls.createServer({ key: fixture('relay.key'), cert: fixture('relay.pem') }, (socket) => {
     let head = '';
@@ -39,7 +40,7 @@ async function startFakeRelay() {
           buffered += data.toString('utf8');
           let newline: number;
           while ((newline = buffered.indexOf('\n')) !== -1) {
-            const frame = JSON.parse(buffered.slice(0, newline)) as Record<string, unknown>;
+            const frame = decodeBoundary(JSON.parse(buffered.slice(0, newline)), boundary.jsonObject);
             buffered = buffered.slice(newline + 1);
             if (frame.t === 'hello') {
               hellos.push(frame);
@@ -76,7 +77,9 @@ async function startFakeRelay() {
   await new Promise<void>((resolve) => control.listen(0, '127.0.0.1', resolve));
   await new Promise<void>((resolve) => front.listen(0, '127.0.0.1', resolve));
   return {
+    // SAFETY: both servers listen on a host and port, so they report an AddressInfo.
     controlPort: (control.address() as AddressInfo).port,
+    // SAFETY: as above.
     frontPort: (front.address() as AddressInfo).port,
     hellos,
     verified,
@@ -85,7 +88,7 @@ async function startFakeRelay() {
   };
 }
 
-const cleanups: Array<() => unknown> = [];
+const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
   while (cleanups.length) await cleanups.pop()?.();
 });
@@ -104,7 +107,8 @@ describe('relay agent', () => {
     cleanups.push(relay.close);
     const devServer = http.createServer((request, response) => response.end(`dev server saw ${request.headers.host}`));
     await new Promise<void>((resolve) => devServer.listen(0, '127.0.0.1', resolve));
-    cleanups.push(() => devServer.close());
+    cleanups.push(() => { devServer.close(); });
+    // SAFETY: the server listens on a host and port, so it reports an AddressInfo.
     const devPort = (devServer.address() as AddressInfo).port;
 
     const key = await loadComputerKey({ read: async () => fixture('computer.key').toString(), write: async () => undefined });

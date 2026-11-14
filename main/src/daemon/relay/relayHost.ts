@@ -42,7 +42,7 @@ function relaySecrets(dataDir: string): RelaySecretStore {
   };
 }
 
-export function computerDisplayName(): string {
+function computerDisplayName(): string {
   return os.hostname().replace(/\.local$/iu, '');
 }
 

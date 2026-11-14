@@ -13,7 +13,7 @@ import { PairingExchange, type PairedEvent, type PairingExchangeResult } from '.
 import { RelayAgent, type RelayAgentState, type RelayAlert } from './relayAgent';
 
 /** Pane's relay domain (D-19). */
-export const PANE_RELAY_DOMAIN = 'runpane.net';
+const PANE_RELAY_DOMAIN = 'runpane.net';
 const PANE_RELAYS = ['us', 'eu', 'asia'].map((region) => `${region}.relay.${PANE_RELAY_DOMAIN}`);
 /** The port same-network phones reach this computer on; another free port when it is taken. */
 const LOCAL_PORT = 42138;
@@ -181,8 +181,8 @@ export class RelayService {
         await this.startup(want);
       }
       this.emit();
-    }).catch((error: unknown) => {
-      this.lastError = error instanceof Error ? error.message : String(error);
+    }).catch((cause: unknown) => {
+      this.lastError = cause instanceof Error ? cause.message : String(cause);
       this.deps.log?.(`[relay] ${this.lastError}`);
       this.emit();
     });
@@ -305,7 +305,7 @@ export class RelayService {
 }
 
 
-function parseHostPort(value: string): { host: string; port: number } {
+function parseHostPort(value: string) {
   const match = /^(.+?)(?::(\d+))?$/u.exec(value.trim());
   return { host: match?.[1] ?? value, port: match?.[2] ? Number(match[2]) : 443 };
 }
@@ -333,7 +333,7 @@ function fileStore(file: string): KeyStore {
 const PRIVATE_V4 = [/^10\./u, /^192\.168\./u, /^172\.(1[6-9]|2\d|3[01])\./u, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./u];
 
 /** This computer's private IPv4 addresses, Tailscale's 100.x CGNAT range excluded for the LAN path. */
-export function privateAddresses(): string[] {
+function privateAddresses(): string[] {
   const seen = new Set<string>();
   for (const entries of Object.values(os.networkInterfaces())) {
     for (const entry of entries ?? []) {

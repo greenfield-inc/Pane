@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import { createHash, X509Certificate } from 'crypto';
 import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import type { OutgoingHttpHeaders } from 'http';
 import https from 'https';
 import net from 'net';
 import { tmpdir } from 'os';
@@ -11,11 +12,11 @@ import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../
 import { PaneCommandRegistry } from '../commandRegistry';
 import { PaneRemoteHttpApiServer } from '../httpApiServer';
 import { RelayService } from './relayService';
-import { createComputerCaller, RelayLinks } from './relayLinks';
+import { createComputerCaller, RelayLinks, relayComputerSchema } from './relayLinks';
 import { registerRelayCommands } from './relayCommands';
 import { RelayPreviews } from './relayPreviews';
 import type { AppConfig } from '../../types/config';
-import type { ConfigManager } from '../../services/configManager';
+import { boundary, decodeBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 /**
  * The computer side end to end: the Rust relay (with its DNS helper), Pebble validating DNS-01
@@ -27,12 +28,15 @@ const RELAY_BIN = process.env.PANE_RELAY_BIN;
 const PEBBLE_BIN = process.env.PEBBLE_BIN;
 const PEBBLE_DIR = process.env.PEBBLE_DIR;
 const DOMAIN = 'relay.test';
+const tokenSchema = boundary.object({ token: boundary.string });
+const everywhereSchema = boundary.object({ removed: boundary.array(boundary.string), notReached: boundary.array(boundary.string) });
 
 async function freePort(): Promise<number> {
   return new Promise((resolve) => {
     const server = net.createServer().listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => resolve(typeof address === 'object' && address ? address.port : 0));
+      // SAFETY: a server listening on a host and port reports an AddressInfo.
+      const { port } = server.address() as net.AddressInfo;
+      server.close(() => resolve(port));
     });
   });
 }
@@ -147,11 +151,13 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
     config.relay = { enabled: true, relayAddress: `us.relay.${DOMAIN}:${relayPort}` };
     const secrets = new Map<string, string>();
     const configManager = {
-      getConfig: () => ({ remoteDaemon: config }) as AppConfig,
+      getConfig: () => ({ remoteDaemon: config }),
       updateConfigWith: async (update: (current: AppConfig) => Partial<AppConfig>) => {
-        const patch = update({ remoteDaemon: config } as AppConfig);
+        // SAFETY: the relay code reads and writes only remoteDaemon.
+        const current = { remoteDaemon: config } as AppConfig;
+        const patch = update(current);
         if (patch.remoteDaemon) config = patch.remoteDaemon;
-        return {};
+        return { ...current, remoteDaemon: config };
       },
     };
     let server: PaneRemoteHttpApiServer | null = null;
@@ -177,7 +183,7 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
     registry.register('sessions:get-all-with-projects', () => [{ id: `${name} session` }]);
     registerRelayCommands(registry, service, new RelayPreviews({
       id: () => null, domain: () => null, isForwardedPort: () => false, clientActive: () => false,
-    }), links, configManager as unknown as Pick<ConfigManager, 'updateConfigWith'>);
+    }), links, configManager);
     server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) }, {
       pairing: {
         exchange: async ({ secret, label, phoneId }) => {
@@ -194,14 +200,16 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
   }
 
   /** A phone's https request to the computer's name, through the relay's port. */
-  function phoneRequest(host: string, method: string, path: string, body?: object, token?: string) {
-    return new Promise<{ status: number; json: Record<string, unknown>; peerKey: Buffer }>((resolve, reject) => {
+  function phoneRequest(host: string, method: string, path: string, body?: JsonObject, token?: string) {
+    return new Promise<{ status: number; json: JsonObject; peerKey: Buffer }>((resolve, reject) => {
       let peerKey = Buffer.alloc(0);
+      const headers: OutgoingHttpHeaders = { 'content-type': 'application/json' };
+      if (token) headers.authorization = `Bearer ${token}`;
       const request = https.request({
         host,
         path,
         method,
-        headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        headers,
         ca: pebbleRoot,
         createConnection: () => {
           const socket = tls.connect({ host: '127.0.0.1', port: relayPort, servername: host, ca: pebbleRoot });
@@ -213,7 +221,7 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
       }, (response) => {
         let text = '';
         response.on('data', (chunk) => { text += chunk; });
-        response.on('end', () => resolve({ status: response.statusCode ?? 0, json: JSON.parse(text || '{}') as Record<string, unknown>, peerKey }));
+        response.on('end', () => resolve({ status: response.statusCode ?? 0, json: decodeBoundary(JSON.parse(text || '{}'), boundary.jsonObject), peerKey }));
       });
       request.on('error', reject);
       request.end(body ? JSON.stringify(body) : undefined);
@@ -229,7 +237,7 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
     return { paired, fragment, host };
   }
 
-  async function invoke(host: string, token: string, channel: string, args: unknown[] = []) {
+  async function invoke(host: string, token: string, channel: string, args: JsonValue[] = []) {
     return phoneRequest(host, 'POST', '/invoke', { channel, args }, token);
   }
 
@@ -240,7 +248,7 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
     const { paired, fragment, host } = await pair(studio, 'Ana’s iPhone', 'phone-ana');
     expect(fragment.get('c')).toBe(status.id);
     expect(paired.status).toBe(200);
-    const computer = paired.json.computer as { fingerprint: string };
+    const computer = decodeBoundary(paired.json.computer, relayComputerSchema);
     // The app pins the computer's key: the certificate it saw carries the key the exchange named.
     expect(createHash('sha256').update(paired.peerKey).digest('base64url')).toBe(computer.fingerprint);
 
@@ -261,29 +269,35 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
     const tokenB = String(b.paired.json.token);
     const laptopForStudio = await invoke(b.host, tokenB, 'relay:client:mint-link', [{ peer: studioInfo }]);
     const studioForLaptop = await invoke(a.host, tokenA, 'relay:client:mint-link', [{ peer: laptopInfo }]);
-    expect((await invoke(a.host, tokenA, 'relay:client:save-link', [{ peer: laptopInfo, token: (laptopForStudio.json.result as { token: string }).token }])).status).toBe(200);
-    expect((await invoke(b.host, tokenB, 'relay:client:save-link', [{ peer: studioInfo, token: (studioForLaptop.json.result as { token: string }).token }])).status).toBe(200);
+    expect((await invoke(a.host, tokenA, 'relay:client:save-link', [{ peer: laptopInfo, token: decodeBoundary(laptopForStudio.json.result, tokenSchema).token }])).status).toBe(200);
+    expect((await invoke(b.host, tokenB, 'relay:client:save-link', [{ peer: studioInfo, token: decodeBoundary(studioForLaptop.json.result, tokenSchema).token }])).status).toBe(200);
 
     // Devices on the laptop says who linked the studio.
-    const laptopDevices = await laptop.registry.invoke('relay:devices', []) as Array<{ kind: string; label: string; linkedBy?: string }>;
+    const laptopDevices = decodeBoundary(
+      await laptop.registry.invoke('relay:devices', []),
+      boundary.array(boundary.object({ kind: boundary.string, label: boundary.string, linkedBy: boundary.optional(boundary.string) })),
+    );
     expect(laptopDevices).toContainEqual(expect.objectContaining({ kind: 'computer', label: 'Studio Mac', linkedBy: 'Ana’s iPhone' }));
 
     // Ben scans only the studio and gets the laptop too.
     const ben = await pair(studio, 'Ben’s Pixel', 'phone-ben');
-    const linked = ben.paired.json.linked as Array<{ computer: { id: string; name: string }; token: string }>;
+    const linked = decodeBoundary(ben.paired.json.linked, boundary.array(boundary.object({ computer: relayComputerSchema, token: boundary.string })));
     expect(linked.map((grant) => grant.computer.name)).toEqual(['Travel Laptop']);
     const benOnLaptop = await invoke(b.host, linked[0].token, 'sessions:get-all-with-projects');
     expect(benOnLaptop.json).toMatchObject({ ok: true, result: [{ id: 'Travel Laptop session' }] });
 
     // "Remove from all your computers" on Ben's row on the studio.
     const benRecord = studio.config().host.clients.find((client) => client.phoneId === 'phone-ben');
-    const removal = await studio.registry.invoke('relay:remove-phone-everywhere', [{ clientId: benRecord?.id }]) as { removed: string[]; notReached: string[] };
+    const removal = decodeBoundary(await studio.registry.invoke('relay:remove-phone-everywhere', [{ clientId: benRecord?.id }]), everywhereSchema);
     expect(removal).toEqual({ removed: expect.arrayContaining(['Studio Mac', 'Travel Laptop']), notReached: [] });
     expect((await invoke(b.host, linked[0].token, 'sessions:get-all-with-projects')).status).toBe(403);
     expect((await invoke(a.host, String(ben.paired.json.token), 'sessions:get-all-with-projects')).status).toBe(403);
 
     // "Unlink from all your computers" on the laptop's row on the studio.
-    const unlink = await studio.registry.invoke('relay:unlink-computer-everywhere', [{ computerId: (laptopInfo as { id: string }).id }]) as { removed: string[]; notReached: string[] };
+    const unlink = decodeBoundary(
+      await studio.registry.invoke('relay:unlink-computer-everywhere', [{ computerId: decodeBoundary(laptopInfo, relayComputerSchema).id }]),
+      everywhereSchema,
+    );
     expect(unlink.notReached).toEqual([]);
     expect(studio.config().client.profiles.some((profile) => profile.relay)).toBe(false);
     expect(laptop.config().client.profiles.some((profile) => profile.relay)).toBe(false);

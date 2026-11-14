@@ -772,17 +772,22 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
     hostSettings.access = access;
   }
 
-  const relay = readJsonObject(config.relay);
-  const relayAddress = relay ? readOptionalString(relay.relayAddress)?.trim() : undefined;
-  return {
+  const normalized: RemoteDaemonConfig = {
     host: hostSettings,
     client: {
       profiles: [...profiles],
       activeProfileId,
       mode: activeProfileId && client.mode === 'remote' ? 'remote' : 'local',
     },
-    ...(relay ? { relay: { enabled: readBoolean(relay.enabled, false), ...(relayAddress ? { relayAddress } : {}) } } : {}),
   };
+  const relay = readJsonObject(config.relay);
+  if (relay) {
+    const relaySettings: RemoteRelaySettings = { enabled: readBoolean(relay.enabled, false) };
+    const relayAddress = readOptionalString(relay.relayAddress)?.trim();
+    if (relayAddress) relaySettings.relayAddress = relayAddress;
+    normalized.relay = relaySettings;
+  }
+  return normalized;
 }
 
 function normalizeRemoteMobilePushSettings(value: JsonValue | undefined): RemoteMobilePushSettings {
