@@ -6,12 +6,13 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
+import { frameSvg, type FrameElement } from '../src/frameSvg.ts';
 import { pinnedPackage } from './pinned.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'build', 'gallery.html');
 
-interface Element { type: string; id?: string; box: { x: number; y: number; w: number; h: number }; text?: string; style?: { border?: number; color?: number } }
+type Element = FrameElement;
 interface Profile { modelName: string; display?: { width?: number; height?: number; maxTextElements?: number; maxImageElements?: number; maxTextLines?: number; resolution?: { width: number; height: number } } | null }
 interface GalleryPage { boxes: Array<{ kind: string }> }
 interface Bundle {
@@ -97,15 +98,7 @@ function flags(bundle: Bundle, rendered: ReturnType<Bundle['render']>, profile: 
 }
 
 function svg(rendered: ReturnType<Bundle['render']>, width: number, height: number): string {
-  const parts = rendered.elements.map((element) => {
-    const { x, y, w, h } = element.box;
-    const gray = Math.round(((element.style?.color ?? 15) / 15) * 255);
-    const fill = `rgb(${Math.round(gray * 0.35)},${gray},${Math.round(gray * 0.35)})`;
-    const border = element.style?.border ? `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="none" stroke="${fill}" stroke-width="2"/>` : '';
-    const lines = (element.text ?? '').split('\n').map((line, index) => `<text x="${x + 4}" y="${y + 21 + index * LINE_H}" fill="${fill}" font-size="20" font-family="system-ui, sans-serif" xml:space="preserve">${escape(line)}</text>`).join('');
-    return `${border}<g clip-path="inset(0)"><svg x="${x}" y="${y - 1}" width="${w}" height="${h + 6}" overflow="hidden"><g transform="translate(${-x},${-y + 1})">${lines}</g></svg></g>`;
-  });
-  return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg"><rect width="${width}" height="${height}" fill="#000"/>${parts.join('')}</svg>`;
+  return frameSvg(rendered.elements, width, height).replace('<svg ', `<svg width="${width}" height="${height}" `);
 }
 
 async function main(): Promise<void> {

@@ -163,14 +163,27 @@ describe("Glassly's speech-to-text", () => {
 describe('notifications', () => {
   const asked = (key: string): Asked => ({ key, title: `question ${key}`, from: 'studio-mac · fix-login' });
   const away = { inFront: false, inUse: false, meeting: null };
-  function notifier() {
+  function notifier(readAloud = false) {
     const calls: string[] = [];
     const poster: Poster = {
       post: async (notification) => { calls.push(`post ${notification.id}: ${notification.title}`); },
       dismiss: async (id) => { calls.push(`dismiss ${id}`); },
+      speak: async (text) => { calls.push(`speak ${text}`); },
     };
-    return { calls, notifier: new Notifier(poster) };
+    return { calls, notifier: new Notifier(poster, () => {}, () => readAloud) };
   }
+
+  it('reads a posted question aloud only when read aloud is on, and never one it held back', () => {
+    const quiet = notifier(false);
+    quiet.notifier.update({ ...away, asked: [] });
+    quiet.notifier.update({ ...away, asked: [asked('q1')] });
+    expect(quiet.calls).toEqual(['post q1: question q1']);
+    const loud = notifier(true);
+    loud.notifier.update({ ...away, asked: [] });
+    loud.notifier.update({ ...away, inUse: true, asked: [asked('typing')] });
+    loud.notifier.update({ ...away, asked: [asked('q1'), asked('typing')] });
+    expect(loud.calls).toEqual(['post q1: question q1', 'speak studio-mac · fix-login: question q1']);
+  });
 
   it('posts each new question once while you are away, and withdraws it once answered anywhere', () => {
     const { calls, notifier: n } = notifier();
@@ -211,7 +224,7 @@ describe('notifications', () => {
 
   it('stops trying after a Glassly App that cannot post refuses once', async () => {
     let posts = 0;
-    const n = new Notifier({ post: async () => { posts += 1; throw new Error('unknown request'); }, dismiss: async () => {} });
+    const n = new Notifier({ post: async () => { posts += 1; throw new Error('unknown request'); }, dismiss: async () => {}, speak: async () => {} });
     n.update({ ...away, asked: [] });
     n.update({ ...away, asked: [asked('q1')] });
     await new Promise((resolve) => setTimeout(resolve, 0));

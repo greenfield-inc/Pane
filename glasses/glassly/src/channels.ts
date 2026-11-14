@@ -1,4 +1,5 @@
 // What the background and Pane's phone screen in the Glassly app say to each other.
+import type { FrameElement } from './frameSvg';
 
 /** One paired computer as the phone screen lists it. */
 export interface PhoneComputer {
@@ -16,6 +17,15 @@ export interface PhoneState {
   computers: PhoneComputer[];
   /** What the glasses show, as text. */
   mirror: string;
+  /** Speak each new question from the phone or Bluetooth headphones (off by default). */
+  readAloud: boolean;
+}
+
+/** Background → phone screen, on channel `frame`: each frame Pane draws on the glasses, as drawn. */
+export interface PhoneFrame {
+  width: number;
+  height: number;
+  elements: FrameElement[];
 }
 
 /** Phone screen → background, on channel `command`. */
@@ -24,4 +34,5 @@ export type PhoneCommand =
   | { type: 'pair'; code: string }
   | { type: 'forget' }
   | { type: 'demo' }
-  | { type: 'ambient'; on: boolean };
+  | { type: 'ambient'; on: boolean }
+  | { type: 'read-aloud'; on: boolean };

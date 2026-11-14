@@ -22,6 +22,7 @@
     .state.live { color: var(--ok); }
     .state.refused, .state.not-paired { color: var(--bad); }
     .why { margin: 4px 0 0; font-size: 14px; color: var(--muted); }
+    .frame svg { display: block; width: 100%; height: auto; border-radius: 8px; margin-bottom: 8px; }
     pre { white-space: pre-wrap; font: 13px ui-monospace, monospace; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
     label { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
     [hidden] { display: none !important; }
@@ -40,9 +41,11 @@
   </section>
   <ul id="computers"></ul>
   <label><input id="ambient" type="checkbox"> Ambient mode: the glasses go quiet after 30&nbsp;s and show new cards as banners</label>
+  <label><input id="read-aloud" type="checkbox"> Read new questions aloud from the phone or Bluetooth headphones</label>
   <div class="row"><button id="forget" hidden>Forget these computers</button></div>
   <section id="mirror-section" hidden>
     <p class="muted">On the glasses</p>
+    <div id="frame" class="frame"></div>
     <pre id="mirror"></pre>
   </section>
   <script src="./main.js"></script>

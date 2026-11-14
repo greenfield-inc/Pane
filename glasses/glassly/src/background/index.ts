@@ -11,7 +11,7 @@ import type { Cancel, Gesture } from '../../../src/platform';
 import { PollClock } from '../../../src/polling';
 import { firstRunPage, pairingFailedPage } from '../../../src/screens';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
-import type { PhoneCommand, PhoneComputer, PhoneState } from '../channels';
+import type { PhoneCommand, PhoneComputer, PhoneFrame, PhoneState } from '../channels';
 import { glanceText } from './glance';
 import { Notifier, meetingAt } from './notifier';
 import { ListFocus, capturedList, renderPage, scrollableText } from './render';
@@ -22,6 +22,8 @@ import { glasslyDictation } from './transcription';
 const RUNTIME_KEY = 'pane.glasses.runtimeId';
 const SESSION_COMPUTER_KEY = 'pane.glasses.lastSessionComputer';
 const AMBIENT_KEY = 'pane.glasses.ambient';
+/** "on" reads each new question aloud; off by default (G2 has no speaker; it plays from the phone). */
+const READ_ALOUD_KEY = 'pane.glasses.readAloud';
 /** How often the calendar is read for a meeting under way, and how often its end is checked. */
 const CALENDAR_READ_MS = 5 * 60_000;
 const MEETING_CHECK_MS = 60_000;
@@ -64,6 +66,7 @@ const commandSchema = boundary.union(
   boundary.object({ type: boundary.literal('forget') }),
   boundary.object({ type: boundary.literal('demo') }),
   boundary.object({ type: boundary.literal('ambient'), on: boundary.boolean }),
+  boundary.object({ type: boundary.literal('read-aloud'), on: boundary.boolean }),
 );
 
 registerMiniapp(async (session) => {
@@ -89,6 +92,7 @@ registerMiniapp(async (session) => {
   }
   let sessionComputer: string | null = (await read(SESSION_COMPUTER_KEY)) || null;
   let ambient = (await read(AMBIENT_KEY)) !== 'off';
+  let readAloud = (await read(READ_ALOUD_KEY)) === 'on';
 
   // ---------- the glasses display ----------
   let tier: Tier = tierOf(session.capabilities);
@@ -98,6 +102,10 @@ registerMiniapp(async (session) => {
   let rendering = false;
   let pending: RenderElement[] | null = null;
   const send = (elements: RenderElement[]) => {
+    // The mirror on Pane's phone screen draws the same frame (dropped while that screen is closed).
+    const display = session.capabilities?.display;
+    const frame: PhoneFrame = { width: display?.width ?? 576, height: display?.height ?? 288, elements: elements.flatMap((element) => (element.type === 'text' ? [element] : [])) };
+    session.ui.send('frame', frame);
     pending = elements;
     if (rendering) return;
     rendering = true;
@@ -147,7 +155,8 @@ registerMiniapp(async (session) => {
   const notifier = new Notifier({
     post: async (notification) => { await session.sendRequest({ type: 'miniapp_notification_post', ...notification }); },
     dismiss: async (id) => { await session.sendRequest({ type: 'miniapp_notification_dismiss', id }); },
-  }, (message) => console.warn(message));
+    speak: async (text) => { await session.speaker.speak(text); },
+  }, (message) => console.warn(message), () => readAloud);
   let events: Array<{ title: string; startsAt: string; endsAt: string; allDay: boolean }> = [];
   const readCalendar = () => {
     const now = Date.now();
@@ -179,7 +188,7 @@ registerMiniapp(async (session) => {
       why: computer.refusal ? `${computer.refusal.message}${computer.refusal.next ? ` ${computer.refusal.next}` : ''}` : computer.hint ?? '',
     }));
     for (const failure of failed) computers.push({ name: failure.name, state: 'not paired', why: `${failure.message}${failure.next ? ` ${failure.next}` : ''}` });
-    const state: PhoneState = { status, paired: hub ? (source?.computers().length ?? 0) : 0, demo: source?.demo ?? false, ambient, computers, mirror: page ? pageText(page) : glance };
+    const state: PhoneState = { status, paired: hub ? (source?.computers().length ?? 0) : 0, demo: source?.demo ?? false, ambient, readAloud, computers, mirror: page ? pageText(page) : glance };
     session.ui.send('state', state);
   };
 
@@ -325,6 +334,11 @@ registerMiniapp(async (session) => {
         ambient = command.on;
         app?.setAmbient(ambient);
         write(AMBIENT_KEY, ambient ? 'on' : 'off');
+        publish();
+        return;
+      case 'read-aloud':
+        readAloud = command.on;
+        write(READ_ALOUD_KEY, readAloud ? 'on' : 'off');
         publish();
         return;
       case 'forget':

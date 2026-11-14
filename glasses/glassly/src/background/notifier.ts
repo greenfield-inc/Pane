@@ -6,6 +6,8 @@
 export interface Poster {
   post(notification: { id: string; title: string; content: string }): Promise<void>;
   dismiss(id: string): Promise<void>;
+  /** Reads a posted question aloud from the phone or Bluetooth headphones (G2 has no speaker). */
+  speak(text: string): Promise<void>;
 }
 
 /** What Glassly rejects a request with: an Error, or a plain `{ code, message }` object. */
@@ -44,7 +46,12 @@ export class Notifier {
   newest: string | null = null;
   private unsupported = false;
 
-  constructor(private readonly poster: Poster, private readonly log: (message: string) => void = () => {}) {}
+  constructor(
+    private readonly poster: Poster,
+    private readonly log: (message: string) => void = () => {},
+    /** Whether posted questions are also read aloud; off unless the wearer turns it on. */
+    private readonly readAloud: () => boolean = () => false,
+  ) {}
 
   update(moment: Moment): void {
     const waiting = new Set(moment.asked.map((asked) => asked.key));
@@ -70,6 +77,10 @@ export class Notifier {
       this.posted.add(asked.key);
       this.newest = asked.key;
       this.send(() => this.poster.post({ id: asked.key, title: asked.title, content: asked.from }));
+      if (this.readAloud()) {
+        // Read aloud follows the same quiet rules as the notification, and fails on its own.
+        this.poster.speak(`${asked.from}: ${asked.title}`).catch((error: Refusal) => this.log(`[Pane glasses] not read aloud: ${error.message ?? 'refused'}`));
+      }
     }
     if (this.meeting && !moment.meeting && this.waited > 0) {
       const count = this.waited;
