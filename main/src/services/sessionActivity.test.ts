@@ -88,6 +88,26 @@ describe('SessionActivityRollup', () => {
     ]);
   });
 
+  it('stops counting a closed tab at once', () => {
+    const rollup = new SessionActivityRollup();
+    run(rollup, [session()], new Set(['a1']), 0, 15_000);
+    const closed = [session({ panes: [{ paneId: 'pane-a', panelIds: ['a2'] }, { paneId: 'pane-b', panelIds: ['b1'] }] })];
+    expect(run(rollup, closed, new Set(), 15_500, 30_000)).toEqual([
+      { at: 15_500, sessionId: 's1', state: 'idle', workingPanes: 0 },
+    ]);
+  });
+
+  it('needs one tab mid-turn for 10 s: two tabs taking turns never add up to a spin', () => {
+    const rollup = new SessionActivityRollup();
+    const members = [session()];
+    const changes = [
+      ...run(rollup, members, new Set(['a1']), 0, 6_000),
+      ...run(rollup, members, new Set(['a2']), 6_500, 12_500),
+      ...run(rollup, members, new Set(['a1']), 13_000, 19_000),
+    ];
+    expect(changes).toEqual([]);
+  });
+
   it('reports a Session that is gone as idle once, and then forgets it', () => {
     const rollup = new SessionActivityRollup();
     run(rollup, [session()], new Set(['orch']), 0, 10_000);

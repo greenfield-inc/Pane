@@ -43,7 +43,9 @@ test('live status moves the Pane dot, its tab and the Session summary together',
   const sessionRow = drawer.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: /Open Session Release prep/ });
   await expect(sessionRow).toContainText('1');
 
+  // "N working" is the host's count, sent with the Session's activity.
   await emitRemoteEvent(page, 'panel:agentStatus', status('anim-remote-0', 'anim-panel-0', 'working'));
+  await emitRemoteEvent(page, 'orchestration-sessions:activity', { sessionId: host.sessions[0].id, state: 'working', workingPanes: 1 });
   await expect(sessionRow).toContainText('1 working');
   await expect(paneDot(page, PANE_P).first()).toHaveAttribute('aria-label', 'Agent working');
 
@@ -83,4 +85,52 @@ test('a status change missed while the phone was offline shows once it reconnect
   await restoreRemoteConnection(page);
 
   await expect(tabDot).toHaveAttribute('aria-label', 'Agent idle');
+});
+
+// Session activity on the phone (cover sheet J12, J14, J15): the host decides it, the phone shows it.
+const sessionIcon = (page: Page, name: string) => page.getByRole('dialog', { name: 'Remote panes' })
+  .getByRole('group', { name: 'Sessions' }).getByRole('button', { name: new RegExp(`Open Session ${name}`) }).getByTestId('session-activity-icon');
+
+test('the Session row spins while the host says it works, and the ring comes back when it stops (J14)', async ({ page }) => {
+  const host = await connect(page, { orchestrationSessionNames: ['Release prep', 'Infra'] });
+  const [release, infra] = host.sessions;
+  host.sessionActivity = [{ sessionId: release.id, state: 'working', workingPanes: 0 }];
+  await dropRemoteConnection(page);
+  await restoreRemoteConnection(page);
+  await openDrawer(page);
+  await expect(sessionIcon(page, 'Release prep')).toHaveAttribute('data-state', 'working');
+  await expect(sessionIcon(page, 'Infra')).toHaveAttribute('data-state', 'idle');
+  // Option 1 at phone width: the spinner and the empty ring sit in the same 12 px box.
+  const working = await sessionIcon(page, 'Release prep').boundingBox();
+  const idle = await sessionIcon(page, 'Infra').boundingBox();
+  expect([working?.width, working?.height]).toEqual([12, 12]);
+  expect([idle?.width, idle?.height]).toEqual([12, 12]);
+  await page.screenshot({ path: test.info().outputPath('j14-phone-working.png') });
+
+  await emitRemoteEvent(page, 'orchestration-sessions:activity', { sessionId: release.id, state: 'idle', workingPanes: 0 });
+  await expect(sessionIcon(page, 'Release prep')).toHaveAttribute('data-state', 'idle');
+  await emitRemoteEvent(page, 'orchestration-sessions:activity', { sessionId: infra.id, state: 'working', workingPanes: 0 });
+  await expect(sessionIcon(page, 'Infra')).toHaveAttribute('data-state', 'working');
+});
+
+test('a turn that ended while the phone was offline reads idle once it reconnects (J12)', async ({ page }) => {
+  const host = await connect(page, { orchestrationSessionNames: ['Release prep'], sessionActivity: [] });
+  await emitRemoteEvent(page, 'orchestration-sessions:activity', { sessionId: host.sessions[0].id, state: 'working', workingPanes: 0 });
+  await openDrawer(page);
+  await expect(sessionIcon(page, 'Release prep')).toHaveAttribute('data-state', 'working');
+
+  await dropRemoteConnection(page);
+  host.sessionActivity = [{ sessionId: host.sessions[0].id, state: 'idle', workingPanes: 0 }];
+  await restoreRemoteConnection(page);
+  await expect(sessionIcon(page, 'Release prep')).toHaveAttribute('data-state', 'idle', { timeout: 2_000 });
+});
+
+test('a host too old to send Session activity shows idle rings and no error (J15)', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await connect(page, { orchestrationSessionNames: ['Release prep'], sessionActivity: null, agentStatuses: [status('anim-remote-0', 'anim-panel-0', 'working')] });
+  await openDrawer(page);
+  await expect(sessionIcon(page, 'Release prep')).toHaveAttribute('data-state', 'idle');
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(errors).toEqual([]);
 });

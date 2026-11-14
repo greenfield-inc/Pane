@@ -30,6 +30,8 @@ export interface RemotePwaMockOptions {
   files?: Record<string, string | null>;
   /** Agent statuses the host already reports when the PWA connects. */
   agentStatuses?: RemotePwaMockHost['agentStatuses'];
+  /** Each Session's activity the host reports; null for a host too old to have it. */
+  sessionActivity?: RemotePwaMockHost['sessionActivity'];
 }
 
 /**
@@ -50,6 +52,8 @@ export interface RemotePwaMockHost {
   held: Record<string, Promise<void>>;
   /** The `panels:agent-statuses` baseline: what the host's agents are doing now. */
   agentStatuses: Array<{ sessionId: string; panelId: string; state: 'blocked' | 'working' | 'idle' | 'unknown' }>;
+  /** The `orchestration-sessions:activity-list` baseline; null for a host without it. */
+  sessionActivity: Array<{ sessionId: string; state: 'working' | 'idle'; workingPanes: number }> | null;
 }
 
 const PROFILE = {
@@ -182,6 +186,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
     sessionTools: {},
     held: {},
     agentStatuses: options.agentStatuses ?? [],
+    sessionActivity: options.sessionActivity === undefined ? [] : options.sessionActivity,
   };
 
   const ports = options.ports ?? { host: 'MacBook Pro', ports: [] };
@@ -407,6 +412,10 @@ export async function emitRemoteHostEvent(page: Page, channel: string, ...args: 
     const status = decodeBoundary(args[0], boundary.object({ panelId: boundary.string, sessionId: boundary.string, state: boundary.enumeration('blocked', 'working', 'idle', 'unknown') }));
     host.agentStatuses = [...host.agentStatuses.filter(item => item.panelId !== status.panelId), status];
   }
+  if (host?.sessionActivity && channel === 'orchestration-sessions:activity') {
+    const activity = decodeBoundary(args[0], boundary.object({ sessionId: boundary.string, state: boundary.enumeration('working', 'idle'), workingPanes: boundary.number }));
+    host.sessionActivity = [...host.sessionActivity.filter(item => item.sessionId !== activity.sessionId), activity];
+  }
   await page.evaluate(({ channel, args }) => {
     const emit = window.__paneRemoteEmit;
     if (!emit) throw new Error('Remote PWA mock is not installed on this page.');
@@ -486,6 +495,10 @@ async function installRemoteHostRoute(
         break;
       case 'panels:agent-statuses':
         result = { success: true, data: host.agentStatuses };
+        break;
+      case 'orchestration-sessions:activity-list':
+        // An older host has no such command and answers as for any unknown one.
+        result = host.sessionActivity ? { success: true, data: host.sessionActivity } : { success: false, error: 'No handler registered for orchestration-sessions:activity-list' };
         break;
       case 'panels:list':
         result = ownerSession ? sessionWorkspace(ownerSession, host.sessionTools[ownerSession.id]) : fixtures.panelsByPane[String(args[0])] ?? [];

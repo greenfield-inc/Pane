@@ -6,9 +6,10 @@
  * The counted tabs are the orchestrator's own agent tabs and the agent tabs of the Session's
  * Panes (not archived or missing). Each tab answers the stricter mid-turn test
  * (agentStatus/midTurn.ts). The orchestrator, and each Pane, turns working once one of its tabs
- * has been mid-turn without a break for 10 s, and idle once none has been mid-turn for 10 s.
- * The Session is working while any of them is; "N working" counts the working Panes, so the
- * label and the icon never disagree. All state is in memory.
+ * has been mid-turn without a break for 10 s, and idle once none of its tabs has been mid-turn
+ * for 10 s; a tab that is closed or leaves stops counting at once. The Session is working while
+ * any of them is; "N working" counts the working Panes, so the label and the icon never
+ * disagree. All state is in memory.
  */
 
 import { EventEmitter } from 'events';
@@ -25,10 +26,16 @@ export interface SessionActivityMembers {
   panes: ReadonlyArray<{ paneId: string; panelIds: readonly string[] }>;
 }
 
-interface Unit {
-  working: boolean;
+interface Tab {
+  /** Mid-turn without a break since then; undefined while not mid-turn. */
   midTurnSince: number | undefined;
   lastMidTurnAt: number | undefined;
+}
+
+interface Unit {
+  working: boolean;
+  /** Only the unit's current tabs: one that leaves is forgotten. */
+  tabs: Map<string, Tab>;
 }
 
 const ORCHESTRATOR = '\u0000orchestrator';
@@ -52,15 +59,21 @@ export class SessionActivityRollup {
       const units = new Map<string, Unit>();
       const groups: Array<{ key: string; panelIds: readonly string[] }> = [{ key: ORCHESTRATOR, panelIds: session.orchestratorPanelIds }, ...session.panes.map(pane => ({ key: pane.paneId, panelIds: pane.panelIds }))];
       for (const { key, panelIds } of groups) {
-        const unit = previous?.get(key) ?? { working: false, midTurnSince: undefined, lastMidTurnAt: undefined };
-        if (panelIds.some(isMidTurn)) {
-          unit.midTurnSince ??= now;
-          unit.lastMidTurnAt = now;
-        } else {
-          unit.midTurnSince = undefined;
+        const before = previous?.get(key);
+        const unit: Unit = { working: before?.working ?? false, tabs: new Map() };
+        for (const panelId of panelIds) {
+          const tab = before?.tabs.get(panelId) ?? { midTurnSince: undefined, lastMidTurnAt: undefined };
+          if (isMidTurn(panelId)) {
+            tab.midTurnSince ??= now;
+            tab.lastMidTurnAt = now;
+          } else {
+            tab.midTurnSince = undefined;
+          }
+          unit.tabs.set(panelId, tab);
         }
-        if (!unit.working && unit.midTurnSince !== undefined && now - unit.midTurnSince >= workingAfter) unit.working = true;
-        else if (unit.working && unit.midTurnSince === undefined && (unit.lastMidTurnAt === undefined || now - unit.lastMidTurnAt >= idleAfter)) unit.working = false;
+        const tabs = [...unit.tabs.values()];
+        if (!unit.working) unit.working = tabs.some(tab => tab.midTurnSince !== undefined && now - tab.midTurnSince >= workingAfter);
+        else unit.working = tabs.some(tab => tab.lastMidTurnAt !== undefined && now - tab.lastMidTurnAt < idleAfter);
         units.set(key, unit);
       }
       this.units.set(session.sessionId, units);
