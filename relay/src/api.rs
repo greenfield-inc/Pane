@@ -13,7 +13,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 const PAIR_HTML: &str = include_str!("pair.html");
 const IOS_APP_ID: &str = "FBM5YSF467.com.dcouple.pane.mobile";
 const ANDROID_PACKAGE: &str = "com.dcouple.pane.mobile";
-const MAX_BODY: usize = 64 * 1024;
+/// A registry batch: up to 5,000 updates of a few hundred bytes each.
+const MAX_BODY: usize = 4 * 1024 * 1024;
 
 pub async fn serve(state: Arc<State>, mut s: BoxStream, peer: IpAddr) {
     let Ok(Ok((req, rest))) =
@@ -199,9 +200,10 @@ async fn registry_post(
     if len > MAX_BODY {
         return respond_json(s, 413, &json!({"error": "body too large"})).await;
     }
+    let mut chunk = vec![0u8; 64 * 1024];
     while body.len() < len {
-        let mut chunk = vec![0u8; len - body.len()];
-        let n = tokio::time::timeout(Duration::from_secs(10), s.read(&mut chunk))
+        let want = chunk.len().min(len - body.len());
+        let n = tokio::time::timeout(Duration::from_secs(10), s.read(&mut chunk[..want]))
             .await
             .unwrap_or(Ok(0))?;
         if n == 0 {
@@ -222,20 +224,26 @@ async fn registry_post(
             }
         };
     }
-    match serde_json::from_slice::<Update>(&body) {
-        Ok(update) if is_valid_id(&update.id) => {
-            state.registry.apply(&update);
-            respond_json(s, 200, &json!({"ok": true})).await
-        }
-        _ => {
-            respond_json(
-                s,
-                400,
-                &json!({"error": "expected {id, region, local, txt, online}"}),
-            )
-            .await
-        }
+    // One update, or a batch as a JSON array of them.
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum Body {
+        One(Update),
+        Batch(Vec<Update>),
     }
+    let updates = match serde_json::from_slice::<Body>(&body) {
+        Ok(Body::One(u)) => vec![u],
+        Ok(Body::Batch(b)) => b,
+        Err(_) => Vec::new(),
+    };
+    if updates.is_empty() || !updates.iter().all(|u| is_valid_id(&u.id)) {
+        let error = "expected {id, region, local, txt, online} or an array of them";
+        return respond_json(s, 400, &json!({ "error": error })).await;
+    }
+    for update in &updates {
+        state.registry.apply(update);
+    }
+    respond_json(s, 200, &json!({"ok": true})).await
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {

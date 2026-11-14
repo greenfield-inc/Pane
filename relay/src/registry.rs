@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Notify, oneshot};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Update {
@@ -39,24 +39,125 @@ pub struct AcmeTxt {
     pub values: Vec<String>,
 }
 
-/// One POST for a helper: the path after the registry URL, its JSON body, and a log label.
-struct Post {
-    suffix: &'static str,
-    body: Vec<u8>,
-    label: String,
-    reply: Option<oneshot::Sender<Result<(), String>>>,
+type Reply = oneshot::Sender<Result<(), String>>;
+
+/// Updates a computer may send in one POST; more go in several.
+const MAX_BATCH: usize = 5000;
+
+/// What is waiting to go to one helper. Updates for the same id merge, so the
+/// queue holds at most one update per computer however slow the helper is.
+#[derive(Default)]
+struct Queue {
+    updates: HashMap<String, Update>,
+    update_replies: Vec<Reply>,
+    acme: HashMap<String, (AcmeTxt, Vec<Reply>)>,
 }
+
+/// One helper's queue, sent by its own task, so a helper that is down delays only itself.
+#[derive(Default)]
+struct Helper {
+    queue: Mutex<Queue>,
+    wake: Notify,
+}
+
+impl Helper {
+    fn push_updates(&self, updates: Vec<Update>, reply: Option<Reply>) {
+        let mut q = self.queue.lock().unwrap();
+        for u in updates {
+            match q.updates.get_mut(&u.id) {
+                Some(queued) => {
+                    queued.region = u.region;
+                    queued.local = u.local;
+                    queued.online = u.online;
+                    if u.txt.is_some() {
+                        queued.txt = u.txt;
+                    }
+                }
+                None => {
+                    q.updates.insert(u.id.clone(), u);
+                }
+            }
+        }
+        q.update_replies.extend(reply);
+        drop(q);
+        self.wake.notify_one();
+    }
+
+    fn push_acme(&self, t: AcmeTxt, reply: Option<Reply>) {
+        let mut q = self.queue.lock().unwrap();
+        let slot = q
+            .acme
+            .entry(t.name.clone())
+            .or_insert_with(|| (t.clone(), Vec::new()));
+        slot.0 = t;
+        slot.1.extend(reply);
+        drop(q);
+        self.wake.notify_one();
+    }
+
+    /// Sends whatever is queued: all updates as JSON arrays of up to `MAX_BATCH`, then each ACME value.
+    async fn run(
+        self: Arc<Self>,
+        url: String,
+        secret: Option<String>,
+        tls: Arc<rustls::ClientConfig>,
+    ) {
+        let send = |suffix: &'static str, body: Vec<u8>| {
+            let (url, secret, tls) = (&url, secret.as_deref(), tls.clone());
+            async move {
+                tokio::time::timeout(POST_TIMEOUT, post(url, suffix, secret, &body, tls))
+                    .await
+                    .map_err(|_| {
+                        format!(
+                            "registry {url} did not answer in {} s",
+                            POST_TIMEOUT.as_secs()
+                        )
+                    })
+                    .and_then(|r| r.map_err(|e| format!("registry {url}: {e}")))
+            }
+        };
+        loop {
+            self.wake.notified().await;
+            let q = std::mem::take(&mut *self.queue.lock().unwrap());
+            if !q.updates.is_empty() {
+                let updates: Vec<Update> = q.updates.into_values().collect();
+                let mut result = Ok(());
+                for batch in updates.chunks(MAX_BATCH) {
+                    let body = serde_json::to_vec(batch).unwrap_or_default();
+                    let sent = send("", body).await;
+                    if let Err(e) = &sent {
+                        tracing::warn!(count = batch.len(), error = %e, "registry update failed");
+                    }
+                    result = result.and(sent);
+                }
+                for reply in q.update_replies {
+                    let _ = reply.send(result.clone());
+                }
+            }
+            for (name, (t, replies)) in q.acme {
+                let sent = send("/acme", serde_json::to_vec(&t).unwrap_or_default()).await;
+                if let Err(e) = &sent {
+                    tracing::warn!(name, error = %e, "registry ACME update failed");
+                }
+                for reply in replies {
+                    let _ = reply.send(sent.clone());
+                }
+            }
+        }
+    }
+}
+
+const POST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct Registry {
     entries: Mutex<HashMap<String, Entry>>,
     /// ACME TXT values by name; `true` marks this relay's own, which it re-posts.
     acme: Mutex<HashMap<String, (Vec<String>, bool)>>,
-    /// One ordered queue per helper URL, so a helper that is down delays only itself.
-    push: Vec<mpsc::UnboundedSender<Post>>,
+    helpers: Vec<Arc<Helper>>,
 }
 
 impl Registry {
-    /// A registry that also forwards every update to each helper in `urls`, in order.
+    /// A registry that also forwards every update to each helper in `urls`.
     /// `extra_ca` adds PEM roots trusted for the helpers' certificates.
     pub fn new(
         urls: &[String],
@@ -64,35 +165,18 @@ impl Registry {
         extra_ca: Option<&Path>,
     ) -> Result<Self, crate::Error> {
         let tls = client_config(extra_ca)?;
-        let push = urls
+        let helpers = urls
             .iter()
             .map(|url| {
-                let (tx, mut rx) = mpsc::unbounded_channel::<Post>();
-                let (url, secret, tls) = (url.clone(), secret.clone(), tls.clone());
-                tokio::spawn(async move {
-                    while let Some(p) = rx.recv().await {
-                        let result = tokio::time::timeout(
-                            Duration::from_secs(10),
-                            post(&url, p.suffix, secret.as_deref(), &p.body, tls.clone()),
-                        )
-                        .await
-                        .map_err(|_| format!("registry {url} did not answer in 10 s"))
-                        .and_then(|r| r.map_err(|e| format!("registry {url}: {e}")));
-                        if let Err(e) = &result {
-                            tracing::warn!(update = %p.label, error = %e, "registry update failed");
-                        }
-                        if let Some(reply) = p.reply {
-                            let _ = reply.send(result);
-                        }
-                    }
-                });
-                tx
+                let helper = Arc::new(Helper::default());
+                tokio::spawn(helper.clone().run(url.clone(), secret.clone(), tls.clone()));
+                helper
             })
             .collect();
         Ok(Self {
             entries: Mutex::default(),
             acme: Mutex::default(),
-            push,
+            helpers,
         })
     }
 
@@ -138,73 +222,96 @@ impl Registry {
         acme.get(name).map(|(v, _)| v.clone()).unwrap_or_default()
     }
 
-    /// This relay's ACME TXT values that are still set, for the periodic re-post.
-    pub fn own_acme(&self) -> Vec<AcmeTxt> {
-        let acme = self.acme.lock().unwrap();
-        acme.iter()
-            .filter(|(_, (_, own))| *own)
-            .map(|(name, (values, _))| AcmeTxt {
-                name: name.clone(),
-                values: values.clone(),
-            })
-            .collect()
-    }
-
-    /// Sets this relay's ACME TXT values here and on every helper (see `publish`).
+    /// Sets this relay's ACME TXT values here and on every helper (see `wait`).
     pub async fn publish_acme(&self, t: AcmeTxt) -> Result<(), String> {
         self.set_acme(&t, true);
-        let body = serde_json::to_vec(&t).unwrap_or_default();
-        self.send("/acme", body, t.name.clone(), true).await
+        let mut replies = Vec::new();
+        for helper in &self.helpers {
+            let (tx, rx) = oneshot::channel();
+            helper.push_acme(t.clone(), Some(tx));
+            replies.push(rx);
+        }
+        wait(replies).await
     }
 
-    /// Applies the update here and sends it to every helper (see `send`).
+    /// Applies the update here and queues it for every helper. With TXT values,
+    /// waits as `wait` does; other updates return at once.
     pub async fn publish(&self, update: Update) -> Result<(), String> {
         self.apply(&update);
-        let body = serde_json::to_vec(&update).unwrap_or_default();
-        let wait = update.txt.is_some();
-        self.send("", body, update.id, wait).await
-    }
-
-    /// Queues one POST for every helper. With `wait` (TXT values), waits for the
-    /// helpers and succeeds when at least one took it: a helper that is down
-    /// answers no DNS, so resolvers ask the other.
-    async fn send(
-        &self,
-        suffix: &'static str,
-        body: Vec<u8>,
-        label: String,
-        wait: bool,
-    ) -> Result<(), String> {
-        let mut replies = Vec::new();
-        for push in &self.push {
-            let (tx, rx) = oneshot::channel();
-            let post = Post {
-                suffix,
-                body: body.clone(),
-                label: label.clone(),
-                reply: wait.then_some(tx),
-            };
-            if push.send(post).is_ok() && wait {
-                replies.push(rx);
+        if update.txt.is_none() {
+            for helper in &self.helpers {
+                helper.push_updates(vec![update.clone()], None);
             }
-        }
-        if !wait || self.push.is_empty() {
             return Ok(());
         }
-        let mut first_err = None;
-        for rx in replies {
-            match rx.await {
-                Ok(Ok(())) => return Ok(()),
-                Ok(Err(e)) => {
-                    first_err.get_or_insert(e);
-                }
-                Err(_) => {
-                    first_err.get_or_insert("registry push stopped".to_string());
-                }
+        let mut replies = Vec::new();
+        for helper in &self.helpers {
+            let (tx, rx) = oneshot::channel();
+            helper.push_updates(vec![update.clone()], Some(tx));
+            replies.push(rx);
+        }
+        wait(replies).await
+    }
+
+    /// Queues the current entry of each of `ids`, and this relay's own ACME
+    /// values, for every helper without waiting: a restarted helper relearns them.
+    pub fn resync(&self, ids: &[String]) {
+        if self.helpers.is_empty() {
+            return;
+        }
+        let updates: Vec<Update> = {
+            let entries = self.entries.lock().unwrap();
+            ids.iter()
+                .filter_map(|id| {
+                    let e = entries.get(id)?;
+                    Some(Update {
+                        id: id.clone(),
+                        region: e.region.clone(),
+                        local: e.local.clone(),
+                        txt: Some(e.txt.clone()),
+                        online: e.online,
+                    })
+                })
+                .collect()
+        };
+        let own: Vec<AcmeTxt> = {
+            let acme = self.acme.lock().unwrap();
+            acme.iter()
+                .filter(|(_, (_, own))| *own)
+                .map(|(name, (values, _))| AcmeTxt {
+                    name: name.clone(),
+                    values: values.clone(),
+                })
+                .collect()
+        };
+        for helper in &self.helpers {
+            helper.push_updates(updates.clone(), None);
+            for t in &own {
+                helper.push_acme(t.clone(), None);
             }
         }
-        Err(first_err.unwrap_or_else(|| "registry push stopped".to_string()))
     }
+}
+
+/// Succeeds once one helper took the update: a helper that is down answers no
+/// DNS, so resolvers ask the other. With no helpers, succeeds at once.
+async fn wait(replies: Vec<oneshot::Receiver<Result<(), String>>>) -> Result<(), String> {
+    if replies.is_empty() {
+        return Ok(());
+    }
+    let mut first_err = None;
+    for rx in replies {
+        match rx.await {
+            Ok(Ok(())) => return Ok(()),
+            Ok(Err(e)) => {
+                first_err.get_or_insert(e);
+            }
+            Err(_) => {
+                first_err.get_or_insert("registry push stopped".to_string());
+            }
+        }
+    }
+    Err(first_err.unwrap_or_else(|| "registry push stopped".to_string()))
 }
 
 /// POSTs JSON to an http(s) URL and succeeds on a 2xx answer.

@@ -719,6 +719,102 @@ async fn still_connected(agent: &mut Agent) {
 
 const SLOWED: Duration = Duration::from_millis(900);
 
+/// A fake registry helper over plain http. With `answer`, it replies 200 and sends each
+/// request's body to the returned channel; without, it reads requests and never replies.
+async fn fake_helper(answer: bool) -> (String, mpsc::UnboundedReceiver<Value>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!(
+        "http://127.0.0.1:{}/v1/registry",
+        listener.local_addr().unwrap().port()
+    );
+    let (tx, rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok((mut tcp, _)) = listener.accept().await {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let head = read_head(&mut tcp).await.to_ascii_lowercase();
+                // Other local programs probe loopback ports; only the relay POSTs.
+                if !head.starts_with("post ") {
+                    return;
+                }
+                let len: usize = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length: "))
+                    .map_or(0, |n| n.trim().parse().unwrap());
+                let mut body = vec![0u8; len];
+                tcp.read_exact(&mut body).await.unwrap();
+                if !answer {
+                    tokio::time::sleep(Duration::from_secs(3600)).await;
+                }
+                let _ = tx.send(serde_json::from_slice(&body).unwrap());
+                let ok = "HTTP/1.1 200 OK\r\ncontent-length: 11\r\nconnection: close\r\n\r\n{\"ok\":true}";
+                let _ = tcp.write_all(ok.as_bytes()).await;
+            });
+        }
+    });
+    (url, rx)
+}
+
+#[tokio::test]
+async fn the_resync_posts_every_computer_to_a_helper_in_one_request() {
+    let (url, mut posts) = fake_helper(true).await;
+    let env = Env::start(&["--registry-url", &url, "--registry-resync-secs", "1"]).await;
+    let mut agents = Vec::new();
+    for _ in 0..100 {
+        agents.push(Agent::connect(&env, &SigningKey::generate()).await);
+    }
+    let mut ids: Vec<String> = agents.iter().map(|a| a.id.clone()).collect();
+    ids.sort();
+
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let body = tokio::time::timeout(left, posts.recv())
+            .await
+            .expect("a request with every computer")
+            .unwrap();
+        let mut posted: Vec<String> = body
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|u| u["id"].as_str().unwrap().to_string())
+            .collect();
+        posted.sort();
+        if posted == ids {
+            break;
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_helper_that_never_answers_does_not_delay_the_blocklist() {
+    let (url, _posts) = fake_helper(false).await;
+    let env = Env::start(&[
+        "--registry-url",
+        &url,
+        "--registry-resync-secs",
+        "1",
+        "--blocklist",
+        "{dir}/blocked.txt",
+    ])
+    .await;
+    let mut agents = Vec::new();
+    for _ in 0..5 {
+        agents.push(Agent::connect(&env, &SigningKey::generate()).await);
+    }
+    // Let a resync start against the silent helper (the first comes with the
+    // 5 s maintenance tick), then block one computer.
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let id = agents[0].id.clone();
+    std::fs::write(env.dir.join("blocked.txt"), format!("{id}\n")).unwrap();
+    // The 5 s blocklist poll cuts it off.
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while env.status(&id).await["state"] != "offline" {
+        assert!(Instant::now() < deadline, "the blocklist was not applied");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 #[tokio::test]
 async fn a_flood_from_one_address_slows_then_refuses_only_that_address() {
     let env = Env::start(&["--listen", "[::]:0", "--limit-conns-per-min", "2"]).await;

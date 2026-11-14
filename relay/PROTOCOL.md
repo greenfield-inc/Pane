@@ -165,12 +165,19 @@ Any iroh endpoint may use the relay. Limits apply per client IP (below).
 With `--dns`, the process answers DNS for `<D>` and keeps the registry: for
 each id, its region, local addresses, TXT values and last-seen time. Every
 relay sends each update to every helper in its `--registry-url` list with
-`POST /v1/registry` (header `authorization: Bearer <registry secret>`), body
-`{"id","region","local":[...],"txt":[...]|null,"online":true|false}`, and
-re-posts its connected computers every 60 s. A helper updates its own registry
-in memory and lists only the other helpers, so both helpers answer the same
-records, and a helper that restarts relearns them within a minute. A TXT
-update succeeds once one helper has it.
+`POST /v1/registry` (header `authorization: Bearer <registry secret>`). The
+body is one update, `{"id","region","local":[...],"txt":[...]|null,"online":true|false}`,
+or a JSON array of up to 5,000 of them (at most 4 MiB); `"txt":null` leaves
+the TXT values as they are. The helper answers `200 {"ok":true}`, or `400`
+and applies nothing when any update is malformed.
+
+Each relay keeps one queue per helper and sends it from its own task, so a
+slow helper delays nothing else. Updates for the same id merge while they
+wait, and everything waiting goes out together as one array. Every 60 s the
+relay queues all its connected computers again, so a helper that restarts
+relearns them within a minute. A TXT update succeeds once one helper has it.
+A helper updates its own registry in memory and lists only the other
+helpers, so both helpers answer the same records.
 
 A relay with `--acme-cache` gets its own certificate for `<D>` and
 `<region>.relay.<D>` with DNS-01. It sets each challenge value on every

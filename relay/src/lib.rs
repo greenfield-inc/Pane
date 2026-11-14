@@ -35,7 +35,6 @@ pub type Error = Box<dyn std::error::Error + Send + Sync>;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_HELLO: usize = 32 * 1024;
 const BLOCKLIST_POLL: Duration = Duration::from_secs(5);
-const REGISTRY_RESYNC: Duration = Duration::from_secs(60);
 
 /// A running relay.
 pub struct Relay {
@@ -135,6 +134,7 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         tokio::spawn(dns::serve_tcp(state.clone(), tcp));
     }
     tokio::spawn(maintenance(state.clone(), blocklist, blocklist_mtime));
+    tokio::spawn(resync(state.clone()));
     if let Some(a) = acme {
         tokio::spawn(acme::run(state.clone(), cert, a));
     }
@@ -255,7 +255,6 @@ async fn reload_blocklist(state: &State, path: &PathBuf, last: &mut Option<Syste
 
 async fn maintenance(state: Arc<State>, blocklist: Option<PathBuf>, mut mtime: Option<SystemTime>) {
     let mut tick = tokio::time::interval(BLOCKLIST_POLL);
-    let mut last_resync = tokio::time::Instant::now();
     loop {
         tokio::select! {
             _ = state.shutdown.cancelled() => return,
@@ -266,17 +265,18 @@ async fn maintenance(state: Arc<State>, blocklist: Option<PathBuf>, mut mtime: O
         }
         state.prune_usage();
         state.alerts.prune();
-        // Re-send connected computers so a restarted helper relearns them.
-        if !state.cfg.registry_url.is_empty() && last_resync.elapsed() >= REGISTRY_RESYNC {
-            last_resync = tokio::time::Instant::now();
-            for id in state.connected_ids() {
-                if let Some(e) = state.registry.get(&id) {
-                    let _ = state.publish(&id, e.local, Some(e.txt), true).await;
-                }
-            }
-            for txt in state.registry.own_acme() {
-                let _ = state.registry.publish_acme(txt).await;
-            }
+    }
+}
+
+/// Re-queues connected computers for every helper, so a restarted helper relearns them.
+/// It only queues: each helper's own task sends, so a slow helper delays nothing here.
+async fn resync(state: Arc<State>) {
+    let period = Duration::from_secs(state.cfg.registry_resync_secs.max(1));
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    loop {
+        tokio::select! {
+            _ = state.shutdown.cancelled() => return,
+            _ = tick.tick() => state.registry.resync(&state.connected_ids()),
         }
     }
 }

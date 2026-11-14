@@ -108,6 +108,10 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_REGISTRY_URL", value_delimiter = ',')]
     pub registry_url: Vec<String>,
 
+    /// How often to re-post connected computers to every helper (tests).
+    #[arg(long, hide = true, default_value_t = 60)]
+    pub registry_resync_secs: u64,
+
     /// UDP address for QUIC address discovery, which direct-path clients use to learn
     /// their public address. Clients expect port 7842. Off unless set.
     #[arg(long, env = "PANE_RELAY_DIRECT_QUIC")]
