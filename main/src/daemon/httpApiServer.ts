@@ -527,7 +527,10 @@ export class PaneRemoteHttpApiServer {
     }
     const portMatch = PORT_STREAM_PATH.exec(url.pathname);
     if (portMatch) {
-      void this.handlePortStreamUpgrade(request, socket, head, Number(portMatch[1]), url).catch(() => socket.destroy());
+      void this.handlePortStreamUpgrade(request, socket, head, Number(portMatch[1]), url).catch(error => {
+        console.error(`[Pane remote daemon] Port ${portMatch[1]} stream failed before it opened; closed the connection:`, error);
+        socket.destroy();
+      });
       return;
     }
     if (url.pathname !== VOICE_DEEPGRAM_STREAM_PATH) {
@@ -570,7 +573,16 @@ export class PaneRemoteHttpApiServer {
       writeRawHttpError(socket, auth.statusCode, auth.error.message, auth.error.code);
       return;
     }
-    const forwarded = await this.isForwardedPort(port);
+    // Node drops its own error listener on upgrade; a client that resets during the read would
+    // otherwise throw in main.
+    const ignoreReset = () => socket.destroy();
+    socket.on('error', ignoreReset);
+    let forwarded: boolean;
+    try {
+      forwarded = await this.isForwardedPort(port);
+    } finally {
+      socket.removeListener('error', ignoreReset);
+    }
     if (socket.destroyed) return;
     if (!forwarded) {
       writeRawHttpError(socket, 403, `Port ${port} is not forwarded from this host`, 'ERR_PORT_NOT_FORWARDED');
