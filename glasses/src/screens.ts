@@ -369,7 +369,7 @@ function loadingPage(title: string, text: string): Page {
 
 /** `firstTime`: how to allow the app on a computer that has never answered. */
 export function noComputerPage(computerCount: number, firstTime?: string): Page {
-  const why = firstTime ?? 'Is Tailscale on on your phone?';
+  const why = firstTime ?? 'Is your phone online, with Tailscale on if you use it?';
   return {
     boxes: [
       header(`Pane · 0 of ${plural(computerCount, 'computer')}`),
