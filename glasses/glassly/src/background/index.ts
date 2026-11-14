@@ -13,7 +13,7 @@ import { firstRunPage, pairingFailedPage } from '../../../src/screens';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PhoneCommand, PhoneComputer, PhoneState } from '../channels';
 import { glanceText } from './glance';
-import { ListFocus, capturedList, renderPage } from './render';
+import { ListFocus, capturedList, renderPage, scrollableText } from './render';
 import { tierOf, type Tier } from './tier';
 import { TouchMapper } from './touch';
 import { glasslyDictation } from './transcription';
@@ -238,6 +238,11 @@ registerMiniapp(async (session) => {
     }
     if (list && gesture.type === 'press') {
       target({ type: 'select', index: focus.selectedIn(list) });
+      return;
+    }
+    const long = page ? scrollableText(page) : null;
+    if (long && (gesture.type === 'up' || gesture.type === 'down')) {
+      if (focus.scroll(long, gesture.type === 'up' ? -1 : 1)) draw();
       return;
     }
     target(gesture);

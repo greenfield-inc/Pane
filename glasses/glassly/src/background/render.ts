@@ -3,15 +3,13 @@
 // with a "> " on the highlighted row and keeps the highlight here (see ListFocus).
 import type { RenderElement } from '@glassly/miniapp';
 import { LIST_PAD, TEXT_PAD, listItems, textContent, type Box, type Brightness, type ListBox, type Page, type TextBox } from '../../../src/page';
+import { LINE_H } from '../../../src/text';
 
 /** What one Glassly display takes per frame. */
 export interface Budget {
   /** Text and rect elements share this pool on stock G2. */
   maxText: number;
 }
-
-/** Even's list rows are 40 px apart, so a list shows this many rows in its box. */
-const LIST_ROW_H = 40;
 
 /** Even's five brightness steps as Glassly's 16 gray levels. */
 const GRAY: Record<Brightness, number> = { 0: 0, 1: 5, 2: 9, 3: 12, 4: 15 };
@@ -23,13 +21,22 @@ const GRAY: Record<Brightness, number> = { 0: 0, 1: 5, 2: 9, 3: 12, 4: 15 };
  */
 const FONT = 'builtin';
 
-/** The highlighted row of each list on the page, by box name. */
-export type ListSelection = ReadonlyMap<string, number>;
+/** The highlighted row of each list, and how far each text box is scrolled, by box name. */
+export interface ListSelection {
+  rows: ReadonlyMap<string, number>;
+  scrolled: ReadonlyMap<string, number>;
+}
+
+/** Lines of Pane's text that fit a text box (Even's firmware font, 27 px a line). */
+function linesThatFit(box: TextBox): number {
+  return Math.max(1, Math.floor((box.h - 2 * (box.pad ?? TEXT_PAD)) / LINE_H));
+}
 
 /** The rows a list box shows: a window around the highlight, the highlighted row marked. */
 export function listLines(box: ListBox, selected: number): string[] {
   const items = listItems(box);
-  const rows = Math.max(1, Math.floor((box.h - 2 * LIST_PAD) / LIST_ROW_H));
+  // Drawn as text, rows sit a text line apart, so more of them fit than in Even's 40 px list rows.
+  const rows = Math.max(1, Math.floor((box.h - 2 * LIST_PAD) / LINE_H));
   const at = Math.max(0, Math.min(selected, items.length - 1));
   const first = Math.max(0, Math.min(at - rows + 1, items.length - rows));
   return items.slice(first, first + rows).map((item, index) => `${first + index === at ? '> ' : '   '}${item}`);
@@ -85,8 +92,12 @@ export function renderPage(page: Page, selection: ListSelection, budget: Budget)
   const texts: Stacked[] = [];
   const lists: RenderElement[] = [];
   for (const box of page.boxes) {
-    if (box.kind === 'text') texts.push({ box, lines: textContent(box).split('\n') });
-    else if (box.kind === 'list') lists.push(textElement(box, listLines(box, selection.get(box.name) ?? 0).join('\n'), 4));
+    if (box.kind === 'text') {
+      // Even's firmware scrolls a text box longer than the screen; here the swipes move this window.
+      const lines = textContent(box).split('\n');
+      const from = selection.scrolled.get(box.name) ?? 0;
+      texts.push({ box, lines: box.capture && lines.length > linesThatFit(box) ? lines.slice(from, from + linesThatFit(box)) : lines });
+    } else if (box.kind === 'list') lists.push(textElement(box, listLines(box, selection.rows.get(box.name) ?? 0).join('\n'), 4));
   }
   const fitted = fitBudget(texts, Math.max(0, budget.maxText - lists.length));
   const pad = (box: Box) => (box.kind === 'text' ? box.pad ?? TEXT_PAD : TEXT_PAD);
@@ -107,35 +118,56 @@ export function capturedList(page: Page): ListBox | null {
   return page.boxes.find((box): box is ListBox => box.kind === 'list' && box.capture === true) ?? null;
 }
 
+/** The page's text box that takes swipes and is longer than it shows, if any. */
+export function scrollableText(page: Page): TextBox | null {
+  const box = page.boxes.find((candidate): candidate is TextBox => candidate.kind === 'text' && candidate.capture === true);
+  return box && textContent(box).split('\n').length > linesThatFit(box) ? box : null;
+}
+
 /**
- * Keeps the highlight of each list the way Even's firmware does: a new list starts on its first
- * row, the same list keeps its row across redraws, swipes move it and stop at the ends.
+ * Keeps what Even's firmware keeps for a page: each list's highlight (a new list starts on its
+ * `selected` row or the first, the same list keeps its row across redraws, swipes stop at the
+ * ends) and how far a long text box is scrolled.
  */
 export class ListFocus {
   private key = '';
-  private selected = new Map<string, number>();
+  private rows = new Map<string, number>();
+  private scrolled = new Map<string, number>();
 
   /** Call with each page shown; returns the selection to draw it with. */
   show(page: Page): ListSelection {
     const lists = page.boxes.filter((box): box is ListBox => box.kind === 'list');
-    const key = JSON.stringify(lists.map((box) => [box.name, box.items]));
+    const scrollable = scrollableText(page);
+    const key = JSON.stringify([lists.map((box) => [box.name, box.items]), scrollable ? [scrollable.name, scrollable.lines] : null]);
     if (key !== this.key) {
       this.key = key;
-      this.selected = new Map(lists.map((box) => [box.name, 0]));
+      this.rows = new Map(lists.map((box) => [box.name, Math.max(0, Math.min(box.selected ?? 0, box.items.length - 1))]));
+      this.scrolled = new Map();
     }
-    return this.selected;
+    return { rows: this.rows, scrolled: this.scrolled };
   }
 
   /** Moves the highlight of `list`; false when it was already at that end. */
   move(list: ListBox, step: 1 | -1): boolean {
-    const at = this.selected.get(list.name) ?? 0;
+    const at = this.rows.get(list.name) ?? 0;
     const next = Math.max(0, Math.min(at + step, Math.min(list.items.length, listItems(list).length) - 1));
     if (next === at) return false;
-    this.selected.set(list.name, next);
+    this.rows.set(list.name, next);
+    return true;
+  }
+
+  /** Scrolls a long text box by most of a screen, keeping one line in view; false at either end. */
+  scroll(box: TextBox, step: 1 | -1): boolean {
+    const fit = linesThatFit(box);
+    const last = Math.max(0, textContent(box).split('\n').length - fit);
+    const at = this.scrolled.get(box.name) ?? 0;
+    const next = Math.max(0, Math.min(at + step * Math.max(1, fit - 1), last));
+    if (next === at) return false;
+    this.scrolled.set(box.name, next);
     return true;
   }
 
   selectedIn(list: ListBox): number {
-    return this.selected.get(list.name) ?? 0;
+    return this.rows.get(list.name) ?? 0;
   }
 }

@@ -39,6 +39,8 @@ export interface TextBox extends BoxFrame {
 export interface ListBox extends BoxFrame {
   kind: 'list';
   items: string[];
+  /** The row highlighted when the list first shows, where the host draws its own highlight (Glassly); Even's firmware starts on the first. */
+  selected?: number;
 }
 
 /** A grayscale picture. `key` names what it shows; it is drawn and sent only when the key changes. */

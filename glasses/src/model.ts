@@ -5,7 +5,7 @@ export interface NotifyCardState extends Pick<NotifySharedState, 'machine' | 'ep
   /** Someone used this computer in the last 2 minutes (a Pane new enough to say). */
   inUse?: boolean;
   items: Array<Pick<NotifyItem, 'id' | 'ui' | 'title' | 'context' | 'suggestions' | 'state' | 'createdAt'> & {
-    choices?: Array<{ label: string }>;
+    choices?: Array<{ label: string; recommended?: boolean }>;
     source: Pick<NotifySource, 'name' | 'paneId' | 'panelId'>;
   }>;
 }
@@ -25,6 +25,8 @@ export interface Card {
   context?: string;
   /** options: the choice labels. */
   choices: string[];
+  /** The index in `choices` the asker recommends, if any. */
+  recommended?: number;
   /** ask: suggested answers. */
   suggestions: string[];
   /** The asking Pane's name. */
@@ -190,6 +192,8 @@ export function cardsFromNotify(computerId: string, state: NotifyCardState): Car
       paneName: item.source.name,
       createdAt: item.createdAt,
     };
+    const recommended = (item.choices ?? []).findIndex((choice) => choice.recommended === true);
+    if (recommended >= 0) card.recommended = recommended;
     if (item.context) card.context = item.context;
     if (item.source.paneId) card.paneId = item.source.paneId;
     if (item.source.panelId) card.panelId = item.source.panelId;

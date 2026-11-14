@@ -267,7 +267,7 @@ const notifyStateSchema: BoundarySchema<NotifyCardState> = boundary.object({
     ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
     title: boundary.string,
     context: boundary.optional(boundary.string),
-    choices: boundary.optional(boundary.array(boundary.object({ label: boundary.string }))),
+    choices: boundary.optional(boundary.array(boundary.object({ label: boundary.string, recommended: boundary.optional(boundary.boolean) }))),
     suggestions: boundary.optional(boundary.array(boundary.string)),
     state: boundary.enumeration('waiting', 'sent', 'answered', 'expired', 'info'),
     createdAt: boundary.number,

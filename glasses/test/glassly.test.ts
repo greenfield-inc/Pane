@@ -1,0 +1,159 @@
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { beforeAll, describe, expect, it } from 'vitest';
+import type { GlassesCapabilities, RenderElement } from '@glassly/miniapp';
+import { GlassesApp } from '../src/app';
+import { DemoSource } from '../src/demo';
+import { homeListPage, homeRows } from '../src/homeList';
+import type { Card, Computer, PaneEntry } from '../src/model';
+import type { Page } from '../src/page';
+import { cardPage, fullQuestionPage } from '../src/screens';
+import { pinnedPackage } from '../glassly/scripts/pinned';
+import { ListFocus, renderPage, scrollableText } from '../glassly/src/background/render';
+import { tierOf } from '../glassly/src/background/tier';
+import { TouchMapper } from '../glassly/src/background/touch';
+import { glasslyDictation } from '../glassly/src/background/transcription';
+
+/** Every device profile Glassly 0.4.0 ships, by file name, read from the pinned engine tarball. */
+const profiles = new Map<string, GlassesCapabilities>();
+
+beforeAll(async () => {
+  const dir = join(await pinnedPackage('engine'), 'src', 'types', 'capabilities');
+  for (const file of readdirSync(dir).filter((name) => name.endsWith('.ts') && name !== 'index.ts')) {
+    const module: Record<string, unknown> = await import(pathToFileURL(join(dir, file)).href);
+    const profile = Object.values(module).find((value): value is GlassesCapabilities => typeof value === 'object' && value !== null && 'modelName' in value);
+    if (profile) profiles.set(file.replace(/\.ts$/, ''), profile);
+  }
+}, 60_000);
+
+const profile = (name: string): GlassesCapabilities => {
+  const found = profiles.get(name);
+  if (!found) throw new Error(`No Glassly profile ${name}; have ${[...profiles.keys()].join(', ')}`);
+  return found;
+};
+
+const text = (elements: RenderElement[]) => elements.flatMap((element) => (element.type === 'text' ? [element.text] : []));
+
+const pane = (id: string, activityAt: number): PaneEntry => ({ kind: 'pane', id, name: id, agent: 'Claude', status: 'idle', panelId: `panel-${id}`, activityAt });
+const computer = (entries: PaneEntry[]): Computer => ({ id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: null, os: 'macOS', entries });
+const card: Card = {
+  key: 'studio:q1', computerId: 'studio', machine: 'studio-mac', itemId: 'q1', ui: 'options', waiting: true,
+  title: 'Which fix should land first?', choices: ['Stub the clock', 'Loosen retry', 'Mock the endpoint'], recommended: 1,
+  suggestions: [], paneName: 'fix-login', createdAt: 1,
+};
+
+describe('device tiers', () => {
+  it('gives stock G2 the full app within its six text elements, and the Simulated Glasses its larger budget', () => {
+    expect(tierOf(profile('even-realities-g2'))).toEqual({ kind: 'full', budget: { maxText: 6 } });
+    expect(tierOf(profile('simulated-glasses'))).toEqual({ kind: 'full', budget: { maxText: 120 } });
+  });
+
+  it('gives every glasses without a G2-sized screen and swipes the read-only glance', () => {
+    for (const name of ['even-realities-g1', 'vuzix-z100', 'rayneo-io', 'mentra-display', 'memomind-one', 'nimo', 'mentra-live', 'none']) {
+      expect([name, tierOf(profile(name)).kind]).toEqual([name, 'glance']);
+    }
+    expect(tierOf(null).kind).toBe('glance');
+  });
+
+  it("keeps every screen of the app within stock G2's element budget", async () => {
+    const pages: Page[] = [];
+    const app = new GlassesApp({
+      source: new DemoSource(() => ({ cancel() {} })), show: (page) => pages.push(page), exit() {}, mic: async () => true,
+      later: () => ({ cancel() {} }), now: () => Date.now(), clock: () => '9:40', lastSessionComputer: { read: () => null, write() {} },
+    });
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    for (const gesture of ['down', 'press', 'double', 'down', 'down', 'press', 'double', 'up', 'up', 'down', 'down', 'down', 'down', 'down', 'press'] as const) {
+      app.handle({ type: gesture });
+      await settle();
+    }
+    const budget = tierOf(profile('even-realities-g2'));
+    if (budget.kind !== 'full') throw new Error('stock G2 should get the full app');
+    expect(pages.length).toBeGreaterThan(5);
+    for (const page of pages) {
+      const elements = renderPage(page, new ListFocus().show(page), budget.budget);
+      expect(elements.length).toBeLessThanOrEqual(6);
+      expect(elements.every((element) => element.type === 'text')).toBe(true);
+    }
+  });
+});
+
+describe('the renderer', () => {
+  it("draws home's six rows as one evenly spaced element, the selected row marked", () => {
+    const rows = homeRows([computer(Array.from({ length: 6 }, (_, index) => pane(`p${index}`, 100 - index)))], []);
+    const page = homeListPage(rows, { selected: 1 }, () => '9:40');
+    expect(page.boxes.filter((box) => box.kind === 'text')).toHaveLength(7);
+    const elements = renderPage(page, new ListFocus().show(page), { maxText: 6 });
+    expect(elements).toHaveLength(2);
+    expect(text(elements)[1]?.split('\n').map((line) => line.slice(0, 4))).toEqual(['   ○', '> ○ ', '   ○', '   ○', '   ○', '   ○']);
+  });
+
+  it('starts a card on its recommended choice, starred, and moves the highlight as firmware does', () => {
+    const page = cardPage(card, []);
+    const focus = new ListFocus();
+    const choices = () => text(renderPage(page, focus.show(page), { maxText: 6 })).at(-1);
+    expect(choices()).toBe('   Stub the clock\n> ★ Loosen retry\n   Mock the endpoint\n   Something else (hold to say it)');
+    const list = page.boxes.find((box) => box.kind === 'list');
+    if (list?.kind !== 'list') throw new Error('a card has a choice list');
+    expect(focus.move(list, 1)).toBe(true);
+    expect(focus.selectedIn(list)).toBe(2);
+    expect(focus.move(list, 1)).toBe(true);
+    expect(focus.move(list, 1)).toBe(false);
+    // The same card drawn again keeps the highlight where the swipes left it.
+    focus.show(cardPage(card, []));
+    expect(focus.selectedIn(list)).toBe(3);
+  });
+
+  it('scrolls a question longer than the screen by swipe, as Even firmware scrolls its text box', () => {
+    const long: Card = { ...card, title: Array.from({ length: 40 }, (_, index) => `Line ${index} of a long question.`).join(' ') };
+    const page = fullQuestionPage(long);
+    const box = scrollableText(page);
+    if (!box) throw new Error('a long question scrolls');
+    const focus = new ListFocus();
+    const body = () => text(renderPage(page, focus.show(page), { maxText: 6 })).at(-1) ?? '';
+    const first = body();
+    expect(focus.scroll(box, -1)).toBe(false);
+    expect(focus.scroll(box, 1)).toBe(true);
+    expect(body()).not.toBe(first);
+    expect(body().split('\n')[0]).toBe(first.split('\n').at(-1));
+  });
+});
+
+describe('touch', () => {
+  it('maps a held press and its release to hold to talk, and ignores the tap a release can bring', () => {
+    let now = 0;
+    const touch = new TouchMapper(() => now);
+    expect(['single_tap', 'double_tap', 'swipe_up', 'swipe_down'].map((kind) => touch.gesture(kind)?.type)).toEqual(['press', 'double', 'up', 'down']);
+    expect(touch.gesture('tap_start')).toEqual({ type: 'hold' });
+    expect(touch.gesture('long_press')).toBeNull();
+    now = 2_000;
+    expect(touch.gesture('tap_end')).toEqual({ type: 'release' });
+    now = 2_200;
+    expect(touch.gesture('single_tap')).toBeNull();
+    now = 3_000;
+    expect(touch.gesture('single_tap')).toEqual({ type: 'press' });
+    expect(touch.gesture('tap_end')).toBeNull();
+  });
+});
+
+describe("Glassly's speech-to-text", () => {
+  it('shows partial words while you speak and answers with every final phrase', async () => {
+    let heard: ((words: { text: string; isFinal: boolean }) => void) | null = null;
+    let stopped = false;
+    const previews: string[] = [];
+    const dictation = glasslyDictation((onHeard) => {
+      heard = onHeard;
+      return () => { stopped = true; };
+    }, (fn) => {
+      queueMicrotask(fn);
+      return { cancel() {} };
+    }, (preview) => previews.push(preview));
+    const say = (words: string, isFinal: boolean) => (heard as unknown as (value: { text: string; isFinal: boolean }) => void)({ text: words, isFinal });
+    say('approve the', false);
+    say('approve the nightly backup', true);
+    say('and run', false);
+    expect(previews.at(-1)).toBe('approve the nightly backup and run');
+    expect(await dictation.finish()).toBe('approve the nightly backup and run');
+    expect(stopped).toBe(true);
+  });
+});

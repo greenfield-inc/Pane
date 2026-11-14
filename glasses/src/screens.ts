@@ -78,7 +78,7 @@ export function firstRunPage(): Page {
 }
 
 export type CardRow =
-  | { kind: 'choice'; label: string }
+  | { kind: 'choice'; label: string; recommended?: true }
   | { kind: 'approve'; approved: boolean; label: string }
   | { kind: 'read-all'; label: string }
   | { kind: 'voice'; label: string }
@@ -105,12 +105,22 @@ export function cardRows(card: Card): CardRow[] {
   if (card.ui === 'approve') {
     rows.push({ kind: 'approve', approved: true, label: 'Approve' }, { kind: 'approve', approved: false, label: 'Not yet' });
   } else {
-    for (const label of card.ui === 'ask' ? card.suggestions : card.choices) rows.push({ kind: 'choice', label });
+    if (card.ui === 'ask') for (const label of card.suggestions) rows.push({ kind: 'choice', label });
+    else card.choices.forEach((label, index) => rows.push(index === card.recommended ? { kind: 'choice', label, recommended: true } : { kind: 'choice', label }));
   }
   if (questionCut(card)) rows.push({ kind: 'read-all', label: 'Read the whole question' });
   const voice = card.ui === 'approve' ? 'Say why (hold)' : card.ui === 'ask' ? 'Say it (hold)' : 'Something else (hold to say it)';
   rows.push({ kind: 'voice', label: voice });
   return rows;
+}
+
+/** A card's choices; the recommended one is starred, and starts highlighted where the host draws the highlight. */
+function choiceList(card: Card): ListBox {
+  const rows = cardRows(card);
+  const box = list('choices', CHOICES_Y, SCREEN_H - CHOICES_Y, rows.map((row) => (row.kind === 'choice' && row.recommended ? `★ ${row.label}` : row.label)));
+  const recommended = rows.findIndex((row) => row.kind === 'choice' && row.recommended === true);
+  if (recommended > 0) box.selected = recommended;
+  return box;
 }
 
 /**
@@ -130,7 +140,7 @@ export function cardPage(card: Card, contextLines: readonly string[]): Page {
   }
   boxes.push(
     { kind: 'text', name: 'question', x: 0, y: questionY, w: SCREEN_W, h: questionH, pad: BAR_PAD, lines: question, brightness: BRIGHT },
-    list('choices', CHOICES_Y, SCREEN_H - CHOICES_Y, cardRows(card).map((row) => row.label)),
+    choiceList(card),
   );
   return { boxes };
 }
