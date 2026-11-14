@@ -448,8 +448,8 @@ describe('TerminalPanelManager hidden output delivery', () => {
     vi.useRealTimers();
   });
 
-  it.each([true, false])('bounds interactive output scheduling with visibility=%s', (visible) => {
-    vi.useFakeTimers();
+  function outputHarness(visible: boolean) {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
     const send = vi.fn();
     const daemonSend = vi.fn();
     setPaneRuntime({
@@ -465,25 +465,87 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
     manager.terminals.set(terminal.panelId, terminal);
     manager.setupTerminalHandlers(terminal);
-    const sink = visible ? send : daemonSend;
-    const outputs = () => sink.mock.calls.filter(call => call[0] === 'terminal:output');
-    emit('before input');
-    vi.advanceTimersByTime(4);
-    manager.writeToTerminal(terminal.panelId, 'x');
-    expect(outputs()).toHaveLength(visible ? 1 : 0);
-    emit('after input');
-    vi.advanceTimersByTime(7);
-    expect(outputs()).toHaveLength(visible ? 1 : 0);
+    const sent = (sink: ReturnType<typeof vi.fn>) => sink.mock.calls
+      .flatMap(([channel, payload]) => channel === 'terminal:output' ? [payload.output] : []);
+    return { manager, terminal, emit: (data: string) => emit(data), rendered: () => sent(send), daemon: () => sent(daemonSend) };
+  }
+
+  it('sends a visible panel\'s output once reads pause after a quiet spell and batches what follows', () => {
+    const { manager, terminal, emit, rendered } = outputHarness(true);
+    // A redraw that arrives in reads 2 ms apart goes out whole, 3 ms after its last read.
+    emit('top rows ');
+    vi.advanceTimersByTime(2);
+    emit('middle rows ');
+    vi.advanceTimersByTime(2);
+    emit('bottom rows');
+    vi.advanceTimersByTime(2);
+    expect(rendered()).toEqual([]);
     vi.advanceTimersByTime(1);
-    expect(outputs()).toHaveLength(visible ? 2 : 0);
+    expect(rendered()).toEqual(['top rows middle rows bottom rows']);
+    emit('more output');
+    vi.advanceTimersByTime(31);
+    expect(rendered()).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(rendered().at(-1)).toBe('more output');
+
+    // Output that never pauses goes out one interval after it began.
+    vi.advanceTimersByTime(100);
+    for (let i = 0; i < 16; i++) { emit('.'); vi.advanceTimersByTime(2); }
+    expect(rendered()).toHaveLength(3);
+    expect(rendered().at(-1)).toBe('.'.repeat(16));
+
     vi.advanceTimersByTime(250);
-    expect(outputs()).toHaveLength(visible ? 2 : 1);
-    emit('bulk output');
-    vi.advanceTimersByTime(8);
-    expect(outputs()).toHaveLength(visible ? 2 : 1);
-    vi.advanceTimersByTime(visible ? 24 : 242);
-    expect(outputs()).toHaveLength(visible ? 3 : 2);
-    if (!visible) expect(send).not.toHaveBeenCalledWith('terminal:output', expect.anything());
+    emit('streaming');
+    vi.advanceTimersByTime(3);
+    emit('pending');
+    manager.writeToTerminal(terminal.panelId, 'x');
+    expect(rendered().slice(-2)).toEqual(['streaming', 'pending']);
+    emit('echo');
+    vi.advanceTimersByTime(7);
+    expect(rendered()).toHaveLength(5);
+    vi.advanceTimersByTime(1);
+    expect(rendered().at(-1)).toBe('echo');
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('holds a visible panel\'s synchronized frame until it closes', () => {
+    const { terminal, emit, rendered } = outputHarness(true);
+    emit('\x1b[?2026h\x1b[Hspin');
+    vi.advanceTimersByTime(20);
+    expect(rendered()).toEqual([]);
+    // The end marker arrives split across two reads.
+    emit('ner\x1b[?20');
+    emit('26l');
+    expect(rendered()).toEqual(['\x1b[?2026h\x1b[Hspinner\x1b[?2026l']);
+
+    // A frame that closes sooner than the interactive interval after the last send waits out the rest of it.
+    vi.advanceTimersByTime(3);
+    emit('\x1b]0;✳ Claude Code\x07\x1b[?2026h\x1b[Hfirst ');
+    emit('word\x1b[?2026l');
+    vi.advanceTimersByTime(4);
+    expect(rendered()).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(rendered().at(-1)).toBe('\x1b]0;✳ Claude Code\x07\x1b[?2026h\x1b[Hfirst word\x1b[?2026l');
+
+    // A frame that never closes goes out after a full interval.
+    vi.advanceTimersByTime(100);
+    emit('\x1b[?2026h\x1b[Hstuck');
+    vi.advanceTimersByTime(31);
+    expect(rendered()).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(rendered().at(-1)).toBe('\x1b[?2026h\x1b[Hstuck');
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('keeps a hidden panel on its slow cadence, off the renderer', () => {
+    const { manager, terminal, emit, rendered, daemon } = outputHarness(false);
+    emit('background');
+    manager.writeToTerminal(terminal.panelId, 'x');
+    vi.advanceTimersByTime(249);
+    expect(daemon()).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(daemon()).toEqual(['background']);
+    expect(rendered()).toEqual([]);
     disposeFlowControlRecord(terminal.flowControl);
   });
 

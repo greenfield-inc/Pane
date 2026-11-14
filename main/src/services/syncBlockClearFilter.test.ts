@@ -31,6 +31,20 @@ describe('filterSyncBlockClears', () => {
     expect(state.inSyncBlock).toBe(false);
   });
 
+  it('sees markers split across chunks', () => {
+    const state = fresh();
+    expect(filterSyncBlockClears(state, `a${SYNC_START.slice(0, 3)}`)).toBe(`a${SYNC_START.slice(0, 3)}`);
+    expect(filterSyncBlockClears(state, `${SYNC_START.slice(3)}${CLEAR}x${SYNC_END.slice(0, 7)}`))
+      .toBe(`${SYNC_START.slice(3)}x${SYNC_END.slice(0, 7)}`);
+    expect(state.inSyncBlock).toBe(true);
+    filterSyncBlockClears(state, `${SYNC_END.slice(7)}${CLEAR}`);
+    expect(state.inSyncBlock).toBe(false);
+    filterSyncBlockClears(state, ALT_ENTER.slice(0, 1));
+    filterSyncBlockClears(state, ALT_ENTER.slice(1, 4));
+    filterSyncBlockClears(state, ALT_ENTER.slice(4));
+    expect(state.filterInAltScreen).toBe(true);
+  });
+
   it('keeps clears inside sync blocks while the alternate screen is active', () => {
     const state = fresh();
     filterSyncBlockClears(state, ALT_ENTER);
