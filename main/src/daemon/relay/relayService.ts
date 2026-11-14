@@ -22,6 +22,9 @@ const PANE_RELAYS = ['us', 'eu', 'asia'].map((region) => `${region}.relay.${PANE
 /** The port same-network phones reach this computer on; another free port when it is taken. */
 const LOCAL_PORT = 42138;
 const RENEW_CHECK_MS = 12 * 60 * 60_000;
+/** Without a valid certificate every connection is refused, so a failed order retries from 1 minute, doubling up to 30. */
+const CERTIFICATE_RETRY_FIRST_MS = 60_000;
+const CERTIFICATE_RETRY_MAX_MS = 30 * 60_000;
 
 export interface RelaySecretStore {
   read(key: string): Promise<string | null>;
@@ -59,6 +62,8 @@ export class RelayService {
   private agentState: RelayAgentState = { status: 'stopped' };
   private lastError: string | null = null;
   private renewTimer: NodeJS.Timeout | null = null;
+  private certificateRetry: NodeJS.Timeout | null = null;
+  private certificateFailures = 0;
   private running: Promise<void> = Promise.resolve();
   private readonly exchange: PairingExchange;
   private readonly listeners = new Set<(status: RelayStatus) => void>();
@@ -292,12 +297,25 @@ export class RelayService {
     try {
       await this.certificate.ensure();
       this.lastError = null;
+      this.certificateFailures = 0;
     } catch (error) {
       // A valid certificate keeps serving; Remote Access shows the reason days before it matters.
       this.lastError = `Could not renew this computer's certificate: ${error instanceof Error ? error.message : String(error)}`;
       this.deps.log?.(`[relay] ${this.lastError}`);
+      if (!this.certificate.isValid()) this.retryCertificate();
     }
     this.emit();
+  }
+
+  private retryCertificate(): void {
+    if (this.certificateRetry) return;
+    const delay = Math.min(CERTIFICATE_RETRY_MAX_MS, CERTIFICATE_RETRY_FIRST_MS * 2 ** this.certificateFailures);
+    this.certificateFailures += 1;
+    this.certificateRetry = setTimeout(() => {
+      this.certificateRetry = null;
+      void this.renewIfDue();
+    }, delay * (0.5 + Math.random() * 0.5));
+    this.certificateRetry.unref();
   }
 
   private localUrls(): string[] {
@@ -376,6 +394,9 @@ export class RelayService {
     await this.stopDirect();
     if (this.renewTimer) clearInterval(this.renewTimer);
     this.renewTimer = null;
+    if (this.certificateRetry) clearTimeout(this.certificateRetry);
+    this.certificateRetry = null;
+    this.certificateFailures = 0;
     this.agent?.stop();
     this.agent = null;
     this.agentState = { status: 'stopped' };

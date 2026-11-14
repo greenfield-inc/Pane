@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
-import { X509Certificate } from 'crypto';
+import { generateKeyPairSync, X509Certificate } from 'crypto';
 import { mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import net from 'net';
 import { tmpdir } from 'os';
@@ -93,5 +93,57 @@ describe.skipIf(!PEBBLE_BIN || !PEBBLE_DIR)('computer certificate (Pebble)', () 
     await restarted.load();
     await restarted.ensure();
     expect(restarted.isValid()).toBe(true);
+  }, 30_000);
+
+  /** A certificate issued now, with the stores a restarted computer reads it back from. */
+  async function issued() {
+    const key = await loadComputerKey(memory());
+    const certificateStore = memory();
+    const accountStore = memory();
+    const first = new ComputerCertificate({ key, domain: 'relay.test', certificateStore, accountStore, setTxt: async () => undefined, directoryUrl, acmeCa });
+    await first.ensure();
+    const status = first.getStatus();
+    if (!status) throw new Error('no certificate was issued');
+    return { key, certificateStore, accountStore, status, serial: new X509Certificate(certificateStore.value ?? '').serialNumber };
+  }
+
+  it('renews with the saved ACME account once a third of the lifetime is left', async () => {
+    const { key, certificateStore, accountStore, status, serial } = await issued();
+    const account = accountStore.value;
+    const later = new ComputerCertificate({
+      key, domain: 'relay.test', certificateStore, accountStore, setTxt: async () => undefined, directoryUrl, acmeCa,
+      now: () => Date.parse(status.renewAt) + 1_000,
+    });
+    await later.load();
+    expect(later.needsRenewal()).toBe(true);
+    await later.ensure();
+
+    expect(new X509Certificate(certificateStore.value ?? '').serialNumber).not.toBe(serial);
+    expect(accountStore.value).toBe(account);
+    expect(later.isValid()).toBe(true);
+  }, 30_000);
+
+  it('registers a saved account key this ACME server has never seen, as after switching directories', async () => {
+    const key = await loadComputerKey(memory());
+    const certificate = new ComputerCertificate({
+      key, domain: 'relay.test', certificateStore: memory(), accountStore: memory(generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()),
+      setTxt: async () => undefined, directoryUrl, acmeCa,
+    });
+    await certificate.ensure();
+    expect(certificate.isValid()).toBe(true);
+  }, 30_000);
+
+  it('replaces a certificate that expired while the computer was off', async () => {
+    const { key, certificateStore, accountStore, status, serial } = await issued();
+    const afterExpiry = new ComputerCertificate({
+      key, domain: 'relay.test', certificateStore, accountStore, setTxt: async () => undefined, directoryUrl, acmeCa,
+      now: () => Date.parse(status.notAfter) + 24 * 60 * 60_000,
+    });
+    await afterExpiry.load();
+    expect(afterExpiry.isValid()).toBe(false);
+    await afterExpiry.ensure();
+
+    expect(new X509Certificate(certificateStore.value ?? '').serialNumber).not.toBe(serial);
+    expect(afterExpiry.secureContext()).not.toBeNull();
   }, 30_000);
 });

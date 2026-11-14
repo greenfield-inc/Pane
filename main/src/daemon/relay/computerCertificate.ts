@@ -80,13 +80,17 @@ export class ComputerCertificate {
     const { key, domain } = this.options;
     const base = `${key.id}.${domain}`;
     const [, csr] = await acme.crypto.createCsr({ commonName: base, altNames: [base, `*.${base}`] }, key.privateKeyPem);
-    let accountKey = await this.options.accountStore.read();
-    if (!accountKey) {
-      accountKey = (await acme.crypto.createPrivateEcdsaKey('P-256')).toString();
-      await this.options.accountStore.write(accountKey);
-    }
+    const savedAccountKey = await this.options.accountStore.read();
+    const accountKey = savedAccountKey ?? (await acme.crypto.createPrivateEcdsaKey('P-256')).toString();
+    if (!savedAccountKey) await this.options.accountStore.write(accountKey);
     if (this.options.acmeCa) acme.axios.defaults.httpsAgent = new https.Agent({ ca: this.options.acmeCa });
     const client = new acme.Client({ directoryUrl: this.options.directoryUrl ?? LETS_ENCRYPT_DIRECTORY, accountKey });
+    if (savedAccountKey) {
+      // Looks the saved account up, so `auto` reuses it: registering a known key again makes
+      // acme-client send an empty account update, which ACME servers refuse. An account this server
+      // never saw (another directory) is registered by `auto`, which also reports any other failure.
+      await client.createAccount({ onlyReturnExisting: true }).catch(() => undefined);
+    }
     // The wildcard and the base name share one TXT name, so both values are published together.
     const values = new Set<string>();
     this.options.log?.(`[relay] requesting a certificate for ${base}`);
