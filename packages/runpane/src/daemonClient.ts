@@ -199,8 +199,11 @@ function pinnedServerIdentity(fingerprint: string, machine: string): (host: stri
   };
 }
 
+// A type alias, not an interface, so it passes as Node's header record.
+type InvokeHeaders = { 'Content-Type': string; Authorization?: string };
+
 /** `fetch` for a linked computer: the same POST over https, with its key pinned (fetch takes no certificate check). */
-function pinnedFetch(url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }, fingerprint: string, machine: string): Promise<Response> {
+function pinnedFetch(url: string, init: { headers: InvokeHeaders; body: string; signal?: AbortSignal }, fingerprint: string, machine: string): Promise<Response> {
   return new Promise((resolve, reject) => {
     const request = https.request(url, {
       method: 'POST',
@@ -253,7 +256,7 @@ export async function invokeRemoteDaemon<T>(
   const body: RemoteInvokeBody = { channel, args };
   const caller = daemonCaller();
   if (caller) body.caller = caller;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const headers: InvokeHeaders = { 'Content-Type': 'application/json' };
   if (target.token) headers.Authorization = `Bearer ${target.token}`;
   let response: Response;
   try {
