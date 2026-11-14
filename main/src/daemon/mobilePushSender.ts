@@ -301,7 +301,7 @@ export class MobilePushSender {
         if (open) await this.markDelivered(registration.id, eventId);
         console.log('[Pane mobile push] Delivered', { platform: registration.platform, kind: open ? 'question' : 'question-clear' });
       } catch (error) {
-        await this.deliveryFailed(registration, open ? 'question' : 'question-clear', error);
+        await this.deliveryFailed(registration, open ? 'question' : 'question-clear', error instanceof ProviderDeliveryError ? error : null);
       }
     }
   }
@@ -398,7 +398,7 @@ export class MobilePushSender {
         await this.markDelivered(registration.id, eventId);
         console.log('[Pane mobile push] Delivered', { platform: registration.platform, kind });
       } catch (error) {
-        await this.deliveryFailed(registration, kind, error);
+        await this.deliveryFailed(registration, kind, error instanceof ProviderDeliveryError ? error : null);
       }
     }
   }
@@ -483,10 +483,10 @@ export class MobilePushSender {
   }
 
   /** Drops a grant the relay refused, revokes a token the provider refused, and logs why. */
-  private async deliveryFailed(registration: RemoteMobilePushRegistration, kind: string, error: unknown): Promise<void> {
+  private async deliveryFailed(registration: RemoteMobilePushRegistration, kind: string, error: ProviderDeliveryError | null): Promise<void> {
     if (error instanceof UnboundGrantError) await this.dropGrant(registration.id);
-    else if (error instanceof ProviderDeliveryError && isInvalidTokenResponse(error)) await this.revokeRegistration(registration.id);
-    const failure = error instanceof ProviderDeliveryError ? { status: error.status, reason: providerReason(error.body), message: error.message } : {};
+    else if (error && isInvalidTokenResponse(error)) await this.revokeRegistration(registration.id);
+    const failure = error ? { status: error.status, reason: providerReason(error.body), message: error.message } : {};
     console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind, ...failure });
   }
 
