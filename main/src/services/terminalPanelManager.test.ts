@@ -470,22 +470,26 @@ describe('TerminalPanelManager hidden output delivery', () => {
     return { manager, terminal, emit: (data: string) => emit(data), rendered: () => sent(send), daemon: () => sent(daemonSend) };
   }
 
-  it('sends a visible panel\'s first output at once and batches what follows', () => {
+  it('sends a visible panel\'s output after a quiet spell on the next tick and batches what follows', () => {
     const { manager, terminal, emit, rendered } = outputHarness(true);
-    emit('first word');
-    expect(rendered()).toEqual(['first word']);
-    emit('rest of the redraw');
-    vi.advanceTimersByTime(31);
+    // A redraw that arrives in two reads goes out whole.
+    emit('top rows ');
+    emit('bottom rows');
+    expect(rendered()).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(rendered()).toEqual(['top rows bottom rows']);
+    emit('more output');
+    vi.advanceTimersByTime(30);
     expect(rendered()).toHaveLength(1);
     vi.advanceTimersByTime(1);
-    expect(rendered()).toEqual(['first word', 'rest of the redraw']);
+    expect(rendered().at(-1)).toBe('more output');
 
     vi.advanceTimersByTime(250);
     emit('streaming');
+    vi.advanceTimersByTime(1);
     emit('pending');
-    expect(rendered()).toEqual(['first word', 'rest of the redraw', 'streaming']);
     manager.writeToTerminal(terminal.panelId, 'x');
-    expect(rendered().at(-1)).toBe('pending');
+    expect(rendered().slice(-2)).toEqual(['streaming', 'pending']);
     emit('echo');
     vi.advanceTimersByTime(7);
     expect(rendered()).toHaveLength(4);
@@ -494,18 +498,32 @@ describe('TerminalPanelManager hidden output delivery', () => {
     disposeFlowControlRecord(terminal.flowControl);
   });
 
-  it('sends a visible panel\'s synchronized frame as soon as it is complete', () => {
+  it('holds a visible panel\'s synchronized frame until it closes', () => {
     const { terminal, emit, rendered } = outputHarness(true);
-    emit('\x1b[?2026h\x1b[Hspinner');
+    emit('\x1b[?2026h\x1b[Hspin');
+    vi.advanceTimersByTime(20);
     expect(rendered()).toEqual([]);
-    emit('\x1b[?2026l\x1b]0;✳ Claude Code\x07');
-    emit('\x1b[?2026h\x1b[Hfirst ');
-    expect(rendered()).toHaveLength(1);
+    // The end marker arrives split across two reads.
+    emit('ner\x1b[?20');
+    emit('26l');
+    expect(rendered()).toEqual(['\x1b[?2026h\x1b[Hspinner\x1b[?2026l']);
+
+    // A frame that closes sooner than the interactive interval after the last send waits out the rest of it.
+    vi.advanceTimersByTime(3);
+    emit('\x1b]0;✳ Claude Code\x07\x1b[?2026h\x1b[Hfirst ');
     emit('word\x1b[?2026l');
-    expect(rendered()).toEqual([
-      '\x1b[?2026h\x1b[Hspinner\x1b[?2026l\x1b]0;✳ Claude Code\x07',
-      '\x1b[?2026h\x1b[Hfirst word\x1b[?2026l',
-    ]);
+    vi.advanceTimersByTime(4);
+    expect(rendered()).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(rendered().at(-1)).toBe('\x1b]0;✳ Claude Code\x07\x1b[?2026h\x1b[Hfirst word\x1b[?2026l');
+
+    // A frame that never closes goes out after a full interval.
+    vi.advanceTimersByTime(100);
+    emit('\x1b[?2026h\x1b[Hstuck');
+    vi.advanceTimersByTime(31);
+    expect(rendered()).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(rendered().at(-1)).toBe('\x1b[?2026h\x1b[Hstuck');
     disposeFlowControlRecord(terminal.flowControl);
   });
 

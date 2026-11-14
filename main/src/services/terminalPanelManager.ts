@@ -372,6 +372,8 @@ interface TerminalProcess {
   pasteModeSequenceTail?: string;
   // DEC Mode 2026 synchronized-output block tracking — persists across chunks
   inSyncBlock: boolean;
+  /** See SyncBlockClearFilterState. */
+  filterSequenceTail?: string;
   /** Alt-screen state as seen by filterSyncBlockClears (stream-ordered, may
    *  differ transiently from isAlternateScreen which is chunk-granular). */
   filterInAltScreen: boolean;
@@ -2277,6 +2279,39 @@ export class TerminalPanelManager extends EventEmitter {
     }
   }
 
+  /**
+   * Schedules a visible panel's buffered output. The batch interval counts
+   * from the last send, so output after a quiet spell (a typing echo, an
+   * agent's first word) goes out on the next timer tick, which still gathers
+   * every read of a redraw that arrives in several. A synchronized-output
+   * (DEC 2026) frame is painted whole by xterm: a frame that just opened is
+   * held until it closes or a full interval passes, and a closed frame goes
+   * out once the interactive interval has passed since the last send.
+   */
+  private scheduleVisibleOutputFlush(terminal: TerminalProcess, wasInSyncBlock: boolean, chunk: string): void {
+    const sinceFlush = performance.now() - (terminal.lastOutputFlushAt ?? -Infinity);
+    const interval = Date.now() < (terminal.interactiveOutputUntil ?? 0)
+      ? OUTPUT_BATCH_INTERVAL_INTERACTIVE : OUTPUT_BATCH_INTERVAL;
+    let wait: number;
+    if (!terminal.inSyncBlock && (wasInSyncBlock || chunk.includes(SYNC_END))) {
+      wait = OUTPUT_BATCH_INTERVAL_INTERACTIVE - sinceFlush;
+      if (wait <= 0) {
+        this.flushOutputBuffer(terminal);
+        return;
+      }
+    } else if (terminal.inSyncBlock && !wasInSyncBlock) {
+      wait = interval;
+    } else if (terminal.outputFlushTimer) {
+      return;
+    } else {
+      wait = Math.max(0, interval - sinceFlush);
+    }
+    if (terminal.outputFlushTimer) clearTimeout(terminal.outputFlushTimer);
+    terminal.outputFlushTimer = setTimeout(() => {
+      this.flushOutputBuffer(terminal);
+    }, wait);
+  }
+
   /** See syncBlockClearFilter.ts — state lives on the terminal object. */
   private filterSyncBlockClears(terminal: TerminalProcess, data: string): string {
     return filterSyncBlockClears(terminal, data);
@@ -2323,6 +2358,7 @@ export class TerminalPanelManager extends EventEmitter {
       }
 
       // Strip \x1b[2J inside DEC 2026 sync blocks before xterm.js sees the data
+      const wasInSyncBlock = terminal.inSyncBlock;
       const filtered = this.filterSyncBlockClears(terminal, data);
       this.captureAgentSessionId(terminal, filtered);
       terminal.screenEmulator?.write(filtered);
@@ -2341,31 +2377,13 @@ export class TerminalPanelManager extends EventEmitter {
       if (terminal.outputBuffer.length >= sizeThreshold) {
         // Buffer is large enough — flush immediately
         this.flushOutputBuffer(terminal);
-      } else if (terminal.isVisible && !terminal.inSyncBlock && filtered.includes(SYNC_END)) {
-        // The chunk closed a synchronized-output frame, which xterm paints
-        // whole, so batching it longer cannot reduce flicker, only delay it.
-        this.flushOutputBuffer(terminal);
+      } else if (terminal.isVisible) {
+        this.scheduleVisibleOutputFlush(terminal, wasInSyncBlock, filtered);
       } else if (!terminal.outputFlushTimer) {
-        // Hidden panels keep their slower cadence. Visible panels briefly use
-        // a tighter window after input, then return to bulk-output batching.
-        // A visible panel's interval counts from its last send, so the first
-        // chunk after a quiet interval (a typing echo, an agent's first word)
-        // goes out at once and the rest of the burst is batched behind it.
-        // Half a synchronized frame waits: its end is sent at once above.
-        const interval = terminal.isVisible
-          ? (Date.now() < (terminal.interactiveOutputUntil ?? 0)
-            ? OUTPUT_BATCH_INTERVAL_INTERACTIVE : OUTPUT_BATCH_INTERVAL)
-          : OUTPUT_BATCH_INTERVAL_HIDDEN;
-        const sinceFlush = terminal.isVisible
-          ? performance.now() - (terminal.lastOutputFlushAt ?? -Infinity) : 0;
-        const wait = interval - sinceFlush;
-        if (wait <= 0 && !terminal.inSyncBlock) {
+        // Hidden panels keep their slower cadence.
+        terminal.outputFlushTimer = setTimeout(() => {
           this.flushOutputBuffer(terminal);
-        } else {
-          terminal.outputFlushTimer = setTimeout(() => {
-            this.flushOutputBuffer(terminal);
-          }, wait);
-        }
+        }, OUTPUT_BATCH_INTERVAL_HIDDEN);
       }
     });
     

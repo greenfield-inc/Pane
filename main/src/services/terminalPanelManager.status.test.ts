@@ -308,8 +308,7 @@ describe('terminal status events', () => {
 
   it.each(['panel:agentStatus', 'terminal:output'])('cleans up even when %s delivery fails during teardown', async channel => {
     const fixture = attach('codex');
-    // The first chunk goes out at once; the second waits in the batch.
-    if (channel === 'terminal:output') { fixture.data('sent output'); fixture.data('pending output'); }
+    if (channel === 'terminal:output') fixture.data('pending output');
     const dispose = vi.spyOn(fixture.terminal.screenEmulator, 'dispose');
     setPaneRuntime({ eventSink: { send(sentChannel) {
       if (sentChannel === channel) throw new Error('event delivery failed');
