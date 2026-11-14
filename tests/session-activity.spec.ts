@@ -208,19 +208,19 @@ test('the Session icon spins only for real turns, with no flicker (J1–J10, J12
     const capture = JSON.parse(readFileSync(path.join(SCREENS, 'claude-long-bash.json'), 'utf8')) as { frames: Array<{ t: number }>; marks: Array<{ t: number; label: string }> };
     const mark = (label: string) => capture.marks.find(entry => entry.label === label)!.t;
     const lastChange = Math.max(...capture.frames.filter(frame => frame.t < mark('bash-mid')).map(frame => frame.t)) - mark('turn-start');
-    const frozenFor = firstAt(j7, 'idle')! - (j7FrozenAt + lastChange);
+    const frozenFor = firstAt(j7, 'idle', firstAt(j7, 'working'))! - (j7FrozenAt + lastChange);
     console.log(`[J7] idle ${(frozenFor / 1000).toFixed(1)} s after the screen froze`);
     expect(frozenFor).toBeGreaterThanOrEqual(23_000);
     expect(frozenFor).toBeLessThanOrEqual(29_000);
     // A stalled chat turn: working 10 s in, idle by the stall limit plus 10 s.
     const stall = await log('J7 stall');
     expect(transitions(stall)).toEqual(['working', 'idle']);
-    expect(firstAt(stall, 'idle')! - j7Stall).toBeLessThanOrEqual(STALL_MS + 12_000);
+    expect(firstAt(stall, 'idle', firstAt(stall, 'working'))! - j7Stall).toBeLessThanOrEqual(STALL_MS + 12_000);
     // J9: idle within 10 s of the Pane leaving, and never working again.
     for (const name of ['J9 archive', 'J9 close', 'J9 detach']) {
       const j9 = await log(name);
       expect(transitions(j9), name).toEqual(['working', 'idle']);
-      expect(firstAt(j9, 'idle')! - j9At, name).toBeLessThanOrEqual(10_000);
+      expect(firstAt(j9, 'idle', j9At)! - j9At, name).toBeLessThanOrEqual(10_000);
     }
     // J10: a long silent command spins once and holds, with no dips, until the turn ends.
     expect(transitions(await log('J10 long command'))).toEqual(['working', 'idle']);
