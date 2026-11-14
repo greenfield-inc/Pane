@@ -59,6 +59,8 @@ export function isolatedPane(prefix: string, extra: Record<string, string> = {},
     ...extra,
   });
   if (options.agentLogin) {
+    // The test runner puts the repository's node_modules/.bin first; real agents come from the install.
+    env.PATH = env.PATH.split(path.delimiter).filter(entry => !entry.includes(`${path.sep}node_modules${path.sep}`)).join(path.delimiter);
     delete env.CLAUDE_CONFIG_DIR;
     mkdirSync(path.join(home, 'Library'), { recursive: true });
     symlinkSync(path.join(homedir(), 'Library', 'Keychains'), path.join(home, 'Library', 'Keychains'));
