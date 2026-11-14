@@ -69,7 +69,7 @@ Every frame has a `t` field. Unknown frame types are ignored.
    `{"t":"error","code":"<code>","message":"<text>"}` and close. Codes:
    `bad-hello`, `bad-version`, `bad-signature`, `blocked`, `over-limit`
    (see [Limits](#limits)) and `full` (the
-   registry holds `--max-computers` and this id is new).
+   registry holds `--max-computers`, all online, and this id is new).
 
 Over the per-address control connection limit, the relay sends that
 `over-limit` error in place of the challenge.
@@ -247,15 +247,21 @@ computer and its other clients carry on.
   minute (the per-computer flags).
 - Per computer, its own control connection: past 1,200 frames a minute the
   relay closes it with `over-limit` and refuses it until the minute ends.
-- Per client address, control connections: 60 a minute
+- Per computer address, control connections: 60 a minute
   (`--limit-agent-conns-per-min`), slowed past it and refused past twice it.
-- Per client address, computers new to the relay: 20 an hour
+  Here an IPv6 address counts by its /56, the block an ISP usually gives one
+  home or small site, so a sender cannot spread over its /64s.
+- Per computer address, computers new to the relay: 20 an hour
   (`--limit-new-ids-per-hour`); past it they get `over-limit`.
-- Computers in the registry: 250,000 (`--max-computers`); past it a new
-  computer gets `full`, and a helper skips new ids it is sent.
+- Computers in the registry: 250,000 (`--max-computers`). A new computer in
+  a full registry takes the place of the one offline longest. Only when
+  every computer is online does it get `full` (a helper skips the new ids it
+  is sent then).
 - A computer offline for 7 days is forgotten: its names answer NXDOMAIN and
-  its status `since` is null. An offline computer's TXT values are cleared
-  10 minutes after it set them; an online computer keeps them.
+  its status `since` is null. One that never set TXT values while the
+  registry knew it is forgotten after 1 hour offline. An offline computer's
+  TXT values are cleared 10 minutes after it set them; an online computer
+  keeps them.
 - Total open client connections (`--max-connections`, default 20,000,
   counting iroh relay connections); new ones beyond it are refused.
 - Idle client connections close after 10 minutes with no bytes either way.

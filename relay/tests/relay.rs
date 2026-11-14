@@ -279,6 +279,11 @@ impl Agent {
         send(&mut self.writer, &v).await;
     }
 
+    /// Closes the control connection, as a computer that quits does.
+    async fn close(mut self) {
+        self.writer.shutdown().await.unwrap();
+    }
+
     async fn next(&mut self) -> Value {
         tokio::time::timeout(WAIT, self.frames.recv())
             .await
@@ -982,6 +987,84 @@ async fn new_computers_are_capped_per_address_and_in_total() {
     assert_eq!(connect_code(&env, &keys[0]).await, "welcome");
     assert_eq!(connect_code(&env, &keys[1]).await, "full");
     assert_eq!(connect_code(&env, &keys[0]).await, "welcome");
+}
+
+/// Waits until the relay reports `id` with `state`.
+async fn wait_state(env: &Env, id: &str, state: &str) {
+    let deadline = Instant::now() + WAIT;
+    while env.status(id).await["state"] != state {
+        assert!(Instant::now() < deadline, "{id} never went {state}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn a_full_registry_makes_room_by_forgetting_its_oldest_offline_computer() {
+    let env = Env::start(&[
+        "--max-computers",
+        "3",
+        "--dns",
+        "127.0.0.1:0",
+        "--public-ip",
+        "203.0.113.10",
+    ])
+    .await;
+    let dns = env.dns();
+    let rcode = |id: String| async move {
+        let m = dns_query(dns, format!("{id}.{D}."), RecordType::A, false).await;
+        m.metadata.response_code
+    };
+    let oldest = Agent::connect(&env, &SigningKey::generate()).await;
+    let older = Agent::connect(&env, &SigningKey::generate()).await;
+    let (oldest_id, older_id) = (oldest.id.clone(), older.id.clone());
+    oldest.close().await;
+    wait_state(&env, &oldest_id, "offline").await;
+    older.close().await;
+    wait_state(&env, &older_id, "offline").await;
+    let _online = Agent::connect(&env, &SigningKey::generate()).await;
+
+    // Full: a new computer takes the place of the one offline longest.
+    let _new = Agent::connect(&env, &SigningKey::generate()).await;
+    assert_eq!(rcode(oldest_id.clone()).await, ResponseCode::NXDomain);
+    assert_eq!(rcode(older_id.clone()).await, ResponseCode::NoError);
+    let _newer = Agent::connect(&env, &SigningKey::generate()).await;
+    assert_eq!(rcode(older_id).await, ResponseCode::NXDomain);
+
+    // Every entry online: refused.
+    assert_eq!(connect_code(&env, &SigningKey::generate()).await, "full");
+}
+
+#[tokio::test]
+async fn computers_that_never_set_txt_are_forgotten_soon_after_going_offline() {
+    let env = Env::start(&[
+        "--dns",
+        "127.0.0.1:0",
+        "--public-ip",
+        "203.0.113.10",
+        "--unproven-ttl-secs",
+        "1",
+    ])
+    .await;
+    let mut proven = Agent::connect(&env, &SigningKey::generate()).await;
+    proven
+        .send(json!({"t": "txt", "req": "1", "values": ["token-abc"]}))
+        .await;
+    assert_eq!(proven.next().await, json!({"t": "ok", "req": "1"}));
+    let unproven = Agent::connect(&env, &SigningKey::generate()).await;
+    let (proven_id, unproven_id) = (proven.id.clone(), unproven.id.clone());
+    proven.close().await;
+    unproven.close().await;
+
+    let a = |id: String| dns_query(env.dns(), format!("{id}.{D}."), RecordType::A, false);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while a(unproven_id.clone()).await.metadata.response_code != ResponseCode::NXDomain {
+        assert!(Instant::now() < deadline, "a computer with no TXT was kept");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert_eq!(
+        a_records(&a(proven_id).await),
+        vec![Ipv4Addr::new(203, 0, 113, 10)]
+    );
 }
 
 #[tokio::test]

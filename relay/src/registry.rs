@@ -40,6 +40,8 @@ pub struct Entry {
     pub last_seen: SystemTime,
     /// When `txt` was last set.
     pub txt_at: SystemTime,
+    /// The computer has set TXT values (for its certificate) since this registry learned it.
+    pub proven: bool,
 }
 
 /// A relay's own ACME challenge values for one of its names, such as
@@ -238,11 +240,22 @@ impl Registry {
         })
     }
 
-    /// Applies an update; false when it is for a new computer and the registry is full.
+    /// Applies an update. A new computer in a full registry takes the place of
+    /// the one offline longest; false when every computer is online.
     pub fn apply(&self, u: &Update) -> bool {
         let mut entries = self.entries.lock().unwrap();
         if !entries.contains_key(&u.id) && entries.len() >= self.max_entries {
-            return false;
+            let oldest = entries
+                .iter()
+                .filter(|(_, e)| !e.online)
+                .min_by_key(|(_, e)| e.last_seen)
+                .map(|(id, _)| id.clone());
+            match oldest {
+                Some(id) => {
+                    entries.remove(&id);
+                }
+                None => return false,
+            }
         }
         let now = SystemTime::now();
         let entry = entries.entry(u.id.clone()).or_insert_with(|| Entry {
@@ -252,6 +265,7 @@ impl Registry {
             online: false,
             last_seen: now,
             txt_at: now,
+            proven: false,
         });
         entry.region = u.region.clone();
         entry.local = u.local.clone();
@@ -260,6 +274,7 @@ impl Registry {
         {
             entry.txt = txt.clone();
             entry.txt_at = now;
+            entry.proven |= !txt.is_empty();
         }
         entry.online = u.online;
         entry.last_seen = now;
@@ -267,13 +282,16 @@ impl Registry {
     }
 
     /// True when the registry has no room for a computer it does not know.
-    pub fn is_full(&self) -> bool {
-        self.entries.lock().unwrap().len() >= self.max_entries
+    /// False when the registry is full and every computer in it is online.
+    pub fn has_room(&self) -> bool {
+        let entries = self.entries.lock().unwrap();
+        entries.len() < self.max_entries || entries.values().any(|e| !e.online)
     }
 
     /// Clears TXT values of offline computers set more than `txt_ttl` ago (an
-    /// ACME check takes seconds), and forgets computers offline more than `ttl`.
-    pub fn prune(&self, ttl: Duration, txt_ttl: Duration) {
+    /// ACME check takes seconds), and forgets computers offline more than `ttl`,
+    /// or more than `unproven_ttl` when they never set TXT values.
+    pub fn prune(&self, ttl: Duration, unproven_ttl: Duration, txt_ttl: Duration) {
         let now = SystemTime::now();
         let age = |t: SystemTime| now.duration_since(t).unwrap_or_default();
         self.entries.lock().unwrap().retain(|_, e| {
@@ -283,7 +301,7 @@ impl Registry {
             if age(e.txt_at) >= txt_ttl {
                 e.txt.clear();
             }
-            age(e.last_seen) < ttl
+            age(e.last_seen) < if e.proven { ttl } else { unproven_ttl }
         });
     }
 

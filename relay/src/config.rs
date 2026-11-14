@@ -165,6 +165,10 @@ pub struct Config {
     #[arg(long, hide = true, default_value_t = 7 * 24 * 3600)]
     pub registry_ttl_secs: u64,
 
+    /// Forget a computer offline this long when it never set TXT values (tests).
+    #[arg(long, hide = true, default_value_t = 3600)]
+    pub unproven_ttl_secs: u64,
+
     /// Clear an offline computer's TXT values this long after they were set (tests).
     #[arg(long, hide = true, default_value_t = 600)]
     pub txt_ttl_secs: u64,

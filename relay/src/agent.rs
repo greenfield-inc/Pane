@@ -3,7 +3,7 @@
 use crate::id::{random_b64url, verify_hello};
 use crate::io::BoxStream;
 use crate::registry::valid_txt;
-use crate::state::{Charge, Level, Out, State, frame, source};
+use crate::state::{Charge, Level, Out, State, frame, registration_source};
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -74,7 +74,7 @@ fn parse_local(v: &Value) -> Vec<Ipv4Addr> {
 pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
     let (rd, mut wr) = tokio::io::split(stream);
     let mut rd = BufReader::new(rd);
-    let source = source(peer);
+    let source = registration_source(peer);
     match state.charge(Charge::AgentConns(&source), 0, 1) {
         Level::Over => {
             let message = "Too many control connections from this address; try again in a minute.";
@@ -127,7 +127,7 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
         ))
     } else if state.registry.get(&id).is_some() {
         None
-    } else if state.registry.is_full() {
+    } else if !state.registry.has_room() {
         Some((
             "full",
             "This relay has no room for new computers; try another relay.",

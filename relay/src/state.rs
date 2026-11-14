@@ -81,6 +81,12 @@ pub fn source(ip: IpAddr) -> String {
     prefix(ip, 32, 64).to_string()
 }
 
+/// The address control connections and new computers are counted under: IPv4
+/// as is, IPv6 by its /56, the block an ISP usually hands one home or small site.
+pub fn registration_source(ip: IpAddr) -> String {
+    prefix(ip, 32, 56).to_string()
+}
+
 /// `ip` with only its first `v4` or `v6` bits kept.
 pub fn prefix(ip: IpAddr, v4: u8, v6: u8) -> IpAddr {
     match ip.to_canonical() {
@@ -354,13 +360,14 @@ impl State {
             .unwrap()
             .retain(|_, u| now.duration_since(u.start) < u.window);
         let ttl = Duration::from_secs(self.cfg.registry_ttl_secs);
+        let unproven_ttl = Duration::from_secs(self.cfg.unproven_ttl_secs);
         let txt_ttl = Duration::from_secs(self.cfg.txt_ttl_secs);
-        self.registry.prune(ttl, txt_ttl);
-        let wall = SystemTime::now();
-        self.status.lock().unwrap().retain(|_, st| {
-            st.presence == Presence::Online
-                || wall.duration_since(st.since).unwrap_or_default() < ttl
-        });
+        self.registry.prune(ttl, unproven_ttl, txt_ttl);
+        // A status row lasts as long as its computer's registry entry.
+        self.status
+            .lock()
+            .unwrap()
+            .retain(|id, st| st.presence == Presence::Online || self.registry.get(id).is_some());
     }
 
     /// Updates the registry for a computer connected here.
@@ -379,5 +386,33 @@ impl State {
             online,
         };
         self.registry.publish(update).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    // The integration tests reach the relay only from 127.0.0.1 and ::1, so the
+    // IPv6 block that registrations count under is checked here, on the counter itself.
+    #[test]
+    fn new_computers_from_one_ipv6_slash56_share_one_limit() {
+        let cfg = Config::parse_from(["pane-relay", "--dev", "--limit-new-ids-per-hour", "20"]);
+        let alerts = Alerts::load(&cfg).unwrap();
+        let registry = Registry::new(&[], None, None, 10).unwrap();
+        let direct = "127.0.0.1:1".parse().unwrap();
+        let state = State::new(cfg, "pane.localhost".into(), registry, alerts, direct, 8443);
+        let new_id = |ip: &str| {
+            let source = registration_source(ip.parse().unwrap());
+            state.charge(Charge::NewIds(&source), 0, 1)
+        };
+        // 2001:db8:0:<n>::1 for n in 0..20: twenty /64s inside 2001:db8::/56.
+        for n in 0..20 {
+            assert_eq!(new_id(&format!("2001:db8:0:{n:x}::1")), Level::Ok);
+        }
+        assert_ne!(new_id("2001:db8:0:ff::1"), Level::Ok);
+        // The next /56 has its own count.
+        assert_eq!(new_id("2001:db8:0:100::1"), Level::Ok);
     }
 }
