@@ -101,8 +101,10 @@ export class UpdateIdleGate extends EventEmitter {
 
   tick(): void {
     const now = this.options.now();
+    // Leaving a busy state counts as busy: a steady agent turn reports only its start.
+    const wasBusy = this.busy !== null;
     this.busy = this.options.readBusy();
-    if (this.busy) this.lastBusyAt = now;
+    if (this.busy || wasBusy) this.lastBusyAt = now;
     if (this.snoozedUntil !== null && now >= this.snoozedUntil) this.snoozedUntil = null;
     if (this.isTonightDue(now)) {
       this.tonightFired = true;
@@ -140,7 +142,8 @@ export class UpdateIdleGate extends EventEmitter {
 
   /** Ticks on a timer only while a clock can run out; with nothing pending, events drive the gate. */
   private syncClock(): void {
-    const pending = this.readyVersion !== null || this.availableVersion !== null || this.snoozedUntil !== null || this.tonight;
+    // availableVersion is left out: nothing timed reads it, so it shows without a clock.
+    const pending = this.readyVersion !== null || this.snoozedUntil !== null || this.tonight;
     if (pending && !this.clock) {
       this.clock = setInterval(() => this.tick(), TICK_MS);
       this.clock.unref();

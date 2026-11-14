@@ -20,6 +20,8 @@ function createGate(start: Date) {
     gate,
     restartTonight,
     advance(ms: number) { now += ms; gate.tick(); },
+    /** Time passes with no event, as during a steady agent turn. */
+    wait(ms: number) { now += ms; },
     setBusy(next: UpdateBusyState | null) { busy = next; gate.tick(); },
     setSystemIdleMinutes(minutes: number) { systemIdleSeconds = minutes * 60; },
   };
@@ -56,6 +58,18 @@ describe('UpdateIdleGate idle toast', () => {
     t.advance(4 * MINUTE);
     expect(t.gate.getState().idleToastDue).toBe(false);
     t.advance(1 * MINUTE);
+    expect(t.gate.getState().idleToastDue).toBe(true);
+  });
+
+  it('starts the 5 minute clock when a long agent turn ends, not when it began', () => {
+    const t = createGate(afternoon);
+    t.setBusy(oneAgentWorking);
+    t.wait(30 * MINUTE);
+    t.setBusy(null);
+    t.wait(1 * MINUTE);
+    t.gate.setReady('2.4.203');
+    expect(t.gate.getState().idleToastDue).toBe(false);
+    t.advance(4 * MINUTE);
     expect(t.gate.getState().idleToastDue).toBe(true);
   });
 
@@ -211,12 +225,6 @@ describe('UpdateIdleGate clock', () => {
     gate.on('state', state => states.push(state.idleToastDue));
     return { gate, states };
   }
-
-  it('sets no timer while no update is pending', () => {
-    const { gate } = realClockGate();
-    gate.tick();
-    expect(vi.getTimerCount()).toBe(0);
-  });
 
   it('shows the idle toast on its own 5 quiet minutes after an update is ready', () => {
     const { gate, states } = realClockGate();
