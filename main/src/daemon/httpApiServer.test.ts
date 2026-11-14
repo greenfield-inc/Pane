@@ -390,6 +390,28 @@ describe('PaneRemoteHttpApiServer', () => {
     });
   });
 
+  it('runs machine commands for a computer linked by QR pairing, and refuses them for a paired phone', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:machine:info', async () => ({ hostname: 'travel-laptop' }));
+    const config = createEnabledRemoteConfig();
+    config.host.clients.push({
+      id: 'computer-1',
+      label: 'Studio Mac',
+      createdAt: new Date('2026-11-14T00:00:00.000Z').toISOString(),
+      tokenHash: hashRemoteDaemonToken('link-token'),
+      kind: 'computer',
+      computerId: 'abcdefghijklmnop',
+    });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config));
+    activeServers.push(server);
+    await server.start();
+
+    await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:machine:info', args: [] }, 'link-token'))
+      .resolves.toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'travel-laptop' } } });
+    await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:machine:info', args: [] }, 'secret-token'))
+      .resolves.toMatchObject({ statusCode: 403, body: { ok: false, error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } } });
+  });
+
   it('accepts browser invoke auth metadata from a simple request body', async () => {
     const registry = new PaneCommandRegistry();
     registry.register('sessions:get-all', async () => [{ id: 'session-1' }]);

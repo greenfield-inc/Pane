@@ -159,6 +159,8 @@ type RemoteRequestAuthResult =
       id: string;
       tokenHash: string;
       label: string;
+      /** "computer" for a computer linked through QR pairing. */
+      kind?: 'glasses' | 'computer';
     } | null;
   }
   | {
