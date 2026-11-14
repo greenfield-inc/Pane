@@ -298,7 +298,7 @@ export class MobilePushSender {
         else if (error instanceof ProviderDeliveryError && isInvalidTokenResponse(error)) await this.revokeRegistration(registration.id);
         const status = error instanceof ProviderDeliveryError ? error.status : undefined;
         const reason = error instanceof ProviderDeliveryError ? providerReason(error.body) : undefined;
-        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind: open ? 'question' : 'question-clear', status, reason });
+        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind: open ? 'question' : 'question-clear', status, reason, message: error instanceof ProviderDeliveryError ? error.message : undefined });
       }
     }
   }
@@ -399,7 +399,7 @@ export class MobilePushSender {
         else if (error instanceof ProviderDeliveryError && isInvalidTokenResponse(error)) await this.revokeRegistration(registration.id);
         const status = error instanceof ProviderDeliveryError ? error.status : undefined;
         const reason = error instanceof ProviderDeliveryError ? providerReason(error.body) : undefined;
-        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind, status, reason });
+        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind, status, reason, message: error instanceof ProviderDeliveryError ? error.message : undefined });
       }
     }
   }

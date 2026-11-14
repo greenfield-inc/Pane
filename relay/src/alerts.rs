@@ -381,6 +381,7 @@ impl Alerts {
         }
         let grant = frame["grant"].as_str().unwrap_or("");
         if !self.granted(id, platform, token, grant) {
+            tracing::info!(id, platform, "alert refused: no valid grant");
             return json!({"t": "error", "code": "unbound",
                 "message": "This phone has not confirmed this computer. It does when it next connects to the computer."});
         }
