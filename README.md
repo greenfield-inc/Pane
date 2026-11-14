@@ -131,7 +131,7 @@ Each of these is a small thing. Together they compound fast.
 | **Clipboard Shortcuts** | `Cmd+Option+[key]` on macOS (`Ctrl+Alt+[key]` on Windows and Linux) pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
 | **Terminal Popover** | Highlight any text in a terminal and an intelligent popover offers the right action: copy, open in browser, or show in explorer. Right-click offers the same actions, plus Paste and Select All. Prefer copy on select? Turn it on in Settings → Terminal. | <img src="images/qol-terminal-popover.png" alt="Terminal text selection popover" width="420"> |
 | **Custom Links** | Turn any pattern in terminal output into a link: an issue key like `PROJ-123` opens your tracker, a build number opens CI. Set a regex and a URL with `$0`–`$9` in Settings → Links, then Ctrl/Cmd+Click. | |
-| **Built-in Browser** | Preview any URL in a tab next to your terminals so every pane can see its own running dev server without alt-tabbing. When a Pane's terminal or agent starts a web server, Pane offers to open a live preview of it beside the agent; the preview is that Pane's tab, so it follows the Pane. A new tab, or the address bar's Ports button, lists every port listening on the machine, grouped by the Pane that started it. On your phone, the Remote Pane app opens the same ports and HTML pages over Tailscale ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)), and its Explorer tab browses, edits and previews the worktree's files ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#files-on-the-phone)). | <img src="images/qol-browser.png" alt="Built-in browser tab previewing a local dev server" width="420"> |
+| **Built-in Browser** | Preview any URL in a tab next to your terminals so every pane can see its own running dev server without alt-tabbing. When a Pane's terminal or agent starts a web server, Pane offers to open a live preview of it beside the agent; the preview is that Pane's tab, so it follows the Pane. A new tab, or the address bar's Ports button, lists every port listening on the machine, grouped by the Pane that started it. On your phone, the Pane app opens the same ports and HTML pages through the computer's own address ([QR pairing](docs/QR_PAIRING.md)) or over Tailscale ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)), and its Explorer tab browses, edits and previews the worktree's files ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#files-on-the-phone)). | <img src="images/qol-browser.png" alt="Built-in browser tab previewing a local dev server" width="420"> |
 | **Resource Manager** | Built-in CPU and memory monitor broken down per pane and per process, so you can catch a runaway agent before it eats your laptop. | <img src="images/qol-resource-manager.png" alt="Built-in resource manager" width="420"> |
 | **Status Cues** | Every AI pane reports its state at a glance — a red dot when an agent is blocked waiting on your approval, an amber pulse while it works, and a "done" cue when it finishes while you're looking elsewhere. The same rollup colors the project dots and pane tabs, on the desktop and in the phone app, so a whole screen of parallel agents reads in one glance. | <img src="images/qol-status-dots.png" alt="Session agent status dots: blocked, working, done" width="280"> |
 | **Jump + Refresh** | Jump to top, jump to bottom, or hard-refresh any terminal from the toolbar to unstick a frozen state in one click. | <img src="images/qol-jump-refresh.png" alt="Terminal jump and refresh controls" width="120"> |
@@ -150,9 +150,15 @@ Pane lists every host in your SSH config (`~/.ssh/config`, or `C:\Users\<you>\.s
 
 ## Remote Pane
 
-Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: the host machine runs the repos, terminals, git state, files, agent credentials, and compute; the client just connects with a `pane-remote://...` code.
+Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: the host machine runs the repos, terminals, git state, files, agent credentials, and compute.
 
-The easiest setup path is in the app:
+### Pair a phone with a QR code
+
+On the computer, open Pane and choose **Use Pane on your phone** on Home. Point your phone's camera at the code and tap the link: it opens the Pane app, or Pane in the phone's browser. It works on any network, with terminals, alerts and dev server previews. Every computer a phone pairs with links to its other computers, so they reach each other for **Switch to**, ports and `runpane workspace`. Pane's servers pass the encrypted connection along without reading it, or you can [run your own relay](docs/SELF_HOSTED_RELAY.md). See [Pair a phone with a QR code](docs/QR_PAIRING.md).
+
+### Connect with a code or Tailscale
+
+The original setup path, with a `pane-remote://...` code over Tailscale or SSH:
 
 1. Install Pane normally on the machine that should host your projects and agents.
 2. Open `Settings > Remote Access` on that host machine.

@@ -5,7 +5,7 @@ Even Realities phone app. It shows every Pane Notify card from all your computer
 with the R1 ring or your voice, and opens any Pane's live terminal so you can read it and dictate
 into it.
 
-It talks straight to each of your computers over Tailscale. Pane has no relay.
+It talks straight to each of your computers over Tailscale, or through each computer's own address when your phone paired with it by [QR code](QR_PAIRING.md).
 
 ## What you need
 

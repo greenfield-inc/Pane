@@ -1,6 +1,8 @@
 # Self-Hosted Remote Daemon
 
-This guide covers running Pane on your own workstation, Mac mini, Linux box, or VM and connecting to it from the local Pane desktop app or the Remote Pane browser app.
+This guide covers running Pane on your own workstation, Mac mini, Linux box, or VM and connecting to it from the local Pane desktop app or the Remote Pane browser app with a connection code.
+
+To pair a phone or another computer without Tailscale or a code, scan a QR code instead: see [Pair a phone with a QR code](QR_PAIRING.md).
 
 The intended flow is:
 
@@ -478,7 +480,7 @@ To the clipboard of the machine you are sitting at. In remote mode, dragging to 
 
 ## Current Limitations
 
-- No hosted relay, NAT traversal, or account-based multi-tenant auth
+- No account-based multi-tenant auth. For a hosted relay that needs no Tailscale, see [Pair a phone with a QR code](QR_PAIRING.md)
 - No direct non-loopback listener support
 - No full live remote end-to-end CI harness yet
 # Mobile push notifications
