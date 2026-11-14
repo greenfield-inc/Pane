@@ -7,10 +7,21 @@ export interface SyncBlockClearFilterState {
   inSyncBlock: boolean;
   /** Alternate screen active, tracked in stream order — persists across chunks. */
   filterInAltScreen: boolean;
+  /** The previous chunk's unfinished escape sequence, so a marker split across two reads still counts. */
+  filterSequenceTail?: string;
 }
 
 /** Ends a DEC 2026 synchronized-output block: the frame before it is complete. */
 export const SYNC_END = '\x1b[?2026l';
+
+/** The sequences that change filter state, each with the change it makes. All are the same length. */
+const STATE_MARKERS: ReadonlyArray<readonly [string, (state: SyncBlockClearFilterState) => void]> = [
+  ['\x1b[?2026h', state => { state.inSyncBlock = true; }],
+  [SYNC_END, state => { state.inSyncBlock = false; }],
+  ['\x1b[?1049h', state => { state.filterInAltScreen = true; }],
+  ['\x1b[?1049l', state => { state.filterInAltScreen = false; }],
+];
+const MARKER_LENGTH = SYNC_END.length;
 
 /**
  * Strips \x1b[2J (clear-screen) sequences that appear inside DEC Mode 2026
@@ -27,43 +38,42 @@ export const SYNC_END = '\x1b[?2026l';
  *
  * Alt-screen transitions (\x1b[?1049h / \x1b[?1049l) are tracked inside the
  * scan so a chunk containing both an alt-screen enter and a clear is handled
- * in stream order. State (inSyncBlock, filterInAltScreen) persists across
- * chunk boundaries on the terminal object.
+ * in stream order. State (inSyncBlock, filterInAltScreen, and a marker cut
+ * off at the end of a chunk) persists across chunk boundaries on the
+ * terminal object.
  */
 export function filterSyncBlockClears(terminal: SyncBlockClearFilterState, data: string): string {
-  const SYNC_START = '\x1b[?2026h';
-  const ALT_ENTER  = '\x1b[?1049h';
-  const ALT_LEAVE  = '\x1b[?1049l';
-  const CLEAR      = '\x1b[2J';
+  const CLEAR = '\x1b[2J';
 
-  const hasAltTransition = data.includes(ALT_ENTER) || data.includes(ALT_LEAVE);
+  // A marker split across two reads: its first bytes already went out with
+  // the previous chunk, so only its state change applies here.
+  let i = 0;
+  const tail = terminal.filterSequenceTail ?? '';
+  const joined = tail + data;
+  if (tail) {
+    const split = STATE_MARKERS.find(([marker]) => marker.startsWith(tail) && joined.startsWith(marker));
+    if (split) {
+      split[1](terminal);
+      i = split[0].length - tail.length;
+    }
+  }
+  const escape = joined.lastIndexOf('\x1b');
+  terminal.filterSequenceTail = escape >= 0 && joined.length - escape < MARKER_LENGTH ? joined.slice(escape) : '';
 
   // Fast path: nothing to strip and no state to update. (No alt-screen fast
   // path: sync-block state must stay exact so it is correct on 1049l.)
-  if (!terminal.inSyncBlock && !data.includes(SYNC_START) && !hasAltTransition) {
+  if (!terminal.inSyncBlock && !STATE_MARKERS.some(([marker]) => data.includes(marker, i))) {
     return data;
   }
 
-  let result = '';
-  let i = 0;
+  let result = data.slice(0, i);
 
   while (i < data.length) {
-    if (data.startsWith(SYNC_START, i)) {
-      terminal.inSyncBlock = true;
-      result += SYNC_START;
-      i += SYNC_START.length;
-    } else if (data.startsWith(SYNC_END, i)) {
-      terminal.inSyncBlock = false;
-      result += SYNC_END;
-      i += SYNC_END.length;
-    } else if (data.startsWith(ALT_ENTER, i)) {
-      terminal.filterInAltScreen = true;
-      result += ALT_ENTER;
-      i += ALT_ENTER.length;
-    } else if (data.startsWith(ALT_LEAVE, i)) {
-      terminal.filterInAltScreen = false;
-      result += ALT_LEAVE;
-      i += ALT_LEAVE.length;
+    const marker = data[i] === '\x1b' ? STATE_MARKERS.find(([m]) => data.startsWith(m, i)) : undefined;
+    if (marker) {
+      marker[1](terminal);
+      result += marker[0];
+      i += marker[0].length;
     } else if (terminal.inSyncBlock && !terminal.filterInAltScreen && data.startsWith(CLEAR, i)) {
       // Strip the clear-screen — scroll position preserved in xterm.js
       i += CLEAR.length;
