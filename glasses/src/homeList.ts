@@ -6,8 +6,7 @@
 // - homeRows(computers, cards, unjoined, newOn): the merged rows, in order. Identity is `key` (computer + id).
 // - homeListPage(rows, view, clock): the page that shows them, in the LIST_MARKS style.
 // - outlineRowAt(rows, index): the row a native list press names (outline marks only).
-import { BRIGHT, DIM, DIMMER, LIST_PAD, MAX_LIST_ITEMS, type Box, type Brightness, type ImageBox, type Page, type TextBox } from './display';
-import { drawLogoStrip, type StripMark } from './logos';
+import { BRIGHT, DIM, DIMMER, LIST_PAD, MAX_LIST_ITEMS, type Box, type Brightness, type ImageBox, type Page, type StripMark, type TextBox } from './page';
 import type { Card, Computer, MachineOs, PaneEntry, UnjoinedComputer } from './model';
 import { SCREEN_H, SCREEN_W, fitLine, wrapClamped, LINE_H } from './text';
 
@@ -193,7 +192,7 @@ function logoStrip(name: string, y: number, marks: StripMark[]): ImageBox {
   return {
     kind: 'image', name, x: STRIP_X, y, w: STRIP_W, h: STRIP_ROWS * ROW_H,
     key: marks.map((mark) => (mark.blank ? 'blank' : `${mark.os ?? 'computer'}${mark.dim ? ':dim' : ''}`)).join(','),
-    draw: () => drawLogoStrip(marks, { width: STRIP_W, height: STRIP_ROWS * ROW_H, rowHeight: ROW_H }),
+    marks, rowHeight: ROW_H,
   };
 }
 

@@ -2,6 +2,8 @@ import type { NotifyAnswer, NotifyItem, NotifySharedState, NotifySource, NotifyU
 
 /** The part of a computer's Notify state (`notify:remote-snapshot`, `notify:shared-changed`) the glasses read. */
 export interface NotifyCardState extends Pick<NotifySharedState, 'machine' | 'epoch' | 'revision'> {
+  /** Someone used this computer in the last 2 minutes (a Pane new enough to say). */
+  inUse?: boolean;
   items: Array<Pick<NotifyItem, 'id' | 'ui' | 'title' | 'context' | 'suggestions' | 'state' | 'createdAt'> & {
     choices?: Array<{ label: string }>;
     source: Pick<NotifySource, 'name' | 'paneId' | 'panelId'>;

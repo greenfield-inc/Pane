@@ -1,8 +1,9 @@
 // The paired computers: one RemoteDaemonClient per computer, each with its own glasses token,
 // merged into one PaneSource. Tokens go only in the Authorization header (and the voice
 // WebSocket's subprotocol), never in a URL.
-import { RemoteDaemonClient, RemoteRequestError, createFetchEventStreamTransport, type RemoteFetch } from '../../shared/remoteClient';
-import type { RemoteFetchResponse } from '../../shared/remoteClient/remoteDaemonClient';
+// Imported by file, not through the shared/remoteClient index, so the Glassly bundle leaves out code that needs `URL`.
+import { RemoteDaemonClient, RemoteRequestError, type RemoteFetch, type RemoteFetchResponse } from '../../shared/remoteClient/remoteDaemonClient';
+import { createFetchEventStreamTransport } from '../../shared/remoteClient/fetchEventStreamTransport';
 import { GLASSES_COMMANDS, decodeGlassesPairingCode, type GlassesPairResult } from '../../shared/types/glasses';
 import type { NotifyAnswer, NotifyRemoteCommand } from '../../shared/types/notify';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../shared/validation/boundaryDecoder';
@@ -28,7 +29,8 @@ import {
 } from './model';
 import { AutoJoin, type VouchAnswer } from './autoJoin';
 import { stripAnsi } from './text';
-import type { Cancel } from './timers';
+import type { Cancel } from './platform';
+import { createPollingTransport, type PollClock } from './polling';
 import { recordedDictation, streamingDictation, voiceMode, type VoiceHost, type VoiceSocket } from './voice';
 
 /** A computer the glasses are paired with. The pairing secret is gone; only the device token is kept. */
@@ -91,12 +93,33 @@ const hostErrorSchema = boundary.object({
   }),
 });
 
-/** The host's own `{ ok: false, error }` body, when a response carries one. */
-async function readRefusal(response: Response): Promise<HostRefusal | null> {
-  const body = await response.clone().json().catch(() => null);
-  const parsed = decodeOptionalBoundary(body, hostErrorSchema);
+/**
+ * What a host fetch answers. The browser's Response fits it, and so does Glassly's, which has
+ * no `clone()` and no streaming body.
+ */
+export interface HostResponse {
+  ok: boolean;
+  status: number;
+  body?: RemoteFetchResponse['body'];
+  json(): Promise<unknown>;
+  text(): Promise<string>;
+}
+
+export type HostFetch = (url: string, init?: Parameters<RemoteFetch>[1]) => Promise<HostResponse>;
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/** The host's own `{ ok: false, error }` body, when a refused response's text carries one. */
+function refusalOf(text: string, status: number): HostRefusal | null {
+  const parsed = decodeOptionalBoundary(parseJson(text), hostErrorSchema);
   if (!parsed) return null;
-  const refusal: HostRefusal = { code: parsed.error.code ?? `HTTP_${response.status}`, message: parsed.error.message };
+  const refusal: HostRefusal = { code: parsed.error.code ?? `HTTP_${status}`, message: parsed.error.message };
   if (parsed.error.next) refusal.next = parsed.error.next;
   return refusal;
 }
@@ -129,7 +152,7 @@ export interface PairingOutcome {
 }
 
 export interface PairingDeps {
-  fetch: typeof fetch;
+  fetch: HostFetch;
   runtimeId: string;
   clientLabel: string;
   /** This app's `location.origin`, which each computer must allow. */
@@ -162,8 +185,15 @@ export async function pairComputers(code: string, deps: PairingDeps): Promise<Pa
     try {
       // No token yet: the secret goes in the body, never the URL.
       const request = transport.invokeRequest({ baseUrl, token: '', runtimeId: deps.runtimeId, clientLabel: deps.clientLabel }, GLASSES_COMMANDS.pair, [{ secret: computer.secret }]);
-      const response = await deps.fetch(`${baseUrl}/invoke`, { method: 'POST', headers: request.headers, body: request.body });
-      const refusal = response.ok ? null : await readRefusal(response);
+      let response: HostResponse;
+      try {
+        response = await deps.fetch(`${baseUrl}/invoke`, { method: 'POST', headers: request.headers, body: request.body });
+      } catch {
+        // No answer at all: a browser reports a refused preflight this way too, Glassly a plain native error.
+        outcome.failed.push({ name: computer.name, url: baseUrl, code: 'ERR_GLASSES_NO_ANSWER', message: noAnswerMessage(computer.name, deps.origin), next: 'Then paste again.' });
+        return;
+      }
+      const refusal = response.ok ? null : refusalOf(await response.text(), response.status);
       if (refusal) {
         const failure: PairingFailure = { name: computer.name, url: baseUrl, code: refusal.code, message: refusal.message };
         if (refusal.next) failure.next = refusal.next;
@@ -174,9 +204,7 @@ export async function pairComputers(code: string, deps: PairingDeps): Promise<Pa
       outcome.paired.push({ name: computer.name, url: baseUrl, token: result.token, deviceLabel: result.device.label });
     } catch (error) {
       // The pairing secret is spent only on success, so the same code works again within its 10 minutes.
-      outcome.failed.push(error instanceof TypeError
-        ? { name: computer.name, url: baseUrl, code: 'ERR_GLASSES_NO_ANSWER', message: noAnswerMessage(computer.name, deps.origin), next: 'Then paste again.' }
-        : { name: computer.name, url: baseUrl, code: 'ERR_GLASSES_PAIR_UNREADABLE', message: `${computer.name} sent an answer Pane can't read: ${error instanceof Error ? error.message : String(error)}`, next: 'Update Pane on that computer, then paste again.' });
+      outcome.failed.push({ name: computer.name, url: baseUrl, code: 'ERR_GLASSES_PAIR_UNREADABLE', message: `${computer.name} sent an answer Pane can't read: ${error instanceof Error ? error.message : String(error)}`, next: 'Update Pane on that computer, then paste again.' });
     }
   }));
   return outcome;
@@ -209,23 +237,29 @@ export function pairedSaver(storage: PairedStorage): (added: readonly PairedComp
   };
 }
 
-function toRemoteFetch(fetchImpl: typeof fetch): RemoteFetch {
+function toRemoteFetch(fetchImpl: HostFetch): RemoteFetch {
   return async (url, init) => adaptResponse(await fetchImpl(url, init));
 }
 
-function adaptResponse(response: Response): RemoteFetchResponse {
+function adaptResponse(response: HostResponse): RemoteFetchResponse {
   return {
     ok: response.ok,
     status: response.status,
-    body: response.body,
+    body: response.body ?? null,
     json: async () => decodeBoundary(await response.json(), boundary.json),
   };
+}
+
+/** A refused response whose text was already read. */
+function readResponse(response: HostResponse, text: string): RemoteFetchResponse {
+  return { ok: response.ok, status: response.status, body: null, json: async () => decodeBoundary(parseJson(text), boundary.json) };
 }
 
 // ---------- host payloads (only the fields the glasses read) ----------
 
 const notifyStateSchema: BoundarySchema<NotifyCardState> = boundary.object({
   machine: boundary.string,
+  inUse: boundary.optional(boundary.boolean),
   epoch: boundary.string,
   revision: boundary.number,
   items: boundary.array(boundary.object({
@@ -361,7 +395,7 @@ function epochOf(iso: string | undefined): number | undefined {
 }
 
 function statusOf(agentState: string | undefined, running = true): PaneStatus {
-  if (!running) return 'stopped';
+  if (!running || agentState === 'stopped') return 'stopped';
   if (agentState === 'working') return 'working';
   if (agentState === 'blocked') return 'needs you';
   return 'idle';
@@ -370,7 +404,7 @@ function statusOf(agentState: string | undefined, running = true): PaneStatus {
 const LIST_EVENTS = new Set(['panel:created', 'panel:deleted', 'session:created', 'session:deleted', 'session:updated', 'sessions:loaded', 'orchestration-sessions:changed']);
 
 export interface HostDeps {
-  fetch: typeof fetch;
+  fetch: HostFetch;
   runtimeId: string;
   later(fn: () => void, ms: number): Cancel;
   now(): number;
@@ -379,7 +413,12 @@ export interface HostDeps {
   origin: string;
   /** Adds computers that joined on their own to the stored ones (see `pairedSaver`). */
   savePaired(added: readonly PairedComputer[]): Promise<void>;
+  /** Read each computer again and again instead of opening its event stream (a host without streaming fetch). */
+  polling?: PollClock;
 }
+
+/** A computer that hasn't answered a read for this long shows offline (polling mode). */
+const POLL_OFFLINE_MS = 10_000;
 
 /** One paired computer: its connection, Notify state, Panes and agent status. */
 export class HostConnection {
@@ -401,12 +440,12 @@ export class HostConnection {
     const guarded = this.guardedFetch();
     this.client = new RemoteDaemonClient({
       profile: { id: paired.url, label: paired.name, baseUrl: paired.url, token: paired.token, transport: 'http+sse' },
-      transport: createFetchEventStreamTransport(guarded),
+      transport: deps.polling ? createPollingTransport(guarded, deps.polling) : createFetchEventStreamTransport(guarded),
       fetch: guarded,
       runtimeId: () => deps.runtimeId,
       clientLabel: paired.deviceLabel || 'Pane glasses',
       deviceLabel: paired.deviceLabel || 'Pane glasses',
-      staleStreamTimeoutMs: 20_000,
+      staleStreamTimeoutMs: deps.polling ? POLL_OFFLINE_MS : 20_000,
       // The Even SDK's replacement timers stall while the app is idle; these keep firing.
       schedule: deps.later,
     });
@@ -433,18 +472,20 @@ export class HostConnection {
       if (now < this.lockedUntil) {
         throw new GlassesError('ERR_GLASSES_LOCKED_OUT', this.refusal?.message ?? `${this.paired.name} is ignoring these glasses for now.`, this.refusal?.next);
       }
-      let response: Response;
+      let response: HostResponse;
       try {
         response = await this.deps.fetch(url, init);
       } catch (error) {
         // A refused CORS preflight looks like a network error; ask the host which it is.
         if (error instanceof TypeError) void this.probeOrigin();
-        throw error;
+        // Glassly's fetch rejects with a plain object; the client expects an Error.
+        throw error instanceof Error ? error : new Error(`${this.paired.name} didn't answer.`);
       }
       if (!response.ok) {
-        const refusal = await readRefusal(response);
+        const text = await response.text().catch(() => '');
+        const refusal = refusalOf(text, response.status);
         // A command an older Pane doesn't let glasses run is no access problem: keep the connection.
-        if (refusal?.code === CHANNEL_REFUSED) return { ...adaptResponse(response), status: 400 };
+        if (refusal?.code === CHANNEL_REFUSED) return { ...readResponse(response, text), status: 400 };
         if (refusal) {
           if (refusal.code === BROWSER_REFUSED) {
             this.refusal = this.originRefusal();
@@ -458,6 +499,7 @@ export class HostConnection {
           }
           this.changed();
         }
+        return readResponse(response, text);
       }
       return adaptResponse(response);
     };
@@ -484,7 +526,7 @@ export class HostConnection {
     this.probing = true;
     try {
       const response = await this.deps.fetch(`${this.paired.url}/health`, { method: 'GET' });
-      if (response.ok || (await readRefusal(response))?.code !== BROWSER_REFUSED) return;
+      if (response.ok || refusalOf(await response.text(), response.status)?.code !== BROWSER_REFUSED) return;
       this.refusal = this.originRefusal();
       this.scheduleRetry();
       this.changed();
@@ -587,6 +629,11 @@ export class HostConnection {
     return computer;
   }
 
+  /** Someone used this computer in the last 2 minutes, as its last snapshot said. */
+  get inUse(): boolean {
+    return this.notify?.inUse === true && this.client.getState().status === 'connected';
+  }
+
   cards(): Card[] {
     if (!this.notify || this.client.getState().status !== 'connected') return [];
     return cardsFromNotify(this.id, this.notify);
@@ -631,8 +678,10 @@ export class HostConnection {
     const state = decodeOptionalBoundary(value, notifyStateSchema);
     if (!state) return;
     const current = this.notify;
-    // Ignore a state older than one already shown; a new epoch is a restarted host.
+    // Ignore a state older than one already shown; a new epoch is a restarted host. A read that
+    // changed nothing (polling reads the same state every few seconds) redraws nothing.
     if (current && current.epoch === state.epoch && current.revision > state.revision) return;
+    if (current && current.epoch === state.epoch && current.revision === state.revision && current.inUse === state.inUse) return;
     this.notify = state;
     this.changed();
   }
@@ -794,6 +843,7 @@ export class HostConnection {
       baseUrl: this.paired.url,
       token: this.paired.token,
       now: this.deps.now,
+      later: this.deps.later,
       openSocket: this.deps.openSocket,
       finalizeStreaming: async (rawText, durationMs) => (await this.invoke('voice:finalize-streaming', [{ rawText, durationMs, language: 'en' }], transcriptSchema)).text,
       transcribe: async (audioDataUrl, durationMs) => (await this.invoke('voice:transcribe', [{ audioDataUrl, mimeType: 'audio/wav', durationMs, language: 'en' }], transcriptSchema)).text,
@@ -869,6 +919,11 @@ export class HostHub implements PaneSource {
 
   unjoined(): UnjoinedComputer[] {
     return this.autoJoin.unjoined();
+  }
+
+  /** Someone is using one of the paired computers (a Pane new enough to report it). */
+  inUse(): boolean {
+    return this.connections.some((connection) => connection.inUse);
   }
 
   subscribe(listener: () => void): () => void {

@@ -2,8 +2,8 @@
 // home → terminal; home → an away computer's Retry page.
 // It reads and acts through a PaneSource (the demo or the paired computers) and draws through `show`.
 import type { NotifyAnswer } from '../../shared/types/notify';
-import { BRIGHT, type Page } from './display';
-import type { Gesture } from './input';
+import { BRIGHT, type Page } from './page';
+import type { Cancel, Gesture } from './platform';
 import { LIST_MARKS, homeListPage, homeRows, outlineRowAt, type HomeListView, type HomeRow, type ListMarks } from './homeList';
 import { CHOICE_KEYS, GlassesError, SCREEN_RECONNECTING, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type SessionRequest, type TerminalKey } from './model';
 import { findMenu, type Menu } from './menu';
@@ -36,7 +36,6 @@ import {
   type AmbientMachine,
 } from './screens';
 import { isRule, trimChrome } from './terminal';
-import type { Cancel } from './timers';
 
 /** How often an open terminal reads the host's screen, and faster while its agent works. */
 const SCREEN_POLL_MS = 1_000;

@@ -2,7 +2,7 @@
 // computer vouches for them. It returns a pairing code for the computers it could add, which the
 // glasses trade as if it were pasted, and a reason for each computer it couldn't.
 import { JOIN_REASONS, type UnjoinedComputer } from './model';
-import type { Cancel } from './timers';
+import type { Cancel } from './platform';
 
 /** How often the glasses ask again, so a computer you add later joins within this long. */
 const JOIN_EVERY_MS = 10 * 60_000;

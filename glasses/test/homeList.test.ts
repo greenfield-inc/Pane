@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Display, type Page } from '../src/display';
 import { homeListPage, homeRows, outlineRowAt } from '../src/homeList';
 import type { Card, Computer, PaneEntry } from '../src/model';
 import { FakeBridge } from './fakeBridge';
+
+// The WebView's canvas draws the logo strips; Node has none, so each draws as an empty image.
+vi.mock('../src/logos', () => ({ drawLogoStrip: async () => new Uint8Array([1]) }));
 
 const clock = (epochMs: number) => (epochMs === 9_12 ? '9:12' : '9:40');
 
@@ -112,11 +115,7 @@ describe('the logo list page', () => {
 
 describe('the logo list on the glasses', () => {
   const rows = homeRows([computer('studio', 'studio-mac', Array.from({ length: 8 }, (_, index) => pane(`s${index}`, 100 - index)))], []);
-  /** The page with its logo strips drawn as empty images, as the WebView's canvas would draw them. */
-  const page = (selected: number): Page => {
-    const built = homeListPage(rows, { selected }, clock);
-    return { boxes: built.boxes.map((box) => (box.kind === 'image' ? { ...box, draw: async () => new Uint8Array([1]) } : box)) };
-  };
+  const page = (selected: number): Page => homeListPage(rows, { selected }, clock);
 
   it('redraws only the two rows that change on a swipe, and resends the logos on a page turn', async () => {
     const bridge = new FakeBridge();

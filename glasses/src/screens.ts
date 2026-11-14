@@ -1,8 +1,7 @@
 // One function per glasses screen in the design reference (mockups v2: C3 card, T3 terminal; the home
 // list is homeList.ts).
 // Each returns a page of boxes at G2 scale; nothing here touches the bridge.
-import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ImageBox, type ListBox, type Page, type TextBox } from './display';
-import { drawLogoStrip } from './logos';
+import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ImageBox, type ListBox, type Page, type TextBox } from './page';
 import { JOIN_REASONS, type Card, type Computer, type HostRefusal, type MachineOs, type PaneEntry } from './model';
 import { isRule } from './terminal';
 import { LINE_H, SCREEN_H, SCREEN_W, fitLine, textWidth, wrap, wrapClamped } from './text';
@@ -427,7 +426,7 @@ const LOGO_W = 24;
 function logo(name: string, x: number, y: number, os: MachineOs | null): ImageBox {
   return {
     kind: 'image', name, x, y, w: LOGO_W, h: BAR_H, key: os ?? 'computer',
-    draw: () => drawLogoStrip([{ os, dim: false }], { width: LOGO_W, height: BAR_H, rowHeight: BAR_H }),
+    marks: [{ os, dim: false }], rowHeight: BAR_H,
   };
 }
 
