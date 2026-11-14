@@ -358,7 +358,14 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
     console.log(JSON.stringify({
       ok: true,
       self: { ...tailnet.self, workspace: local },
-      machines: rows.map(({ machine, probe }) => ({ ...machine, joined: Boolean(probe.info), info: probe.info, error: probe.error })),
+      // A linked computer's token stays internal: the list names where it is and which key it holds.
+      machines: rows.map(({ machine: { linked, ...machine }, probe }) => ({
+        ...machine,
+        linked: linked && { baseUrl: linked.baseUrl, fingerprint: linked.fingerprint },
+        joined: Boolean(probe.info),
+        info: probe.info,
+        error: probe.error,
+      })),
     }, null, 2));
     return 0;
   }

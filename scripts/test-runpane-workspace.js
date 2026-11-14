@@ -330,3 +330,14 @@ test('a linked computer whose key is not the one it linked with never receives t
     assert.deepEqual(requests, []);
   });
 });
+
+test('workspace list shows a linked computer without its link token', posixOnly, async () => {
+  await withLinkedComputer((keys) => keys.laptop, async (run) => {
+    for (const args of [['workspace', 'list', '--json'], ['workspace', 'list']]) {
+      const list = await run(...args);
+      assert.equal(list.status, 0, list.output);
+      assert.match(list.output, /travel-laptop/, list.output);
+      assert.doesNotMatch(list.output, /link-token/, list.output);
+    }
+  });
+});
