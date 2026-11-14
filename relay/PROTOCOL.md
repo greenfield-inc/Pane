@@ -116,10 +116,12 @@ paired with, so someone holding a leaked device token can't alert it. The
 grant key comes from `--registry-secret`, so every relay that shares the
 secret accepts the same grants and a computer keeps its grants when it moves
 to another region. A relay without the secret makes a random key at start,
-and its grants end when it restarts. A grant is refused with `unbound`; the
-computer then drops it and asks for a new one when the phone next registers.
-Each phone gets at most 10 grant pushes an hour, counted apart from its
-alerts, and each computer at most `--limit-alerts-per-hour` of them.
+and its grants end when it restarts. An alert whose grant is missing or wrong
+is refused with `unbound`; the computer then drops the grant and asks for a
+new one when the phone next registers. Until it holds a grant, the computer
+tells the phone it is waiting (`PUSH_AWAITING_PHONE`) instead of ready.
+Each phone gets at most 10 grant pushes an hour, counted separately from its
+alerts, and each computer at most `--limit-alerts-per-hour` of them an hour.
 
 The computer builds the alert payload exactly as it would send it itself,
 and adds `"grant":"<grant>"` to the frame:

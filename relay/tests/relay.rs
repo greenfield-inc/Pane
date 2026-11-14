@@ -1787,6 +1787,62 @@ async fn alerts_need_the_grant_the_phone_received_for_that_computer() {
 }
 
 #[tokio::test]
+async fn a_grant_is_good_only_for_the_platform_it_names() {
+    // One fake provider answers for both APNs and FCM.
+    let mut both = Provider::start(|path, _| match path {
+        "/token" => (
+            200,
+            r#"{"access_token":"ya29.test","expires_in":3600}"#.to_string(),
+        ),
+        _ => (200, "{}".to_string()),
+    })
+    .await;
+    let kp = rcgen::KeyPair::generate().unwrap();
+    let key_path = both.ca.with_file_name("apns.p8");
+    std::fs::write(&key_path, kp.serialize_pem()).unwrap();
+    let sa = json!({"type": "service_account", "project_id": "pane-test",
+        "private_key": FCM_KEY, "client_email": "sender@pane-test.iam.gserviceaccount.com"});
+    let sa_path = both.ca.with_file_name("sa.json");
+    std::fs::write(&sa_path, sa.to_string()).unwrap();
+    let token_url = format!("{}/token", both.url);
+    let env = Env::start(&[
+        "--apns-key-path",
+        key_path.to_str().unwrap(),
+        "--apns-key-id",
+        "KEY1234567",
+        "--apns-team-id",
+        "TEAM123456",
+        "--apns-url",
+        &both.url,
+        "--fcm-service-account",
+        sa_path.to_str().unwrap(),
+        "--fcm-url",
+        &both.url,
+        "--fcm-token-url",
+        &token_url,
+        "--provider-ca",
+        both.ca.to_str().unwrap(),
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+
+    // A hex token is valid on both platforms; the Android grant must not work for iOS.
+    let (g, _) = grant(&mut agent, &mut both, "android", "abcdef01").await;
+    agent
+        .send(
+            json!({"t": "alert", "req": "1", "platform": "ios", "token": "abcdef01",
+            "pushType": "alert", "payload": {"aps": {}}, "grant": g}),
+        )
+        .await;
+    assert_eq!(agent.next().await["code"], "unbound");
+    agent
+        .send(json!({"t": "alert", "req": "2", "platform": "android",
+            "message": {"token": "abcdef01", "data": {}}, "grant": g}))
+        .await;
+    assert_eq!(agent.next().await["t"], "ok");
+}
+
+#[tokio::test]
 async fn grants_hold_on_every_relay_that_shares_the_registry_secret() {
     let key = SigningKey::generate();
     let (first, mut fcm) = fcm_env(&["--registry-secret", "shared"]).await;

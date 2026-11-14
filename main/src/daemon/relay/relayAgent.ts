@@ -53,10 +53,12 @@ export class RelayRequestError extends Error {
   }
 }
 
+/** An alert as the computer builds it for the provider (relay/PROTOCOL.md, Alerts). */
+export type RelayAlertPayload =
+  | { platform: 'ios'; token: string; pushType: 'alert' | 'background'; collapseId?: string; payload: object }
+  | { platform: 'android'; message: object };
 /** `grant`: what the phone handed back from the relay's grant push for this computer and token. */
-export type RelayAlert =
-  | { platform: 'ios'; token: string; pushType: 'alert' | 'background'; collapseId?: string; payload: object; grant: string }
-  | { platform: 'android'; message: object; grant: string };
+export type RelayAlert = RelayAlertPayload & { grant: string };
 
 /** Asks the relay to push the phone a grant for this computer; `hostProfileId` tells the phone which computer it is for. */
 export interface RelayGrantRequest { platform: 'ios' | 'android'; token: string; hostProfileId: string }
