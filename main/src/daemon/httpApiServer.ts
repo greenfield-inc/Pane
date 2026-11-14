@@ -77,6 +77,11 @@ interface ConnectedRemoteEventClient {
   remoteRuntimeId: string | null;
   /** The Pane install reading this computer's cards on this stream (`readingMachines`); null for anything else. */
   readerMachineId: string | null;
+  /**
+   * Whether the stream shows this computer to a person (`remoteEventStreams`). A saved machine's
+   * stream, which names its install (`X-Pane-Machine-Id`), only follows Notify and does not.
+   */
+  shown: boolean;
   remoteAddress: string | null;
   connectedAt: string;
   lastSeenAt: string;
@@ -1017,6 +1022,7 @@ export class PaneRemoteHttpApiServer {
       deviceLabel: getClientDeviceLabelFromHeaders(request),
       remoteRuntimeId: getRemoteRuntimeIdFromRequest(request, url.searchParams.get('runtime_id')),
       readerMachineId: glassesClient ? null : this.readerMachineId(request, auth),
+      shown: !getSingleHeaderValue(request.headers['x-pane-machine-id'])?.trim(),
       remoteAddress: getRemoteAddress(request),
       connectedAt,
       lastSeenAt: connectedAt,
@@ -1031,7 +1037,7 @@ export class PaneRemoteHttpApiServer {
     };
     this.eventClients.set(clientConnectionId, connectedClient);
     if (connectedClient.readerMachineId) readingMachines.add(connectedClient.readerMachineId);
-    remoteEventStreams.add();
+    if (connectedClient.shown) remoteEventStreams.add();
     if (connectedClient.remoteRuntimeId && connectedClient.deviceLabel) {
       // A phone answers from an alert button with no stream open; it keeps the name it gave here.
       this.deviceLabelsByRuntime.set(connectedClient.remoteRuntimeId, connectedClient.deviceLabel);
@@ -1434,7 +1440,7 @@ export class PaneRemoteHttpApiServer {
     );
     this.eventClients.delete(clientConnectionId);
     if (client.readerMachineId) readingMachines.remove(client.readerMachineId);
-    remoteEventStreams.remove();
+    if (client.shown) remoteEventStreams.remove();
     if (!client.stream.writableEnded) {
       client.stream.end();
     }

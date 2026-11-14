@@ -1,8 +1,9 @@
 import { EventEmitter } from 'events';
 
 /**
- * How many remote event streams (a phone, another desktop, glasses) are open to this computer,
- * over its paired or its Tailscale transport. Emits `change` when the count changes.
+ * How many remote event streams that show this computer to a person (a phone, a desktop in remote
+ * mode, glasses) are open, over its paired or its Tailscale transport. A saved machine's Notify
+ * stream is not counted. Emits `change` when the count changes.
  */
 class RemoteEventStreams extends EventEmitter {
   private open = 0;
