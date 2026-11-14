@@ -199,6 +199,8 @@ async fn connection(
     mut tcp: TcpStream,
     peer: SocketAddr,
 ) {
+    // A dual-stack listener reports IPv4 clients as ::ffff:a.b.c.d.
+    let peer = SocketAddr::new(peer.ip().to_canonical(), peer.port());
     let mut buf = Vec::with_capacity(2048);
     let read_hello = async {
         let mut chunk = [0u8; 4096];

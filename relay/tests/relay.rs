@@ -59,17 +59,16 @@ impl Env {
         let ck = relay_cert();
         std::fs::write(dir.join("cert.pem"), ck.cert.pem()).unwrap();
         std::fs::write(dir.join("key.pem"), ck.signing_key.serialize_pem()).unwrap();
-        let mut args = vec![
-            "pane-relay".to_string(),
-            "--domain".into(),
-            D.into(),
-            "--listen".into(),
-            "127.0.0.1:0".into(),
+        let mut args = vec!["pane-relay".to_string(), "--domain".into(), D.into()];
+        if !extra.contains(&"--listen") {
+            args.extend(["--listen".into(), "127.0.0.1:0".into()]);
+        }
+        args.extend([
             "--cert".into(),
             dir.join("cert.pem").display().to_string(),
             "--key".into(),
             dir.join("key.pem").display().to_string(),
-        ];
+        ]);
         args.extend(
             extra
                 .iter()
@@ -83,8 +82,16 @@ impl Env {
         }
     }
 
+    /// The relay's https address over IPv4 loopback.
     fn addr(&self) -> SocketAddr {
-        self.relay.as_ref().unwrap().https_addr
+        let port = self.relay.as_ref().unwrap().https_addr.port();
+        SocketAddr::from((Ipv4Addr::LOCALHOST, port))
+    }
+
+    /// The same listener over IPv6 loopback, a second client address (needs `--listen [::]:0`).
+    fn addr_v6(&self) -> SocketAddr {
+        let port = self.relay.as_ref().unwrap().https_addr.port();
+        SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, port))
     }
 
     fn dns(&self) -> SocketAddr {
@@ -279,7 +286,12 @@ impl Agent {
 
     /// A client connects to `sni` through the relay, sends a line and returns the computer's answer.
     async fn exchange(&self, env: &Env, sni: &str) -> std::io::Result<String> {
-        let mut s = tls_connect(env.addr(), sni, &self.cert).await?;
+        self.exchange_from(env.addr(), sni).await
+    }
+
+    /// Like `exchange`, connecting to the relay at `addr`.
+    async fn exchange_from(&self, addr: SocketAddr, sni: &str) -> std::io::Result<String> {
+        let mut s = tls_connect(addr, sni, &self.cert).await?;
         s.write_all(b"ping\n").await?;
         let mut out = String::new();
         s.read_to_string(&mut out).await?;
@@ -690,30 +702,78 @@ async fn two_helpers_answer_for_a_computer_on_a_third_region() {
     }
 }
 
+/// Opens one client connection to `host` from `addr` and reports how it went.
+async fn timed(agent: &Agent, addr: SocketAddr, host: &str) -> Result<Duration, ()> {
+    let started = Instant::now();
+    match agent.exchange_from(addr, host).await {
+        Ok(answer) if answer == format!("{host} ping\n") => Ok(started.elapsed()),
+        _ => Err(()),
+    }
+}
+
+/// The computer is still connected: it gets a pong, not a close.
+async fn still_connected(agent: &mut Agent) {
+    agent.send(json!({"t": "ping"})).await;
+    assert_eq!(agent.next().await, json!({"t": "pong"}));
+}
+
+const SLOWED: Duration = Duration::from_millis(900);
+
 #[tokio::test]
-async fn new_connections_past_the_limit_are_slowed_then_cut() {
-    let env = Env::start(&["--limit-conns-per-min", "2"]).await;
+async fn a_flood_from_one_address_slows_then_refuses_only_that_address() {
+    let env = Env::start(&["--listen", "[::]:0", "--limit-conns-per-min", "2"]).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
     let host = format!("{}.{D}", agent.id);
 
+    // Up to the limit: straight through. Up to twice it: slowed. Past that: refused.
     for _ in 0..2 {
-        let started = Instant::now();
-        agent.exchange(&env, &host).await.unwrap();
-        assert!(started.elapsed() < Duration::from_millis(900));
+        assert!(timed(&agent, env.addr(), &host).await.unwrap() < SLOWED);
     }
     for _ in 0..2 {
-        let started = Instant::now();
-        agent.exchange(&env, &host).await.unwrap();
-        assert!(
-            started.elapsed() >= Duration::from_millis(900),
-            "connection over the limit was not slowed"
-        );
+        assert!(timed(&agent, env.addr(), &host).await.unwrap() >= SLOWED);
     }
-    assert!(
-        agent.exchange(&env, &host).await.is_err(),
-        "connection past twice the limit was let through"
-    );
-    let close = agent.next().await;
+    assert!(timed(&agent, env.addr(), &host).await.is_err());
+
+    // The computer stays connected, and another address still reaches it at full speed.
+    still_connected(&mut agent).await;
+    assert!(timed(&agent, env.addr_v6(), &host).await.unwrap() < SLOWED);
+}
+
+#[tokio::test]
+async fn one_address_has_a_limit_across_all_computers() {
+    let env = Env::start(&["--listen", "[::]:0", "--limit-ip-conns-per-min", "2"]).await;
+    let mut a = Agent::connect(&env, &SigningKey::generate()).await;
+    let mut b = Agent::connect(&env, &SigningKey::generate()).await;
+    let (host_a, host_b) = (format!("{}.{D}", a.id), format!("{}.{D}", b.id));
+
+    for _ in 0..2 {
+        assert!(timed(&a, env.addr(), &host_a).await.unwrap() < SLOWED);
+    }
+    // B is new to this address, but the address is past its own limit.
+    for _ in 0..2 {
+        assert!(timed(&b, env.addr(), &host_b).await.unwrap() >= SLOWED);
+    }
+    assert!(timed(&b, env.addr(), &host_b).await.is_err());
+
+    still_connected(&mut a).await;
+    still_connected(&mut b).await;
+    assert!(timed(&b, env.addr_v6(), &host_b).await.unwrap() < SLOWED);
+}
+
+#[tokio::test]
+async fn a_computer_flooding_its_control_connection_is_cut_off() {
+    let env = Env::start(&[]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    // More than twice the 600 frames a minute.
+    for _ in 0..1201 {
+        agent.send(json!({"t": "ping"})).await;
+    }
+    let close = loop {
+        let frame = agent.next().await;
+        if frame["t"] != "pong" {
+            break frame;
+        }
+    };
     assert_eq!(
         (close["t"].as_str(), close["code"].as_str()),
         (Some("close"), Some("over-limit"))

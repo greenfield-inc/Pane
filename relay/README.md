@@ -73,8 +73,10 @@ Every flag also reads the environment variable in brackets.
 | `--direct-quic` [`PANE_RELAY_DIRECT_QUIC`] | off | UDP address for QUIC address discovery on direct paths; clients expect port 7842, such as `0.0.0.0:7842` |
 | `--blocklist` [`PANE_RELAY_BLOCKLIST`] | | File of blocked ids, one per line, reread every 5 s when it changes |
 | `--max-connections` | 20000 | Total open client connections |
-| `--limit-bytes-per-min` | 50000000 | Per computer, and per client IP on the iroh relay; slowed above it, cut above twice it |
-| `--limit-conns-per-min` | 100 | Per computer, and per client IP on the iroh relay; slowed above it, cut above twice it |
+| `--limit-bytes-per-min` | 50000000 | Per computer and client address, and per client address on the iroh relay; that address is slowed above it and refused above twice it |
+| `--limit-conns-per-min` | 100 | New connections, counted like `--limit-bytes-per-min` |
+| `--limit-ip-bytes-per-min` | 200000000 | Per client address across all computers; slowed above it, refused above twice it |
+| `--limit-ip-conns-per-min` | 400 | New connections, counted like `--limit-ip-bytes-per-min` |
 | `--idle-timeout-secs` | 600 | Close client connections idle this long |
 | `--android-cert-sha256` | | App signing fingerprints for `assetlinks.json` |
 | `--apns-key-path`, `--apns-key-id`, `--apns-team-id` [`PANE_RELAY_APNS_KEY_PATH`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID`] | | The Pane app's APNs auth key (.p8), its key id and team id; without them iOS alerts answer `unconfigured` |

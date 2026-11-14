@@ -121,7 +121,8 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_MAX_CONNECTIONS", default_value_t = 20_000)]
     pub max_connections: usize,
 
-    /// Per computer: client bytes a minute before slowing (cut at twice this).
+    /// Per computer and client address: client bytes a minute before slowing
+    /// that address (refused at twice this).
     #[arg(
         long,
         env = "PANE_RELAY_LIMIT_BYTES_PER_MIN",
@@ -129,9 +130,23 @@ pub struct Config {
     )]
     pub limit_bytes_per_min: u64,
 
-    /// Per computer: new client connections a minute before slowing (cut at twice this).
+    /// Per computer and client address: new client connections a minute before
+    /// slowing that address (refused at twice this).
     #[arg(long, env = "PANE_RELAY_LIMIT_CONNS_PER_MIN", default_value_t = 100)]
     pub limit_conns_per_min: u64,
+
+    /// Per client address across all computers: bytes a minute before slowing (refused at twice this).
+    #[arg(
+        long,
+        env = "PANE_RELAY_LIMIT_IP_BYTES_PER_MIN",
+        default_value_t = 200_000_000
+    )]
+    pub limit_ip_bytes_per_min: u64,
+
+    /// Per client address across all computers: new connections a minute before
+    /// slowing (refused at twice this).
+    #[arg(long, env = "PANE_RELAY_LIMIT_IP_CONNS_PER_MIN", default_value_t = 400)]
+    pub limit_ip_conns_per_min: u64,
 
     /// Close client connections with no bytes either way for this many seconds.
     #[arg(long, env = "PANE_RELAY_IDLE_TIMEOUT_SECS", default_value_t = 600)]

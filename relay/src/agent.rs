@@ -2,7 +2,7 @@
 
 use crate::id::{random_b64url, verify_hello};
 use crate::io::BoxStream;
-use crate::state::{Out, State, frame};
+use crate::state::{Charge, Level, Out, State, frame};
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -111,7 +111,7 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
         } else {
             (
                 "over-limit",
-                "This computer is over its traffic limit; try again in a minute.",
+                "This computer sent too many control frames; try again in a minute.",
             )
         };
         tracing::info!(id, %peer, code, "control connection refused");
@@ -181,6 +181,10 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
             Ok(Err(ReadError::Invalid)) => break "invalid frame",
             Ok(Ok(v)) => v,
         };
+        if state.charge(Charge::Frames(&id), 0, 1) == Level::Over {
+            state.cut(&id, "over-limit", "Too many control frames this minute.");
+            continue;
+        }
         let req = v.get("req").cloned().unwrap_or(Value::Null);
         match v["t"].as_str().unwrap_or("") {
             "ping" => {

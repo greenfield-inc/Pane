@@ -3,7 +3,7 @@
 
 use crate::Error;
 use crate::io::BoxStream;
-use crate::state::{Level, State};
+use crate::state::{Charge, Level, State, source};
 use iroh_relay::server::{QuicConfig, RelayConfig, Server, ServerConfig};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -37,8 +37,8 @@ pub async fn proxy(state: Arc<State>, client: BoxStream, head: Vec<u8>, peer: Ip
         tracing::warn!(%peer, "direct relay client refused: relay at --max-connections");
         return;
     };
-    let key = format!("direct {peer}");
-    match state.count_conn(&key) {
+    let key = source(peer);
+    match state.charge(Charge::Direct(&key), 0, 1) {
         Level::Over => return,
         Level::Slow => tokio::time::sleep(SLOW_CONN_DELAY).await,
         Level::Ok => {}
@@ -77,7 +77,7 @@ async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             Ok(0) | Err(_) => break,
             Ok(n) => n,
         };
-        match state.count_bytes(key, n as u64) {
+        match state.charge(Charge::Direct(key), n as u64, 0) {
             Level::Over => {
                 over.cancel();
                 return;

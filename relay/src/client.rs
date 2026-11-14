@@ -1,7 +1,7 @@
 //! Client connections for a computer's names: passed through to the computer still encrypted.
 
 use crate::id::random_b64url;
-use crate::state::{Level, Out, State, frame};
+use crate::state::{Level, Out, State, frame, source};
 use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 const DATA_DEADLINE: Duration = Duration::from_secs(10);
 const SLOW_CONN_DELAY: Duration = Duration::from_secs(1);
@@ -32,9 +33,11 @@ pub async fn run(
         tracing::warn!(id, peer = %peer.ip(), "client refused: relay at --max-connections");
         return;
     };
-    match state.count_conn(&id) {
+    // Limits charge the client's source, so a flood slows and refuses only its sender.
+    let source = source(peer.ip());
+    match state.charge_client(&id, &source, 0, 1) {
         Level::Over => {
-            state.cut(&id, "over-limit", "Too many new connections this minute.");
+            tracing::info!(id, peer = %peer.ip(), "client refused: too many new connections this minute");
             return;
         }
         Level::Slow => tokio::time::sleep(SLOW_CONN_DELAY).await,
@@ -63,16 +66,23 @@ pub async fn run(
     let down = AtomicU64::new(0);
     let last = AtomicU64::new(0);
     let idle = Duration::from_secs(state.cfg.idle_timeout_secs);
+    let over = CancellationToken::new();
     let (cr, cw) = client.into_split();
     let (dr, dw) = tokio::io::split(data);
+    let meter = Meter {
+        state: &state,
+        id: &id,
+        source: &source,
+        last: &last,
+        started,
+        over: &over,
+    };
     let reason = tokio::select! {
         _ = async {
-            tokio::join!(
-                copy(&state, &id, cr, dw, &up, &last, started),
-                copy(&state, &id, dr, cw, &down, &last, started),
-            )
+            tokio::join!(meter.copy(cr, dw, &up), meter.copy(dr, cw, &down))
         } => "closed",
         _ = watch_idle(&last, started, idle) => "idle",
+        _ = over.cancelled() => "over the limit",
         _ = agent.cut.cancelled() => "cut off",
     };
     tracing::info!(
@@ -86,36 +96,47 @@ pub async fn run(
     );
 }
 
-async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
-    state: &State,
-    id: &str,
-    mut r: R,
-    mut w: W,
-    count: &AtomicU64,
-    last: &AtomicU64,
+/// Counts one client connection's bytes against its limits.
+struct Meter<'a> {
+    state: &'a State,
+    id: &'a str,
+    source: &'a str,
+    last: &'a AtomicU64,
     started: Instant,
-) {
-    let mut buf = vec![0u8; 16 * 1024];
-    loop {
-        let n = match r.read(&mut buf).await {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        last.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
-        count.fetch_add(n as u64, Ordering::Relaxed);
-        match state.count_bytes(id, n as u64) {
-            Level::Over => {
-                state.cut(id, "over-limit", "Too much traffic this minute.");
+    /// Cancelled when the connection goes past twice a limit; it then closes.
+    over: &'a CancellationToken,
+}
+
+impl Meter<'_> {
+    async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+        &self,
+        mut r: R,
+        mut w: W,
+        count: &AtomicU64,
+    ) {
+        let mut buf = vec![0u8; 16 * 1024];
+        loop {
+            let n = match r.read(&mut buf).await {
+                Ok(0) | Err(_) => break,
+                Ok(n) => n,
+            };
+            let elapsed = self.started.elapsed().as_millis() as u64;
+            self.last.store(elapsed, Ordering::Relaxed);
+            count.fetch_add(n as u64, Ordering::Relaxed);
+            match self.state.charge_client(self.id, self.source, n as u64, 0) {
+                Level::Over => {
+                    self.over.cancel();
+                    break;
+                }
+                Level::Slow => tokio::time::sleep(self.state.slow_delay(n as u64)).await,
+                Level::Ok => {}
+            }
+            if w.write_all(&buf[..n]).await.is_err() {
                 break;
             }
-            Level::Slow => tokio::time::sleep(state.slow_delay(n as u64)).await,
-            Level::Ok => {}
         }
-        if w.write_all(&buf[..n]).await.is_err() {
-            break;
-        }
+        let _ = w.shutdown().await;
     }
-    let _ = w.shutdown().await;
 }
 
 async fn watch_idle(last: &AtomicU64, started: Instant, idle: Duration) {

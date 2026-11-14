@@ -186,12 +186,19 @@ registrar.
 
 ## Limits (starting values, all flags)
 
-- Per computer: 50 MB and 100 new client connections a minute. Over the
-  limit the relay slows the computer's connections, and past twice the limit
-  it closes them with `over-limit`.
-- Per client IP on the iroh relay: the same 50 MB and 100 new connections a
-  minute (`--limit-bytes-per-min`, `--limit-conns-per-min`). Over the limit
-  the relay slows that IP's connections, and past twice the limit closes them.
+Limits count each client by its address: an IPv4 address, or the /64 that
+holds an IPv6 address. A client over a limit is slowed, and past twice the
+limit its new connections are refused and its open ones closed. The
+computer and its other clients carry on.
+
+- Per computer and client address: 50 MB and 100 new client connections a
+  minute (`--limit-bytes-per-min`, `--limit-conns-per-min`).
+- Per client address across all computers: 200 MB and 400 new connections a
+  minute (`--limit-ip-bytes-per-min`, `--limit-ip-conns-per-min`).
+- Per client address on the iroh relay: 50 MB and 100 new connections a
+  minute (the per-computer flags).
+- Per computer, its own control connection: past 1,200 frames a minute the
+  relay closes it with `over-limit` and refuses it until the minute ends.
 - Total open client connections (`--max-connections`, default 20,000,
   counting iroh relay connections); new ones beyond it are refused.
 - Idle client connections close after 10 minutes with no bytes either way.

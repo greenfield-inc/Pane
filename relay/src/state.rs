@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::io::BoxStream;
 use crate::registry::{Registry, Update};
 use std::collections::{HashMap, HashSet};
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
@@ -48,12 +48,47 @@ pub enum Level {
 }
 
 struct Usage {
-    window: Instant,
+    start: Instant,
+    window: Duration,
     bytes: u64,
     conns: u64,
 }
 
-const WINDOW: Duration = Duration::from_secs(60);
+const MINUTE: Duration = Duration::from_secs(60);
+/// A control connection sending more frames than this a minute is cut off.
+const MAX_FRAMES_PER_MIN: u64 = 600;
+
+/// What a usage counter charges, each with its own limits (see PROTOCOL.md, Limits).
+pub enum Charge<'a> {
+    /// A client connection to a computer, by computer id and client source.
+    Client(&'a str, &'a str),
+    /// Everything one client source sends to or through this relay's computers.
+    Source(&'a str),
+    /// A client of the iroh relay, by source.
+    Direct(&'a str),
+    /// A computer's own control frames, by id.
+    Frames(&'a str),
+}
+
+/// The address a client is counted under: IPv4 as is, IPv6 by its /64, the
+/// smallest block one host usually holds.
+pub fn source(ip: IpAddr) -> String {
+    prefix(ip, 32, 64).to_string()
+}
+
+/// `ip` with only its first `v4` or `v6` bits kept.
+pub fn prefix(ip: IpAddr, v4: u8, v6: u8) -> IpAddr {
+    match ip.to_canonical() {
+        IpAddr::V4(a) => {
+            let mask = u32::MAX.checked_shl(32 - u32::from(v4)).unwrap_or(0);
+            IpAddr::V4(Ipv4Addr::from(u32::from(a) & mask))
+        }
+        IpAddr::V6(a) => {
+            let mask = u128::MAX.checked_shl(128 - u32::from(v6)).unwrap_or(0);
+            IpAddr::V6(Ipv6Addr::from(u128::from(a) & mask))
+        }
+    }
+}
 
 pub struct State {
     pub cfg: Config,
@@ -225,23 +260,46 @@ impl State {
         (n < self.cfg.max_connections).then_some(slot)
     }
 
-    fn account(&self, id: &str, bytes: u64, conns: u64) -> Level {
+    /// Adds to a counter and returns its level: over its limit slows, over twice refuses.
+    pub fn charge(&self, charge: Charge, bytes: u64, conns: u64) -> Level {
+        let cfg = &self.cfg;
+        let (key, window, byte_limit, conn_limit) = match charge {
+            Charge::Client(id, source) => (
+                format!("client {id} {source}"),
+                MINUTE,
+                cfg.limit_bytes_per_min,
+                cfg.limit_conns_per_min,
+            ),
+            Charge::Source(source) => (
+                format!("source {source}"),
+                MINUTE,
+                cfg.limit_ip_bytes_per_min,
+                cfg.limit_ip_conns_per_min,
+            ),
+            Charge::Direct(source) => (
+                format!("direct {source}"),
+                MINUTE,
+                cfg.limit_bytes_per_min,
+                cfg.limit_conns_per_min,
+            ),
+            Charge::Frames(id) => (format!("frames {id}"), MINUTE, u64::MAX, MAX_FRAMES_PER_MIN),
+        };
         let mut usage = self.usage.lock().unwrap();
         let now = Instant::now();
-        let u = usage.entry(id.to_string()).or_insert(Usage {
-            window: now,
+        let fresh = Usage {
+            start: now,
+            window,
             bytes: 0,
             conns: 0,
-        });
-        if now.duration_since(u.window) >= WINDOW {
-            *u = Usage {
-                window: now,
-                bytes: 0,
-                conns: 0,
-            };
+        };
+        let u = usage.entry(key).or_insert(fresh);
+        if now.duration_since(u.start) >= u.window {
+            u.start = now;
+            u.bytes = 0;
+            u.conns = 0;
         }
-        u.bytes += bytes;
-        u.conns += conns;
+        u.bytes = u.bytes.saturating_add(bytes);
+        u.conns = u.conns.saturating_add(conns);
         let level = |used: u64, limit: u64| {
             if used > limit.saturating_mul(2) {
                 Level::Over
@@ -251,25 +309,22 @@ impl State {
                 Level::Ok
             }
         };
-        let b = level(u.bytes, self.cfg.limit_bytes_per_min);
-        let c = level(u.conns, self.cfg.limit_conns_per_min);
-        b.max(c)
+        level(u.bytes, byte_limit).max(level(u.conns, conn_limit))
     }
 
-    pub fn count_conn(&self, id: &str) -> Level {
-        self.account(id, 0, 1)
+    /// Charges a client connection (`conns` 1) or its bytes to both the
+    /// computer-and-source counter and the source's own.
+    pub fn charge_client(&self, id: &str, source: &str, bytes: u64, conns: u64) -> Level {
+        let pair = self.charge(Charge::Client(id, source), bytes, conns);
+        pair.max(self.charge(Charge::Source(source), bytes, conns))
     }
 
-    pub fn count_bytes(&self, id: &str, n: u64) -> Level {
-        self.account(id, n, 0)
-    }
-
-    /// True while the computer's current window is past twice a limit.
+    /// True while the computer is past twice its own control-frame limit.
     pub fn over_limit(&self, id: &str) -> bool {
-        self.account(id, 0, 0) == Level::Over
+        self.charge(Charge::Frames(id), 0, 0) == Level::Over
     }
 
-    /// How long to pause after `n` bytes so the computer's traffic runs at its limit.
+    /// How long to pause after `n` bytes so a slowed connection runs at the per-computer limit.
     pub fn slow_delay(&self, n: u64) -> Duration {
         Duration::from_secs_f64(n as f64 * 60.0 / self.cfg.limit_bytes_per_min.max(1) as f64)
     }
@@ -279,7 +334,7 @@ impl State {
         self.usage
             .lock()
             .unwrap()
-            .retain(|_, u| now.duration_since(u.window) < WINDOW);
+            .retain(|_, u| now.duration_since(u.start) < u.window);
     }
 
     /// Updates the registry for a computer connected here.
