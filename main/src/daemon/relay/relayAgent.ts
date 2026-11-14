@@ -266,7 +266,11 @@ export class RelayAgent {
 
   private openData(conn: string, peer: string): void {
     upgrade(this.options, `/v1/data/${encodeURIComponent(conn)}`)
-      .then(({ stream }) => this.options.onClient(stream, peer))
+      .then(({ stream }) => {
+        // Whoever takes the stream adds its own handling; a reset before then is not a crash.
+        stream.on('error', (error) => this.options.log?.(`[relay] a client connection failed: ${error.message}`));
+        this.options.onClient(stream, peer);
+      })
       .catch((error: Error) => this.options.log?.(`[relay] could not open a data connection: ${error.message}`));
   }
 

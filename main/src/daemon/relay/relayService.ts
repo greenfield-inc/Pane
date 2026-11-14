@@ -15,16 +15,19 @@ import { computerHost, localAddressHost } from './computerNames';
 import { PairingExchange, type PairedEvent, type PairingExchangeRequest, type PairingExchangeResult } from './pairingExchange';
 import { RelayAgent, type RelayAgentState, type RelayAlert } from './relayAgent';
 import { findPaneDirect, PaneDirectProcess } from './paneDirect';
+import { DEFAULT_RELAY_DOMAIN } from '../../../../shared/remoteClient/relay';
+import { PaneError, reasonOf } from '../../../../shared/paneError';
 
-/** Pane's relay domain (D-19). */
-const PANE_RELAY_DOMAIN = 'runpane.net';
-const PANE_RELAYS = ['us', 'eu', 'asia'].map((region) => `${region}.relay.${PANE_RELAY_DOMAIN}`);
+const PANE_RELAYS = ['us', 'eu', 'asia'].map((region) => `${region}.relay.${DEFAULT_RELAY_DOMAIN}`);
 /** The port same-network phones reach this computer on; another free port when it is taken. */
 const LOCAL_PORT = 42138;
 const RENEW_CHECK_MS = 12 * 60 * 60_000;
 /** Without a valid certificate every connection is refused, so a failed order retries from 1 minute, doubling up to 30. */
 const CERTIFICATE_RETRY_FIRST_MS = 60_000;
 const CERTIFICATE_RETRY_MAX_MS = 30 * 60_000;
+/** A failed start (a locked keychain at launch) retries from 5 seconds, doubling up to 5 minutes. */
+const START_RETRY_FIRST_MS = 5_000;
+const START_RETRY_MAX_MS = 5 * 60_000;
 
 export interface RelaySecretStore {
   read(key: string): Promise<string | null>;
@@ -64,6 +67,8 @@ export class RelayService {
   private renewTimer: NodeJS.Timeout | null = null;
   private certificateRetry: NodeJS.Timeout | null = null;
   private certificateFailures = 0;
+  private startRetry: NodeJS.Timeout | null = null;
+  private startFailures = 0;
   private running: Promise<void> = Promise.resolve();
   private readonly exchange: PairingExchange;
   private readonly listeners = new Set<(status: RelayStatus) => void>();
@@ -90,6 +95,8 @@ export class RelayService {
     this.unsubscribe?.();
     this.unsubscribe = null;
     await this.running;
+    if (this.startRetry) clearTimeout(this.startRetry);
+    this.startRetry = null;
     await this.shutdown();
   }
 
@@ -108,7 +115,9 @@ export class RelayService {
   }
 
   sendAlert(alert: RelayAlert): Promise<{ status: number; body: string }> {
-    if (!this.agent) return Promise.reject(new Error('Phone access is off on this computer.'));
+    if (!this.agent) {
+      return Promise.reject(new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so the alert was not sent.', 'Turn on phone access in Settings › Remote Access.'));
+    }
     return this.agent.sendAlert(alert);
   }
 
@@ -153,7 +162,11 @@ export class RelayService {
   createPairingCode(): RelayPairingInfo {
     const status = this.getStatus();
     if (status.phase !== 'ready' || !status.id || !status.domain) {
-      throw new Error(status.lastError ?? 'Phone access is still starting. Try again in a moment.');
+      throw new PaneError(
+        'ERR_RELAY_NOT_READY',
+        status.lastError ? `Phone access is not ready, so no code was made: ${reasonOf(status.lastError)}.` : 'Phone access is still starting, so no code was made.',
+        'Try again in a moment; Settings › Remote Access shows when phone access is ready.',
+      );
     }
     const { secret, expiresAt } = this.exchange.createSecret();
     const fragment = new URLSearchParams({ s: secret, c: status.id, n: this.deps.displayName().slice(0, 60) });
@@ -203,12 +216,25 @@ export class RelayService {
         await this.shutdown();
         await this.startup(want);
       }
+      this.startFailures = 0;
       this.emit();
     }).catch((cause: unknown) => {
       this.lastError = cause instanceof Error ? cause.message : String(cause);
       this.deps.log?.(`[relay] ${this.lastError}`);
       this.emit();
+      this.retryStart();
     });
+  }
+
+  private retryStart(): void {
+    if (this.startRetry || !this.unsubscribe) return;
+    const delay = Math.min(START_RETRY_MAX_MS, START_RETRY_FIRST_MS * 2 ** this.startFailures);
+    this.startFailures += 1;
+    this.startRetry = setTimeout(() => {
+      this.startRetry = null;
+      this.sync();
+    }, delay);
+    this.startRetry.unref();
   }
 
   /** The configured relay address, a development override, or `''` for Pane's nearest relay. */
@@ -237,14 +263,24 @@ export class RelayService {
       ca,
       displayName: () => this.deps.displayName(),
       localAddresses: () => privateAddresses(),
-      onClient: (stream, peer) => this.terminator?.accept(stream, peer),
+      onClient: (stream, peer) => {
+        // Until the TLS listener exists (the certificate is still loading), the phone retries.
+        if (this.terminator) this.terminator.accept(stream, peer);
+        else stream.destroy();
+      },
       onState: (state) => {
         const cameOnline = state.status === 'online' && this.agentState.status !== 'online';
         this.agentState = state;
         if (state.status === 'online') {
           this.lastError = null;
           if (this.domain !== state.domain) this.domain = state.domain;
-          if (cameOnline) void this.onOnline();
+          if (cameOnline) {
+            this.onOnline().catch((cause: unknown) => {
+              this.lastError = `Could not set up this computer's certificate: ${reasonOf(cause)}`;
+              this.deps.log?.(`[relay] ${this.lastError}`);
+              this.emit();
+            });
+          }
         } else if (state.status === 'connecting' && state.lastError) {
           this.lastError = `Can't reach ${host}: ${state.lastError}`;
         }
@@ -383,8 +419,11 @@ export class RelayService {
           response.setEncoding('utf8');
           response.on('data', (chunk: string) => { text += chunk; });
           response.on('end', () => (response.statusCode === 200 ? resolve(text) : reject(new Error(`HTTP ${response.statusCode}`))));
+          response.on('close', () => { if (!response.complete) reject(new Error('the answer was cut off')); });
         });
         request.on('timeout', () => request.destroy(new Error('no answer within 5 s')));
+        const deadline = setTimeout(() => request.destroy(new Error('no full answer within 10 s')), 10_000);
+        request.on('close', () => clearTimeout(deadline));
         request.on('error', reject);
       });
       const { relays } = decodeBoundary(JSON.parse(body), relayListSchema);

@@ -46,10 +46,15 @@ export class ComputerCertificate {
     this.now = options.now ?? Date.now;
   }
 
-  /** Loads a saved certificate if it matches this key and names. */
+  /** Loads a saved certificate if it matches this key and names; an unreadable one counts as none, so a new one is ordered. */
   async load(): Promise<void> {
     const pem = await this.options.certificateStore.read();
-    if (pem) this.use(pem);
+    if (!pem) return;
+    try {
+      this.use(pem);
+    } catch (error) {
+      this.options.log?.(`[relay] ignored the saved certificate, which could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   secureContext(): tls.SecureContext | null {

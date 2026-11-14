@@ -31,6 +31,20 @@ async function freePort(): Promise<number> {
   });
 }
 
+describe('computer certificate', () => {
+  it('starts with no certificate when the saved one cannot be read, so it orders a new one', async () => {
+    const key = await loadComputerKey(memory());
+    const certificate = new ComputerCertificate({
+      key, domain: 'relay.test', certificateStore: memory('not a certificate'), accountStore: memory(), setTxt: async () => undefined,
+    });
+
+    await certificate.load();
+
+    expect(certificate.getStatus()).toBeNull();
+    expect(certificate.needsRenewal()).toBe(true);
+  });
+});
+
 describe.skipIf(!integrationEnvSet(['PEBBLE_BIN', 'PEBBLE_DIR']))('computer certificate (Pebble)', () => {
   let pebble: ChildProcess;
   let directoryUrl = '';

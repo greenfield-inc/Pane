@@ -5,6 +5,7 @@ import http from 'http';
 import net, { type AddressInfo } from 'net';
 import { join } from 'path';
 import tls from 'tls';
+import type { Duplex } from 'stream';
 import { loadComputerKey } from './computerKey';
 import { createComputerTlsServer } from './computerTlsServer';
 import { RelayAgent } from './relayAgent';
@@ -23,6 +24,7 @@ async function startFakeRelay() {
   const agents: tls.TLSSocket[] = [];
   const waiting = new Map<string, net.Socket>();
   const hellos: JsonObject[] = [];
+  const dataSockets: tls.TLSSocket[] = [];
   const verified: boolean[] = [];
   const control = tls.createServer({ key: fixture('relay.key'), cert: fixture('relay.pem') }, (socket) => {
     let head = '';
@@ -62,12 +64,16 @@ async function startFakeRelay() {
           return;
         }
         socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: pane-relay/1\r\nConnection: Upgrade\r\n\r\n');
+        dataSockets.push(socket);
         client.pipe(socket).pipe(client);
         client.resume();
       }
     };
     socket.on('data', onHead);
   });
+  // TLS sockets cannot send a reset; their TCP sockets, found by the client's port, can.
+  const rawSockets = new Map<number, net.Socket>();
+  control.on('connection', (raw: net.Socket) => { rawSockets.set(raw.remotePort ?? 0, raw); });
   const front = net.createServer((client) => {
     client.pause();
     const conn = randomBytes(16).toString('base64url');
@@ -84,6 +90,10 @@ async function startFakeRelay() {
     hellos,
     verified,
     agentsConnected: () => agents.length,
+    /** Resets every data connection, as the relay does when it drops a parked client. */
+    resetData: () => {
+      for (const socket of dataSockets) rawSockets.get(socket.remotePort ?? 0)?.resetAndDestroy();
+    },
     close: () => { control.close(); front.close(); for (const agent of agents) agent.destroy(); },
   };
 }
@@ -159,5 +169,36 @@ describe('relay agent', () => {
     // A same-network phone reaches the local listener directly.
     expect(await get(await computer.listen(0, '127.0.0.1'))).toBe(`dev server saw p5173.${key.id}.${DOMAIN} from 127.0.0.1`);
     await agent.setAcmeTxt(['token-digest']);
+  });
+
+  it('shrugs off the relay resetting a client stream the computer has not taken up', async () => {
+    const relay = await startFakeRelay();
+    cleanups.push(relay.close);
+    const key = await loadComputerKey({ read: async () => fixture('computer.key').toString(), write: async () => undefined });
+    const streams: Duplex[] = [];
+    const agent = new RelayAgent({
+      relayHost: RELAY_HOST,
+      connectHost: '127.0.0.1',
+      relayPort: relay.controlPort,
+      key,
+      displayName: () => 'Studio Mac',
+      localAddresses: () => [],
+      ca: fixture('ca.pem'),
+      // Like a computer whose TLS listener is not up yet.
+      onClient: (stream) => { streams.push(stream); },
+    });
+    cleanups.push(() => agent.stop());
+    agent.start();
+    await waitFor(() => agent.getState().status === 'online', 'the agent to come online');
+    const phone = net.connect(relay.frontPort, '127.0.0.1');
+    phone.on('error', () => {});
+    cleanups.push(() => { phone.destroy(); });
+    phone.write('hello');
+    await waitFor(() => streams.length === 1, 'the client stream');
+
+    relay.resetData();
+
+    await waitFor(() => streams[0].destroyed, 'the stream to close');
+    expect(agent.getState().status).toBe('online');
   });
 });
