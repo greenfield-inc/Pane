@@ -49,6 +49,8 @@ jobs:
             - '.github/workflows/quality.yml'
           relay:
             - 'relay/**'
+            - 'packages/runpane/src/relay.ts'
+            - 'scripts/test-runpane-relay.js'
             - 'direct/**'
             - 'main/src/daemon/relay/**'
             - '.github/workflows/quality.yml'
@@ -456,6 +458,9 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.relay == 'true'
     runs-on: ubuntu-latest
+    env:
+      # The relay, Pebble and pane-direct suites fail here instead of skipping when a binary is missing.
+      PANE_RELAY_INTEGRATION_REQUIRED: '1'
     timeout-minutes: 30
     steps:
     - name: Checkout code
@@ -521,6 +526,9 @@ jobs:
 
     - name: Run the computer side against the relay, and the direct path
       run: pnpm --filter main exec vitest run src/daemon/relay
+
+    - name: Run runpane relay against the relay
+      run: pnpm run test:runpane-relay
 
   # The one check branch protection requires. Skipped jobs pass; failed or
   # cancelled ones fail it.

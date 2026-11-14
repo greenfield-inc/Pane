@@ -79,6 +79,10 @@ of every computer it reached through yours.
   connections close within seconds. The Pane app shows **Pair again**; a
   browser says the computer removed it and to scan a new code on that
   computer.
+- Removing a phone also undoes the links it made: computers that phone linked
+  stop reaching each other, along with the phones they shared it with. That
+  keeps a lost or stolen phone from leaving a way back in. To link them again,
+  pair one phone with each of them.
 - **Unlink from all your computers**, on a linked computer's row, removes
   that computer from every phone's list and from **Switch to** everywhere,
   and the phones you paired through it lose access to it.
