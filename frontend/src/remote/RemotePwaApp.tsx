@@ -20,6 +20,8 @@ import { RemoteSidebar, type RemoteSidebarActions } from './components/RemoteSid
 import { RemoteStatusBar } from './components/RemoteStatusBar';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
 import { RemoteBrowserPanel } from './components/RemoteBrowserPanel';
+import type { RelayPreview } from '../../../shared/utils/phonePage';
+import { RELAY_CLIENT_COMMANDS } from '../../../shared/types/relay';
 import { RemoteExplorerPanel } from './components/RemoteExplorerPanel';
 import { RemoteDiffPanel } from './components/RemoteDiffPanel';
 import { RemoteChatTab } from './components/RemoteChatTab';
@@ -762,6 +764,13 @@ export function RemotePwaApp() {
     });
   }, [adapter, upsertPanel, setLastError]);
 
+  const isRelayComputer = activeProfile?.relay !== undefined;
+  const relayAddress = useCallback(async (ask: RelayPreview['ask']): Promise<string> => {
+    if (!adapter) throw new Error('Not connected to the computer.');
+    const { url } = await adapter.invoke<{ url: string }>(RELAY_CLIENT_COMMANDS.previewAddress, [ask]);
+    return url;
+  }, [adapter]);
+
   const requestPhoneAddress = useCallback((port: number) => {
     if (!adapter) return;
     adapter.requestPhoneAddress(port).catch((error: Error) => {
@@ -1189,7 +1198,7 @@ export function RemotePwaApp() {
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
           >
             {selectedPanel.type === 'browser' && (
-              <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} />
+              <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} onRelayAddress={isRelayComputer ? relayAddress : undefined} />
             )}
             {selectedPanel.type === 'explorer' && adapter && (
               <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} panelId={selectedPanel.id} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />

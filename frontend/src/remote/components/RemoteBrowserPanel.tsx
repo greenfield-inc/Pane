@@ -5,7 +5,7 @@ import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningP
 import { PortsList } from '../../components/panels/browser/PortsList';
 import { normalizeUrl } from '../../components/panels/browser/browserUrl';
 import { cn } from '../../utils/cn';
-import { phonePage, type PhonePage } from '../../../../shared/utils/phonePage';
+import { phonePage, relayPreview, relayPreviewSrc, type PhonePage, type RelayPreview } from '../../../../shared/utils/phonePage';
 import { isNativeMobile, openNativeExternalUrl } from '../runtime/nativeMobile';
 
 interface RemoteBrowserPanelProps {
@@ -18,6 +18,8 @@ interface RemoteBrowserPanelProps {
   /** Asks the host for a web port's phone address. */
   onRequestAddress(port: number): void;
   onError(message: string): void;
+  /** Set for a computer reached through Pane's servers: returns a one-time address for a page on it. */
+  onRelayAddress?: (ask: RelayPreview['ask']) => Promise<string>;
 }
 
 const TOOL_BUTTON = 'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40';
@@ -27,7 +29,7 @@ const TOOL_BUTTON = 'flex h-8 w-8 flex-shrink-0 items-center justify-center roun
  * address, with the host-relative address in the bar. A cross-origin frame cannot report a page
  * that refuses framing, so "Open in Safari" is always offered.
  */
-export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, onRequestAddress, onError }: RemoteBrowserPanelProps) {
+export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, onRequestAddress, onError, onRelayAddress }: RemoteBrowserPanelProps) {
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const url = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl ?? '';
   const [draft, setDraft] = useState<string | null>(null);
@@ -37,8 +39,11 @@ export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, o
   const [copied, setCopied] = useState(false);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
 
+  const relay = useRelayPage(url, panel.id, onRelayAddress, reloadKey);
   let page: PhonePage | null = null;
-  if (url) {
+  if (relay) {
+    page = relay;
+  } else if (url && !onRelayAddress) {
     try {
       page = phonePage(url, ports, panel.id);
     } catch {
@@ -211,4 +216,43 @@ function currentPortOf(url: string): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A page on a computer reached through Pane's servers, loaded from a one-time address the
+ * computer hands out. Null when the browser panel is not on such a computer, or the page is not
+ * on the computer.
+ */
+function useRelayPage(url: string, panelId: string, onRelayAddress: RemoteBrowserPanelProps['onRelayAddress'], reloadKey: number): PhonePage | null {
+  let preview: RelayPreview | null = null;
+  let invalid = false;
+  if (url && onRelayAddress) {
+    try {
+      preview = relayPreview(url, panelId);
+    } catch {
+      invalid = true;
+    }
+  }
+  const askKey = preview ? JSON.stringify(preview.ask) : null;
+  const [ticket, setTicket] = useState<{ key: string; src: string } | { key: string; error: string } | null>(null);
+
+  useEffect(() => {
+    if (!preview || !askKey || !onRelayAddress) return;
+    let cancelled = false;
+    const key = `${url}#${reloadKey}`;
+    onRelayAddress(preview.ask).then(
+      ticketUrl => { if (!cancelled) setTicket({ key, src: relayPreviewSrc(ticketUrl, preview) }); },
+      (error: Error) => { if (!cancelled) setTicket({ key, error: error.message }); },
+    );
+    return () => { cancelled = true; };
+    // The ask is keyed by its JSON; `preview` is rebuilt every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askKey, url, reloadKey, onRelayAddress]);
+
+  if (!url || !onRelayAddress) return null;
+  if (invalid) return { kind: 'unavailable', address: url, host: 'the computer', reason: 'This address is not a valid URL.', cause: 'invalid' };
+  if (!preview) return { kind: 'frame', src: url, address: url };
+  const current = ticket?.key === `${url}#${reloadKey}` ? ticket : null;
+  if (current && 'src' in current) return { kind: 'frame', src: current.src, address: preview.address };
+  return { kind: 'unavailable', address: preview.address, host: 'the computer', reason: current && 'error' in current ? current.error : 'Opening this page…', cause: 'starting' };
 }
