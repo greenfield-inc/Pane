@@ -99,7 +99,11 @@ async function addCanvasText(text, x, y) {
   await launch();
   const project = await page.evaluate(repo => window.electronAPI.projects.create({ name: 'Native Notes QA', path: repo }), repo);
   assert(project.success, JSON.stringify(project));
-  if (await page.getByRole('button', { name: 'Skip', exact: true }).isVisible()) await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  if (await page.getByRole('button', { name: 'Skip', exact: true }).isVisible()) {
+    await page.getByRole('button', { name: 'Skip', exact: true }).click();
+    // Onboarding ends on the phone step.
+    await page.getByRole('button', { name: 'Skip for now', exact: true }).click({ timeout: 10_000 });
+  }
   await page.evaluate(id => window.electronAPI.projects.activate(String(id)), project.data.id);
   const created = await page.evaluate(id => window.electronAPI.sessions.create({ prompt: 'Native Notes QA', worktreeTemplate: 'notes-qa', count: 1, projectId: id, toolType: 'none' }), project.data.id);
   assert(created.success, JSON.stringify(created));

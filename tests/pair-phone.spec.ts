@@ -33,7 +33,7 @@ async function openHome(page: Page, options: ElectronApiMockOptions = {}, theme:
     ...options,
   });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  for (const name of ['No thanks', 'Get Started', 'Skip']) {
+  for (const name of ['No thanks', 'Get Started', 'Skip', 'Skip for now']) {
     const button = page.getByRole('dialog').getByRole('button', { name, exact: true });
     if (await button.isVisible({ timeout: 1500 }).catch(() => false)) await button.click();
   }
