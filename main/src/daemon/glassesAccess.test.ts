@@ -459,6 +459,63 @@ describe('glasses on the workspace listener', () => {
     expect(await upgrade('https://attacker.example')).toBe(403);
   });
 
+  it('admits a native runtime\'s voice socket with a token and no Origin, under every other glasses check', async () => {
+    vi.stubEnv('DEEPGRAM_API_KEY', '');
+    const host = await setup();
+    const { token } = await host.pair();
+    const upgrade = (protocols: string[], headers: Record<string, string>, path = '/voice/deepgram-stream') => new Promise<number>((resolve, reject) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${host.port}/serve-secret${path}`, protocols, { headers });
+      socket.once('unexpected-response', (_request, response) => {
+        resolve(response.statusCode ?? 0);
+        socket.terminate();
+      });
+      socket.once('open', () => reject(new Error('opened without a Deepgram key')));
+      socket.once('error', reject);
+    });
+    const owner = { 'Tailscale-User-Login': OWNER };
+
+    // Admitted past every glasses check, the host reports the missing key.
+    expect(await upgrade(['pane-glasses', token], owner)).toBe(503);
+    expect(await upgrade(['pane-glasses', token], { ...owner, Origin: 'https://attacker.example' })).toBe(403);
+    expect(await upgrade(['pane-glasses', token], {})).toBe(403);
+    expect(await upgrade(['pane-glasses', token], { ...owner, 'Tailscale-User-Login': TEAMMATE })).toBe(403);
+    expect(await upgrade(['pane-glasses', token], owner, '/voice/deepgram-stream?access_token=x')).toBe(400);
+    expect(await upgrade(['pane-glasses', token], owner, '/ports/3000')).toBe(403);
+    expect(await upgrade(['pane-glasses', token], { ...owner, 'Tailscale-Funnel-Request': '?1' })).toBe(403);
+    expect(await upgrade(['pane-glasses', `pgt_${'A'.repeat(43)}`], owner)).toBe(401);
+
+    // Over HTTP the same token and no Origin are still refused.
+    const { Origin: _origin, ...noOrigin } = host.fromGlasses(token);
+    expect(errorCode(await host.invoke('runpane:panels:screen', [{}], noOrigin))).toBe('ERR_GLASSES_ORIGIN_REFUSED');
+  });
+
+  it('keeps a voice socket without an Origin open across heartbeats, and closes it when the glasses are revoked', async () => {
+    const upstream = new WebSocketServer({ port: 0 });
+    await new Promise<void>((resolve) => upstream.once('listening', resolve));
+    vi.stubEnv('DEEPGRAM_API_KEY', 'test-key-0123456789abcdef');
+    try {
+      // SAFETY: a TCP server that is listening reports an AddressInfo.
+      const host = await setup({ heartbeatIntervalMs: 20, deepgramListenEndpoint: `ws://127.0.0.1:${(upstream.address() as AddressInfo).port}` });
+      const { token } = await host.pair();
+      const socket = new WebSocket(`ws://127.0.0.1:${host.port}/serve-secret/voice/deepgram-stream`, ['pane-glasses', token], {
+        headers: { 'Tailscale-User-Login': OWNER },
+      });
+      let closed = false;
+      socket.once('close', () => { closed = true; });
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => resolve());
+        socket.once('error', reject);
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(closed).toBe(false);
+      await host.glasses.revoke(host.glasses.list()[0].id);
+      await vi.waitFor(() => expect(closed).toBe(true), { timeout: 1000 });
+    } finally {
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  });
+
   it('keeps today\'s refusal for browser pages without a glasses token', async () => {
     const host = await setup();
     const page = await host.invoke('runpane:panels:screen', [{}], { 'Tailscale-User-Login': OWNER, Origin: 'https://attacker.example' });

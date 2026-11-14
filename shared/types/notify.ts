@@ -520,6 +520,11 @@ export interface NotifySharedState {
   items: NotifyItem[];
   queue: string[];
   hidden: string[];
+  /**
+   * Whether someone used the host in the last 2 minutes, by the rule that holds back phone pushes.
+   * Only `notify:remote-snapshot` sets it; `notify:shared-changed` leaves it out.
+   */
+  inUse?: boolean;
 }
 
 /** Commands a connected screen or phone sends the host (`notify:remote-command`). */

@@ -191,8 +191,13 @@ hold:
   WebSocket's subprotocol), never in a URL.
 - It comes from an **allowed origin**: the Even app's `http://127.0.0.1` on any port, or one the
   owner allowed in **Settings › Remote Access › Devices**, matched exactly except that a loopback
-  origin matches on any port. Null, missing and wildcard origins are never accepted. A page served
-  from `127.0.0.1` on your phone still needs a glasses token, which only the paired glasses hold.
+  origin matches on any port. Null and wildcard origins are never accepted. HTTP requests always
+  need an allowed origin. A page served from `127.0.0.1` on your phone still needs a glasses token,
+  which only the paired glasses hold.
+- The one exception is the **voice WebSocket**: it may arrive with no `Origin` when it carries a
+  glasses token. Browsers always send an `Origin` on a WebSocket, so this admits only a native
+  glasses runtime, such as Glassly's, that cannot set one. Every other check above still applies,
+  and a revoke or Funnel still closes the socket.
 - The source is not **locked out**: 5 refused attempts in 10 minutes lock it out for a minute,
   doubling on each repeat up to an hour. Each refusal is logged with the source and reason, never
   the token.
