@@ -43,7 +43,7 @@ function buildPaneDirect(platform, arch) {
   return binary;
 }
 
-module.exports = { buildPaneDirect };
+module.exports = { buildPaneDirect, hasCommand };
 
 if (require.main === module) {
   const [platform = process.platform, arch = process.arch] = process.argv.slice(2);

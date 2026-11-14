@@ -348,7 +348,8 @@ Test UI and packaging changes in a packaged build for your platform
 (`pnpm build:mac`, `pnpm build:linux:x64` on x64 Linux,
 `pnpm build:linux:arm64` on ARM64 Linux, or `pnpm build:win:x64`; output in
 `dist-electron/`). Packaging builds the `pane-direct` helper (`direct/`) with
-Rust, so install it first from https://rustup.rs. The x64 Linux build scans
+Rust (https://rustup.rs); without cargo, a local package leaves it out and
+warns, and direct paths stay off. The x64 Linux build scans
 native modules with `objdump`
 (from binutils) and fails if one needs a CPU newer than generic x86-64; if your
 compiler defaults higher, export `CFLAGS` and `CXXFLAGS` as

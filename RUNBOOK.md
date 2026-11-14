@@ -1,9 +1,10 @@
 # Pane runbook
 
-How Pane ships and what runs outside a developer's machine. Pane has no server
-and no production database: the desktop app keeps its data on each user's
-machine. The things that ship are installers, two CLI packages, a preview
-build of the Remote PWA, and over-the-air updates for the phone app.
+How Pane ships and what runs outside a developer's machine. Pane has no
+production database: the desktop app keeps its data on each user's machine.
+The things that ship are installers, two CLI packages, a preview build of the
+Remote PWA, over-the-air updates for the phone app, and three relays that give
+each computer its `runpane.net` address for QR pairing.
 
 ## Surfaces
 
@@ -17,6 +18,7 @@ build of the Remote PWA, and over-the-air updates for the phone app.
 | Phone app updates | `Native OTA Updates` (`native-updates.yml`) | push to `main` touching `native/`, `shared/`, `pnpm-lock.yaml` or `deploy/native-updates/`; manual on `main` | Exports the phone app's JavaScript, writes one update manifest per platform, and deploys it to the Cloud Run service `pane-native-updates`. On pull requests it builds and smoke-tests the image without deploying |
 | Native runtime check | `Native Runtime` (`native-runtime.yml`) | pull requests that touch `native/` or `pnpm-lock.yaml` | Fails when the phone app's native code changed without a `runtimeVersion` bump, and labels bumped PRs `native-change` |
 | Android build check | `Native Android Build` (`native-android.yml`) | pull requests and pushes to `main` whose Expo Android fingerprint changed, or that change the workflow; weekly; manual | Builds the Android dev client APK with the Firebase config. Pull requests build `arm64-v8a` only; pushes to `main`, the weekly run and manual runs build all four ABIs, one job per ABI |
+| Relays | `Deploy Pane relays` (`relay-deploy.yml`) | manual only | Builds `relay/`, pushes the image to Google Artifact Registry, and creates or updates the three relay VMs; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |
 | Website notification | `Notify website on release` (`notify-website.yml`) | manual only | Re-sends the release event to the website repo; tag releases already do this from `Build & Release` |
 | PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux, macOS and Windows, the runpane wrapper matrix, and the Playwright smoke suite |
 | React review | `React Doctor` (`react-doctor.yml`) | pull requests that touch `frontend/` | Comments on new React findings; advisory, never blocks |
@@ -86,9 +88,10 @@ Every installer carries `pane-direct`, the Rust helper for direct paths to linke
 computers (`direct/`). `scripts/after-pack.js` builds it in release mode for each
 packaged platform and arch (`scripts/build-pane-direct.js`, which adds the Rust
 target with rustup) and copies it into the app's resources folder, where main
-finds it. A universal macOS app merges the two copies. Packaging therefore needs
-Rust: every packaging job installs the stable toolchain first, and a local
-package build needs it too (https://rustup.rs).
+finds it. A universal macOS app merges the two copies. Every packaging job
+installs the stable Rust toolchain first, and CI fails without it. A local
+package build without cargo warns and leaves the helper out, so its linked
+computers connect through the relay only.
 
 ```
 build (macOS arm64,   ─┐
@@ -215,6 +218,7 @@ Names only; values live in the GitHub repository settings.
 | `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | `build.yml` | macOS signing. It turns on only when all five are set and the `sign` input is not unchecked; otherwise builds are unsigned |
 | `SITE_REPO_DISPATCH_TOKEN` | `build.yml`, `notify-website.yml` | Sends the `pane-release` event to the website repo |
 | `TRAFFIC_TOKEN` | `traffic-snapshot.yml` | Reads repository traffic |
+| `PANE_RELAY_ACME_EMAIL`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID`, `PANE_RELAY_ANDROID_CERT_SHA256` variables | `relay-deploy.yml` | Relay certificates, iOS alerts and app links; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |
 | `GCP_*`, `CLOUD_RUN_*` variables | `deploy-remote-pwa-preview.yml`, `native-updates.yml` (all but `CLOUD_RUN_SERVICE`) | See [Remote PWA preview](#remote-pwa-preview) |
 
 Local development needs no secrets and no `.env` file.

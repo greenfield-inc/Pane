@@ -5,7 +5,7 @@ const { Arch } = require('electron-builder');
 
 const { verifyPackedApp } = require('./verify-packaged-icon');
 const { verifyChatAdapters } = require('./verify-chat-adapters');
-const { buildPaneDirect } = require('./build-pane-direct');
+const { buildPaneDirect, hasCommand } = require('./build-pane-direct');
 
 function verifyLinuxSqliteArchitecture(appOutDir, arch) {
   const name = Arch[arch];
@@ -113,6 +113,12 @@ function addPaneDirect(context) {
   const resources = platform === 'darwin'
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
+  // CI must ship it; a local package without cargo leaves direct paths off and says so.
+  if (!process.env.CI && !hasCommand('cargo')) {
+    console.warn('[pane-direct] cargo is not on PATH, so this local package has no direct-path helper: '
+      + 'linked computers connect through the relay only. Install Rust from https://rustup.rs to include it.');
+    return;
+  }
   const binary = buildPaneDirect(platform, arch);
   const destination = path.join(resources, path.basename(binary));
   fs.copyFileSync(binary, destination);
