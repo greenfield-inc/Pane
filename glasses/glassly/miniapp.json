@@ -106,5 +106,17 @@
         ]
       }
     }
+  ],
+  "widgets": [
+    {
+      "id": "pane_status",
+      "name": "Pane",
+      "sizes": [
+        "SM",
+        "MD",
+        "EX"
+      ],
+      "defaultSize": "SM"
+    }
   ]
 }

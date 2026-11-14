@@ -15,6 +15,7 @@ import { tierOf } from '../glassly/src/background/tier';
 import { TouchMapper } from '../glassly/src/background/touch';
 import { glasslyDictation } from '../glassly/src/background/transcription';
 import { PaneActions, STAGED_MS, type Staged } from '../glassly/src/background/actions';
+import { StatusWidget, summaryLine } from '../glassly/src/background/widget';
 import { Notifier, SUMMARY_ID, meetingAt, type Asked, type Poster } from '../glassly/src/background/notifier';
 
 /** Every device profile Glassly 0.4.0 ships, by file name, read from the pinned engine tarball. */
@@ -282,5 +283,42 @@ describe('Actions for Glassly AI', () => {
     actions.handle('start_session', { goal: 'Find why checkout charges twice' }, 'com.glassly.ai');
     expect(staged.map((request) => request.show.kind === 'confirm' && request.show.request.kind)).toEqual(['answer', 'session']);
     expect(started).toBe(0);
+  });
+});
+
+describe('the dashboard widget', () => {
+  async function widgetOn() {
+    const source = new DemoSource(() => ({ cancel() {} }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const timers: Array<() => void> = [];
+    const answered: Array<[string, unknown]> = [];
+    const widget = new StatusWidget({
+      source: () => source,
+      later: (fn) => { timers.push(fn); return { cancel: () => { timers.splice(timers.indexOf(fn), 1); } }; },
+      answer: async (card, answer) => { answered.push([card.paneName, answer]); },
+      redraw: () => {},
+    });
+    return { source, widget, timers, answered };
+  }
+  const shown = (elements: RenderElement[]) => text(elements).join('\n');
+
+  it('shows how many agents work and wait, and the newest question', async () => {
+    const { widget, source } = await widgetOn();
+    const newest = source.cards().find((card) => card.waiting);
+    expect(shown(widget.card({ width: 300, height: 80 }))).toBe(`Pane · ${summaryLine(source)}\n${newest?.paneName}: ${newest?.title}`);
+  });
+
+  it('answers from the expanded view only after the undo hold, and a second tap takes it back', async () => {
+    const { widget, timers, answered } = await widgetOn();
+    const box = { width: 576, height: 288 };
+    expect(shown(widget.expanded(box))).toContain('> ');
+    widget.input({ type: 'swipe', direction: 'down' });
+    widget.input({ type: 'tap' });
+    expect(shown(widget.expanded(box))).toContain('Sent · tap to undo');
+    widget.input({ type: 'tap' });
+    expect(timers).toHaveLength(0);
+    widget.input({ type: 'tap' });
+    timers.shift()?.();
+    expect(answered).toHaveLength(1);
   });
 });

@@ -14,6 +14,7 @@ import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/
 import type { PhoneCommand, PhoneComputer, PhoneFrame, PhoneState } from '../channels';
 import { PaneActions, type Staged } from './actions';
 import { glanceText } from './glance';
+import { StatusWidget, WIDGET_ID } from './widget';
 import { Notifier, meetingAt } from './notifier';
 import { ListFocus, capturedList, renderPage, scrollableText } from './render';
 import { tierOf, type Tier } from './tier';
@@ -186,6 +187,37 @@ registerMiniapp(async (session) => {
   readCalendar();
   every(readCalendar, CALENDAR_READ_MS);
   every(notify, MEETING_CHECK_MS);
+  // ---------- the dashboard widget (Glassly custom firmware) ----------
+  // Glassly redraws a widget at most once a second; only a changed frame is sent.
+  let widgetFrame = '';
+  const widget = new StatusWidget({
+    source: () => source,
+    later,
+    answer: (card, answer) => source?.answer(card, answer) ?? Promise.resolve(),
+    redraw: () => drawWidget(),
+  });
+  const handle = session.widgets.provide(WIDGET_ID, {
+    onBox: () => drawWidget(),
+    onEvent: (event) => {
+      if (event.type === 'beforeShow' || event.type === 'expand' || event.type === 'collapse') {
+        drawWidget();
+        return { handled: true };
+      }
+      return { handled: widget.input(event) };
+    },
+  });
+  void handle.setExpandable(true).catch(() => false);
+  function drawWidget(): void {
+    const expanded = handle.expanded;
+    const box = handle.box;
+    if (!expanded && !box) return;
+    const elements = expanded ? widget.expanded(expanded) : box ? widget.card(box) : [];
+    const key = JSON.stringify([Boolean(expanded), elements]);
+    if (key === widgetFrame) return;
+    widgetFrame = key;
+    handle.update(elements, { view: expanded ? 'expanded' : 'card' });
+  }
+
   // ---------- Actions for Glassly's assistant ----------
   // A change an Action asks for waits here for one press on the glasses, and lapses unconfirmed.
   let staged: Staged | null = null;
@@ -273,6 +305,7 @@ registerMiniapp(async (session) => {
       glance = glanceText(next);
       if (tier.kind === 'glance') draw();
       notify();
+      drawWidget();
       publish();
     });
     glance = glanceText(next);
