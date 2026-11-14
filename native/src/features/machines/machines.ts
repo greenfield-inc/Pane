@@ -98,6 +98,8 @@ export function listMachines({ profiles, current, connection, presence, tailnet 
       colorName: entry?.name ?? profile.tailnetMachine ?? profile.label,
       os: entry?.os ?? null,
       ...live,
+      // Until the networking module finds a direct path, a relay computer is always reached through Pane's servers.
+      status: profile.relay ? `${live.status} · Via relay` : live.status,
       current: isCurrent,
       selectable: !isCurrent && live.state !== 'dimmed',
       profile,

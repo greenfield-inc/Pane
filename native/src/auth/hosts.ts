@@ -22,6 +22,12 @@ export function addHost(hosts: SavedHosts, profile: RemotePaneConnectionProfile)
   return { profiles: [...others, profile], activeId: profile.id };
 }
 
+/** Saves several computers at once (a relay pairing and the computers linked with it), keeping `activeId`. */
+export function addHosts(hosts: SavedHosts, profiles: readonly RemotePaneConnectionProfile[], activeId: string | null): SavedHosts {
+  const next = profiles.reduce((saved, profile) => addHost(saved, profile), hosts);
+  return { profiles: next.profiles, activeId: activeId ?? hosts.activeId };
+}
+
 export function removeHost(hosts: SavedHosts, id: string): SavedHosts {
   const profiles = hosts.profiles.filter(p => p.id !== id);
   const activeId = hosts.activeId !== id && profiles.some(p => p.id === hosts.activeId)

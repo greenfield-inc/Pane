@@ -5,7 +5,7 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import { queryClient } from '@/daemon/queryClient';
 import { DEMO_PROFILE, resetDemoHost } from '@/features/demo/demoHost';
 
-import { addHost, EMPTY_HOSTS, loadHosts, removeHost, saveHosts, type SavedHosts } from './hosts';
+import { addHost, addHosts, EMPTY_HOSTS, loadHosts, removeHost, saveHosts, type SavedHosts } from './hosts';
 import { secureStore } from './secureStore';
 
 interface HostsState extends SavedHosts {
@@ -15,6 +15,8 @@ interface HostsState extends SavedHosts {
   hydrate(): Promise<void>;
   /** Saves a verified pairing and makes it the active host. */
   add(profile: RemotePaneConnectionProfile): Promise<void>;
+  /** Saves several computers; `activeId` (null: keep the current one) becomes active. */
+  addMany(profiles: RemotePaneConnectionProfile[], activeId: string | null): Promise<void>;
   /** Signs out of one host: its token is deleted from this device. */
   remove(id: string): Promise<void>;
   setActive(id: string): Promise<void>;
@@ -39,6 +41,7 @@ export const useHostsStore = create<HostsState>((set, get) => {
       set({ ...hosts, hydrated: true });
     },
     add: profile => commit(addHost(get(), profile)),
+    addMany: (profiles, activeId) => commit(addHosts(get(), profiles, activeId)),
     remove: id => commit(removeHost(get(), id)),
     setActive: id => commit({ profiles: get().profiles, activeId: id }),
     startDemo: () => {

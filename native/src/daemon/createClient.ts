@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import {
   createFetchEventStreamTransport,
   getOrCreateRuntimeId,
+  relayBaseUrl,
   RemoteDaemonClient,
 } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
@@ -33,7 +34,8 @@ export function getRuntimeId(): Promise<string> {
 
 export function createDaemonClient(profile: RemotePaneConnectionProfile): RemoteDaemonClient {
   return new RemoteDaemonClient({
-    profile,
+    // A relay computer's address is picked per connection (the networking module adds same-network addresses).
+    profile: { ...profile, baseUrl: relayBaseUrl(profile) },
     // The demo's sample computers answer in the app, whichever screen builds the client.
     ...(isDemoProfile(profile)
       ? demoConnection()

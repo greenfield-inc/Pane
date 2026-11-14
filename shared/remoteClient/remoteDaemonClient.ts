@@ -201,7 +201,7 @@ export class RemoteDaemonClient {
   private runtimeId: string | null = null;
   private abortController: AbortController | null = null;
   private reconnectTimer: RemoteTimer | null = null;
-  private readonly recovery = new RecoveryCycle();
+  private readonly recovery: RecoveryCycle;
   private wakeProbes: AbortController | null = null;
   private wake: { wokeAt: number; firstAnswerAt: number | null; attempts: number; lastError: string | null } | null = null;
   private deadlineTimer: RemoteTimer | null = null;
@@ -238,6 +238,8 @@ export class RemoteDaemonClient {
     this.resolveRuntimeId = options.runtimeId;
     this.staleStreamTimeoutMs = options.staleStreamTimeoutMs;
     this.schedule = options.schedule ?? scheduleWithGlobals;
+    // A computer reached through a relay is never given up on while the app is open (D-15); only a revoked token stops it.
+    this.recovery = new RecoveryCycle(Math.random, options.profile.relay ? Number.POSITIVE_INFINITY : undefined);
   }
 
   getState(): RemoteDaemonConnectionState {
@@ -720,6 +722,7 @@ export class RemoteDaemonClient {
   }
 
   private armDeadline(): void {
+    if (!Number.isFinite(this.recovery.remainingMs)) return;
     this.deadlineTimer ??= this.schedule(() => this.stopRecovery(RECONNECT_GAVE_UP_MESSAGE), this.recovery.remainingMs);
   }
 

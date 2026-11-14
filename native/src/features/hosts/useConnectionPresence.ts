@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 
-import { CONNECTION_GRACE_MS, connectionNotice, connectionPresence } from '@shared/remoteClient';
+import { CONNECTION_GRACE_MS, connectionNotice, connectionPresence, isRelayProfile, relayAsleepSince } from '@shared/remoteClient';
 
 import { useDaemon } from '@/daemon';
+import { streamingFetch } from '@/daemon/createClient';
+
+/** How often the relay is asked whether an unreachable computer is asleep. */
+const ASLEEP_POLL_MS = 10_000;
 
 /** A return from the background reconnects within a few seconds when the network is fine, so it says so sooner. */
 const WAKE_GRACE_MS = 5_000;
@@ -50,10 +54,26 @@ export function useConnectionPresence() {
 
   // The shared rule only compares the time down with the grace window.
   const downForMs = elapsedWindow === graceWindow.id ? CONNECTION_GRACE_MS : 0;
-  const notice = connectionNotice(connection, downForMs, profile.label);
+  const relay = isRelayProfile(profile) ? profile : null;
+  const [asleepSince, setAsleepSince] = useState<string | null>(null);
+  const askRelay = relay !== null && !connected && foreground && downForMs > 0 && connection.status !== 'error';
+  useEffect(() => {
+    if (!askRelay || !relay) return;
+    let cancelled = false;
+    const ask = () => void relayAsleepSince(streamingFetch, relay).then(since => { if (!cancelled) setAsleepSince(since); });
+    ask();
+    const timer = setInterval(ask, ASLEEP_POLL_MS);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [askRelay, relay]);
+  const notice = connectionNotice(connection, downForMs, profile.label, relay ? { asleepSince: askRelay && asleepSince ? formatTime(asleepSince) : null } : undefined);
   return {
     presence: connectionPresence(connection.status, downForMs),
     notice: notice && connection.updateIntent ? { ...notice, message: `Updating Pane on ${profile.label} · ${connection.updateIntent.id}` } : notice,
     retry: () => client.retryNow(),
   };
+}
+
+function formatTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }

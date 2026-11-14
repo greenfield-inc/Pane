@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ListeningPortsSnapshot } from '@shared/types/listeningPorts';
 
-import { browserPage, htmlFromBase64, reloadFile, splitAddress } from './browserPage';
+import { browserPage, htmlFromBase64, relayBrowserPage, reloadFile, splitAddress } from './browserPage';
 
 const on: ListeningPortsSnapshot = {
   host: 'studio-mac',
@@ -105,5 +105,32 @@ describe('reloadFile', () => {
     await vi.waitFor(() => expect(second.observer.getCurrentResult().data).toBe('status-v2'));
     second.stop();
     expect(reads).toEqual(['status-v1', 'status-v2']);
+  });
+});
+
+describe('relayBrowserPage', () => {
+  const TICKET = 'https://p5173.abc.runpane.net/?pane-ticket=T1';
+
+  it('waits for the computer’s one-time address, then loads the dev server path through it', () => {
+    expect(relayBrowserPage('http://localhost:5173/checkout?step=2#pay', { ports: off }, 'panel-1', 'Studio Mac', null))
+      .toEqual({ kind: 'loading', address: 'localhost:5173/checkout?step=2#pay', host: 'Studio Mac' });
+    expect(relayBrowserPage('http://localhost:5173/checkout?step=2#pay', { ports: off }, 'panel-1', 'Studio Mac', TICKET))
+      .toEqual({ kind: 'web', src: 'https://p5173.abc.runpane.net/checkout?pane-ticket=T1&step=2#pay', address: 'localhost:5173/checkout?step=2#pay' });
+  });
+
+  it('loads an HTML file through the files address the computer returns', () => {
+    const ticket = 'https://files.abc.runpane.net/file/panel-1/report.html?pane-ticket=T2';
+    expect(relayBrowserPage('file:///work/report.html', { ports: null }, 'panel-1', 'Studio Mac', ticket))
+      .toEqual({ kind: 'web', src: ticket, address: 'report.html' });
+  });
+
+  it('says nothing listens before asking for an address', () => {
+    expect(relayBrowserPage('http://localhost:4000/', { ports: off }, 'panel-1', 'Studio Mac', null))
+      .toMatchObject({ kind: 'refused', port: 4000 });
+  });
+
+  it('loads a public page as it is', () => {
+    expect(relayBrowserPage('https://example.com/a', { ports: null }, 'panel-1', 'Studio Mac', null))
+      .toEqual({ kind: 'web', src: 'https://example.com/a', address: 'https://example.com/a' });
   });
 });

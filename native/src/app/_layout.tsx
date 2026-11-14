@@ -7,6 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { DaemonProvider, queryClient } from '@/daemon';
+import { RelayComputerSync } from '@/features/hosts/RelayComputerSync';
 import { SharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
 import { NotificationTapRouter, NotifyAlertCleanup } from '@/features/notifications/NotificationRouting';
 import { PushRegistrationSync } from '@/features/notifications/usePushSetup';
@@ -51,6 +52,7 @@ export default function RootLayout() {
               <DaemonProvider key={activeHost.id} profile={activeHost}>
                 <RootStack signedIn />
                 <NotifyAlertCleanup />
+                <RelayComputerSync />
               </DaemonProvider>
               <SharedCredentialSync />
               <PushRegistrationSync />
@@ -120,6 +122,7 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           name="new"
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.8, 1], sheetGrabberVisible: true, headerShown: false }}
         />
+        <Stack.Screen name="hosts/new" options={{ title: 'Add a computer', ...grouped }} />
         <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add with a code' }} />
         <Stack.Screen name="computers" options={{ title: 'Your computers', ...grouped }} />
       </Stack.Protected>

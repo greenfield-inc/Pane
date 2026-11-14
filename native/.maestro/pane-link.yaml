@@ -12,7 +12,7 @@ env:
 - tapOn:
     id: settings-add-machine
 - tapOn:
-    id: computers-add-code
+    id: add-computer-code
 - tapOn:
     id: connect-code-input
 - inputText: ${SECOND_CODE}

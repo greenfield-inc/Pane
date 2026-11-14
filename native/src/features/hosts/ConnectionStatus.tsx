@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
@@ -23,7 +24,11 @@ export function ConnectionBar({ notice, onRetry }: { notice: ConnectionNotice | 
   return (
     <View testID="connection-bar" accessibilityLiveRegion="polite" style={[styles.bar, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
       <Text variant="footnote" tone="secondary" style={styles.barText}>{notice.message}</Text>
-      {notice.canRetry ? (
+      {notice.pairAgain ? (
+        <Pressable testID="connection-pair-again" accessibilityRole="button" hitSlop={10} onPress={() => router.push('/scan')}>
+          <Text variant="footnote" tone="accent" style={styles.retry}>Pair again</Text>
+        </Pressable>
+      ) : notice.canRetry ? (
         <Pressable testID="connection-retry" accessibilityRole="button" accessibilityLabel="Retry now" hitSlop={10} onPress={onRetry}>
           <Text variant="footnote" tone="accent" style={styles.retry}>Retry now</Text>
         </Pressable>
