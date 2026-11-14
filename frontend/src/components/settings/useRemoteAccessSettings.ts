@@ -145,11 +145,16 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
       closeSettings();
     });
     const unsubscribeHost = window.electronAPI.remoteDaemon.onHostStateChanged(setHostState);
+    // Phones and linked computers change the device list too (a removed phone, a new link); main announces every config change.
+    const unsubscribeConfig = window.electronAPI.events.onConfigUpdated(() => {
+      void refresh().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : 'Failed to load Remote Pane'));
+    });
     return () => {
       unsubscribeConnection();
       unsubscribeHost();
+      unsubscribeConfig();
     };
-  }, [closeSettings, isOpen, reload]);
+  }, [closeSettings, isOpen, refresh, reload]);
 
   /** Runs a connect; once main publishes its checklist, Settings closes. Errors before that stay inline. */
   const showChecklist = useCallback(async <T,>(connect: () => Promise<T>): Promise<T> => {

@@ -9,6 +9,7 @@ type PairTestWindow = Window & {
     getInvokeCalls(channel: string): Array<{ args: unknown[] }>;
     emitRelayPaired(clientId: string, label: string): void;
     emitRelayStatus(updates: Partial<RelayStatus>): void;
+    emitHostClientsChanged(clients: RemoteDaemonClientRecord[]): void;
   };
 };
 
@@ -122,6 +123,22 @@ for (const theme of ['light', 'dark'] as const) {
     await shot(page, `settings-remove-menu-${theme}`);
   });
 }
+
+test('Devices follows changes made from another computer or a phone without reopening Settings', async ({ page }) => {
+  await openRemoteAccess(page);
+  await expect(page.getByRole('button', { name: "Remove Sam's iPhone" })).toBeVisible();
+  await expect(page.getByTestId('linked-Travel Laptop')).toBeVisible();
+
+  const BUILD_BOX: RemoteDaemonClientRecord = { id: 'computer-2', label: 'Build Box', createdAt: '2026-11-03T10:00:00Z', tokenHash: 'h3', kind: 'computer', computerId: 'b6y1k3', linkedBy: "Ana's Pixel" };
+  // SAFETY: installElectronApiMock installs __paneTestElectronMock before navigation.
+  await page.evaluate((clients) => (window as PairTestWindow).__paneTestElectronMock.emitHostClientsChanged(clients), [BUILD_BOX]);
+
+  await expect(page.getByRole('button', { name: "Remove Sam's iPhone" })).toHaveCount(0);
+  await expect(page.getByTestId('linked-Travel Laptop')).toHaveCount(0);
+  await expect(page.getByTestId('linked-Build Box')).toContainText("Linked by Ana's Pixel");
+  await page.getByRole('heading', { name: 'Devices' }).evaluate((heading) => heading.scrollIntoView({ block: 'start' }));
+  await shot(page, 'settings-devices-changed-elsewhere-dark');
+});
 
 test('Remove from all your computers removes the phone everywhere and says where it could not', async ({ page }) => {
   await openRemoteAccess(page, { relay: { everywhere: { removed: ['devbox', 'Travel Laptop'], notReached: ['Build Box'] } } });

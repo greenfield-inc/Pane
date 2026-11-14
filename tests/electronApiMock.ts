@@ -640,6 +640,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onRelayStatusChanged') {
           return (callback: MockEventCallback) => subscribe('relay:status-changed', callback);
         }
+        if (prop === 'onConfigUpdated') {
+          return (callback: MockEventCallback) => subscribe('config:updated', callback);
+        }
         if (prop === 'onRelayPaired') {
           return (callback: MockEventCallback) => subscribe('relay:paired', callback);
         }
@@ -1920,6 +1923,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           remoteDaemonConfig.host.clients.push({ id: clientId, label, createdAt: new Date().toISOString(), tokenHash: 'hash', phoneId: `install-${clientId}` });
           syncRemoteDaemonConfig();
           emit('relay:paired', { clientId, label });
+        },
+        /** Another computer or a phone changed this computer's devices; main announces the new config. */
+        emitHostClientsChanged(clients: RemoteDaemonClientRecord[]) {
+          remoteDaemonConfig.host.clients = clone(clients);
+          syncRemoteDaemonConfig();
+          emit('config:updated', clone(configState));
         },
         /** Main moving this computer's relay to a new phase. */
         emitRelayStatus(updates: Partial<RelayStatus>) {
