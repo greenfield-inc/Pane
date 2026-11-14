@@ -272,7 +272,7 @@ export class RemotePaneClient {
     this.dnsLookup = options.dnsLookup ?? defaultLookup;
     const directBin = profile.relay ? findPaneDirect() : null;
     this.direct = profile.relay && directBin
-      ? new DirectPath({ bin: directBin, baseUrl: this.normalizedBaseUrl, fingerprint: profile.relay.fingerprint, label: profile.label })
+      ? new DirectPath({ bin: directBin, baseUrl: this.normalizedBaseUrl, fingerprint: profile.relay.fingerprint, label: profile.label, log: (line) => console.log(line) })
       : null;
   }
 

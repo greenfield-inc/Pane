@@ -157,7 +157,8 @@ export class DirectPath {
       const [relay, direct] = await Promise.all([this.roundTrip(this.relayAgent), this.roundTrip(this.directAgent)]);
       const before = this.choice.path;
       this.choice = choosePath(this.choice, { relay, direct });
-      if (this.choice.path !== before) this.options.log?.(`[direct] ${this.options.label}: new connections use the ${this.choice.path} path (relay ${relay ?? 'failed'} ms, direct ${direct ?? 'failed'} ms)`);
+      const ms = (value: number | null) => (value === null ? 'failed' : `${Math.round(value)} ms`);
+      if (this.choice.path !== before) this.options.log?.(`[direct] ${this.options.label}: new connections use the ${this.choice.path} path (relay ${ms(relay)}, direct ${ms(direct)})`);
     } finally {
       this.probing = false;
     }
