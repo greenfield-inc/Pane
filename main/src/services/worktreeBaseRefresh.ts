@@ -144,13 +144,15 @@ async function readFetchHead(projectPath: string, fetchHeadPath: string, command
   const [info, text] = await Promise.all([stat(fetchHeadPath).catch(() => null), readFile(fetchHeadPath, 'utf8').catch(() => '')]);
   if (!info || !text.trim()) return false;
   const urls = await remoteUrls(projectPath, commandRunner);
+  // A file dated ahead of this clock (skew, a copied repo) counts as fetched now, not in the future.
+  const fetchedAt = Math.min(info.mtimeMs, Date.now());
   let named = false;
   // Each line: `<sha>\t[not-for-merge]\tbranch '<branch>' of <url>`, the URL without credentials or `.git`.
   for (const line of text.split('\n')) {
     const match = /\tbranch '(.+)' of (.+)$/.exec(line);
     const remote = match ? urls.get(normalizeRemoteUrl(match[2])) : undefined;
     if (!match || !remote) continue;
-    recordBaseFetch(projectPath, { remote, branch: match[1] }, info.mtimeMs);
+    recordBaseFetch(projectPath, { remote, branch: match[1] }, fetchedAt);
     named = true;
   }
   return named;
