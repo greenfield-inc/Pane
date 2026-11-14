@@ -29,7 +29,7 @@ test('the Working row sits a small gap above the status line, and your message a
   const working = await box(page, '.chat-fold-row[data-running=true]');
   const status = await box(page, '.chat-statusline');
   const user = await box(page, '.chat-turn:last-child .chat-user-row');
-  expect(status.top - working.bottom, 'Working row to status line').toBeLessThanOrEqual(28);
+  expect(status.top - working.bottom, 'Working row to status line').toBeLessThanOrEqual(20);
   expect(working.top - user.bottom, 'your message to the Working row').toBeLessThanOrEqual(24);
 });
 
@@ -42,7 +42,7 @@ for (const query of ['working=1', 'working=1&queue=2', 'permission=1', '']) {
     expect(last.bottom).toBeLessThanOrEqual(viewport.bottom);
     expect(viewport.bottom).toBeLessThanOrEqual(footer.top + 0.5);
     // Not a large empty band either.
-    expect(footer.top - last.bottom, 'last row to the footer').toBeLessThanOrEqual(28);
+    expect(footer.top - last.bottom, 'last row to the footer').toBeLessThanOrEqual(20);
   });
 }
 
