@@ -490,6 +490,17 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "relay",
+      "summary": "Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags.",
+      "usage": [
+        "runpane relay [pane-relay flags...]"
+      ],
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
       "name": "repos list",
       "summary": "List repositories saved in the running Pane app.",
       "usage": [
@@ -3062,6 +3073,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane daemon repair [--pane-dir <path>] [--yes] [--json]",
         "  runpane agent-context [--json]",
         "  runpane mcp [--toolsets <name,...>] [--read-only]",
+        "  runpane relay [pane-relay flags...]",
         "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
@@ -3783,6 +3795,20 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, workspace, git, docs, links, admin",
         "  --read-only                    Serve only read-only tools"
+      ],
+      "relay": [
+        "Usage:",
+        "  runpane relay [pane-relay flags...]",
+        "",
+        "Runs pane-relay, the open-source relay that gives your computers addresses on your own domain for QR pairing.",
+        "Flags, stdio, signals and the exit code pass through to pane-relay; `runpane relay --help` lists its flags.",
+        "npm installs the binary with runpane as an optional dependency (@runpane/relay-<platform>-<arch>) on macOS, Linux and Windows, x64 and arm64. Pane's built-in runpane does not include it; use npx.",
+        "",
+        "Examples:",
+        "  npx --yes runpane@latest relay --dev",
+        "  npx --yes runpane@latest relay --domain relay.example.com --acme-cache /var/lib/pane-relay/acme --dns 0.0.0.0:53 --public-ip 203.0.113.10",
+        "",
+        "Guide: docs/SELF_HOSTED_RELAY.md"
       ],
       "agents doctor": [
         "Usage:",
@@ -5039,6 +5065,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane daemon repair [--pane-dir <path>] [--yes] [--json]",
         "  runpane agent-context [--json]",
         "  runpane mcp [--toolsets <name,...>] [--read-only]",
+        "  runpane relay [pane-relay flags...]",
         "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
@@ -5731,6 +5758,13 @@ export const RUNPANE_CONTRACT = {
         "",
         "The Pane MCP server ships in the npm package and inside the Pane app, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest mcp"
+      ],
+      "relay": [
+        "Usage:",
+        "  runpane relay",
+        "",
+        "`runpane relay` ships in the npm package, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest relay"
       ],
       "agents doctor": [
         "Usage:",
@@ -18314,6 +18348,28 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "Only the npm package and the Pane app include the MCP server; the Python package prints how to run it with Node.",
           "Commands that need --yes in the CLI take `yes: true` as a tool input."
+        ]
+      },
+      "relay": {
+        "name": "relay",
+        "summary": "Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags.",
+        "details": "For self-hosting the relay that gives computers addresses on your own domain for QR pairing (docs/SELF_HOSTED_RELAY.md). runpane passes every argument, stdio, signals and the exit code through to pane-relay, which npm installs as runpane's optional dependency @runpane/relay-<platform>-<arch>. It runs in the foreground until stopped.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "[pane-relay flags...]",
+            "required": false,
+            "description": "Passed to pane-relay unchanged; `runpane relay --help` lists them."
+          }
+        ],
+        "examples": [
+          "npx --yes runpane@latest relay --dev",
+          "npx --yes runpane@latest relay --help"
+        ],
+        "notes": [
+          "Only the npm package includes it; Pane's built-in runpane and the Python package print how to run it with npx.",
+          "Fails with ERR_RELAY_NOT_INSTALLED when this platform has no prebuilt binary or npm skipped optional dependencies."
         ]
       },
       "repos list": {

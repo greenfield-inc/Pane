@@ -106,6 +106,8 @@ async function addCanvasText(text, x, y) {
     if (await firstRun.isVisible()) await firstRun.getByRole('button', { name: 'Skip', exact: true }).click({ timeout: 2000 });
     await expect(firstRun).toHaveCount(0, { timeout: 2000 });
   }).toPass({ timeout: 30000 });
+  // Then it ends on the phone step.
+  await page.getByRole('button', { name: 'Skip for now', exact: true }).click({ timeout: 10000 });
   await page.getByRole('button', { name: 'Home', exact: true }).click();
   const project = await page.evaluate(repo => window.electronAPI.projects.create({ name: 'Native Notes QA', path: repo }), repo);
   assert(project.success, JSON.stringify(project));

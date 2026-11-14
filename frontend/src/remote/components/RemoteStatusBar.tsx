@@ -19,7 +19,7 @@ export function RemoteStatusBar({
   profile,
   openName,
   status,
-  lastError,
+  lastError: reportedError,
   lastSeenAt,
   updateIntent,
   onDisconnect,
@@ -27,6 +27,12 @@ export function RemoteStatusBar({
   onOpenSidebar,
 }: RemoteStatusBarProps) {
   const connected = status === 'connected';
+  // Through Pane's servers, the connection bar under this header says what is wrong in plain words;
+  // the client's own reason (a dropped stream, a refused token) stays out of the header.
+  const relay = profile.relay !== undefined;
+  const lastError = relay && !connected ? null : reportedError;
+  // A refused token only stops a relay connection: retrying cannot help, a new code does.
+  const canRetry = status === 'reconnecting' || (status === 'error' && !relay);
   // `error` is a settled state and stays still; only the two states where the
   // app is actively trying to reach the host get the ring.
   const reaching = status === 'connecting' || status === 'reconnecting';
@@ -84,7 +90,7 @@ export function RemoteStatusBar({
           </p>
         </div>
       </div>
-      {(status === 'error' || status === 'reconnecting') && <button type="button" onClick={onRetry} className="shrink-0 rounded-md border border-border-primary px-3 py-2 text-sm text-text-primary">Retry now</button>}
+      {canRetry && <button type="button" onClick={onRetry} className="shrink-0 rounded-md border border-border-primary px-3 py-2 text-sm text-text-primary">Retry now</button>}
       <button
         type="button"
         onClick={onDisconnect}

@@ -58,6 +58,7 @@ import type { PaneLinkTarget } from '../../shared/types/paneLinks';
 import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
+import type { RelayStatus } from '../../shared/types/relay';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -979,6 +980,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, snapshot: ListeningPortsSnapshot) => callback(snapshot);
       ipcRenderer.on('ports:changed', wrappedCallback);
       return () => ipcRenderer.removeListener('ports:changed', wrappedCallback);
+    },
+    /** This computer's relay (QR pairing) moved to a new phase. */
+    onRelayStatusChanged: (callback: (status: RelayStatus) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, status: RelayStatus) => callback(status);
+      ipcRenderer.on('relay:status-changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('relay:status-changed', wrappedCallback);
+    },
+    /** A phone used this computer's pairing code. */
+    onRelayPaired: (callback: (event: { clientId: string; label: string }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, paired: { clientId: string; label: string }) => callback(paired);
+      ipcRenderer.on('relay:paired', wrappedCallback);
+      return () => ipcRenderer.removeListener('relay:paired', wrappedCallback);
     },
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkTarget) => callback(target);

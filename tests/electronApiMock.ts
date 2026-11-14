@@ -21,6 +21,7 @@ import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId 
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
 import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
+import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -135,6 +136,18 @@ export type ElectronApiMockOptions = {
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
   /** machines:run answers by machine, then command type. Absent: `{ success: true }`. */
   machineRunAnswers?: Record<string, Record<string, JsonValue>>;
+  /** Phone access (QR pairing). Absent: off; turning it on reaches `ready` at once with 10-minute codes. */
+  relay?: {
+    /** The phase turning it on reaches, with this lastError for `error`. */
+    phaseWhenOn?: RelayStatus['phase'];
+    lastError?: string;
+    /** How long each pairing code lasts. */
+    codeTtlMs?: number;
+    /** What the "everywhere" commands report. */
+    everywhere?: { removed: string[]; notReached: string[] };
+  };
+  /** Client records this computer's host holds: phones, linked computers, glasses. */
+  hostClients?: RemoteDaemonClientRecord[];
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -197,7 +210,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           pairingRequired: true,
           allowInsecureHttpOnLoopback: true,
         },
-        clients: [],
+        clients: clone(mockOptions.hostClients ?? []),
       },
       client: {
         profiles: [],
@@ -236,6 +249,25 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         checkedAt: '1970-01-01T00:00:00.000Z',
       },
       updatedAt: '1970-01-01T00:00:00.000Z',
+    };
+    const relayOptions = mockOptions.relay ?? {};
+    const relayStatus: RelayStatus = {
+      enabled: false, phase: 'off', id: null, domain: null, address: null, relay: null, region: null,
+      localAddresses: [], certificate: null, lastError: null,
+    };
+    let relayCodes = 0;
+    const turnRelayOn = () => {
+      const phase = relayOptions.phaseWhenOn ?? 'ready';
+      Object.assign(relayStatus, {
+        enabled: true,
+        phase,
+        id: 'k7q2m9',
+        domain: 'pane.example',
+        address: 'https://k7q2m9.pane.example',
+        relay: 'us.relay.pane.example',
+        lastError: phase === 'error' ? relayOptions.lastError ?? null : null,
+      });
+      remoteDaemonConfig.relay = { ...remoteDaemonConfig.relay, enabled: true };
     };
     const configState: JsonObject = {
       remoteDaemon: clone(remoteDaemonConfig),
@@ -605,6 +637,15 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onArchiveProgress') {
           return (callback: MockEventCallback) => subscribe('archive:progress', callback);
         }
+        if (prop === 'onRelayStatusChanged') {
+          return (callback: MockEventCallback) => subscribe('relay:status-changed', callback);
+        }
+        if (prop === 'onConfigUpdated') {
+          return (callback: MockEventCallback) => subscribe('config:updated', callback);
+        }
+        if (prop === 'onRelayPaired') {
+          return (callback: MockEventCallback) => subscribe('relay:paired', callback);
+        }
         if (prop === 'onRestartToUpdateState') {
           return (callback: MockEventCallback) => subscribe('updater:restart-state', callback);
         }
@@ -712,6 +753,39 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       if (channel === 'ports:list') {
         return Promise.resolve({ host: 'mock-host', ports: [] });
+      }
+      if (channel === 'relay:status') return Promise.resolve(clone(relayStatus));
+      if (channel === 'relay:set-enabled') {
+        if (args[0] === true) turnRelayOn();
+        else Object.assign(relayStatus, { enabled: false, phase: 'off' });
+        queueMicrotask(() => emit('relay:status-changed', clone(relayStatus)));
+        return Promise.resolve(clone(relayStatus));
+      }
+      if (channel === 'relay:pairing-code') {
+        if (relayStatus.phase !== 'ready') return Promise.reject(new Error("Error invoking remote method 'relay:pairing-code': Error [ERR_RELAY_NOT_READY]: This computer isn't ready to pair yet."));
+        relayCodes += 1;
+        const code: RelayPairingInfo = {
+          url: `https://pane.example/pair#s=secret-${relayCodes}&c=k7q2m9&n=devbox`,
+          expiresAt: new Date(Date.now() + (relayOptions.codeTtlMs ?? 10 * 60_000)).toISOString(),
+        };
+        return Promise.resolve(code);
+      }
+      if (channel === 'relay:set-address') {
+        const address = args[0] == null ? '' : String(args[0]).trim();
+        if (address && !/^[a-z0-9.-]+(:\d{1,5})?$/iu.test(address)) {
+          return Promise.reject(new Error(`Error invoking remote method 'relay:set-address': Error [ERR_RELAY_ADDRESS_INVALID]: "${address}" is not a relay address. Next: Enter a host name, such as relay.example.com, optionally with :port.`));
+        }
+        remoteDaemonConfig.relay = { enabled: relayStatus.enabled };
+        if (address) remoteDaemonConfig.relay.relayAddress = address;
+        syncRemoteDaemonConfig();
+        return Promise.resolve(clone(relayStatus));
+      }
+      if (channel === 'relay:remove-phone-everywhere' || channel === 'relay:unlink-computer-everywhere') {
+        // SAFETY: the renderer sends { clientId } or { computerId } to these two commands.
+        const target = args[0] as { clientId?: string; computerId?: string };
+        remoteDaemonConfig.host.clients = remoteDaemonConfig.host.clients.filter((client) => client.id !== target.clientId && (!target.computerId || client.computerId !== target.computerId));
+        syncRemoteDaemonConfig();
+        return Promise.resolve(clone(relayOptions.everywhere ?? { removed: ['devbox'], notReached: [] }));
       }
       if (channel === 'panels:get-layout') {
         return success(clone(key && mockLayouts.has(key) ? mockLayouts.get(key) : mockOptions.initialLayout ?? null));
@@ -1843,6 +1917,23 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getConsoleLogCalls() {
           return clone((invokeCalls.get('console:log') ?? []).map((call) => call.args[0]));
+        },
+        /** A phone used the current pairing code: its record lands here and main announces it. */
+        emitRelayPaired(clientId: string, label: string) {
+          remoteDaemonConfig.host.clients.push({ id: clientId, label, createdAt: new Date().toISOString(), tokenHash: 'hash', phoneId: `install-${clientId}` });
+          syncRemoteDaemonConfig();
+          emit('relay:paired', { clientId, label });
+        },
+        /** Another computer or a phone changed this computer's devices; main announces the new config. */
+        emitHostClientsChanged(clients: RemoteDaemonClientRecord[]) {
+          remoteDaemonConfig.host.clients = clone(clients);
+          syncRemoteDaemonConfig();
+          emit('config:updated', clone(configState));
+        },
+        /** Main moving this computer's relay to a new phase. */
+        emitRelayStatus(updates: Partial<RelayStatus>) {
+          Object.assign(relayStatus, updates);
+          emit('relay:status-changed', clone(relayStatus));
         },
         /** Stands in for main pushing a connection change, such as a host that stopped answering. */
         emitRemoteConnectionState(updates: Partial<RemotePaneConnectionState>) {

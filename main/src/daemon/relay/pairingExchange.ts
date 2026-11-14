@@ -1,0 +1,150 @@
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
+import type { RemoteDaemonClientRecord } from '../../../../shared/types/remoteDaemon';
+
+const SECRET_TTL_MS = 10 * 60_000;
+/** Recently used or expired secrets are remembered this long, so a late scan gets the right message. */
+const SPENT_MEMORY_MS = 60 * 60_000;
+const MAX_PENDING = 16;
+const FAILURE_WINDOW_MS = 60_000;
+const FAILURES_BEFORE_LOCK = 5;
+const LOCK_MS = 15 * 60_000;
+/** Sources with recent wrong secrets kept at once; the oldest is forgotten first. */
+const MAX_TRACKED_SOURCES = 1_000;
+const MAX_LABEL_LENGTH = 60;
+
+export type PairingExchangeResult =
+  | { ok: true; token: string; client: RemoteDaemonClientRecord }
+  | { ok: false; status: number; code: string; message: string };
+
+export interface PairedEvent {
+  clientId: string;
+  label: string;
+}
+
+export interface PairingExchangeRequest {
+  secret: string;
+  label: string;
+  phoneId?: string;
+  /** The client's IP address: the relay's `peer` for a relayed connection, else the socket's. */
+  source: string;
+}
+
+interface SourceFailures {
+  failures: number[];
+  lockedUntil: number;
+}
+
+interface Pending {
+  hash: Buffer;
+  expiresAt: number;
+  spentAt: number | null;
+}
+
+interface PairingExchangeDeps {
+  now?: () => number;
+  /** Saves the new client record in `remoteDaemon.host.clients`, replacing earlier records of the same phone. */
+  addClient(record: RemoteDaemonClientRecord): Promise<void>;
+  log?: (line: string) => void;
+}
+
+function sha256(value: string): Buffer {
+  return createHash('sha256').update(value).digest();
+}
+
+function cleanLabel(label: string): string {
+  const clean = label.replace(/[\p{Cc}\p{Cf}]/gu, '').trim().slice(0, MAX_LABEL_LENGTH);
+  return clean || 'Phone';
+}
+
+/**
+ * One-time QR secrets: 32 random bytes, kept only as a hash, good for 10 minutes and one trade,
+ * like glasses pairing secrets. The trade is the pairing listener's only unauthenticated route, so
+ * five wrong secrets from one source within a minute lock that source out for 15 minutes; other
+ * sources, the owner's phone among them, still pair.
+ */
+export class PairingExchange {
+  private readonly pending: Pending[] = [];
+  private readonly sources = new Map<string, SourceFailures>();
+  private readonly listeners = new Set<(event: PairedEvent) => void>();
+  private readonly now: () => number;
+
+  constructor(private readonly deps: PairingExchangeDeps) {
+    this.now = deps.now ?? Date.now;
+  }
+
+  createSecret() {
+    const now = this.now();
+    this.prune(now);
+    const live = this.pending.filter((entry) => entry.spentAt === null);
+    if (live.length >= MAX_PENDING) live[0].spentAt = now;
+    const secret = randomBytes(32).toString('base64url');
+    const expiresAt = now + SECRET_TTL_MS;
+    this.pending.push({ hash: sha256(secret), expiresAt, spentAt: null });
+    return { secret, expiresAt: new Date(expiresAt).toISOString() };
+  }
+
+  onPaired(listener: (event: PairedEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  async exchange({ secret, label, phoneId, source }: PairingExchangeRequest): Promise<PairingExchangeResult> {
+    const now = this.now();
+    this.prune(now);
+    if (now < (this.sources.get(source)?.lockedUntil ?? 0)) {
+      return { ok: false, status: 429, code: 'ERR_PAIRING_LOCKED', message: 'Too many wrong pairing codes from this network. Try again in 15 minutes.' };
+    }
+    const presented = sha256(secret);
+    const entry = this.pending.find((candidate) => timingSafeEqual(candidate.hash, presented));
+    if (!entry) {
+      this.recordFailure(source, now);
+      return { ok: false, status: 403, code: 'ERR_PAIRING_CODE_INVALID', message: 'This code is not from this computer. Scan the code it shows now.' };
+    }
+    if (entry.spentAt !== null && entry.expiresAt > entry.spentAt) {
+      return { ok: false, status: 410, code: 'ERR_PAIRING_CODE_USED', message: 'This code was already used. Scan the new code on the computer.' };
+    }
+    if (entry.spentAt !== null || now > entry.expiresAt) {
+      entry.spentAt ??= now;
+      return { ok: false, status: 410, code: 'ERR_PAIRING_CODE_EXPIRED', message: 'This code expired. Scan the new code on the computer.' };
+    }
+    entry.spentAt = now;
+    const token = randomBytes(32).toString('base64url');
+    const client: RemoteDaemonClientRecord = {
+      id: randomUUID(),
+      label: cleanLabel(label),
+      createdAt: new Date(now).toISOString(),
+      tokenHash: sha256(token).toString('hex'),
+    };
+    if (phoneId) client.phoneId = phoneId.slice(0, 100);
+    await this.deps.addClient(client);
+    for (const listener of this.listeners) listener({ clientId: client.id, label: client.label });
+    return { ok: true, token, client };
+  }
+
+  private recordFailure(source: string, now: number): void {
+    const state = this.sources.get(source) ?? { failures: [], lockedUntil: 0 };
+    // Re-inserted, so the map stays ordered from least to most recently failed.
+    this.sources.delete(source);
+    this.sources.set(source, state);
+    state.failures = [...state.failures.filter((at) => now - at < FAILURE_WINDOW_MS), now];
+    if (state.failures.length >= FAILURES_BEFORE_LOCK) {
+      state.failures = [];
+      state.lockedUntil = now + LOCK_MS;
+      this.deps.log?.(`[pairing] ${FAILURES_BEFORE_LOCK} wrong pairing codes within a minute from ${source}; it is locked out for 15 minutes`);
+    }
+    for (const oldest of this.sources.keys()) {
+      if (this.sources.size <= MAX_TRACKED_SOURCES) break;
+      this.sources.delete(oldest);
+    }
+  }
+
+  private prune(now: number): void {
+    for (let index = this.pending.length - 1; index >= 0; index -= 1) {
+      const entry = this.pending[index];
+      if (now - Math.max(entry.expiresAt, entry.spentAt ?? 0) > SPENT_MEMORY_MS) this.pending.splice(index, 1);
+    }
+    for (const [source, state] of this.sources) {
+      if (now >= state.lockedUntil && state.failures.every((at) => now - at >= FAILURE_WINDOW_MS)) this.sources.delete(source);
+    }
+  }
+}

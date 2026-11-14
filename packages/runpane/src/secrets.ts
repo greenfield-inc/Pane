@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +6,7 @@ import type { ParsedArgs } from './commands';
 import { confirmMutation } from './daemonActions';
 import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
 import { RunpaneError } from './errors';
+import { runForwardingSignals, type ChildEnd } from './forwardedChild';
 import { describeNotifyResult, notifyCallerFields, notifyResultSchema, type NotifyRequest, type NotifyResult } from './notify';
 
 // `runpane secrets`: Pane secrets are values only `secrets exec` hands out, to a child process's
@@ -228,33 +228,10 @@ export async function runSecretsExec(parsed: ParsedArgs): Promise<number> {
   return ended.status ?? 1;
 }
 
-interface ChildEnd {
-  status: number | null;
-  signal: NodeJS.Signals | null;
-}
-
-/** Runs the child with signals forwarded the way handOffToManagedCli does. */
+/** Runs the child with stdio passed through and signals forwarded. */
 async function runChild(command: string[], env: NodeJS.ProcessEnv): Promise<ChildEnd> {
-  // From a terminal, Ctrl-C and Ctrl-\ reach the child through the process group it shares with
-  // this CLI, so forwarding them would deliver them twice. Without a terminal the child gets its
-  // own group and every signal is forwarded once.
-  const ownGroup = process.platform !== 'win32' && !process.stdin.isTTY;
   const [file, args, windowsVerbatimArguments] = windowsBatchCommand(command, env) ?? [command[0], command.slice(1), false];
-  const child = spawn(file, args, { stdio: 'inherit', env, detached: ownGroup, windowsVerbatimArguments });
-  const forward = (signal: NodeJS.Signals) => { child.kill(signal); };
-  const interrupt = (signal: NodeJS.Signals) => () => { if (ownGroup) forward(signal); };
-  const handlers: Array<[NodeJS.Signals, () => void]> = [
-    ['SIGINT', interrupt('SIGINT')],
-    ['SIGQUIT', interrupt('SIGQUIT')],
-    ['SIGTERM', () => forward('SIGTERM')],
-    ['SIGHUP', () => forward('SIGHUP')],
-  ];
-  for (const [signal, handler] of handlers) process.on(signal, handler);
-  const result = await new Promise<ChildEnd | { error: string }>((resolve) => {
-    child.once('error', (error: NodeJS.ErrnoException) => resolve({ error: error.code ?? 'unknown error' }));
-    child.once('close', (status, signal) => resolve({ status, signal }));
-  });
-  for (const [signal, handler] of handlers) process.off(signal, handler);
+  const result = await runForwardingSignals(file, args, { env, windowsVerbatimArguments });
   if ('error' in result) {
     throw new RunpaneError(
       'ERR_SECRETS_EXEC_FAILED',

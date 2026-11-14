@@ -48,6 +48,7 @@
         "@xterm/addon-serialize",
         "@xterm/addon-unicode11",
         "@xterm/headless",
+        "acme-client",
         "better-sqlite3-multiple-ciphers",
         "bull",
         "chokidar",

@@ -20,6 +20,8 @@ import { RemoteSidebar, type RemoteSidebarActions } from './components/RemoteSid
 import { RemoteStatusBar } from './components/RemoteStatusBar';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
 import { RemoteBrowserPanel } from './components/RemoteBrowserPanel';
+import type { RelayPreview } from '../../../shared/utils/phonePage';
+import { RELAY_CLIENT_COMMANDS } from '../../../shared/types/relay';
 import { RemoteExplorerPanel } from './components/RemoteExplorerPanel';
 import { RemoteDiffPanel } from './components/RemoteDiffPanel';
 import { RemoteChatTab } from './components/RemoteChatTab';
@@ -30,6 +32,10 @@ import { useRemoteListeningPorts } from './hooks/useRemoteListeningPorts';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
+import { withNewProfiles } from '../../../shared/remoteClient/relay';
+import { pairingErrorText, pairThisBrowser, takePairingSecret } from './runtime/relayBrowserPairing';
+import { RelayConnectionBar } from './components/RelayConnectionBar';
+import { getClientLabel, getRuntimeId } from './runtime/remoteDaemonBrowserClient';
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
 import { findFirstSessionId, phoneShows, useRemoteSessionStore, visibleTabs } from './stores/remoteSessionStore';
@@ -580,16 +586,40 @@ export function RemotePwaApp() {
     void connectProfile(profile).then(applyRoute).catch(() => {});
   }, [activeProfile?.id, adapter, connectProfile, loadPanels, pendingPushRoute, profilesLoading, requestView, savedProfiles, selectSession, setLastError]);
 
+  const pairFromLink = useCallback(async (secret: string) => {
+    setLastError(null);
+    try {
+      const [computer, ...linked] = await pairThisBrowser(window, secret, {
+        fetch: (url, init) => fetch(url, init),
+        label: getClientLabel(),
+        phoneId: getRuntimeId(),
+      });
+      if (!computer) return;
+      // Computers the Pane app already linked with this one come along. The browser links none itself:
+      // each computer's browser app has its own storage, so it never sees the others.
+      setSavedProfiles(previous => withNewProfiles(previous, linked));
+      await connectProfile(computer);
+    } catch (error) {
+      setLastError(error instanceof Error ? pairingErrorText(error) : 'Pairing failed.');
+    }
+  }, [connectProfile, setLastError]);
+
   // Reconnects to the last used host once on open; a notification tap picks its own host instead.
   useEffect(() => {
     if (profilesLoading || !pushRouteChecked || autoConnectStartedRef.current) return;
     autoConnectStartedRef.current = true;
+    // Opened from the pairing page's "Continue in browser": pair with the computer that served this page.
+    const pairingSecret = takePairingSecret(window);
+    if (pairingSecret) {
+      void pairFromLink(pairingSecret);
+      return;
+    }
     // saveProfile keeps the last connected profile first.
     const profile = savedProfiles[0];
     if (!profile || pendingPushRoute || isAutoConnectPaused()) return;
     setReconnectingProfile(profile);
     void connectProfile(profile).catch(() => {}).finally(() => setReconnectingProfile(null));
-  }, [connectProfile, pendingPushRoute, profilesLoading, pushRouteChecked, savedProfiles]);
+  }, [connectProfile, pairFromLink, pendingPushRoute, profilesLoading, pushRouteChecked, savedProfiles]);
 
   const connectCode = useCallback(async (code: string) => {
     setLastError(null);
@@ -732,6 +762,13 @@ export function RemotePwaApp() {
       if (current === shown) upsertPanel(panel);
     });
   }, [adapter, upsertPanel, setLastError]);
+
+  const isRelayComputer = activeProfile?.relay !== undefined;
+  const relayAddress = useCallback(async (ask: RelayPreview['ask']): Promise<string> => {
+    if (!adapter) throw new Error('Not connected to the computer.');
+    const { url } = await adapter.invoke<{ url: string }>(RELAY_CLIENT_COMMANDS.previewAddress, [ask]);
+    return url;
+  }, [adapter]);
 
   const requestPhoneAddress = useCallback((port: number) => {
     if (!adapter) return;
@@ -893,6 +930,20 @@ export function RemotePwaApp() {
 
   useEffect(() => adapter ? subscribeRemotePanelStatus(adapter) : undefined, [adapter]);
 
+  // Back online or back in view: retry now instead of waiting out the backoff. The Pane app's shell suspends and resumes instead.
+  useEffect(() => {
+    if (!adapter || isNativeMobile()) return;
+    const retry = () => {
+      if (document.visibilityState === 'visible' && adapter.getStatus().status === 'reconnecting') adapter.retryNow();
+    };
+    window.addEventListener('online', retry);
+    document.addEventListener('visibilitychange', retry);
+    return () => {
+      window.removeEventListener('online', retry);
+      document.removeEventListener('visibilitychange', retry);
+    };
+  }, [adapter]);
+
   useEffect(() => {
     if (!adapter || !activeProfile || !isNativeMobile()) return;
     let cancelled = false;
@@ -984,6 +1035,9 @@ export function RemotePwaApp() {
     void loadPanels(selectedSessionId, adapter);
   }, [adapter, loadPanels, selectedSessionId]);
 
+  const connectionBar = (
+    <RelayConnectionBar profile={activeProfile ?? reconnectingProfile ?? savedProfiles[0]} status={connectionStatus} lastError={lastError} />
+  );
   if (profilesLoading) return <main className="flex min-h-dvh items-center justify-center bg-bg-primary text-text-secondary">Loading saved connections…</main>;
   if (reconnectingProfile && (!adapter || !activeProfile)) {
     return (
@@ -1001,14 +1055,17 @@ export function RemotePwaApp() {
   }
   if (!adapter || !activeProfile) {
     return (
-      <RemoteConnectionScreen
-        savedProfiles={savedProfiles}
-        error={lastError}
-        errorKind={connectionErrorKind}
-        onConnectCode={connectCode}
-        onConnectProfile={async profile => { await connectProfile(profile); }}
-        onForgetProfile={forgetProfile}
-      />
+      <>
+        <div className="fixed inset-x-0 top-0 z-[60]">{connectionBar}</div>
+        <RemoteConnectionScreen
+          savedProfiles={savedProfiles}
+          error={lastError}
+          errorKind={connectionErrorKind}
+          onConnectCode={connectCode}
+          onConnectProfile={async profile => { await connectProfile(profile); }}
+          onForgetProfile={forgetProfile}
+        />
+      </>
     );
   }
 
@@ -1075,6 +1132,7 @@ export function RemotePwaApp() {
           onDisconnect={disconnect}
           onOpenSidebar={openSidebar}
         />
+        {connectionBar}
 
         {isNativeMobile() && (
           <details className="border-b border-border-primary bg-surface-secondary px-3 py-2 text-sm">
@@ -1153,7 +1211,7 @@ export function RemotePwaApp() {
             className="flex min-h-0 flex-1 flex-col overflow-hidden"
           >
             {selectedPanel.type === 'browser' && (
-              <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} />
+              <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} onRelayAddress={isRelayComputer ? relayAddress : undefined} />
             )}
             {selectedPanel.type === 'explorer' && adapter && (
               <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} panelId={selectedPanel.id} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />

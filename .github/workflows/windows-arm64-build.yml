@@ -5,6 +5,9 @@ on:
     paths:
       - 'scripts/build-win.js'
       - 'scripts/after-pack.js'
+      - 'scripts/build-pane-direct.js'
+      - 'direct/Cargo.toml'
+      - 'direct/Cargo.lock'
       - 'scripts/verify-packaged-icon.js'
       - 'package.json'
       - 'main/package.json'
@@ -26,6 +29,9 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
       # No install scripts: build-win.js downloads the arm64 Electron SQLite
       # prebuilt itself, so the host-arch rebuild at install was thrown away.
+      # afterPack builds the pane-direct helper (direct/) for each packaged arch.
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Build ARM64 installer with target-native SQLite validation
         run: node scripts/build-win.js arm64
