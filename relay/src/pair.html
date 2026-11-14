@@ -44,7 +44,7 @@ a.btn.primary { background: var(--primary); border-color: var(--primary); color:
     return;
   }
   if (name) title.textContent = "Pair with " + name;
-  document.getElementById("app").href = "pane://pair" + location.hash;
+  document.getElementById("app").href = "pane://pair" + location.hash + "&d=" + encodeURIComponent(location.host);
   document.getElementById("web").href = "https://" + id + "." + location.host + "/app/#pair=" + encodeURIComponent(secret);
   document.getElementById("actions").hidden = false;
   fetch("/v1/status/" + id).then(function (r) { return r.json(); }).then(function (s) {
