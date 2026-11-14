@@ -69,13 +69,20 @@ export async function createRelayHost(deps: {
     settings: () => remote()?.relay,
     onSettingsChanged: (listener) => {
       configManager.on('config-updated', listener);
-      return () => configManager.off('config-updated', listener);
+      remoteHostRuntimeStateStore.on('state-changed', listener);
+      return () => {
+        configManager.off('config-updated', listener);
+        remoteHostRuntimeStateStore.off('state-changed', listener);
+      };
     },
     secrets: relaySecrets(deps.dataDir),
     dataDir: deps.dataDir,
-    serverPort: () => {
-      const host = remote()?.host.config;
-      return host?.enabled ? host.listenPort : null;
+    // The port the listener bound, never the configured one: another app may hold that.
+    pairingListener: () => {
+      const listener = remoteHostRuntimeStateStore.getState();
+      if (listener.status === 'live' && listener.listenPort !== null) return { port: listener.listenPort };
+      if (listener.status === 'error') return { error: listener.lastError ?? 'it could not start' };
+      return { error: remote()?.host.config.enabled ? 'it is still starting' : 'it is turned off' };
     },
     previewPort: () => proxy?.port ?? null,
     displayName: computerDisplayName,

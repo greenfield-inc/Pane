@@ -1047,7 +1047,7 @@ describe('QR-paired phones and linked computers', () => {
       onSettingsChanged: () => () => {},
       secrets: { read: async () => null, write: async () => {} },
       dataDir: '',
-      serverPort: () => null,
+      pairingListener: () => ({ error: 'it is turned off' }),
       previewPort: () => null,
       displayName: () => 'Travel Laptop',
       addClient: async () => {},

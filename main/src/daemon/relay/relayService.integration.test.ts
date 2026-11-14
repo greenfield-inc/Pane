@@ -144,6 +144,8 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     server: PaneRemoteHttpApiServer;
     registry: PaneCommandRegistry;
     config(): RemoteDaemonConfig;
+    /** As when another app holds the listener's port. */
+    setListenerDown(down: boolean): void;
   }
 
   async function startComputer(name: string, dataDir: string): Promise<Computer> {
@@ -162,12 +164,16 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       },
     };
     let server: PaneRemoteHttpApiServer | null = null;
+    let listenerDown = false;
     const service = new RelayService({
       settings: () => config.relay,
       onSettingsChanged: () => () => undefined,
       secrets: { read: async (key) => secrets.get(key) ?? null, write: async (key, value) => { secrets.set(key, value); } },
       dataDir,
-      serverPort: () => server?.getAddress()?.port ?? null,
+      pairingListener: () => {
+        const port = server?.getAddress()?.port;
+        return port && !listenerDown ? { port } : { error: 'listen EADDRINUSE: address already in use 127.0.0.1:42137' };
+      },
       previewPort: () => null,
       displayName: () => name,
       addClient: async (record) => { config = { ...config, host: { ...config.host, clients: [...config.host.clients, record] } }; },
@@ -198,7 +204,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     await server.start();
     service.start();
     await until(() => service.getStatus().phase === 'ready', `${name} to be ready with a certificate`);
-    return { service, links, server, registry, config: () => config };
+    return { service, links, server, registry, config: () => config, setListenerDown: (down) => { listenerDown = down; } };
   }
 
   /** A phone's https request to the computer's name, through the relay's port. */
@@ -259,6 +265,21 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
 
     const again = await phoneRequest(host, 'POST', '/pair/exchange', { secret: fragment.get('s'), label: 'Second phone' });
     expect(again).toMatchObject({ status: 410, json: { error: { code: 'ERR_PAIRING_CODE_USED' } } });
+  }, 90_000);
+
+  it('closes phone connections while its pairing listener is down, and says why, until it listens again', async () => {
+    const qr = new URL(studio.service.createPairingCode().url);
+    const host = `${new URLSearchParams(qr.hash.slice(1)).get('c')}.${DOMAIN}`;
+    studio.setListenerDown(true);
+    try {
+      expect(studio.service.getStatus()).toMatchObject({ phase: 'error', lastError: expect.stringContaining('EADDRINUSE') });
+      expect(() => studio.service.createPairingCode()).toThrow(/EADDRINUSE/u);
+      await expect(phoneRequest(host, 'POST', '/invoke', { channel: 'sessions:get-all-with-projects', args: [] }, 'any-token')).rejects.toThrow();
+    } finally {
+      studio.setListenerDown(false);
+    }
+    expect(studio.service.getStatus()).toMatchObject({ phase: 'ready', lastError: null });
+    expect((await pair(studio, 'Ana’s iPhone', 'phone-ana')).paired.status).toBe(200);
   }, 90_000);
 
   it('links the computers a phone pairs with, so a second phone that scans one reaches both, until removed or unlinked', async () => {

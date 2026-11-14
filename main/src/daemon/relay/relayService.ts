@@ -36,11 +36,12 @@ export interface RelaySecretStore {
 
 export interface RelayServiceDeps {
   settings(): RemoteRelaySettings | undefined;
+  /** Calls `listener` when the settings or the pairing listener change. */
   onSettingsChanged(listener: () => void): () => void;
   secrets: RelaySecretStore;
   dataDir: string;
-  /** The pairing listener's loopback port, or null while it is off. */
-  serverPort(): number | null;
+  /** The loopback port the pairing listener is bound to, or why it is not listening. */
+  pairingListener(): { port: number } | { error: string };
   /** The preview proxy's loopback port for relay names, or null while it is off. */
   previewPort(): number | null;
   displayName(): string;
@@ -134,6 +135,8 @@ export class RelayService {
 
   getStatus(): RelayStatus {
     const enabled = this.deps.settings()?.enabled === true;
+    const listenerError = enabled ? this.listenerError() : null;
+    const lastError = listenerError ?? this.lastError;
     const certificate = this.certificate?.getStatus() ?? null;
     const id = this.key?.id ?? null;
     const address = id && this.domain ? `https://${computerHost(id, this.domain)}` : null;
@@ -142,7 +145,7 @@ export class RelayService {
       if (this.agentState.status !== 'online') phase = 'connecting';
       else if (!this.certificate?.isValid()) phase = 'certificate';
       else phase = 'ready';
-      if (this.lastError && phase !== 'ready') phase = 'error';
+      if (listenerError || (this.lastError && phase !== 'ready')) phase = 'error';
     }
     return {
       enabled,
@@ -154,8 +157,15 @@ export class RelayService {
       region: this.agentState.status === 'online' ? this.agentState.region : null,
       localAddresses: this.localUrls(),
       certificate,
-      lastError: this.lastError,
+      lastError,
     };
+  }
+
+  /** Why phones can't reach the pairing listener, or null while it listens. */
+  private listenerError(): string | null {
+    const listener = this.deps.pairingListener();
+    if ('port' in listener) return null;
+    return `Phones can't connect: this computer's phone listener isn't running (${reasonOf(listener.error)}). In Settings › Remote Access › More › Advanced, turn on the host listener or give it a free port.`;
   }
 
   /** A one-time QR code. Throws while the relay is not ready. */
@@ -319,7 +329,12 @@ export class RelayService {
         domain,
         // An expired certificate is never served: connections wait for the renewal.
         secureContext: () => (certificate.isValid() ? certificate.secureContext() : null),
-        target: (name) => (name.kind === 'server' ? this.deps.serverPort() : this.deps.previewPort()),
+        // Only to the port this Pane's listener is bound to; while it is down, no connection is accepted, previews included.
+        target: (name) => {
+          const listener = this.deps.pairingListener();
+          if (!('port' in listener)) return null;
+          return name.kind === 'server' ? listener.port : this.deps.previewPort();
+        },
         log: this.deps.log,
       });
       this.localPort = await this.terminator.listen(LOCAL_PORT, '0.0.0.0')
