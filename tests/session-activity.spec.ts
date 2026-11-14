@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { boundary, decodeBoundary } from '../shared/validation/boundaryDecoder';
 import { dismissDialogs, isolatedPane, launchIsolated, runpane, type IsolatedPane } from './isolatedPane';
 
 // Session activity journeys (cover sheet r1, J1–J12 and J16) in an isolated Electron build. The
@@ -67,13 +68,12 @@ async function installRecorder(page: Page): Promise<void> {
     };
     new MutationObserver(read).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state'] });
     read();
-    (window as unknown as { __activity: typeof log }).__activity = log;
+    window.__activity = log;
   });
 }
 
 async function changes(page: Page, session: SessionRef): Promise<Change[]> {
-  // SAFETY: installRecorder sets window.__activity to this shape.
-  return page.evaluate(id => (window as unknown as { __activity: Record<string, Change[]> }).__activity[id] ?? [], session.id);
+  return page.evaluate(id => window.__activity?.[id] ?? [], session.id);
 }
 
 /** The changes after the first one the recorder saw (the row appearing idle). */
@@ -174,7 +174,7 @@ test('the Session icon spins only for real turns, with no flicker (J1–J10, J12
     clearInterval(poller);
     await shot(page, 'after');
     const log = (name: string) => changes(page, s[name]);
-    const report: Record<string, unknown> = {};
+    const report: Record<string, string[]> = {};
     for (const name of names) report[name] = (await log(name)).map(change => `${change.state}@${((change.at - t0) / 1000).toFixed(1)}s`);
     console.log(`[session activity] t0-relative changes: ${JSON.stringify(report, null, 1)}`);
 
@@ -205,7 +205,10 @@ test('the Session icon spins only for real turns, with no flicker (J1–J10, J12
     const j7 = await log('J7 frozen');
     expect(transitions(j7)).toEqual(['working', 'idle']);
     // The replay's last screen change comes this long after it starts (the tab's own start adds ~1 s).
-    const capture = JSON.parse(readFileSync(path.join(SCREENS, 'claude-long-bash.json'), 'utf8')) as { frames: Array<{ t: number }>; marks: Array<{ t: number; label: string }> };
+    const capture = decodeBoundary(JSON.parse(readFileSync(path.join(SCREENS, 'claude-long-bash.json'), 'utf8')), boundary.object({
+      frames: boundary.array(boundary.object({ t: boundary.number })),
+      marks: boundary.array(boundary.object({ t: boundary.number, label: boundary.string })),
+    }));
     const mark = (label: string) => capture.marks.find(entry => entry.label === label)!.t;
     const lastChange = Math.max(...capture.frames.filter(frame => frame.t < mark('bash-mid')).map(frame => frame.t)) - mark('turn-start');
     const frozenFor = firstAt(j7, 'idle', firstAt(j7, 'working'))! - (j7FrozenAt + lastChange);

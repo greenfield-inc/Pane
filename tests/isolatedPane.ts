@@ -10,6 +10,14 @@ import path from 'node:path';
  * nothing inherited from the terminal that runs the tests (PANE_*, RUNPANE_*, CLAUDE*,
  * AGENT_FARM*). It refuses to start when any of it resolves to the real ~/.pane.
  */
+declare global {
+  interface Window {
+    /** The Session activity recorders the journeys install: each Session's icon changes, with times. */
+    __activity?: Record<string, Array<{ state: string; at: number }>>;
+    __real?: Array<{ state: string; at: number }>;
+  }
+}
+
 export interface IsolatedPane {
   root: string;
   paneDir: string;
@@ -122,7 +130,11 @@ export async function dismissDialogs(page: Page): Promise<void> {
 
 /** The isolated Pane's bundled `runpane`, as an agent in the given tab would run it. */
 export function runpane(pane: IsolatedPane, args: string[], from?: { paneId: string; panelId: string }): Promise<string> {
-  const env = { ...pane.env, ...(from ? { PANE_SESSION_ID: from.paneId, PANE_PANEL_ID: from.panelId } : {}) };
+  const env = { ...pane.env };
+  if (from) {
+    env.PANE_SESSION_ID = from.paneId;
+    env.PANE_PANEL_ID = from.panelId;
+  }
   return new Promise((resolve, reject) => {
     execFile(path.join(pane.paneDir, 'bin', 'runpane'), args, { env, timeout: 60_000 }, (error, stdout, stderr) => {
       if (error) reject(new Error(`runpane ${args.join(' ')} failed: ${stderr || error.message}`));

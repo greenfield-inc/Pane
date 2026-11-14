@@ -55,12 +55,11 @@ async function installRecorder(page: Page, sessionId: string): Promise<void> {
     };
     new MutationObserver(read).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state'] });
     read();
-    (window as unknown as { __real: typeof log }).__real = log;
+    window.__real = log;
   }, sessionId);
 }
 
-// SAFETY: installRecorder sets window.__real to this shape.
-const changesSince = async (page: Page, since: number) => (await page.evaluate(() => (window as unknown as { __real: Change[] }).__real)).filter(change => change.at >= since).map(change => change.state);
+const changesSince = async (page: Page, since: number) => (await page.evaluate(() => window.__real ?? [])).filter(change => change.at >= since).map(change => change.state);
 
 test('real Claude Code and Codex workers spin the Session only for a real turn (J17)', async ({ baseURL }, testInfo) => {
   test.setTimeout(600_000);
