@@ -98,7 +98,7 @@ import { printVersion } from './version';
 import { handOffToManagedCli } from './managedCli';
 import { assertSupportedCliRuntime } from './nodeRuntime';
 import {
-  readTailnet,
+  readMachines,
   readWorkspaceSummary,
   resolveMachine,
   runWorkspaceExec,
@@ -171,8 +171,8 @@ async function runOnMachine(machineQuery: string, command: string[]): Promise<nu
   if (THIS_MACHINE_ONLY.has(parsed.command)) {
     throw new Error(`runpane ${parsed.command} runs on this machine only. On ${machineQuery}, use: runpane workspace ${machineQuery} exec -- runpane ${command.join(' ')}`);
   }
-  const tailnet = await readTailnet();
-  if (!tailnet.ok) throw new Error(`runpane workspace needs Tailscale: ${tailnet.reason}. ${tailnet.fix}`);
+  const tailnet = await readMachines(parsed.paneDir);
+  if (!tailnet.ok) throw new Error(`runpane workspace needs Tailscale or a computer linked by QR pairing: ${tailnet.reason}. ${tailnet.fix}`);
   routeDaemonCallsTo(workspaceTarget(resolveMachine(machineQuery, [tailnet.self, ...tailnet.machines])));
   try {
     return await main(command);

@@ -13,6 +13,8 @@ export const RELAY_COMMANDS = {
   setEnabled: 'relay:set-enabled',
   setAddress: 'relay:set-address',
   pairingCode: 'relay:pairing-code',
+  /** Local only: linked computers with the tokens to call them, for `runpane workspace`. */
+  linkedComputers: 'relay:linked-computers',
 } as const;
 
 const callerSchema = boundary.object({ clientId: boundary.nonEmptyString });
@@ -115,6 +117,17 @@ export function registerRelayCommands(
   registry.register(RELAY_COMPUTER_COMMANDS.forgetComputer, async (request: unknown, from: unknown) => {
     await links.forgetComputer(decodeBoundary(request, boundary.object({ computerId: boundary.nonEmptyString })).computerId, caller(from));
     return null;
+  });
+
+  registry.register(RELAY_COMMANDS.linkedComputers, () => {
+    onThisComputerOnly();
+    return links.linked().map((profile) => ({
+      id: profile.relay.computerId,
+      name: profile.label,
+      address: profile.baseUrl,
+      token: profile.token,
+      fingerprint: profile.relay.fingerprint,
+    }));
   });
 
   // Desktop only: Remote Access › Devices.

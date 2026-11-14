@@ -35,6 +35,8 @@ export interface TailnetMachine {
   owner: string;
   /** Signed in to this machine's own login. Other people's machines let in only who their visibility allows. */
   mine: boolean;
+  /** A computer linked through QR pairing: reached at its relay address with its link token, Tailscale or not. */
+  linked?: { baseUrl: string; token: string };
 }
 
 export type Tailnet =
@@ -227,11 +229,77 @@ function describeMachines(machines: readonly TailnetMachine[]): string {
 
 /** "name (OS, online)", plus the owner's login for someone else's machine. */
 function describeMachine(machine: TailnetMachine): string {
-  return `${machine.name} (${machine.os}, ${machine.online ? 'online' : 'offline'}${machine.mine ? '' : `, owner ${machine.owner}`})`;
+  return `${machine.name} (${machine.linked && !machine.online ? 'linked' : machine.os}, ${machine.online ? 'online' : 'offline'}${machine.mine ? '' : `, owner ${machine.owner}`})`;
 }
 
 export function workspaceTarget(machine: TailnetMachine): RemoteDaemonTarget {
+  if (machine.linked) return { machine: machine.name, baseUrl: machine.linked.baseUrl, token: machine.linked.token };
   return { machine: machine.name, baseUrl: `https://${machine.dnsName}:${workspaceHttpsPort()}` };
+}
+
+const linkedComputersSchema = boundary.array(boundary.object({
+  id: boundary.string,
+  name: boundary.string,
+  address: boundary.string,
+  token: boundary.string,
+  fingerprint: boundary.string,
+}));
+
+/** "lowercase-with-dashes" for a computer name, so it reads like a Tailscale machine name. */
+function machineSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'computer';
+}
+
+/**
+ * Computers linked with this one through QR pairing (Settings › Remote Access), from the local
+ * Pane. Each answers runpane workspace at its relay address; its OS comes from asking it.
+ */
+async function readLinkedMachines(paneDir?: string): Promise<TailnetMachine[]> {
+  let linked: ReturnType<typeof linkedComputersSchema.decode>;
+  try {
+    linked = await invokeDaemon('relay:linked-computers', [], linkedComputersSchema, { paneDir, timeoutMs: LOCAL_STATUS_TIMEOUT_MS });
+  } catch {
+    return [];
+  }
+  return Promise.all(linked.map(async (computer): Promise<TailnetMachine> => {
+    const machine: TailnetMachine = {
+      name: machineSlug(computer.name),
+      dnsName: new URL(computer.address).hostname,
+      os: 'Linux',
+      online: false,
+      ips: [],
+      self: false,
+      owner: 'you',
+      mine: true,
+      linked: { baseUrl: computer.address, token: computer.token },
+    };
+    try {
+      const info = await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS);
+      return { ...machine, os: info.os, online: true };
+    } catch {
+      return machine;
+    }
+  }));
+}
+
+/**
+ * The machines runpane workspace can reach: the tailnet's, plus computers linked through QR
+ * pairing, which work without Tailscale. Linked computers already on the tailnet keep their
+ * Tailscale entry.
+ */
+export async function readMachines(paneDir?: string): Promise<Tailnet> {
+  const [tailnet, linked] = await Promise.all([readTailnet(), readLinkedMachines(paneDir)]);
+  if (tailnet.ok) {
+    const names = new Set(tailnet.machines.map((machine) => machine.name));
+    return { ...tailnet, machines: [...tailnet.machines, ...linked.filter((machine) => !names.has(machine.name))] };
+  }
+  if (!linked.length) return tailnet;
+  const hostname = os.hostname().replace(/\.local$/i, '');
+  const self: TailnetMachine = {
+    name: machineSlug(hostname), dnsName: hostname, os: process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux',
+    online: true, ips: [], self: true, owner: 'you', mine: true,
+  };
+  return { ok: true, self, machines: linked, httpsCertificates: true };
 }
 
 const NOT_ANSWERING = 'Pane is not answering there; it needs a Pane with workspaces running and signed in to Tailscale';
@@ -251,8 +319,8 @@ async function probeMachine(machine: TailnetMachine, notAnswering = NOT_ANSWERIN
 }
 
 async function requireTailnet(): Promise<Extract<Tailnet, { ok: true }>> {
-  const tailnet = await readTailnet();
-  if (!tailnet.ok) throw new Error(`runpane workspace needs Tailscale: ${tailnet.reason}. ${tailnet.fix}`);
+  const tailnet = await readMachines();
+  if (!tailnet.ok) throw new Error(`runpane workspace needs Tailscale or a computer linked by QR pairing: ${tailnet.reason}. ${tailnet.fix}`);
   return tailnet;
 }
 

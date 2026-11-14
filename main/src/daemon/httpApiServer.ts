@@ -851,7 +851,9 @@ export class PaneRemoteHttpApiServer {
       this.writeJson(response, auth.statusCode, auth);
       return;
     }
-    if (!this.workspace && WORKSPACE_ONLY_CHANNEL_PREFIXES.some((prefix) => invokeRequest.channel.startsWith(prefix))) {
+    // A linked computer (QR pairing) is the owner's own device, so it runs machine commands as runpane workspace does.
+    const linkedComputer = auth.client?.kind === 'computer' && invokeRequest.channel.startsWith('runpane:machine:');
+    if (!this.workspace && !linkedComputer && WORKSPACE_ONLY_CHANNEL_PREFIXES.some((prefix) => invokeRequest.channel.startsWith(prefix))) {
       this.writeJson(response, 403, {
         ok: false,
         error: {

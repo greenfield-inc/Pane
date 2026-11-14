@@ -177,6 +177,8 @@ export function getPaneDaemonEndpoint(appDirectory: string, platform: NodeJS.Pla
 export interface RemoteDaemonTarget {
   machine: string;
   baseUrl: string;
+  /** A linked computer's token (QR pairing); Tailscale machines are reached by login instead. */
+  token?: string;
 }
 
 const remoteInvokeResponseSchema = boundary.union(
@@ -217,7 +219,7 @@ export async function invokeRemoteDaemon<T>(
   try {
     response = await fetch(`${target.baseUrl}/invoke`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(target.token ? { Authorization: `Bearer ${target.token}` } : {}) },
       body: JSON.stringify(body),
       signal: Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined,
     });

@@ -231,3 +231,59 @@ test('without a machine name, local reads and writes go through this machine\'s 
   assert.equal(write.status, 0, write.output);
   assert.deepEqual(write.requests, [{ channel: 'runpane:machine:write', args: [{ path: nested, content: 'hello\n', encoding: 'utf8' }] }]);
 });
+
+test('a computer linked by QR pairing answers by name with its token when Tailscale is off', posixOnly, async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-linked-'));
+  // No tailscale on PATH: this one exits like a signed-out install.
+  fs.writeFileSync(path.join(home, 'tailscale'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const linkedFetch = path.join(home, 'linked-computer.js');
+  fs.writeFileSync(linkedFetch, `
+const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+globalThis.fetch = async (url, init) => {
+  if (new URL(String(url)).hostname !== 'k3x9linked0000aa.relay.invalid') return reply(502, {});
+  if (init.headers.Authorization !== 'Bearer link-token') return reply(403, { ok: false, error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID', message: 'bad token' } });
+  const { channel } = JSON.parse(init.body);
+  if (channel === 'runpane:machine:info') {
+    return reply(200, { ok: true, result: { hostname: 'travel-laptop', os: 'Linux', isWsl: false, shell: '/bin/bash', homeDir: '/home/ana', wslDistros: [] } });
+  }
+  if (channel === 'runpane:machine:read') return reply(200, { ok: true, result: { path: '/home/ana/notes.md', encoding: 'utf8', content: 'from the laptop\\n', bytes: 16 } });
+  return reply(404, { ok: false, error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'unknown channel' } });
+};
+`);
+  const { getPaneDaemonEndpoint } = require(path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const endpoint = getPaneDaemonEndpoint(home);
+  fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
+  const server = net.createServer((socket) => {
+    let buffer = '';
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      for (let index = buffer.indexOf('\n'); index !== -1; index = buffer.indexOf('\n')) {
+        const frame = JSON.parse(buffer.slice(0, index));
+        buffer = buffer.slice(index + 1);
+        if (frame.id !== 1) continue;
+        const result = frame.channel === 'relay:linked-computers'
+          ? [{ id: 'k3x9linked0000aa', name: 'Travel Laptop', address: 'https://k3x9linked0000aa.relay.invalid', token: 'link-token', fingerprint: 'f' }]
+          : { enabled: false, state: 'off', reason: 'Tailscale is signed out' };
+        socket.end(`${JSON.stringify({ type: 'response', id: 1, ok: true, result })}\n`);
+      }
+    });
+  });
+  await new Promise((resolve) => server.listen(endpoint.path, resolve));
+  const run = (...args) => new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--require', linkedFetch, cli, ...args], {
+      cwd: home,
+      env: { ...process.env, PATH: `${home}${path.delimiter}/usr/bin${path.delimiter}/bin`, PANE_DIR: home, RUNPANE_TELEMETRY_DISABLED: '1' },
+    });
+    let output = '';
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { output += chunk; });
+    child.on('close', (status) => resolve({ status, output }));
+  });
+  try {
+    const read = await run('workspace', 'travel-laptop', 'read', '~/notes.md');
+    assert.equal(read.output, 'from the laptop\n');
+    assert.equal(read.status, 0);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
