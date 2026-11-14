@@ -15,6 +15,7 @@ import {
   ambientPage,
   bannerPage,
   cardPage,
+  undoPage,
   cardRows,
   connectingPage,
   dictationPage,
@@ -57,6 +58,8 @@ const NUMBER_IGNORED = "The menu didn't take its number; answer it with keys";
 const PICK_SETTLE_MS = 1_000;
 /** Ambient mode: untouched this long, the glasses go quiet; a card that arrives then shows this long. */
 const IDLE_MS = 30_000;
+/** How long an answer waits on the glasses, undoable, before it goes to the computer. */
+export const UNDO_MS = 5_000;
 const BANNER_MS = 15_000;
 
 /** A new Session's name: the first words of what you said, on one line. The host takes up to 120 characters. */
@@ -166,6 +169,8 @@ type View =
   | { name: 'full'; key: string }
   | { name: 'info'; key: string }
   | { name: 'voice-answer'; key: string; transcript: string }
+  /** An answer held for UNDO_MS: a double press takes it back, otherwise it is sent. */
+  | { name: 'undo'; key: string; answer: NotifyAnswer; summary: string }
   | ({ name: 'terminal' } & TerminalState)
   | ({ name: 'dictation'; transcript: string } & TerminalState)
   /** A row of a computer that isn't live was pressed: why, and Retry. */
@@ -193,6 +198,8 @@ export class GlassesApp {
   /** Info cards read here, gone from the list until the computer's next Notify state drops them. */
   private readonly read = new Set<string>();
   private dictation: Dictation | null = null;
+  /** Sends the answer on the undo screen when it runs. */
+  private undoTimer: Cancel | null = null;
   /** Counts holds; a voice startup that finishes after its hold ended sees a newer number and stands down. */
   private listening = 0;
   private poll: Cancel | null = null;
@@ -344,6 +351,10 @@ export class GlassesApp {
         const card = this.deps.source.cards().find((candidate) => candidate.key === view.key);
         return card ? voiceAnswerPage(card, view.transcript) : this.homePage();
       }
+      case 'undo': {
+        const card = this.deps.source.cards().find((candidate) => candidate.key === view.key);
+        return card ? undoPage(card, view.summary) : this.homePage();
+      }
       case 'terminal':
         return this.terminalPage(view);
       case 'dictation':
@@ -380,7 +391,7 @@ export class GlassesApp {
     const rows = this.rows();
     const view: HomeListView = { selected: this.selected(rows), marks: this.marks() };
     if (this.confirmation) view.confirmation = this.confirmation;
-    return homeListPage(rows, view, this.deps.clock);
+    return homeListPage(rows, { ...view, now: this.deps.now() }, this.deps.clock);
   }
 
   private marks(): ListMarks {
@@ -478,6 +489,14 @@ export class GlassesApp {
         }
         break;
       case 'voice-answer': if (gesture.type === 'release') void this.finishVoiceAnswer(view.key); break;
+      // A double press here undoes the answer (nothing was sent) instead of going back.
+      case 'undo':
+        if (gesture.type === 'double') {
+          this.undoTimer?.cancel();
+          this.undoTimer = null;
+          this.go({ name: 'card', key: view.key, context: [] });
+        }
+        break;
       case 'terminal': this.onTerminal(view, gesture); break;
       case 'dictation': if (gesture.type === 'release') void this.finishDictation(view); break;
       case 'away':
@@ -615,12 +634,30 @@ export class GlassesApp {
       const row = cardRows(card)[gesture.index];
       if (!row) return;
       if (row.kind === 'read-all') this.go({ name: 'full', key: card.key });
-      else if (row.kind === 'choice') void this.sendAnswer(card, { choice: row.label }, row.label);
-      else if (row.kind === 'approve') void this.sendAnswer(card, { approved: row.approved }, row.label);
+      else if (row.kind === 'choice') this.sendAnswer(card, { choice: row.label }, row.label);
+      else if (row.kind === 'approve') this.sendAnswer(card, { approved: row.approved }, row.label);
     }
   }
 
-  private async sendAnswer(card: Card, answer: NotifyAnswer, summary: string): Promise<void> {
+  /** Holds the answer on the undo screen; it goes to the computer after UNDO_MS unless undone. */
+  private sendAnswer(card: Card, answer: NotifyAnswer, summary: string): void {
+    this.undoTimer?.cancel();
+    this.go({ name: 'undo', key: card.key, answer, summary });
+    this.undoTimer = this.deps.later(() => {
+      this.undoTimer = null;
+      const view = this.view;
+      if (view.name !== 'undo' || view.key !== card.key) return;
+      // Answered on a computer meanwhile: nothing to send.
+      const current = this.deps.source.cards().find((candidate) => candidate.key === card.key);
+      if (!current?.waiting) {
+        this.goHome();
+        return;
+      }
+      void this.deliverAnswer(current, answer, summary);
+    }, UNDO_MS);
+  }
+
+  private async deliverAnswer(card: Card, answer: NotifyAnswer, summary: string): Promise<void> {
     this.answered.add(card.key);
     this.confirmation = `Answered ${card.paneName}: ${summary}`;
     // The row in the answered question's place is selected: the next question, if any.
@@ -669,8 +706,8 @@ export class GlassesApp {
       return;
     }
     // On an approval, a spoken answer is the reason for "Not yet".
-    if (card.ui === 'approve') await this.sendAnswer(card, { approved: false, note: text }, `Not yet, "${text}"`);
-    else await this.sendAnswer(card, { text }, `"${text}"`);
+    if (card.ui === 'approve') this.sendAnswer(card, { approved: false, note: text }, `Not yet, "${text}"`);
+    else this.sendAnswer(card, { text }, `"${text}"`);
   }
 
   // ---------- a new Session ----------

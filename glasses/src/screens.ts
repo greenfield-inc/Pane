@@ -146,6 +146,17 @@ export function fullQuestionPage(card: Card): Page {
   };
 }
 
+/** An answer held on the glasses before it is sent: a double press takes it back. */
+export function undoPage(card: Card, summary: string): Page {
+  return {
+    boxes: [
+      header(`${card.paneName} · ${card.machine}`),
+      body(`Sent · double press to undo\n\n${summary}`, { y: 36, h: 220, capture: true }),
+      footer('goes to the computer in 5 s'),
+    ],
+  };
+}
+
 /** Hold on a card: the words appear while you speak. */
 export function voiceAnswerPage(card: Card, transcript: string): Page {
   return {
