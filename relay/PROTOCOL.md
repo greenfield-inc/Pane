@@ -205,9 +205,11 @@ and applies nothing when any update is malformed.
 
 Each relay keeps one queue per helper and sends it from its own task, so a
 slow helper delays nothing else. Updates for the same id merge while they
-wait, and everything waiting goes out together as one array. Every 60 s the
-relay queues all its connected computers again, so a helper that restarts
-relearns them within a minute. A TXT update succeeds once one helper has it.
+wait. A computer's TXT update goes first, in a request of its own; the rest
+go out together as one array. Every 60 s the relay queues all its connected
+computers again, so a helper that restarts relearns them within a minute. A
+TXT update succeeds as soon as one helper has it, and fails only when every
+helper failed.
 A helper updates its own registry in memory and lists only the other
 helpers, so both helpers answer the same records.
 

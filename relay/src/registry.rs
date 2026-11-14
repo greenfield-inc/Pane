@@ -57,11 +57,55 @@ const MAX_BATCH: usize = 5000;
 
 /// What is waiting to go to one helper. Updates for the same id merge, so the
 /// queue holds at most one update per computer however slow the helper is.
+/// Updates someone waits for (a computer's TXT values) are urgent and go first.
 #[derive(Default)]
 struct Queue {
+    urgent: HashMap<String, Update>,
+    urgent_replies: Vec<Reply>,
     updates: HashMap<String, Update>,
-    update_replies: Vec<Reply>,
     acme: HashMap<String, (AcmeTxt, Vec<Reply>)>,
+}
+
+/// One request's worth of the queue.
+enum Job {
+    Updates(Vec<Update>, Vec<Reply>),
+    Acme(AcmeTxt, Vec<Reply>),
+}
+
+impl Queue {
+    /// Urgent updates first, then each ACME value, then up to `MAX_BATCH` other updates.
+    fn next(&mut self) -> Option<Job> {
+        if !self.urgent.is_empty() {
+            let updates = std::mem::take(&mut self.urgent).into_values().collect();
+            return Some(Job::Updates(
+                updates,
+                std::mem::take(&mut self.urgent_replies),
+            ));
+        }
+        if let Some(name) = self.acme.keys().next().cloned() {
+            let (t, replies) = self.acme.remove(&name)?;
+            return Some(Job::Acme(t, replies));
+        }
+        if self.updates.is_empty() {
+            return None;
+        }
+        let ids: Vec<String> = self.updates.keys().take(MAX_BATCH).cloned().collect();
+        let batch = ids
+            .iter()
+            .filter_map(|id| self.updates.remove(id))
+            .collect();
+        Some(Job::Updates(batch, Vec::new()))
+    }
+}
+
+/// `u` applied over `queued`: `txt: None` keeps the queued TXT values.
+fn merge(queued: &mut Update, u: Update) {
+    queued.region = u.region;
+    queued.local = u.local;
+    queued.online = u.online;
+    if u.txt.is_some() {
+        queued.txt = u.txt;
+    }
 }
 
 /// One helper's queue, sent by its own task, so a helper that is down delays only itself.
@@ -72,25 +116,26 @@ struct Helper {
 }
 
 impl Helper {
+    /// Queues updates; with `reply` they are urgent and the reply gets the helper's answer.
     fn push_updates(&self, updates: Vec<Update>, reply: Option<Reply>) {
         let mut q = self.queue.lock().unwrap();
+        let q = &mut *q;
         for u in updates {
-            match q.updates.get_mut(&u.id) {
-                Some(queued) => {
-                    queued.region = u.region;
-                    queued.local = u.local;
-                    queued.online = u.online;
-                    if u.txt.is_some() {
-                        queued.txt = u.txt;
-                    }
-                }
-                None => {
-                    q.updates.insert(u.id.clone(), u);
-                }
+            let id = u.id.clone();
+            if let Some(queued) = q.urgent.get_mut(&id) {
+                merge(queued, u);
+            } else if reply.is_some() {
+                // An urgent update takes over any queued one for the same id.
+                let mut queued = q.updates.remove(&id).unwrap_or_else(|| u.clone());
+                merge(&mut queued, u);
+                q.urgent.insert(id, queued);
+            } else if let Some(queued) = q.updates.get_mut(&id) {
+                merge(queued, u);
+            } else {
+                q.updates.insert(id, u);
             }
         }
-        q.update_replies.extend(reply);
-        drop(q);
+        q.urgent_replies.extend(reply);
         self.wake.notify_one();
     }
 
@@ -106,7 +151,7 @@ impl Helper {
         self.wake.notify_one();
     }
 
-    /// Sends whatever is queued: all updates as JSON arrays of up to `MAX_BATCH`, then each ACME value.
+    /// Sends the queue one request at a time, in the order `Queue::next` gives.
     async fn run(
         self: Arc<Self>,
         url: String,
@@ -129,27 +174,26 @@ impl Helper {
         };
         loop {
             self.wake.notified().await;
-            let q = std::mem::take(&mut *self.queue.lock().unwrap());
-            if !q.updates.is_empty() {
-                let updates: Vec<Update> = q.updates.into_values().collect();
-                let mut result = Ok(());
-                for batch in updates.chunks(MAX_BATCH) {
-                    let body = serde_json::to_vec(batch).unwrap_or_default();
-                    let sent = send("", body).await;
-                    if let Err(e) = &sent {
-                        tracing::warn!(count = batch.len(), error = %e, "registry update failed");
+            loop {
+                let job = self.queue.lock().unwrap().next();
+                let (sent, replies) = match job {
+                    None => break,
+                    Some(Job::Updates(batch, replies)) => {
+                        let body = serde_json::to_vec(&batch).unwrap_or_default();
+                        let sent = send("", body).await;
+                        if let Err(e) = &sent {
+                            tracing::warn!(count = batch.len(), error = %e, "registry update failed");
+                        }
+                        (sent, replies)
                     }
-                    result = result.and(sent);
-                }
-                for reply in q.update_replies {
-                    let _ = reply.send(result.clone());
-                }
-            }
-            for (name, (t, replies)) in q.acme {
-                let sent = send("/acme", serde_json::to_vec(&t).unwrap_or_default()).await;
-                if let Err(e) = &sent {
-                    tracing::warn!(name, error = %e, "registry ACME update failed");
-                }
+                    Some(Job::Acme(t, replies)) => {
+                        let sent = send("/acme", serde_json::to_vec(&t).unwrap_or_default()).await;
+                        if let Err(e) = &sent {
+                            tracing::warn!(name = t.name, error = %e, "registry ACME update failed");
+                        }
+                        (sent, replies)
+                    }
+                };
                 for reply in replies {
                     let _ = reply.send(sent.clone());
                 }
@@ -338,20 +382,22 @@ impl Registry {
     }
 }
 
-/// Succeeds once one helper took the update: a helper that is down answers no
-/// DNS, so resolvers ask the other. With no helpers, succeeds at once.
+/// Succeeds as soon as one helper took the update, and fails only when all
+/// failed: a helper that is down answers no DNS, so resolvers ask the other.
+/// With no helpers, succeeds at once.
 async fn wait(replies: Vec<oneshot::Receiver<Result<(), String>>>) -> Result<(), String> {
     if replies.is_empty() {
         return Ok(());
     }
+    let mut pending: tokio::task::JoinSet<_> = replies.into_iter().collect();
     let mut first_err = None;
-    for rx in replies {
-        match rx.await {
-            Ok(Ok(())) => return Ok(()),
-            Ok(Err(e)) => {
+    while let Some(answer) = pending.join_next().await {
+        match answer {
+            Ok(Ok(Ok(()))) => return Ok(()),
+            Ok(Ok(Err(e))) => {
                 first_err.get_or_insert(e);
             }
-            Err(_) => {
+            _ => {
                 first_err.get_or_insert("registry push stopped".to_string());
             }
         }

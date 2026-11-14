@@ -791,9 +791,9 @@ async fn still_connected(agent: &mut Agent) {
 
 const SLOWED: Duration = Duration::from_millis(900);
 
-/// A fake registry helper over plain http. With `answer`, it replies 200 and sends each
-/// request's body to the returned channel; without, it reads requests and never replies.
-async fn fake_helper(answer: bool) -> (String, mpsc::UnboundedReceiver<Value>) {
+/// A fake registry helper over plain http. It sends each request's body to the returned
+/// channel as it arrives, then replies 200 after `delay`, or never without one.
+async fn fake_helper(delay: Option<Duration>) -> (String, mpsc::UnboundedReceiver<Value>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!(
         "http://127.0.0.1:{}/v1/registry",
@@ -815,10 +815,8 @@ async fn fake_helper(answer: bool) -> (String, mpsc::UnboundedReceiver<Value>) {
                     .map_or(0, |n| n.trim().parse().unwrap());
                 let mut body = vec![0u8; len];
                 tcp.read_exact(&mut body).await.unwrap();
-                if !answer {
-                    tokio::time::sleep(Duration::from_secs(3600)).await;
-                }
                 let _ = tx.send(serde_json::from_slice(&body).unwrap());
+                tokio::time::sleep(delay.unwrap_or(Duration::from_secs(3600))).await;
                 let ok = "HTTP/1.1 200 OK\r\ncontent-length: 11\r\nconnection: close\r\n\r\n{\"ok\":true}";
                 let _ = tcp.write_all(ok.as_bytes()).await;
             });
@@ -829,7 +827,7 @@ async fn fake_helper(answer: bool) -> (String, mpsc::UnboundedReceiver<Value>) {
 
 #[tokio::test]
 async fn the_resync_posts_every_computer_to_a_helper_in_one_request() {
-    let (url, mut posts) = fake_helper(true).await;
+    let (url, mut posts) = fake_helper(Some(Duration::ZERO)).await;
     let env = Env::start(&[
         "--registry-url",
         &url,
@@ -869,8 +867,73 @@ async fn the_resync_posts_every_computer_to_a_helper_in_one_request() {
 }
 
 #[tokio::test]
+async fn a_txt_update_succeeds_when_one_helper_never_answers() {
+    let (silent, _) = fake_helper(None).await;
+    let (healthy, _) = fake_helper(Some(Duration::ZERO)).await;
+    let env = Env::start(&["--registry-url", &format!("{silent},{healthy}")]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let started = Instant::now();
+    agent
+        .send(json!({"t": "txt", "req": "1", "values": ["token-abc"]}))
+        .await;
+    assert_eq!(agent.next().await, json!({"t": "ok", "req": "1"}));
+    // The computer gives up after 20 s; the healthy helper answers at once.
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn a_txt_update_goes_out_ahead_of_a_queued_resync() {
+    // A slow helper keeps a resync of every computer waiting in the queue.
+    let (url, mut posts) = fake_helper(Some(Duration::from_secs(2))).await;
+    let env = Env::start(&[
+        "--registry-url",
+        &url,
+        "--registry-resync-secs",
+        "1",
+        "--limit-agent-conns-per-min",
+        "1000",
+        "--limit-new-ids-per-hour",
+        "1000",
+    ])
+    .await;
+    let mut agents = Vec::new();
+    for _ in 0..30 {
+        agents.push(Agent::connect(&env, &SigningKey::generate()).await);
+    }
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    let agent = &mut agents[0];
+    agent
+        .send(json!({"t": "txt", "req": "1", "values": ["token-abc"]}))
+        .await;
+
+    // The request carrying the TXT value holds that update alone, not the resync's 30.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let body = loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let body = tokio::time::timeout(left, posts.recv())
+            .await
+            .expect("the TXT update reached the helper")
+            .unwrap();
+        if body.to_string().contains("token-abc") {
+            break body;
+        }
+    };
+    let ids: Vec<&str> = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|u| u["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec![agent.id.as_str()]);
+}
+
+#[tokio::test]
 async fn a_helper_that_never_answers_does_not_delay_the_blocklist() {
-    let (url, _posts) = fake_helper(false).await;
+    let (url, _posts) = fake_helper(None).await;
     let env = Env::start(&[
         "--registry-url",
         &url,
