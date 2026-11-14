@@ -147,7 +147,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     const unsubscribeHost = window.electronAPI.remoteDaemon.onHostStateChanged(setHostState);
     // Phones and linked computers change the device list too (a removed phone, a new link); main announces every config change.
     const unsubscribeConfig = window.electronAPI.events.onConfigUpdated(() => {
-      void refresh().catch((loadError: unknown) => setError(loadError instanceof Error ? loadError.message : 'Failed to load Remote Pane'));
+      void refresh().catch((loadError) => setError(loadError instanceof Error ? loadError.message : 'Failed to load Remote Pane'));
     });
     return () => {
       unsubscribeConnection();
