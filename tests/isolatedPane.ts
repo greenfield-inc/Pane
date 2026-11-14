@@ -1,6 +1,6 @@
 import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -30,7 +30,13 @@ function assertNotRealPane(env: Record<string, string>): void {
   }
 }
 
-export function isolatedPane(prefix: string, extra: Record<string, string> = {}): IsolatedPane {
+/**
+ * `agentLogin` (the approved real-agent run, J17 only) lets real Claude Code and Codex sign in
+ * from the throwaway HOME: this Mac's keychain linked in (Claude finds its login there only
+ * without CLAUDE_CONFIG_DIR, so ~/.claude is the throwaway HOME's), and a read-only copy of
+ * ~/.codex/auth.json in CODEX_HOME. Nothing else of the real home is read.
+ */
+export function isolatedPane(prefix: string, extra: Record<string, string> = {}, options: { agentLogin?: boolean } = {}): IsolatedPane {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), `${prefix}-`)));
   const paneDir = path.join(root, 'pane');
   const home = path.join(root, 'home');
@@ -52,6 +58,20 @@ export function isolatedPane(prefix: string, extra: Record<string, string> = {})
     NODE_ENV: 'development',
     ...extra,
   });
+  if (options.agentLogin) {
+    delete env.CLAUDE_CONFIG_DIR;
+    mkdirSync(path.join(home, 'Library'), { recursive: true });
+    symlinkSync(path.join(homedir(), 'Library', 'Keychains'), path.join(home, 'Library', 'Keychains'));
+    // Onboarding done, and everything under the throwaway root trusted, so no first-run screen.
+    writeFileSync(path.join(home, '.claude.json'), JSON.stringify({
+      hasCompletedOnboarding: true, bypassPermissionsModeAccepted: true, autoUpdates: false,
+      projects: Object.fromEntries([root, path.join(root, 'repo')].map(dir => [dir, { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true }])),
+    }));
+    const auth = path.join(home, '.codex', 'auth.json');
+    copyFileSync(path.join(homedir(), '.codex', 'auth.json'), auth);
+    chmodSync(auth, 0o400);
+    writeFileSync(path.join(home, '.codex', 'config.toml'), `check_for_update_on_startup = false\n[projects."${root}"]\ntrust_level = "trusted"\n`);
+  }
   assertNotRealPane(env);
   return { root, paneDir, home, env };
 }
@@ -64,10 +84,21 @@ export async function launchIsolated(pane: IsolatedPane, baseURL: string | undef
     args: [path.resolve('main/dist/main/src/index.js'), `--user-data-dir=${path.join(pane.root, 'electron')}`, '--use-mock-keychain', '--password-store=basic'],
     env,
   });
+  // The app's own log, for a journey that fails: PANE_QA_LOG names a file to append it to.
+  const logFile = process.env.PANE_QA_LOG;
+  if (logFile) {
+    const write = (chunk: Buffer) => appendFileSync(logFile, chunk);
+    app.process().stdout?.on('data', write);
+    app.process().stderr?.on('data', write);
+  }
   const isMain = (candidate: Page): boolean => /^https?:|^file:/.test(candidate.url()) && !candidate.url().includes('notify.html');
   await expect.poll(() => app.windows().some(isMain), { timeout: 30_000 }).toBe(true);
   const page = app.windows().find(isMain)!;
   await page.waitForFunction(() => !!window.electronAPI?.orchestrationSessions, undefined, { timeout: 30_000, polling: 250 });
+  if (logFile) {
+    page.on('console', message => { if (message.type() === 'error' || message.type() === 'warning') appendFileSync(logFile, `[renderer ${message.type()}] ${message.text()}\n`); });
+    page.on('crash', () => appendFileSync(logFile, '[renderer] crashed\n'));
+  }
   await app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find(candidate => !candidate.webContents.getURL().includes('notify.html'));
     window?.setContentSize(1500, 950);
