@@ -108,6 +108,8 @@ export interface AppConfig {
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
   archiveRetentionDays?: number;
+  // Under the same switch: stop a chat tab's agent after this many idle minutes (default 30; whole minutes 5 to 1440)
+  chatIdleReleaseMinutes?: number;
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
@@ -251,6 +253,7 @@ export interface UpdateConfigRequest {
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
   archiveRetentionDays?: number;
+  chatIdleReleaseMinutes?: number;
   theme?: AppConfig['theme'];
   appearanceMode?: AppearanceMode;
   systemLightTheme?: Theme;

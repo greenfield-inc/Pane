@@ -14,6 +14,7 @@ import type { DatabaseService } from '../database/database';
 import type { Session as DbSession, CreateSessionData, UpdateSessionData, ConversationMessage, PromptMarker, ExecutionDiff, CreateExecutionDiffData, Project } from '../database/models';
 import { TerminalSessionManager } from './terminalSessionManager';
 import { parseSessionTimestampMs } from './paneInactivity';
+import { pausedMarkSchema } from '../../../shared/types/autoPause';
 import { pausedMarkOf, type TerminalPausedMark, type TerminalPanelState, type ToolPanelState, type ResumableSession } from '../../../shared/types/panels';
 import { formatForDisplay } from '../utils/timestampUtils';
 import { isCliAgentType, resolveAgentTypeFromCommand } from './agents/agentIdentity';
@@ -121,12 +122,6 @@ function parseTerminalResumeState(value: ToolPanelState['customState']): {
   }
 }
 
-const pausedMarkSchema = boundary.object({
-  at: boundary.nonEmptyString,
-  by: boundary.enumeration('manual', 'auto'),
-  idleHours: boundary.optional(boundary.number),
-  runScript: boundary.optional(boundary.boolean),
-});
 
 function terminalCustomState(value: ToolPanelState['customState']): TerminalPanelState {
   // SAFETY: This helper is called only for panels whose type is terminal; their

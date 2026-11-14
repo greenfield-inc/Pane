@@ -4102,6 +4102,16 @@ describe('runpane IPC handlers', () => {
     expect(stopped).toMatchObject({ panes: [{ status: 'stopped', agentState: 'none' }] });
   });
 
+  it('counts a chat agent\'s activity in a Pane\'s inactiveSince', async () => {
+    const chatPanel: ToolPanel = { ...terminalPanel, id: 'chat-1', type: 'chat', state: { isActive: false } };
+    vi.mocked(panelManager.getPanelsForSession).mockReturnValue([chatPanel]);
+    const activity = vi.spyOn(getChatTabManager(), 'lastActivity').mockReturnValue(new Date('2026-06-01T12:00:00.000Z'));
+
+    const result = await createRegistry().invoke('runpane:panes:list', [{ repo: 'active' }]);
+    expect(result).toMatchObject({ panes: [{ inactiveSince: '2026-06-01T12:00:00.000Z' }] });
+    activity.mockRestore();
+  });
+
   it('lists how Pane knows each panel\'s agent and its launch command', async () => {
     const wrapperPanel: ToolPanel = {
       ...terminalPanel,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { PauseSettings } from './PauseSettings';
-import { parseAutoPauseHours } from '../../../../../shared/types/autoPause';
+import { parseAutoPauseHours, parseChatReleaseMinutes } from '../../../../../shared/types/autoPause';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { DEFAULT_SETTINGS_PREFERENCES } from '../../../types/settings';
 import type { AppConfig } from '../../../types/config';
@@ -39,16 +39,29 @@ describe('auto-pause threshold field', () => {
   });
 });
 
+describe('chat tab threshold field', () => {
+  it('accepts whole minutes from 5 to 1440 and refuses the rest', () => {
+    expect(parseChatReleaseMinutes('5')).toBe(5);
+    expect(parseChatReleaseMinutes(' 30 ')).toBe(30);
+    expect(parseChatReleaseMinutes('1440')).toBe(1440);
+    expect(parseChatReleaseMinutes('4')).toBeNull();
+    expect(parseChatReleaseMinutes('1441')).toBeNull();
+    expect(parseChatReleaseMinutes('2.5')).toBeNull();
+  });
+});
+
 describe('PauseSettings', () => {
   it('starts with resume-on-open off and auto-pause on at 48 hours on a fresh profile', () => {
     const markup = render({});
     expect(markup).toMatch(/aria-checked="false"[^>]*aria-label="Resume a paused Pane when you open it"|aria-label="Resume a paused Pane when you open it"[^>]*aria-checked="false"/);
     expect(markup).toMatch(/aria-checked="true"[^>]*aria-label="Pause idle Panes"|aria-label="Pause idle Panes"[^>]*aria-checked="true"/);
     expect(markup).toContain('value="48"');
+    expect(markup).toContain('value="30"');
   });
 
-  it('disables the threshold field while auto-pause is off and keeps its value', () => {
-    const markup = render({ autoPauseEnabled: false, autoPauseAfterHours: 12 });
+  it('disables both threshold fields while auto-pause is off and keeps their values', () => {
+    const markup = render({ autoPauseEnabled: false, autoPauseAfterHours: 12, chatIdleReleaseMinutes: 45 });
     expect(markup).toMatch(/<input[^>]*value="12"[^>]*disabled=""|<input[^>]*disabled=""[^>]*value="12"/);
+    expect(markup).toMatch(/<input[^>]*value="45"[^>]*disabled=""|<input[^>]*disabled=""[^>]*value="45"/);
   });
 });

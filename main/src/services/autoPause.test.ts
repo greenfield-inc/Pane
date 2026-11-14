@@ -33,8 +33,11 @@ function world(overrides: Partial<AutoPauseDependencies> = {}) {
     agentState: (panelId): AgentState | undefined => panelId === 'blocked:1' ? 'blocked' : 'idle',
     hasOpenNotify: panelIds => panelIds.includes('notify:1'),
     focusedPaneId: () => 'focused',
+    shownPaneId: () => 'focused',
     heldByUpdate: panel => panel.id === 'updating:1',
     pause: async (paneId, mark) => { pausedCalls.push({ paneId, mark }); return { paused: [`${paneId}:1`], failed: [] }; },
+    chatRunning: () => true,
+    pauseChats: async panelIds => ({ paused: panelIds, failed: [] }),
     ...overrides,
   };
   return { deps, pausedCalls, panels, advance: (ms: number) => { now += ms; } };
@@ -93,5 +96,66 @@ describe('auto-pause', () => {
     });
     advance(49 * HOUR);
     expect(await new AutoPauser(deps).sweep()).toEqual(['session-chat']);
+  });
+});
+
+describe('auto-pause of chat tabs', () => {
+  const MINUTE = 60 * 1000;
+  function chat(id: string, lastActiveAt = new Date(START).toISOString()): ToolPanel {
+    return { id, sessionId: id.split(':')[0], type: 'chat', title: id, state: { isActive: false }, metadata: { createdAt: '2026-11-01T00:00:00.000Z', lastActiveAt, position: 0 } };
+  }
+
+  function chats(overrides: Partial<AutoPauseDependencies> = {}) {
+    const paused: string[][] = [];
+    const panes: AutoPausePane[] = ['work', 'shown', 'archived'].map(id => ({ id, createdAt: new Date(START), archived: id === 'archived' }));
+    const panels = new Map<string, ToolPanel[]>([
+      ['work', [chat('work:idle'), chat('work:selected', new Date(START + 20 * MINUTE).toISOString()), chat('work:talking'), chat('work:asking'), chat('work:carded'), chat('work:released')]],
+      ['shown', [chat('shown:idle')]],
+      ['archived', [chat('archived:idle')]],
+    ]);
+    const { deps, advance } = world({
+      panes: () => panes,
+      panels: paneId => panels.get(paneId) ?? [],
+      // The Pane on screen in a window the person has left for another app.
+      focusedPaneId: () => undefined,
+      shownPaneId: () => 'shown',
+      liveActivity: panelId => panelId === 'work:talking' ? new Date(START + 25 * MINUTE) : undefined,
+      agentState: panelId => panelId === 'work:asking' ? 'blocked' : 'idle',
+      // A card the agent posted and ended its turn on: the tab reads idle, but the person owes an answer.
+      hasOpenNotify: panelIds => panelIds.includes('work:carded'),
+      chatRunning: panelId => panelId !== 'work:released',
+      pauseChats: async (panelIds) => { paused.push(panelIds); return { paused: panelIds, failed: [] }; },
+      ...overrides,
+    });
+    return { deps, advance, paused };
+  }
+
+  it('stops chat agents idle for 30 minutes, skipping the Pane on screen in an unfocused window, archived Panes, and chats waiting on the person', async () => {
+    const { deps, advance, paused } = chats();
+    advance(29 * MINUTE);
+    await new AutoPauser(deps).sweep();
+    expect(paused).toEqual([]);
+    advance(2 * MINUTE);
+    await new AutoPauser(deps).sweep();
+    expect(paused).toEqual([['work:idle']]);
+    // Selecting a chat tab or its agent's own activity counts as use.
+    advance(30 * MINUTE);
+    await new AutoPauser(deps).sweep();
+    expect(paused.at(-1)).toEqual(['work:idle', 'work:selected', 'work:talking']);
+  });
+
+  it('uses the chat setting apart from the Pane hours, and stops nothing when auto-pause is off', async () => {
+    const custom = chats({ settings: () => ({ enabled: true, hours: 48, chatMinutes: 90 }) });
+    custom.advance(60 * MINUTE);
+    await new AutoPauser(custom.deps).sweep();
+    expect(custom.paused).toEqual([]);
+    custom.advance(31 * MINUTE);
+    await new AutoPauser(custom.deps).sweep();
+    expect(custom.paused.at(-1)).toContain('work:idle');
+
+    const off = chats({ settings: () => ({ enabled: false, chatMinutes: 30 }) });
+    off.advance(120 * MINUTE);
+    await new AutoPauser(off.deps).sweep();
+    expect(off.paused).toEqual([]);
   });
 });

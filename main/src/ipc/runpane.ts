@@ -1,4 +1,5 @@
 import { getChatTabManager } from '../services/chatTabs';
+import { decodeChatPanelState } from '../services/chatTabs/state';
 import { createChatTab } from './chatTabs';
 import { chatTabLastMessage, chatTabNoTerminal, chatTabOutput, chatTabScreen, submitChatTab, waitForChatTab } from './runpaneChatTabs';
 import { paneCommandSignal } from '../daemon/commandRegistry';
@@ -1507,7 +1508,7 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:pause', async (request: PaneCommandValue): Promise<RunpanePauseResult> => {
     return withRunpaneAction(services, 'panels:pause', {}, async () => {
       const target = resolvePanel(parsePauseTarget(request, 'panelId', 'Panel pause'));
-      if (target.type === 'chat') throw new PaneError('ERR_RUNPANE_CHAT_NOT_PAUSABLE', `Panel ${target.id} is a chat tab, and chat tabs can't pause yet, so nothing was paused. Its agent keeps running.`, `Press Stop in the tab to end its turn, or close the tab: runpane panels close --panel ${target.id}.`);
+      if (target.type === 'chat') throw new PaneError('ERR_RUNPANE_CHAT_NOT_PAUSABLE', `Panel ${target.id} is a chat tab, and Pause leaves chat tabs running, so nothing was paused. Its agent keeps running.`, `Press Stop in the tab to end its turn, or close the tab: runpane panels close --panel ${target.id}.`);
       const panel = resolveTerminalPanel(target.id);
       return pauseTabs(services, { kind: 'panel', panelId: panel.id, paneId: panel.sessionId }, [panel.id], 0, mark => terminalPanelManager.pausePanels([panel.id], mark));
     }, pauseActionMetrics);
@@ -1571,7 +1572,8 @@ export function registerRunpaneHandlers(
         });
       }
 
-      // A paused tab stays paused until someone resumes it by name: `--panel`, or its Pane or Session.
+      // A paused terminal tab stays paused until someone resumes it by name: `--panel`, or its Pane or Session.
+      // An auto-paused chat tab is left too: it resumes when opened or sent a message.
       candidates = candidates.filter(candidate => !isPanelPaused(candidate.panelId));
       const exited = await Promise.all(candidates.map(candidate => terminalPanelManager.hasLaunchCommandExited(candidate.panelId)));
       const stopped = candidates.filter((candidate, index) => !candidate.running || exited[index]);
@@ -2313,7 +2315,7 @@ function sessionToPaneSummary(session: Session, project: Project): RunpanePaneSu
     createdAt: toIsoString(session.createdAt),
     lastActivity: toIsoString(session.lastActivity),
     inactiveSince: paneInactiveSince({ createdAt: session.createdAt, lastViewedAt: session.lastViewedAt, panels },
-      panelId => terminalPanelManager.getLastActivity(panelId)).toISOString(),
+      panelId => terminalPanelManager.getLastActivity(panelId) ?? getChatTabManager().lastActivity(panelId)).toISOString(),
     paused: session.paused,
     archived: session.archived || undefined,
     ownership: session.worktreeOwnership ?? 'pane',
@@ -3599,6 +3601,7 @@ async function resumeTabs(services: AppServices, registry: PaneCommandRegistry, 
 
 function isPanelPaused(panelId: string): boolean {
   const panel = panelManager.getPanel(panelId);
+  if (panel?.type === 'chat') return !!decodeChatPanelState(panel.state.customState)?.paused;
   return !!panel && !!pausedMarkOf(panel);
 }
 

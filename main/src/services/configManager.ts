@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import type { AnalyticsIdentity, AppConfig } from '../types/config';
 import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared/types/paneChat';
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../shared/types/appearance';
-import { DEFAULT_AUTO_PAUSE_HOURS } from '../../../shared/types/autoPause';
+import { DEFAULT_AUTO_PAUSE_HOURS, DEFAULT_CHAT_RELEASE_MINUTES } from '../../../shared/types/autoPause';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { customLinkSchema, type CustomLink } from '../../../shared/types/customLinks';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
@@ -175,6 +175,7 @@ export class ConfigManager extends EventEmitter {
       resumePausedOnOpen: false,
       autoPauseEnabled: true,
       autoPauseAfterHours: DEFAULT_AUTO_PAUSE_HOURS,
+      chatIdleReleaseMinutes: DEFAULT_CHAT_RELEASE_MINUTES,
       notifications: {
         playSound: false,
         enabled: true
