@@ -118,11 +118,12 @@ export async function createRelayHost(deps: {
     previews,
     links,
     pairing: {
-      exchange: async ({ secret, label, phoneId }) => {
-        const result = await relay.exchangeSecret(secret, label, phoneId);
+      exchange: async (request) => {
+        const result = await relay.exchangeSecret(request);
         if (!result.ok) return result;
-        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId }, []) };
+        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, []) };
       },
+      clientAddress: (remoteAddress, remotePort) => relay.clientAddress(remoteAddress, remotePort),
     },
     suspend: () => relay.suspend(),
     resume: () => relay.resume(),

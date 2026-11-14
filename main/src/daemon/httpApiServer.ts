@@ -265,6 +265,8 @@ interface PairingRequest {
   secret: string;
   label: string;
   phoneId?: string;
+  /** The caller's IP address; wrong secrets lock out only this source. */
+  source: string;
 }
 
 /** The phone's new token, what it stores about this computer, and the computers it may now reach. */
@@ -274,6 +276,8 @@ type PairingRouteResult =
 
 export interface PairingRoute {
   exchange(request: PairingRequest): Promise<PairingRouteResult>;
+  /** The client IP behind a connection the relay's TLS terminator forwarded here; null for any other connection. */
+  clientAddress(remoteAddress: string | undefined, remotePort: number | undefined): string | null;
 }
 
 const pairingBodySchema = boundary.object({
@@ -842,7 +846,7 @@ export class PaneRemoteHttpApiServer {
       this.writeJson(response, 400, { ok: false, error: { code: 'ERR_PAIRING_BAD_REQUEST', message: 'The pairing code is missing.' } });
       return;
     }
-    const exchangeRequest: PairingRequest = { secret, label: decodeOptionalBoundary(body.label, boundary.string) ?? '' };
+    const exchangeRequest: PairingRequest = { secret, label: decodeOptionalBoundary(body.label, boundary.string) ?? '', source: this.sourceAddress(request) };
     const phoneId = decodeOptionalBoundary(body.phoneId, boundary.string);
     if (phoneId) exchangeRequest.phoneId = phoneId;
     const result = await pairing.exchange(exchangeRequest);
@@ -1188,7 +1192,7 @@ export class PaneRemoteHttpApiServer {
         getSingleHeaderValue(request.headers['x-forwarded-for']),
         request.socket.remoteAddress,
       )
-      : glassesSource(null, null, request.socket.remoteAddress);
+      : glassesSource(null, null, this.sourceAddress(request));
     const lockedMs = glasses.lockedFor(source);
     if (lockedMs > 0) {
       const seconds = Math.ceil(lockedMs / 1000);
@@ -1398,6 +1402,12 @@ export class PaneRemoteHttpApiServer {
   /** Funnel puts the workspace port on the internet; it says nothing about the paired listener. */
   private funnelRefusesGlasses(glasses: GlassesAccess): boolean {
     return Boolean(this.workspace) && glasses.isFunnelOn();
+  }
+
+  /** The caller's IP on the paired listener: the client behind the relay's TLS terminator, else the socket's own. */
+  private sourceAddress(request: IncomingMessage): string {
+    const { remoteAddress, remotePort } = request.socket;
+    return this.pairing?.clientAddress(remoteAddress, remotePort) ?? remoteAddress ?? 'unknown';
   }
 
   private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {

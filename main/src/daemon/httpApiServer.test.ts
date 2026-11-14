@@ -419,7 +419,7 @@ describe('PaneRemoteHttpApiServer', () => {
     const config = createEnabledRemoteConfig();
     const exchange = new PairingExchange({ addClient: async (record) => { config.host.clients.push(record); } });
     const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config), {
-      pairing: { exchange: async ({ secret, label, phoneId }) => exchange.exchange(secret, label, phoneId) },
+      pairing: { exchange: (request) => exchange.exchange(request), clientAddress: () => null },
     });
     activeServers.push(server);
     await server.start();

@@ -12,7 +12,7 @@ import { loadComputerKey, type ComputerKey, type KeyStore } from './computerKey'
 import { ComputerCertificate, LETS_ENCRYPT_DIRECTORY } from './computerCertificate';
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
 import { computerHost, localAddressHost } from './computerNames';
-import { PairingExchange, type PairedEvent, type PairingExchangeResult } from './pairingExchange';
+import { PairingExchange, type PairedEvent, type PairingExchangeRequest, type PairingExchangeResult } from './pairingExchange';
 import { RelayAgent, type RelayAgentState, type RelayAlert } from './relayAgent';
 import { findPaneDirect, PaneDirectProcess } from './paneDirect';
 
@@ -161,10 +161,15 @@ export class RelayService {
   }
 
   /** The pairing listener's `POST /pair/exchange`. */
-  async exchangeSecret(secret: string, label: string, phoneId?: string): Promise<PairingExchangeResult & { computer?: RelayComputer }> {
-    const result = await this.exchange.exchange(secret, label, phoneId);
+  async exchangeSecret(request: PairingExchangeRequest): Promise<PairingExchangeResult & { computer?: RelayComputer }> {
+    const result = await this.exchange.exchange(request);
     if (!result.ok) return result;
     return { ...result, computer: this.computerInfo() };
+  }
+
+  /** The client IP behind a connection the TLS terminator forwarded to a loopback listener; null for any other. */
+  clientAddress(remoteAddress: string | undefined, remotePort: number | undefined): string | null {
+    return this.terminator?.clientAddress(remoteAddress, remotePort) ?? null;
   }
 
   /** What a paired phone stores about this computer. */
@@ -232,7 +237,7 @@ export class RelayService {
       ca,
       displayName: () => this.deps.displayName(),
       localAddresses: () => privateAddresses(),
-      onClient: (stream) => this.terminator?.accept(stream),
+      onClient: (stream, peer) => this.terminator?.accept(stream, peer),
       onState: (state) => {
         const cameOnline = state.status === 'online' && this.agentState.status !== 'online';
         this.agentState = state;

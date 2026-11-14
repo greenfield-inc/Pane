@@ -186,11 +186,12 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
     }), links, configManager);
     server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) }, {
       pairing: {
-        exchange: async ({ secret, label, phoneId }) => {
-          const result = await service.exchangeSecret(secret, label, phoneId);
+        exchange: async (request) => {
+          const result = await service.exchangeSecret(request);
           if (!result.ok) return result;
-          return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId }, []) };
+          return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, []) };
         },
+        clientAddress: (remoteAddress, remotePort) => service.clientAddress(remoteAddress, remotePort),
       },
     });
     await server.start();
