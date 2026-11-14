@@ -134,7 +134,13 @@ Preview components never enter the editable auto-save path, even on errors.
 - Worktrees go in `<repo>/worktrees/` unless the project sets another folder
   (`worktreeManager.ts`). A worktree on a remote-tracking base fetches that
   branch first (`worktreeBaseRefresh.ts`: capped at about 10 s, shared by
-  concurrent creates, never fails the create). `worktreePoolManager.ts` keeps
+  concurrent creates, never fails the create). Every fetch (Fetch button,
+  dashboard, branch list, new worktree, or an agent's `git fetch` or `git
+  pull` in the active Pane, seen through its `FETCH_HEAD`) updates
+  ahead/behind for the project's Panes, and the time under Fetch shows when
+  the Pane's base branch was last fetched; `FETCH_HEAD` files seed that time
+  at startup (`gitStatusManager.ts`).
+  `worktreePoolManager.ts` keeps
   empty reserve worktrees on `_reserve/<hex>` branches so new panes open fast;
   a reserve is only claimed while its base ref still points at its commit.
 - Archive cleanup intents live in SQLite's `archive_cleanup_jobs`, atomically
@@ -246,6 +252,7 @@ Notes tab.
 | `runpane` CLI contract | `contracts/runpane/` | [RUNPANE_CLI_CONTRACT.md](RUNPANE_CLI_CONTRACT.md) |
 | Analytics | `analyticsManager.ts`, `frontend/src/services/posthog.ts` | [ANALYTICS_INVARIANTS.md](ANALYTICS_INVARIANTS.md) |
 | Themes | `frontend/src/styles/tokens/colors.css` | [APPEARANCE.md](APPEARANCE.md), [scripts/README.md](../scripts/README.md) |
+| Background checks (pause while nobody looks) | `main/src/services/backgroundActivity.ts` decides when Pane is away: nobody looking (no phone, remote desktop or glasses stream open, which a saved machine's Notify stream does not count as, and the screen locked or the window off screen) while the Settings › General › Power profile's condition holds (Balanced: locked, asleep or Low Power Mode; Battery saver: also on battery; Performance: never). While away, port reads (`listeningPorts.ts`) and usage indexing (`main/src/services/usage/`) pause and catch up on return; nothing an agent, Approvals or a phone push needs depends on it | |
 | Usage and cost | `main/src/services/usage/` | [usage/README.md](../main/src/services/usage/README.md) |
 | Mobile companion | `mobile/` | [NATIVE_MOBILE.md](NATIVE_MOBILE.md) |
 

@@ -838,6 +838,8 @@ async function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
     mainWindowRevealed = false;
+    // No window is no one looking; a new window's renderer reports itself on screen.
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused: false, visible: false });
   });
 
   // Log any console messages from the renderer
@@ -1092,6 +1094,7 @@ async function createWindow() {
   // instead of document.hasFocus() (which lies when DevTools is focused).
   mainWindow.on('focus', () => {
     mainWindow?.webContents.send('window:focus-changed', true);
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused: true });
     if (gitStatusManager) {
       gitStatusManager.handleVisibilityChange(false); // false = visible/focused
     }
@@ -1100,6 +1103,7 @@ async function createWindow() {
 
   mainWindow.on('blur', () => {
     mainWindow?.webContents.send('window:focus-changed', false);
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused: false });
     if (gitStatusManager) {
       gitStatusManager.handleVisibilityChange(true); // true = hidden/blurred
     }
@@ -1108,6 +1112,7 @@ async function createWindow() {
 
   mainWindow.on('minimize', () => {
     mainWindow?.webContents.send('window:focus-changed', false);
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused: false, visible: false });
     if (gitStatusManager) {
       gitStatusManager.handleVisibilityChange(true); // true = hidden/minimized
     }
@@ -1119,6 +1124,7 @@ async function createWindow() {
     // actually focuses the window; that is what restarts git/resource work.
     const focused = mainWindow?.isFocused() ?? false;
     mainWindow?.webContents.send('window:focus-changed', focused);
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused, visible: true });
   });
 }
 
@@ -1162,7 +1168,14 @@ async function initializeServices() {
   logger = services.logger;
   archiveProgressManager = services.archiveProgressManager;
   analyticsManager = services.analyticsManager;
-  powerSaveManager = new PowerSaveManager(configManager, sessionManager, terminalPanelManager, { logger });
+  const backgroundActivity = services.backgroundActivity;
+  // Linux reports a locked screen only when asked; the keep-awake poll asks while agents work.
+  powerSaveManager = new PowerSaveManager(configManager, sessionManager, terminalPanelManager, {
+    logger,
+    onPoll: () => backgroundActivity?.evaluate('the Linux power poll ran'),
+  });
+  backgroundActivity?.on('change', (away: boolean) => usageManager.setPaused(away));
+  usageManager.setPaused(backgroundActivity?.isAway() ?? false);
   powerSaveManager.sync();
   const navigationMemory = new UIStateManager(databaseService);
   startRestartToUpdate({
@@ -1377,6 +1390,10 @@ if (launchRemoteSetup) {
   // Register before any renderer loads. useNotifications pulls this on mount
   // and will race a late registration inside createWindow/loadURL.
   ipcMain.handle('window:is-focused', () => mainWindow?.isFocused() ?? true);
+  // The renderer knows when the window is covered or hidden (document.visibilityState); main does not.
+  ipcMain.on('window:visibility-changed', (_event, visible: PaneCommandValue) => {
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ visible: decodeBoundary(visible, boundary.boolean) });
+  });
   // A clicked desktop notification opens its tab the way an OS pane:// link does.
   // The window comes forward even when the tab has since been closed.
   ipcMain.handle('window:open-pane-link', (_event, link: PaneCommandValue) => {

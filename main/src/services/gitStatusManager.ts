@@ -1,7 +1,7 @@
 import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { EventEmitter } from 'events';
 import type { Logger } from '../utils/logger';
-import type { GitStatus } from '../types/session';
+import type { GitStatus, Session } from '../types/session';
 import type { SessionManager } from './sessionManager';
 import type { WorktreeManager } from './worktreeManager';
 import type { GitDiffManager } from './gitDiffManager';
@@ -11,6 +11,7 @@ import { GitStatusLogger } from './gitStatusLogger';
 import { GitFileWatcher } from './gitFileWatcher';
 import { fastCheckWorkingDirectory, fastGetAheadBehind, fastGetDiffStats } from './gitPlumbingCommands';
 import { escapeShellArg } from '../utils/shellEscape';
+import { lastBaseFetchedAt, recordFetchHead } from './worktreeBaseRefresh';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const githubPrListSchema = boundary.array(boundary.object({
@@ -101,6 +102,9 @@ export class GitStatusManager extends EventEmitter {
   private activePrEnrichmentOperations = 0;
   private prEnrichmentTimers: Map<string, NodeJS.Timeout> = new Map();
 
+  // One ahead/behind pass per project at a time; a fetch during a pass runs it once more.
+  private fetchPasses = new Map<string, { rerun: boolean; done: Promise<void> }>();
+
   constructor(
     private sessionManager: SessionManager,
     private worktreeManager: WorktreeManager,
@@ -123,6 +127,11 @@ export class GitStatusManager extends EventEmitter {
       this.refreshSessionGitStatus(sessionId, false).catch(error => {
         this.logger?.error(`[GitStatus] Failed to refresh after file change for session ${sessionId}:`, error);
       });
+    });
+    // An agent's own `git fetch` in the watched worktree.
+    this.fileWatcher.on('fetched', (sessionId: string, fetchHeadPath: string) => {
+      const ctx = this.sessionManager.getProjectContext(sessionId);
+      if (ctx) void recordFetchHead(ctx.project.path, fetchHeadPath, ctx.commandRunner);
     });
 
     this.hydratePersistentCache();
@@ -276,6 +285,63 @@ export class GitStatusManager extends EventEmitter {
       await this.refreshSessionGitStatus(sessionId, false);
     } catch (error) {
       console.warn(`[GitStatus] Failed to refresh active session on focus:`, error);
+    }
+  }
+
+  /**
+   * After a fetch into the project, brings each of its Panes' ahead/behind and "fetched"
+   * time up to date. Fetches that land while a pass runs share one more pass.
+   */
+  refreshProjectAfterFetch(projectPath: string): Promise<void> {
+    const running = this.fetchPasses.get(projectPath);
+    if (running) {
+      running.rerun = true;
+      return running.done;
+    }
+    const pass = { rerun: false, done: Promise.resolve() };
+    pass.done = (async () => {
+      try {
+        do {
+          pass.rerun = false;
+          const sessions = (await this.sessionManager.getAllSessions()).filter(session =>
+            !session.archived && session.status !== 'error' && session.worktreePath && !isHomeDirectory(session.worktreePath)
+            && this.sessionManager.getProjectForSession(session.id)?.path === projectPath);
+          await Promise.all(sessions.map(session => this.executeWithLimit(() => this.refreshAfterFetch(session))));
+        } while (pass.rerun);
+      } finally {
+        this.fetchPasses.delete(projectPath);
+      }
+    })();
+    this.fetchPasses.set(projectPath, pass);
+    return pass.done;
+  }
+
+  /**
+   * One Pane after a fetch: a full refresh when its ahead/behind moved, so state and "Ready to
+   * merge" follow; only the fetched time when nothing else moved.
+   */
+  private async refreshAfterFetch(session: Session): Promise<void> {
+    const cached = this.cache[session.id];
+    const ctx = this.sessionManager.getProjectContext(session.id);
+    if (!cached || !ctx || !session.worktreePath) {
+      await this.refreshSessionGitStatus(session.id, false);
+      return;
+    }
+    try {
+      const comparisonBranch = await this.worktreeManager.getSessionComparisonBranch(session, ctx);
+      const { ahead, behind } = await this.dependencies.fastGetAheadBehind(session.worktreePath, comparisonBranch, ctx.commandRunner.wslContext);
+      if (ahead !== cached.status.ahead || behind !== cached.status.behind) {
+        await this.refreshSessionGitStatus(session.id, false);
+        return;
+      }
+      const fetchedAt = await lastBaseFetchedAt(ctx.project.path, comparisonBranch, ctx.commandRunner);
+      const lastFetchedAt = fetchedAt === undefined ? undefined : new Date(fetchedAt).toISOString();
+      if (lastFetchedAt === cached.status.lastFetchedAt) return;
+      const updatedStatus = { ...cached.status, lastFetchedAt };
+      this.updateCache(session.id, updatedStatus);
+      this.emitThrottled(session.id, 'updated', updatedStatus);
+    } catch {
+      await this.refreshSessionGitStatus(session.id, false);
     }
   }
 
@@ -989,6 +1055,7 @@ export class GitStatusManager extends EventEmitter {
 
       // Get ahead/behind status using fast plumbing command
       const comparisonBranch = await this.worktreeManager.getSessionComparisonBranch(session, ctx);
+      const fetchedAt = await lastBaseFetchedAt(ctx.project.path, comparisonBranch, ctx.commandRunner);
       const { ahead, behind } = await this.dependencies.fastGetAheadBehind(session.worktreePath, comparisonBranch, ctx.commandRunner.wslContext);
 
       // Get total additions/deletions for all commits in the branch (compared to comparison branch)
@@ -1069,7 +1136,8 @@ export class GitStatusManager extends EventEmitter {
         commitDeletions: totalCommitDeletions > 0 ? totalCommitDeletions : undefined,
         commitFilesChanged: totalCommitFilesChanged > 0 ? totalCommitFilesChanged : undefined,
         // Total commits in branch
-        totalCommits: totalCommits > 0 ? totalCommits : undefined
+        totalCommits: totalCommits > 0 ? totalCommits : undefined,
+        lastFetchedAt: fetchedAt === undefined ? undefined : new Date(fetchedAt).toISOString(),
       };
       
       if (abortController.signal.aborted) return null;

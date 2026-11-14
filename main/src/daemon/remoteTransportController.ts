@@ -64,7 +64,7 @@ export class PaneRemoteTransportController {
     private readonly commandRegistry: PaneCommandRegistry,
     private readonly configManager: RemoteTransportConfigProvider,
     private readonly analyticsManager?: Pick<AnalyticsManager, 'track'>,
-    private readonly isForwardedPort?: (port: number) => boolean,
+    private readonly isForwardedPort?: (port: number) => boolean | Promise<boolean>,
     private readonly paneVersion?: string,
   ) {
     this.mobilePushSender = getMobilePushSender(configManager);

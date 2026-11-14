@@ -814,6 +814,8 @@ interface ElectronAPI {
   window: {
     consumeUncleanShutdown: () => Promise<boolean>;
     isFocused: () => Promise<boolean>;
+    /** Tells main whether the window is on screen, so Pane knows when nobody is looking. */
+    reportVisibility: (visible: boolean) => void;
     /** Raises the window and opens a pane:// link, like one opened from the OS. */
     openPaneLink: (link: string) => Promise<void>;
   };

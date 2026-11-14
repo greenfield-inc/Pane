@@ -290,6 +290,25 @@ describe('GitFileWatcher pure logic', () => {
       expect(emits).toEqual(['s1']);
     });
 
+    it('reports a fetch from the git dir, as the in-distro watcher prints it, and ignores the git dir\'s other files', async () => {
+      buildWsl();
+      const fetched: string[] = [];
+      const emits: string[] = [];
+      watcher.on('fetched', (_sid: string, fetchHeadPath: string) => fetched.push(fetchHeadPath));
+      watcher.on('needs-refresh', (sid: string) => emits.push(sid));
+      await watcher.startWatching('s1', '/home/me/repo');
+
+      // A main checkout prints its git dir as ./.git; a linked worktree's by its own path.
+      child.stdout.emit('data', './.git/FETCH_HEAD\n/home/me/repo/.git/worktrees/b/FETCH_HEAD\n./.git/objects/zz\n./.git/packed-refs.lock\n');
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      expect(fetched).toEqual([
+        '\\\\wsl.localhost\\Ubuntu\\home\\me\\repo\\.git\\FETCH_HEAD',
+        '\\\\wsl.localhost\\Ubuntu\\home\\me\\repo\\.git\\worktrees\\b\\FETCH_HEAD',
+      ]);
+      expect(emits).toEqual([]);
+    });
+
     it('degrades to git status polling when the in-distro watcher dies', async () => {
       let status = '';
       buildWsl((command) => (command.startsWith('git status') ? status : ''));

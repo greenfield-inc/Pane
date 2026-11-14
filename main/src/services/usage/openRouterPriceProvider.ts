@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { createPausableInterval, type PausableInterval } from '../../utils/pausableInterval';
 import { join, dirname } from 'path';
 import type { ModelPrice } from '../../../../shared/types/usage';
 import { setLivePrices } from './modelPricing';
@@ -94,7 +95,7 @@ export function parseOpenRouterResponse(data: OpenRouterResponse): ModelPrice[] 
 }
 
 export class OpenRouterPriceProvider {
-  private refreshTimer: NodeJS.Timeout | undefined;
+  private refresh: PausableInterval | undefined;
   private cachePath: string;
 
   constructor(appDir: string) {
@@ -105,17 +106,17 @@ export class OpenRouterPriceProvider {
   start(): void {
     this.loadFromDisk();
     void this.fetchAndUpdate();
-    this.refreshTimer = setInterval(() => {
-      void this.fetchAndUpdate();
-    }, REFRESH_INTERVAL_MS);
-    this.refreshTimer.unref?.();
+    this.refresh = createPausableInterval(() => void this.fetchAndUpdate(), REFRESH_INTERVAL_MS);
+  }
+
+  /** While paused, scheduled refreshes wait; one runs on resume if any was due. */
+  setPaused(paused: boolean): void {
+    this.refresh?.setPaused(paused);
   }
 
   stop(): void {
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = undefined;
-    }
+    this.refresh?.stop();
+    this.refresh = undefined;
   }
 
   private loadFromDisk(): void {

@@ -59,7 +59,11 @@ interface RemoteConnectionStateMetadata {
 }
 
 interface RemotePaneClientOptions {
-  /** This install's id (`AppConfig.machineId`), sent on the event stream so the host knows this machine reads its cards. */
+  /**
+   * This install's id (`AppConfig.machineId`), sent on the event stream so the host knows this machine
+   * reads its cards. Only a saved machine's Notify connection sets it: the host then does not count
+   * the stream as someone looking at it, so a desktop in remote mode leaves it unset.
+   */
   machineId?: string;
   eventSink?: PaneEventSink;
   initialHandshakeTimeoutMs?: number;

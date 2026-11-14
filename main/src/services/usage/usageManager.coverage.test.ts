@@ -56,7 +56,7 @@ describe('UsageManager transcript coverage without native watchers', () => {
         { provider: 'codex', path: join(directory, '.codex/sessions') },
       ],
       repository,
-      createPriceProvider: () => ({ start() {}, stop() {} }),
+      createPriceProvider: () => ({ start() {}, stop() {}, setPaused() {} }),
     });
   });
 

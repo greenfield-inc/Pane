@@ -67,6 +67,8 @@ export interface PowerSaveEnvironment {
   helper: WindowsKeepAwakeHelper | null;
   /** Re-read the power source on this interval while there is activity; null when it emits its own events. */
   powerSourcePollMs: number | null;
+  /** Called after each of those re-reads, so others can re-read what Linux reports only when asked. */
+  onPoll?: () => void;
   logger: PowerSaveLogger;
 }
 
@@ -149,6 +151,7 @@ export class PowerSaveManager {
         ? environment.powerSourcePollMs
         : process.platform === 'linux' ? LINUX_POWER_SOURCE_POLL_MS : null,
       logger: environment.logger ?? console,
+      onPoll: environment.onPoll,
     };
     this.sessionManager.on('sessions-loaded', this.handleSessionsLoaded);
     this.sessionManager.on('session-created', this.handleSessionChanged);
@@ -230,7 +233,10 @@ export class PowerSaveManager {
   private updatePolling(hasActivity: boolean): void {
     const shouldPoll = hasActivity && this.env.powerSourcePollMs !== null;
     if (shouldPoll && this.pollTimer === null && this.env.powerSourcePollMs !== null) {
-      this.pollTimer = setInterval(() => this.sync(), this.env.powerSourcePollMs);
+      this.pollTimer = setInterval(() => {
+        this.sync();
+        this.env.onPoll?.();
+      }, this.env.powerSourcePollMs);
       this.pollTimer.unref?.();
     } else if (!shouldPoll && this.pollTimer !== null) {
       clearInterval(this.pollTimer);
