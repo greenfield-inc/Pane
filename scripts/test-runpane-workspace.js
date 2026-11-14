@@ -241,7 +241,7 @@ test('a computer linked by QR pairing answers by name with its token when Tailsc
 const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 globalThis.fetch = async (url, init) => {
   if (new URL(String(url)).hostname !== 'k3x9linked0000aa.relay.invalid') return reply(502, {});
-  if (init.headers.Authorization !== 'Bearer link-token') return reply(403, { ok: false, error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID', message: 'bad token' } });
+  if (new Headers(init.headers).get('authorization') !== 'Bearer link-token') return reply(403, { ok: false, error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID', message: 'bad token' } });
   const { channel } = JSON.parse(init.body);
   if (channel === 'runpane:machine:info') {
     return reply(200, { ok: true, result: { hostname: 'travel-laptop', os: 'Linux', isWsl: false, shell: '/bin/bash', homeDir: '/home/ana', wslDistros: [] } });
