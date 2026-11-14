@@ -180,6 +180,17 @@ describe('fetching the active Pane\'s base on focus', () => {
     expect(f.fetches()).toHaveLength(0);
   }, 20_000);
 
+  it('counts an agent\'s fetch from an SSH remote, which FETCH_HEAD names without its user', async () => {
+    const f = fixture();
+    git(f.project, 'remote', 'set-url', 'origin', 'git@example.invalid:team/repo.git');
+    // What `git fetch origin main` writes for that remote: git drops `git@` and `.git`.
+    writeFileSync(join(f.project, '.git', 'worktrees', 'a', 'FETCH_HEAD'), `${f.tip('origin/main')}\t\tbranch 'main' of example.invalid:team/repo\n`);
+
+    f.manager.setActiveSession('b');
+
+    await vi.waitFor(() => expect(f.logged('Focus fetch skipped-fresh')).toBe(true), { timeout: 10_000 });
+  }, 20_000);
+
   it('leaves FETCH_HEAD to the person: a terminal fetch of a pull request stays checkable', async () => {
     const f = fixture();
     git(f.project, 'fetch', '-q', 'origin', 'side');

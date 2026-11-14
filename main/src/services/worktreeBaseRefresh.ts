@@ -172,8 +172,13 @@ function remoteUrls(projectPath: string, commandRunner: CommandRunner): Promise<
   return urls;
 }
 
+/** A remote URL as FETCH_HEAD names it: git drops the user and password (`git@host:`, `https://user:token@host/`) and a trailing `.git`. */
 function normalizeRemoteUrl(url: string): string {
-  return url.trim().replace(/\/+$/, '').replace(/\.git$/, '');
+  return url.trim()
+    .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1')
+    .replace(/^[^/@:]+@([^/:]+:)/, '$1')
+    .replace(/\/+$/, '')
+    .replace(/\.git$/, '');
 }
 
 function cachedRemoteBranchOf(projectPath: string, baseRef: string, commandRunner: CommandRunner): Promise<RemoteBranch | null> {

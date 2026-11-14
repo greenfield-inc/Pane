@@ -120,7 +120,7 @@ export interface GitStatus {
   deletions?: number; // Uncommitted deletions
   filesChanged?: number; // Uncommitted files changed
   lastChecked?: string;
-  /** When anything last fetched into the project (ISO time); absent when unknown. */
+  /** When the base branch was last fetched (ISO time); absent when unknown. */
   lastFetchedAt?: string;
   // Enhanced status information
   isReadyToMerge?: boolean; // True when ahead of base branch with no uncommitted changes and not diverged (not behind)
