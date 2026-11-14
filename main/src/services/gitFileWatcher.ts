@@ -324,17 +324,23 @@ export class GitFileWatcher extends EventEmitter {
           fi
         done
       fi
+      # The git dir is watched one level deep (its index, HEAD and FETCH_HEAD, even before they
+      # exist): inside the worktree as ./.git, or by its own path for a linked worktree. Excludes
+      # name only paths below it, since some inotify-tools versions also drop matching events.
       gitdir="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
       watch_args=(.)
-      if [ -n "$gitdir" ]; then
-        [ -e "$gitdir/index" ] && watch_args+=("$gitdir/index")
-        [ -e "$gitdir/HEAD" ] && watch_args+=("$gitdir/HEAD")
-        [ -e "$gitdir/FETCH_HEAD" ] && watch_args+=("$gitdir/FETCH_HEAD")
+      gitsubdirs='(objects|refs|logs|hooks|info|modules|lfs|rr-cache|branches|reftable|fsmonitor--daemon)'
+      exclude="(^|/)(node_modules|\\.next|\\.nuxt|\\.turbo|\\.cache|\\.parcel-cache|\\.venv|venv|__pycache__|\\.svelte-kit)(/|$)|(^|/)\\.git/$gitsubdirs(/|$)"
+      if [ "$gitdir" = "$PWD/.git" ]; then
+        exclude="$exclude|(^|/)\\.git/worktrees(/|$)"
+      elif [ -n "$gitdir" ]; then
+        watch_args+=("$gitdir")
+        exclude="$exclude|^$(printf '%s' "$gitdir" | sed 's/[][\\.*^$+?(){}|/]/\\\\&/g')/$gitsubdirs(/|$)"
       fi
       exec inotifywait -m -r -q \
         -e modify,create,delete,move,attrib \
         --format '%w%f' \
-        --exclude '(^|/)(node_modules|\\.git|\\.next|\\.nuxt|\\.turbo|\\.cache|\\.parcel-cache|\\.venv|venv|__pycache__|\\.svelte-kit)(/|$)' \
+        --exclude "$exclude" \
         "\${watch_args[@]}"
     `;
 
@@ -356,9 +362,16 @@ export class GitFileWatcher extends EventEmitter {
       for (const line of lines) {
         const changed = line.trim();
         if (!changed) continue;
-        // This worktree's own `git fetch`, as a Windows path Pane can read.
-        if (changed.endsWith('/FETCH_HEAD')) this.emit('fetched', sessionId, linuxToUNCPath(changed, distro));
-        else this.handleFileChange(sessionId, changed, 'change');
+        // Absolute paths and ./.git/ are the git dir: only its index, HEAD and FETCH_HEAD matter.
+        if (changed.startsWith('/') || changed.startsWith('./.git/')) {
+          const name = changed.slice(changed.lastIndexOf('/') + 1);
+          const absolute = changed.startsWith('/') ? changed : path.posix.join(worktreePath, changed);
+          // This worktree's own `git fetch`, as a Windows path Pane can read.
+          if (name === 'FETCH_HEAD') this.emit('fetched', sessionId, linuxToUNCPath(absolute, distro));
+          else if (name === 'index' || name === 'HEAD') this.handleFileChange(sessionId, changed, 'change');
+          continue;
+        }
+        this.handleFileChange(sessionId, changed, 'change');
       }
     });
 
