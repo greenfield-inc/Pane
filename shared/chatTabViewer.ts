@@ -57,7 +57,7 @@ export class ChatTabViewer {
   private publishLive(patch: Partial<ChatTabViewerState>): void {
     this.state = { ...this.state, ...patch };
     if (this.frame) return;
-    const wait = this.notifiedAt + STREAM_FRAME_MS - Date.now();
+    const wait = this.notifiedAt + STREAM_FRAME_MS - performance.now();
     if (wait <= 0) this.notify();
     else this.frame = setTimeout(() => this.notify(), wait);
   }
@@ -65,7 +65,7 @@ export class ChatTabViewer {
   private notify(): void {
     clearTimeout(this.frame);
     this.frame = undefined;
-    this.notifiedAt = Date.now();
+    this.notifiedAt = performance.now();
     this.listeners.forEach(listener => listener());
   }
 
