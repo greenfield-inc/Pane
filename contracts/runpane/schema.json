@@ -837,6 +837,7 @@
         "panels close",
         "agent-context",
         "mcp",
+        "relay",
         "panes git-status",
         "panes commit",
         "panes push",
@@ -1074,6 +1075,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "mcp": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "relay": {
           "$ref": "#/$defs/helpLines"
         },
         "panes git-status": {

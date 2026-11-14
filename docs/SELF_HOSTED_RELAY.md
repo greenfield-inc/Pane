@@ -20,17 +20,11 @@ instead of Pane's servers. The wire protocol is
 
 ## Run it
 
-Build it, or use the container:
+With Node.js 22 or later, `runpane relay` runs the prebuilt binary for macOS,
+Linux or Windows (x64 and arm64). Start it with its DNS helper:
 
 ```sh
-cd relay && cargo build --release
-docker build -t pane-relay relay/
-```
-
-Start it with its DNS helper:
-
-```sh
-pane-relay \
+npx --yes runpane@latest relay \
   --domain relay.example.com \
   --region us \
   --listen 0.0.0.0:443 \
@@ -40,6 +34,15 @@ pane-relay \
   --direct-quic 0.0.0.0:7842
 ```
 
+Ports 443 and 53 need root, or on Linux the `CAP_NET_BIND_SERVICE`
+capability. `runpane relay` passes its flags to `pane-relay` unchanged, so the
+`pane-relay` commands below work the same through it.
+
+Or use the container: `docker build -t pane-relay relay/`, then pass the same
+flags after the image name. Publish the ports above, and mount a directory for
+`--acme-cache` that uid 65532 (the image's `nonroot` user) can write. To build
+the binary yourself, run `cargo build --release` in `relay/`.
+
 The first start serves a stand-in certificate for a few seconds while Let's
 Encrypt checks the relay's DNS; renewals swap the new certificate in without
 a restart. `--acme-directory` points at another CA, such as Let's Encrypt
@@ -48,7 +51,7 @@ staging while you try things out.
 `--direct-quic` is optional. It helps phones and computers find a direct
 path to each other; without it they still connect.
 
-`pane-relay --help` and [relay/README.md](../relay/README.md) list every
+`runpane relay --help` and [relay/README.md](../relay/README.md) list every
 flag, including connection and byte limits and the blocklist.
 
 ## Two name servers

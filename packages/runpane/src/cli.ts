@@ -95,6 +95,7 @@ import {
   type WrapperTelemetryContext
 } from './telemetry';
 import { printVersion } from './version';
+import { runRelay } from './relay';
 import { handOffToManagedCli } from './managedCli';
 import { assertSupportedCliRuntime } from './nodeRuntime';
 import {
@@ -118,7 +119,8 @@ export async function main(argv: string[]): Promise<number> {
   if (hooked !== null) return hooked;
   assertSupportedCliRuntime(process.versions.node, process.versions.electron);
   if (argv[0] === '__update-runner' && argv.length === 2) return runUpdateHelper(argv[1]);
-  const handedOff = await handOffToManagedCli(argv);
+  // Pane's built-in CLI has no relay binary; npm's runpane runs its own.
+  const handedOff = argv[0] === 'relay' ? null : await handOffToManagedCli(argv);
   if (handedOff !== null) return handedOff;
   const telemetryContext = createInitialTelemetryContext(argv);
   if (argv.length === 0) {
@@ -158,7 +160,7 @@ export async function main(argv: string[]): Promise<number> {
 /** Commands that run on this machine only; everything else is a daemon call another machine can answer. */
 const THIS_MACHINE_ONLY = new Set<string>([
   'help', 'setup', 'install', 'update', 'version', 'doctor', 'daemon repair', 'agent-context', 'mcp',
-  'docs search', 'docs read', 'agents start', 'agents status', 'agents send', 'handoff',
+  'docs search', 'docs read', 'agents start', 'agents status', 'agents send', 'handoff', 'relay',
   // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.
   'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
   // These read or change this machine's own secret store; another machine runs its own.
@@ -320,6 +322,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'workspace write': async (parsed) => runWorkspaceWrite(parsed),
   'workspace exec': async (parsed) => runWorkspaceExec(parsed),
   'handoff': async (parsed) => runHandoff(parsed),
+  'relay': async (parsed) => runRelay(parsed.execCommand ?? []),
   'pr watch': async parsed => runPrWatchCommand(parsed),
   'pr unwatch': async parsed => runPrWatchCommand(parsed),
   'pr list': async parsed => runPrWatchCommand(parsed),

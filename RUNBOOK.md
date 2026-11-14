@@ -98,13 +98,21 @@ build (macOS arm64,   ─┐
   macOS x64, Linux)    │                        ┌─ notify-website
                        ├─ publish ──────────────┼─ homebrew (after packaging)
 build-windows (x64,  ──┘                        ├─ publish-npm   ┐
-  arm64)                validate-runpane-packages ┴─ publish-pypi  ┘
+  arm64)  build-relay ─ validate-runpane-packages ┴─ publish-pypi  ┘
 ```
 
 `publish` merges the macOS and Windows updater files, computes
 `SHA256SUMS.txt` and `continuity.json`, uploads them with the macOS and
 Windows installers, and publishes the draft release. `publish-npm` and `publish-pypi` each need both `publish` and
 `validate-runpane-packages`.
+
+`build-relay` builds `pane-relay` (`relay/`) for each platform `runpane relay`
+supports; Linux binaries link musl statically. `validate-runpane-packages`
+packs each `@runpane/relay-<platform>-<arch>` package without publishing and
+runs `runpane relay` on the Linux binary. `publish-npm` publishes those six
+packages first, skipping any this version already has, then lists them as
+runpane's `optionalDependencies` and publishes runpane
+(`scripts/runpane-relay-packages.js`).
 
 `publish-release` (`scripts/publish-github-release.sh`) fills an empty draft's
 notes from GitHub's generated notes and keeps a hand-written body. Either way it
@@ -121,6 +129,7 @@ git tag --points-at origin/main
 gh run list --limit 10
 gh release view vX.Y.Z
 npm view runpane version
+npm view @runpane/relay-linux-x64 version
 python3 -m pip index versions runpane
 ```
 
