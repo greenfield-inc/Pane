@@ -1,4 +1,4 @@
-import { exec, execFile, spawn, type ChildProcessWithoutNullStreams, ExecOptions, ExecFileOptions } from 'child_process';
+import { exec, execFile, ExecOptions, ExecFileOptions } from 'child_process';
 import { promisify } from 'util';
 import { getShellPath } from './shellPath';
 import { WSLContext, buildWSLENV, escapeForBash, getWSLExecArgs } from './wslUtils';
@@ -184,14 +184,6 @@ export class CommandExecutor {
       }
       throw error;
     }
-  }
-
-  /** Starts `file` with piped stdio, PATH and WSL wrapping as `execFileAsync` does, for a caller that writes to its stdin. */
-  spawnFile(file: string, args: readonly string[], cwd: string, wslContext?: WSLContext | null): ChildProcessWithoutNullStreams {
-    const env = { ...process.env, PATH: getShellPath() };
-    if (!wslContext) return spawn(file, [...args], { cwd, env, windowsHide: true });
-    const wrapped = getWSLExecArgs([file, ...args].map(escapeForBash).join(' '), wslContext.distribution, cwd);
-    return spawn(wrapped.file, wrapped.args, { env, windowsHide: true });
   }
 
   async execFileAsync(

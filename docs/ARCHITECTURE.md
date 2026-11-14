@@ -134,17 +134,13 @@ Preview components never enter the editable auto-save path, even on errors.
 - Worktrees go in `<repo>/worktrees/` unless the project sets another folder
   (`worktreeManager.ts`). A worktree on a remote-tracking base fetches that
   branch first (`worktreeBaseRefresh.ts`: capped at about 10 s, shared by
-  concurrent creates, never fails the create). Focusing the window or
-  selecting a Pane fetches that Pane's remote-tracking base when nothing has
-  fetched that branch for 5 minutes (`fetchBaseForFocus`); the `FETCH_HEAD`
-  files that name it seed that time at startup. Only HTTPS and local remotes
-  are fetched, so an SSH agent never asks on focus. The fetch lands in a ref
-  of Pane's own, and the remote-tracking branch moves in one ref transaction
-  committed only while no git fetch or pull runs in the repository, so it
-  never makes a `git pull` fail. Every fetch (focus, Fetch button, dashboard,
-  branch list, new worktree, or an agent's `git fetch` in the active Pane)
-  updates ahead/behind for the project's Panes and the "fetched" time under
-  Fetch (`gitStatusManager.ts`). `worktreePoolManager.ts` keeps
+  concurrent creates, never fails the create). Every fetch (Fetch button,
+  dashboard, branch list, new worktree, or an agent's `git fetch` or `git
+  pull` in the active Pane, seen through its `FETCH_HEAD`) updates
+  ahead/behind for the project's Panes, and the time under Fetch shows when
+  the Pane's base branch was last fetched; `FETCH_HEAD` files seed that time
+  at startup (`gitStatusManager.ts`).
+  `worktreePoolManager.ts` keeps
   empty reserve worktrees on `_reserve/<hex>` branches so new panes open fast;
   a reserve is only claimed while its base ref still points at its commit.
 - Archive cleanup intents live in SQLite's `archive_cleanup_jobs`, atomically

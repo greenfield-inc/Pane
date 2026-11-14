@@ -251,11 +251,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const gitDiffManager = new GitDiffManager(logger, analyticsManager);
   // Desktop only: a headless host has no window or person to wait for, so it keeps today's behaviour.
   const backgroundActivity = mode === 'desktop' ? new BackgroundActivity(configManager, { logger }) : null;
-  const gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, logger, databaseService, undefined, {
-    // A focus fetch waits out Low Power Mode, and battery under Battery saver.
-    shouldSkipFocusFetch: () => backgroundActivity?.isConstrained() ?? false,
-  });
-  // Every fetch into a project (focus, Fetch button, dashboard, branch list, new worktree, an agent's own) updates its Panes' ahead/behind.
+  const gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, logger, databaseService);
+  // Every fetch into a project (Fetch button, dashboard, branch list, new worktree, an agent's own) updates its Panes' ahead/behind.
   onFetch(projectPath => {
     gitStatusManager.refreshProjectAfterFetch(projectPath).catch(error => {
       logger.warn(`[GitStatus] Could not update ${projectPath} after a fetch: ${error instanceof Error ? error.message : String(error)}`);
