@@ -18,11 +18,11 @@ use std::{
     time::Duration,
 };
 
-use iroh::{Endpoint, EndpointId, RelayUrl};
+use iroh::{Endpoint, EndpointId};
 use serde_json::{Value, json};
 use tokio::{net::TcpListener, runtime::Runtime, task::JoinHandle};
 
-use crate::{Emit, bind_endpoint, connect, emit_error, pinned_tls::PinnedTls};
+use crate::{Emit, Relays, bind_endpoint, connect, emit_error, pinned_tls::PinnedTls};
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -45,7 +45,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// What `pane_direct_connect` takes.
 struct Config {
     node_id: EndpointId,
-    relay_urls: Vec<RelayUrl>,
+    relays: Relays,
     direct_addrs: Vec<SocketAddr>,
     tls: PinnedTls,
 }
@@ -72,10 +72,13 @@ fn parse_config(text: &str) -> Result<Config, String> {
         node_id: str_field("nodeId")?
             .parse()
             .map_err(|e| format!("nodeId: {e}"))?,
-        relay_urls: list("relayUrls")
-            .iter()
-            .map(|u| u.parse().map_err(|e| format!("relayUrls {u}: {e}")))
-            .collect::<Result<_, String>>()?,
+        relays: Relays {
+            urls: list("relayUrls")
+                .iter()
+                .map(|u| u.parse().map_err(|e| format!("relayUrls {u}: {e}")))
+                .collect::<Result<_, String>>()?,
+            ca: None,
+        },
         // An address this phone can't use (another family, a typo) is skipped, not fatal.
         direct_addrs: list("directAddrs")
             .iter()
@@ -154,7 +157,7 @@ fn start(text: &str) -> Result<(u64, u16), String> {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
             .map_err(|e| format!("listen: {e}"))?;
-        let endpoint = bind_endpoint(None, Vec::new(), None, &config.relay_urls).await?;
+        let endpoint = bind_endpoint(None, Vec::new(), None, &config.relays).await?;
         Ok::<_, String>((endpoint, listener))
     })?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
@@ -162,7 +165,7 @@ fn start(text: &str) -> Result<(u64, u16), String> {
         endpoint.clone(),
         config.node_id,
         config.direct_addrs,
-        config.relay_urls,
+        config.relays.urls,
         listener,
         Some(config.tls),
         emit.clone(),

@@ -6,8 +6,8 @@ use std::{
     time::Duration,
 };
 
-use iroh::{EndpointId, RelayUrl, SecretKey};
-use pane_direct::{ALPN, Emit, bind_endpoint, connect, serve};
+use iroh::{EndpointId, SecretKey};
+use pane_direct::{ALPN, Emit, Relays, bind_endpoint, connect, serve};
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -17,8 +17,8 @@ use tokio::{
 type RunFuture = Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
 
 const USAGE: &str = "usage:
-  pane-direct serve --secret-key-file <path> --target <ip:port> [--bind <ip:port>] [--relay-url <url>]...
-  pane-direct connect --node-id <id> [--relay-url <url>]... [--direct-addr <ip:port>]... [--listen <ip:port>]";
+  pane-direct serve --secret-key-file <path> --target <ip:port> [--bind <ip:port>] [--relay-url <url>]... [--relay-ca <pem>]
+  pane-direct connect --node-id <id> [--relay-url <url>]... [--relay-ca <pem>] [--direct-addr <ip:port>]... [--listen <ip:port>]";
 
 /// Writes one JSON line to stdout. `println!` locks stdout per call, so lines
 /// from concurrent tasks never interleave.
@@ -45,7 +45,7 @@ enum Mode {
 
 struct Args {
     mode: Mode,
-    relay_urls: Vec<RelayUrl>,
+    relays: Relays,
 }
 
 fn parse_args(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -56,6 +56,7 @@ fn parse_args(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
         flags.push((flag, value));
     }
     let mut relay_urls = Vec::new();
+    let mut relay_ca = None;
     let mut secret_key_file = None;
     let mut target = None;
     let mut bind = None;
@@ -66,6 +67,7 @@ fn parse_args(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
     for (flag, value) in &flags {
         match (command.as_str(), flag.as_str()) {
             (_, "--relay-url") => relay_urls.push(value.parse().map_err(|e| bad(flag, &e))?),
+            (_, "--relay-ca") => relay_ca = Some(PathBuf::from(value)),
             ("serve", "--secret-key-file") => secret_key_file = Some(PathBuf::from(value)),
             ("serve", "--target") => target = Some(value.parse().map_err(|e| bad(flag, &e))?),
             ("serve", "--bind") => bind = Some(value.parse().map_err(|e| bad(flag, &e))?),
@@ -90,7 +92,13 @@ fn parse_args(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
         },
         other => return Err(format!("unknown command {other}")),
     };
-    Ok(Args { mode, relay_urls })
+    Ok(Args {
+        mode,
+        relays: Relays {
+            urls: relay_urls,
+            ca: relay_ca,
+        },
+    })
 }
 
 /// Loads the hex secret key at `path`, or creates it (mode 0600 on Unix).
@@ -159,7 +167,7 @@ async fn run_main() -> ExitCode {
                 }
             };
             let endpoint =
-                match bind_endpoint(Some(key), vec![ALPN.to_vec()], bind, &args.relay_urls).await {
+                match bind_endpoint(Some(key), vec![ALPN.to_vec()], bind, &args.relays).await {
                     Ok(endpoint) => endpoint,
                     Err(e) => {
                         emit_error(e);
@@ -181,7 +189,7 @@ async fn run_main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let endpoint = match bind_endpoint(None, Vec::new(), None, &args.relay_urls).await {
+            let endpoint = match bind_endpoint(None, Vec::new(), None, &args.relays).await {
                 Ok(endpoint) => endpoint,
                 Err(e) => {
                     emit_error(e);
@@ -192,7 +200,7 @@ async fn run_main() -> ExitCode {
                 endpoint.clone(),
                 node_id,
                 direct_addrs,
-                args.relay_urls,
+                args.relays.urls,
                 listener,
                 None,
                 stdout,
