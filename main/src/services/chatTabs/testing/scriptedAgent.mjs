@@ -14,6 +14,11 @@
 //   env NAME [NAME...]  replies with those environment variables as JSON
 //   caps                replies with the client capabilities, session _meta and mode
 //   steps N             N completed steps of mixed kinds, then a reply
+//   turn S              a turn of S seconds that streams a dot every second, then replies "Done."
+//   hold S              a tool call that runs silently for S seconds, then replies "Held."
+//   stall               sends one chunk, then goes silent with no tool running until cancelled
+//   run COMMAND         runs COMMAND in a shell as a tool call (the real one, with this tab's
+//                       environment), then replies with its output
 //   [Pane · Start]      Autopilot's Start: reads `runpane autopilot waiting --json`, puts the
 //                       topmost Session's items on the stack, and lists them in an
 //                       autopilot-items block (the real CLI, through the daemon)
@@ -30,7 +35,7 @@ import { Readable, Writable } from 'node:stream';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 
 const store = process.env.SCRIPTED_AGENT_STORE ?? path.join(process.cwd(), '.scripted-agent');
 mkdirSync(store, { recursive: true });
@@ -174,6 +179,46 @@ const app = agent()
     if (word === 'slow') {
       while (!session.cancelled) { await say('.'); await new Promise(resolve => setTimeout(resolve, 30)); }
       return { stopReason: 'cancelled' };
+    }
+    if (word === 'turn') {
+      const seconds = Number(rest[0] ?? 0);
+      for (let second = 0; second < seconds && !session.cancelled; second += 1) {
+        await say('.');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      if (session.cancelled) return { stopReason: 'cancelled' };
+      await say('Done.');
+      return { stopReason: 'end_turn' };
+    }
+    if (word === 'hold') {
+      const toolCallId = `tool-${randomUUID()}`;
+      await send({ sessionUpdate: 'tool_call', toolCallId, title: `sleep ${rest[0] ?? 0}`, kind: 'execute', status: 'in_progress', rawInput: { command: `sleep ${rest[0] ?? 0}` } });
+      const until = Date.now() + Number(rest[0] ?? 0) * 1000;
+      while (Date.now() < until && !session.cancelled) await new Promise(resolve => setTimeout(resolve, 100));
+      await send({ sessionUpdate: 'tool_call_update', toolCallId, status: session.cancelled ? 'failed' : 'completed' });
+      if (session.cancelled) return { stopReason: 'cancelled' };
+      await say('Held.');
+      return { stopReason: 'end_turn' };
+    }
+    if (word === 'stall') {
+      await say('Thinking');
+      while (!session.cancelled) await new Promise(resolve => setTimeout(resolve, 100));
+      return { stopReason: 'cancelled' };
+    }
+    if (word === 'run') {
+      const command = rest.join(' ');
+      const toolCallId = `tool-${randomUUID()}`;
+      await send({ sessionUpdate: 'tool_call', toolCallId, title: command, kind: 'execute', status: 'in_progress', rawInput: { command } });
+      const output = await new Promise(resolve => {
+        const child = spawn('/bin/sh', ['-c', command], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+        let text = '';
+        child.stdout.on('data', chunk => { text += chunk; });
+        child.stderr.on('data', chunk => { text += chunk; });
+        child.on('close', code => resolve({ text, code }));
+      });
+      await send({ sessionUpdate: 'tool_call_update', toolCallId, status: output.code === 0 ? 'completed' : 'failed', rawOutput: { stdout: output.text } });
+      await say(`Ran: ${output.text.trim().slice(0, 200)}`);
+      return { stopReason: 'end_turn' };
     }
     if (word === 'permission') {
       const toolCallId = `tool-${randomUUID()}`;

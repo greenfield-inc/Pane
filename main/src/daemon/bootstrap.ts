@@ -299,6 +299,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     paneChatManager,
     gitStatusManager,
   );
+  orchestrationSessionManager.liveActivity.start();
   await orchestrationSessionManager.initialize().catch(error => {
     // Keep the rest of Pane available when a previously-written Session store
     // cannot be read. Session APIs retry and return the exact failure instead

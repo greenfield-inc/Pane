@@ -48,6 +48,7 @@ import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionArchiveSelection,
   OrchestrationSessionSelector,
+  SessionActivity,
   OrchestrationSessionUpdateInput,
 } from '../../shared/types/orchestrationSession';
 import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
@@ -549,6 +550,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
     detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),
     overview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:overview', selector),
+    activityList: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:activity-list'),
     archivePreview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:archive-preview', selector),
     archive: (selector: OrchestrationSessionSelector, selection: OrchestrationSessionArchiveSelection): Promise<IPCResponse> => invokeIpc('orchestration-sessions:archive', selector, selection),
   },
@@ -1057,6 +1059,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, change: { sessionId: string; kind: string; selectionChanged?: boolean }) => callback(change);
       ipcRenderer.on('orchestration-sessions:changed', wrappedCallback);
       return () => ipcRenderer.removeListener('orchestration-sessions:changed', wrappedCallback);
+    },
+    onOrchestrationSessionActivity: (callback: (activity: SessionActivity) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, activity: SessionActivity) => callback(activity);
+      ipcRenderer.on('orchestration-sessions:activity', wrappedCallback);
+      return () => ipcRenderer.removeListener('orchestration-sessions:activity', wrappedCallback);
     },
     onOrchestrationSessionsOverviewUpdated: (callback: (change: { panelId: string; sessionId?: string; state: string }) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, change: { panelId: string; sessionId?: string; state: string }) => callback(change);

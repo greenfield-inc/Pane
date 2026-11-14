@@ -60,6 +60,7 @@ import type {
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
   OrchestrationSessionSelector,
+  SessionActivity,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
@@ -107,6 +108,7 @@ interface MachineReadAnswers {
   'sessions:get-all-with-projects': IPCResponse<Array<Project & { sessions: Session[] }>>;
   'orchestration-sessions:list': IPCResponse<OrchestrationSessionListResult>;
   'panels:agent-statuses': IPCResponse<PanelAgentStatusEvent[]>;
+  'orchestration-sessions:activity-list': IPCResponse<SessionActivity[]>;
   'permission:getPending': IPCResponse<PanePermissionRequest[]>;
   'notify:remote-snapshot': NotifySharedState | null;
 }
@@ -250,6 +252,8 @@ interface ElectronAPI {
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     detach: (selector: OrchestrationSessionSelector, paneId?: string) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     overview: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionOverview>>;
+    /** Every open Session's live activity; absent on an older host. */
+    activityList?: () => Promise<IPCResponse<SessionActivity[]>>;
     archivePreview: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionArchivePreview>>;
     archive: (selector: OrchestrationSessionSelector, selection: OrchestrationSessionArchiveSelection) => Promise<IPCResponse<OrchestrationSessionArchiveResult>>;
   };
@@ -591,6 +595,7 @@ interface ElectronAPI {
     onSessionLogsCleared: (callback: (data: { sessionId: string }) => void) => () => void;
     onSessionOutputAvailable: (callback: (info: { sessionId: string; hasNewOutput: boolean }) => void) => () => void;
     onOrchestrationSessionsChanged?: (callback: (change: { sessionId: string; kind: string; selectionChanged?: boolean }) => void) => () => void;
+    onOrchestrationSessionActivity?: (callback: (activity: SessionActivity) => void) => () => void;
     onOrchestrationSessionsOverviewUpdated?: (callback: (change: { panelId: string; sessionId?: string; state: string }) => void) => () => void;
     onGitStatusUpdated: (callback: (data: { sessionId: string; gitStatus: GitStatus }) => void) => () => void;
     onGitStatusLoading: (callback: (data: { sessionId: string }) => void) => () => void;

@@ -46,6 +46,7 @@ export const REMOTE_READ_CHANNELS = new Set([
   'panels:list',
   'panels:getActive',
   'panels:agent-statuses',
+  'orchestration-sessions:activity-list',
   'panels:checkInitialized',
   'panels:get-output',
   'ports:list',

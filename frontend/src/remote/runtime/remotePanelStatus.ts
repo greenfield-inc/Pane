@@ -1,5 +1,6 @@
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { panelStatusesSchema, subscribePanelStatus } from '../../services/panelStatusSync';
+import { sessionActivityListSchema, sessionActivitySchema, subscribeSessionActivity } from '../../services/sessionActivitySync';
 import { usePanelStore } from '../../stores/panelStore';
 import { useRemoteSessionStore } from '../stores/remoteSessionStore';
 import type { RemoteRuntimeAdapter } from './remoteRuntimeAdapter';
@@ -19,7 +20,7 @@ const panelRefSchema = boundary.object({ panelId: boundary.string, sessionId: bo
 const createdPanelSchema = boundary.object({ id: boundary.string });
 
 type StatusAdapter = Pick<RemoteRuntimeAdapter, 'onEvent' | 'onStatus'> & {
-  invoke: (channel: 'panels:agent-statuses') => Promise<JsonValue>;
+  invoke: (channel: 'panels:agent-statuses' | 'orchestration-sessions:activity-list') => Promise<JsonValue>;
 };
 
 /**
@@ -36,20 +37,29 @@ export function subscribeRemotePanelStatus(adapter: StatusAdapter): () => void {
       if (value) callback(value);
     });
 
+  // The first report is the state at subscribe; a stream opening after it
+  // may have missed events (the host replays none), so reread then.
+  const onReconnect = (callback: () => void) => {
+    let previous: string | null = null;
+    return adapter.onStatus(state => {
+      if (state.status === 'connected' && previous !== null && previous !== 'connected') callback();
+      previous = state.status;
+    });
+  };
+
+  // Each Session's working/idle activity, decided by the host (a host without it reads idle).
+  const unsubscribeActivity = subscribeSessionActivity({
+    onActivity: callback => on('orchestration-sessions:activity', sessionActivitySchema, callback),
+    onResync: onReconnect,
+    readActivity: async () => decodeBoundary(await adapter.invoke('orchestration-sessions:activity-list'), sessionActivityListSchema),
+  });
+
   const unsubscribeStatus = subscribePanelStatus({
     onAgentStatus: callback => on('panel:agentStatus', agentStatusSchema, event => callback({ ...event, reason: event.reason ?? null })),
     onActivityStatus: callback => on('panel:activityStatus', activityStatusSchema, callback),
     onPanelDeleted: callback => on('panel:deleted', panelRefSchema, callback),
     onPanelCreated: callback => on('panel:created', createdPanelSchema, callback),
-    onResync: callback => {
-      // The first report is the state at subscribe; a stream opening after it
-      // may have missed events (the host replays none), so reread then.
-      let previous: string | null = null;
-      return adapter.onStatus(state => {
-        if (state.status === 'connected' && previous !== null && previous !== 'connected') callback();
-        previous = state.status;
-      });
-    },
+    onResync: onReconnect,
     readStatuses: async () => decodeBoundary(await adapter.invoke('panels:agent-statuses'), panelStatusesSchema),
     viewedSessionId: () => useRemoteSessionStore.getState().selectedSessionId,
   });
@@ -64,6 +74,7 @@ export function subscribeRemotePanelStatus(adapter: StatusAdapter): () => void {
 
   return () => {
     unsubscribeStatus();
+    unsubscribeActivity();
     unsubscribeViewed();
     // Statuses belong to this host; the next host starts from its own baseline.
     usePanelStore.setState({ agentStatus: {}, agentStatusSession: {}, activityStatus: {}, lastActivityAt: {}, unviewedCompletedActivity: {} });

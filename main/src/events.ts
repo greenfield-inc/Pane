@@ -16,6 +16,7 @@ import { resourceMonitorService } from './services/resourceMonitorService';
 import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { PaneEventArgument } from './core/eventSink';
 import type { AgentState } from '../../shared/types/agentStatus';
+import type { SessionActivity } from '../../shared/types/orchestrationSession';
 
 function isArchivedSessionOutputValidation(validation: { error?: string; sessionId?: string }): boolean {
   return Boolean(
@@ -55,6 +56,10 @@ export function setupEventListeners(services: AppServices): void {
   terminalPanelManager.on('pause-changed', (change: { paneIds: string[] }) => {
     for (const paneId of change.paneIds) sessionManager.publishPausedChange(paneId);
     orchestrationSessionManager?.notifyPausedChange(change.paneIds);
+  });
+  // Each Session's working/idle activity, decided here once for every client (sessionActivity.ts).
+  orchestrationSessionManager?.liveActivity.on('changed', (activity: SessionActivity) => {
+    sendRendererEvent('orchestration-sessions:activity', activity);
   });
   orchestrationSessionManager?.on('overview-updated', (change: { panelId: string; state: string }) => {
     sendRendererEvent('orchestration-sessions:overview-updated', change);

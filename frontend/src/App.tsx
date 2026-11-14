@@ -36,6 +36,7 @@ import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
 import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
+import { subscribeSessionActivity } from './services/sessionActivitySync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
 import { subscribeNotify, useNotifyStore } from './stores/notifyStore';
 import { subscribeAutopilot } from './stores/autopilotStore';
@@ -185,6 +186,7 @@ function App() {
 
   // Subscribe to live statuses and reconcile the daemon baseline on attach/reconnect.
   useEffect(() => subscribePanelStatus(), []);
+  useEffect(() => subscribeSessionActivity(), []);
   useEffect(() => {
     void useAttentionInboxStore.getState().loadEnabled();
     return subscribeAttentionInbox();

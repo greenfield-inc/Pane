@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import path from 'path';
-import type { ContentBlock, InitializeResponse, McpServer, NewSessionRequest, SessionInfo } from '@agentclientprotocol/sdk';
+import type { ContentBlock, InitializeResponse, McpServer, NewSessionRequest, SessionInfo, SessionUpdate } from '@agentclientprotocol/sdk';
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { TerminalPausedMark, ToolPanel } from '../../../../shared/types/panels';
@@ -16,6 +16,7 @@ import { QueuedBodies } from './queuedBodies';
 import { agentConfig, agentLabel } from '../../../../shared/agents';
 import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
+import { CHAT_STALL_MS, chatMidTurn, runpaneWaits } from '../agentStatus/midTurn';
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
 export interface ResolvedLaunch {
@@ -110,6 +111,8 @@ interface Tab {
   resuming?: boolean;
   /** When the agent last sent an update or was sent a message, in ms since the epoch. */
   activeAt?: number;
+  /** Tool calls of the current turn that are pending or in progress, for the Session's stall test. */
+  toolsRunning?: Set<string>;
 }
 
 const DEFAULT_VIEW_LIMIT = 200;
@@ -182,6 +185,22 @@ export class ChatTabManager {
     if (!state) return 'unknown';
     const tab = this.tab(panelId);
     return publishedState(this.snapshot(panelId, state, tab, 0), tab);
+  }
+
+  /**
+   * The Session icon's stricter test (midTurn.ts): a turn that is open and still sending
+   * updates or running a tool, and no runpane waiting call open from this tab.
+   */
+  isMidTurn(panelId: string, now: number = Date.now()): boolean {
+    const state = this.options.store.state(panelId);
+    const tab = this.tabs.get(panelId);
+    if (!state || !tab) return false;
+    return chatMidTurn({
+      status: this.status(state, tab),
+      lastUpdateAt: tab.activeAt,
+      toolRunning: (tab.toolsRunning?.size ?? 0) > 0,
+      waiting: runpaneWaits.isWaiting(panelId),
+    }, now, chatStallMs());
   }
 
   /** The terminal sign-in the tab's agent advertised, when it runs as its own CLI. */
@@ -608,6 +627,7 @@ export class ChatTabManager {
       generation,
       onUpdate: update => {
         this.lastUpdateAt = tab.activeAt = Date.now();
+        trackToolCall(tab, update);
         let event: ChatTabEvent | undefined;
         try { event = transcript.accept(update); }
         catch (error) {
@@ -763,6 +783,7 @@ export class ChatTabManager {
     }
     tab.delivering = true;
     tab.activeAt = Date.now();
+    tab.toolsRunning = undefined;
     const generation = tab.generation;
     const content: ContentBlock[] = [
       ...(body.text ? [{ type: 'text' as const, text: body.text }] : []),
@@ -1027,6 +1048,23 @@ function withTurnTime(state: ChatPanelState, sessionId: string, turn: ChatTurnTi
 }
 
 /** A resume from pause with nothing to send reads as idle, so the tab and sidebar do not flash a spinner. */
+/** Follow the turn's tool calls: pending or in progress keeps a silent turn counting. */
+function trackToolCall(tab: Tab, update: SessionUpdate): void {
+  if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return;
+  const status = update.status;
+  if (status === 'pending' || status === 'in_progress' || (update.sessionUpdate === 'tool_call' && status == null)) {
+    (tab.toolsRunning ??= new Set()).add(update.toolCallId);
+  } else if (status === 'completed' || status === 'failed') {
+    tab.toolsRunning?.delete(update.toolCallId);
+  }
+}
+
+/** A shorter stall limit for tests (`PANE_CHAT_STALL_MS`); the default otherwise. */
+function chatStallMs(): number {
+  const override = Number(process.env.PANE_CHAT_STALL_MS);
+  return Number.isFinite(override) && override > 0 ? override : CHAT_STALL_MS;
+}
+
 function publishedState(view: ChatTabView, tab: Tab): AgentState {
   if (view.status === 'starting' && tab.resuming && view.queue.length === 0) return 'idle';
   return toAgentState(view);

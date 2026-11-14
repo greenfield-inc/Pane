@@ -67,6 +67,7 @@ import {
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import { SessionActivityService, type SessionActivityMembers } from './sessionActivity';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { agentReportData, readPanelAgentReport } from './agentReport';
 import { paneChatFirstPrompt } from './paneChatMigrateOffer';
@@ -96,6 +97,15 @@ export class OrchestrationSessionManager extends EventEmitter {
   /** The line a person is typing into each Session agent panel, until its first message names the Session. */
   private readonly firstMessageDrafts = new Map<string, string | null>();
   private readonly namedPanelIds = new Set<string>();
+  /** Each Session's live working/idle activity; bootstrap starts it, events.ts relays it. */
+  readonly liveActivity = new SessionActivityService({
+    members: () => this.activityMembers(),
+    isMidTurn: (panelId, now) => {
+      const type = panelManager.getPanel(panelId)?.type;
+      if (type === 'chat') return getChatTabManager().isMidTurn(panelId, now);
+      return type === 'terminal' && terminalPanelManager.isMidTurn(panelId, now);
+    },
+  });
 
   constructor(
     private readonly configManager: ConfigManager,
@@ -726,6 +736,27 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (!latest || mark.at > latest.at) latest = mark;
     }
     return { ...record, paused: latest };
+  }
+
+  /**
+   * What each open Session's activity counts: its orchestrator's own agent tabs, and the agent
+   * tabs of its Panes that still exist and are not archived (an association's tab subset where
+   * it has one). Other tabs in the orchestrator's Pane, shells and browsers never count. Reads the
+   * in-memory store without the lock, like `workspaceMembership`.
+   */
+  activityMembers(): SessionActivityMembers[] {
+    return this.store.memberships().filter(session => !session.archived).map(session => ({
+      sessionId: session.id,
+      orchestratorPanelIds: session.panelIds,
+      panes: session.associations.filter(association => this.sessionManager.getSession(association.paneId)?.archived === false).map(association => ({
+        paneId: association.paneId,
+        panelIds: (association.panelIds.length > 0
+          ? association.panelIds.flatMap(panelId => panelManager.getPanel(panelId) ?? [])
+          : panelManager.getPanelsForSession(association.paneId))
+          .filter(panel => panel.sessionId === association.paneId && (panel.type === 'terminal' || panel.type === 'chat'))
+          .map(panel => panel.id),
+      })),
+    }));
   }
 
   /** The hidden owner Pane of each Session that is not archived, read like `activeMemberPaneIds`. */
