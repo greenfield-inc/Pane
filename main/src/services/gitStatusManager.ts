@@ -317,8 +317,8 @@ export class GitStatusManager extends EventEmitter {
   }
 
   /**
-   * One Pane after a fetch: a full refresh when its ahead/behind moved, so state and "Ready to
-   * merge" follow; only the fetched time when nothing else moved.
+   * One Pane after a fetch: its whole status recomputed when its ahead/behind moved, so state and
+   * "Ready to merge" follow; only the fetched time when nothing else moved.
    */
   private async refreshAfterFetch(session: Session): Promise<void> {
     const cached = this.cache[session.id];
@@ -331,7 +331,9 @@ export class GitStatusManager extends EventEmitter {
       const comparisonBranch = await this.worktreeManager.getSessionComparisonBranch(session, ctx);
       const { ahead, behind } = await this.dependencies.fastGetAheadBehind(session.worktreePath, comparisonBranch, ctx.commandRunner.wslContext);
       if (ahead !== cached.status.ahead || behind !== cached.status.behind) {
-        await this.refreshSessionGitStatus(session.id, false);
+        // Not refreshSessionGitStatus: its quick check skips ahead/behind on a dirty tree.
+        const status = await this.fetchGitStatus(session.id);
+        if (status) this.emitThrottled(session.id, 'updated', this.updateCache(session.id, status));
         return;
       }
       const fetchedAt = await lastBaseFetchedAt(ctx.project.path, comparisonBranch, ctx.commandRunner);

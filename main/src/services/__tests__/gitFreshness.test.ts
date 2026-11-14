@@ -1,5 +1,5 @@
-import { execFileSync, spawn } from 'child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
@@ -111,11 +111,12 @@ describe('every fetch keeps the Panes in its project current', () => {
     expect(f.fetches()).toHaveLength(0);
   }, 20_000);
 
-  it('recomputes a Pane\'s whole status when a fetch moves it, so it is no longer ready to merge', async () => {
+  it('recomputes the behind count of a Pane with local changes when a fetch moves it', async () => {
     const f = fixture();
     git(f.sessions[1].worktreePath ?? '', 'commit', '-q', '--allow-empty', '-m', 'work');
+    writeFileSync(join(f.sessions[1].worktreePath ?? '', 'notes.txt'), 'untracked\n');
     await f.loadStatuses();
-    expect(f.manager.getCachedStatus('b')?.status.isReadyToMerge).toBe(true);
+    expect(f.behind('b')).toBe(0);
     f.manager.setActiveSession('a');
     await vi.waitFor(() => expect(f.logged('Started file watching for session a')).toBe(true), { timeout: 10_000 });
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -124,7 +125,6 @@ describe('every fetch keeps the Panes in its project current', () => {
     git(f.sessions[0].worktreePath ?? '', 'fetch', '-q', 'origin');
 
     await vi.waitFor(() => expect(f.behind('b')).toBe(1), { timeout: 10_000 });
-    expect(f.manager.getCachedStatus('b')?.status.isReadyToMerge).toBe(false);
   }, 20_000);
 
   it('shows when the base branch was fetched, not when another branch was', async () => {

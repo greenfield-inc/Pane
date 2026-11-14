@@ -324,12 +324,14 @@ export class GitFileWatcher extends EventEmitter {
           fi
         done
       fi
-      # The git dir is watched one level deep (its index, HEAD and FETCH_HEAD, even before they
-      # exist): inside the worktree as ./.git, or by its own path for a linked worktree. Excludes
-      # name only paths below it, since some inotify-tools versions also drop matching events.
+      # The git dir is watched with its large folders (objects, refs, logs, annex...) excluded, so
+      # Pane sees its index, HEAD and FETCH_HEAD, even before they exist: inside the worktree as
+      # ./.git, or by its own path for a linked worktree. Other git-dir folders (rebase-merge,
+      # sequencer) stay watched; their events are ignored. Excludes name only paths below the git
+      # dir, since some inotify-tools versions also drop matching events.
       gitdir="$(git rev-parse --absolute-git-dir 2>/dev/null || true)"
       watch_args=(.)
-      gitsubdirs='(objects|refs|logs|hooks|info|modules|lfs|rr-cache|branches|reftable|fsmonitor--daemon)'
+      gitsubdirs='(objects|refs|logs|hooks|info|modules|lfs|annex|rr-cache|branches|reftable|fsmonitor--daemon)'
       exclude="(^|/)(node_modules|\\.next|\\.nuxt|\\.turbo|\\.cache|\\.parcel-cache|\\.venv|venv|__pycache__|\\.svelte-kit)(/|$)|(^|/)\\.git/$gitsubdirs(/|$)"
       if [ "$gitdir" = "$PWD/.git" ]; then
         exclude="$exclude|(^|/)\\.git/worktrees(/|$)"
