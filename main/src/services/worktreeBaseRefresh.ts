@@ -248,7 +248,7 @@ async function focusFetch(projectPath: string, target: RemoteBranch, commandRunn
         { env: NON_INTERACTIVE_GIT_ENV, timeout: BASE_REFRESH_TIMEOUT_MS },
       );
     } catch (error) {
-      return failed(describeFetchError(error));
+      return failed(describeFetchError(error instanceof Error ? error : new Error(String(error))));
     }
     const { stdout: fetched } = await git(['rev-parse', '--verify', own]);
     const next = fetched.trim();
@@ -351,7 +351,8 @@ async function repositoryDirectories(commandRunner: CommandRunner, cwd: string):
   return Promise.all(directories.map(directory => realpath(directory).catch(() => directory)));
 }
 
-function describeFetchError(error: unknown): string {
+/** Why a `git fetch` failed, from the failure execFile rejected with (its `stderr` and `killed`). */
+function describeFetchError(error: Error): string {
   let details: FetchError;
   try {
     details = decodeBoundary(error, fetchErrorSchema);
@@ -471,7 +472,7 @@ async function fetchBranch(
       );
       return undefined;
     } catch (error) {
-      return describeFetchError(error);
+      return describeFetchError(error instanceof Error ? error : new Error(String(error)));
     }
   })();
   try {
