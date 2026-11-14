@@ -12,6 +12,7 @@ import {
 import type { RelayComputer, RelayComputerGrant, RelayDevice } from '../../../../shared/types/relay';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../../types/config';
+import { isRelayComputerUnder } from '../../../../shared/remoteClient/relay';
 
 /** Commands only a linked computer may call, with its link token. */
 export const RELAY_COMPUTER_COMMANDS = {
@@ -160,9 +161,25 @@ export class RelayLinks {
     return this.remote().client.profiles.flatMap((profile) => (profile.relay ? [{ ...profile, relay: profile.relay }] : []));
   }
 
+  /** A peer this computer may link with: one at `https://<id>.<domain>` under this computer's own relay domain. */
+  private checkPeer(peer: RelayComputer): void {
+    const domain = this.deps.self()?.domain;
+    if (!domain) {
+      throw new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so it was not linked.', 'Turn on phone access in Settings › Remote Access, then scan both computers again.');
+    }
+    if (!isRelayComputerUnder(peer, domain)) {
+      throw new PaneError(
+        'ERR_RELAY_LINK_OUTSIDE_DOMAIN',
+        `${peer.name} is at ${peer.address}, outside this computer's relay domain ${domain}, so it was not linked.`,
+        `Link only computers that use the same relay: set the same Relay address in Settings › Remote Access on both, then scan both again.`,
+      );
+    }
+  }
+
   /** A phone asks this computer for a token its peer computer will use to call this one. */
   async mintLink(peer: RelayComputer, callerClientId: string): Promise<{ token: string }> {
     const phone = this.callerPhone(callerClientId);
+    this.checkPeer(peer);
     if (peer.id === this.deps.self()?.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'A computer cannot link with itself.', 'Scan another computer.');
     const { token, tokenHash } = newToken();
     const record: RemoteDaemonClientRecord = {
@@ -187,6 +204,7 @@ export class RelayLinks {
   /** A phone hands this computer the token to call a peer it just linked. */
   async saveLink(peer: RelayComputer, token: string, callerClientId: string): Promise<void> {
     const phone = this.callerPhone(callerClientId);
+    this.checkPeer(peer);
     if (peer.id === this.deps.self()?.id) return;
     const profile: RemotePaneConnectionProfile = {
       id: profileId(peer.id),
@@ -307,16 +325,18 @@ export class RelayLinks {
   /** "Unlink from all your computers" on a linked computer's row. */
   async unlinkComputerEverywhere(computerId: string): Promise<{ removed: string[]; notReached: string[] }> {
     const targets = this.linked();
-    const removed: string[] = [];
+    // The computers it is removed from: this one, and each other linked computer that answers.
+    const removed = [this.deps.self()?.name ?? 'This computer'];
     const notReached: string[] = [];
     await Promise.all(targets.map(async (profile) => {
+      const unlinked = profile.relay.computerId === computerId;
       // The unlinked computer forgets this one and the rest; the others forget it.
-      const forget = profile.relay.computerId === computerId
+      const forget = unlinked
         ? targets.filter((other) => other.relay.computerId !== computerId).map((other) => other.relay.computerId).concat(this.deps.self()?.id ?? [])
         : [computerId];
       try {
         for (const id of forget) await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.forgetComputer, [{ computerId: id }]);
-        removed.push(profile.label);
+        if (!unlinked) removed.push(profile.label);
       } catch {
         notReached.push(profile.label);
       }

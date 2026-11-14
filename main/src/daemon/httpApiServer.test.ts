@@ -987,12 +987,14 @@ describe('PaneRemoteHttpApiServer', () => {
 describe('QR-paired phones and linked computers', () => {
   const STUDIO = { id: 'studiostudiostud', name: 'Studio Mac', domain: 'runpane.net', address: 'https://studiostudiostud.runpane.net', local: [], fingerprint: 'studio-key' };
   const ROGUE = { id: 'roguerogueroguer', name: 'Totally your laptop', domain: 'runpane.net', address: 'https://roguerogueroguer.runpane.net', local: [], fingerprint: 'rogue-key' };
+  const BUILD_BOX = { id: 'buildboxbuildbox', name: 'Build Box', domain: 'runpane.net', address: 'https://buildboxbuildbox.runpane.net', local: [], fingerprint: 'build-key' };
+  const LAPTOP = { id: 'laptoplaptoplapt', name: 'Travel Laptop', domain: 'runpane.net', address: 'https://laptoplaptoplapt.runpane.net', local: [], fingerprint: 'laptop-key' };
 
   /**
    * This computer, with a QR-paired phone (`phone-token`) and Studio Mac linked by an earlier scan
    * (`studio-token` calls here; the profile calls Studio Mac). `call` answers for Studio Mac.
    */
-  async function startComputer(options: { phoneId?: string } = {}) {
+  async function startComputer(options: { phoneId?: string; linked?: Array<typeof STUDIO> } = {}) {
     const remote = createEnabledRemoteConfig();
     const phone: RemoteDaemonClientRecord = {
       id: 'phone-ana',
@@ -1009,14 +1011,14 @@ describe('QR-paired phones and linked computers', () => {
       kind: 'computer',
       computerId: STUDIO.id,
     }];
-    remote.client.profiles = [{
-      id: `relay-${STUDIO.id}`,
-      label: STUDIO.name,
-      baseUrl: STUDIO.address,
-      token: 'token-for-studio',
+    remote.client.profiles = (options.linked ?? [STUDIO]).map((peer) => ({
+      id: `relay-${peer.id}`,
+      label: peer.name,
+      baseUrl: peer.address,
+      token: `token-for-${peer.id}`,
       transport: 'http+sse',
-      relay: { computerId: STUDIO.id, fingerprint: STUDIO.fingerprint, linkedBy: 'Ana’s iPhone' },
-    }];
+      relay: { computerId: peer.id, fingerprint: peer.fingerprint, linkedBy: 'Ana’s iPhone' },
+    }));
     let config: Pick<AppConfig, 'remoteDaemon'> = { remoteDaemon: remote };
     const store = {
       getConfig: () => config,
@@ -1035,7 +1037,7 @@ describe('QR-paired phones and linked computers', () => {
     const previews = new RelayPreviews({ id: () => null, domain: () => null, isForwardedPort: () => false, clientActive: () => true });
     const links = new RelayLinks({
       config: store,
-      self: () => undefined,
+      self: () => LAPTOP,
       call,
       disconnect: (ids) => { server.disconnectClients(ids); },
       connectedClientIds: () => new Set(),
@@ -1083,6 +1085,33 @@ describe('QR-paired phones and linked computers', () => {
       .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_PHONE_ONLY' } } });
   });
 
+  it.each([
+    ['another relay domain', { ...ROGUE, domain: 'evil.example', address: 'https://roguerogueroguer.evil.example' }],
+    ['an address outside its id', { ...ROGUE, address: 'https://studiostudiostud.runpane.net' }],
+    ['an address off the relay', { ...ROGUE, address: 'https://evil.example' }],
+  ])('refuses to link a peer at %s, and changes nothing', async (_case, peer) => {
+    const computer = await startComputer();
+
+    for (const [channel, request] of [['relay:client:mint-link', { peer }], ['relay:client:save-link', { peer, token: 'stolen' }]] as const) {
+      await expect(computer.invoke('phone-token', channel, request))
+        .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_LINK_OUTSIDE_DOMAIN', message: expect.stringContaining('runpane.net') } } });
+    }
+    await expect(computer.registry.invoke('relay:linked-computers', [])).resolves.toEqual([expect.objectContaining({ name: 'Studio Mac' })]);
+    await expect(computer.registry.invoke(RELAY_DEVICE_COMMANDS.list, [])).resolves.toEqual([
+      expect.objectContaining({ label: 'Ana’s iPhone' }),
+      expect.objectContaining({ label: 'Studio Mac' }),
+    ]);
+  });
+
+  it('names the computers an unlinked computer was removed from, never the unlinked computer itself', async () => {
+    const computer = await startComputer({ linked: [STUDIO, BUILD_BOX] });
+
+    await expect(computer.registry.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: BUILD_BOX.id }]))
+      .resolves.toEqual({ removed: ['Travel Laptop', 'Studio Mac'], notReached: [] });
+    await expect(computer.registry.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: STUDIO.id }]))
+      .resolves.toEqual({ removed: ['Travel Laptop'], notReached: [] });
+  });
+
   it('revokes a link a phone minted, and the phone tokens that link handed out, when the phone is removed from all computers', async () => {
     const computer = await startComputer({ phoneId: 'pane-native-ana' });
     const minted = await computer.mint('phone-token');
@@ -1092,7 +1121,7 @@ describe('QR-paired phones and linked computers', () => {
     await expect(computer.invoke(handedOut, 'sessions:get-all')).resolves.toMatchObject({ statusCode: 200 });
 
     await expect(computer.registry.invoke(RELAY_DEVICE_COMMANDS.removePhoneEverywhere, [{ clientId: 'phone-ana' }]))
-      .resolves.toEqual({ removed: ['This computer', 'Studio Mac'], notReached: [] });
+      .resolves.toEqual({ removed: ['Travel Laptop', 'Studio Mac'], notReached: [] });
 
     for (const token of ['phone-token', minted, handedOut]) {
       await expect(computer.invoke(token, 'sessions:get-all'))
@@ -1128,7 +1157,7 @@ describe('QR-paired phones and linked computers', () => {
     const computer = await startComputer();
 
     await expect(computer.registry.invoke(RELAY_DEVICE_COMMANDS.removePhoneEverywhere, [{ clientId: 'phone-ana' }]))
-      .resolves.toEqual({ removed: ['This computer'], notReached: ['Studio Mac'] });
+      .resolves.toEqual({ removed: ['Travel Laptop'], notReached: ['Studio Mac'] });
     expect(computer.call).not.toHaveBeenCalled();
   });
 });

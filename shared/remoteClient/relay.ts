@@ -162,7 +162,7 @@ export async function exchangeRelayPairing(
 }
 
 /** Whether a computer sits at `https://<id>.<domain>`, so its answer can't stand in for another address. */
-function isRelayComputerUnder(computer: RelayComputer, domain: string): boolean {
+export function isRelayComputerUnder(computer: RelayComputer, domain: string): boolean {
   return COMPUTER_ID.test(computer.id)
     && computer.domain === domain
     && computer.address.replace(/\/+$/u, '') === relayComputerAddress({ computerId: computer.id, domain });
