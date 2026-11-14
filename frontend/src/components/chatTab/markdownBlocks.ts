@@ -19,14 +19,22 @@ export function markdownBlocks(text: string): string[] {
   const lines = text.split('\n');
   let start = 0;
   let fence: string | undefined;
+  let fenceIndent = 0;
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
-    const marker = FENCE.exec(line)?.[1];
+    const match = FENCE.exec(line);
+    const marker = match?.[1];
+    const indent = match ? match[0].length - marker!.length : 0;
     if (fence) {
-      if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) fence = undefined;
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length && line.trim() === marker) {
+        // A closer left of its opener may end a list item instead, and then opens a fence of its own: keep the rest whole.
+        if (indent < fenceIndent) break;
+        fence = undefined;
+      }
       continue;
     }
     fence = marker;
+    fenceIndent = indent;
     if (index === 0 || line === '' || CONTINUES.test(line) || lines[index - 1].trim() !== '') continue;
     blocks.push(`${lines.slice(start, index).join('\n')}\n`);
     start = index;

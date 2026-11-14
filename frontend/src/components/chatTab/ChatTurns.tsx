@@ -1,4 +1,4 @@
-import { memo, useContext, useMemo, useState, type ComponentProps } from 'react';
+import { memo, useContext, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { ChatBlocksContext } from './chatRendering';
 import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Terminal, Wrench, XCircle } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -37,7 +37,12 @@ function blockLanguage(node: HastNode | undefined): string | undefined {
   return language?.slice('language-'.length);
 }
 
-/** `live`: the turn is still writing. Its text parses block by block, so each token re-parses only the block being written; finished text parses whole, which mounts faster. */
+/**
+ * `live`: the turn is still writing. Text that mounts while its turn writes parses block by block,
+ * so each token re-parses only the block being written; text that mounts finished parses whole,
+ * which mounts faster. The choice holds for the text's lifetime, so a turn ending never remounts
+ * its blocks and the state inside them (a half-typed form) survives.
+ */
 const Markdown = memo(({ text, live }: { text: string; live: boolean }) => {
   const { blocks } = useContext(ChatBlocksContext);
   const components = useMemo<Components>(() => ({
@@ -48,7 +53,8 @@ const Markdown = memo(({ text, live }: { text: string; live: boolean }) => {
       return render ? <>{render(hastText(node).replace(/\n$/, ''))}</> : <CodeBlock {...props}>{children}</CodeBlock>;
     },
   }), [blocks]);
-  const parts = live ? markdownBlocks(text) : [text];
+  const split = useRef(live).current;
+  const parts = split ? markdownBlocks(text) : [text];
   return <div className="chat-markdown">{parts.map((block, index) => <MarkdownBlock key={index} text={block} components={components} />)}</div>;
 });
 Markdown.displayName = 'Markdown';

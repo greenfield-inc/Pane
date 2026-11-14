@@ -65,6 +65,10 @@ describe('markdownBlocks', () => {
     rendersAsWhole('```a`b here\n\n```\ncode\n\nmore\n```\n\nEnd');
   });
 
+  it('renders a list item\'s code block closed at the left margin as the whole message does', () => {
+    rendersAsWhole('1. Install:\n   ```bash\n   npm i\n```\n\nThen run it.\n\nDone.');
+  });
+
   it('keeps a message whole when references or footnotes link across it', () => {
     expect(markdownBlocks('See [the docs][docs].\n\nMore text[^1].\n\n[docs]: https://example.com\n\n[^1]: A note.')).toHaveLength(1);
   });
