@@ -160,10 +160,10 @@ fn start_pebble(bin: &str, dir: &Path, scratch: &Path, dns: u16) -> (Pebble, u16
 #[tokio::test]
 async fn a_relay_gets_and_renews_its_certificate_through_the_helper_dns() {
     let (Ok(bin), Ok(dir)) = (std::env::var("PEBBLE_BIN"), std::env::var("PEBBLE_DIR")) else {
-        // CI must run it: a missing Pebble there is a broken setup, not a skip.
+        // CI's Relay Tests job must run it: a missing Pebble there is a broken setup.
         assert!(
-            std::env::var_os("CI").is_none(),
-            "CI is set but PEBBLE_BIN or PEBBLE_DIR is not: install Pebble for this test"
+            std::env::var("PANE_RELAY_INTEGRATION_REQUIRED").as_deref() != Ok("1"),
+            "PANE_RELAY_INTEGRATION_REQUIRED=1 but PEBBLE_BIN or PEBBLE_DIR is not set: install Pebble for this test"
         );
         eprintln!("skipped: set PEBBLE_BIN and PEBBLE_DIR to run the Pebble test");
         return;

@@ -40,7 +40,7 @@ A local `pane-direct` uses `--relay-url https://127.0.0.1:8443/ --relay-ca
 `serve` and `connect` through the relay; it builds `../direct` first, or uses
 `PANE_DIRECT_BIN`. `tests/acme.rs` gets and renews a certificate from Pebble, a
 test ACME CA; it runs when `PEBBLE_BIN` and `PEBBLE_DIR` (Pebble's source
-folder) are set, and fails without them when `CI` is set:
+folder) are set, and fails without them when `PANE_RELAY_INTEGRATION_REQUIRED=1`:
 
 ```sh
 GOBIN=$PWD/.bin go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.8.0
