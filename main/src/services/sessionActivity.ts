@@ -15,10 +15,10 @@
 import { EventEmitter } from 'events';
 import type { SessionActivity } from '../../../shared/types/orchestrationSession';
 
-export const SESSION_WORKING_AFTER_MS = 10_000;
-export const SESSION_IDLE_AFTER_MS = 10_000;
+const SESSION_WORKING_AFTER_MS = 10_000;
+const SESSION_IDLE_AFTER_MS = 10_000;
 /** The host re-evaluates on this cadence, the same as the terminal status poll. */
-export const SESSION_ACTIVITY_TICK_MS = 500;
+const SESSION_ACTIVITY_TICK_MS = 500;
 
 export interface SessionActivityMembers {
   sessionId: string;
