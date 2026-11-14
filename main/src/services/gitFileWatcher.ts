@@ -2,8 +2,8 @@ import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { EventEmitter } from 'events';
 import { watch as chokidarWatch, type FSWatcher } from 'chokidar';
 import path from 'path';
+import { linuxToUNCPath } from '../utils/wslUtils';
 import type { Stats } from 'fs';
-import { stat } from 'fs/promises';
 // node:fs recursive watcher — aliased so it doesn't collide with chokidar's
 // imported `watch`/`FSWatcher`. Used for the darwin/win32 native path.
 import { watch as fsWatch, type FSWatcher as NodeFsWatcher, type WatchEventType } from 'node:fs';
@@ -329,6 +329,7 @@ export class GitFileWatcher extends EventEmitter {
       if [ -n "$gitdir" ]; then
         [ -e "$gitdir/index" ] && watch_args+=("$gitdir/index")
         [ -e "$gitdir/HEAD" ] && watch_args+=("$gitdir/HEAD")
+        [ -e "$gitdir/FETCH_HEAD" ] && watch_args+=("$gitdir/FETCH_HEAD")
       fi
       exec inotifywait -m -r -q \
         -e modify,create,delete,move,attrib \
@@ -353,9 +354,11 @@ export class GitFileWatcher extends EventEmitter {
       const lines = stdoutBuffer.split('\n');
       stdoutBuffer = lines.pop() ?? '';
       for (const line of lines) {
-        if (line.trim()) {
-          this.handleFileChange(sessionId, line.trim(), 'change');
-        }
+        const changed = line.trim();
+        if (!changed) continue;
+        // This worktree's own `git fetch`, as a Windows path Pane can read.
+        if (changed.endsWith('/FETCH_HEAD')) this.emit('fetched', sessionId, linuxToUNCPath(changed, distro));
+        else this.handleFileChange(sessionId, changed, 'change');
       }
     });
 
@@ -743,28 +746,34 @@ export class GitFileWatcher extends EventEmitter {
           : path.resolve(watchPath, commonDirRaw)
         : undefined;
       const fetchHead = path.join(gitDir, 'FETCH_HEAD');
+      const packedRefs = commonDir ? path.join(commonDir, 'packed-refs') : undefined;
+      const refsHeads = commonDir ? path.join(commonDir, 'refs', 'heads') : undefined;
+      // The git dir itself is watched, filtered to these entries, so a FETCH_HEAD that a
+      // worktree's first `git fetch` creates is seen too (chokidar misses a file target
+      // that does not exist yet). refs/remotes changes are not watched.
+      const kept = new Set([gitDir, path.join(gitDir, 'index'), path.join(gitDir, 'HEAD'), fetchHead, ...(packedRefs ? [packedRefs] : []), ...(commonDir ? [path.join(commonDir, 'refs')] : [])]);
+      const ignored = (candidate: string): boolean => {
+        const resolved = path.resolve(candidate);
+        if (!isInside(gitDir, resolved) || kept.has(resolved)) return false;
+        return !(refsHeads && (resolved === refsHeads || isInside(refsHeads, resolved)));
+      };
       const targets = new Set<string>([
-        path.join(gitDir, 'index'),
-        path.join(gitDir, 'HEAD'),
-        // This worktree's own `git fetch` (refs/remotes changes are not watched)
-        fetchHead,
+        gitDir,
         // small dir + single file; chokidar handle cost is trivial here
-        ...(commonDir
-          ? [path.join(commonDir, 'packed-refs'), path.join(commonDir, 'refs', 'heads')]
-          : []), // degrade to index/HEAD-only, as today
+        ...(packedRefs && refsHeads ? [packedRefs, refsHeads] : []), // degrade to the git dir only, as today
       ]);
       const gitWatcher = chokidarWatch([...targets], {
         ignoreInitial: true,
         persistent: true,
         followSymlinks: false,
         usePolling: false,
+        ignored,
       });
       gitWatcher.on('all', (_event, changedPath) => {
-        if (path.resolve(changedPath) === path.resolve(fetchHead)) {
-          // A failed fetch leaves FETCH_HEAD empty.
-          void stat(fetchHead).then(info => {
-            if (info.size > 0 && this.watchedSessions.has(sessionId)) this.emit('fetched', sessionId);
-          }, () => undefined);
+        const changed = path.resolve(changedPath);
+        if (changed === gitDir) return;
+        if (changed === path.resolve(fetchHead)) {
+          if (this.watchedSessions.has(sessionId)) this.emit('fetched', sessionId, fetchHead);
           return;
         }
         // intentional: bypass any ignore checks, always trigger on
@@ -854,4 +863,10 @@ export class GitFileWatcher extends EventEmitter {
       sessionsNeedingRefresh,
     };
   }
+}
+
+/** Whether `child` is strictly inside the directory `parent`. */
+function isInside(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
