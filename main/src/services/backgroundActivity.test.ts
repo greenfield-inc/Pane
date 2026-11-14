@@ -173,6 +173,23 @@ describe('background activity', () => {
     expect(pc.activity.isAway()).toBe(false);
   });
 
+  it('on Linux, sees an unlock within half a minute while the window stays on screen but unfocused', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const pc = computer({ lockEvents: false });
+      pc.activity.setWindowState({ focused: false, visible: true });
+      pc.state.locked = true;
+      pc.activity.evaluate('the Linux power poll ran');
+      expect(pc.activity.isAway()).toBe(true);
+      pc.state.locked = false;
+      vi.advanceTimersByTime(30_000);
+      expect(pc.activity.isAway()).toBe(false);
+      pc.activity.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('on Linux, where no lock event fires, sees the lock when asked to look again', () => {
     const pc = computer({ lockEvents: false });
     pc.state.locked = true;

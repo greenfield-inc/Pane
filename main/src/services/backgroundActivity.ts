@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import { EventEmitter } from 'events';
+import { readFile } from 'fs/promises';
 import { powerMonitor } from 'electron';
 import type { AppConfig } from '../types/config';
 import { readLinuxOnBattery } from './linuxPowerSupply';
@@ -12,6 +13,9 @@ const DEFAULT_BACKGROUND_ACTIVITY: BackgroundActivityProfile = 'balanced';
 /** A Low Power Mode read is reused this long, so switching apps doesn't start a process each time. */
 const LOW_POWER_CACHE_MS = 60_000;
 const LOW_POWER_READ_TIMEOUT_MS = 2_000;
+const LINUX_PLATFORM_PROFILE = '/sys/firmware/acpi/platform_profile';
+/** Where no unlock event fires (Linux), the lock is read this often while away, so an unlock is seen without a click. */
+const AWAY_LOCK_RECHECK_MS = 30_000;
 
 type PowerEvent = 'lock-screen' | 'unlock-screen' | 'suspend' | 'resume' | 'on-ac' | 'on-battery';
 
@@ -57,6 +61,7 @@ export class BackgroundActivity extends EventEmitter {
   private lowPowerReadAt = Number.NEGATIVE_INFINITY;
   private lowPowerRead: Promise<void> | null = null;
   private away = false;
+  private lockRecheck: NodeJS.Timeout | null = null;
 
   private readonly powerListeners: Array<[PowerEvent, () => void]> = [
     ['lock-screen', () => { this.locked = true; this.evaluate('the screen locked'); }],
@@ -77,6 +82,7 @@ export class BackgroundActivity extends EventEmitter {
     this.env.remoteStreams.on('change', this.handleRemoteStreams);
     this.config.on('config-updated', this.handleConfig);
     this.away = this.compute();
+    this.syncLockRecheck();
   }
 
   profile(): BackgroundActivityProfile {
@@ -122,11 +128,14 @@ export class BackgroundActivity extends EventEmitter {
     const away = this.compute();
     if (away === this.away) return;
     this.away = away;
+    this.syncLockRecheck();
     this.env.logger.info(`[BackgroundActivity] ${away ? 'Away' : 'Back'} (${this.profile()}): ${reason}.`);
     this.emit('change', away);
   }
 
   dispose(): void {
+    if (this.lockRecheck) clearInterval(this.lockRecheck);
+    this.lockRecheck = null;
     for (const [event, listener] of this.powerListeners) this.env.power.removeListener(event, listener);
     this.env.remoteStreams.removeListener('change', this.handleRemoteStreams);
     this.config.removeListener('config-updated', this.handleConfig);
@@ -137,6 +146,18 @@ export class BackgroundActivity extends EventEmitter {
     if (this.env.remoteStreams.count() > 0) return true;
     if (!this.env.lockEvents) this.locked = this.env.isLocked();
     return !this.locked && !this.suspended && (this.windowFocused || this.windowVisible);
+  }
+
+  private syncLockRecheck(): void {
+    const wanted = this.away && !this.env.lockEvents;
+    if (wanted === (this.lockRecheck !== null)) return;
+    if (this.lockRecheck) {
+      clearInterval(this.lockRecheck);
+      this.lockRecheck = null;
+      return;
+    }
+    this.lockRecheck = setInterval(() => this.evaluate('the screen was checked again'), AWAY_LOCK_RECHECK_MS);
+    this.lockRecheck.unref?.();
   }
 
   private compute(): boolean {
@@ -180,14 +201,21 @@ function electronEnvironment(): BackgroundActivityEnvironment {
   };
 }
 
-/** macOS: `pmset -g` lists `lowpowermode 1`. Linux: power-profiles-daemon's `power-saver` profile. Windows: unknown. */
-function readLowPower(): Promise<boolean> {
+/**
+ * macOS: `pmset -g` lists `lowpowermode 1`. Linux: the ACPI platform profile is `low-power`, else
+ * (no such file) power-profiles-daemon's `power-saver` profile. Windows: unknown.
+ */
+async function readLowPower(): Promise<boolean> {
+  if (process.platform === 'linux') {
+    const profile = await readFile(LINUX_PLATFORM_PROFILE, 'utf8').catch(() => null);
+    if (profile !== null) return profile.trim() === 'low-power';
+  }
   const command = process.platform === 'darwin'
     ? { file: 'pmset', args: ['-g'], on: (out: string) => /^\s*lowpowermode\s+1\b/mu.test(out) }
     : process.platform === 'linux'
       ? { file: 'powerprofilesctl', args: ['get'], on: (out: string) => out.trim() === 'power-saver' }
       : null;
-  if (!command) return Promise.resolve(false);
+  if (!command) return false;
   return new Promise(resolve => {
     execFile(command.file, command.args, { encoding: 'utf8', timeout: LOW_POWER_READ_TIMEOUT_MS }, (error, stdout) => {
       resolve(!error && command.on(stdout));
