@@ -11,9 +11,12 @@ It talks straight to each of your computers over Tailscale, or through each comp
 
 - G2 glasses (the R1 ring is optional; the temple touchpads do the same gestures).
 - The Even Realities app on your phone, and the Pane app ([iOS and Android](NATIVE_MOBILE.md)).
-- Tailscale on the phone and on each computer, signed in with the same login.
-- Pane open on each computer, with **Settings › Remote Access › Who can connect** set to
-  **Only me** or **Everyone on tailnet** (on by default for the Pane that owns `~/.pane`).
+- Each computer reachable from the Pane phone app in one of two ways:
+  - paired with the phone by [QR code](QR_PAIRING.md); or
+  - over Tailscale: Tailscale on the phone and the computer, signed in with the same login, and
+    Pane's **Settings › Remote Access › Who can connect** set to **Only me** or **Everyone on
+    tailnet** (on by default for the Pane that owns `~/.pane`).
+- Pane open on each computer.
 - For dictation and voice answers, a Deepgram key (live) or a fal key (recorded) on the computer
   you talk to: **Settings › Integrations › Voice transcription** on the computer, or **Settings › Voice** in the
   Pane phone app.
@@ -22,8 +25,10 @@ It talks straight to each of your computers over Tailscale, or through each comp
 
 1. In the Even Realities app, open **Even Hub** and install **Pane**.
 2. In the Pane phone app, open **Settings › Glasses** and tap **Pair glasses**. The phone asks each
-   of your computers for a one-time pairing secret and copies them as one code. The code works for
-   10 minutes and only once per computer.
+   of your computers (the ones on your Tailscale login and the ones it paired by QR code) for a
+   one-time pairing secret and copies them as one code. The code works for 10 minutes and only once
+   per computer. A computer the phone reaches both ways is paired once, over Tailscale, when its
+   Tailscale name matches its name in Pane.
 3. Tap **Open Even app**, open Pane there, and tap **Paste**, then **Connect**.
 4. The glasses show **Pane · N computers**. Each computer now lists the glasses under
    **Settings › Remote Access › Devices**, named after your phone, with when they were last used.
@@ -42,6 +47,9 @@ gets a dim row at the end of the home list with the reason; press it for what to
 | needs its password | Connect to that computer once from Pane on a paired computer, so it saves the password. |
 | Funnel is on | Turn Funnel off for port 8443 on that computer. |
 | not answering | Check that Pane is open there and Tailscale is on. |
+
+Computers reached only by QR code don't join on their own: tap **Add computers** in Settings ›
+Glasses after you pair the phone with a new one.
 
 A paired computer on an older Pane can't ask for the others; the glasses skip it until the next
 10-minute round, so once you update Pane there it asks within 10 minutes. You can still add
@@ -183,9 +191,12 @@ are lost. Two gaps remain:
 The glasses app is a web page inside the Even app. Each computer lets it in only when all of these
 hold:
 
-- The request comes through Tailscale Serve on your tailnet with **your** Tailscale login. Other
-  people on your tailnet are refused even with a valid glasses token. Funnel is never used: while
-  Funnel is on for the computer's workspace port, glasses are refused.
+- Over Tailscale, the request comes through Tailscale Serve on your tailnet with **your**
+  Tailscale login. Other people on your tailnet are refused even with a valid glasses token.
+  Funnel is never used: while Funnel is on for the computer's workspace port, glasses are refused
+  there.
+- Through the computer's own address (QR pairing), only a phone paired with that computer can ask
+  it for a pairing secret, so a glasses token there was issued through a phone you paired.
 - It carries this computer's **glasses token**: 256 random bits, one per pair of glasses, stored on
   the computer only as a hash. Tokens travel only in the `Authorization` header (and the voice
   WebSocket's subprotocol), never in a URL.
@@ -193,8 +204,10 @@ hold:
   owner allowed in **Settings › Remote Access › Devices**, matched exactly except that a loopback
   origin matches on any port. Null, missing and wildcard origins are never accepted. A page served
   from `127.0.0.1` on your phone still needs a glasses token, which only the paired glasses hold.
-- The source is not **locked out**: 5 refused attempts in 10 minutes lock it out for a minute,
-  doubling on each repeat up to an hour. Each refusal is logged with the source and reason, never
+- Over Tailscale, the source is not **locked out**: 5 refused attempts in 10 minutes lock it out
+  for a minute, doubling on each repeat up to an hour. Through the computer's own address every
+  connection arrives from the computer's TLS listener, so refusals there are not counted, and no
+  stranger can lock your glasses out. Each refusal is logged with the source and reason, never
   the token.
 
 A glasses token reaches only what the glasses use: listing Sessions and Panes, starting a Session
@@ -222,7 +235,9 @@ computers, reach anyone else's computer, change settings, write files, commit, r
 commands, or choose what a terminal runs, and its event stream never carries terminal output.
 
 Typing into a terminal can run commands, so treat the glasses like your phone: whoever holds a
-working token on your tailnet and login can type into your shells. The Even app serves the glasses
+working token can type into your shells, from your tailnet or, for a computer paired by QR code,
+from anywhere. Through a computer's own address the glasses trust its public certificate; unlike
+the Pane app, they don't check the computer's key. The Even app serves the glasses
 app's code, so a compromised Even build could read the token on your phone; revoke the glasses if
 you lose the phone, and check **Last used** on each computer.
 
@@ -233,7 +248,7 @@ The pairing code on your clipboard holds one-time pairing secrets, not tokens, a
 
 | On the glasses | Fix |
 |---|---|
-| Can't reach any computer | Turn Tailscale on in the phone's Tailscale app. The glasses reconnect on their own. |
+| Can't reach any computer | Turn Tailscale on in the phone's Tailscale app; for computers paired by QR code, check the phone's internet connection. The glasses reconnect on their own. |
 | Allow this app on the computer | Update Pane on that computer (see above). |
 | Not paired, or revoked | Pair again from Settings › Glasses in the Pane phone app. |
 | Locked out for N s | Wait. If you did not cause the refusals, revoke the glasses on that computer. |

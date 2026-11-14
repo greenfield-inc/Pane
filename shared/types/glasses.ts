@@ -1,5 +1,6 @@
 import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '../validation/boundaryDecoder';
 import { base64UrlDecode, base64UrlEncode } from './remoteDaemon';
+import { DEFAULT_RELAY_DOMAIN } from '../remoteClient/relay';
 
 /** A glasses device token: sent only in the Authorization header, or the voice WebSocket's subprotocol. */
 export const GLASSES_TOKEN_PREFIX = 'pgt_';
@@ -9,7 +10,11 @@ const PAIRING_CODE_SCHEME = 'pane-glasses://';
 /** The voice WebSocket's subprotocol: `['pane-glasses', token]`, since a browser WebSocket can't set headers. */
 export const GLASSES_WEBSOCKET_PROTOCOL = 'pane-glasses';
 
-/** Workspace-listener commands that manage glasses. Only the owner's own devices, without a glasses token, may call them. */
+/**
+ * Commands that manage glasses. Only the owner's own devices, without a glasses token, may call them:
+ * the owner's Tailscale login on the workspace listener, or a paired phone's or linked computer's token
+ * on the paired listener the relay reaches.
+ */
 export const GLASSES_COMMANDS = {
   createPairingSecret: 'runpane:glasses:create-pairing-secret',
   list: 'runpane:glasses:list',
@@ -94,9 +99,9 @@ export interface GlassesVouchResult {
 }
 
 export interface GlassesPairingComputer {
-  /** The computer's Tailscale machine name. */
+  /** The computer's Tailscale machine name, or its name as a relay computer. */
   name: string;
-  /** Its workspace URL, `https://<dnsName>:8443`. */
+  /** Its workspace URL, `https://<dnsName>:8443`, or its relay address, `https://<id>.runpane.net`. */
   url: string;
   secret: string;
 }
@@ -137,8 +142,8 @@ export function decodeGlassesPairingCode(input: string): GlassesPairingCode {
   const code = decodeBoundary(parsed, pairingCodeSchema);
   for (const computer of code.computers) {
     const url = new URL(computer.url);
-    if (url.protocol !== 'https:' || !url.hostname.endsWith('.ts.net')) {
-      throw new Error(`The code names ${computer.url}, which is not a Tailscale address. Copy it again from the Pane app.`);
+    if (url.protocol !== 'https:' || !(url.hostname.endsWith('.ts.net') || url.hostname.endsWith(`.${DEFAULT_RELAY_DOMAIN}`))) {
+      throw new Error(`The code names ${computer.url}, which is not a Tailscale or Pane relay address. Copy it again from the Pane app.`);
     }
     if (!computer.secret.startsWith(GLASSES_PAIRING_SECRET_PREFIX)) {
       throw new Error('This glasses code holds something other than pairing secrets. Copy it again from the Pane app.');

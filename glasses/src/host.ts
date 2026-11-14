@@ -34,7 +34,7 @@ import { recordedDictation, streamingDictation, voiceMode, type VoiceHost, type 
 /** A computer the glasses are paired with. The pairing secret is gone; only the device token is kept. */
 export interface PairedComputer {
   name: string;
-  /** `https://<dnsName>:8443` */
+  /** `https://<dnsName>:8443` over Tailscale, or `https://<id>.runpane.net` through Pane's relay. */
   url: string;
   token: string;
   /** The glasses' name on that computer, such as "Even G2 · iPhone". */

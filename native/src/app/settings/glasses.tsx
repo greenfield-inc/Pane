@@ -12,8 +12,8 @@ const GLASSES_DOCS_URL = 'https://github.com/greenfield-inc/Pane/blob/main/docs/
 const EVEN_APP_URL = 'evenapp://';
 
 /**
- * Settings › Glasses: pairs Even G2 glasses with every computer on this phone's Tailscale login at
- * once. Each computer gives a single-use secret; the phone copies them as one 10-minute code, and
+ * Settings › Glasses: pairs Even G2 glasses at once with every computer on this phone's Tailscale
+ * login and every computer it paired by QR, which the glasses reach at its relay address. Each computer gives a single-use secret; the phone copies them as one 10-minute code, and
  * the glasses trade each secret for their own token. Lists and revokes the glasses everywhere.
  */
 export default function GlassesSettingsScreen() {
@@ -21,10 +21,10 @@ export default function GlassesSettingsScreen() {
   const { directory, machines, computers, skipped, deviceName, paired, pair, revoke } = useGlasses();
   const [openError, setOpenError] = useState<string | null>(null);
 
-  if (!directory) {
+  if (!directory && computers.length === 0) {
     return (
       <Screen scroll grouped testID="glasses-settings">
-        <ListSection title="Glasses" footer="Glasses pair with the computers this phone reaches over Tailscale.">
+        <ListSection title="Glasses" footer="Glasses pair with the computers this phone reaches, by QR code or over Tailscale.">
           <ListRow testID="glasses-find-computers" title="Find your computers" trailing="chevron" onPress={() => router.push('/computers')} />
         </ListSection>
       </Screen>
@@ -66,7 +66,7 @@ export default function GlassesSettingsScreen() {
         {isPaired ? (
           <ListRow testID="glasses-device" title={deviceName} subtitle={`${pairedOn.length} ${pairedOn.length === 1 ? 'computer' : 'computers'}`} />
         ) : null}
-        {machines.isPending ? <View style={styles.cardNote}><ActivityIndicator color={theme.colors.textMuted} /></View> : null}
+        {directory && machines.isPending ? <View style={styles.cardNote}><ActivityIndicator color={theme.colors.textMuted} /></View> : null}
         {machines.isError ? <View style={styles.cardNote}><ErrorState error={machines.error} onRetry={() => void machines.refetch()} /></View> : null}
         {machines.data && !machines.data.ok ? <View style={styles.cardNote}><Text variant="rowDetail" tone="secondary">{machines.data.reason}. {machines.data.fix}</Text></View> : null}
         {computers.map(({ machine }) => {
