@@ -1,7 +1,10 @@
+import defaultTheme from 'tailwindcss/defaultTheme.js';
+
 /**
- * A status that wants attention (a blocked agent) pulses this many times when
- * it appears, then holds steady. An endless pulse keeps the GPU display clock
- * ticking for as long as the window is in front, about 300 wakeups a second.
+ * A status dot that stays on screen (a blocked agent, a running script) pulses
+ * this many times when it appears, then holds steady. An endless pulse keeps the
+ * GPU display clock ticking for as long as the window is in front, about 300
+ * wakeups a second.
  */
 const ATTENTION_PULSES = 3;
 
@@ -279,7 +282,7 @@ const config = {
       animation: {
         shimmer: 'shimmer 2s linear infinite',
         // Tailwind's `animate-pulse`, run a set number of times instead of forever.
-        'attention-pulse': `pulse 2s cubic-bezier(0.4, 0, 0.6, 1) ${ATTENTION_PULSES}`,
+        'attention-pulse': defaultTheme.animation.pulse.replace('infinite', String(ATTENTION_PULSES)),
         'status-working': 'status-working-sweep 1.4s ease-in-out infinite alternate',
         'in': 'in 0.2s ease-out',
         'fade-in': 'fade-in 0.2s ease-out',
