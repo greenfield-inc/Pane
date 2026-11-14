@@ -575,8 +575,7 @@ export function getMobilePushSender(configManager: MobilePushConfigManager, opti
 }
 
 function providerReadiness(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): Pick<RemoteMobilePushStatus, 'provider' | 'code' | 'message'> {
-  const hasKeys = platform === 'ios' ? readApnsCredentials(apns) !== null : readFcmCredentials() !== null;
-  if (!hasKeys && relayForPush()) return { provider: 'ready', code: 'PUSH_READY', message: 'Alerts go through Pane\'s servers.' };
+  if (relayFor(platform, apns)) return { provider: 'ready', code: 'PUSH_READY', message: 'Alerts go through Pane\'s servers.' };
   if (platform === 'ios') return readApnsCredentials(apns)
     ? { provider: 'ready', code: 'PUSH_READY', message: 'APNs delivery is configured.' }
     : { provider: 'missing-config', code: 'ERR_APNS_NOT_CONFIGURED', message: 'This host has no valid APNs configuration.' };
