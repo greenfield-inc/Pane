@@ -50,7 +50,6 @@ export interface RemoteDaemonConnectedClient {
   deviceLabel: string | null;
   remoteAddress: string | null;
   connectedAt: string;
-  lastSeenAt: string;
 }
 
 /** What Settings shows about this host's tailnet: a problem and its fix, or that the host moved. */

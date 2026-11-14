@@ -223,7 +223,6 @@ describe('PaneRemoteTransportController', () => {
       label: 'Mac mini',
       remoteAddress: expect.any(String),
       connectedAt: expect.any(String),
-      lastSeenAt: expect.any(String),
     }]);
 
     daemonEventSink.send('session:created', { id: 'session-1' });
