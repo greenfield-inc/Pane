@@ -12,7 +12,7 @@ export interface Budget {
 }
 
 /** Even's five brightness steps as Glassly's 16 gray levels. */
-const GRAY: Record<Brightness, number> = { 0: 0, 1: 5, 2: 9, 3: 12, 4: 15 };
+const GRAY = { 0: 0, 1: 5, 2: 9, 3: 12, 4: 15 } satisfies Record<Brightness, number>;
 
 /**
  * Text keeps Pane's own wrapping (the Even firmware font at 27 px a line, which `text.ts`
@@ -33,7 +33,7 @@ function linesThatFit(box: TextBox): number {
 }
 
 /** The rows a list box shows: a window around the highlight, the highlighted row marked. */
-export function listLines(box: ListBox, selected: number): string[] {
+function listLines(box: ListBox, selected: number): string[] {
   const items = listItems(box);
   // Drawn as text, rows sit a text line apart, so more of them fit than in Even's 40 px list rows.
   const rows = Math.max(1, Math.floor((box.h - 2 * LIST_PAD) / LINE_H));
@@ -67,14 +67,15 @@ function fitBudget(boxes: Stacked[], maxText: number): Stacked[] {
     const sorted = [...out].sort((a, b) => a.box.y - b.box.y);
     const touching = (upper: Stacked, lower: Stacked) => lower.box.x === upper.box.x && lower.box.w === upper.box.w && lower.box.y === upper.box.y + upper.box.h;
     let best: Stacked[] = [];
-    for (let start = 0; start < sorted.length; start += 1) {
-      const run = [sorted[start] as Stacked];
-      while (start + run.length < sorted.length && touching(run[run.length - 1] as Stacked, sorted[start + run.length] as Stacked)) run.push(sorted[start + run.length] as Stacked);
+    let run: Stacked[] = [];
+    for (const stacked of sorted) {
+      const previous = run.at(-1);
+      run = previous && touching(previous, stacked) ? [...run, stacked] : [stacked];
       if (run.length > best.length) best = run;
     }
-    if (best.length < 2) return out.slice(0, maxText);
-    const first = best[0] as Stacked;
-    const last = best[best.length - 1] as Stacked;
+    const first = best[0];
+    const last = best.at(-1);
+    if (best.length < 2 || !first || !last) return out.slice(0, maxText);
     const merged: Stacked = {
       box: { ...first.box, h: last.box.y + last.box.h - first.box.y, brightness: 4 },
       lines: best.flatMap((stacked) => stacked.lines),

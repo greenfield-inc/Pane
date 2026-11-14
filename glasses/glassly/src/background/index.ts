@@ -31,6 +31,13 @@ const MEETING_CHECK_MS = 60_000;
  */
 const ORIGIN = 'http://127.0.0.1';
 
+/** What Glassly's background fetch reads from a request: method, headers and a string body. */
+interface GlasslyRequest {
+  method: string;
+  headers: Record<string, string>;
+  body?: string;
+}
+
 const later = (fn: () => void, ms: number): Cancel => {
   const timer = setTimeout(fn, ms);
   return { cancel: () => clearTimeout(timer) };
@@ -69,11 +76,11 @@ registerMiniapp(async (session) => {
   };
   const read = (key: string) => storage.getLocalStorage(key).catch(() => '');
   const write = (key: string, value: string) => void storage.setLocalStorage(key, value).catch(() => false);
-  const fetchHost: HostFetch = (url, init) => fetch(url, {
-    method: init?.method ?? 'GET',
-    headers: { ...init?.headers, Origin: ORIGIN },
-    ...(init?.body === undefined ? {} : { body: init.body }),
-  });
+  const fetchHost: HostFetch = (url, init) => {
+    const request: GlasslyRequest = { method: init?.method ?? 'GET', headers: { ...init?.headers, Origin: ORIGIN } };
+    if (init?.body !== undefined) request.body = init.body;
+    return fetch(url, request);
+  };
 
   let runtimeId = await read(RUNTIME_KEY);
   if (!runtimeId) {
@@ -138,8 +145,8 @@ registerMiniapp(async (session) => {
   // Posted through the request a newer Glassly App takes (SDK 0.4.0 has no `post`); an older
   // App refuses it and Pane carries on without notifications.
   const notifier = new Notifier({
-    post: (notification) => session.sendRequest({ type: 'miniapp_notification_post', ...notification }),
-    dismiss: (id) => session.sendRequest({ type: 'miniapp_notification_dismiss', id }),
+    post: async (notification) => { await session.sendRequest({ type: 'miniapp_notification_post', ...notification }); },
+    dismiss: async (id) => { await session.sendRequest({ type: 'miniapp_notification_dismiss', id }); },
   }, (message) => console.warn(message));
   let events: Array<{ title: string; startsAt: string; endsAt: string; allDay: boolean }> = [];
   const readCalendar = () => {

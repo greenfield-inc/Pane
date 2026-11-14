@@ -134,6 +134,12 @@
       "project": ["src/**/*.ts", "dev/*.ts", "test/**/*.ts", "scripts/*.mjs", "vite.config.ts"],
       "ignoreDependencies": ["@evenrealities/evenhub-cli", "@evenrealities/evenhub-simulator"]
     },
+    "glasses/glassly": {
+      "entry": ["src/background/index.ts", "src/ui/main.ts", "build.ts", "scripts/*.ts"],
+      "project": ["src/**/*.ts", "build.ts", "scripts/*.ts"],
+      "ignoreDependencies": ["@evenrealities/pretext"],
+      "ignoreBinaries": ["glassly"]
+    },
     "shared": {
       "entry": ["types/*.ts", "remoteClient/index.ts"],
       "project": ["types/*.ts", "remoteClient/*.ts"]

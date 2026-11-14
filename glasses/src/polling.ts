@@ -16,7 +16,7 @@ import type { Cancel } from './platform';
 
 /** How often the glasses read each computer while Pane is in front, and while it isn't. */
 export const POLL_FRONT_MS = 2_000;
-export const POLL_BEHIND_MS = 5_000;
+const POLL_BEHIND_MS = 5_000;
 
 /** When to read next, and a way to read at once (on wake or a touch). */
 export class PollClock {

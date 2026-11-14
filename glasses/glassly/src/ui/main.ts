@@ -1,9 +1,10 @@
 // Pane's phone screen in the Glassly app: pairing, the paired computers and what the glasses show.
 import type { PhoneCommand, PhoneState } from '../channels';
 
+/** The part of Glassly's injected `glassly` bus this screen uses, with Pane's two channels. */
 interface GlasslyBus {
-  send(channel: string, payload: unknown): void;
-  on(channel: string, handler: (payload: unknown) => void): () => void;
+  send(channel: 'command', payload: PhoneCommand): void;
+  on(channel: 'state', handler: (payload: PhoneState) => void): () => void;
 }
 
 function element<T extends HTMLElement>(id: string, type: new () => T): T {
@@ -12,6 +13,8 @@ function element<T extends HTMLElement>(id: string, type: new () => T): T {
   return found;
 }
 
+// SAFETY: Glassly injects `glassly` into its miniapp WebViews before content loads; the background
+// sends PhoneState on `state` and reads PhoneCommand on `command`, both defined in ../channels.
 const bus = (globalThis as { glassly?: GlasslyBus }).glassly;
 const ui = {
   status: element('status', HTMLParagraphElement),
@@ -53,7 +56,7 @@ function render(state: PhoneState): void {
 if (!bus) {
   ui.status.textContent = "This page runs inside the Glassly app. Open Pane there.";
 } else {
-  bus.on('state', (payload) => render(payload as PhoneState));
+  bus.on('state', render);
   ui.pair.addEventListener('click', () => {
     const code = ui.code.value.trim();
     if (code) command({ type: 'pair', code });

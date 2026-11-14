@@ -7,16 +7,19 @@ import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
+import type { JsonValue } from '../../shared/validation/boundaryDecoder.ts';
 import { pinnedPackage } from './scripts/pinned.ts';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const repo = join(root, '..', '..');
 const dist = join(root, 'dist');
 
+/** miniapp.json as read from disk; Glassly's own check below decides whether it is valid. */
+type Manifest = Record<string, JsonValue>;
 interface Finding { api: string; line: number; column: number; replacement: string }
 interface GlasslyChecks {
   findUnsupportedBackgroundApis(source: string, fileName: string): Finding[];
-  validateManifest(manifest: unknown): { valid: boolean; errors: string[] };
+  validateManifest(manifest: Manifest): { valid: boolean; errors: string[] };
 }
 
 /** Glassly's runtime guard and manifest check, from the pinned CLI source, bundled for Node. */
@@ -36,6 +39,7 @@ export async function glasslyChecks(): Promise<GlasslyChecks> {
     external: ['typescript', '@glassly/miniapp', '@glassly/miniapp/*'],
     logLevel: 'error',
   });
+  // SAFETY: the bundle above exports exactly these two functions from Glassly's CLI source.
   return import(pathToFileURL(out).href) as Promise<GlasslyChecks>;
 }
 
@@ -53,7 +57,7 @@ export function bundledModules(output: string): Array<{ path: string; code: stri
 
 export async function buildMiniapp(): Promise<void> {
   const checks = await glasslyChecks();
-  const manifest: unknown = JSON.parse(readFileSync(join(root, 'miniapp.json'), 'utf8'));
+  const manifest: Manifest = JSON.parse(readFileSync(join(root, 'miniapp.json'), 'utf8'));
   const { valid, errors } = checks.validateManifest(manifest);
   if (!valid) throw new Error(`miniapp.json fails Glassly's check:\n  ${errors.join('\n  ')}`);
 
@@ -96,6 +100,7 @@ export async function buildMiniapp(): Promise<void> {
   copyFileSync(join(root, 'src', 'ui', 'index.html'), join(dist, 'ui', 'index.html'));
 }
 
+// SAFETY: Bun sets `import.meta.main`; Node leaves it undefined, so the argv check decides there.
 const isMain = (import.meta as { main?: boolean }).main ?? (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]);
 if (isMain) {
   buildMiniapp().then(() => console.log(`Built ${relative(process.cwd(), dist) || dist}`), (error: Error) => {

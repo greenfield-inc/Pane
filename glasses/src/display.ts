@@ -103,7 +103,8 @@ export class Display {
   lastWrite: WriteSummary = { rebuilt: false, texts: 0, images: 0 };
   onPage: (page: Page) => void = () => {};
 
-  constructor(private readonly bridge: GlassesBridge) {}
+  /** `draw` makes an image box's PNG; the WebView's canvas draws it unless a test passes its own. */
+  constructor(private readonly bridge: GlassesBridge, private readonly draw: typeof drawLogoStrip = drawLogoStrip) {}
 
   /** Forget what is on the glasses, so the next page is sent in full. */
   invalidate(): void {
@@ -194,7 +195,7 @@ export class Display {
       shown.images.set(box.name, box.key);
       let imageData: Uint8Array;
       try {
-        imageData = await drawLogoStrip(box.marks, { width: box.w, height: box.h, rowHeight: box.rowHeight });
+        imageData = await this.draw(box.marks, { width: box.w, height: box.h, rowHeight: box.rowHeight });
       } catch (error) {
         console.error('[Pane glasses] image not drawn', error);
         continue;

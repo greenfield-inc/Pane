@@ -97,19 +97,19 @@ const hostErrorSchema = boundary.object({
  * What a host fetch answers. The browser's Response fits it, and so does Glassly's, which has
  * no `clone()` and no streaming body.
  */
-export interface HostResponse {
+interface HostResponse {
   ok: boolean;
   status: number;
   body?: RemoteFetchResponse['body'];
-  json(): Promise<unknown>;
+  json(): Promise<JsonValue>;
   text(): Promise<string>;
 }
 
 export type HostFetch = (url: string, init?: Parameters<RemoteFetch>[1]) => Promise<HostResponse>;
 
-function parseJson(text: string): unknown {
+function parseJson(text: string): JsonValue {
   try {
-    return JSON.parse(text);
+    return decodeOptionalBoundary(JSON.parse(text), boundary.json) ?? null;
   } catch {
     return null;
   }

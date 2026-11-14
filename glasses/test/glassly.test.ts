@@ -22,8 +22,9 @@ const profiles = new Map<string, GlassesCapabilities>();
 beforeAll(async () => {
   const dir = join(await pinnedPackage('engine'), 'src', 'types', 'capabilities');
   for (const file of readdirSync(dir).filter((name) => name.endsWith('.ts') && name !== 'index.ts')) {
-    const module: Record<string, unknown> = await import(pathToFileURL(join(dir, file)).href);
-    const profile = Object.values(module).find((value): value is GlassesCapabilities => typeof value === 'object' && value !== null && 'modelName' in value);
+    // SAFETY: each file under capabilities/ exports its device's Capabilities object and nothing else.
+    const module = (await import(pathToFileURL(join(dir, file)).href)) as Record<string, GlassesCapabilities>;
+    const profile = Object.values(module).find((value) => Boolean(value.modelName));
     if (profile) profiles.set(file.replace(/\.ts$/, ''), profile);
   }
 }, 60_000);
@@ -139,7 +140,7 @@ describe('touch', () => {
 
 describe("Glassly's speech-to-text", () => {
   it('shows partial words while you speak and answers with every final phrase', async () => {
-    let heard: ((words: { text: string; isFinal: boolean }) => void) | null = null;
+    let heard: (words: { text: string; isFinal: boolean }) => void = () => {};
     let stopped = false;
     const previews: string[] = [];
     const dictation = glasslyDictation((onHeard) => {
@@ -149,7 +150,7 @@ describe("Glassly's speech-to-text", () => {
       queueMicrotask(fn);
       return { cancel() {} };
     }, (preview) => previews.push(preview));
-    const say = (words: string, isFinal: boolean) => (heard as unknown as (value: { text: string; isFinal: boolean }) => void)({ text: words, isFinal });
+    const say = (words: string, isFinal: boolean) => heard({ text: words, isFinal });
     say('approve the', false);
     say('approve the nightly backup', true);
     say('and run', false);

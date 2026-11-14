@@ -2,7 +2,7 @@
 // manifest check and runtime guard (whose dependencies are newer than this repo's 7-day install
 // floor) and the engine's device profiles (whose dependencies pull in React Native).
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
@@ -25,7 +25,7 @@ const cache = join(root, '.cache', 'pinned');
 
 /** Writes each regular file of a tar archive under `dir`. */
 function untar(archive: Uint8Array, dir: string): void {
-  const text = (start: number, length: number) => new TextDecoder().decode(archive.subarray(start, start + length)).replace(/\0.*$/s, '');
+  const text = (start: number, length: number) => new TextDecoder().decode(archive.subarray(start, start + length)).split('\u0000')[0] ?? '';
   for (let offset = 0; offset + 512 <= archive.length;) {
     const name = text(offset, 100);
     if (!name) break;
@@ -57,9 +57,4 @@ export async function pinnedPackage(name: PinnedName): Promise<string> {
   untar(gunzipSync(bytes), dir);
   writeFileSync(done, integrity);
   return join(dir, 'package');
-}
-
-/** A file inside a pinned package, as text. */
-export async function pinnedFile(name: PinnedName, path: string): Promise<string> {
-  return readFileSync(join(await pinnedPackage(name), path), 'utf8');
 }

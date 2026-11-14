@@ -18,6 +18,7 @@ function files(dir: string): string[] {
 
 export async function packMiniapp(): Promise<string> {
   await buildMiniapp();
+  // SAFETY: buildMiniapp just passed miniapp.json through Glassly's manifest check, which requires both fields.
   const manifest = JSON.parse(readFileSync(join(root, 'miniapp.json'), 'utf8')) as { packageName: string; version: string };
   const zip = new JSZip();
   const dist = join(root, 'dist');
@@ -30,6 +31,7 @@ export async function packMiniapp(): Promise<string> {
   return out;
 }
 
+// SAFETY: Bun sets `import.meta.main`; Node leaves it undefined, so the argv check decides there.
 const isMain = (import.meta as { main?: boolean }).main ?? (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]);
 if (isMain) {
   packMiniapp().then((out) => console.log(`Packed ${relative(process.cwd(), out)}`), (error: Error) => {

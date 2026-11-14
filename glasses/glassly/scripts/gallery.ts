@@ -13,9 +13,10 @@ const out = join(root, 'build', 'gallery.html');
 
 interface Element { type: string; id?: string; box: { x: number; y: number; w: number; h: number }; text?: string; style?: { border?: number; color?: number } }
 interface Profile { modelName: string; display?: { width?: number; height?: number; maxTextElements?: number; maxImageElements?: number; maxTextLines?: number; resolution?: { width: number; height: number } } | null }
+interface GalleryPage { boxes: Array<{ kind: string }> }
 interface Bundle {
-  pages: Array<[string, { boxes: Array<{ kind: string }> }]>;
-  render(page: unknown, profile: Profile): { tier: 'full' | 'glance'; elements: Element[]; textBoxes: number };
+  pages: Array<[string, GalleryPage]>;
+  render(page: GalleryPage | undefined, profile: Profile): { tier: 'full' | 'glance'; elements: Element[]; textBoxes: number };
   textWidth(text: string): number;
 }
 
@@ -60,6 +61,7 @@ async function loadBundle(): Promise<Bundle> {
     }],
     logLevel: 'error',
   });
+  // SAFETY: the bundle above exports `pages`, `render` and `textWidth` with these shapes.
   return import(pathToFileURL(file).href) as Promise<Bundle>;
 }
 
@@ -67,8 +69,9 @@ async function loadProfiles(): Promise<Array<[string, Profile]>> {
   const dir = join(await pinnedPackage('engine'), 'src', 'types', 'capabilities');
   const profiles: Array<[string, Profile]> = [];
   for (const file of readdirSync(dir).filter((name) => name.endsWith('.ts') && name !== 'index.ts' && name !== 'none.ts')) {
-    const module: Record<string, unknown> = await import(pathToFileURL(join(dir, file)).href);
-    const profile = Object.values(module).find((value): value is Profile => typeof value === 'object' && value !== null && 'modelName' in value);
+    // SAFETY: each file under capabilities/ exports its device's Capabilities object and nothing else.
+    const module = (await import(pathToFileURL(join(dir, file)).href)) as Record<string, Profile>;
+    const profile = Object.values(module).find((value) => Boolean(value.modelName));
     if (profile?.display) profiles.push([file.replace(/\.ts$/, ''), profile]);
   }
   return profiles;

@@ -105,7 +105,7 @@ function awayText(row: HomeRow, clock: (epochMs: number) => string): string | nu
  * A row's status mark, drawn by the glasses' own font: needs you ●, working ◐, idle ○,
  * stopped ■, away ×, a message ◇. The new-Session row has none.
  */
-export function statusMark(row: HomeRow): string {
+function statusMark(row: HomeRow): string {
   if (row.kind === 'new') return '';
   if (row.status !== 'live' || row.kind === 'computer') return '×';
   if (row.kind === 'question') return '●';
@@ -119,7 +119,7 @@ export function statusMark(row: HomeRow): string {
 }
 
 /** How long ago, short: "now", "3m", "2h", "4d". */
-export function age(epochMs: number, now: number): string {
+function age(epochMs: number, now: number): string {
   const minutes = Math.floor(Math.max(0, now - epochMs) / 60_000);
   if (minutes < 1) return 'now';
   if (minutes < 60) return `${minutes}m`;

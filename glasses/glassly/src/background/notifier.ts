@@ -4,9 +4,12 @@
 
 /** Glassly's notification calls, which a Glassly App too old to post them refuses. */
 export interface Poster {
-  post(notification: { id: string; title: string; content: string }): Promise<unknown>;
-  dismiss(id: string): Promise<unknown>;
+  post(notification: { id: string; title: string; content: string }): Promise<void>;
+  dismiss(id: string): Promise<void>;
 }
+
+/** What Glassly rejects a request with: an Error, or a plain `{ code, message }` object. */
+type Refusal = Error | { message?: string };
 
 /** A question as a notification shows it. */
 export interface Asked {
@@ -83,12 +86,12 @@ export class Notifier {
     return newest;
   }
 
-  private send(call: () => Promise<unknown>): void {
+  private send(call: () => Promise<void>): void {
     if (this.unsupported) return;
-    call().catch((error: unknown) => {
+    call().catch((error: Refusal) => {
       // An older Glassly App can't post; Pane works without it, so this is logged, not shown.
       this.unsupported = true;
-      this.log(`[Pane glasses] notifications off: ${error instanceof Error ? error.message : JSON.stringify(error)}`);
+      this.log(`[Pane glasses] notifications off: ${error.message ?? 'refused'}`);
     });
   }
 }

@@ -334,6 +334,9 @@ importers:
       '@evenrealities/evenhub-simulator':
         specifier: 0.9.5
         version: 0.9.5
+      '@glassly/miniapp':
+        specifier: 0.4.0
+        version: 0.4.0(react@19.2.3)
       vite:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@24.13.3)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
@@ -23845,7 +23848,7 @@ snapshots:
   vite-node@3.2.4(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.51.0)(terser@5.51.2)(yaml@2.9.0):
     dependencies:
       cac: 6.7.14
-      debug: 4.4.1
+      debug: 4.4.3
       es-module-lexer: 1.7.0
       pathe: 2.0.3
       vite: 6.3.5(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.33.0)(sass@1.51.0)(terser@5.51.2)(yaml@2.9.0)
