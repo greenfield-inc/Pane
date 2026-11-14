@@ -64,6 +64,16 @@ describe('previews under the computer’s names', () => {
     expect((await get(proxyPort, `files.${ID}.${DOMAIN}`, '/file/x/index.html', cookie)).status).toBe(403);
   });
 
+  it('finds its own cookie behind a same-named cookie another page set on the parent domain', async () => {
+    const { previews, proxyPort, devPort } = await setup();
+    const address = new URL(previews.address({ port: devPort }, 'phone-1'));
+    const cookie = String((await get(proxyPort, address.hostname, `${address.pathname}${address.search}`)).headers['set-cookie']).split(';')[0];
+
+    const page = await get(proxyPort, address.hostname, '/', `pane_preview=planted-by-a-sibling; ${cookie}`);
+
+    expect(page).toMatchObject({ status: 200, body: 'vite /' });
+  });
+
   it('refuses the preview address without a ticket or cookie', async () => {
     const { proxyPort, devPort } = await setup();
     expect((await get(proxyPort, `p${devPort}.${ID}.${DOMAIN}`, '/')).status).toBe(403);

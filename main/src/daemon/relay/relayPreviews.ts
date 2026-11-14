@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import type http from 'http';
 import { hostnameOf, singleHeader, type PreviewRoute } from '../previewProxy';
 import { filesHost, parseComputerName, portHost } from './computerNames';
+import { PaneError } from '../../../../shared/paneError';
 
 const TICKET_TTL_MS = 60_000;
 const SESSION_TTL_MS = 12 * 60 * 60_000;
@@ -45,9 +46,11 @@ export class RelayPreviews {
   address(target: { port: number } | { files: string }, clientId: string): string {
     const id = this.options.id();
     const domain = this.options.domain();
-    if (!id || !domain) throw new Error('Phone access is not ready on this computer yet.');
+    if (!id || !domain) {
+      throw new PaneError('ERR_RELAY_NOT_READY', 'Phone access is not ready on this computer yet, so the preview did not open.', 'Try again in a moment.');
+    }
     if ('port' in target && !this.options.isForwardedPort(target.port)) {
-      throw new Error(`Nothing on this computer is listening on port ${target.port}.`);
+      throw new PaneError('ERR_RELAY_PREVIEW_PORT', `Nothing on this computer is listening on port ${target.port}, so there is nothing to preview.`, 'Start the dev server, then open the preview again.');
     }
     const host = 'port' in target ? portHost(target.port, id, domain) : filesHost(id, domain);
     const ticket = randomBytes(24).toString('base64url');
@@ -88,13 +91,14 @@ export class RelayPreviews {
       return {
         kind: 'redirect',
         location: `${url.pathname}${url.search}`,
+        // SameSite=None: the browser app shows previews in an iframe on its own origin, a third-party context.
         setCookie: `${COOKIE}=${session}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=${SESSION_TTL_MS / 1000}`,
       };
     }
-    const cookie = readCookie(singleHeader(request.headers.cookie), COOKIE);
-    if (!cookie) return forbidden;
-    const presented = sha256(cookie);
-    const session = this.sessions.find((candidate) => candidate.host === host && timingSafeEqual(candidate.hash, presented));
+    // Until the domain is on the Public Suffix List, a sibling name can set a parent-domain cookie of
+    // the same name, which the browser may send first; any matching value counts.
+    const presented = readCookies(singleHeader(request.headers.cookie), COOKIE).map(sha256);
+    const session = this.sessions.find((candidate) => candidate.host === host && presented.some((hash) => timingSafeEqual(candidate.hash, hash)));
     if (!session || !this.options.clientActive(session.clientId)) return forbidden;
     const path = `${url.pathname}${url.search}`;
     if (name.kind === 'files') return { kind: 'files', path };
@@ -109,10 +113,9 @@ export class RelayPreviews {
   }
 }
 
-function readCookie(header: string, name: string): string | null {
-  for (const part of header.split(';')) {
+function readCookies(header: string, name: string): string[] {
+  return header.split(';').flatMap((part) => {
     const [key, ...value] = part.trim().split('=');
-    if (key === name) return value.join('=');
-  }
-  return null;
+    return key === name ? [value.join('=')] : [];
+  });
 }
