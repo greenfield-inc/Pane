@@ -36,8 +36,9 @@ folder is void and runs again, up to 3 attempts; the report gives the void
 rate. Relative paths that climb out of the run folder are not detected.
 
 A stub stands in for Pane on both the CLI and the MCP server. It logs every
-call; answers with the scenario's script or, for anything unscripted, a
-minimal valid example of the command's result; and passes `--help`,
+call; answers with the scenario's script (where `$NAME` becomes the call's
+`--name`) or, for anything unscripted, a minimal valid example of the
+command's result; and passes `--help`,
 `agent-context` and `docs` to the version under test, so no card, Pane or
 secret is touched. Before the first session, every scripted answer is checked
 against the MCP tool's output schema, and a script key that names no runpane
