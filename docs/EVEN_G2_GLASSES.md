@@ -199,6 +199,19 @@ Pane in the Glassly app is the same app with these differences:
 - **Images**: Glassly draws no OS logos on stock G2 firmware; the status marks stay.
 - **Other glasses**: glasses smaller than G2's screen, or without swipes, show a glance: how many
   questions wait and the newest one. New questions also arrive as notifications there.
+- **Read aloud**: switch on **Read new questions aloud** on Pane's phone screen and each question
+  that pops up as a notification is also spoken from the phone or Bluetooth headphones (G2 has no
+  speaker). Off by default; it follows the same quiet rules.
+- **Mirror**: Pane's phone screen in the Glassly app shows what Pane shows on the glasses, live.
+  Only Pane's own screens, never other miniapps'.
+- **Glassly AI**: ask Glassly's assistant "what needs me in Pane?" or "what's the PR status of
+  nightly-backup?". It can also prepare an answer ("answer the nightly-backup question with yes")
+  or a new Session, but sends or starts nothing: a notification asks you to confirm, opening Pane
+  shows the card with that choice selected (or the request), and one press does it. An unconfirmed
+  request lapses after 2 minutes. Pane answers only Glassly's own assistant, never another miniapp.
+- **Dashboard widget** (Glassly's custom firmware only): Pane's widget shows "3 working · 1 needs
+  you" and the newest question. Tap to expand it to that question's choices, swipe to pick, tap to
+  answer; a tap in the next 5 seconds takes the answer back.
 
 ## Revoke
 
