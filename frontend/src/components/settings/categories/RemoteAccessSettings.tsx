@@ -41,6 +41,8 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
   const [selectError, setSelectError] = useState<string | null>(null);
   const [password, setPassword] = useState<{ id: string; value: string } | null>(null);
   const [pairing, setPairing] = useState(false);
+  // Kept here: an unlinked computer's row is gone after the reload, but its outcome may ask the person to finish elsewhere.
+  const [unlinkOutcome, setUnlinkOutcome] = useState<string | null>(null);
   const handledPasswordRequest = useRef<number | null>(null);
 
   const local = machines[0];
@@ -174,15 +176,16 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
         }}
       />
 
-      {linked.length > 0 && (
+      {(linked.length > 0 || unlinkOutcome) && (
         <RemoteGroup
           title="Your computers"
           footnote="Linked computers share their phones: a phone paired with one reaches all of them."
         >
           <div id={settingDomId('remote-linked-computers')} data-setting-id="remote-linked-computers" tabIndex={-1} className="divide-y divide-border-secondary outline-none">
             {linked.map((computer) => (
-              <LinkedComputerRow key={computer.id} computer={computer} controller={controller} />
+              <LinkedComputerRow key={computer.id} computer={computer} controller={controller} onOutcome={setUnlinkOutcome} />
             ))}
+            {unlinkOutcome && <p className={`text-xs text-text-secondary ${CARD_ROW}`} role="status">{unlinkOutcome}</p>}
           </div>
         </RemoteGroup>
       )}
@@ -536,8 +539,7 @@ function PhoneRow({ title, detail, children }: { title: string; detail: string; 
 }
 
 /** A computer linked with this one when a phone scanned both. */
-function LinkedComputerRow({ computer, controller }: { computer: RemoteDaemonClientRecord; controller: RemoteAccessController }) {
-  const [outcome, setOutcome] = useState<string | null>(null);
+function LinkedComputerRow({ computer, controller, onOutcome }: { computer: RemoteDaemonClientRecord; controller: RemoteAccessController; onOutcome: (line: string | null) => void }) {
   const [busy, setBusy] = useState(false);
   const connected = controller.hostState.connectedClients.some((entry) => entry.clientId === computer.id);
   const detail = [computer.linkedBy && `Linked by ${computer.linkedBy}`, connected ? 'Connected now' : null].filter(Boolean).join(' · ');
@@ -573,17 +575,16 @@ function LinkedComputerRow({ computer, controller }: { computer: RemoteDaemonCli
               description: 'It stops reaching your other computers, and they stop reaching it.',
               onClick: () => {
                 setBusy(true);
-                setOutcome(null);
+                onOutcome(null);
                 void runEverywhere(controller, 'relay:unlink-computer-everywhere', { computerId }, `Unlinked ${computer.label}`).then((line) => {
                   setBusy(false);
-                  setOutcome(line);
+                  onOutcome(line);
                 });
               },
             }]}
           />
         )}
       </div>
-      {outcome && <p className="mt-2 text-xs text-text-secondary" role="status">{outcome}</p>}
     </div>
   );
 }

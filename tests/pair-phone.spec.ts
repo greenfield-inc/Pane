@@ -133,13 +133,19 @@ test('Remove from all your computers removes the phone everywhere and says where
   await shot(page, 'settings-removed-dark');
 });
 
-test('Unlink from all your computers unlinks the computer', async ({ page }) => {
-  await openRemoteAccess(page);
-  await page.getByRole('button', { name: 'Unlink Travel Laptop' }).click();
-  await page.getByRole('menuitem', { name: /Unlink from all your computers/ }).click();
-  await expect.poll(() => calls(page, 'relay:unlink-computer-everywhere')).toEqual([[{ computerId: 'p4x8n2' }]]);
-  await expect(page.getByTestId('linked-Travel Laptop')).toHaveCount(0);
-});
+for (const theme of ['light', 'dark'] as const) {
+  test(`Unlink from all your computers unlinks the computer and says where it could not (${theme})`, async ({ page }) => {
+    await openRemoteAccess(page, { relay: { everywhere: { removed: ['devbox'], notReached: ['Build Box'] } } }, theme);
+    await page.getByRole('button', { name: 'Unlink Travel Laptop' }).click();
+    await page.getByRole('menuitem', { name: /Unlink from all your computers/ }).click();
+    await expect.poll(() => calls(page, 'relay:unlink-computer-everywhere')).toEqual([[{ computerId: 'p4x8n2' }]]);
+    await expect(page.getByTestId('linked-Travel Laptop')).toHaveCount(0);
+    const status = page.getByRole('status').filter({ hasText: 'Unlinked Travel Laptop from devbox.' });
+    await expect(status).toContainText("Build Box didn't answer and still has it.");
+    await status.evaluate((line) => line.scrollIntoView({ block: 'center' }));
+    await shot(page, `settings-unlinked-${theme}`);
+  });
+}
 
 test('Relay address saves on Enter or leaving the field, and a bad one says how to fix it', async ({ page }) => {
   await openRemoteAccess(page);
