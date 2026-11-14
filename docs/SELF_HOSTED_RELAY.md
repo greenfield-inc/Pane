@@ -52,7 +52,11 @@ staging while you try things out.
 path to each other; without it they still connect.
 
 `runpane relay --help` and [relay/README.md](../relay/README.md) list every
-flag, including connection and byte limits and the blocklist.
+flag, including connection and byte limits and the blocklist. Limits count
+each client address, so a flood slows and refuses only the address it comes
+from. Many computers behind one shared address, such as an office network,
+may need a higher `--limit-agent-conns-per-min` and
+`--limit-new-ids-per-hour`.
 
 ## Two name servers
 
