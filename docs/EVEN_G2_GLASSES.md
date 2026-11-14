@@ -1,16 +1,19 @@
 # Use Pane from Even G2 glasses
 
 The Pane glasses app runs on [Even Realities G2](https://www.evenrealities.com) glasses, inside the
-Even Realities phone app. It shows every Pane Notify card from all your computers, lets you answer
-with the R1 ring or your voice, and opens any Pane's live terminal so you can read it and dictate
-into it.
+Even Realities phone app or inside the [Glassly](https://glassly.ai) app. It shows every Pane Notify
+card from all your computers, lets you answer with the R1 ring or your voice, and opens any Pane's
+live terminal so you can read it and dictate into it. Glassly also runs it on other display
+glasses: the full app on glasses with a screen at least 576 × 288 and tap, double tap and swipes
+(today G2), and a read-only glance on the rest. See [Pane on Glassly](#pane-on-glassly).
 
 It talks straight to each of your computers over Tailscale. Pane has no relay.
 
 ## What you need
 
 - G2 glasses (the R1 ring is optional; the temple touchpads do the same gestures).
-- The Even Realities app on your phone, and the Pane app ([iOS and Android](NATIVE_MOBILE.md)).
+- The Even Realities app or the Glassly app on your phone, and the Pane app
+  ([iOS and Android](NATIVE_MOBILE.md)). Use one of them for Pane at a time.
 - Tailscale on the phone and on each computer, signed in with the same login.
 - Pane open on each computer, with **Settings › Remote Access › Who can connect** set to
   **Only me** or **Everyone on tailnet** (on by default for the Pane that owns `~/.pane`).
@@ -48,6 +51,16 @@ A paired computer on an older Pane can't ask for the others; the glasses skip it
 a computer by hand: tap **Add computers** in Settings › Glasses and paste the new code the same way.
 Computers that are offline are skipped and named on the screen.
 
+### With Glassly
+
+1. Install **Pane** from the Glassly store in the Glassly app. Until it is listed, a developer
+   build installs from a QR code: **Settings › Miniapp Developer Settings › Scan Miniapp QR Code**.
+2. In the Pane phone app, open **Settings › Glasses** and tap **Pair glasses**, as above.
+3. In the Glassly app, open Pane's phone screen, paste the code and tap **Pair**. The screen lists
+   each computer and whether it answers.
+
+Everything else in this page applies, with the differences under [Pane on Glassly](#pane-on-glassly).
+
 ### The Even app's origin
 
 The Even app serves the glasses app from `http://127.0.0.1`, on a port it picks each time it starts.
@@ -70,8 +83,10 @@ Esc and Tab. You can't dictate in keys mode; leave it first.
 
 - **Home** is one list across every paired computer: questions first, newest first, then info
   cards, then every Session and Pane, newest activity first. Each row starts with its computer's OS logo (Apple,
-  Windows or Linux; a plain monitor for a computer whose Pane is too old to say) and the first five
-  letters of its name. The selected row starts with ">" at full brightness. The header counts the
+  Windows or Linux; a plain monitor for a computer whose Pane is too old to say; not on Glassly),
+  its status (● needs you, ◐ working, ○ idle, ■ stopped, × computer away, ◇ a message) and the
+  first five letters of its computer's name, and ends with its age ("3m"). The selected row starts
+  with ">" at full brightness. The header counts the
   questions waiting ("All computers · 2 need you") and confirms an answer you just sent. The list
   updates while it is open: a new Pane shows within about a second. Press a question to open its
   card (hold to answer it by voice), an info card to read its message, or a Session or Pane to open
@@ -90,7 +105,12 @@ Esc and Tab. You can't dictate in keys mode; leave it first.
   pair). When no computer answers and none has rows yet, home is one page
   that says so.
 - **A card** shows the asking Pane's last output lines (dimmed), the question, and the choices.
-  A long question is cut at three lines; the **Read the whole question** row shows all of it.
+  The choice the asker recommends is starred (★). A long question is cut at three lines; the
+  **Read the whole question** row shows all of it.
+- **An answer waits 5 seconds** on the glasses behind **Sent · double press to undo** before it
+  goes to the computer. A double press there takes it back: the card is waiting again and the agent
+  received nothing. If the card is answered elsewhere or the app stops in those 5 seconds, nothing
+  is sent.
 - **A terminal** shows the Pane's live screen, refreshed about once a second. Opening it marks the
   Pane viewed on that computer, as opening it there does. A stopped Pane starts its saved agent or command. The terminal hides an
   agent's input box and the status rows under it, so you read its output. Each swipe moves half a
@@ -146,12 +166,39 @@ sends nothing. On a banner, the touch acts on its card:
 
 The glasses never go quiet while you hold to talk or while a menu choice is being sent. Coming back to the app from the glasses menu opens it awake.
 
-Ambient mode is on by default. To turn it off, open Pane in the Even app on the phone and switch off
-**Ambient mode**; it applies at once and stays off after the app restarts. Off, the glasses behave as
+Ambient mode is on by default. To turn it off, open Pane's phone screen in the Even app or the
+Glassly app and switch off **Ambient mode**; it applies at once and stays off after the app restarts. Off, the glasses behave as
 before: they stay on the screen you left and show no banners.
 
 With the app closed, Pane's phone alerts still reach the glasses through the Even app's
 notification mirroring, as the title only ("planner has a question").
+
+## Pane on Glassly
+
+Pane in the Glassly app is the same app with these differences:
+
+- **Gestures**: as above, with tap for press. A double tap is Pane's back gesture, so Glassly's own
+  "double tap to exit" doesn't apply while Pane is in front; a double tap on home exits.
+- **Always On**: Pane starts with the Glassly app and keeps running after you swipe its card away,
+  so cards keep arriving. Turn that off in Glassly's settings for Pane.
+- **Notifications**: while another miniapp is in front, each new question pops up on the glasses as
+  a notification with its question, and leaves once it is answered anywhere. They stay quiet while
+  any paired computer has been used in the last 2 minutes (that computer alerts you instead) and
+  during a timed calendar event, if you let Pane read your calendar. When the event ends, one
+  notification says how many questions waited and names the event. Opening Pane shows the newest
+  notified card with its recommended choice selected; one press answers. Notifications need a
+  Glassly app that can post them; an older one runs Pane without them. A computer on an older
+  Pane never counts as in use.
+- **Speech-to-text**: a computer with a Deepgram or fal key turns your speech into text, as with
+  the Even app. A computer with neither, or one on an older Pane that refuses the glasses' live
+  voice connection, uses Glassly's own speech-to-text instead. That speech goes to Glassly's cloud
+  and counts against your Glassly plan's minutes.
+- **Updates**: Glassly can't keep a live connection open for Pane, so the glasses read each
+  computer every 2 seconds while Pane is in front, and its cards every 5 seconds while it isn't.
+  A computer that doesn't answer for 10 seconds shows offline.
+- **Images**: Glassly draws no OS logos on stock G2 firmware; the status marks stay.
+- **Other glasses**: glasses smaller than G2's screen, or without swipes, show a glance: how many
+  questions wait and the newest one. New questions also arrive as notifications there.
 
 ## Revoke
 
@@ -180,8 +227,8 @@ are lost. Two gaps remain:
 
 ## Security
 
-The glasses app is a web page inside the Even app. Each computer lets it in only when all of these
-hold:
+The glasses app is a web page inside the Even app, or a miniapp inside the Glassly app, which sends
+the Even app's origin. Each computer lets it in only when all of these hold:
 
 - The request comes through Tailscale Serve on your tailnet with **your** Tailscale login. Other
   people on your tailnet are refused even with a valid glasses token. Funnel is never used: while
@@ -227,8 +274,8 @@ computers, reach anyone else's computer, change settings, write files, commit, r
 commands, or choose what a terminal runs, and its event stream never carries terminal output.
 
 Typing into a terminal can run commands, so treat the glasses like your phone: whoever holds a
-working token on your tailnet and login can type into your shells. The Even app serves the glasses
-app's code, so a compromised Even build could read the token on your phone; revoke the glasses if
+working token on your tailnet and login can type into your shells. The Even app or the Glassly app
+runs the glasses app's code, so a compromised build of either could read the token on your phone; revoke the glasses if
 you lose the phone, and check **Last used** on each computer.
 
 The pairing code on your clipboard holds one-time pairing secrets, not tokens, and expires after
@@ -259,6 +306,15 @@ several; a loopback one covers every port). `glasses/dev/gallery.html` shows the
 can't reach, and `glasses/dev/ambient.html?at=35:q,60:answer` runs the demo with ambient mode on and
 raises or answers cards on a schedule (see the top of `glasses/dev/ambient.ts`). The host side is `main/src/daemon/glassesAccess.ts`; the shared pairing-code format is
 `shared/types/glasses.ts`.
+
+The Glassly build is [`glasses/glassly/`](../glasses/glassly): the same app in Glassly's
+background runtime. `pnpm --filter @pane/glasses-glassly build` bundles it with esbuild and runs
+Glassly's own manifest check and runtime guard over every repo module it bundles (Glassly checks
+only a project's own `src/`); `pnpm --filter @pane/glasses-glassly pack` writes
+`glasses/glassly/build/com.runpane.glasses-<version>.zip`. For a phone, run `bun x glassly dev` in
+`glasses/glassly` on a computer on the phone's Wi-Fi and scan its QR in the Glassly app. Glassly's
+CLI and device profiles are read from pinned npm tarballs (`glasses/glassly/scripts/pinned.ts`);
+`glasses/test/glassly.test.ts` checks every screen against Glassly's own G2 profile.
 
 Joining other computers is `glasses/src/autoJoin.ts`; the host side is the `runpane:glasses:vouch`
 command. The home list is `glasses/src/homeList.ts`. The firmware list can't show images, so the app draws its

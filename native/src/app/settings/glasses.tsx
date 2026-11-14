@@ -61,7 +61,7 @@ export default function GlassesSettingsScreen() {
     <Screen scroll grouped testID="glasses-settings">
       <ListSection
         title="Glasses"
-        footer={isPaired ? undefined : 'Pair Even G2 glasses with all your computers.'}
+        footer={isPaired ? undefined : 'Pair Even G2 glasses with all your computers, for Pane in the Even app or in Glassly.'}
       >
         {isPaired ? (
           <ListRow testID="glasses-device" title={deviceName} subtitle={`${pairedOn.length} ${pairedOn.length === 1 ? 'computer' : 'computers'}`} />
@@ -97,7 +97,7 @@ export default function GlassesSettingsScreen() {
       </View>
 
       {pair.data?.code ? (
-        <ListSection title="Code copied" footer="Next: in the Even app, open Pane and tap Paste.">
+        <ListSection title="Code copied" footer="Next: open Pane in the Even app and tap Paste, or open Pane's phone screen in Glassly and paste it there.">
           <ListRow testID="glasses-code-copied" title="Pairing code copied" subtitle={`It works for 10 minutes, on ${pair.data.paired.join(', ')}.`} />
           <ListRow testID="glasses-open-even" title="Open Even app" trailing="chevron" onPress={() => void openEven()} />
         </ListSection>

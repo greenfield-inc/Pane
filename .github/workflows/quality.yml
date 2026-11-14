@@ -92,6 +92,13 @@ jobs:
     - name: Run frontend unit tests
       run: CI=1 pnpm --filter frontend exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
 
+    # The glasses app's tests cover both builds; the Glassly build also runs Glassly's own
+    # manifest check and runtime guard.
+    - name: Run glasses tests and build the Glassly miniapp
+      run: |
+        CI=1 pnpm --filter @pane/glasses exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+        pnpm --filter @pane/glasses-glassly build
+
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
     # failed so it never hides behind them.
