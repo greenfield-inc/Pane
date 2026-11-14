@@ -11,6 +11,7 @@ import { getRemoteDaemonHostConfigValidationError } from '../../../shared/types/
 import type { RemoteDaemonHostConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { PaneRemoteHttpApiServer, type PairingRoute } from './httpApiServer';
+import type { GlassesAccess } from './glassesAccess';
 import { remoteHostRuntimeStateStore } from './remoteHostRuntimeState';
 import { getMobilePushSender, type MobilePushSender } from './mobilePushSender';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -67,6 +68,7 @@ export class PaneRemoteTransportController {
     private readonly isForwardedPort?: (port: number) => boolean,
     private readonly paneVersion?: string,
     private readonly pairing?: PairingRoute,
+    private readonly glasses?: GlassesAccess,
   ) {
     this.mobilePushSender = getMobilePushSender(configManager);
   }
@@ -133,6 +135,7 @@ export class PaneRemoteTransportController {
         isForwardedPort: this.isForwardedPort,
         paneVersion: this.paneVersion,
         pairing: this.pairing,
+        glasses: this.glasses,
       });
       try {
         await remoteHttpApiServer.start();

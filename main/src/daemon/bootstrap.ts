@@ -525,7 +525,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     powerMonitor.on('suspend', () => relayHost.suspend());
     powerMonitor.on('resume', () => relayHost.resume());
   }
-  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort, options.app.getVersion(), relayHost?.pairing);
+  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort, options.app.getVersion(), relayHost?.pairing, workspaceHost.glasses);
   const remoteHostTailnetMonitor = new RemoteHostTailnetMonitor(configManager);
   try {
     paneDaemonServer = new PaneDaemonServer(commandRegistry, getAppDirectory());
