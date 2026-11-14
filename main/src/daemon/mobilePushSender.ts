@@ -116,6 +116,11 @@ export class MobilePushSender {
     if (registration) {
       status.needsInputEnabled = registration.needsInputEnabled;
       status.completedEnabled = registration.completedEnabled;
+      // Alerts through the relay wait for the phone to hand back its grant (relay/PROTOCOL.md, Alerts).
+      if (!registration.relayGrant && relayFor(platform, this.configManager.getConfig().apns)) {
+        status.code = 'PUSH_AWAITING_PHONE';
+        status.message = 'Waiting for this phone to confirm this computer. Open Pane on this phone while it is connected.';
+      }
     }
     return status;
   }

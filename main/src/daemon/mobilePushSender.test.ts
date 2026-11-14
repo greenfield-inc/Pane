@@ -193,15 +193,18 @@ describe('MobilePushSender', () => {
     try {
       const sender = new MobilePushSender(manager, providers);
 
-      // Registering asks the relay to push the phone a grant; until the phone hands it back, nothing is sent.
-      await register(sender, 'fcm-token');
+      // Registering asks the relay to push the phone a grant; until the phone hands it back, nothing is
+      // sent and the phone's row says it is waiting, not On.
+      expect(await register(sender, 'fcm-token')).toMatchObject({ provider: 'ready', code: 'PUSH_AWAITING_PHONE', message: expect.stringContaining('Open Pane on this phone') });
       await vi.waitFor(() => expect(grants).toEqual([{ platform: 'android', token: 'fcm-token', hostProfileId: 'profile-1' }]));
       await blocked(sender);
       expect(sent).toEqual([]);
 
       // A grant for another computer is refused; this computer's is kept and goes with each alert.
       expect(await sender.confirmGrant('client-1', { platform: 'android', installationId: 'install-1', grant: 'laptop.sig' })).toEqual({ ok: false });
+      expect(await sender.confirmGrant('client-1', { platform: 'android', installationId: 'install-1', grant: 'studio2.sig' })).toEqual({ ok: false });
       expect(await sender.confirmGrant('client-1', { platform: 'android', installationId: 'install-1', grant: 'studio.sig' })).toEqual({ ok: true });
+      expect(sender.getStatus('client-1', 'android', 'install-1')).toMatchObject({ provider: 'ready', code: 'PUSH_READY' });
       await blocked(sender);
       expect(sent).toEqual([expect.objectContaining({ platform: 'android', grant: 'studio.sig' })]);
 

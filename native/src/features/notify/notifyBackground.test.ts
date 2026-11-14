@@ -5,10 +5,12 @@ const native = vi.hoisted(() => ({
   task: undefined as undefined | ((body: { data: unknown }) => Promise<void>),
   schedule: vi.fn((_request: { content: { categoryIdentifier?: string } }) => Promise.resolve('alert-id')),
   profiles: [] as { id: string }[],
+  appState: { currentState: 'background' },
+  refresh: vi.fn(),
   invoke: vi.fn((_client: { profile: string }, _channel: string, _args: unknown[]) => Promise.resolve({ ok: true })),
 }));
 
-vi.mock('react-native', () => ({ Platform: { OS: 'android' }, AppState: { currentState: 'background' } }));
+vi.mock('react-native', () => ({ Platform: { OS: 'android' }, AppState: native.appState }));
 vi.mock('expo-task-manager', () => ({
   defineTask: (_name: string, task: typeof native.task) => { native.task = task; },
 }));
@@ -32,6 +34,7 @@ vi.mock('@/daemon/createClient', () => ({
   createDaemonClient: (profile: { id: string }) => ({ profile: profile.id }),
 }));
 vi.mock('@/daemon/invoke', () => ({ invokeChannel: native.invoke }));
+vi.mock('@/features/notifications/usePushSetup', () => ({ requestPushRegistration: native.refresh }));
 vi.mock('@/features/notifications/device', () => ({
   clearPaneNotifications: () => Promise.resolve(), dismissNotifyAlerts: () => Promise.resolve(),
   devicePush: { platform: 'android' }, getInstallationId: () => Promise.resolve('install-1'),
@@ -72,5 +75,17 @@ describe('relay grants', () => {
     native.invoke.mockClear();
     await native.task?.({ data: { data: { hostProfileId: 'stranger', paneGrant: 'other.sig' } } });
     expect(native.invoke).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the alert rows once the computer keeps the grant while Pane is open', async () => {
+    native.profiles = [{ id: 'host-1' }];
+    native.appState.currentState = 'active';
+    native.refresh.mockClear();
+    native.invoke.mockResolvedValueOnce({ ok: false });
+    await native.task?.({ data: { data: { hostProfileId: 'host-1', paneGrant: 'other.sig' } } });
+    expect(native.refresh).not.toHaveBeenCalled();
+    await native.task?.({ data: { data: { hostProfileId: 'host-1', paneGrant: 'studio.sig' } } });
+    expect(native.refresh).toHaveBeenCalledTimes(1);
+    native.appState.currentState = 'background';
   });
 });

@@ -8,6 +8,7 @@ import { CLIENT_LABEL, createDaemonClient, DEVICE_LABEL, getRuntimeId, streaming
 import { invokeChannel } from '@/daemon/invoke';
 import { parseGrantPush, parseNotifyPush, type NotifyPush } from '@/features/links/links';
 import { clearPaneNotifications, devicePush, dismissNotifyAlerts, getInstallationId } from '@/features/notifications/device';
+import { requestPushRegistration } from '@/features/notifications/usePushSetup';
 
 import { commandForAction, IOS_BUTTONS_OPEN_APP, NOTIFY_CATEGORY, notifyCategories, optionsCategory, sendNotifyCommand, type NotifySendResult } from './notifyActions';
 
@@ -117,7 +118,9 @@ async function handBackGrant(payload: unknown): Promise<boolean> {
   if (!profile) return true;
   const request = { platform: devicePush.platform, installationId: await getInstallationId(), grant: push.grant };
   // Best effort: a grant that doesn't arrive is asked for again the next time the phone connects.
-  await invokeChannel(createDaemonClient(profile), 'mobile:push-grant', [request]).catch(() => undefined);
+  const kept = await invokeChannel<{ ok: boolean }>(createDaemonClient(profile), 'mobile:push-grant', [request]).catch(() => null);
+  // With Pane open, refresh Settings › Notifications so the computer's row turns On.
+  if (kept?.ok && AppState.currentState === 'active') requestPushRegistration();
   return true;
 }
 
