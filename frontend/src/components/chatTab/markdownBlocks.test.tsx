@@ -55,19 +55,22 @@ describe('markdownBlocks', () => {
     expect(blocks.map(html).join('')).toBe(html(reply));
   });
 
-  it('never cuts inside a code block a streaming reply has not closed yet', () => {
-    const streaming = 'Intro\n\n```py\nx = 1\n\ny = 2\n\nz = 3';
-    expect(markdownBlocks(streaming)).toEqual(['Intro\n\n', '```py\nx = 1\n\ny = 2\n\nz = 3']);
+  const rendersAsWhole = (text: string) => expect(markdownBlocks(text).map(html).join('')).toBe(html(text));
+
+  it('renders a reply still inside an unclosed code block as the whole message does', () => {
+    rendersAsWhole('Intro\n\n```py\nx = 1\n\ny = 2\n\nz = 3');
+  });
+
+  it('renders a line opening with backticks that is not a fence as the whole message does', () => {
+    rendersAsWhole('```a`b here\n\n```\ncode\n\nmore\n```\n\nEnd');
   });
 
   it('keeps a message whole when references or footnotes link across it', () => {
-    const linked = 'See [the docs][docs].\n\nMore text[^1].\n\n[docs]: https://example.com\n\n[^1]: A note.';
-    expect(markdownBlocks(linked)).toEqual([linked]);
+    expect(markdownBlocks('See [the docs][docs].\n\nMore text[^1].\n\n[docs]: https://example.com\n\n[^1]: A note.')).toHaveLength(1);
   });
 
   it('renders raw HTML that spans a blank line as the whole message does', () => {
-    for (const text of ['Before\n\n<!-- a note\n\nstill the note -->\n\nAfter', 'Before\n\n<pre>\none\n\ntwo\n</pre>\n\nAfter']) {
-      expect(markdownBlocks(text).map(html).join('')).toBe(html(text));
-    }
+    rendersAsWhole('Before\n\n<!-- a note\n\nstill the note -->\n\nAfter');
+    rendersAsWhole('Before\n\n<pre>\none\n\ntwo\n</pre>\n\nAfter');
   });
 });

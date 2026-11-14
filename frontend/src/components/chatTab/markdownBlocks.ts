@@ -1,4 +1,5 @@
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+/** A code fence opener or closer. A backtick fence's info string has no backtick, or the line is a paragraph. */
+const FENCE = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/;
 /** A line that, after a blank line, can still belong to the block before it: indented, or a list item. */
 const CONTINUES = /^(\s|[-*+](\s|$)|\d{1,9}[.)](\s|$))/;
 /**
