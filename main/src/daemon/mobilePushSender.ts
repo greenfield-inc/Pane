@@ -1,3 +1,4 @@
+import { RelayRequestError, type RelayAlert } from './relay/relayAgent';
 import { createHash, createPrivateKey, createSign, randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import os from 'os';
@@ -290,7 +291,8 @@ export class MobilePushSender {
     const buttons = notifyButtons(item);
     if (registration.platform === 'ios') {
       const credentials = readApnsCredentials(this.configManager.getConfig().apns);
-      if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
+      const relay = credentials ? null : relayForPush();
+      if (!credentials && !relay) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
       const payload: JsonObject = { ...routing };
       if (open) {
         const aps: JsonObject = { alert: { title, body }, sound: 'default', 'thread-id': threadId };
@@ -306,11 +308,14 @@ export class MobilePushSender {
         payload.notifyClear = true;
         payload.aps = { 'content-available': 1 };
       }
-      await this.sendApns(registration, credentials, { collapseId, payload, pushType: open ? 'alert' : 'background' });
+      const pushType = open ? 'alert' : 'background';
+      if (credentials) await this.sendApns(registration, credentials, { collapseId, payload, pushType });
+      else if (relay) await sendThroughRelay(relay, { platform: 'ios', token: registration.token, pushType, collapseId, payload }, 'APNs alert');
       return;
     }
     const credentials = readFcmCredentials();
-    if (!credentials) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
+    const relay = credentials ? null : relayForPush();
+    if (!credentials && !relay) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
     // A build that draws buttons builds the alert itself, so it gets data only; older builds get the system alert.
     let message: JsonObject;
     if (!registration.notifyButtons) {
@@ -326,6 +331,10 @@ export class MobilePushSender {
         data.notifyClear = '1';
       }
       message = { token: registration.token, android: { priority: 'high' }, data };
+    }
+    if (!credentials) {
+      if (relay) await sendThroughRelay(relay, { platform: 'android', message }, 'FCM alert');
+      return;
     }
     const response = await this.transport.fcm({
       token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.projectId, payload: { message },
@@ -379,19 +388,27 @@ export class MobilePushSender {
     const payload: JsonObject = { ...routing, aps: { alert: { title, body }, sound: 'default', 'thread-id': subject.groupPaneId } };
     if (registration.platform === 'ios') {
       const credentials = readApnsCredentials(this.configManager.getConfig().apns);
-      if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
-      await this.sendApns(registration, credentials, { collapseId, payload });
+      const relay = credentials ? null : relayForPush();
+      if (credentials) await this.sendApns(registration, credentials, { collapseId, payload });
+      else if (relay) await sendThroughRelay(relay, { platform: 'ios', token: registration.token, pushType: 'alert', collapseId, payload }, 'APNs alert');
+      else throw new ProviderDeliveryError(503, '', 'APNs is not configured');
       return;
     }
+    const message: JsonObject = {
+      token: registration.token, notification: { title, body },
+      android: { notification: { tag: collapseId } },
+      data: routing,
+    };
     const credentials = readFcmCredentials();
-    if (!credentials) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
+    if (!credentials) {
+      const relay = relayForPush();
+      if (!relay) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
+      await sendThroughRelay(relay, { platform: 'android', message }, 'FCM alert');
+      return;
+    }
     const response = await this.transport.fcm({
       token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.projectId,
-      payload: { message: {
-        token: registration.token, notification: { title, body },
-        android: { notification: { tag: collapseId } },
-        data: routing,
-      } },
+      payload: { message },
     });
     if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'FCM rejected notification');
   }
@@ -469,6 +486,29 @@ export class MobilePushSender {
   }
 }
 
+/** A relay that delivers alerts with the Pane app's keys, for a computer that has none (QR pairing). */
+export interface RelayPushChannel {
+  available(): boolean;
+  send(alert: RelayAlert): Promise<ProviderResponse>;
+}
+let relayPush: RelayPushChannel | null = null;
+export function setRelayPushChannel(channel: RelayPushChannel | null): void {
+  relayPush = channel;
+}
+function relayForPush(): RelayPushChannel | null {
+  return relayPush?.available() ? relayPush : null;
+}
+async function sendThroughRelay(relay: RelayPushChannel, alert: RelayAlert, what: string): Promise<void> {
+  let response: ProviderResponse;
+  try {
+    response = await relay.send(alert);
+  } catch (error) {
+    const code = error instanceof RelayRequestError ? error.code : 'provider';
+    throw new ProviderDeliveryError(code === 'throttled' ? 429 : 503, '', `Pane's servers did not send the ${what}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, `${what} rejected`);
+}
+
 /** One host config has one serial mutation stream across IPC and SSE delivery. */
 export function getMobilePushSender(configManager: MobilePushConfigManager, options?: MobilePushSenderOptions): MobilePushSender {
   const existing = senderByConfigManager.get(configManager);
@@ -479,6 +519,8 @@ export function getMobilePushSender(configManager: MobilePushConfigManager, opti
 }
 
 function providerReadiness(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): Pick<RemoteMobilePushStatus, 'provider' | 'code' | 'message'> {
+  const hasKeys = platform === 'ios' ? readApnsCredentials(apns) !== null : readFcmCredentials() !== null;
+  if (!hasKeys && relayForPush()) return { provider: 'ready', code: 'PUSH_READY', message: 'Alerts go through Pane\'s servers.' };
   if (platform === 'ios') return readApnsCredentials(apns)
     ? { provider: 'ready', code: 'PUSH_READY', message: 'APNs delivery is configured.' }
     : { provider: 'missing-config', code: 'ERR_APNS_NOT_CONFIGURED', message: 'This host has no valid APNs configuration.' };

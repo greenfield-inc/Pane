@@ -26,6 +26,18 @@ export interface RelayAgentOptions {
 
 type Frame = { t: string; [field: string]: unknown };
 
+/** A request the relay refused, with its code (`throttled`, `unconfigured`, ...). */
+export class RelayRequestError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = 'RelayRequestError';
+  }
+}
+
+export type RelayAlert =
+  | { platform: 'ios'; token: string; pushType: 'alert' | 'background'; collapseId?: string; payload: object }
+  | { platform: 'android'; message: object };
+
 const PING_INTERVAL_MS = 25_000;
 const SILENCE_TIMEOUT_MS = 75_000;
 const MAX_FRAME_BYTES = 64 * 1024;
@@ -44,7 +56,7 @@ export class RelayAgent {
   private pingTimer: NodeJS.Timeout | null = null;
   private lastHeard = 0;
   private nextRequest = 1;
-  private readonly requests = new Map<string, { resolve(): void; reject(error: Error): void }>();
+  private readonly requests = new Map<string, { resolve(frame: Frame): void; reject(error: Error): void }>();
   private state: RelayAgentState = { status: 'stopped' };
 
   constructor(private readonly options: RelayAgentOptions) {}
@@ -87,12 +99,22 @@ export class RelayAgent {
   }
 
   /** Sets the `_acme-challenge` TXT values for this computer's name. */
-  setAcmeTxt(values: string[]): Promise<void> {
-    return this.request({ t: 'txt', values });
+  async setAcmeTxt(values: string[]): Promise<void> {
+    await this.request({ t: 'txt', values });
+  }
+
+  /** Delivers a push alert with the Pane app's keys held by the relay (relay/PROTOCOL.md, Alerts). */
+  async sendAlert(alert: RelayAlert): Promise<{ status: number; body: string }> {
+    const answer = await this.request({ t: 'alert', ...alert });
+    return { status: Number(answer.status ?? 0), body: typeof answer.body === 'string' ? answer.body : '' };
+  }
+
+  isOnline(): boolean {
+    return this.state.status === 'online';
   }
 
   /** Sends a request frame and waits for its `ok`. */
-  request(frame: Frame): Promise<void> {
+  request(frame: Frame): Promise<Frame> {
     if (this.state.status !== 'online') return Promise.reject(new Error('The relay is not connected yet.'));
     const req = String(this.nextRequest++);
     return new Promise((resolve, reject) => {
@@ -101,7 +123,7 @@ export class RelayAgent {
         reject(new Error('The relay did not answer within 20 seconds.'));
       }, 20_000);
       this.requests.set(req, {
-        resolve: () => { clearTimeout(timer); resolve(); },
+        resolve: (answer) => { clearTimeout(timer); resolve(answer); },
         reject: (error) => { clearTimeout(timer); reject(error); },
       });
       this.send({ ...frame, req });
@@ -187,7 +209,7 @@ export class RelayAgent {
         this.settle(frame, null);
         return;
       case 'error':
-        if (frame.req !== undefined) this.settle(frame, new Error(String(frame.message ?? frame.code ?? 'Relay error')));
+        if (frame.req !== undefined) this.settle(frame, new RelayRequestError(String(frame.code ?? 'error'), String(frame.message ?? frame.code ?? 'Relay error')));
         else this.control?.destroy(new Error(`The relay refused this computer: ${String(frame.message ?? frame.code)}`));
         return;
       case 'ping':
@@ -206,7 +228,7 @@ export class RelayAgent {
     if (!pending) return;
     this.requests.delete(String(frame.req));
     if (error) pending.reject(error);
-    else pending.resolve();
+    else pending.resolve(frame);
   }
 
   private openData(conn: string, peer: string): void {

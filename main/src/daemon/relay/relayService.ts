@@ -10,7 +10,7 @@ import { ComputerCertificate, LETS_ENCRYPT_DIRECTORY } from './computerCertifica
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
 import { computerHost, localAddressHost } from './computerNames';
 import { PairingExchange, type PairedEvent, type PairingExchangeResult } from './pairingExchange';
-import { RelayAgent, type RelayAgentState } from './relayAgent';
+import { RelayAgent, type RelayAgentState, type RelayAlert } from './relayAgent';
 
 /** Pane's relay domain (D-19). */
 export const PANE_RELAY_DOMAIN = 'runpane.net';
@@ -85,6 +85,16 @@ export class RelayService {
 
   onPaired(listener: (event: PairedEvent) => void): () => void {
     return this.exchange.onPaired(listener);
+  }
+
+  /** True while connected to the relay, so it can carry alerts. */
+  isOnline(): boolean {
+    return this.agent?.isOnline() === true;
+  }
+
+  sendAlert(alert: RelayAlert): Promise<{ status: number; body: string }> {
+    if (!this.agent) return Promise.reject(new Error('Phone access is off on this computer.'));
+    return this.agent.sendAlert(alert);
   }
 
   /** Before the computer sleeps: phones show "Asleep since …". */

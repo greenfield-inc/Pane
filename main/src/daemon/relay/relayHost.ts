@@ -14,6 +14,7 @@ import { createComputerCaller, RelayLinks } from './relayLinks';
 import { disconnectActiveRemoteHostClients } from '../remoteTransportController';
 import { remoteHostRuntimeStateStore } from '../remoteHostRuntimeState';
 import { readFileSync } from 'fs';
+import { setRelayPushChannel } from '../mobilePushSender';
 
 export interface RelayHost {
   service: RelayService;
@@ -110,6 +111,8 @@ export async function createRelayHost(deps: {
   relay.onStatus((status) => getPaneEventSink().send('relay:status-changed', status));
   relay.onPaired((event) => getPaneEventSink().send('relay:paired', event));
   relay.start();
+  // A computer without the Pane app's push keys sends its phones' alerts through its relay.
+  setRelayPushChannel({ available: () => relay.isOnline(), send: (alert) => relay.sendAlert(alert) });
   return {
     service: relay,
     previews,
@@ -124,6 +127,7 @@ export async function createRelayHost(deps: {
     suspend: () => relay.suspend(),
     resume: () => relay.resume(),
     stop: async () => {
+      setRelayPushChannel(null);
       await relay.stop();
       await proxy?.close();
     },

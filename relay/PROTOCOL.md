@@ -79,9 +79,28 @@ A second control connection for the same id replaces the first, which gets
 | relay | `{"t":"ok","req":"<n>"}` / `{"t":"error","req":"<n>","code","message"}` | Answer to a request frame carrying `req`. |
 | computer | `{"t":"local","local":["..."]}` | The computer's private addresses changed. |
 | computer | `{"t":"sleep"}` | The computer is about to sleep; the relay reports it as asleep until it reconnects. |
-| computer | `{"t":"alert","req":"<n>","to":[<push target>],"alert":{...}}` | Forward a push alert (P6). |
+| computer | `{"t":"alert","req":"<n>",...}` | Deliver a push alert with the Pane app's keys; see [Alerts](#alerts). |
 | either | `{"t":"ping"}` / `{"t":"pong"}` | Keepalive. The computer pings every 25 s; the relay closes a control connection silent for 75 s. |
 | relay | `{"t":"close","code":"<code>","message":"<text>"}` | The relay is cutting the computer off (`replaced`, `blocked`, `over-limit`, `shutdown`). |
+
+## Alerts
+
+A computer without the Pane app's push keys sends its phones' alerts through
+the relay, which holds the keys. The computer builds the payload exactly as it
+would send it itself:
+
+- iOS: `{"t":"alert","req":"<n>","platform":"ios","token":"<APNs device token>","pushType":"alert"|"background","collapseId":"<id>","payload":{...}}`.
+  The relay sends it to APNs with the app's topic, production first and the
+  sandbox once on `BadDeviceToken`.
+- Android: `{"t":"alert","req":"<n>","platform":"android","message":{...}}`, an
+  FCM v1 `message` (with its `token`), sent with the app's sender account.
+
+The relay answers `{"t":"ok","req":"<n>","status":<provider HTTP status>,"body":"<provider body, at most 2 KiB>"}`
+when the provider answered, whatever its status, or
+`{"t":"error","req":"<n>","code":"throttled"|"unconfigured"|"bad-request"|"provider","message":"..."}`.
+Each computer may send 60 alerts an hour (`--limit-alerts-per-hour`); past
+that the relay answers `throttled` and logs one line per computer per hour.
+Payloads and device tokens are never logged.
 
 ## Data connection
 
