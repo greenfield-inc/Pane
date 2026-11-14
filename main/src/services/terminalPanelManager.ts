@@ -53,6 +53,8 @@ import type { PaneEventArgument } from '../core/eventSink';
 
 const OUTPUT_BATCH_INTERVAL = 32; // ms (~30fps) — wider window reduces TUI flicker
 const OUTPUT_BATCH_INTERVAL_INTERACTIVE = 8;
+/** Output after a quiet spell goes out once reads pause this long: in the app, the reads of one `less` or `vim` redraw arrive up to ~2 ms apart. */
+const OUTPUT_SETTLE_MS = 3;
 const INTERACTIVE_OUTPUT_WINDOW_MS = 200;
 /** What a pause did: the tabs it stopped, and why any could not be paused. */
 export interface PauseOutcome {
@@ -336,6 +338,8 @@ interface TerminalProcess {
   interactiveOutputUntil?: number;
   /** `performance.now()` of the last batch sent to the renderer; a visible panel's batch interval counts from it. */
   lastOutputFlushAt?: number;
+  /** `performance.now()` of the first read buffered after a quiet spell; that output goes out within one interval of it. */
+  quietOutputSince?: number;
   /** Foreground-process and screen evidence gathered while `agentType` is unresolved. */
   agentProbe?: AgentProbe;
   /** The agent showed its own working signal since it last went idle. */
@@ -1317,6 +1321,7 @@ export class TerminalPanelManager extends EventEmitter {
 
     const data = terminal.outputBuffer;
     terminal.outputBuffer = '';
+    terminal.quietOutputSince = undefined;
 
     if (!terminal.isVisible) {
       // Hidden terminals run headless: keep PTY output in main scrollback, but
@@ -2281,12 +2286,13 @@ export class TerminalPanelManager extends EventEmitter {
 
   /**
    * Schedules a visible panel's buffered output. The batch interval counts
-   * from the last send, so output after a quiet spell (a typing echo, an
-   * agent's first word) goes out on the next timer tick, which still gathers
-   * every read of a redraw that arrives in several. A synchronized-output
-   * (DEC 2026) frame is painted whole by xterm: a frame that just opened is
-   * held until it closes or a full interval passes, and a closed frame goes
-   * out once the interactive interval has passed since the last send.
+   * from the last send, so output after a quiet spell (a typing echo, a
+   * pager's next page) goes out once reads pause for OUTPUT_SETTLE_MS, which
+   * gathers every read of a redraw that arrives in several, and at most one
+   * interval after it began. A synchronized-output (DEC 2026) frame is
+   * painted whole by xterm: a frame that just opened is held until it closes
+   * or a full interval passes, and a closed frame goes out once the
+   * interactive interval has passed since the last send.
    */
   private scheduleVisibleOutputFlush(terminal: TerminalProcess, wasInSyncBlock: boolean, chunk: string): void {
     const sinceFlush = performance.now() - (terminal.lastOutputFlushAt ?? -Infinity);
@@ -2301,10 +2307,14 @@ export class TerminalPanelManager extends EventEmitter {
       }
     } else if (terminal.inSyncBlock && !wasInSyncBlock) {
       wait = interval;
+    } else if (!terminal.inSyncBlock && sinceFlush >= interval) {
+      const now = performance.now();
+      terminal.quietOutputSince ??= now;
+      wait = Math.max(0, Math.min(OUTPUT_SETTLE_MS, terminal.quietOutputSince + interval - now));
     } else if (terminal.outputFlushTimer) {
       return;
     } else {
-      wait = Math.max(0, interval - sinceFlush);
+      wait = interval - sinceFlush;
     }
     if (terminal.outputFlushTimer) clearTimeout(terminal.outputFlushTimer);
     terminal.outputFlushTimer = setTimeout(() => {

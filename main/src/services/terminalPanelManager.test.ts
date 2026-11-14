@@ -470,29 +470,39 @@ describe('TerminalPanelManager hidden output delivery', () => {
     return { manager, terminal, emit: (data: string) => emit(data), rendered: () => sent(send), daemon: () => sent(daemonSend) };
   }
 
-  it('sends a visible panel\'s output after a quiet spell on the next tick and batches what follows', () => {
+  it('sends a visible panel\'s output once reads pause after a quiet spell and batches what follows', () => {
     const { manager, terminal, emit, rendered } = outputHarness(true);
-    // A redraw that arrives in two reads goes out whole.
+    // A redraw that arrives in reads 2 ms apart goes out whole, 3 ms after its last read.
     emit('top rows ');
+    vi.advanceTimersByTime(2);
+    emit('middle rows ');
+    vi.advanceTimersByTime(2);
     emit('bottom rows');
+    vi.advanceTimersByTime(2);
     expect(rendered()).toEqual([]);
     vi.advanceTimersByTime(1);
-    expect(rendered()).toEqual(['top rows bottom rows']);
+    expect(rendered()).toEqual(['top rows middle rows bottom rows']);
     emit('more output');
-    vi.advanceTimersByTime(30);
+    vi.advanceTimersByTime(31);
     expect(rendered()).toHaveLength(1);
     vi.advanceTimersByTime(1);
     expect(rendered().at(-1)).toBe('more output');
 
+    // Output that never pauses goes out one interval after it began.
+    vi.advanceTimersByTime(100);
+    for (let i = 0; i < 16; i++) { emit('.'); vi.advanceTimersByTime(2); }
+    expect(rendered()).toHaveLength(3);
+    expect(rendered().at(-1)).toBe('.'.repeat(16));
+
     vi.advanceTimersByTime(250);
     emit('streaming');
-    vi.advanceTimersByTime(1);
+    vi.advanceTimersByTime(3);
     emit('pending');
     manager.writeToTerminal(terminal.panelId, 'x');
     expect(rendered().slice(-2)).toEqual(['streaming', 'pending']);
     emit('echo');
     vi.advanceTimersByTime(7);
-    expect(rendered()).toHaveLength(4);
+    expect(rendered()).toHaveLength(5);
     vi.advanceTimersByTime(1);
     expect(rendered().at(-1)).toBe('echo');
     disposeFlowControlRecord(terminal.flowControl);
