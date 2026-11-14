@@ -98,11 +98,16 @@ of every computer it reached through yours.
   Awake.
 - **A browser on a Wi-Fi with no internet** can't reach the computer: a
   browser needs internet DNS. Open the Pane app instead.
+- **"Phones can't connect: this computer's phone listener isn't running":**
+  another app (often a second Pane) holds the listener's port. Quit that app,
+  or give the listener a free port in **Settings › Remote Access › More ›
+  Advanced**. Until then the computer turns phones away.
 
 ## Use your own relay
 
 Set **Settings › Remote Access › More › Relay address** to a relay you run,
-and Pane connects there instead of Pane's servers. See
+and Pane connects there instead of Pane's servers. Computers link only with
+computers on the same relay. See
 [Run your own relay](SELF_HOSTED_RELAY.md).
 
 ## Use Tailscale instead
