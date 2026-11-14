@@ -415,6 +415,11 @@ export interface HostDeps {
   savePaired(added: readonly PairedComputer[]): Promise<void>;
   /** Read each computer again and again instead of opening its event stream (a host without streaming fetch). */
   polling?: PollClock;
+  /**
+   * The glasses host's own speech-to-text, used when a computer has no speech key or can't take
+   * the live voice socket. The computer's key comes first when it has one.
+   */
+  fallbackDictation?: (onPreview: (text: string) => void) => Dictation;
 }
 
 /** A computer that hasn't answered a read for this long shows offline (polling mode). */
@@ -835,6 +840,8 @@ export class HostConnection {
   async dictate(onPreview: (text: string) => void): Promise<Dictation> {
     const affordances = await this.invoke('remote:pwa-affordances', [], affordancesSchema);
     const mode = voiceMode(affordances.voiceTranscription);
+    const fallback = this.deps.fallbackDictation;
+    if (!mode && fallback) return fallback(onPreview);
     if (!mode) {
       throw new GlassesError('ERR_GLASSES_VOICE_UNAVAILABLE', `${this.paired.name} can't turn speech into text.`, 'Add a Deepgram key (live) or a fal key (recorded) in Pane on that computer: Settings › Integrations › Voice transcription.');
     }
@@ -848,7 +855,14 @@ export class HostConnection {
       finalizeStreaming: async (rawText, durationMs) => (await this.invoke('voice:finalize-streaming', [{ rawText, durationMs, language: 'en' }], transcriptSchema)).text,
       transcribe: async (audioDataUrl, durationMs) => (await this.invoke('voice:transcribe', [{ audioDataUrl, mimeType: 'audio/wav', durationMs, language: 'en' }], transcriptSchema)).text,
     };
-    return mode === 'streaming' ? streamingDictation(host, onPreview) : recordedDictation(host, onPreview);
+    if (mode === 'recorded') return recordedDictation(host, onPreview);
+    try {
+      return await streamingDictation(host, onPreview);
+    } catch (error) {
+      // An older Pane refuses a voice socket that comes without an Origin.
+      if (fallback) return fallback(onPreview);
+      throw error;
+    }
   }
 }
 

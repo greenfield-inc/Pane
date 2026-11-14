@@ -1,0 +1,21 @@
+{
+  "name": "@pane/glasses-glassly",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.ts",
+    "dev": "glassly dev",
+    "pack": "node scripts/pack.ts",
+    "typecheck": "node ../../node_modules/@typescript/native/bin/tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@evenrealities/pretext": "0.1.4",
+    "@glassly/miniapp": "0.4.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.7",
+    "jszip": "3.10.1",
+    "typescript": "5.8.3"
+  }
+}
