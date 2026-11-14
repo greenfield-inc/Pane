@@ -1,3 +1,4 @@
+import { STREAM_FRAME_MS } from './constants/streamCadence';
 import { applyChatTabEvent, type ChatTabClient, type ChatTabEvent, type ChatTabSend, type ChatTabTranscript, type ChatTabView } from './types/chatTab';
 
 export interface ChatTabViewerState {
@@ -37,6 +38,8 @@ export class ChatTabViewer {
   private pending: ChatTabEvent[] = [];
   /** Bumped by rebind(); replies from an older transport are dropped. */
   private transport = 0;
+  private frame?: ReturnType<typeof setTimeout>;
+  private notifiedAt = 0;
 
   constructor(private chatClient: ChatTabClient, readonly panelId: string) {}
 
@@ -44,6 +47,25 @@ export class ChatTabViewer {
 
   private publish(patch: Partial<ChatTabViewerState>): void {
     this.state = { ...this.state, ...patch };
+    this.notify();
+  }
+
+  /**
+   * A live event updates the state at once but redraws at most once a stream frame: the
+   * first event of a burst redraws immediately, the rest together at the frame's end.
+   */
+  private publishLive(patch: Partial<ChatTabViewerState>): void {
+    this.state = { ...this.state, ...patch };
+    if (this.frame) return;
+    const wait = this.notifiedAt + STREAM_FRAME_MS - performance.now();
+    if (wait <= 0) this.notify();
+    else this.frame = setTimeout(() => this.notify(), wait);
+  }
+
+  private notify(): void {
+    clearTimeout(this.frame);
+    this.frame = undefined;
+    this.notifiedAt = performance.now();
     this.listeners.forEach(listener => listener());
   }
 
@@ -76,6 +98,8 @@ export class ChatTabViewer {
     return () => {
       this.listeners.delete(listener);
       if (this.listeners.size === 0) {
+        clearTimeout(this.frame);
+        this.frame = undefined;
         this.detach?.();
         this.detach = undefined;
         // Keep the draft and an unconfirmed send; release the heavy transcript.
@@ -98,12 +122,12 @@ export class ChatTabViewer {
       if (this.state.hasNewer && event.generation === transcript.generation && event.index >= transcript.start + transcript.messages.length) {
         // Past the end of a window scrolled back from the newest: keep the window, track the revision.
         if (event.revision > transcript.revision + 1) { void this.refresh(); return; }
-        if (event.revision === transcript.revision + 1) this.publish({ transcript: { ...transcript, revision: event.revision } });
+        if (event.revision === transcript.revision + 1) this.publishLive({ transcript: { ...transcript, revision: event.revision } });
         return;
       }
       const applied = applyChatTabEvent(transcript, event);
       if (applied.resync) { void this.refresh(); return; }
-      this.publish({ transcript: this.state.hasNewer ? applied.transcript : this.bounded(applied.transcript) });
+      this.publishLive({ transcript: this.state.hasNewer ? applied.transcript : this.bounded(applied.transcript) });
     });
     const states = client.onState(view => {
       if (view.panelId !== this.panelId) return;
