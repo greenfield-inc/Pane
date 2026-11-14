@@ -93,6 +93,8 @@ export interface RemoteDaemonClientRecord {
   linkedBy?: string;
   /** A phone token handed out by a linked computer: that computer's relay id, so unlinking it revokes the token. */
   grantedBy?: string;
+  /** Linked computers only: the client id of the phone whose scan minted this link, so removing that phone revokes it. */
+  mintedBy?: string;
 }
 
 export interface RemotePaneConnectionProfile {
@@ -590,6 +592,7 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   computerId: boundary.optional(boundary.nonEmptyString),
   linkedBy: boundary.optional(boundary.nonEmptyString),
   grantedBy: boundary.optional(boundary.nonEmptyString),
+  mintedBy: boundary.optional(boundary.nonEmptyString),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({
   kind: boundary.enumeration('ssh', 'tailscale', 'manual'),

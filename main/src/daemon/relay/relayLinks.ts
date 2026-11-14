@@ -70,6 +70,50 @@ function profileId(computerId: string): string {
 }
 
 /**
+ * Removes clients here with everything they vouched for: links a removed phone minted, and for each
+ * computer whose link goes, the phone tokens it handed out and the profile that calls it.
+ */
+export function revokeClients(
+  remote: RemoteDaemonConfig,
+  seed: { clients?: (client: RemoteDaemonClientRecord) => boolean; computers?: readonly string[] },
+) {
+  const clients = new Set(remote.host.clients.filter((client) => seed.clients?.(client) === true).map((client) => client.id));
+  const computers = new Set(seed.computers);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const client of remote.host.clients) {
+      const linkedComputer = client.kind === 'computer' ? client.computerId : undefined;
+      if (!clients.has(client.id)) {
+        const vouched = (client.mintedBy !== undefined && clients.has(client.mintedBy))
+          || (linkedComputer !== undefined && computers.has(linkedComputer))
+          || (client.grantedBy !== undefined && computers.has(client.grantedBy));
+        if (!vouched) continue;
+        clients.add(client.id);
+        grew = true;
+      }
+      if (linkedComputer !== undefined && !computers.has(linkedComputer)) {
+        computers.add(linkedComputer);
+        grew = true;
+      }
+    }
+  }
+  const forgetsActive = remote.client.activeProfileId !== null && [...computers].some((id) => remote.client.activeProfileId === profileId(id));
+  return {
+    revoked: [...clients],
+    remote: {
+      ...remote,
+      host: { ...remote.host, clients: remote.host.clients.filter((client) => !clients.has(client.id)) },
+      client: {
+        ...remote.client,
+        profiles: remote.client.profiles.filter((profile) => profile.relay === undefined || !computers.has(profile.relay.computerId)),
+        activeProfileId: forgetsActive ? null : remote.client.activeProfileId,
+        mode: forgetsActive ? 'local' : remote.client.mode,
+      },
+    },
+  };
+}
+
+/**
  * "Your computers" (D-16): each computer a phone pairs with links to the phone's other computers
  * with no prompt. Links are client records of kind "computer" (the token a peer uses to call this
  * computer) and client profiles with `relay` (the token this computer uses to call the peer), so
@@ -92,6 +136,14 @@ export class RelayLinks {
     return record;
   }
 
+  private callerPhone(clientId: string): RemoteDaemonClientRecord {
+    const record = this.caller(clientId);
+    if (record.kind !== undefined) {
+      throw new PaneError('ERR_RELAY_PHONE_ONLY', 'Only a paired phone can link computers.', 'Scan both computers with the same phone.');
+    }
+    return record;
+  }
+
   private callerComputer(clientId: string): RemoteDaemonClientRecord & { computerId: string } {
     const record = this.caller(clientId);
     if (record.kind !== 'computer' || !record.computerId) {
@@ -107,7 +159,7 @@ export class RelayLinks {
 
   /** A phone asks this computer for a token its peer computer will use to call this one. */
   async mintLink(peer: RelayComputer, callerClientId: string): Promise<{ token: string }> {
-    const phone = this.caller(callerClientId);
+    const phone = this.callerPhone(callerClientId);
     if (peer.id === this.deps.self()?.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'A computer cannot link with itself.', 'Scan another computer.');
     const { token, tokenHash } = newToken();
     const record: RemoteDaemonClientRecord = {
@@ -118,6 +170,7 @@ export class RelayLinks {
       kind: 'computer',
       computerId: peer.id,
       linkedBy: phone.label,
+      mintedBy: phone.id,
     };
     const replaced = this.remote().host.clients.filter((client) => client.kind === 'computer' && client.computerId === peer.id).map((client) => client.id);
     await this.update((remote) => ({
@@ -130,7 +183,7 @@ export class RelayLinks {
 
   /** A phone hands this computer the token to call a peer it just linked. */
   async saveLink(peer: RelayComputer, token: string, callerClientId: string): Promise<void> {
-    const phone = this.caller(callerClientId);
+    const phone = this.callerPhone(callerClientId);
     if (peer.id === this.deps.self()?.id) return;
     const profile: RemotePaneConnectionProfile = {
       id: profileId(peer.id),
@@ -200,13 +253,13 @@ export class RelayLinks {
   /** Revokes a phone here, by its install id. */
   async removePhone(phoneId: string, callerClientId: string): Promise<void> {
     this.callerComputer(callerClientId);
-    await this.revokeLocally((client) => client.kind === undefined && client.phoneId === phoneId);
+    await this.revokeLocally({ clients: (client) => client.kind === undefined && client.phoneId === phoneId });
   }
 
   /** Forgets a computer here: its link both ways, and phone tokens it handed out. */
   async forgetComputer(computerId: string, callerClientId: string): Promise<void> {
     this.callerComputer(callerClientId);
-    await this.forgetLocally(computerId);
+    await this.revokeLocally({ computers: [computerId] });
   }
 
   devices(): RelayDevice[] {
@@ -229,19 +282,22 @@ export class RelayLinks {
   async removePhoneEverywhere(clientId: string): Promise<{ removed: string[]; notReached: string[] }> {
     const record = this.remote().host.clients.find((client) => client.id === clientId);
     if (!record) return { removed: [], notReached: [] };
-    await this.revokeLocally((client) => client.id === clientId || (record.phoneId !== undefined && client.kind === undefined && client.phoneId === record.phoneId));
+    // Read first: revoking here forgets the computers this phone linked.
+    const peers = this.linked();
+    const { phoneId } = record;
+    await this.revokeLocally({ clients: (client) => client.id === clientId || (phoneId !== undefined && client.kind === undefined && client.phoneId === phoneId) });
     const removed = [this.deps.self()?.name ?? 'This computer'];
+    // Other computers know the phone only by its install id; without one, they still have it.
+    if (phoneId === undefined) return { removed, notReached: peers.map((profile) => profile.label) };
     const notReached: string[] = [];
-    if (record.phoneId) {
-      await Promise.all(this.linked().map(async (profile) => {
-        try {
-          await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.removePhone, [{ phoneId: record.phoneId }]);
-          removed.push(profile.label);
-        } catch {
-          notReached.push(profile.label);
-        }
-      }));
-    }
+    await Promise.all(peers.map(async (profile) => {
+      try {
+        await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.removePhone, [{ phoneId }]);
+        removed.push(profile.label);
+      } catch {
+        notReached.push(profile.label);
+      }
+    }));
     return { removed, notReached };
   }
 
@@ -262,28 +318,18 @@ export class RelayLinks {
         notReached.push(profile.label);
       }
     }));
-    await this.forgetLocally(computerId);
+    await this.revokeLocally({ computers: [computerId] });
     return { removed, notReached };
   }
 
-  private async forgetLocally(computerId: string): Promise<void> {
-    await this.revokeLocally((client) => (client.kind === 'computer' && client.computerId === computerId) || client.grantedBy === computerId);
-    await this.update((remote) => ({
-      ...remote,
-      client: {
-        ...remote.client,
-        profiles: remote.client.profiles.filter((profile) => profile.relay?.computerId !== computerId),
-        activeProfileId: remote.client.activeProfileId === profileId(computerId) ? null : remote.client.activeProfileId,
-        mode: remote.client.activeProfileId === profileId(computerId) ? 'local' : remote.client.mode,
-      },
-    }));
-  }
-
-  private async revokeLocally(match: (client: RemoteDaemonClientRecord) => boolean): Promise<void> {
-    const ids = this.remote().host.clients.filter(match).map((client) => client.id);
-    if (!ids.length) return;
-    await this.update((remote) => ({ ...remote, host: { ...remote.host, clients: remote.host.clients.filter((client) => !ids.includes(client.id)) } }));
-    this.deps.disconnect(ids);
+  private async revokeLocally(seed: Parameters<typeof revokeClients>[1]): Promise<void> {
+    let revoked: string[] = [];
+    await this.update((remote) => {
+      const result = revokeClients(remote, seed);
+      revoked = result.revoked;
+      return result.remote;
+    });
+    if (revoked.length) this.deps.disconnect(revoked);
   }
 }
 
