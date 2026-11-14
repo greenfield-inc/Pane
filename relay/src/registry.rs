@@ -11,6 +11,15 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{Notify, oneshot};
 
+/// TXT values per name: what ACME DNS-01 needs (a wildcard and its base name
+/// share one name), each at most 64 bytes (ACME values are 43).
+pub const MAX_TXT_VALUES: usize = 2;
+pub const MAX_TXT_LEN: usize = 64;
+
+pub fn valid_txt(values: &[String]) -> bool {
+    values.len() <= MAX_TXT_VALUES && values.iter().all(|v| v.len() <= MAX_TXT_LEN)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Update {
     pub id: String,

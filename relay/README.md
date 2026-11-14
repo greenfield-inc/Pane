@@ -66,6 +66,7 @@ Every flag also reads the environment variable in brackets.
 | `--public-ip` [`PANE_RELAY_PUBLIC_IP`] | | IPv4 that DNS returns for `<D>` and for regions without `--region-ip` |
 | `--region-ip` [`PANE_RELAY_REGION_IP`] | | `us=1.2.3.4,eu=5.6.7.8`: each region's public IPv4 |
 | `--dns` [`PANE_RELAY_DNS`] | off | Helper role: answer DNS on this address, UDP and TCP |
+| `--dns-responses-per-sec` | 50 | UDP answers a second per client /24 (IPv6 /56); past it answers are truncated (TC=1) so resolvers retry over TCP |
 | `--ns` [`PANE_RELAY_NS`] | `ns1.<D>,ns2.<D>` | Name servers for the zone's NS and SOA records |
 | `--ns-ip` [`PANE_RELAY_NS_IP`] | | `ns1=1.2.3.4,ns2=5.6.7.8`: each name server's IPv4 by its first label; others get `--public-ip` |
 | `--registry-secret` [`PANE_RELAY_REGISTRY_SECRET`] | | Bearer secret for `POST /v1/registry` |

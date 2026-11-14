@@ -2,13 +2,16 @@
 
 use crate::agent::is_private;
 use crate::id::is_valid_id;
-use crate::state::State;
+use crate::state::{State, prefix};
 use hickory_proto::op::{Edns, Message, MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::rdata::{A, NS, SOA, TXT};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
+use std::collections::HashMap;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
@@ -243,8 +246,33 @@ pub fn answer(state: &State, query: &[u8], max_len: usize) -> Option<Vec<u8>> {
     truncated.to_vec().ok()
 }
 
+/// Response-rate limiting: answers per client prefix in the current second.
+#[derive(Default)]
+struct Rate {
+    seen: HashMap<IpAddr, (Instant, u32)>,
+}
+
+impl Rate {
+    /// Counts one answer for `ip`'s /24 (IPv6 /56); false past `limit` this second.
+    fn admit(&mut self, ip: IpAddr, limit: u32) -> bool {
+        let now = Instant::now();
+        if self.seen.len() > 65_536 {
+            self.seen
+                .retain(|_, (start, _)| now.duration_since(*start) < Duration::from_secs(1));
+        }
+        let (start, count) = self.seen.entry(prefix(ip, 24, 56)).or_insert((now, 0));
+        if now.duration_since(*start) >= Duration::from_secs(1) {
+            *start = now;
+            *count = 0;
+        }
+        *count += 1;
+        *count <= limit
+    }
+}
+
 pub async fn serve_udp(state: Arc<State>, socket: UdpSocket) {
     let mut buf = vec![0u8; 4096];
+    let mut rate = Rate::default();
     loop {
         let (n, from) = tokio::select! {
             _ = state.shutdown.cancelled() => return,
@@ -258,6 +286,12 @@ pub async fn serve_udp(state: Arc<State>, socket: UdpSocket) {
             .and_then(|m| m.edns.map(|e| e.max_payload() as usize))
             .unwrap_or(512)
             .clamp(512, 1232);
+        // Over the rate, max 0 truncates every answer to its header and question.
+        let max = if rate.admit(from.ip(), state.cfg.dns_responses_per_sec) {
+            max
+        } else {
+            0
+        };
         if let Some(resp) = answer(&state, &buf[..n], max) {
             let _ = socket.send_to(&resp, from).await;
         }

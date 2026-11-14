@@ -90,6 +90,12 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_DNS")]
     pub dns: Option<SocketAddr>,
 
+    /// UDP answers a second per client /24 (IPv6 /56); past it the answer is
+    /// truncated (TC=1, no records), so real resolvers retry over TCP and a
+    /// spoofed source gets nothing larger than its query.
+    #[arg(long, env = "PANE_RELAY_DNS_RESPONSES_PER_SEC", default_value_t = 50)]
+    pub dns_responses_per_sec: u32,
+
     /// Name server names for the zone's NS and SOA records. Defaults to ns1.<D>,ns2.<D>.
     #[arg(long, env = "PANE_RELAY_NS", value_delimiter = ',')]
     pub ns: Vec<String>,

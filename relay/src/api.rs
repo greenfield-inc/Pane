@@ -2,7 +2,7 @@
 
 use crate::id::is_valid_id;
 use crate::io::{BoxStream, Prefixed, Request, SWITCHING, read_request, respond, respond_json};
-use crate::registry::{AcmeTxt, Update};
+use crate::registry::{AcmeTxt, Update, valid_txt};
 use crate::state::{Presence, State};
 use serde_json::json;
 use std::net::IpAddr;
@@ -214,12 +214,12 @@ async fn registry_post(
     body.truncate(len);
     if acme {
         return match serde_json::from_slice::<AcmeTxt>(&body) {
-            Ok(t) if crate::dns::is_relay_acme_name(state, &t.name) && t.values.len() <= 4 => {
+            Ok(t) if crate::dns::is_relay_acme_name(state, &t.name) && valid_txt(&t.values) => {
                 state.registry.apply_acme(&t);
                 respond_json(s, 200, &json!({"ok": true})).await
             }
             _ => {
-                let error = "expected {name, values}: _acme-challenge.<D> or _acme-challenge.<region>.relay.<D>, at most 4 values";
+                let error = "expected {name, values}: _acme-challenge.<D> or _acme-challenge.<region>.relay.<D>, at most 2 values of at most 64 bytes";
                 respond_json(s, 400, &json!({ "error": error })).await
             }
         };
@@ -236,7 +236,8 @@ async fn registry_post(
         Ok(Body::Batch(b)) => b,
         Err(_) => Vec::new(),
     };
-    if updates.is_empty() || !updates.iter().all(|u| is_valid_id(&u.id)) {
+    let valid = |u: &Update| is_valid_id(&u.id) && u.txt.as_deref().is_none_or(valid_txt);
+    if updates.is_empty() || !updates.iter().all(valid) {
         let error = "expected {id, region, local, txt, online} or an array of them";
         return respond_json(s, 400, &json!({ "error": error })).await;
     }

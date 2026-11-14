@@ -82,7 +82,7 @@ A second control connection for the same id replaces the first, which gets
 | From | Frame | Meaning |
 | --- | --- | --- |
 | relay | `{"t":"open","conn":"<base64url 16 bytes>","peer":"<ip>"}` | A client connected for one of this computer's names. Open a data connection for `conn` within 10 s. |
-| computer | `{"t":"txt","req":"<n>","values":["..."]}` | Set the TXT values of `_acme-challenge.<id>.<D>` (empty list clears). |
+| computer | `{"t":"txt","req":"<n>","values":["..."]}` | Set the TXT values of `_acme-challenge.<id>.<D>` (empty list clears): at most 2 values of at most 64 bytes, what ACME needs for the name and its wildcard. More gets `bad-request`. |
 | relay | `{"t":"ok","req":"<n>"}` / `{"t":"error","req":"<n>","code","message"}` | Answer to a request frame carrying `req`. |
 | computer | `{"t":"local","local":["..."]}` | The computer's private addresses changed. |
 | computer | `{"t":"sleep"}` | The computer is about to sleep; the relay reports it as asleep until it reconnects. |
@@ -172,8 +172,8 @@ With `--dns`, the process answers DNS for `<D>` and keeps the registry: for
 each id, its region, local addresses, TXT values and last-seen time. Every
 relay sends each update to every helper in its `--registry-url` list with
 `POST /v1/registry` (header `authorization: Bearer <registry secret>`). The
-body is one update, `{"id","region","local":[...],"txt":[...]|null,"online":true|false}`,
-or a JSON array of up to 5,000 of them (at most 4 MiB); `"txt":null` leaves
+body is one update, `{"id","region","local":[...],"txt":[...]|null,"online":true|false}` (TXT
+values as the `txt` frame allows), or a JSON array of up to 5,000 of them (at most 4 MiB); `"txt":null` leaves
 the TXT values as they are. The helper answers `200 {"ok":true}`, or `400`
 and applies nothing when any update is malformed.
 
@@ -188,7 +188,8 @@ helpers, so both helpers answer the same records.
 A relay with `--acme-cache` gets its own certificate for `<D>` and
 `<region>.relay.<D>` with DNS-01. It sets each challenge value on every
 helper with `POST /v1/registry/acme` (same bearer secret), body
-`{"name":"_acme-challenge.<region>.relay.<D>","values":["..."]}`, and clears
+`{"name":"_acme-challenge.<region>.relay.<D>","values":["..."]}` (the same
+2 values of at most 64 bytes), and clears
 it with `"values":[]` when the CA is done. Helpers accept only
 `_acme-challenge.<D>` and `_acme-challenge.<region>.relay.<D>` for a region
 they know. A helper relay sets its own values in memory as well.
@@ -196,6 +197,12 @@ they know. A helper relay sets its own values in memory as well.
 The zone's name servers are `ns1.<D>` and `ns2.<D>` (`--ns`); each answers
 with its `--ns-ip` address, so the A records match the glue at the
 registrar.
+
+UDP answers are rate limited per client /24 (IPv6 /56): 50 a second
+(`--dns-responses-per-sec`). Past it the helper answers with the header and
+question only and TC=1, so a real resolver retries over TCP and a spoofed
+source gets nothing larger than the query it sent. TCP answers are not
+limited.
 
 ## Limits
 

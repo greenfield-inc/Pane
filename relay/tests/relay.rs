@@ -640,6 +640,76 @@ async fn dns_answers_for_computer_names() {
     assert_eq!(txt.answers.len(), 1);
 }
 
+#[tokio::test]
+async fn txt_values_are_limited_to_what_acme_needs() {
+    let env = Env::start(&["--dns", "127.0.0.1:0", "--registry-secret", "s3cret"]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    // ACME values are 43 characters; a wildcard and its base name need two.
+    let value = "a".repeat(43);
+    let cases = [
+        (json!([value, value]), "ok"),
+        (json!([value, value, value]), "error"),
+        (json!(["a".repeat(65)]), "error"),
+        (json!(["a".repeat(64)]), "ok"),
+    ];
+    for (i, (values, want)) in cases.into_iter().enumerate() {
+        let req = i.to_string();
+        agent
+            .send(json!({"t": "txt", "req": req, "values": values}))
+            .await;
+        let answer = agent.next().await;
+        assert_eq!(answer["t"], want, "{values}");
+        assert_eq!(answer["req"], req.as_str());
+    }
+
+    let auth = "authorization: Bearer s3cret\r\n";
+    let update = |txt: Value| {
+        json!({"id": "bbbbbbbbbbbbbbbb", "region": "us", "local": [], "txt": txt, "online": true})
+            .to_string()
+    };
+    let env = &env;
+    let post = |body: String| async move { env.http("POST", "/v1/registry", auth, &body).await.0 };
+    assert_eq!(post(update(json!(["x", "y", "z"]))).await, 400);
+    assert_eq!(post(update(json!(["a".repeat(65)]))).await, 400);
+    assert_eq!(post(update(json!(["x", "y"]))).await, 200);
+    let acme = json!({"name": format!("_acme-challenge.us.relay.{D}"), "values": ["x", "y", "z"]});
+    let (code, _) = env
+        .http("POST", "/v1/registry/acme", auth, &acme.to_string())
+        .await;
+    assert_eq!(code, 400);
+}
+
+#[tokio::test]
+async fn udp_answers_past_the_rate_limit_are_truncated() {
+    let env = Env::start(&[
+        "--dns",
+        "127.0.0.1:0",
+        "--public-ip",
+        "203.0.113.10",
+        "--dns-responses-per-sec",
+        "3",
+    ])
+    .await;
+    let name = format!("{D}.");
+    let mut truncated = 0;
+    for _ in 0..6 {
+        let m = dns_query(env.dns(), name.clone(), RecordType::A, false).await;
+        if m.metadata.truncation {
+            assert!(m.answers.is_empty());
+            truncated += 1;
+        } else {
+            assert_eq!(a_records(&m), vec![Ipv4Addr::new(203, 0, 113, 10)]);
+        }
+    }
+    // Six queries well inside one second: three answered, three truncated
+    // (a test that straddles a second boundary answers more).
+    assert!((1..=3).contains(&truncated), "{truncated} truncated");
+    // TCP, where the source address is real, still answers in full.
+    let m = dns_query(env.dns(), name, RecordType::A, true).await;
+    assert!(!m.metadata.truncation);
+    assert_eq!(a_records(&m), vec![Ipv4Addr::new(203, 0, 113, 10)]);
+}
+
 /// Polls `server` until `name` has A records, then returns them.
 async fn resolves(server: SocketAddr, name: String) -> Vec<Ipv4Addr> {
     let deadline = Instant::now() + WAIT;

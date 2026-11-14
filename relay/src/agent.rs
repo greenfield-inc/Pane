@@ -2,6 +2,7 @@
 
 use crate::id::{random_b64url, verify_hello};
 use crate::io::BoxStream;
+use crate::registry::valid_txt;
 use crate::state::{Charge, Level, Out, State, frame, source};
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv4Addr};
@@ -14,7 +15,6 @@ use tokio_util::sync::CancellationToken;
 const MAX_FRAME: u64 = 64 * 1024;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const SILENCE_TIMEOUT: Duration = Duration::from_secs(75);
-const MAX_TXT_VALUES: usize = 8;
 const SLOW_CONN_DELAY: Duration = Duration::from_secs(1);
 
 enum ReadError {
@@ -226,13 +226,11 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
                 tracing::info!(id, "computer going to sleep");
             }
             "txt" => {
-                let values: Option<Vec<String>> = v["values"].as_array().and_then(|a| {
-                    a.iter()
-                        .map(|s| s.as_str().filter(|s| s.len() <= 255).map(String::from))
-                        .collect()
-                });
+                let values: Option<Vec<String>> = v["values"]
+                    .as_array()
+                    .and_then(|a| a.iter().map(|s| s.as_str().map(String::from)).collect());
                 let answer = match values {
-                    Some(values) if values.len() <= MAX_TXT_VALUES => {
+                    Some(values) if valid_txt(&values) => {
                         match state.publish(&id, local.clone(), Some(values), true).await {
                             Ok(()) => json!({"t": "ok", "req": req}),
                             Err(e) => {
@@ -241,7 +239,7 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
                         }
                     }
                     _ => json!({"t": "error", "req": req, "code": "bad-request",
-                        "message": "values must be at most 8 strings of at most 255 bytes"}),
+                        "message": "values must be at most 2 strings of at most 64 bytes"}),
                 };
                 let _ = tx.send(Out::Frame(frame(answer)));
             }
