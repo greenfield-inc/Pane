@@ -1,0 +1,22 @@
+[package]
+name = "pane-direct"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+description = "Direct QUIC paths to a Pane computer, carrying its TLS byte stream"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+data-encoding = "2.11"
+iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "portmapper", "fast-apple-datapath"] }
+n0-future = "0.3"
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "time", "sync", "fs"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
