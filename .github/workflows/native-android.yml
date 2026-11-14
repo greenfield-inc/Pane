@@ -140,9 +140,21 @@ jobs:
       working-directory: native
       run: pnpm exec expo prebuild --platform android --no-install
 
+    - name: Set up Rust for the pane-direct library
+      if: matrix.abi == 'arm64-v8a' || matrix.abi == 'x86_64'
+      run: |
+        rustup toolchain install stable --profile minimal && rustup default stable
+        rustup target add aarch64-linux-android x86_64-linux-android
+        cargo install cargo-ndk --locked
+
     - name: Build debug APK
       working-directory: native/android
       run: ./gradlew assembleDebug --no-daemon --build-cache -PreactNativeArchitectures=${{ matrix.abi }}
+
+    - name: Check the APK carries pane-direct
+      if: matrix.abi == 'arm64-v8a' || matrix.abi == 'x86_64'
+      working-directory: native/android
+      run: unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q "lib/${{ matrix.abi }}/libpane_direct.so"
 
     # The ABI jobs share one entry, saved by the arm64-v8a job (the ABI pull
     # requests build); the others would spend about 25 s packing it only to
