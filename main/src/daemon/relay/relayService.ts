@@ -1,16 +1,20 @@
 import { createHash } from 'crypto';
 import { promises as fs, readFileSync } from 'fs';
+import https from 'https';
 import net from 'net';
 import os from 'os';
 import path from 'path';
+import tls from 'tls';
 import type { RemoteDaemonClientRecord, RemoteRelaySettings } from '../../../../shared/types/remoteDaemon';
-import type { RelayComputer, RelayPairingInfo, RelayStatus } from '../../../../shared/types/relay';
+import type { RelayComputer, RelayDirectEndpoint, RelayPairingInfo, RelayStatus } from '../../../../shared/types/relay';
+import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { loadComputerKey, type ComputerKey, type KeyStore } from './computerKey';
 import { ComputerCertificate, LETS_ENCRYPT_DIRECTORY } from './computerCertificate';
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
 import { computerHost, localAddressHost } from './computerNames';
 import { PairingExchange, type PairedEvent, type PairingExchangeResult } from './pairingExchange';
 import { RelayAgent, type RelayAgentState, type RelayAlert } from './relayAgent';
+import { findPaneDirect, PaneDirectProcess } from './paneDirect';
 
 /** Pane's relay domain (D-19). */
 const PANE_RELAY_DOMAIN = 'runpane.net';
@@ -60,6 +64,12 @@ export class RelayService {
   private readonly listeners = new Set<(status: RelayStatus) => void>();
   private readonly env: NodeJS.ProcessEnv;
   private unsubscribe: (() => void) | null = null;
+  /** How to reach the relay's own API: its name, port, the address to dial and any extra CA. */
+  private relayApi: { host: string; port: number; connectHost?: string; ca?: Buffer } | null = null;
+  /** `pane-direct serve`: the computer's QUIC endpoint, piping each stream to the local TLS listener. */
+  private direct: PaneDirectProcess | null = null;
+  private directEndpoint: RelayDirectEndpoint | null = null;
+  private directMissingLogged = false;
 
   constructor(private readonly deps: RelayServiceDeps) {
     this.env = deps.env ?? process.env;
@@ -100,6 +110,7 @@ export class RelayService {
   /** Before the computer sleeps: phones show "Asleep since …". */
   suspend(): void {
     this.agent?.sleep();
+    void this.stopDirect();
   }
 
   resume(): void {
@@ -155,7 +166,7 @@ export class RelayService {
   computerInfo(): RelayComputer | undefined {
     const status = this.getStatus();
     if (!this.key || !status.address || !status.domain) return undefined;
-    return {
+    const computer: RelayComputer = {
       id: this.key.id,
       name: this.deps.displayName(),
       domain: status.domain,
@@ -163,6 +174,8 @@ export class RelayService {
       local: status.localAddresses,
       fingerprint: createHash('sha256').update(this.key.spki).digest('base64url'),
     };
+    if (this.directEndpoint) computer.direct = this.directEndpoint;
+    return computer;
   }
 
   private emit(): void {
@@ -204,6 +217,7 @@ export class RelayService {
     const { host, port } = target ? parseHostPort(target) : { host: await nearestRelay(PANE_RELAYS), port: 443 };
     this.relayHost = target || host;
     const ca = readOptionalFile(this.env.PANE_RELAY_CA);
+    this.relayApi = { host, port, connectHost: this.env.PANE_RELAY_CONNECT_HOST, ca };
 
     const agent = new RelayAgent({
       relayHost: host,
@@ -265,6 +279,7 @@ export class RelayService {
       this.localPort = await this.terminator.listen(LOCAL_PORT, '0.0.0.0')
         .catch(() => this.terminator?.listen(0, '0.0.0.0') ?? null);
     }
+    await this.startDirect();
     await this.renewIfDue();
     if (!this.renewTimer) {
       this.renewTimer = setInterval(() => { void this.renewIfDue(); }, RENEW_CHECK_MS);
@@ -291,7 +306,74 @@ export class RelayService {
     return privateAddresses().map((address) => `https://${localAddressHost(address, id, this.domain ?? '')}:${this.localPort}`);
   }
 
+  /** Starts `pane-direct serve` once the local TLS listener is up; without the helper, direct paths stay off. */
+  private async startDirect(): Promise<void> {
+    if (this.direct || this.localPort === null || this.agentState.status !== 'online') return;
+    const bin = findPaneDirect(this.env);
+    if (!bin) {
+      if (!this.directMissingLogged) this.deps.log?.('[relay] pane-direct is not installed, so devices reach this computer through the relay only.');
+      this.directMissingLogged = true;
+      return;
+    }
+    const relayUrls = await this.directRelayUrls(this.agentState.region);
+    if (this.direct || this.localPort === null || this.agentState.status !== 'online') return;
+    const args = ['serve', '--secret-key-file', path.join(this.deps.dataDir, 'relay', 'direct-key'), '--target', `127.0.0.1:${this.localPort}`];
+    for (const url of relayUrls) args.push('--relay-url', url);
+    const direct = new PaneDirectProcess({
+      bin,
+      args,
+      onEvent: (event) => {
+        if (this.direct !== direct) return;
+        if (event.t === 'ready' && event.nodeId) this.directEndpoint = { nodeId: event.nodeId, addrs: event.addrs ?? [], relayUrls };
+        else if (event.t === 'addrs' && this.directEndpoint) this.directEndpoint = { ...this.directEndpoint, addrs: event.addrs ?? [] };
+        else if (event.t === 'exit') this.directEndpoint = null;
+      },
+      log: this.deps.log,
+    });
+    this.direct = direct;
+    direct.start();
+  }
+
+  private async stopDirect(): Promise<void> {
+    const direct = this.direct;
+    this.direct = null;
+    this.directEndpoint = null;
+    await direct?.stop();
+  }
+
+  /** The iroh relay of this computer's region (`directRelay` in `GET /v1/relays`); none when the relay lists none. */
+  private async directRelayUrls(region: string): Promise<string[]> {
+    const api = this.relayApi;
+    if (!api) return [];
+    try {
+      const body = await new Promise<string>((resolve, reject) => {
+        const request = https.get({
+          host: api.connectHost ?? api.host,
+          port: api.port,
+          servername: api.host,
+          headers: { host: api.host },
+          path: '/v1/relays',
+          ca: api.ca ? [...tls.rootCertificates, api.ca.toString()] : undefined,
+          timeout: 5_000,
+        }, (response) => {
+          let text = '';
+          response.setEncoding('utf8');
+          response.on('data', (chunk: string) => { text += chunk; });
+          response.on('end', () => (response.statusCode === 200 ? resolve(text) : reject(new Error(`HTTP ${response.statusCode}`))));
+        });
+        request.on('timeout', () => request.destroy(new Error('no answer within 5 s')));
+        request.on('error', reject);
+      });
+      const { relays } = decodeBoundary(JSON.parse(body), relayListSchema);
+      return relays.flatMap((entry) => (entry.region === region && entry.directRelay ? [entry.directRelay] : []));
+    } catch (error) {
+      this.deps.log?.(`[relay] ${api.host} did not list its direct relay, so direct paths use local addresses only: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  }
+
   private async shutdown(): Promise<void> {
+    await this.stopDirect();
     if (this.renewTimer) clearInterval(this.renewTimer);
     this.renewTimer = null;
     this.agent?.stop();
@@ -304,6 +386,11 @@ export class RelayService {
   }
 }
 
+
+/** `GET /v1/relays` (relay/PROTOCOL.md); `directRelay` is absent on relays without one. */
+const relayListSchema = boundary.object({
+  relays: boundary.array(boundary.object({ region: boundary.string, directRelay: boundary.optional(boundary.string) })),
+});
 
 function parseHostPort(value: string) {
   const match = /^(.+?)(?::(\d+))?$/u.exec(value.trim());

@@ -35,6 +35,18 @@ export interface RelayComputer {
   local: string[];
   /** base64url SHA-256 of the computer's public key (SPKI DER); the Pane app and desktop check it. */
   fingerprint: string;
+  /** The computer's direct QUIC endpoint (`pane-direct`); absent while it has none. */
+  direct?: RelayDirectEndpoint;
+}
+
+/** Where `pane-direct connect` finds a computer: its node id, its addresses, and the relays that introduce the two ends. */
+export interface RelayDirectEndpoint {
+  /** iroh node id (the endpoint's public key). */
+  nodeId: string;
+  /** `ip:port` addresses the computer's endpoint listens on. */
+  addrs: string[];
+  /** iroh relay URLs that carry traffic until a direct path opens. */
+  relayUrls: string[];
 }
 
 /** A computer with a token for the caller, handed out by one of its linked computers. */
