@@ -2,7 +2,7 @@
 
 use crate::id::is_valid_id;
 use crate::io::{BoxStream, Prefixed, Request, SWITCHING, read_request, respond, respond_json};
-use crate::registry::Update;
+use crate::registry::{AcmeTxt, Update};
 use crate::state::{Presence, State};
 use serde_json::json;
 use std::net::IpAddr;
@@ -118,7 +118,8 @@ pub async fn serve(state: Arc<State>, mut s: BoxStream, peer: IpAddr) {
             };
             respond_json(&mut s, 200, &body).await
         }
-        ("POST", "/v1/registry") => registry_post(&state, &req, rest, &mut s).await,
+        ("POST", "/v1/registry") => registry_post(&state, &req, rest, &mut s, false).await,
+        ("POST", "/v1/registry/acme") => registry_post(&state, &req, rest, &mut s, true).await,
         _ => respond(&mut s, 404, "text/plain", "", b"not found\n").await,
     };
 }
@@ -180,6 +181,7 @@ async fn registry_post(
     req: &Request,
     mut body: Vec<u8>,
     s: &mut BoxStream,
+    acme: bool,
 ) -> std::io::Result<()> {
     let authorized = match (&state.cfg.registry_secret, req.header("authorization")) {
         (Some(secret), Some(auth)) => auth
@@ -208,6 +210,18 @@ async fn registry_post(
         body.extend_from_slice(&chunk[..n]);
     }
     body.truncate(len);
+    if acme {
+        return match serde_json::from_slice::<AcmeTxt>(&body) {
+            Ok(t) if crate::dns::is_relay_acme_name(state, &t.name) && t.values.len() <= 4 => {
+                state.registry.apply_acme(&t);
+                respond_json(s, 200, &json!({"ok": true})).await
+            }
+            _ => {
+                let error = "expected {name, values}: _acme-challenge.<D> or _acme-challenge.<region>.relay.<D>, at most 4 values";
+                respond_json(s, 400, &json!({ "error": error })).await
+            }
+        };
+    }
     match serde_json::from_slice::<Update>(&body) {
         Ok(update) if is_valid_id(&update.id) => {
             state.registry.apply(&update);

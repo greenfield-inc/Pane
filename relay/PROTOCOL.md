@@ -172,6 +172,14 @@ in memory and lists only the other helpers, so both helpers answer the same
 records, and a helper that restarts relearns them within a minute. A TXT
 update succeeds once one helper has it.
 
+A relay with `--acme-cache` gets its own certificate for `<D>` and
+`<region>.relay.<D>` with DNS-01. It sets each challenge value on every
+helper with `POST /v1/registry/acme` (same bearer secret), body
+`{"name":"_acme-challenge.<region>.relay.<D>","values":["..."]}`, and clears
+it with `"values":[]` when the CA is done. Helpers accept only
+`_acme-challenge.<D>` and `_acme-challenge.<region>.relay.<D>` for a region
+they know. A helper relay sets its own values in memory as well.
+
 The zone's name servers are `ns1.<D>` and `ns2.<D>` (`--ns`); each answers
 with its `--ns-ip` address, so the A records match the glue at the
 registrar.

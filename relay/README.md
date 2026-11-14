@@ -38,7 +38,15 @@ dig @127.0.0.1 -p 5353 pane.localhost A
 A local `pane-direct` uses `--relay-url https://127.0.0.1:8443/ --relay-ca
 "$TMPDIR/pane-relay-dev-pane.localhost.pem"`. `tests/direct.rs` runs direct/'s
 `serve` and `connect` through the relay; it builds `../direct` first, or uses
-`PANE_DIRECT_BIN`.
+`PANE_DIRECT_BIN`. `tests/acme.rs` gets and renews a certificate from Pebble, a
+test ACME CA; it runs when `PEBBLE_BIN` and `PEBBLE_DIR` (Pebble's source
+folder) are set:
+
+```sh
+GOBIN=$PWD/.bin go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.8.0
+PEBBLE_BIN=$PWD/.bin/pebble \
+  PEBBLE_DIR=$(go env GOMODCACHE)/github.com/letsencrypt/pebble/v2@v2.8.0 cargo test --test acme
+```
 
 ## Flags
 
@@ -49,7 +57,10 @@ Every flag also reads the environment variable in brackets.
 | `--domain` [`PANE_RELAY_DOMAIN`] | `pane.localhost` with `--dev` | The relay domain `<D>` |
 | `--region` [`PANE_RELAY_REGION`] | `us` | This relay's region |
 | `--listen` [`PANE_RELAY_LISTEN`] | `0.0.0.0:443` (`127.0.0.1:8443` with `--dev`) | TLS listen address |
-| `--cert`, `--key` [`PANE_RELAY_CERT`, `PANE_RELAY_KEY`] | | PEM certificate and key for `<D>` and `*.relay.<D>` |
+| `--cert`, `--key` [`PANE_RELAY_CERT`, `PANE_RELAY_KEY`] | | PEM certificate and key for `<D>` and `<region>.relay.<D>`; win over `--acme-cache` |
+| `--acme-cache` [`PANE_RELAY_ACME_CACHE`] | | Get the certificate from an ACME CA with DNS-01 and keep the account, key and certificate in this folder (mode 0600); renewed with a third of its lifetime left, without a restart |
+| `--acme-email` [`PANE_RELAY_ACME_EMAIL`] | | Contact email for the ACME account |
+| `--acme-directory` [`PANE_RELAY_ACME_DIRECTORY`] | Let's Encrypt production | ACME directory URL; staging is `https://acme-staging-v02.api.letsencrypt.org/directory` |
 | `--dev` [`PANE_RELAY_DEV`] | off | Generate a self-signed certificate when `--cert`/`--key` are absent |
 | `--relays` [`PANE_RELAY_RELAYS`] | this region | `us=us.relay.D,eu=eu.relay.D` for `GET /v1/relays` |
 | `--public-ip` [`PANE_RELAY_PUBLIC_IP`] | | IPv4 that DNS returns for `<D>` and for regions without `--region-ip` |

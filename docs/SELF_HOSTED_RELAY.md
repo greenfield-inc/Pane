@@ -12,9 +12,11 @@ instead of Pane's servers. The wire protocol is
 - A domain you control, say `relay.example.com`, delegated to that machine:
   an `NS` record for `relay.example.com` pointing at a name with an `A`
   record for the machine.
-- A certificate for `relay.example.com` and `*.relay.relay.example.com`
-  (the relay's own names). Computers get their own certificates through the
-  relay's DNS.
+- Nothing else for certificates: with `--acme-cache` each relay gets and
+  renews its own from Let's Encrypt through its DNS helper, and computers get
+  theirs the same way. You can pass your own with `--cert` and `--key`
+  instead; it must cover `relay.example.com` and
+  `us.relay.relay.example.com` (each region's name).
 
 ## Run it
 
@@ -32,11 +34,16 @@ pane-relay \
   --domain relay.example.com \
   --region us \
   --listen 0.0.0.0:443 \
-  --cert /etc/pane-relay/cert.pem --key /etc/pane-relay/key.pem \
+  --acme-cache /var/lib/pane-relay/acme --acme-email ops@example.com \
   --dns 0.0.0.0:53 \
   --public-ip 203.0.113.10 \
   --direct-quic 0.0.0.0:7842
 ```
+
+The first start serves a stand-in certificate for a few seconds while Let's
+Encrypt checks the relay's DNS; renewals swap the new certificate in without
+a restart. `--acme-directory` points at another CA, such as Let's Encrypt
+staging while you try things out.
 
 `--direct-quic` is optional. It helps phones and computers find a direct
 path to each other; without it they still connect.
@@ -54,7 +61,7 @@ registry address and the same secret:
 ```sh
 # on us; on eu, swap the --region and the --registry-url host
 pane-relay --domain relay.example.com --region us \
-  --cert ... --key ... --dns 0.0.0.0:53 --public-ip 203.0.113.10 \
+  --acme-cache /var/lib/pane-relay/acme --dns 0.0.0.0:53 --public-ip 203.0.113.10 \
   --region-ip us=203.0.113.10,eu=198.51.100.7 \
   --ns-ip ns1=203.0.113.10,ns2=198.51.100.7 \
   --registry-url https://eu.relay.relay.example.com/v1/registry \
@@ -67,6 +74,11 @@ without `--dns` lists both helpers:
 `--registry-url https://us.relay.relay.example.com/v1/registry,https://eu.relay.relay.example.com/v1/registry`.
 Every relay sends each change to every helper and re-posts its computers
 every minute, so both answer the same records.
+
+The first time, start one helper and wait for its certificate (the log says
+`relay certificate issued`) before starting the other. Relays reach a helper
+over https, so it needs its certificate before others can post to it; while
+the second helper is down, Let's Encrypt asks the first.
 
 Check it:
 

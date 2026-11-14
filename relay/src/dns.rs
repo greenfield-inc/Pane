@@ -56,6 +56,20 @@ fn soa(state: &State) -> SOA {
     )
 }
 
+/// `_acme-challenge.<D>` or `_acme-challenge.<region>.relay.<D>` for a known region:
+/// the only names whose TXT values relays set for their own certificates.
+pub fn is_relay_acme_name(state: &State, name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("_acme-challenge.") else {
+        return false;
+    };
+    if rest == state.domain {
+        return true;
+    }
+    rest.strip_suffix(&state.domain)
+        .and_then(|p| p.strip_suffix(".relay."))
+        .is_some_and(|region| !region.contains('.') && known_region(state, region))
+}
+
 fn known_region(state: &State, region: &str) -> bool {
     region == state.cfg.region
         || state.cfg.relays.get(region).is_some()
@@ -92,6 +106,12 @@ fn lookup(state: &State, qname: &str, qtype: RecordType) -> Lookup {
                 _ => Vec::new(),
             };
             return Lookup::Found(records);
+        }
+        ["_acme-challenge"] | ["_acme-challenge", _, "relay"] => {
+            if !is_relay_acme_name(state, &qname) {
+                return Lookup::NxDomain;
+            }
+            (None, Some(state.registry.acme_txt(&qname)))
         }
         [ns, ..] if ns_names(state).contains(&qname) => {
             let ip = state.cfg.ns_ip.get(ns).and_then(|ip| ip.parse().ok());

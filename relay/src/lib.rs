@@ -1,5 +1,6 @@
 //! Pane relay: routes TLS by SNI to connected Pane computers (see PROTOCOL.md).
 
+mod acme;
 mod agent;
 mod alerts;
 mod api;
@@ -61,13 +62,35 @@ impl Relay {
 /// Binds the listeners and starts serving.
 pub async fn start(cfg: Config) -> Result<Relay, Error> {
     let domain = cfg.domain()?;
-    let (tls, dev_cert) = match (&cfg.cert, &cfg.key, cfg.dev) {
-        (Some(c), Some(k), _) => (tls::load(c, k)?, None),
-        (None, None, true) => {
-            let (tls, path) = tls::dev(&domain)?;
-            (tls, Some(path))
+    let mut acme = None;
+    let (tls, cert, dev_cert) = match (&cfg.cert, &cfg.key, &cfg.acme_cache, cfg.dev) {
+        (Some(c), Some(k), _, _) => {
+            let (tls, cert) = tls::load(c, k)?;
+            (tls, cert, None)
         }
-        _ => return Err("pass --cert and --key (or --dev for a self-signed certificate)".into()),
+        (None, None, Some(cache), _) => {
+            let region = cfg.region.to_ascii_lowercase();
+            let a = acme::Acme {
+                cache: cache.clone(),
+                directory: cfg.acme_directory.clone(),
+                email: cfg.acme_email.clone(),
+                ca: cfg.provider_ca.clone(),
+                names: vec![domain.clone(), format!("{region}.relay.{domain}")],
+            };
+            let (tls, cert) = tls::server_config(a.initial()?)?;
+            acme = Some(a);
+            (tls, cert, None)
+        }
+        (None, None, None, true) => {
+            let (tls, cert, path) = tls::dev(&domain)?;
+            (tls, cert, Some(path))
+        }
+        _ => {
+            return Err(
+                "pass --cert and --key, --acme-cache for an ACME certificate, or --dev for a self-signed one"
+                    .into(),
+            );
+        }
     };
     let registry = registry::Registry::new(
         &cfg.registry_url,
@@ -112,6 +135,9 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         tokio::spawn(dns::serve_tcp(state.clone(), tcp));
     }
     tokio::spawn(maintenance(state.clone(), blocklist, blocklist_mtime));
+    if let Some(a) = acme {
+        tokio::spawn(acme::run(state.clone(), cert, a));
+    }
 
     let shutdown = state.shutdown.clone();
     let task = tokio::spawn(async move {
@@ -245,6 +271,9 @@ async fn maintenance(state: Arc<State>, blocklist: Option<PathBuf>, mut mtime: O
                 if let Some(e) = state.registry.get(&id) {
                     let _ = state.publish(&id, e.local, Some(e.txt), true).await;
                 }
+            }
+            for txt in state.registry.own_acme() {
+                let _ = state.registry.publish_acme(txt).await;
             }
         }
     }

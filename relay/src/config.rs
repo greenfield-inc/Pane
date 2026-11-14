@@ -53,6 +53,23 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_KEY")]
     pub key: Option<PathBuf>,
 
+    /// Get the relay's certificate for <D> and <region>.relay.<D> from an ACME CA with
+    /// DNS-01, keeping the account and certificate here (files mode 0600). --cert/--key win.
+    #[arg(long, env = "PANE_RELAY_ACME_CACHE")]
+    pub acme_cache: Option<PathBuf>,
+
+    /// Contact email for the ACME account.
+    #[arg(long, env = "PANE_RELAY_ACME_EMAIL")]
+    pub acme_email: Option<String>,
+
+    /// ACME directory URL. Let's Encrypt staging is https://acme-staging-v02.api.letsencrypt.org/directory.
+    #[arg(
+        long,
+        env = "PANE_RELAY_ACME_DIRECTORY",
+        default_value = "https://acme-v02.api.letsencrypt.org/directory"
+    )]
+    pub acme_directory: String,
+
     /// Development mode: generate a self-signed certificate when --cert/--key are absent.
     #[arg(long, env = "PANE_RELAY_DEV")]
     pub dev: bool,
@@ -183,7 +200,8 @@ pub struct Config {
     #[arg(long, hide = true)]
     pub fcm_token_url: Option<String>,
 
-    /// Extra PEM root certificates trusted for push providers and registry helpers (tests).
+    /// Extra PEM root certificates trusted for push providers and registry helpers; its
+    /// first certificate is the only root trusted for the ACME CA (tests).
     #[arg(long, hide = true)]
     pub provider_ca: Option<PathBuf>,
 }

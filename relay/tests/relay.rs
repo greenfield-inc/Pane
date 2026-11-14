@@ -585,6 +585,45 @@ async fn dns_answers_for_computer_names() {
         a_records(&a(format!("{other}.{D}.")).await),
         vec![Ipv4Addr::new(198, 51, 100, 7)]
     );
+
+    // A relay's ACME challenge for its own name; other names are refused.
+    let acme = |name: String| json!({"name": name, "values": ["relay-token"]}).to_string();
+    let auth = "authorization: Bearer s3cret\r\n";
+    let (code, _) = env
+        .http(
+            "POST",
+            "/v1/registry/acme",
+            auth,
+            &acme(format!("_acme-challenge.{id}.{D}")),
+        )
+        .await;
+    assert_eq!(code, 400);
+    let (code, _) = env
+        .http(
+            "POST",
+            "/v1/registry/acme",
+            "",
+            &acme(format!("_acme-challenge.eu.relay.{D}")),
+        )
+        .await;
+    assert_eq!(code, 401);
+    let (code, _) = env
+        .http(
+            "POST",
+            "/v1/registry/acme",
+            auth,
+            &acme(format!("_acme-challenge.eu.relay.{D}")),
+        )
+        .await;
+    assert_eq!(code, 200);
+    let txt = dns_query(
+        env.dns(),
+        format!("_acme-challenge.eu.relay.{D}."),
+        RecordType::TXT,
+        false,
+    )
+    .await;
+    assert_eq!(txt.answers.len(), 1);
 }
 
 /// Polls `server` until `name` has A records, then returns them.

@@ -1,4 +1,5 @@
-//! The registry: each computer's region, local addresses, TXT values and last-seen time.
+//! The registry: each computer's region, local addresses, TXT values and last-seen time,
+//! plus the relays' own ACME TXT values.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -30,12 +31,28 @@ pub struct Entry {
     pub last_seen: SystemTime,
 }
 
-type Push = (Update, Option<oneshot::Sender<Result<(), String>>>);
+/// A relay's own ACME challenge values for one of its names, such as
+/// `{"name":"_acme-challenge.us.relay.<D>","values":["..."]}`. Empty values clear it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AcmeTxt {
+    pub name: String,
+    pub values: Vec<String>,
+}
+
+/// One POST for a helper: the path after the registry URL, its JSON body, and a log label.
+struct Post {
+    suffix: &'static str,
+    body: Vec<u8>,
+    label: String,
+    reply: Option<oneshot::Sender<Result<(), String>>>,
+}
 
 pub struct Registry {
     entries: Mutex<HashMap<String, Entry>>,
+    /// ACME TXT values by name; `true` marks this relay's own, which it re-posts.
+    acme: Mutex<HashMap<String, (Vec<String>, bool)>>,
     /// One ordered queue per helper URL, so a helper that is down delays only itself.
-    push: Vec<mpsc::UnboundedSender<Push>>,
+    push: Vec<mpsc::UnboundedSender<Post>>,
 }
 
 impl Registry {
@@ -50,22 +67,21 @@ impl Registry {
         let push = urls
             .iter()
             .map(|url| {
-                let (tx, mut rx) = mpsc::unbounded_channel::<Push>();
+                let (tx, mut rx) = mpsc::unbounded_channel::<Post>();
                 let (url, secret, tls) = (url.clone(), secret.clone(), tls.clone());
                 tokio::spawn(async move {
-                    while let Some((update, reply)) = rx.recv().await {
-                        let body = serde_json::to_vec(&update).unwrap_or_default();
+                    while let Some(p) = rx.recv().await {
                         let result = tokio::time::timeout(
                             Duration::from_secs(10),
-                            post(&url, secret.as_deref(), &body, tls.clone()),
+                            post(&url, p.suffix, secret.as_deref(), &p.body, tls.clone()),
                         )
                         .await
                         .map_err(|_| format!("registry {url} did not answer in 10 s"))
                         .and_then(|r| r.map_err(|e| format!("registry {url}: {e}")));
                         if let Err(e) = &result {
-                            tracing::warn!(id = %update.id, error = %e, "registry update failed");
+                            tracing::warn!(update = %p.label, error = %e, "registry update failed");
                         }
-                        if let Some(reply) = reply {
+                        if let Some(reply) = p.reply {
                             let _ = reply.send(result);
                         }
                     }
@@ -75,6 +91,7 @@ impl Registry {
             .collect();
         Ok(Self {
             entries: Mutex::default(),
+            acme: Mutex::default(),
             push,
         })
     }
@@ -101,25 +118,77 @@ impl Registry {
         self.entries.lock().unwrap().get(id).cloned()
     }
 
-    /// Applies the update here and sends it to every helper. TXT updates wait for
-    /// the helpers and succeed when at least one took them: a helper that is down
-    /// answers no DNS, so resolvers ask the other.
+    /// Stores ACME TXT values that another relay posted.
+    pub fn apply_acme(&self, t: &AcmeTxt) {
+        self.set_acme(t, false);
+    }
+
+    fn set_acme(&self, t: &AcmeTxt, own: bool) {
+        let mut acme = self.acme.lock().unwrap();
+        if t.values.is_empty() {
+            acme.remove(&t.name);
+        } else {
+            acme.insert(t.name.clone(), (t.values.clone(), own));
+        }
+    }
+
+    /// The ACME TXT values for `name` (a lowercase name without the trailing dot).
+    pub fn acme_txt(&self, name: &str) -> Vec<String> {
+        let acme = self.acme.lock().unwrap();
+        acme.get(name).map(|(v, _)| v.clone()).unwrap_or_default()
+    }
+
+    /// This relay's ACME TXT values that are still set, for the periodic re-post.
+    pub fn own_acme(&self) -> Vec<AcmeTxt> {
+        let acme = self.acme.lock().unwrap();
+        acme.iter()
+            .filter(|(_, (_, own))| *own)
+            .map(|(name, (values, _))| AcmeTxt {
+                name: name.clone(),
+                values: values.clone(),
+            })
+            .collect()
+    }
+
+    /// Sets this relay's ACME TXT values here and on every helper (see `publish`).
+    pub async fn publish_acme(&self, t: AcmeTxt) -> Result<(), String> {
+        self.set_acme(&t, true);
+        let body = serde_json::to_vec(&t).unwrap_or_default();
+        self.send("/acme", body, t.name.clone(), true).await
+    }
+
+    /// Applies the update here and sends it to every helper (see `send`).
     pub async fn publish(&self, update: Update) -> Result<(), String> {
         self.apply(&update);
-        if update.txt.is_none() {
-            for push in &self.push {
-                let _ = push.send((update.clone(), None));
-            }
-            return Ok(());
-        }
+        let body = serde_json::to_vec(&update).unwrap_or_default();
+        let wait = update.txt.is_some();
+        self.send("", body, update.id, wait).await
+    }
+
+    /// Queues one POST for every helper. With `wait` (TXT values), waits for the
+    /// helpers and succeeds when at least one took it: a helper that is down
+    /// answers no DNS, so resolvers ask the other.
+    async fn send(
+        &self,
+        suffix: &'static str,
+        body: Vec<u8>,
+        label: String,
+        wait: bool,
+    ) -> Result<(), String> {
         let mut replies = Vec::new();
         for push in &self.push {
             let (tx, rx) = oneshot::channel();
-            if push.send((update.clone(), Some(tx))).is_ok() {
+            let post = Post {
+                suffix,
+                body: body.clone(),
+                label: label.clone(),
+                reply: wait.then_some(tx),
+            };
+            if push.send(post).is_ok() && wait {
                 replies.push(rx);
             }
         }
-        if self.push.is_empty() {
+        if !wait || self.push.is_empty() {
             return Ok(());
         }
         let mut first_err = None;
@@ -141,6 +210,7 @@ impl Registry {
 /// POSTs JSON to an http(s) URL and succeeds on a 2xx answer.
 async fn post(
     url: &str,
+    suffix: &str,
     secret: Option<&str>,
     body: &[u8],
     tls_config: Arc<rustls::ClientConfig>,
@@ -156,6 +226,7 @@ async fn post(
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/v1/registry"),
     };
+    let path = format!("{}{suffix}", path.trim_end_matches('/'));
     let (host, port) = match authority.rsplit_once(':') {
         Some((h, p)) => (h, p.parse().map_err(|_| "bad registry port")?),
         None => (authority, if tls { 443 } else { 80 }),

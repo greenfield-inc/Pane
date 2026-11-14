@@ -15,6 +15,7 @@ getrandom = "0.4.3"
 h2 = "0.4.19"
 hickory-proto = { version = "0.26.3", default-features = false, features = ["std"] }
 http = "1.5.0"
+instant-acme = { version = "0.8.5", default-features = false, features = ["ring", "hyper-rustls", "rcgen"] }
 iroh-relay = { version = "=1.4.1", default-features = false, features = ["server"] }
 p256 = { version = "0.14.0", features = ["ecdsa", "pkcs8"] }
 ring = "0.17.14"
@@ -30,6 +31,7 @@ tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring
 tokio-util = { version = "0.7.20", features = ["rt"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "ansi"] }
+x509-parser = "0.18.1"
 
 [profile.release]
 lto = "thin"
