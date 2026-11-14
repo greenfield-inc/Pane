@@ -32,6 +32,7 @@ import { useRemoteListeningPorts } from './hooks/useRemoteListeningPorts';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
+import { withNewProfiles } from '../../../shared/remoteClient/relay';
 import { pairingErrorText, pairThisBrowser, takePairingSecret } from './runtime/relayBrowserPairing';
 import { RelayConnectionBar } from './components/RelayConnectionBar';
 import { getClientLabel, getRuntimeId } from './runtime/remoteDaemonBrowserClient';
@@ -596,7 +597,7 @@ export function RemotePwaApp() {
       if (!computer) return;
       // Computers the Pane app already linked with this one come along. The browser links none itself:
       // each computer's browser app has its own storage, so it never sees the others.
-      setSavedProfiles(previous => [...previous.filter(profile => !linked.some(added => added.id === profile.id || added.baseUrl === profile.baseUrl)), ...linked]);
+      setSavedProfiles(previous => withNewProfiles(previous, linked));
       await connectProfile(computer);
     } catch (error) {
       setLastError(error instanceof Error ? pairingErrorText(error) : 'Pairing failed.');

@@ -1,6 +1,5 @@
 import {
   exchangeRelayPairing,
-  relayProfile,
   RelayPairingError,
   type RelayConnectionProfile,
 } from '../../../../shared/remoteClient/relay';
@@ -29,12 +28,10 @@ export async function pairThisBrowser(
   secret: string,
   request: { fetch: RemoteFetch; label: string; phoneId: string },
 ): Promise<RelayConnectionProfile[]> {
-  // The computer's name arrives with the exchange; until then the address carries only its id.
-  const result = await exchangeRelayPairing(request.fetch, page.location.origin, { secret, label: request.label, phoneId: request.phoneId }, 'your computer');
-  return [
-    relayProfile({ computer: result.computer, token: result.token }),
-    ...result.linked.map(grant => relayProfile(grant, result.computer.name)),
-  ];
+  // The page's host is `<id>.<domain>`. The computer's name arrives with the exchange.
+  const [computerId = '', ...domain] = new URL(page.location.origin).host.split('.');
+  const scanned = { computerId, domain: domain.join('.'), name: 'your computer' };
+  return exchangeRelayPairing(request.fetch, scanned, { secret, label: request.label, phoneId: request.phoneId });
 }
 
 /** The pairing error as one line for the connection screen. */

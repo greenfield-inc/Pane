@@ -1,8 +1,6 @@
 import {
   exchangeRelayPairing,
   linkWithSavedRelayComputers,
-  relayComputerAddress,
-  relayProfile,
   type RelayConnectionProfile,
   type RelayPairingLink,
 } from '@shared/remoteClient';
@@ -15,16 +13,7 @@ import { CLIENT_LABEL, createDaemonClient, DEVICE_LABEL, getRuntimeId, streaming
  * then every computer linked with it, each with its own token.
  */
 export async function exchangeRelayLink(link: RelayPairingLink): Promise<RelayConnectionProfile[]> {
-  const result = await exchangeRelayPairing(
-    streamingFetch,
-    relayComputerAddress(link),
-    { secret: link.secret, label: DEVICE_LABEL ?? CLIENT_LABEL, phoneId: await getRuntimeId() },
-    link.name,
-  );
-  return [
-    relayProfile({ computer: result.computer, token: result.token }),
-    ...result.linked.map(grant => relayProfile(grant, result.computer.name)),
-  ];
+  return exchangeRelayPairing(streamingFetch, link, { secret: link.secret, label: DEVICE_LABEL ?? CLIENT_LABEL, phoneId: await getRuntimeId() });
 }
 
 /**

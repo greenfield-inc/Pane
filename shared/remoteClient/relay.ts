@@ -3,7 +3,6 @@ import {
   type RelayComputer,
   type RelayComputerGrant,
   type RelayExchangeRequest,
-  type RelayExchangeResult,
 } from '../types/relay';
 import type { RemotePaneConnectionProfile, RemoteRelayProfile } from '../types/remoteDaemon';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
@@ -126,19 +125,21 @@ function pairingFailure(code: string, name: string): RelayPairingError {
 }
 
 /**
- * Trades a pairing secret for this device's token at `POST <address>/pair/exchange`. `address` is
- * the computer's relay address, or the browser app's own origin. Throws `RelayPairingError`.
+ * Trades a pairing secret for this device's token at `POST https://<id>.<domain>/pair/exchange`
+ * (the browser app's own origin) and returns the scanned computer's profile first, then a profile
+ * for each computer linked with it. Throws `RelayPairingError`, also when a different computer
+ * answers. Linked computers outside `<id>.<domain>` are dropped.
  */
 export async function exchangeRelayPairing(
   fetch: RemoteFetch,
-  address: string,
+  scanned: Pick<RelayPairingLink, 'computerId' | 'domain' | 'name'>,
   request: RelayExchangeRequest,
-  name: string,
-): Promise<RelayExchangeResult> {
+): Promise<RelayConnectionProfile[]> {
+  const { name } = scanned;
   let response;
   let body: unknown;
   try {
-    response = await fetch(`${address}/pair/exchange`, {
+    response = await fetch(`${relayComputerAddress(scanned)}/pair/exchange`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
@@ -149,9 +150,33 @@ export async function exchangeRelayPairing(
     throw new RelayPairingError(`Can’t reach ${name}`, `Pane’s servers didn’t answer, so ${name} can’t be reached from this network. Try again in a minute.`, 'unreachable', false);
   }
   const result = decodeOptionalBoundary(body, exchangeSchema);
-  if (response.ok && result) return result;
-  const failure = decodeOptionalBoundary(body, failureSchema);
-  throw pairingFailure(failure?.error.code ?? `HTTP_${response.status}`, name);
+  if (!response.ok || !result) {
+    const failure = decodeOptionalBoundary(body, failureSchema);
+    throw pairingFailure(failure?.error.code ?? `HTTP_${response.status}`, name);
+  }
+  if (result.computer.id !== scanned.computerId || !isRelayComputerUnder(result.computer, scanned.domain)) {
+    throw new RelayPairingError('This code didn’t work', `A different computer answered. Scan the code Pane on ${name} is showing now.`, 'ERR_PAIRING_WRONG_COMPUTER', true);
+  }
+  const linked = result.linked.filter(grant => grant.computer.id !== scanned.computerId && isRelayComputerUnder(grant.computer, scanned.domain));
+  return [relayProfile({ computer: result.computer, token: result.token }), ...linked.map(grant => relayProfile(grant, result.computer.name))];
+}
+
+/** Whether a computer sits at `https://<id>.<domain>`, so its answer can't stand in for another address. */
+function isRelayComputerUnder(computer: RelayComputer, domain: string): boolean {
+  return COMPUTER_ID.test(computer.id)
+    && computer.domain === domain
+    && computer.address.replace(/\/+$/u, '') === relayComputerAddress({ computerId: computer.id, domain });
+}
+
+/**
+ * `saved` plus each of `added` the device has no profile for yet (same id or address). A
+ * computer's answer never replaces a saved computer's token or fingerprint; only scanning that
+ * computer's own code does.
+ */
+export function withNewProfiles<T extends RemotePaneConnectionProfile>(saved: readonly T[], added: readonly T[]): T[] {
+  return added.reduce<T[]>((profiles, profile) => (
+    profiles.some(known => known.id === profile.id || known.baseUrl === profile.baseUrl) ? profiles : [...profiles, profile]
+  ), [...saved]);
 }
 
 /** A client that calls one computer's commands: `RemoteDaemonClient`, or a fake in tests. */
@@ -204,7 +229,7 @@ export function relayComputerOf(profile: RelayConnectionProfile): RelayComputer 
 
 /**
  * "Your computers": asks one relay computer for the computers linked with it and returns profiles
- * for the ones this device has not saved yet.
+ * for the ones this device has not saved yet, on that computer's domain.
  */
 export async function fetchNewRelayProfiles(
   client: RelayCommandClient,
@@ -213,7 +238,9 @@ export async function fetchNewRelayProfiles(
 ): Promise<RelayConnectionProfile[]> {
   const known = saved.flatMap(profile => (profile.relay ? [profile.relay.computerId] : []));
   const grants = decodeBoundary(await client.invoke(RELAY_CLIENT_COMMANDS.computers, [{ known }]), boundary.array(grantSchema));
-  return grants.filter(grant => !known.includes(grant.computer.id)).map(grant => relayProfile(grant, from.label));
+  return grants
+    .filter(grant => !known.includes(grant.computer.id) && isRelayComputerUnder(grant.computer, from.relay.domain))
+    .map(grant => relayProfile(grant, from.label));
 }
 
 const statusSchema = boundary.object({

@@ -37,6 +37,7 @@ export {
   relayComputerAddress,
   relayComputerOf,
   relayProfile,
+  withNewProfiles,
   type RelayCommandClient,
   type RelayConnectionProfile,
   type RelayLinkPeer,

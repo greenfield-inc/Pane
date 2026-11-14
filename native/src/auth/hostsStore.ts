@@ -15,8 +15,8 @@ interface HostsState extends SavedHosts {
   hydrate(): Promise<void>;
   /** Saves a verified pairing and makes it the active host. */
   add(profile: RemotePaneConnectionProfile): Promise<void>;
-  /** Saves several computers; `activeId` (null: keep the current one) becomes active. */
-  addMany(profiles: RemotePaneConnectionProfile[], activeId: string | null): Promise<void>;
+  /** Adds the computers the phone has not saved; `paired` (a scanned computer) replaces its entry and becomes active. */
+  addMany(added: RemotePaneConnectionProfile[], paired?: RemotePaneConnectionProfile): Promise<void>;
   /** Signs out of one host: its token is deleted from this device. */
   remove(id: string): Promise<void>;
   setActive(id: string): Promise<void>;
@@ -41,7 +41,7 @@ export const useHostsStore = create<HostsState>((set, get) => {
       set({ ...hosts, hydrated: true });
     },
     add: profile => commit(addHost(get(), profile)),
-    addMany: (profiles, activeId) => commit(addHosts(get(), profiles, activeId)),
+    addMany: (added, paired) => commit(addHosts(get(), added, paired)),
     remove: id => commit(removeHost(get(), id)),
     setActive: id => commit({ profiles: get().profiles, activeId: id }),
     startDemo: () => {

@@ -17,7 +17,7 @@ export function RelayComputerSync() {
     if (!connected || !isRelayProfile(profile)) return;
     let cancelled = false;
     void fetchNewRelayProfiles(client, profile, useHostsStore.getState().profiles)
-      .then(added => { if (!cancelled && added.length) return addHosts(added, null); })
+      .then(added => { if (!cancelled && added.length) return addHosts(added); })
       .catch((error: unknown) => console.info('[relay] could not refresh your computers', error));
     return () => { cancelled = true; };
   }, [connected, client, profile, addHosts]);

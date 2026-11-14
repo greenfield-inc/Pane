@@ -60,6 +60,16 @@ describe('pairing the browser app from "Continue in browser"', () => {
     ]);
   });
 
+  it('refuses an answer from a computer other than the one that served the page', async () => {
+    const fetch = async () => ({
+      ok: true,
+      status: 200,
+      body: null,
+      json: async () => ({ ok: true, token: 'tok', clientId: 'c', computer: computer('workmacworkmacwo', 'Work Mac'), linked: [] }),
+    });
+    await expect(pairThisBrowser(page(''), 's3cret', { fetch, label: 'x', phoneId: 'y' })).rejects.toThrow('This code didn’t work');
+  });
+
   it('says a used code was already used', async () => {
     const fetch = async () => ({ ok: false, status: 410, body: null, json: async () => ({ ok: false, error: { code: 'ERR_PAIRING_CODE_USED', message: 'used' } }) });
     await expect(pairThisBrowser(page(''), 's3cret', { fetch, label: 'x', phoneId: 'y' }))

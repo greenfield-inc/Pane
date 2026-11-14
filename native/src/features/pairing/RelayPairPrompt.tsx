@@ -1,7 +1,7 @@
 import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
-import { RelayPairingError, type RelayPairingLink } from '@shared/remoteClient';
+import { DEFAULT_RELAY_DOMAIN, RelayPairingError, type RelayPairingLink } from '@shared/remoteClient';
 
 import { Button, Text } from '@/ui';
 
@@ -20,6 +20,11 @@ export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: 
       <Text variant="callout" tone="secondary">
         {error ? errorDetail(error) : `Watch and steer the agents on ${link.name} from this phone, from any network.`}
       </Text>
+      {!error && link.domain !== DEFAULT_RELAY_DOMAIN ? (
+        <Text variant="callout" tone="secondary" testID="relay-pair-domain">
+          {`This code connects through ${link.domain}, not Pane’s servers. Pair only if you set that up.`}
+        </Text>
+      ) : null}
       {error instanceof RelayPairingError && error.scanAgain ? (
         <Button testID="relay-pair-scan" title="Scan the new code" onPress={() => router.replace('/scan')} />
       ) : (

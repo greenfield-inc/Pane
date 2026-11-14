@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { linkRelayComputers, type RelayLinkPeer } from '@shared/remoteClient';
+import { fetchNewRelayProfiles, linkRelayComputers, relayProfile, type RelayLinkPeer } from '@shared/remoteClient';
 import type { RelayComputer } from '@shared/types/relay';
 
 function computer(id: string): RelayComputer {
@@ -52,5 +52,19 @@ describe('linking a newly paired computer with the phone’s others', () => {
     const added = fakeComputer('new');
     expect(await linkRelayComputers(added.peer, [fakeComputer('new').peer])).toEqual([]);
     expect(added.saved).toEqual([]);
+  });
+});
+
+describe('"Your computers"', () => {
+  it('adds only computers at <id>.<domain> on the asking computer’s domain', async () => {
+    const from = relayProfile({ computer: computer('studio'), token: 'tok-studio' });
+    const grants = [
+      { computer: computer('build'), token: 'tok-build' },
+      { computer: { ...computer('evil'), domain: 'evil.test', address: 'https://evil.evil.test' }, token: 'x' },
+      { computer: { ...computer('spoof'), address: 'https://evil.test' }, token: 'y' },
+    ];
+    const client = { invoke: async <T>() => grants as T };
+    const added = await fetchNewRelayProfiles(client, from, [from]);
+    expect(added.map(p => p.baseUrl)).toEqual(['https://build.runpane.net']);
   });
 });

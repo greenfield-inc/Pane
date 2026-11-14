@@ -42,19 +42,47 @@ describe('pairing QR links', () => {
 
 describe('the pairing exchange', () => {
   const respond = (status: number, body: unknown) => async () => ({ ok: status < 400, status, body: null, json: async () => body as never });
+  const scanned = { computerId: 'abcdefghijklmnop', domain: 'runpane.net', name: 'Studio Mac' };
+  const computer = (id: string, address = `https://${id}.runpane.net`, domain = 'runpane.net') => ({ id, name: id, domain, address, local: [], fingerprint: `fp-${id}` });
+  const answer = (from: ReturnType<typeof computer>, linked: Array<ReturnType<typeof computer>> = []) =>
+    respond(200, { ok: true, token: 'tok', clientId: 'c', computer: from, linked: linked.map(grant => ({ computer: grant, token: `tok-${grant.id}` })) });
+
+  it('saves the scanned computer first, then the computers linked with it', async () => {
+    const profiles = await exchangeRelayPairing(answer(computer('abcdefghijklmnop'), [computer('qrstuvwxyzabcdef')]), scanned, { secret: 's', label: 'Phone' });
+    expect(profiles.map(p => [p.id, p.baseUrl, p.token])).toEqual([
+      ['relay:abcdefghijklmnop', 'https://abcdefghijklmnop.runpane.net', 'tok'],
+      ['relay:qrstuvwxyzabcdef', 'https://qrstuvwxyzabcdef.runpane.net', 'tok-qrstuvwxyzabcdef'],
+    ]);
+  });
+
+  it('refuses an answer from a computer other than the scanned one', async () => {
+    const other = exchangeRelayPairing(answer(computer('workmacworkmacwo')), scanned, { secret: 's', label: 'Phone' });
+    await expect(other).rejects.toThrow(RelayPairingError);
+    const elsewhere = exchangeRelayPairing(answer(computer('abcdefghijklmnop', 'https://abcdefghijklmnop.evil.test', 'evil.test')), scanned, { secret: 's', label: 'Phone' });
+    await expect(elsewhere).rejects.toThrow(RelayPairingError);
+  });
+
+  it('drops linked computers whose address is not <id>.<scanned domain>', async () => {
+    const profiles = await exchangeRelayPairing(answer(computer('abcdefghijklmnop'), [
+      computer('qrstuvwxyzabcdef', 'https://qrstuvwxyzabcdef.evil.test', 'evil.test'),
+      computer('workmacworkmacwo', 'https://evil.test'),
+      computer('buildboxbuildbox'),
+    ]), scanned, { secret: 's', label: 'Phone' });
+    expect(profiles.map(p => p.baseUrl)).toEqual(['https://abcdefghijklmnop.runpane.net', 'https://buildboxbuildbox.runpane.net']);
+  });
 
   it.each([
     ['ERR_PAIRING_CODE_USED', 410, 'This code was already used', true],
     ['ERR_PAIRING_CODE_EXPIRED', 410, 'This code expired', true],
     ['ERR_PAIRING_LOCKED', 429, 'Pairing is paused', false],
   ])('says %s in plain words', async (code, status, title, scanAgain) => {
-    const failure = exchangeRelayPairing(respond(status, { ok: false, error: { code, message: 'x' } }), 'https://a.runpane.net', { secret: 's', label: 'Phone' }, 'Studio Mac');
+    const failure = exchangeRelayPairing(respond(status, { ok: false, error: { code, message: 'x' } }), scanned, { secret: 's', label: 'Phone' });
     await expect(failure).rejects.toMatchObject({ message: title, scanAgain });
   });
 
   it('says it can’t reach the computer when nothing answers', async () => {
     const offline = async () => { throw new TypeError('Network request failed'); };
-    const failure = exchangeRelayPairing(offline, 'https://a.runpane.net', { secret: 's', label: 'Phone' }, 'Studio Mac');
+    const failure = exchangeRelayPairing(offline, scanned, { secret: 's', label: 'Phone' });
     await expect(failure).rejects.toThrow(RelayPairingError);
     await expect(failure).rejects.toMatchObject({ message: 'Can’t reach Studio Mac' });
   });
