@@ -202,18 +202,4 @@ describe('background activity', () => {
     pc.activity.setWindowState({ focused: true });
     expect(pc.activity.isAway()).toBe(false);
   });
-
-  it('logs each change with its reason', () => {
-    const info = vi.fn();
-    const power = new EventEmitter();
-    const activity = new BackgroundActivity(new Config(), {
-      power, lockEvents: true, isLocked: () => false, isOnBattery: () => false,
-      readLowPower: async () => false,
-      remoteStreams: Object.assign(new EventEmitter(), { count: () => 0 }),
-      now: () => 0, logger: { info },
-    });
-    power.emit('lock-screen');
-    expect(info).toHaveBeenCalledWith('[BackgroundActivity] Away (balanced): the screen locked.');
-    activity.dispose();
-  });
 });

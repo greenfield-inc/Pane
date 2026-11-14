@@ -301,6 +301,19 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
     }
   });
 
+  it('still reads when asked while paused, so a port tunnel can admit a server started meanwhile', async () => {
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], lastOutputAt: () => Date.now() });
+    monitor.setPaused(true);
+    monitor.start();
+    try {
+      const { port } = await startListener(HTTP_SERVER);
+      expect((await monitor.refresh()).ports.some(entry => entry.port === port)).toBe(true);
+      expect(monitor.isPaused()).toBe(true);
+    } finally {
+      monitor.stop();
+    }
+  });
+
   it('while every terminal is quiet, finds a port opened elsewhere a minute after the last read only while watched', async () => {
     let watched = false;
     const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [], lastOutputAt: () => 0, watched: () => watched });
