@@ -442,6 +442,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     agentState: panelId => panelManager.getPanel(panelId)?.type === 'chat' ? getChatTabManager().agentState(panelId) : terminalPanelManager.getAgentStatus(panelId),
     hasOpenNotify: panelIds => services.notifyService?.queue.hasOpenFor(panelIds) ?? false,
     focusedPaneId: () => (options.getMainWindow()?.isFocused() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined),
+    shownPaneId: () => {
+      const window = options.getMainWindow();
+      return window?.isVisible() && !window.isMinimized() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined;
+    },
     heldByUpdate: panel => {
       // SAFETY: auto-pause only passes terminal panels; their custom state is TerminalPanelState.
       const hold = (panel.state.customState as TerminalPanelState | undefined)?.updateResumeHold;

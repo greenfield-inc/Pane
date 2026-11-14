@@ -27,6 +27,8 @@ export interface AutoPauseDependencies {
   hasOpenNotify(panelIds: readonly string[]): boolean;
   /** The Pane the person has selected in a focused Pane window, if any. */
   focusedPaneId(): string | undefined;
+  /** The Pane selected in a Pane window that is on screen (shown and not minimized), focused or not. */
+  shownPaneId(): string | undefined;
   /** A tab an app update stopped and still holds for its own restore. */
   heldByUpdate(panel: ToolPanel): boolean;
   /** Pauses a whole Pane: its tabs and its run script. */
@@ -46,7 +48,8 @@ export interface AutoPauseDependencies {
  * an open Notify card), an archived or already paused Pane, or tabs an update still holds.
  *
  * Chat tabs also pause on their own, after `chatMinutes` (30 by default) with no message, agent
- * update or selection, under the same switch and the same skips; a chat tab with a turn, a
+ * update or selection, under the same switch and the same skips, and never while their Pane is on
+ * screen, even in an unfocused window; a chat tab with a turn, a
  * queued message, an approval, a question or a background task is never paused. Opening or
  * messaging a paused chat tab starts its agent again in the same conversation.
  */
@@ -119,7 +122,7 @@ export class AutoPauser {
     const threshold = this.deps.testThresholdMs ?? minutes * MINUTE_MS;
     const idle: string[] = [];
     for (const pane of this.deps.panes()) {
-      if (pane.archived || pane.id === this.deps.focusedPaneId()) continue;
+      if (pane.archived || pane.id === this.deps.shownPaneId()) continue;
       for (const panel of this.deps.panels(pane.id)) {
         if (panel.type !== 'chat' || !this.deps.chatRunning(panel.id)) continue;
         if (this.deps.agentState(panel.id) === 'blocked' || this.deps.hasOpenNotify([panel.id])) continue;

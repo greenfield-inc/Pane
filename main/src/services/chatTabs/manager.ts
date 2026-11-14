@@ -233,7 +233,7 @@ export class ChatTabManager {
         continue;
       }
       const pausing = this.stopForPause(panelId, tab, mark);
-      tab.pausing = pausing.finally(() => { if (tab.pausing === settled) tab.pausing = undefined; });
+      tab.pausing = pausing.catch(() => undefined).finally(() => { if (tab.pausing === settled) tab.pausing = undefined; });
       const settled = tab.pausing;
       try {
         await pausing;
@@ -270,7 +270,13 @@ export class ChatTabManager {
     const tab = this.tab(panelId);
     if (tab.runtime?.isAlive()) return Promise.resolve();
     // A send or open during a pause starts the agent once the pause has stopped it.
-    if (tab.pausing) return tab.pausing.catch(() => undefined).then(() => this.ensure(panelId));
+    if (tab.pausing) {
+      return tab.pausing.then(() => {
+        // A tab closed or stopped for a problem during the pause stays as it is.
+        if (this.tabs.get(panelId) !== tab || this.options.store.state(panelId)?.status === 'stopped') return;
+        return this.ensure(panelId);
+      });
+    }
     // Publish after the start settles: while it runs, every view says `starting`.
     tab.starting ??= this.start(panelId, tab).finally(() => {
       tab.starting = undefined;
@@ -454,7 +460,7 @@ export class ChatTabManager {
 
   async configure(panelId: string, configId: string, value: string): Promise<void> {
     if (configId === CHAT_FULL_ACCESS_CONTROL) { await this.setFullAccess(panelId, value === FULL_ACCESS_ON); return; }
-    const runtime = this.liveRuntime(panelId);
+    const runtime = await this.wokenRuntime(panelId);
     if (runtime.isRunning()) throw new PaneError('CHAT_CONFIG_BUSY', 'Settings cannot change while the agent is working. Nothing changed.', 'Wait for the turn to end, or press Stop.');
     await runtime.configure(configId, value);
     this.update(panelId, state => ({ ...state, settings: { ...state.settings, [configId]: value } }));
@@ -484,7 +490,7 @@ export class ChatTabManager {
   /** The folder's past conversations for the picker, newest first, with this tab's and other tabs' marked. */
   async conversations(panelId: string): Promise<ChatTabConversation[]> {
     const state = this.required(panelId);
-    const runtime = this.liveRuntime(panelId);
+    const runtime = await this.wokenRuntime(panelId);
     const elsewhere = this.options.openConversations?.(panelId) ?? new Map();
     const { sessions } = await runtime.list(state.cwd);
     return newestFirst(sessions).map(session => {
@@ -542,7 +548,7 @@ export class ChatTabManager {
     await this.end(tab);
     tab.transcript?.dispose();
     this.bodies.clear(panelId);
-    rmSync(this.pausedFile(panelId), { force: true });
+    try { rmSync(this.pausedFile(panelId), { force: true }); } catch (error) { console.warn(`[ChatTabs] ${panelId}: could not remove its paused view:`, error); }
     this.tabs.delete(panelId);
     this.options.onClosed?.(panelId);
   }
@@ -887,6 +893,12 @@ export class ChatTabManager {
     // is kept, so viewers accept the stopped state published next.
     tab.run = 0;
     await runtime?.stop();
+  }
+
+  /** The running agent; a paused tab's controls stay live, so using one resumes its agent first. */
+  private async wokenRuntime(panelId: string): Promise<ChatTabRuntime> {
+    if (this.required(panelId).paused || this.tabs.get(panelId)?.pausing) await this.ensure(panelId);
+    return this.liveRuntime(panelId);
   }
 
   private liveRuntime(panelId: string): ChatTabRuntime {

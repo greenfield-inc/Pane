@@ -732,6 +732,7 @@ describe('chat tab manager', () => {
     manager.view('p1');
     expect(lastReply()).toEqual([{ type: 'text', text: 'You said: hello' }]);
     expect([...manager.messages('p1')]).toHaveLength(4);
+    expect(manager.history('p1', 4, 100)).toHaveLength(4);
     await manager.ensure('p1');
     expect(lastReply()).toEqual([{ type: 'text', text: 'You said: hello' }]);
   });
@@ -799,6 +800,24 @@ describe('chat tab manager', () => {
     await manager.restart('p1');
     const after = manager.view('p1').transcript!.messages.map(message => message.role === 'user' ? 'user' : message.parts[0]?.type === 'content' ? 'time' : message.parts[0]?.type);
     expect(after).toEqual(before);
+  });
+
+  it('changes a paused tab\'s model and lists its conversations, resuming its agent first', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'a', text: 'hello' });
+    await expect.poll(() => manager.receipt('p1', 'a')?.state).toBe('completed');
+    const sessionId = store.state('p1')?.acpSessionId;
+    await manager.pause(['p1'], MARK);
+
+    await manager.configure('p1', 'model', 'fast');
+    expect(manager.view('p1', 0, false).controls.find(control => control.id === 'model')?.currentValue).toBe('fast');
+    expect(store.state('p1')?.paused).toBeUndefined();
+    expect(store.state('p1')?.acpSessionId).toBe(sessionId);
+
+    await manager.pause(['p1'], MARK);
+    expect((await manager.conversations('p1')).find(entry => entry.current)?.sessionId).toBe(sessionId);
   });
 
   it('keeps chosen settings across a restart', async () => {

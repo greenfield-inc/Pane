@@ -33,6 +33,7 @@ function world(overrides: Partial<AutoPauseDependencies> = {}) {
     agentState: (panelId): AgentState | undefined => panelId === 'blocked:1' ? 'blocked' : 'idle',
     hasOpenNotify: panelIds => panelIds.includes('notify:1'),
     focusedPaneId: () => 'focused',
+    shownPaneId: () => 'focused',
     heldByUpdate: panel => panel.id === 'updating:1',
     pause: async (paneId, mark) => { pausedCalls.push({ paneId, mark }); return { paused: [`${paneId}:1`], failed: [] }; },
     chatRunning: () => true,
@@ -106,15 +107,18 @@ describe('auto-pause of chat tabs', () => {
 
   function chats(overrides: Partial<AutoPauseDependencies> = {}) {
     const paused: string[][] = [];
-    const panes: AutoPausePane[] = ['work', 'focused', 'archived'].map(id => ({ id, createdAt: new Date(START), archived: id === 'archived' }));
+    const panes: AutoPausePane[] = ['work', 'shown', 'archived'].map(id => ({ id, createdAt: new Date(START), archived: id === 'archived' }));
     const panels = new Map<string, ToolPanel[]>([
       ['work', [chat('work:idle'), chat('work:selected', new Date(START + 20 * MINUTE).toISOString()), chat('work:talking'), chat('work:asking'), chat('work:carded'), chat('work:released')]],
-      ['focused', [chat('focused:idle')]],
+      ['shown', [chat('shown:idle')]],
       ['archived', [chat('archived:idle')]],
     ]);
     const { deps, advance } = world({
       panes: () => panes,
       panels: paneId => panels.get(paneId) ?? [],
+      // The Pane on screen in a window the person has left for another app.
+      focusedPaneId: () => undefined,
+      shownPaneId: () => 'shown',
       liveActivity: panelId => panelId === 'work:talking' ? new Date(START + 25 * MINUTE) : undefined,
       agentState: panelId => panelId === 'work:asking' ? 'blocked' : 'idle',
       // A card the agent posted and ended its turn on: the tab reads idle, but the person owes an answer.
@@ -126,7 +130,7 @@ describe('auto-pause of chat tabs', () => {
     return { deps, advance, paused };
   }
 
-  it('stops chat agents idle for 30 minutes, skipping the Pane on screen, archived Panes, and chats waiting on the person', async () => {
+  it('stops chat agents idle for 30 minutes, skipping the Pane on screen in an unfocused window, archived Panes, and chats waiting on the person', async () => {
     const { deps, advance, paused } = chats();
     advance(29 * MINUTE);
     await new AutoPauser(deps).sweep();

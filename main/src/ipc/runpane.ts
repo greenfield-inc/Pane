@@ -1,4 +1,5 @@
 import { getChatTabManager } from '../services/chatTabs';
+import { decodeChatPanelState } from '../services/chatTabs/state';
 import { createChatTab } from './chatTabs';
 import { chatTabLastMessage, chatTabNoTerminal, chatTabOutput, chatTabScreen, submitChatTab, waitForChatTab } from './runpaneChatTabs';
 import { paneCommandSignal } from '../daemon/commandRegistry';
@@ -3599,6 +3600,7 @@ async function resumeTabs(services: AppServices, registry: PaneCommandRegistry, 
 
 function isPanelPaused(panelId: string): boolean {
   const panel = panelManager.getPanel(panelId);
+  if (panel?.type === 'chat') return !!decodeChatPanelState(panel.state.customState)?.paused;
   return !!panel && !!pausedMarkOf(panel);
 }
 
