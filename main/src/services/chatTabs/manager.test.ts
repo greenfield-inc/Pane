@@ -820,6 +820,19 @@ describe('chat tab manager', () => {
     expect((await manager.conversations('p1')).find(entry => entry.current)?.sessionId).toBe(sessionId);
   });
 
+  it('leaves a paused tab that Autopilot then stopped stopped when its controls are used', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    await manager.pause(['p1'], MARK);
+    await manager.stop('p1', { message: 'Autopilot is off.', next: 'Turn Autopilot on.' });
+
+    await expect(manager.configure('p1', 'model', 'fast')).rejects.toThrow();
+    await expect(manager.conversations('p1')).rejects.toThrow();
+    expect(store.state('p1')?.status).toBe('stopped');
+    expect(manager.isRunning('p1')).toBe(false);
+  });
+
   it('keeps chosen settings across a restart', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));

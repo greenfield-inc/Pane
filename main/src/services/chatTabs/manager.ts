@@ -895,9 +895,10 @@ export class ChatTabManager {
     await runtime?.stop();
   }
 
-  /** The running agent; a paused tab's controls stay live, so using one resumes its agent first. */
+  /** The running agent; a paused tab's controls stay live, so using one resumes its agent first. A stopped tab stays stopped. */
   private async wokenRuntime(panelId: string): Promise<ChatTabRuntime> {
-    if (this.required(panelId).paused || this.tabs.get(panelId)?.pausing) await this.ensure(panelId);
+    const state = this.required(panelId);
+    if (state.status !== 'stopped' && (state.paused || this.tabs.get(panelId)?.pausing)) await this.ensure(panelId);
     return this.liveRuntime(panelId);
   }
 
