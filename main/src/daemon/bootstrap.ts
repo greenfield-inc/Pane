@@ -254,7 +254,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     shouldSkipFocusFetch: () => backgroundActivity?.isConstrained() ?? false,
   });
   // Every fetch into a project (focus, Fetch button, dashboard, branch list, new worktree, an agent's own) updates its Panes' ahead/behind.
-  onFetch(projectPath => void gitStatusManager.refreshProjectAfterFetch(projectPath));
+  onFetch(projectPath => {
+    gitStatusManager.refreshProjectAfterFetch(projectPath).catch(error => {
+      logger.warn(`[GitStatus] Could not update ${projectPath} after a fetch: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
   const executionTracker = new ExecutionTracker(sessionManager, gitDiffManager);
   const worktreeNameGenerator = new WorktreeNameGenerator(configManager);
   const runCommandManager = new RunCommandManager(databaseService);
