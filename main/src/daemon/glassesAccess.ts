@@ -156,7 +156,8 @@ interface GlassesAccessOptions {
 }
 
 /**
- * Per-device access for the Pane glasses app on the workspace listener. Device tokens and
+ * Per-device access for the Pane glasses app, on the workspace listener and the paired listener
+ * phones reach through the relay. Device tokens and
  * single-use pairing secrets are 256-bit, stored only as SHA-256 hashes and compared in constant
  * time. Device records live in `remoteDaemon.host.clients` with `kind: 'glasses'`. Pending pairing
  * secrets and the failure counters live in memory and end with the process.
@@ -368,7 +369,7 @@ export class GlassesAccess {
     this.lastUsedWrites.set(id, now);
     const lastUsedAt = new Date(now).toISOString();
     void this.write((clients) => clients.map((client) => (client.id === id ? { ...client, lastUsedAt } : client)))
-      .catch((error) => this.log(`[Pane glasses] could not save last use: ${error instanceof Error ? error.message : String(error)}`));
+      .catch((error) => this.log(`[Pane devices] could not save when a device was last used: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   /** Milliseconds left on this source's lockout, or 0. */
@@ -377,10 +378,15 @@ export class GlassesAccess {
     return state ? Math.max(0, state.lockedUntil - this.now()) : 0;
   }
 
-  /** Logs a refused glasses request and counts it toward the source's lockout. Never logs a credential. */
+  /** Logs a refused glasses request. Never logs a credential. */
+  logRefusal(source: string, reason: GlassesFailureReason, detail?: string): void {
+    this.log(`[Pane glasses] refused ${reason} from ${source} at ${new Date(this.now()).toISOString()}${detail ? ` (${detail})` : ''}`);
+  }
+
+  /** Logs a refused glasses request and counts it toward the source's lockout. */
   recordFailure(source: string, reason: GlassesFailureReason, detail?: string): void {
     const now = this.now();
-    this.log(`[Pane glasses] refused ${reason} from ${source} at ${new Date(now).toISOString()}${detail ? ` (${detail})` : ''}`);
+    this.logRefusal(source, reason, detail);
     // Only guesses at a credential count. A command outside the scope is a bug or an old app,
     // and any web page on the owner's phone can send a wrong origin or reach a Funnel, so
     // counting those would let a page lock the real glasses out.

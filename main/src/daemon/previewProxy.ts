@@ -67,17 +67,19 @@ export function createPreviewFiles(deps: {
   };
 }
 
-type Route =
+export type PreviewRoute =
   | { kind: 'refused'; status: number; body: string; html?: boolean }
+  | { kind: 'redirect'; location: string; setCookie: string }
   | { kind: 'port'; port: number; path: string; forwardedHost: string }
   | { kind: 'files'; path: string };
+type Route = PreviewRoute;
 
 /**
  * The loopback listener behind every phone page's Serve handler. Serve targets carry
  * `<basePath>/<port>` (a dev server) or `<basePath>/files` (HTML bundles and media), and sign
  * each request with the visitor's Tailscale login, which must pass "Who can connect".
  */
-export async function startPreviewProxy(options: PreviewProxyOptions): Promise<PreviewProxy> {
+export function startPreviewProxy(options: PreviewProxyOptions): Promise<PreviewProxy> {
   const route = (request: http.IncomingMessage): Route => {
     const url = request.url ?? '/';
     if (!startsWithSecret(url, options.basePath)) return { kind: 'refused', status: 403, body: 'Forbidden' };
@@ -100,9 +102,21 @@ export async function startPreviewProxy(options: PreviewProxyOptions): Promise<P
     if (!gate.ports.has(port)) return { kind: 'refused', status: 404, body: 'Not found' };
     return { kind: 'port', port, path, forwardedHost };
   };
+  return servePreviews(route, options.files);
+}
 
+/**
+ * The loopback listener that forwards a routed request to a dev server (HTTP and WebSocket) or
+ * serves preview files. `route` decides who may reach what.
+ */
+export async function servePreviews(route: (request: http.IncomingMessage) => PreviewRoute, files: PreviewFiles): Promise<PreviewProxy> {
   const server = http.createServer((request, response) => {
     const target = route(request);
+    if (target.kind === 'redirect') {
+      response.writeHead(302, { location: target.location, 'set-cookie': target.setCookie, 'cache-control': 'no-store' }).end();
+      request.resume();
+      return;
+    }
     if (target.kind === 'refused') {
       response.writeHead(target.status, {
         'content-type': target.html ? 'text/html; charset=utf-8' : 'text/plain; charset=utf-8',
@@ -112,7 +126,7 @@ export async function startPreviewProxy(options: PreviewProxyOptions): Promise<P
       return;
     }
     if (target.kind === 'files') {
-      void serveFile(options.files, target.path, request, response);
+      void serveFile(files, target.path, request, response);
       return;
     }
     const upstream = http.request({
@@ -136,7 +150,7 @@ export async function startPreviewProxy(options: PreviewProxyOptions): Promise<P
   server.on('upgrade', (request: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     const target = route(request);
     if (target.kind !== 'port') {
-      const status = target.kind === 'refused' ? target.status : 404;
+      const status = target.kind === 'refused' ? target.status : target.kind === 'redirect' ? 403 : 404;
       socket.end(`HTTP/1.1 ${status} ${http.STATUS_CODES[status]}\r\nConnection: close\r\n\r\n`);
       return;
     }
@@ -247,11 +261,11 @@ function startsWithSecret(url: string, basePath: string): boolean {
   return next === '/' || next === '?' || next === '';
 }
 
-function singleHeader(value: string | string[] | undefined): string {
+export function singleHeader(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value.length === 1 ? value[0] : '') : value ?? '';
 }
 
-function hostnameOf(host: string): string {
+export function hostnameOf(host: string): string {
   return host.replace(/:\d+$/u, '').toLowerCase();
 }
 

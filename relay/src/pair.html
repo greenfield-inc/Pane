@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Pair with Pane</title>
+<style>
+:root { color-scheme: light dark; --bg: #ffffff; --fg: #18181b; --muted: #71717a; --line: #e4e4e7; --primary: #18181b; --on-primary: #ffffff; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f0f11; --fg: #f4f4f5; --muted: #a1a1aa; --line: #2e2e33; --primary: #f4f4f5; --on-primary: #18181b; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px;
+  background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { width: 100%; max-width: 360px; text-align: center; }
+h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; overflow-wrap: anywhere; }
+p { margin: 0 0 24px; color: var(--muted); }
+a.btn { display: block; padding: 12px 16px; margin-top: 12px; border-radius: 10px; border: 1px solid var(--line);
+  color: var(--fg); text-decoration: none; font-weight: 500; }
+a.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title">Pair with Pane</h1>
+  <p id="status">Connect this device to your computer.</p>
+  <div id="actions" hidden>
+    <a class="btn primary" id="app" href="#">Open in Pane app</a>
+    <a class="btn" id="web" href="#">Continue in browser</a>
+  </div>
+</main>
+<script>
+(function () {
+  var params = new URLSearchParams(location.hash.slice(1));
+  var secret = params.get("s") || "";
+  var id = params.get("c") || "";
+  var name = (params.get("n") || "").slice(0, 60);
+  var title = document.getElementById("title");
+  var status = document.getElementById("status");
+  if (!secret || !/^[a-z2-7]{16}$/.test(id)) {
+    status.textContent = "This pairing link is incomplete. Scan the QR code on your computer again.";
+    return;
+  }
+  if (name) title.textContent = "Pair with " + name;
+  document.getElementById("app").href = "pane://pair" + location.hash + "&d=" + encodeURIComponent(location.host);
+  document.getElementById("web").href = "https://" + id + "." + location.host + "/app/#pair=" + encodeURIComponent(secret);
+  document.getElementById("actions").hidden = false;
+  fetch("/v1/status/" + id).then(function (r) { return r.json(); }).then(function (s) {
+    if (s.state === "asleep") status.textContent = "Your computer is asleep. Wake it, then continue.";
+    else if (s.state === "offline") status.textContent = "Your computer is offline. Open Pane on it, then continue.";
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>

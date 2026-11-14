@@ -732,25 +732,122 @@ describe('a revoke while its config write is queued', () => {
   });
 });
 
-describe('glasses tokens on the paired listener', () => {
-  it('are refused: they work only on the workspace listener', async () => {
-    const config = createDefaultRemoteDaemonConfig();
-    config.host.config = { ...config.host.config, enabled: true, listenPort: 0 };
-    config.host.clients = normalizeRemoteDaemonConfig({ host: { clients: [{ id: 'g1', label: 'Even G2', createdAt: '2026-10-28T00:00:00.000Z', tokenHash: hashRemoteDaemonToken('pgt_glasses'), kind: 'glasses' }] } }).host.clients;
-    expect(config.host.clients[0].kind).toBe('glasses');
-    const registry = new PaneCommandRegistry();
-    registry.register('runpane:panels:screen', () => ({}));
-    const server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) });
-    servers.push(server);
-    await server.start();
-    const status = await new Promise<number>((resolve, reject) => {
-      const req = http.request({ host: '127.0.0.1', port: server.getAddress()?.port, method: 'POST', path: '/invoke', headers: { Authorization: 'Bearer pgt_glasses', 'Content-Type': 'application/json' } }, (res) => {
+/** The paired listener, as a QR-paired phone and the glasses reach it through the relay: no Tailscale headers. */
+async function setupPaired(options: { glasses?: boolean; heartbeatIntervalMs?: number } = {}) {
+  const PHONE_TOKEN = 'phone-token-from-the-qr';
+  const remoteDaemon = createDefaultRemoteDaemonConfig();
+  remoteDaemon.host.config = { ...remoteDaemon.host.config, enabled: true, listenPort: 0 };
+  remoteDaemon.host.clients = [{ id: 'phone-1', label: 'Ana\'s iPhone', createdAt: '2026-10-28T00:00:00.000Z', tokenHash: hashRemoteDaemonToken(PHONE_TOKEN), phoneId: 'pane-native-phone-a' }];
+  let config: Pick<AppConfig, 'remoteDaemon' | 'workspaces'> = { remoteDaemon };
+  const store = {
+    getConfig: () => config,
+    updateConfigWith: async (update: (current: AppConfig) => Partial<AppConfig>) => {
+      // SAFETY: the glasses store reads and writes only remoteDaemon and workspaces.
+      config = { ...config, ...update(config as AppConfig) };
+      return config;
+    },
+  };
+  const log: string[] = [];
+  const glasses = new GlassesAccess(store, { env: {}, log: (line) => log.push(line) });
+  const registry = new PaneCommandRegistry();
+  for (const channel of ['runpane:panels:screen', 'file:write']) registry.register(channel, () => ({ ran: channel }));
+  registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue) => {
+    const { deviceName, phoneId } = decodeBoundary(request, boundary.object({ deviceName: boundary.string, phoneId: boundary.string }));
+    return glasses.createPairingSecret(deviceName, phoneId);
+  });
+  registry.register(GLASSES_COMMANDS.list, () => ({ devices: glasses.list() }));
+  registry.register(GLASSES_COMMANDS.revoke, async (request: PaneCommandValue) =>
+    ({ revoked: await glasses.revoke(decodeBoundary(request, boundary.object({ id: boundary.string })).id) }));
+  const server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config.remoteDaemon }) }, {
+    heartbeatIntervalMs: options.heartbeatIntervalMs,
+    glasses: options.glasses === false ? undefined : glasses,
+  });
+  servers.push(server);
+  await server.start();
+  const port = server.getAddress()?.port ?? 0;
+  const invoke = (channel: string, args: JsonValue[], headers: Record<string, string>) => new Promise<Response>((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/invoke', headers: { 'Content-Type': 'application/json', ...headers } }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: decodeBoundary(JSON.parse(Buffer.concat(chunks).toString('utf8')), boundary.json) }));
+    });
+    req.once('error', reject);
+    req.end(JSON.stringify({ channel, args }));
+  });
+  /** The Even app's WebView, which serves the glasses app from loopback on a new port each launch. */
+  const fromGlasses = (token?: string, origin = 'http://127.0.0.1:54456'): Record<string, string> =>
+    (token ? { Origin: origin, Authorization: `Bearer ${token}` } : { Origin: origin });
+  const fromPhone = { Authorization: `Bearer ${PHONE_TOKEN}` };
+  const pair = async () => {
+    const minted = await invoke(GLASSES_COMMANDS.createPairingSecret, [{ deviceName: 'Even G2 · iPhone', phoneId: 'pane-native-phone-a' }], fromPhone);
+    const paired = await invoke(GLASSES_COMMANDS.pair, [{ secret: readString(minted.body, 'result', 'secret') }], fromGlasses());
+    return readString(paired.body, 'result', 'token');
+  };
+  return { server, glasses, log, port, invoke, fromGlasses, fromPhone, pair };
+}
+
+describe('glasses through the relay, on the paired listener', () => {
+  it('pair with a secret the paired phone minted, and reach only their allowlist with their own token', async () => {
+    const host = await setupPaired();
+    const token = await host.pair();
+
+    expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(token))).body).toEqual({ ok: true, result: { ran: 'runpane:panels:screen' } });
+    expect(errorCode(await host.invoke('file:write', [{}], host.fromGlasses(token)))).toBe('ERR_GLASSES_CHANNEL_REFUSED');
+    expect(errorCode(await host.invoke(GLASSES_COMMANDS.list, [], host.fromGlasses(token)))).toBe('ERR_GLASSES_CHANNEL_REFUSED');
+    expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(token, 'https://attacker.example'))).status).toBe(403);
+    // Funnel concerns the Tailscale workspace port only.
+    host.glasses.setFunnelOn(true);
+    expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(token))).status).toBe(200);
+    expect((await host.invoke(GLASSES_COMMANDS.list, [], host.fromPhone)).body).toMatchObject({ ok: true, result: { devices: [{ label: 'Even G2 · iPhone', phoneId: 'pane-native-phone-a' }] } });
+  });
+
+  it('let only a paired token mint a secret, and only the Even app trade one', async () => {
+    const host = await setupPaired();
+    expect((await host.invoke(GLASSES_COMMANDS.createPairingSecret, [{ deviceName: 'x', phoneId: 'p' }], {})).status).toBe(401);
+    expect((await host.invoke(GLASSES_COMMANDS.createPairingSecret, [{ deviceName: 'x', phoneId: 'p' }], { Authorization: 'Bearer wrong' })).status).toBe(403);
+
+    const minted = await host.invoke(GLASSES_COMMANDS.createPairingSecret, [{ deviceName: 'Even G2', phoneId: 'p' }], host.fromPhone);
+    const secret = readString(minted.body, 'result', 'secret');
+    expect(errorCode(await host.invoke(GLASSES_COMMANDS.pair, [{ secret }], host.fromPhone))).toBe('ERR_GLASSES_ORIGIN_REFUSED');
+    expect(errorCode(await host.invoke(GLASSES_COMMANDS.pair, [{ secret }], host.fromGlasses(undefined, 'https://attacker.example')))).toBe('ERR_GLASSES_ORIGIN_REFUSED');
+    expect((await host.invoke(GLASSES_COMMANDS.pair, [{ secret }], host.fromGlasses())).status).toBe(200);
+    expect(errorCode(await host.invoke(GLASSES_COMMANDS.pair, [{ secret }], host.fromGlasses()))).toBe('ERR_GLASSES_PAIRING_SECRET_INVALID');
+  });
+
+  it('close the glasses\' stream when the paired phone revokes them', async () => {
+    const host = await setupPaired({ heartbeatIntervalMs: 50 });
+    const token = await host.pair();
+    let closed = false;
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: host.port, path: '/events', headers: host.fromGlasses(token) }, (res) => {
+        expect(res.statusCode).toBe(200);
         res.resume();
-        resolve(res.statusCode ?? 0);
+        res.on('end', () => { closed = true; });
+        resolve();
       });
       req.once('error', reject);
-      req.end(JSON.stringify({ channel: 'runpane:panels:screen', args: [] }));
+      req.end();
     });
-    expect(status).toBe(403);
+
+    const [device] = host.glasses.list();
+    expect((await host.invoke(GLASSES_COMMANDS.revoke, [{ id: device.id }], host.fromPhone)).body).toEqual({ ok: true, result: { revoked: true } });
+    await vi.waitFor(() => expect(closed).toBe(true), { timeout: 1000 });
+    expect(errorCode(await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(token)))).toBe('ERR_GLASSES_TOKEN_INVALID');
+  });
+
+  it('log wrong tokens without locking anyone out, since every relayed request arrives from loopback', async () => {
+    const host = await setupPaired();
+    const token = await host.pair();
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(`pgt_${'A'.repeat(43)}`))).status).toBe(401);
+    }
+    expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(token))).status).toBe(200);
+    expect(host.log.filter((line) => line.includes('refused token'))).toHaveLength(8);
+  });
+
+  it('are refused where the paired listener has no glasses access', async () => {
+    const host = await setupPaired({ glasses: false });
+    expect((await host.invoke(GLASSES_COMMANDS.createPairingSecret, [{ deviceName: 'x', phoneId: 'p' }], host.fromPhone)).status).toBe(403);
+    expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses('pgt_glasses'))).status).toBe(403);
   });
 });

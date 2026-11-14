@@ -218,7 +218,7 @@ export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null
 function describeAccess(access: WorkspaceAccessSummary | null): string {
   if (!access) return 'Checking Tailscale…';
   if (access.state === 'off' && access.visibility !== 'off') return `${access.reason ?? 'Not running'}. ${access.fix ?? ''}`.trim();
-  if (access.visibility === 'off') return 'Connection codes only.';
+  if (access.visibility === 'off') return 'No one over Tailscale. Phones paired with a QR code and connection codes still work.';
   return access.visibility === 'tailnet' ? 'Anyone on this tailnet.' : 'Your devices on Tailscale.';
 }
 

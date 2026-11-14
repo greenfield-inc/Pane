@@ -519,7 +519,7 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
   return args.splice(1, 1)[0];
 }
 
-/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; read and write take one path; inbox ack takes item ids; Autopilot's answer, close and rewrite take one. */
+/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; Autopilot's answer, close and rewrite take one. */
 function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item'> {
   if (AUTOPILOT_ITEM_COMMANDS.has(command)) {
     return args[0] !== undefined && !args[0].startsWith('-') ? { item: args.shift() ?? '' } : {};
@@ -534,6 +534,8 @@ function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs
     while (args[0] !== undefined && !args[0].startsWith('-')) words.push(args.shift() ?? '');
     return words.length ? { handoffDestination: words.join(' ') } : {};
   }
+  // Every word after `relay` is pane-relay's, --help included.
+  if (command === 'relay') return { execCommand: args.splice(0) };
   if (command === 'workspace exec' || command === 'secrets exec') {
     const separator = args.indexOf('--');
     if (separator !== -1) return { execCommand: args.splice(separator).slice(1) };

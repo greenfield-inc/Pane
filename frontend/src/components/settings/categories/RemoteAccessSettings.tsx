@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ExternalLink, Info, Plus, RefreshCw, Server, Smartphone, Terminal } from 'lucide-react';
+import { ChevronDown, ExternalLink, Info, Monitor, Plus, QrCode, RefreshCw, Server, Smartphone, Terminal, Trash2, X } from 'lucide-react';
 import { Button, IconButton } from '../../ui/Button';
 import { Input, Textarea } from '../../ui/Input';
 import { SettingRow, SettingsPage } from '../SettingRow';
@@ -11,7 +11,11 @@ import { MachineMark } from '../../machines/MachineMark';
 import { useMachines } from '../../../hooks/useMachines';
 import { THIS_COMPUTER, type MachineEntry } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
-import type { RemoteAccessSubviewId } from '../../../types/settings';
+import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
+import { Dropdown } from '../../ui/Dropdown';
+import { PairPhoneDialog } from '../../PairPhoneDialog';
+import type { RemoteDaemonClientRecord } from '../../../../../shared/types/remoteDaemon';
+import type { RemoteAccessSubviewId, SettingSaveState } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
 
 /** Machines come and go, and a tailnet switch changes the whole list; refresh while it is on screen. */
@@ -36,12 +40,17 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
   });
   const [selectError, setSelectError] = useState<string | null>(null);
   const [password, setPassword] = useState<{ id: string; value: string } | null>(null);
+  const [pairing, setPairing] = useState(false);
+  // Kept here: an unlinked computer's row is gone after the reload, but its outcome may ask the person to finish elsewhere.
+  const [unlinkOutcome, setUnlinkOutcome] = useState<string | null>(null);
   const handledPasswordRequest = useRef<number | null>(null);
 
   const local = machines[0];
   const active = machines.find((machine) => machine.active) ?? local;
   const others = machines.filter((machine) => machine !== active);
-  const scope = `on ${local.name === THIS_COMPUTER ? 'this computer' : local.name}`;
+  const here = local.name === THIS_COMPUTER ? 'this computer' : local.name;
+  const scope = `on ${here}`;
+  const linked = controller.config.host.clients.filter((client) => client.kind === 'computer');
   const tailnetName = tailnet?.ok ? tailnet.tailnet : null;
 
   // A machine routed here for its password opens its field once the listing shows it.
@@ -65,7 +74,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
   };
 
   return (
-    <SettingsPage title="Remote Access" description="Use Pane on your other computers.">
+    <SettingsPage title="Remote Access" description="Use Pane from your phone and your other computers.">
       {controller.loading && (
         <p className="text-sm text-text-tertiary" aria-live="polite">Loading Remote Pane status...</p>
       )}
@@ -141,18 +150,52 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
       <RemoteGroup
         title="Devices"
         scope={scope}
-        footnote="Phones connect over Tailscale or with a connection code. Glasses pair from the Pane phone app."
+        aside={(
+          <Button
+            id={settingDomId('remote-pair-phone')}
+            data-setting-id="remote-pair-phone"
+            type="button"
+            variant="secondary"
+            size="sm"
+            icon={<QrCode className="h-4 w-4" />}
+            onClick={() => setPairing(true)}
+          >
+            Pair a phone
+          </Button>
+        )}
+        footnote="On the same Wi-Fi a device connects directly. Anywhere else, Pane's servers carry the connection. Glasses pair from the Pane phone app."
       >
-        <PhoneRows controller={controller} />
+        <PhoneRows controller={controller} here={here} />
         <GlassesRows />
-        <PairHelp onSetUpHost={() => onOpenSubview('host-setup')} />
       </RemoteGroup>
+      <PairPhoneDialog
+        isOpen={pairing}
+        onClose={() => {
+          setPairing(false);
+          void controller.reload();
+        }}
+      />
+
+      {(linked.length > 0 || unlinkOutcome) && (
+        <RemoteGroup
+          title="Your computers"
+          footnote="Linked computers share their phones: a phone paired with one reaches all of them."
+        >
+          <div id={settingDomId('remote-linked-computers')} data-setting-id="remote-linked-computers" tabIndex={-1} className="divide-y divide-border-secondary outline-none">
+            {linked.map((computer) => (
+              <LinkedComputerRow key={computer.id} computer={computer} controller={controller} onOutcome={setUnlinkOutcome} />
+            ))}
+            {unlinkOutcome && <p className={`text-xs text-text-secondary ${CARD_ROW}`} role="status">{unlinkOutcome}</p>}
+          </div>
+        </RemoteGroup>
+      )}
 
       <RemoteGroup title="More">
+        <RelayAddressRow controller={controller} />
         <SettingRow
           settingId="remote-pane"
-          label="Connection codes and host setup"
-          description="For browsers, other Tailscale accounts, and manual hosts."
+          label="Use Tailscale instead"
+          description="Reach this computer over your tailnet without Pane's servers. Connection codes and manual hosts are here too."
           align="start"
           className={CARD_ROW}
         >
@@ -387,12 +430,43 @@ function AddMachine({ controller, startAdding }: { controller: RemoteAccessContr
   );
 }
 
-/** Phones paired with a connection code, and any device connected right now. */
-function PhoneRows({ controller }: { controller: RemoteAccessController }) {
+/**
+ * "Removed from A and B." plus, for computers that didn't answer, how to finish there. `unlinked`
+ * names the computer being unlinked, which can itself be one that didn't answer.
+ */
+function everywhereResult(subject: string, result: { removed: string[]; notReached: string[] }, unlinked?: string): string {
+  const join = (names: string[]) => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  const done = result.removed.length > 0 ? `${subject} from ${join(result.removed)}.` : '';
+  const others = result.notReached.filter((name) => name !== unlinked);
+  const one = others.length === 1;
+  const left = others.length > 0
+    ? ` ${join(others)} didn't answer and still ${one ? 'has' : 'have'} it. Remove it there in Settings › Remote Access once ${one ? "it's" : "they're"} back online.`
+    : '';
+  const itself = unlinked && result.notReached.includes(unlinked)
+    ? ` ${unlinked} didn't answer, so it may still list your other computers. Unlink them there in Settings › Remote Access once it's back online.`
+    : '';
+  return (done + left + itself).trim();
+}
+
+/** Runs an "everywhere" command, then reloads the list; returns the line to show under the list. */
+async function runEverywhere(controller: RemoteAccessController, channel: string, args: { clientId: string } | { computerId: string }, subject: string, unlinked?: string): Promise<string> {
+  try {
+    const result: { removed: string[]; notReached: string[] } = await window.electronAPI.invoke(channel, args);
+    return everywhereResult(subject, result, unlinked);
+  } catch (cause) {
+    return `Nothing was removed: ${ipcErrorMessage(cause, "Pane couldn't reach your other computers")}. Try again.`;
+  } finally {
+    void controller.reload();
+  }
+}
+
+/** Phones paired with this computer, and any device connected right now. */
+function PhoneRows({ controller, here }: { controller: RemoteAccessController; here: string }) {
+  const [outcome, setOutcome] = useState<string | null>(null);
   const live = controller.hostState.connectedClients;
-  // Glasses are listed with their origins below.
+  // Glasses are listed with their origins below; linked computers in Your computers.
   const records = controller.config.host.clients;
-  const paired = records.filter((client) => client.kind !== 'glasses');
+  const paired = records.filter((client) => client.kind === undefined);
   const recordIds = new Set(records.map((client) => client.id));
   const unpaired = live.filter((client) => !client.clientId || !recordIds.has(client.clientId));
   const lastUsed = (at?: string) => (at ? `Last used ${new Date(at).toLocaleString()}` : 'Never used');
@@ -401,10 +475,41 @@ function PhoneRows({ controller }: { controller: RemoteAccessController }) {
     <>
       {paired.map((client) => {
         const connected = live.some((entry) => entry.clientId === client.id);
+        const detail = [connected ? 'Connected now' : lastUsed(client.lastUsedAt), client.linkedBy && `Added by ${client.linkedBy}`].filter(Boolean).join(' · ');
         return (
-          <PhoneRow key={client.id} title={client.label} detail={connected ? 'Connected now' : lastUsed(client.lastUsedAt)}>
+          <PhoneRow key={client.id} title={client.label} detail={detail}>
             {connected && <Button type="button" variant="ghost" size="sm" disabled={controller.busy} onClick={() => controller.disconnectClients([client.id])}>Disconnect</Button>}
-            <Button type="button" variant="ghost" size="sm" aria-label={`Revoke ${client.label}`} disabled={controller.busy} onClick={() => controller.revokeClient(client.id)}>Revoke</Button>
+            <Dropdown
+              menuLabel={`Remove ${client.label}`}
+              position="bottom-right"
+              width="lg"
+              trigger={(
+                <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${client.label}`} disabled={controller.busy}>
+                  Remove
+                  <ChevronDown className="ml-1 h-3.5 w-3.5" aria-hidden="true" />
+                </Button>
+              )}
+              items={[
+                {
+                  id: 'here',
+                  icon: X,
+                  label: `Remove from ${here}`,
+                  description: 'It keeps working with your other computers.',
+                  onClick: () => { setOutcome(null); controller.revokeClient(client.id); },
+                },
+                {
+                  id: 'everywhere',
+                  icon: Trash2,
+                  variant: 'danger',
+                  label: 'Remove from all your computers',
+                  description: 'Signs it out of every computer linked with this one.',
+                  onClick: () => {
+                    setOutcome(null);
+                    void runEverywhere(controller, 'relay:remove-phone-everywhere', { clientId: client.id }, `Removed ${client.label}`).then(setOutcome);
+                  },
+                },
+              ]}
+            />
           </PhoneRow>
         );
       })}
@@ -415,6 +520,10 @@ function PhoneRows({ controller }: { controller: RemoteAccessController }) {
           )}
         </PhoneRow>
       ))}
+      {paired.length === 0 && unpaired.length === 0 && (
+        <p className={`text-sm text-text-tertiary ${CARD_ROW}`}>No phones yet. Pair one to use Pane from anywhere.</p>
+      )}
+      {outcome && <p className={`text-xs text-text-secondary ${CARD_ROW}`} role="status">{outcome}</p>}
     </>
   );
 }
@@ -428,36 +537,106 @@ function PhoneRow({ title, detail, children }: { title: string; detail: string; 
         </span>
         <div className="min-w-0">
           <p className="truncate text-sm font-medium text-text-primary">{title}</p>
-          <p className="text-xs text-text-tertiary">{detail}</p>
+          <p className="truncate text-xs text-text-tertiary">{detail}</p>
         </div>
       </div>
-      <div className="flex gap-1">{children}</div>
+      <div className="flex flex-none gap-1">{children}</div>
     </div>
   );
 }
 
-/** How to add a phone or glasses; opens to the steps. */
-function PairHelp({ onSetUpHost }: { onSetUpHost: () => void }) {
-  const [open, setOpen] = useState(false);
-  return open ? (
-    <div className={cn('space-y-2 text-xs text-text-secondary', CARD_ROW)}>
-      <p className="text-sm font-medium text-text-primary">Pair a phone or glasses</p>
-      <p>Phone on your Tailscale login: open Pane on it and enter the Address above.</p>
-      <p>Any other phone or browser: create a connection code in Set Up Host and paste it there.</p>
-      <p>Glasses: pair from the Pane phone app, in Settings › Glasses › Pair glasses.</p>
-      <div className="flex justify-end gap-2 pt-1">
-        <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>Done</Button>
-        <Button type="button" variant="secondary" size="sm" icon={<Server className="h-4 w-4" />} onClick={onSetUpHost}>Set Up Host</Button>
+/** A computer linked with this one when a phone scanned both. */
+function LinkedComputerRow({ computer, controller, onOutcome }: { computer: RemoteDaemonClientRecord; controller: RemoteAccessController; onOutcome: (line: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  const connected = controller.hostState.connectedClients.some((entry) => entry.clientId === computer.id);
+  const detail = [computer.linkedBy && `Linked by ${computer.linkedBy}`, connected ? 'Connected now' : null].filter(Boolean).join(' · ');
+  const computerId = computer.computerId;
+  return (
+    <div className={CARD_ROW} data-testid={`linked-${computer.label}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-surface-secondary text-text-secondary" aria-hidden="true">
+            <Monitor className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-text-primary">{computer.label}</p>
+            {detail && <p className="truncate text-xs text-text-tertiary">{detail}</p>}
+          </div>
+        </div>
+        {computerId && (
+          <Dropdown
+            menuLabel={`Unlink ${computer.label}`}
+            position="bottom-right"
+            width="lg"
+            trigger={(
+              <Button type="button" variant="ghost" size="sm" aria-label={`Unlink ${computer.label}`} loading={busy}>
+                Unlink
+                <ChevronDown className="ml-1 h-3.5 w-3.5" aria-hidden="true" />
+              </Button>
+            )}
+            items={[{
+              id: 'everywhere',
+              icon: Trash2,
+              variant: 'danger',
+              label: 'Unlink from all your computers',
+              description: 'It stops reaching your other computers, and they stop reaching it.',
+              onClick: () => {
+                setBusy(true);
+                onOutcome(null);
+                void runEverywhere(controller, 'relay:unlink-computer-everywhere', { computerId }, `Unlinked ${computer.label}`, computer.label).then((line) => {
+                  setBusy(false);
+                  onOutcome(line);
+                });
+              },
+            }]}
+          />
+        )}
       </div>
     </div>
-  ) : (
-    <button
-      type="button"
-      className={cn('flex w-full items-center gap-3 text-left text-sm font-medium text-interactive-text hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring-subtle', CARD_ROW)}
-      onClick={() => setOpen(true)}
+  );
+}
+
+/** "Relay address": a self-hosted relay; empty uses Pane's servers. */
+function RelayAddressRow({ controller }: { controller: RemoteAccessController }) {
+  const saved = controller.config.relay?.relayAddress ?? '';
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SettingSaveState>({ state: 'idle' });
+  const value = draft ?? saved;
+  const save = async () => {
+    if (value.trim() === saved || saveState.state === 'saving') return;
+    setSaveState({ state: 'saving' });
+    try {
+      await window.electronAPI.invoke('relay:set-address', value.trim() || null);
+      await controller.reload();
+      setDraft(null);
+      setSaveState({ state: 'saved' });
+    } catch (cause) {
+      setSaveState({ state: 'error', message: `Not saved: ${ipcErrorMessage(cause, "Pane couldn't save the address")}` });
+    }
+  };
+  return (
+    <SettingRow
+      settingId="remote-relay-address"
+      label="Relay address"
+      description="Leave it empty to use Pane's servers. To run your own, enter its host name, such as relay.example.com, and press Enter."
+      saveState={saveState}
+      className={CARD_ROW}
     >
-      <Plus className="h-4 w-4 flex-none" aria-hidden="true" />
-      Pair a phone or glasses
-    </button>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save();
+        }}
+      >
+        <Input
+          aria-label="Relay address"
+          placeholder="Pane's servers"
+          className="w-56 text-sm"
+          value={value}
+          onChange={(event) => { setDraft(event.target.value); setSaveState({ state: 'idle' }); }}
+          onBlur={() => void save()}
+        />
+      </form>
+    </SettingRow>
   );
 }

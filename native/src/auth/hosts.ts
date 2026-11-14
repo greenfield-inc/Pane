@@ -1,3 +1,4 @@
+import { withNewProfiles } from '@shared/remoteClient';
 import { isRemotePaneConnectionProfile, type RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { isDemoProfile } from '@/features/demo/demoHost';
@@ -20,6 +21,16 @@ export function addHost(hosts: SavedHosts, profile: RemotePaneConnectionProfile)
   assertSavableHost(profile);
   const others = hosts.profiles.filter(p => p.baseUrl !== profile.baseUrl && p.id !== profile.id);
   return { profiles: [...others, profile], activeId: profile.id };
+}
+
+/**
+ * Saves the computers a relay pairing or "Your computers" brought along, adding only ones the
+ * phone has not saved. `paired`, the scanned computer, replaces its old entry and becomes active.
+ */
+export function addHosts(hosts: SavedHosts, added: readonly RemotePaneConnectionProfile[], paired?: RemotePaneConnectionProfile): SavedHosts {
+  added.forEach(assertSavableHost);
+  const base = paired ? addHost(hosts, paired) : hosts;
+  return { profiles: withNewProfiles(base.profiles, added), activeId: base.activeId };
 }
 
 export function removeHost(hosts: SavedHosts, id: string): SavedHosts {

@@ -36,6 +36,7 @@ import { isLockOwnerLive } from '../ipc/runpane';
 import { isPaneDaemonListening, PaneDaemonServer } from './server';
 import { decideInstanceDuties, type InstanceDuties } from './instanceDuties';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
+import { createRelayHost } from './relay/relayHost';
 import { PaneRemoteTransportController } from './remoteTransportController';
 import { PaneWorkspaceHostController } from './workspaceHost';
 import { runRemoteSetupCommand } from './remote-setup-command';
@@ -490,16 +491,17 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     options.app.getVersion(),
   );
   registerWorkspaceCommands(commandRegistry, workspaceHost, configManager, options.app.getVersion());
+  const phonePreviewFiles = createPreviewFiles({
+    getPanel: panelId => panelManager.getPanel(panelId),
+    resolvePath: async (sessionId, filePath) => decodeBoundary(
+      await commandRegistry.invoke('file:getPath', [{ sessionId, filePath }]),
+      boundary.object({ success: boundary.literal(true), path: boundary.string }),
+    ).path,
+  });
   const phonePreviews = new PhonePreviewHost({
     workspace: workspaceHost,
     paneDir: getAppDirectory(),
-    files: createPreviewFiles({
-      getPanel: panelId => panelManager.getPanel(panelId),
-      resolvePath: async (sessionId, filePath) => decodeBoundary(
-        await commandRegistry.invoke('file:getPath', [{ sessionId, filePath }]),
-        boundary.object({ success: boundary.literal(true), path: boundary.string }),
-      ).path,
-    }),
+    files: phonePreviewFiles,
     onChange: () => publishPorts(),
   });
   let latestPorts: ListeningPortsSnapshot | null = null;
@@ -511,7 +513,25 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   commandRegistry.register('ports:phone-address', async (port: number) => { await phonePreviews.request(port); });
 
   let paneDaemonServer: PaneDaemonServer | null = null;
-  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort, options.app.getVersion());
+  // Phone access through Pane's relays (QR pairing); idle until turned on in Remote Access.
+  const relayHost = startRemoteTransport
+    ? await createRelayHost({
+      commandRegistry,
+      configManager,
+      dataDir: getAppDirectory(),
+      isForwardedPort,
+      files: phonePreviewFiles,
+      log: line => logger.info(line),
+    }).catch((cause: unknown) => {
+      logger.error('[Pane relay] Failed to start', cause instanceof Error ? cause : new Error(String(cause)));
+      return null;
+    })
+    : null;
+  if (relayHost) {
+    powerMonitor.on('suspend', () => relayHost.suspend());
+    powerMonitor.on('resume', () => relayHost.resume());
+  }
+  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort, options.app.getVersion(), relayHost?.pairing, workspaceHost.glasses);
   const remoteHostTailnetMonitor = new RemoteHostTailnetMonitor(configManager);
   try {
     paneDaemonServer = new PaneDaemonServer(commandRegistry, getAppDirectory());
@@ -631,6 +651,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       workspaceJournal.dispose();
       await permissionIpcServer?.stop();
       remoteHostTailnetMonitor.stop();
+      await relayHost?.stop();
       await remoteTransportController.stopWatchingAndShutdown();
       // The workspace handler first: phone handler removal can use up the rest of the budget.
       await workspaceHost.shutdown();

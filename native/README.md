@@ -36,7 +36,7 @@ The + at the bottom right (and a repository's own +) opens **New**: a Session/Pa
 
 Each machine has a color and its OS logo (`src/features/machines/`). The color comes from the machine's Tailscale name, or its label when paired with a code, and is never stored: names settle clashes alphabetically, so pairing order never changes a color. The logo is solid when reachable, pulses while the current machine reconnects (one 1.6 s rhythm; dimmed instead under Reduce Motion), and is dimmed when the machine can't be reached.
 
-Settings opens on the current machine, with every other machine under **Switch to** and **Add a machine** (Your computers, or **Add with a code**). **Composer** is saved on the current machine, which its title names; **General** (Notifications, Glasses, Autocorrect) covers every saved machine. On home, swipe a Pane or Session right to pin it, and left to pause or resume it or archive it; VoiceOver and TalkBack offer Pin, Pause or Resume, and Archive as row actions. A paused Pane or Session is grayed out with a pause glyph where its status dot goes. Opening a paused tab shows its last screen under a **Paused … · last screen** bar with **Resume**, and starts nothing; when the computer's Settings turn on resuming paused Panes on open, opening the tab resumes it.
+Settings opens on the current machine, with every other machine under **Switch to** and **Add a machine** (scan a QR code, paste a connection code, or Tailscale's Your computers). **Composer** is saved on the current machine, which its title names; **General** (Notifications, Glasses, Autocorrect) covers every saved machine. On home, swipe a Pane or Session right to pin it, and left to pause or resume it or archive it; VoiceOver and TalkBack offer Pin, Pause or Resume, and Archive as row actions. A paused Pane or Session is grayed out with a pause glyph where its status dot goes. Opening a paused tab shows its last screen under a **Paused … · last screen** bar with **Resume**, and starts nothing; when the computer's Settings turn on resuming paused Panes on open, opening the tab resumes it.
 
 ## Approvals
 
@@ -50,7 +50,11 @@ While Autopilot is on for the computer, home shows an **Autopilot** row above Ap
 
 ## Point it at a host
 
-For your computers, sign in to Tailscale on the phone and computer, then open **Your computers** on the welcome screen (or **Settings → Add a machine** after connecting). Enter the **Address** shown in desktop **Settings → Remote Access → Access**, tap **Find computers**, then **Connect**. Enter the computer's password when asked. **Use another computer** lets you change the address if that computer is unavailable or you switch tailnets. Saved profiles stay bound to their original tailnet.
+The app opens on the camera the first time: scan the code that **Pair a phone** shows in Pane on your computer. The QR is `https://runpane.net/pair#s=<secret>&c=<computer>&n=<name>`, a universal link (iOS) and app link (Android), so the phone's own camera opens the app too, on **Pair with <computer>**, where one tap pairs. The phone trades the one-time secret at `https://<computer>.runpane.net/pair/exchange` for its own token and saves that computer and every computer linked with it, then links the new computer with the phone's other relay computers, with no prompt (`shared/remoteClient/relay.ts`). Each connection to the computer refreshes the list: it saves computers linked since. Under the camera: **Paste a connection code**, **Use Tailscale instead** and **Try a demo**. **Settings → Add a machine** opens **Add a computer**: **Scan a QR code**, or **Paste a connection code** and **Use Tailscale**. Errors say "This code was already used", "This code expired" or "Can't reach <computer>".
+
+A relay computer reconnects like any other (the 10-second grace and the one-line bar), but the app never stops retrying while it is open, at most 5 s apart. When the relay says the computer is asleep, the bar says "Asleep since 9:40". A computer that removed the phone is the one hard stop: the bar says so, with **Pair again**. Pages on a relay computer load through the one-time address it hands out (`relay:client:preview-address`). A relay computer's saved address is always its relay address, which `relayBaseUrl` (`shared/remoteClient/relay.ts`) returns.
+
+For your computers over Tailscale, sign in to Tailscale on the phone and computer, then tap **Use Tailscale instead** on the welcome screen (or **Settings → Add a machine → Use Tailscale** after connecting). Enter the **Address** shown in desktop **Settings → Remote Access → Access**, tap **Find computers**, then **Connect**. Enter the computer's password when asked. **Use another computer** lets you change the address if that computer is unavailable or you switch tailnets. Saved profiles stay bound to their original tailnet.
 
 The phone asks a computer on its own Tailscale login for the tailnet list because it cannot run `tailscale status` itself. Other users cannot request that computer's discovery view, even when it allows everyone on the tailnet to connect. Native requests use the Workspaces listener on port 8443. Push notifications and shared integration keys work over this connection for the computer's owner; another Tailscale user the computer lets in is refused. Browsers and the PWA keep using connection codes: the Workspaces listener refuses requests with an `Origin` header, except the Pane glasses app, which Settings › Glasses pairs with a per-device token ([Even G2 glasses](../docs/EVEN_G2_GLASSES.md)).
 
@@ -65,9 +69,17 @@ node main/dist/main/src/daemon/setupRemoteHostCli.js --pane-dir $D --label "RN D
 PANE_DIR=$D pnpm exec electron ./main/dist/main/src/daemon/headless.js --pane-dir $D
 ```
 
-The simulator reaches `http://127.0.0.1:42157` directly. For the Android emulator, forward the port first: `adb reverse tcp:42157 tcp:42157`. Non-loopback hosts must use HTTPS (Tailscale Serve or an HTTPS proxy), and a phone reaches them over Tailscale, an SSH tunnel or that proxy. Pane has no relay.
+The simulator reaches `http://127.0.0.1:42157` directly. For the Android emulator, forward the port first: `adb reverse tcp:42157 tcp:42157`. Non-loopback hosts must use HTTPS (Tailscale Serve or an HTTPS proxy), and a phone reaches them over Tailscale, an SSH tunnel or that proxy.
 
 To add projects and panes to the dev host, use the RunPane CLI against its data directory, for example `node packages/runpane/dist/cli.js repos add --path <repo> --yes --pane-dir $D`.
+
+## Direct connections
+
+When a computer runs `pane-direct serve` (`direct/`), its `relay:client:computer` answer carries `direct: {nodeId, addrs, relayUrls}`, which the phone saves per computer. While the app is connected to that computer, `modules/pane-direct` runs pane-direct's `connect` in the app. It opens one QUIC connection to the computer: directly across the internet when both networks allow it, to the computer's local addresses on the same Wi-Fi (no internet or DNS needed), and otherwise through the iroh relays in `relayUrls`. It listens on a loopback port. The app sends plain HTTP there, and the module opens TLS to the computer's own name and accepts only the key fingerprint the phone saved at pairing, so the computer's server and its auth see the same connection as through the relay. The web view's pages still load through the relay.
+
+`src/daemon/direct/` routes the app's requests: it probes `/health` through the relay and the direct connection (every second for the first five probes after the connection opens or the app returns to the foreground, then every 15 s) and moves to the other path only when it was clearly faster (a quarter quicker and at least 10 ms) for three probes in a row, or at once when the current path stops answering. Requests already in flight finish on their path, so a switch never interrupts what is on screen.
+
+Building it needs Rust (rustup): `rustup target add aarch64-apple-ios aarch64-apple-ios-sim` for iOS, which an Xcode script phase builds for the platform being built. iOS builds fail without them, and build arm64 only (devices and Apple silicon simulators); `cargo install cargo-ndk` and `rustup target add aarch64-linux-android x86_64-linux-android` for Android, which a Gradle task builds for `arm64-v8a` and `x86_64`. An Android build without them, or for another ABI, still works and reaches computers through the relay only.
 
 ## Test it
 
@@ -90,6 +102,8 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 
 `demo.yaml` needs no host: it starts the demo, answers a question, uses a terminal, visits the other screens and exits. Run it without `CONNECTION_CODE`. `tabs.yaml` needs no host either: it opens a page, Explorer, the file viewer, Diff, Run script, an Editor tab and a placeholder in the demo.
 
+`relay-pairing-link.yaml` opens a pairing QR's link and pairs; pass a fresh one as `-e PAIRING_URL=<https://…/pair#…>`.
+
 `pause.yaml` pauses and resumes a new Pane and a new Session on a host with a repository and Sessions, with resuming paused Panes on open turned off (the default).
 
 `terminal.yaml` needs a host whose first pane has a plain `Terminal` tab and a `Claude Code` tab, which is what `runpane panes create --agent claude` gives you. On a busy machine, set `MAESTRO_DRIVER_STARTUP_TIMEOUT=240000` if Maestro reports that the iOS driver was not ready in time.
@@ -98,7 +112,7 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 
 A Pane or Session screen shows every tab in one strip, each with its type's icon: agents and terminals, then pages, then Explorer and Diff, then other tabs, then tabs that open only on the computer. A Session's agent chat comes first. Each type has its own view (`src/features/terminal/panels.ts` picks it):
 
-- **Pages** (`src/features/browser/`) load in a WebView under an address row with back, forward, the address, reload and Open in Safari. A computer's dev server and HTML files load through the phone addresses it creates over Tailscale ([Browser tabs on the phone](../docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)). When those addresses are off or out of reach, an HTML file is read through the phone's own connection instead (`panels:read-browser-file`), so a self-contained page loads with a pairing code too. Entering an address saves it to the tab, so the computer's tab moves with it. Each case that can't load has its own screen: nothing listens on the port, pages are off on that computer, the phone is off Tailscale, the computer is offline, or its Pane is too old.
+- **Pages** (`src/features/browser/`) load in a WebView under an address row with back, forward, the address, reload and Open in Safari. A computer's dev server and HTML files load through the phone addresses it creates over Tailscale ([Browser tabs on the phone](../docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)). On a computer paired with a QR, they load through a one-time address the computer hands out instead. When those addresses are off or out of reach, an HTML file is read through the phone's own connection instead (`panels:read-browser-file`), so a self-contained page loads with a pairing code too. Entering an address saves it to the tab, so the computer's tab moves with it. Each case that can't load has its own screen: nothing listens on the port, pages are off on that computer, the phone is off Tailscale, the computer is offline, or its Pane is too old.
 - **Explorer** (`src/features/files/`) lists the branch's changed files first, then browses the worktree one folder at a time, with a path bar back up and a search box; changed files carry their M, A or D badge. Files open read-only: code with syntax colours (highlight.js) and line numbers, Markdown rendered or as source, images up to 5 MB. Text over 1 MB and other binaries stay on the computer, with Copy path. **Editor** tabs open their file in the same viewer.
 - **Diff** (`src/features/diff/`) lists the branch's changed files with their counts, against the same base as the desktop's Changes panel; tap a file for its patch. A patch too large for the phone says so. An Editor tab showing a file's changes opens its patch. Explorer and Diff share one read of the changes per Pane, refreshed when the computer's git status changes.
 - **Run script** (`src/features/runScript/`) shows the Pane's script output and follows it live (`sessions:get-logs`, then `session-log` events), staying at the end until you scroll up.
@@ -137,6 +151,7 @@ Tapping a notification opens `/open?host=…&paneId=…&panelId=…` (plus `noti
 
 | Link | Opens |
 | --- | --- |
+| `https://runpane.net/pair#s=…&c=…&n=…` and `pane://pair#…` | **Pair with <computer>** (`features/pairing/RelayPairPrompt.tsx`). It pairs only after you tap Pair. `pane://pair` names Pane's domain unless its fragment carries `d=<domain>`. |
 | `pane-remote://<code>` | The pairing screen with the code filled in (`features/pairing/deepLink.ts`). It connects only after you tap Connect. |
 | `pane://pane/<paneId>?host=<base URL or profile id>&panel=<panelId>` | That pane, switching hosts first. Without `host` it opens the pane on the active host. |
 
@@ -253,6 +268,7 @@ Launch the app once to download the update and again to run it. `PANE_UPDATES_UR
 | `src/theme/` | Colors (light and dark, from the desktop app's default themes), spacing, radius, typography. `useTheme()`. |
 | `src/daemon/` | Connection to the active host: `DaemonProvider`, `useDaemon()`, `useInvokeQuery`, `useInvokeMutation`, `useDaemonEvent`, the TanStack Query client. |
 | `src/auth/` | Saved hosts in secure storage (`useHostsStore`), pairing verification. |
+| `modules/` | Local Expo modules with native code. `pane-direct` runs the `direct/` Rust crate's `connect` in the app. |
 | `../shared/` | Types and logic shared with the desktop app and the PWA. Import as `@shared/...`. |
 
 See `AGENTS.md` for conventions.

@@ -2,13 +2,21 @@ import http from 'http';
 import zlib from 'zlib';
 import WebSocket from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDefaultRemoteDaemonConfig, NATIVE_APP_WEBSOCKET_ORIGIN, type RemoteDaemonConfig, type RemoteInvokeRequest } from '../../../shared/types/remoteDaemon';
+import { createDefaultRemoteDaemonConfig, NATIVE_APP_WEBSOCKET_ORIGIN, type RemoteDaemonClientRecord, type RemoteDaemonConfig, type RemoteInvokeRequest } from '../../../shared/types/remoteDaemon';
 import { PaneCommandRegistry, teammatePaneCaller } from './commandRegistry';
 import { hashRemoteDaemonToken } from './auth';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
 import { RecentWrites } from './recentWrites';
+import { PairingExchange } from './relay/pairingExchange';
+import { GlassesAccess } from './glassesAccess';
+import { RelayLinks } from './relay/relayLinks';
+import { registerRelayCommands } from './relay/relayCommands';
+import { RelayPreviews } from './relay/relayPreviews';
+import { RelayService } from './relay/relayService';
+import { RELAY_DEVICE_COMMANDS } from '../../../shared/types/relay';
+import type { AppConfig } from '../types/config';
 import { readingMachines } from './readingMachines';
 import { PaneError } from '../../../shared/paneError';
 
@@ -18,6 +26,8 @@ interface ConfigManagerStub {
 
 interface TestEventStream {
   contentEncoding: string | undefined;
+  /** Settles when the server ends the stream. */
+  ended: Promise<void>;
   close(): void;
   nextEvent(timeoutMs?: number): Promise<{ event: string | null; data: string[] }>;
 }
@@ -214,6 +224,7 @@ async function openEventStream(
 
       resolve({
         contentEncoding,
+        ended: new Promise((settle) => { response.once('close', () => settle()); }),
         close() {
           request.destroy();
         },
@@ -388,6 +399,90 @@ describe('PaneRemoteHttpApiServer', () => {
         result: [{ id: 'session-1' }],
       },
     });
+  });
+
+  it('runs machine commands for a computer linked by QR pairing, and refuses them for a paired phone', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:machine:info', async () => ({ hostname: 'travel-laptop' }));
+    const config = createEnabledRemoteConfig();
+    config.host.clients.push({
+      id: 'computer-1',
+      label: 'Studio Mac',
+      createdAt: new Date('2026-11-14T00:00:00.000Z').toISOString(),
+      tokenHash: hashRemoteDaemonToken('link-token'),
+      kind: 'computer',
+      computerId: 'abcdefghijklmnop',
+    });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config));
+    activeServers.push(server);
+    await server.start();
+
+    await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:machine:info', args: [] }, 'link-token'))
+      .resolves.toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'travel-laptop' } } });
+    await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:machine:info', args: [] }, 'secret-token'))
+      .resolves.toMatchObject({ statusCode: 403, body: { ok: false, error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } } });
+  });
+
+  it('records when a paired phone last reached this computer, saving it at most once a minute', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('sessions:get-all', async () => []);
+    let config: Pick<AppConfig, 'remoteDaemon'> = { remoteDaemon: createEnabledRemoteConfig() };
+    const store = {
+      getConfig: () => config,
+      updateConfigWith: async (update: (current: AppConfig) => Partial<AppConfig>) => {
+        // SAFETY: the server and the glasses store read and write only remoteDaemon here.
+        config = { ...config, ...update(config as AppConfig) };
+        return config;
+      },
+    };
+    let now = Date.parse('2026-11-14T08:00:00.000Z');
+    const server = new PaneRemoteHttpApiServer(registry, store, { glasses: new GlassesAccess(store, { now: () => now, env: {}, log: () => {} }) });
+    activeServers.push(server);
+    await server.start();
+    const lastUsed = () => config.remoteDaemon?.host.clients.find((client) => client.id === 'client-1')?.lastUsedAt;
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+    await requestJson(server, 'POST', '/invoke', { channel: 'sessions:get-all', args: [] }, 'secret-token');
+    await settle();
+    expect(lastUsed()).toBe('2026-11-14T08:00:00.000Z');
+
+    now += 30_000;
+    await requestJson(server, 'POST', '/invoke', { channel: 'sessions:get-all', args: [] }, 'secret-token');
+    await settle();
+    expect(lastUsed()).toBe('2026-11-14T08:00:00.000Z');
+
+    now += 31_000;
+    await requestJson(server, 'POST', '/invoke', { channel: 'sessions:get-all', args: [] }, 'secret-token');
+    await settle();
+    expect(lastUsed()).toBe('2026-11-14T08:01:01.000Z');
+  });
+
+  it('gives a teammate who scans a fresh QR code a token of their own, which removing them here revokes alone', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('sessions:get-all', async () => []);
+    const config = createEnabledRemoteConfig();
+    const exchange = new PairingExchange({ addClient: async (record) => { config.host.clients.push(record); } });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config), {
+      pairing: { exchange: (request) => exchange.exchange(request), clientAddress: () => null },
+    });
+    activeServers.push(server);
+    await server.start();
+    const scan = async (label: string, phoneId: string) => {
+      const { body } = await requestJson(server, 'POST', '/pair/exchange', { secret: exchange.createSecret().secret, label, phoneId });
+      const answer = decodeBoundary(body, boundary.object({ token: boundary.nonEmptyString, clientId: boundary.nonEmptyString }));
+      return { ...answer, sessions: () => requestJson(server, 'POST', '/invoke', { channel: 'sessions:get-all', args: [] }, answer.token) };
+    };
+
+    const owner = await scan('Ana\'s iPhone', 'pane-native-ana');
+    const teammate = await scan('Ben\'s Pixel', 'pane-native-ben');
+    expect(teammate.token).not.toBe(owner.token);
+    expect(teammate.clientId).not.toBe(owner.clientId);
+    await expect(teammate.sessions()).resolves.toMatchObject({ statusCode: 200 });
+
+    // Remove from this computer: Settings deletes that one record (remote-daemon:delete-client-record).
+    config.host.clients = config.host.clients.filter((client) => client.id !== teammate.clientId);
+    await expect(teammate.sessions()).resolves.toMatchObject({ statusCode: 403, body: { error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID' } } });
+    await expect(owner.sessions()).resolves.toMatchObject({ statusCode: 200 });
   });
 
   it('accepts browser invoke auth metadata from a simple request body', async () => {
@@ -886,6 +981,184 @@ describe('PaneRemoteHttpApiServer', () => {
     await expect(server.start()).rejects.toThrow(
       'Remote daemon direct HTTP only supports loopback listen hosts; keep listenHost on 127.0.0.1, ::1, or localhost and expose it through an SSH tunnel, Tailscale/VPN, or a reverse proxy.',
     );
+  });
+});
+
+describe('QR-paired phones and linked computers', () => {
+  const STUDIO = { id: 'studiostudiostud', name: 'Studio Mac', domain: 'runpane.net', address: 'https://studiostudiostud.runpane.net', local: [], fingerprint: 'studio-key' };
+  const ROGUE = { id: 'roguerogueroguer', name: 'Totally your laptop', domain: 'runpane.net', address: 'https://roguerogueroguer.runpane.net', local: [], fingerprint: 'rogue-key' };
+  const BUILD_BOX = { id: 'buildboxbuildbox', name: 'Build Box', domain: 'runpane.net', address: 'https://buildboxbuildbox.runpane.net', local: [], fingerprint: 'build-key' };
+  const LAPTOP = { id: 'laptoplaptoplapt', name: 'Travel Laptop', domain: 'runpane.net', address: 'https://laptoplaptoplapt.runpane.net', local: [], fingerprint: 'laptop-key' };
+
+  /**
+   * This computer, with a QR-paired phone (`phone-token`) and Studio Mac linked by an earlier scan
+   * (`studio-token` calls here; the profile calls Studio Mac). `call` answers for Studio Mac.
+   */
+  async function startComputer(options: { phoneId?: string; linked?: Array<typeof STUDIO> } = {}) {
+    const remote = createEnabledRemoteConfig();
+    const phone: RemoteDaemonClientRecord = {
+      id: 'phone-ana',
+      label: 'Ana’s iPhone',
+      createdAt: '2026-11-14T00:00:00.000Z',
+      tokenHash: hashRemoteDaemonToken('phone-token'),
+    };
+    if (options.phoneId !== undefined) phone.phoneId = options.phoneId;
+    remote.host.clients = [phone, {
+      id: 'link-studio',
+      label: STUDIO.name,
+      createdAt: '2026-11-14T00:00:00.000Z',
+      tokenHash: hashRemoteDaemonToken('studio-token'),
+      kind: 'computer',
+      computerId: STUDIO.id,
+    }];
+    remote.client.profiles = (options.linked ?? [STUDIO]).map((peer) => ({
+      id: `relay-${peer.id}`,
+      label: peer.name,
+      baseUrl: peer.address,
+      token: `token-for-${peer.id}`,
+      transport: 'http+sse',
+      relay: { computerId: peer.id, fingerprint: peer.fingerprint, linkedBy: 'Ana’s iPhone' },
+    }));
+    let config: Pick<AppConfig, 'remoteDaemon'> = { remoteDaemon: remote };
+    const store = {
+      getConfig: () => config,
+      updateConfigWith: async (update: (current: AppConfig) => Partial<AppConfig>) => {
+        // SAFETY: relay links and the server read and write only remoteDaemon here.
+        config = { ...config, ...update(config as AppConfig) };
+        return config;
+      },
+    };
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:machine:info', async () => ({ hostname: 'travel-laptop' }));
+    registry.register('sessions:get-all', async () => []);
+    const server = new PaneRemoteHttpApiServer(registry, store);
+    activeServers.push(server);
+    const call = vi.fn(async (): Promise<JsonValue | undefined> => null);
+    const previews = new RelayPreviews({ id: () => null, domain: () => null, isForwardedPort: () => false, clientActive: () => true });
+    const links = new RelayLinks({
+      config: store,
+      self: () => LAPTOP,
+      call,
+      disconnect: (ids) => { server.disconnectClients(ids); },
+      connectedClientIds: () => new Set(),
+    });
+    const relay = new RelayService({
+      settings: () => undefined,
+      onSettingsChanged: () => () => {},
+      secrets: { read: async () => null, write: async () => {} },
+      dataDir: '',
+      pairingListener: () => ({ error: 'it is turned off' }),
+      previewPort: () => null,
+      displayName: () => 'Travel Laptop',
+      addClient: async () => {},
+    });
+    registerRelayCommands(registry, relay, previews, links, store);
+    await server.start();
+    const invoke = (token: string, channel: string, ...args: JsonValue[]) => requestJson(server, 'POST', '/invoke', { channel, args }, token);
+    const mint = async (token: string, peer = ROGUE) => {
+      const { body } = await invoke(token, 'relay:client:mint-link', { peer });
+      return decodeBoundary(body, boundary.object({ result: boundary.object({ token: boundary.nonEmptyString }) })).result.token;
+    };
+    return { server, registry, invoke, mint, call };
+  }
+
+  it.each([
+    ['relay:client:grant-phone', { label: 'Rogue phone', phoneId: 'pane-native-rogue' }],
+    ['relay:client:remove-phone', { phoneId: 'pane-native-ana' }],
+    ['relay:client:forget-computer', { computerId: STUDIO.id }],
+  ])('refuses %s from a paired phone, and changes nothing', async (channel, request) => {
+    const computer = await startComputer({ phoneId: 'pane-native-ana' });
+
+    await expect(computer.invoke('phone-token', channel, request))
+      .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_COMPUTER_ONLY' } } });
+    await expect(computer.invoke('phone-token', 'sessions:get-all')).resolves.toMatchObject({ statusCode: 200 });
+    await expect(computer.invoke('studio-token', 'runpane:machine:info')).resolves.toMatchObject({ statusCode: 200 });
+  });
+
+  it.each([
+    ['relay:client:mint-link', { peer: ROGUE }],
+    ['relay:client:save-link', { peer: ROGUE, token: 'stolen' }],
+  ])('refuses %s from a linked computer, since only a phone that scanned both may link them', async (channel, request) => {
+    const computer = await startComputer();
+
+    await expect(computer.invoke('studio-token', channel, request))
+      .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_PHONE_ONLY' } } });
+  });
+
+  it.each([
+    ['another relay domain', { ...ROGUE, domain: 'evil.example', address: 'https://roguerogueroguer.evil.example' }],
+    ['an address outside its id', { ...ROGUE, address: 'https://studiostudiostud.runpane.net' }],
+    ['an address off the relay', { ...ROGUE, address: 'https://evil.example' }],
+  ])('refuses to link a peer at %s, and changes nothing', async (_case, peer) => {
+    const computer = await startComputer();
+
+    for (const [channel, request] of [['relay:client:mint-link', { peer }], ['relay:client:save-link', { peer, token: 'stolen' }]] as const) {
+      await expect(computer.invoke('phone-token', channel, request))
+        .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_LINK_OUTSIDE_DOMAIN', message: expect.stringContaining('runpane.net') } } });
+    }
+    await expect(computer.registry.invoke('relay:linked-computers', [])).resolves.toEqual([expect.objectContaining({ name: 'Studio Mac' })]);
+    await expect(computer.registry.invoke(RELAY_DEVICE_COMMANDS.list, [])).resolves.toEqual([
+      expect.objectContaining({ label: 'Ana’s iPhone' }),
+      expect.objectContaining({ label: 'Studio Mac' }),
+    ]);
+  });
+
+  it('names the computers an unlinked computer was removed from, never the unlinked computer itself', async () => {
+    const computer = await startComputer({ linked: [STUDIO, BUILD_BOX] });
+
+    await expect(computer.registry.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: BUILD_BOX.id }]))
+      .resolves.toEqual({ removed: ['Travel Laptop', 'Studio Mac'], notReached: [] });
+    await expect(computer.registry.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: STUDIO.id }]))
+      .resolves.toEqual({ removed: ['Travel Laptop'], notReached: [] });
+  });
+
+  it('revokes a link a phone minted, and the phone tokens that link handed out, when the phone is removed from all computers', async () => {
+    const computer = await startComputer({ phoneId: 'pane-native-ana' });
+    const minted = await computer.mint('phone-token');
+    await expect(computer.invoke(minted, 'runpane:machine:info')).resolves.toMatchObject({ statusCode: 200 });
+    const { body } = await computer.invoke(minted, 'relay:client:grant-phone', { label: 'Rogue phone', phoneId: 'pane-native-rogue' });
+    const handedOut = decodeBoundary(body, boundary.object({ result: boundary.object({ token: boundary.nonEmptyString }) })).result.token;
+    await expect(computer.invoke(handedOut, 'sessions:get-all')).resolves.toMatchObject({ statusCode: 200 });
+
+    await expect(computer.registry.invoke(RELAY_DEVICE_COMMANDS.removePhoneEverywhere, [{ clientId: 'phone-ana' }]))
+      .resolves.toEqual({ removed: ['Travel Laptop', 'Studio Mac'], notReached: [] });
+
+    for (const token of ['phone-token', minted, handedOut]) {
+      await expect(computer.invoke(token, 'sessions:get-all'))
+        .resolves.toMatchObject({ statusCode: 403, body: { error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID' } } });
+    }
+    expect(computer.call).toHaveBeenCalledWith(expect.objectContaining({ label: 'Studio Mac' }), 'relay:client:remove-phone', [{ phoneId: 'pane-native-ana' }]);
+  });
+
+  it('revokes a link a phone minted here when another computer removes that phone', async () => {
+    const computer = await startComputer({ phoneId: 'pane-native-ana' });
+    const minted = await computer.mint('phone-token');
+
+    await expect(computer.invoke('studio-token', 'relay:client:remove-phone', { phoneId: 'pane-native-ana' }))
+      .resolves.toMatchObject({ statusCode: 200 });
+
+    await expect(computer.invoke(minted, 'runpane:machine:info'))
+      .resolves.toMatchObject({ statusCode: 403, body: { error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID' } } });
+    await expect(computer.invoke('studio-token', 'runpane:machine:info')).resolves.toMatchObject({ statusCode: 200 });
+  });
+
+  it('ends a removed phone’s open event stream within seconds of "Remove from all your computers"', async () => {
+    const computer = await startComputer({ phoneId: 'pane-native-ana' });
+    const stream = await openEventStream(computer.server, 'phone-token');
+    await stream.nextEvent();
+
+    await computer.registry.invoke(RELAY_DEVICE_COMMANDS.removePhoneEverywhere, [{ clientId: 'phone-ana' }]);
+
+    await expect(Promise.race([stream.ended.then(() => 'ended'), new Promise((resolve) => { setTimeout(resolve, 3_000, 'still open'); })]))
+      .resolves.toBe('ended');
+  });
+
+  it('reports linked computers as not reached when the phone never said which install it is', async () => {
+    const computer = await startComputer();
+
+    await expect(computer.registry.invoke(RELAY_DEVICE_COMMANDS.removePhoneEverywhere, [{ clientId: 'phone-ana' }]))
+      .resolves.toEqual({ removed: ['Travel Laptop'], notReached: ['Studio Mac'] });
+    expect(computer.call).not.toHaveBeenCalled();
   });
 });
 

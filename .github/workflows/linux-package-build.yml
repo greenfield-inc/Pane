@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'scripts/after-pack.js'
+      - 'scripts/build-pane-direct.js'
+      - 'direct/Cargo.toml'
+      - 'direct/Cargo.lock'
       - 'scripts/test-packaged-native-architecture.js'
       - 'scripts/test-packaged-headless-remote-setup.sh'
       - 'main/package.json'
@@ -44,6 +47,9 @@ jobs:
         run: |
           echo 'CFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
           echo 'CXXFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
+      # afterPack builds the pane-direct helper (direct/) for each packaged arch.
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
       - run: pnpm install --frozen-lockfile
       - run: node --test scripts/test-packaged-native-architecture.js
       - name: Build native ${{ matrix.arch }} Linux packages

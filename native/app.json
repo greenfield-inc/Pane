@@ -3,7 +3,7 @@
     "name": "Pane",
     "slug": "pane",
     "version": "1.2",
-    "runtimeVersion": "1.4",
+    "runtimeVersion": "1.5",
     "updates": {
       "url": "https://pane-native-updates-297294606300.us-central1.run.app/manifest",
       "checkAutomatically": "ON_LOAD",
@@ -20,6 +20,9 @@
     "ios": {
       "bundleIdentifier": "com.dcouple.pane.mobile",
       "supportsTablet": false,
+      "associatedDomains": [
+        "applinks:runpane.net"
+      ],
       "infoPlist": {
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
@@ -37,7 +40,24 @@
         "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 7
+      "versionCode": 7,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "runpane.net",
+              "pathPrefix": "/pair"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "plugins": [
       [
@@ -95,7 +115,8 @@
           }
         }
       ],
-      "./plugins/withQuietDevMenu"
+      "./plugins/withQuietDevMenu",
+      "./plugins/withLoopbackHttp"
     ],
     "experiments": {
       "typedRoutes": true,

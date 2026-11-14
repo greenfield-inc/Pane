@@ -1300,4 +1300,23 @@ describe('remote daemon IPC', () => {
     });
     expect(disconnectActiveRemoteHostClients).toHaveBeenCalledWith(['client-1']);
   });
+
+  it('removes a phone here together with the computer links it minted and the phones those computers vouched for', async () => {
+    const config = createDefaultRemoteDaemonConfig();
+    const createdAt = '2026-11-14T00:00:00.000Z';
+    config.host.clients = [
+      { id: 'phone-ana', label: 'Ana’s iPhone', createdAt, tokenHash: 'h1' },
+      { id: 'link-rogue', label: 'Rogue', createdAt, tokenHash: 'h2', kind: 'computer', computerId: 'roguerogueroguer', mintedBy: 'phone-ana' },
+      { id: 'phone-granted', label: 'Rogue phone', createdAt, tokenHash: 'h3', grantedBy: 'roguerogueroguer' },
+      { id: 'phone-ben', label: 'Ben’s Pixel', createdAt, tokenHash: 'h4' },
+    ];
+    const ipcMain = createIpcMainStub();
+    registerTestRemoteDaemonHandlers(ipcMain, { configManager: createConfigManagerStub(config) });
+
+    await expect(ipcMain.handlers.get('remote-daemon:delete-client-record')?.({}, 'phone-ana')).resolves.toMatchObject({
+      success: true,
+      data: [{ id: 'phone-ben' }],
+    });
+    expect(vi.mocked(disconnectActiveRemoteHostClients).mock.lastCall?.[0]?.toSorted()).toEqual(['link-rogue', 'phone-ana', 'phone-granted']);
+  });
 });

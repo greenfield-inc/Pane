@@ -376,7 +376,7 @@ function windowsHost(f, options={}) {
  const self=options.remote?{name:'sender',dnsName:'sender.invalid',os:'Linux',online:true,ips:[],self:true}:host;
  const repo={id:7,name:'experiments (win)',path:options.repoPath??'C:/Users/Jane Doe/repo',environment:options.environment??'windows',active:true,sessionCount:0};
  const item={index:0,ok:true,pinned:false,warnings:[],sessionId:'host-pane',panelId:'host-panel',initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}},...options.item};
- fs.writeFileSync(preload,`const fs=require('node:fs');const decodeBoundary=require(${JSON.stringify(path.join(dist,'boundaryDecoder.js'))}).decodeBoundary;const decode=(schema,value)=>decodeBoundary(value,schema);require(${JSON.stringify(path.join(dist,'workspace.js'))}).readTailnet=async()=>({ok:true,self:${JSON.stringify(self)},machines:${JSON.stringify(options.remote?[host]:[])}});
+ fs.writeFileSync(preload,`const fs=require('node:fs');const decodeBoundary=require(${JSON.stringify(path.join(dist,'boundaryDecoder.js'))}).decodeBoundary;const decode=(schema,value)=>decodeBoundary(value,schema);const tailnet=async()=>({ok:true,self:${JSON.stringify(self)},machines:${JSON.stringify(options.remote?[host]:[])}});const workspace=require(${JSON.stringify(path.join(dist,'workspace.js'))});workspace.readTailnet=tailnet;workspace.readMachines=tailnet;
  const cp=require('node:child_process');const spawn=cp.spawn;cp.spawn=(command,args,opts)=>command==='runpane'&&args.includes('repos')&&${JSON.stringify(options.hostWrapper??false)}?spawn(process.execPath,['-e',"console.error('Windows wrapper must not override Linux daemon');process.exit(1)"],opts):command==='runpane'?spawn(process.execPath,[${JSON.stringify(cli)},...args],opts):spawn(command,args,opts);
  require(${JSON.stringify(path.join(dist,'daemonClient.js'))}).invokeRemoteDaemon=async(target,channel,args,schema)=>{
  fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({target,channel,args})+'\\n');
@@ -527,7 +527,7 @@ function sessionSender(t, options = {}) {
   fs.writeFileSync(preload, `const fs=require('node:fs');const path=require('node:path');const cp=require('node:child_process');const {decodeBoundary}=require(${JSON.stringify(path.join(dist, 'boundaryDecoder.js'))});
 const log=(entry)=>fs.appendFileSync(${JSON.stringify(log)},JSON.stringify(entry)+'\\n');
 const carry=${JSON.stringify(Boolean(options.carry))};const home=${JSON.stringify(remoteHome)};const windows=process.platform==='win32';let resumed;
-require(${JSON.stringify(path.join(dist, 'workspace.js'))}).readTailnet=async()=>({ok:true,self:${JSON.stringify(machineOf('tylers-macbook', true))},machines:[${JSON.stringify(machineOf('tylers-mac-mini'))}]});
+{const tailnet=async()=>({ok:true,self:${JSON.stringify(machineOf('tylers-macbook', true))},machines:[${JSON.stringify(machineOf('tylers-mac-mini'))}]});const workspace=require(${JSON.stringify(path.join(dist, 'workspace.js'))});workspace.readTailnet=tailnet;workspace.readMachines=tailnet;}
 const client=require(${JSON.stringify(path.join(dist, 'daemonClient.js'))});
 client.invokeDaemon=async(channel,args,schema)=>{log({local:true,channel,args});
  if(channel==='runpane:sessions:get'&&args[0].sessionId===${JSON.stringify(source.id)})return decodeBoundary({ok:true,session:${JSON.stringify(source)}},schema);

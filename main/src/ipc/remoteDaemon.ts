@@ -46,6 +46,7 @@ import { formatTailscaleIssue } from '../daemon/tailscaleSetup';
 import { getAppDirectory } from '../utils/appDirectory';
 import { ShellDetector } from '../utils/shellDetector';
 import { disconnectActiveRemoteHostClients } from '../daemon/remoteTransportController';
+import { revokeClients } from '../daemon/relay/relayLinks';
 import {
   getConnectedClientCountBucket,
   getRemoteFailureCategory,
@@ -534,17 +535,11 @@ export function registerRemoteDaemonHandlers(
     try {
       const decodedClientId = decodeBoundary(clientId, boundary.nonEmptyString);
 
-      const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
-      const next = normalizeRemoteDaemonConfig({
-        ...current,
-        host: {
-          ...current.host,
-          clients: current.host.clients.filter((client) => client.id !== decodedClientId),
-        },
-      });
+      // A removed phone takes the computer links it minted, and what those computers vouched for, with it.
+      const { remote: next, revoked } = revokeClients(getRemoteDaemonConfig(configManager.getConfig().remoteDaemon), { clients: (client) => client.id === decodedClientId });
 
       await configManager.updateConfig({ remoteDaemon: next });
-      dependencies.disconnectActiveRemoteHostClients([decodedClientId]);
+      dependencies.disconnectActiveRemoteHostClients([...new Set([decodedClientId, ...revoked])]);
       return { success: true, data: next.host.clients };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to delete remote daemon client record') };

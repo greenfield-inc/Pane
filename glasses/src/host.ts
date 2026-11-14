@@ -34,7 +34,7 @@ import { recordedDictation, streamingDictation, voiceMode, type VoiceHost, type 
 /** A computer the glasses are paired with. The pairing secret is gone; only the device token is kept. */
 export interface PairedComputer {
   name: string;
-  /** `https://<dnsName>:8443` */
+  /** `https://<dnsName>:8443` over Tailscale, or `https://<id>.runpane.net` through Pane's relay. */
   url: string;
   token: string;
   /** The glasses' name on that computer, such as "Even G2 · iPhone". */
@@ -148,7 +148,7 @@ function isEvenAppOrigin(origin: string): boolean {
  */
 export function noAnswerMessage(computerName: string, origin: string): string {
   return isEvenAppOrigin(origin)
-    ? `${computerName} didn't answer. Check that Pane is open and up to date on it, and that Tailscale is on.`
+    ? `${computerName} didn't answer. Check that Pane is open and up to date on it, and that it is online.`
     : `${computerName} didn't answer. If this is the first time, allow the Even app on it: Pane › Settings › Remote Access › Glasses › Allow (origin ${origin}).`;
 }
 

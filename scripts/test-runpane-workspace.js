@@ -231,3 +231,113 @@ test('without a machine name, local reads and writes go through this machine\'s 
   assert.equal(write.status, 0, write.output);
   assert.deepEqual(write.requests, [{ channel: 'runpane:machine:write', args: [{ path: nested, content: 'hello\n', encoding: 'utf8' }] }]);
 });
+
+/**
+ * A computer linked by QR pairing, with Tailscale signed out: a real TLS server on localhost
+ * (trusted through NODE_EXTRA_CA_CERTS, as a CA-issued certificate would be) behind the local
+ * Pane's `relay:linked-computers` answer, which carries `fingerprint`.
+ */
+async function withLinkedComputer(fingerprintFor, check) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-linked-'));
+  // No tailscale on PATH: this one exits like a signed-out install.
+  fs.writeFileSync(path.join(home, 'tailscale'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  const certificate = (name) => {
+    const key = path.join(home, `${name}-key.pem`);
+    const cert = path.join(home, `${name}-cert.pem`);
+    const made = spawnSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '1',
+      '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost', '-keyout', key, '-out', cert], { encoding: 'utf8' });
+    assert.equal(made.status, 0, made.stderr);
+    // base64url SHA-256 of the SubjectPublicKeyInfo, as the openssl pipeline in docs/QR_PAIRING.md would print it.
+    const spki = spawnSync('sh', ['-c', `openssl x509 -in "${cert}" -pubkey -noout | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64`], { encoding: 'utf8' });
+    assert.equal(spki.status, 0, spki.stderr);
+    return { key, cert, fingerprint: spki.stdout.trim().replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') };
+  };
+  const laptop = certificate('laptop');
+  const other = certificate('other');
+  const requests = [];
+  const https = require('node:https');
+  const linked = https.createServer({ key: fs.readFileSync(laptop.key), cert: fs.readFileSync(laptop.cert) }, (request, response) => {
+    let body = '';
+    request.on('data', (chunk) => { body += chunk; });
+    request.on('end', () => {
+      requests.push({ authorization: request.headers.authorization, channel: JSON.parse(body).channel });
+      const reply = (status, payload) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(payload)); };
+      if (request.headers.authorization !== 'Bearer link-token') return reply(403, { ok: false, error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID', message: 'bad token' } });
+      const { channel } = JSON.parse(body);
+      if (channel === 'runpane:machine:info') {
+        return reply(200, { ok: true, result: { hostname: 'travel-laptop', os: 'Linux', isWsl: false, shell: '/bin/bash', homeDir: '/home/ana', wslDistros: [] } });
+      }
+      if (channel === 'runpane:machine:read') return reply(200, { ok: true, result: { path: '/home/ana/notes.md', encoding: 'utf8', content: 'from the laptop\n', bytes: 16 } });
+      return reply(404, { ok: false, error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'unknown channel' } });
+    });
+  });
+  await new Promise((resolve) => linked.listen(0, '127.0.0.1', resolve));
+  const address = `https://localhost:${linked.address().port}`;
+  const fingerprint = fingerprintFor({ laptop: laptop.fingerprint, other: other.fingerprint });
+  const { getPaneDaemonEndpoint } = require(path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const endpoint = getPaneDaemonEndpoint(home);
+  fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
+  const server = net.createServer((socket) => {
+    let buffer = '';
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      for (let index = buffer.indexOf('\n'); index !== -1; index = buffer.indexOf('\n')) {
+        const frame = JSON.parse(buffer.slice(0, index));
+        buffer = buffer.slice(index + 1);
+        if (frame.id !== 1) continue;
+        const result = frame.channel === 'relay:linked-computers'
+          ? [{ id: 'k3x9linked0000aa', name: 'Travel Laptop', address, token: 'link-token', fingerprint }]
+          : { enabled: false, state: 'off', reason: 'Tailscale is signed out' };
+        socket.end(`${JSON.stringify({ type: 'response', id: 1, ok: true, result })}\n`);
+      }
+    });
+  });
+  await new Promise((resolve) => server.listen(endpoint.path, resolve));
+  const run = (...args) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [cli, ...args], {
+      cwd: home,
+      env: {
+        ...process.env, PATH: `${home}${path.delimiter}/usr/bin${path.delimiter}/bin`, PANE_DIR: home, RUNPANE_TELEMETRY_DISABLED: '1',
+        NODE_EXTRA_CA_CERTS: laptop.cert,
+      },
+    });
+    let output = '';
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.stderr.on('data', (chunk) => { output += chunk; });
+    child.on('close', (status) => resolve({ status, output }));
+  });
+  try {
+    await check(run, requests);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => linked.close(resolve));
+  }
+}
+
+test('a computer linked by QR pairing answers by name with its token when Tailscale is off', posixOnly, async () => {
+  await withLinkedComputer((keys) => keys.laptop, async (run) => {
+    const read = await run('workspace', 'travel-laptop', 'read', '~/notes.md');
+    assert.equal(read.output, 'from the laptop\n');
+    assert.equal(read.status, 0);
+  });
+});
+
+test('a linked computer whose key is not the one it linked with never receives the token', posixOnly, async () => {
+  await withLinkedComputer((keys) => keys.other, async (run, requests) => {
+    const read = await run('workspace', 'travel-laptop', 'read', '~/notes.md');
+    assert.notEqual(read.status, 0, read.output);
+    assert.match(read.output, /key/, read.output);
+    assert.deepEqual(requests, []);
+  });
+});
+
+test('workspace list shows a linked computer without its link token', posixOnly, async () => {
+  await withLinkedComputer((keys) => keys.laptop, async (run) => {
+    for (const args of [['workspace', 'list', '--json'], ['workspace', 'list']]) {
+      const list = await run(...args);
+      assert.equal(list.status, 0, list.output);
+      assert.match(list.output, /travel-laptop/, list.output);
+      assert.doesNotMatch(list.output, /link-token/, list.output);
+    }
+  });
+});

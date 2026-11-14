@@ -1,5 +1,7 @@
 import type { BrowserPanelState, ToolPanel } from '@shared/types/panels';
-import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
+import { isRelayProfile, RemoteUnconfirmedResultError } from '@shared/remoteClient';
+import { RELAY_CLIENT_COMMANDS } from '@shared/types/relay';
+import { relayPreview } from '@shared/utils/phonePage';
 import { normalizeUrl } from '@shared/utils/browserUrl';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
@@ -14,7 +16,7 @@ import { Button, ErrorState, Icon, Text } from '@/ui';
 import { isDemoProfile } from '../demo/demoHost';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { AddressAsker, type AddressFailure } from './addressAsker';
-import { browserPage, htmlFromBase64, reloadFile, splitAddress, type BrowserPage } from './browserPage';
+import { browserPage, htmlFromBase64, relayBrowserPage, reloadFile, splitAddress, type BrowserPage } from './browserPage';
 import { StateScreen } from '../tabs/StateScreen';
 import { usePorts } from './usePorts';
 
@@ -44,7 +46,17 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
   const [loadError, setLoadError] = useState<{ src: string; message: string } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
-  let page: BrowserPage = browserPage(url, read, panel.id);
+  // A computer reached through a relay hands out a one-time address for each page on it.
+  const relayAsk = isRelayProfile(profile) ? relayAskFor(url, panel.id) : null;
+  const ticket = useInvokeQuery<{ url: string }>(RELAY_CLIENT_COMMANDS.previewAddress, [relayAsk], {
+    enabled: relayAsk !== null,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+  });
+  let page: BrowserPage = relayAsk !== null
+    ? relayBrowserPage(url, read, panel.id, profile.label, ticket.data?.url ?? null)
+    : browserPage(url, read, panel.id);
   // The demo's pages are sample files on the phone.
   if (isDemoProfile(profile) && page.kind !== 'web' && page.kind !== 'empty' && page.kind !== 'invalid') page = { kind: 'file', url, address: page.address };
   // A files address the phone can't reach (not on Tailscale): read the file through the computer instead.
@@ -61,7 +73,7 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
   useEffect(() => {
     if (requested !== undefined) asker.ask(requested);
   }, [requested, asker]);
-  const addressError = requested !== undefined && askFailure?.port === requested ? askFailure.error : null;
+  const addressError = relayAsk !== null ? ticket.error : requested !== undefined && askFailure?.port === requested ? askFailure.error : null;
 
   const save = useInvokeMutation<[string, Partial<ToolPanel>]>('panels:update', { invalidates: ['panels:list'] });
   const submit = () => {
@@ -93,6 +105,7 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
     else if (page.kind === 'file') void reloadFile(queryClient, fileKey);
     else read.refetch();
     if (requested !== undefined && addressError) asker.retry(requested);
+    if (relayAsk !== null && page.kind !== 'web') void ticket.refetch();
     setReloadKey(key => key + 1);
   };
   const src = page.kind === 'web' ? page.src : null;
@@ -314,6 +327,15 @@ function LoadingScreen({ address, from }: { address: string; from: string }) {
       actions={<ActivityIndicator color={colors.accent} />}
     />
   );
+}
+
+/** What to ask the computer for, or null for a page that isn't on it. */
+function relayAskFor(url: string, panelId: string): { port: number } | { files: string } | null {
+  try {
+    return url ? relayPreview(url, panelId)?.ask ?? null : null;
+  } catch {
+    return null;
+  }
 }
 
 function ToolButton({ testID, label, ios, android, disabled, onPress }: {

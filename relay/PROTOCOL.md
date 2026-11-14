@@ -1,0 +1,268 @@
+# Pane relay protocol, version 1
+
+The relay gives every Pane computer an https address that works from any
+network. It passes each client's TLS connection to the computer still
+encrypted: the relay reads only the requested name (TLS SNI). The computer
+holds its own private key and certificate and ends TLS itself.
+
+One binary, `pane-relay`, runs two roles:
+
+- **relay**: accepts TLS on port 443, routes by SNI, keeps one control
+  connection per computer, and serves its own small https API.
+- **helper** (`--dns`): authoritative DNS for the domain, and the registry of
+  which region each computer is connected to. Two relays run it (say `us`
+  and `eu`), so the zone has two name servers.
+
+## Names
+
+`<D>` is the relay domain (production: picked in P0; development: any test
+domain). Every computer has an id derived from its public key:
+
+```
+id = lowercase base32 (RFC 4648, no padding) of the first 10 bytes of
+     sha256(SubjectPublicKeyInfo DER of the computer's P-256 key)
+```
+
+That gives 16 characters from `a-z2-7`. Only the key holder can use the id,
+so the relay needs no name registration and no database of owners.
+
+| Name | Resolves to | Served by |
+| --- | --- | --- |
+| `<D>` | relay apex addresses | relay API, pairing landing page, app-link files |
+| `<region>.relay.<D>` | that region's relay | relay API, agent control and data connections |
+| `<id>.<D>` | the relay the computer is connected to | the computer's Pane server |
+| `p<port>.<id>.<D>` | same | the computer's dev server on `localhost:<port>` |
+| `files.<id>.<D>` | same | the computer's preview files |
+| `l<a>-<b>-<c>-<d>.<id>.<D>` | `a.b.c.d` (private ranges only) | the computer's local https listener |
+| `_acme-challenge.<id>.<D>` TXT | values the computer set | Let's Encrypt DNS-01 |
+
+The computer's certificate covers `<id>.<D>` and `*.<id>.<D>`.
+
+Local address names answer only for RFC 1918 (`10/8`, `172.16/12`,
+`192.168/16`) and CGNAT (`100.64/10`) addresses; anything else is NXDOMAIN.
+
+## Control connection (computer to relay)
+
+The computer opens TLS to `<region>.relay.<D>:443` (certificate checked
+normally) and sends:
+
+```
+GET /v1/agent HTTP/1.1
+Host: <region>.relay.<D>
+Upgrade: pane-relay/1
+Connection: Upgrade
+```
+
+The relay answers `101 Switching Protocols`. From then on both sides send
+newline-delimited JSON frames, one object per line, at most 64 KiB each.
+Every frame has a `t` field. Unknown frame types are ignored.
+
+### Handshake
+
+1. relay: `{"t":"challenge","nonce":"<base64url 32 bytes>"}`
+2. computer: `{"t":"hello","v":1,"spki":"<base64url SPKI DER>","sig":"<base64url DER ECDSA-SHA256 signature>","local":["192.168.1.20"],"name":"Studio Mac"}`
+   The signature covers the ASCII bytes `pane-relay-v1:` followed by the
+   nonce string exactly as received. `local` lists the computer's private
+   IPv4 addresses (may be empty). `name` is the display name shown on the
+   landing page (at most 60 characters).
+3. relay: `{"t":"welcome","id":"<id>","domain":"<D>","region":"us"}`, or
+   `{"t":"error","code":"<code>","message":"<text>"}` and close. Codes:
+   `bad-hello`, `bad-version`, `bad-signature`, `blocked`, `over-limit`
+   (see [Limits](#limits)) and `full` (the
+   registry holds `--max-computers` and this id is new).
+
+Over the per-address control connection limit, the relay sends that
+`over-limit` error in place of the challenge.
+
+After `full`, `over-limit` or `blocked`, as an error or a `close`, Pane waits
+5 minutes before connecting again; after any other failure it retries within
+10 seconds.
+
+A second control connection for the same id replaces the first, which gets
+`{"t":"close","code":"replaced"}`.
+
+### Frames after the handshake
+
+| From | Frame | Meaning |
+| --- | --- | --- |
+| relay | `{"t":"open","conn":"<base64url 16 bytes>","peer":"<ip>"}` | A client connected for one of this computer's names. Open a data connection for `conn` within 10 s. |
+| computer | `{"t":"txt","req":"<n>","values":["..."]}` | Set the TXT values of `_acme-challenge.<id>.<D>` (empty list clears): at most 2 values of at most 64 bytes, what ACME needs for the name and its wildcard. More gets `bad-request`. |
+| relay | `{"t":"ok","req":"<n>"}` / `{"t":"error","req":"<n>","code","message"}` | Answer to a request frame carrying `req`. |
+| computer | `{"t":"local","local":["..."]}` | The computer's private addresses changed. |
+| computer | `{"t":"sleep"}` | The computer is about to sleep; the relay reports it as asleep until it reconnects. |
+| computer | `{"t":"alert","req":"<n>",...}` | Deliver a push alert with the Pane app's keys; see [Alerts](#alerts). |
+| either | `{"t":"ping"}` / `{"t":"pong"}` | Keepalive. The computer pings every 25 s; the relay closes a control connection silent for 75 s. |
+| relay | `{"t":"close","code":"<code>","message":"<text>"}` | The relay is cutting the computer off (`replaced`, `blocked`, `over-limit`, `shutdown`). |
+
+## Alerts
+
+A computer without the Pane app's push keys sends its phones' alerts through
+the relay, which holds the keys. The computer builds the payload exactly as it
+would send it itself:
+
+- iOS: `{"t":"alert","req":"<n>","platform":"ios","token":"<APNs device token>","pushType":"alert"|"background","collapseId":"<id>","payload":{...}}`.
+  The relay sends it to APNs with the app's topic, production first and the
+  sandbox once on `BadDeviceToken`.
+- Android: `{"t":"alert","req":"<n>","platform":"android","message":{...}}`, an
+  FCM v1 `message` (with its `token`), sent with the app's sender account:
+  a service account key file, or with no key the service account attached to
+  the relay's Google Compute Engine VM (`--fcm-project`). A
+  message without a device `token` gets `bad-request`.
+
+The relay accepts only the fields Pane sends, and each string at most
+1024 bytes; anything else gets `bad-request`:
+
+- iOS `payload`: `eventId`, `hostProfileId`, `notifyId`, `paneId`,
+  `sessionPaneId`, `panelId`, `notifyUi` (strings), `notifyClear` (boolean),
+  `notifyChoices` (up to 3 strings), and `aps` with `alert` (`title`,
+  `body`), `sound`, `thread-id`, `category`, and `mutable-content` or
+  `content-available` set to 1.
+- Android `message`: `token`, `notification` (`title`, `body`), `android`
+  (`priority` `"high"`, `notification.tag`), and `data` with string values
+  under `eventId`, `hostProfileId`, `notifyId`, `paneId`, `sessionPaneId`,
+  `panelId`, `notifyTag`, `notifyUi`, `notifyTitle`, `notifyBody`,
+  `notifyChoices` and `notifyClear`.
+
+The relay answers `{"t":"ok","req":"<n>","status":<provider HTTP status>,"body":"<provider body, at most 2 KiB>"}`
+when the provider answered, whatever its status, or
+`{"t":"error","req":"<n>","code":"throttled"|"unconfigured"|"bad-request"|"provider","message":"..."}`.
+Each computer may send 60 alerts an hour (`--limit-alerts-per-hour`), and
+each device token may get 30 an hour from all computers together
+(`--limit-alerts-per-token-per-hour`). Past either, the relay answers
+`throttled` and logs one line per computer or device per hour. Payloads and
+device tokens are never logged.
+
+The relay does not check that a computer was paired with the device it
+alerts. Pairing runs end to end between the phone and the computer, so the
+relay never sees it, and proving it would need the phone to sign a grant
+the relay can check. The per-device limit bounds what any number of
+computers can send one phone, and the per-address limit on new computers
+bounds how many ids one sender can make.
+
+## Data connection
+
+For each `open`, the computer opens a new TLS connection to the same relay:
+
+```
+GET /v1/data/<conn> HTTP/1.1
+Host: <region>.relay.<D>
+Upgrade: pane-relay/1
+Connection: Upgrade
+```
+
+After `101 Switching Protocols` the stream carries the client's bytes
+unchanged, starting with its TLS ClientHello, in both directions. An unknown
+or expired `conn` gets `404` and close. The computer then ends the client's
+TLS with its own certificate.
+
+## Relay API (https on `<D>` and `<region>.relay.<D>`)
+
+| Request | Answer |
+| --- | --- |
+| `GET /healthz` | `200 {"ok":true,"region":"us","computers":<n>}` |
+| `GET /v1/relays` | `{"relays":[{"region":"us","host":"us.relay.<D>","directRelay":"https://us.relay.<D>/"},...]}` |
+| `GET /v1/status/<id>` | `{"state":"online" \| "asleep" \| "offline","since":"<ISO time or null>"}` |
+| `GET /pair` | The pairing landing page (the QR's address; the secret stays in the `#fragment`). |
+| `GET /.well-known/apple-app-site-association` | iOS universal links for `/pair`. |
+| `GET /.well-known/assetlinks.json` | Android app links for `/pair`. |
+| `GET /relay`, `GET /ping` | The iroh relay for direct paths (below). |
+
+## Direct paths
+
+Every relay is also an [iroh](https://iroh.computer) relay, the meeting point
+for direct QUIC paths between a computer and its phones and desktops
+(`pane-direct` in `direct/`, ALPN `pane/direct/1`). Both ends pass the same
+relay URL, the `directRelay` of the computer's region from `GET /v1/relays`:
+
+```sh
+pane-direct serve   --relay-url https://us.relay.<D>/ ...   # the computer
+pane-direct connect --relay-url https://us.relay.<D>/ ...   # a phone or desktop
+```
+
+The relay serves iroh's relay protocol on its https listener: a websocket at
+`/relay` and the latency probe at `/ping`. iroh endpoints prove their key to
+the relay and exchange end-to-end encrypted QUIC packets through it until
+they find a direct path, then send directly. `directRelay` is on port 443
+unless the `--relays` host names a port (or, in `--dev`, the listener's port).
+
+QUIC address discovery, which tells an endpoint its public address, runs on
+UDP when the relay has `--direct-quic` (clients expect port 7842). Without
+it, endpoints still connect, through the relay or over the addresses they
+already know.
+
+Any iroh endpoint may use the relay. Limits apply per client IP (below).
+
+## Registry (helper)
+
+With `--dns`, the process answers DNS for `<D>` and keeps the registry: for
+each id, its region, local addresses, TXT values and last-seen time. Every
+relay sends each update to every helper in its `--registry-url` list with
+`POST /v1/registry` (header `authorization: Bearer <registry secret>`). The
+body is one update, `{"id","region","local":[...],"txt":[...]|null,"online":true|false}` (TXT
+values as the `txt` frame allows), or a JSON array of up to 5,000 of them (at most 4 MiB); `"txt":null` leaves
+the TXT values as they are. The helper answers `200 {"ok":true}`, or `400`
+and applies nothing when any update is malformed.
+
+Each relay keeps one queue per helper and sends it from its own task, so a
+slow helper delays nothing else. Updates for the same id merge while they
+wait, and everything waiting goes out together as one array. Every 60 s the
+relay queues all its connected computers again, so a helper that restarts
+relearns them within a minute. A TXT update succeeds once one helper has it.
+A helper updates its own registry in memory and lists only the other
+helpers, so both helpers answer the same records.
+
+A relay with `--acme-cache` gets its own certificate for `<D>` and
+`<region>.relay.<D>` with DNS-01. It sets each challenge value on every
+helper with `POST /v1/registry/acme` (same bearer secret), body
+`{"name":"_acme-challenge.<region>.relay.<D>","values":["..."]}` (the same
+2 values of at most 64 bytes), and clears
+it with `"values":[]` when the CA is done. Helpers accept only
+`_acme-challenge.<D>` and `_acme-challenge.<region>.relay.<D>` for a region
+they know. A helper relay sets its own values in memory as well.
+
+The zone's name servers are `ns1.<D>` and `ns2.<D>` (`--ns`); each answers
+with its `--ns-ip` address, so the A records match the glue at the
+registrar.
+
+UDP answers are rate limited per client /24 (IPv6 /56): 50 a second
+(`--dns-responses-per-sec`). Past it the helper answers with the header and
+question only and TC=1, so a real resolver retries over TCP and a spoofed
+source gets nothing larger than the query it sent. TCP answers are not
+limited.
+
+## Limits
+
+Limits count each client by its address: an IPv4 address, or the /64 that
+holds an IPv6 address. A client over a limit is slowed, and past twice the
+limit its new connections are refused and its open ones closed. The
+computer and its other clients carry on.
+
+- Per computer and client address: 50 MB and 100 new client connections a
+  minute (`--limit-bytes-per-min`, `--limit-conns-per-min`).
+- Per client address across all computers: 200 MB and 400 new connections a
+  minute (`--limit-ip-bytes-per-min`, `--limit-ip-conns-per-min`).
+- Per client address on the iroh relay: 50 MB and 100 new connections a
+  minute (the per-computer flags).
+- Per computer, its own control connection: past 1,200 frames a minute the
+  relay closes it with `over-limit` and refuses it until the minute ends.
+- Per client address, control connections: 60 a minute
+  (`--limit-agent-conns-per-min`), slowed past it and refused past twice it.
+- Per client address, computers new to the relay: 20 an hour
+  (`--limit-new-ids-per-hour`); past it they get `over-limit`.
+- Computers in the registry: 250,000 (`--max-computers`); past it a new
+  computer gets `full`, and a helper skips new ids it is sent.
+- A computer offline for 7 days is forgotten: its names answer NXDOMAIN and
+  its status `since` is null. An offline computer's TXT values are cleared
+  10 minutes after it set them; an online computer keeps them.
+- Total open client connections (`--max-connections`, default 20,000,
+  counting iroh relay connections); new ones beyond it are refused.
+- Idle client connections close after 10 minutes with no bytes either way.
+- Blocked ids: a file (`--blocklist`), one id per line, reread when it
+  changes. A blocked id's control connection gets `close` `blocked`.
+
+## Privacy
+
+The relay never logs or stores payload bytes, tokens or URLs. Logs carry
+ids, client IPs, byte counts, timing and close reasons. On the iroh relay it
+sees iroh endpoint ids and IPs; the packets it forwards are encrypted between
+the endpoints.

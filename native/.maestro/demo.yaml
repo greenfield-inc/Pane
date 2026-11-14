@@ -120,12 +120,30 @@ name: Try the demo
     timeout: 10000
 - tapOn:
     id: settings-add-machine
+- assertVisible:
+    id: add-computer-scan
+- tapOn:
+    id: add-computer-tailscale
 - extendedWaitUntil:
     visible: "travel-laptop.*"
     timeout: 10000
 - assertVisible: "build-box.*"
 - assertVisible:
     id: computers-add-code
+# Back to Add a computer, then to Settings.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - swipe:
+          start: 5%, 50%
+          end: 90%, 50%
+          duration: 400
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
 - runFlow:
     when:
       platform: iOS

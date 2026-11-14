@@ -5,6 +5,7 @@ const { Arch } = require('electron-builder');
 
 const { verifyPackedApp } = require('./verify-packaged-icon');
 const { verifyChatAdapters } = require('./verify-chat-adapters');
+const { buildPaneDirect, hasCommand } = require('./build-pane-direct');
 
 function verifyLinuxSqliteArchitecture(appOutDir, arch) {
   const name = Arch[arch];
@@ -103,7 +104,30 @@ function createLinuxCompatibilityAlias(appOutDir) {
   fs.symlinkSync('pane', aliasPath);
 }
 
+// The direct-path helper sits next to app.asar, where main finds it through
+// process.resourcesPath. A universal macOS app merges (lipo) the two per-arch copies.
+function addPaneDirect(context) {
+  const arch = Arch[context.arch];
+  if (arch === 'universal') return;
+  const platform = context.electronPlatformName;
+  const resources = platform === 'darwin'
+    ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
+    : path.join(context.appOutDir, 'resources');
+  // CI must ship it; a local package without cargo leaves direct paths off and says so.
+  if (!process.env.CI && !hasCommand('cargo')) {
+    console.warn('[pane-direct] cargo is not on PATH, so this local package has no direct-path helper: '
+      + 'linked computers connect through the relay only. Install Rust from https://rustup.rs to include it.');
+    return;
+  }
+  const binary = buildPaneDirect(platform, arch);
+  const destination = path.join(resources, path.basename(binary));
+  fs.copyFileSync(binary, destination);
+  fs.chmodSync(destination, 0o755);
+  console.log(`[pane-direct] Packaged ${path.relative(context.appOutDir, destination)}`);
+}
+
 async function afterPack(context) {
+  addPaneDirect(context);
   // Runs for every platform and target, so a build that drops either the bundle
   // icon or the runtime window icon fails here instead of shipping (issue: the
   // v2.4.69 Windows taskbar icon). The Windows launcher's own icon is not
