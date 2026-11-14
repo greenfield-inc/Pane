@@ -243,13 +243,15 @@ export class ArchiveCleanupManager {
   private schedule(): void {
     if (this.stopped) return;
     clearTimeout(this.timer);
+    // One reading of the clock: a job due between two readings would be neither started nor timed.
+    const now = Date.now();
     // Moving each dispatched job to the end gives other jobs/repositories a
     // turn between purge batches and retries. At most one job per repository.
     for (const job of [...this.jobs.values()]) {
       if (this.active.size >= 2) break;
       const key = archivePathKey(job.repository);
       if (job.status !== 'queued' || this.waitingForTeardown.has(job.sessionId)
-        || this.repositories.has(key) || job.nextAttempt > Date.now()) continue;
+        || this.repositories.has(key) || job.nextAttempt > now) continue;
       this.jobs.delete(job.sessionId);
       this.jobs.set(job.sessionId, job);
       this.active.add(job.sessionId);
@@ -263,7 +265,6 @@ export class ArchiveCleanupManager {
       this.inFlight.add(execution);
     }
     // A finished teardown or run calls schedule() itself; only a retry backoff needs a timer.
-    const now = Date.now();
     const retryAt = Math.min(...[...this.jobs.values()]
       .filter(job => job.status === 'queued' && job.nextAttempt > now)
       .map(job => job.nextAttempt));
