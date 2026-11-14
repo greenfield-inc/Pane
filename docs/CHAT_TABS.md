@@ -396,7 +396,7 @@ The latest turn says when it finished (D-202): "Worked for 27s · 2:04 PM", or
 "2:04 PM" alone when it did nothing but answer. An older time reads "Yesterday
 4:12 PM" or "Nov 3, 4:12 PM", in the person's locale. Every other message shows
 its time on hover; on the phone, a long press shows it. A conversation reopened
-after a restart has no times for its earlier turns.
+after a restart keeps the times of its last 200 turns; older turns show none.
 
 The conversation stays in the order things happened (D-193). Claude can start a
 turn by itself, for example when a background command finishes. Pane sees that
@@ -438,6 +438,13 @@ replays the history) and shows it. A turn that was running when Pane closed is
 marked *Stopped when Pane closed*; a message sent then continues the same
 conversation. If the agent exits, the tab shows why with **Restart**, which
 loads the same conversation.
+
+Auto-pause (Settings > Pause) stops the agent of a chat tab idle for
+`chatIdleReleaseMinutes` (30 by default), which frees its memory. It skips the
+Pane on screen and a tab that is working, holds a queued message or waits on the
+person. The paused tab keeps showing its conversation and controls; opening it,
+sending it a message or using its model, mode or `/resume` controls resumes the
+agent in the same conversation.
 
 ## Cost
 

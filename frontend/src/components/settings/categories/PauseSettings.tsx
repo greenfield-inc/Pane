@@ -45,7 +45,7 @@ export function PauseSettings({ persistence }: { persistence: SettingsPersistenc
       <SettingRow
         settingId="auto-pause"
         label={AUTO_PAUSE_LABEL}
-        description="Stops the agents and scripts of a Pane nobody has used for this long, and the agent of a chat tab idle for its shorter time. Panes and chats waiting on you are skipped, and so is the Pane on screen. Resume brings a Pane back in the same conversations; a chat tab resumes when you open it or send it a message. Wakeups and scheduled jobs a chat agent keeps only in memory end with it."
+        description="Stops the agents and scripts of a Pane nobody has used for this long, and the agent of a chat tab idle for its shorter time. Panes and chats waiting on you are skipped, and so are the Pane you're working in and the chats of the Pane on screen. Resume brings a Pane back in the same conversations; a chat tab resumes when you open it or send it a message. Wakeups and scheduled jobs a chat agent keeps only in memory end with it."
         saveState={persistence.saveStates['auto-pause']}
         align="start"
         details={(
