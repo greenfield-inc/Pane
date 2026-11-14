@@ -8,5 +8,5 @@ RUN cargo build --release --locked
 FROM gcr.io/distroless/cc-debian12:nonroot
 COPY --from=build /src/target/release/pane-relay /usr/local/bin/pane-relay
 USER nonroot
-EXPOSE 443/tcp 53/udp 53/tcp
+EXPOSE 443/tcp 53/udp 53/tcp 7842/udp
 ENTRYPOINT ["/usr/local/bin/pane-relay"]

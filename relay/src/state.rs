@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::io::BoxStream;
 use crate::registry::{Registry, Update};
 use std::collections::{HashMap, HashSet};
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
@@ -60,6 +60,10 @@ pub struct State {
     pub domain: String,
     pub registry: Registry,
     pub alerts: Alerts,
+    /// The in-process iroh relay's loopback address.
+    pub direct_addr: SocketAddr,
+    /// The port the https listener is bound to.
+    pub https_port: u16,
     pub shutdown: CancellationToken,
     pub tracker: TaskTracker,
     agents: Mutex<HashMap<String, AgentHandle>>,
@@ -91,12 +95,21 @@ pub fn close_frame(code: &str, message: &str) -> Out {
 }
 
 impl State {
-    pub fn new(cfg: Config, domain: String, registry: Registry, alerts: Alerts) -> Self {
+    pub fn new(
+        cfg: Config,
+        domain: String,
+        registry: Registry,
+        alerts: Alerts,
+        direct_addr: SocketAddr,
+        https_port: u16,
+    ) -> Self {
         Self {
             cfg,
             domain,
             registry,
             alerts,
+            direct_addr,
+            https_port,
             shutdown: CancellationToken::new(),
             tracker: TaskTracker::new(),
             agents: Mutex::default(),

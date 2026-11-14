@@ -7,7 +7,8 @@ instead of Pane's servers. The wire protocol is
 
 ## What you need
 
-- A machine reachable from the internet on TCP 443 and on UDP and TCP 53.
+- A machine reachable from the internet on TCP 443 and on UDP and TCP 53,
+  plus UDP 7842 if you turn on QUIC address discovery (`--direct-quic`).
 - A domain you control, say `relay.example.com`, delegated to that machine:
   an `NS` record for `relay.example.com` pointing at a name with an `A`
   record for the machine.
@@ -33,8 +34,12 @@ pane-relay \
   --listen 0.0.0.0:443 \
   --cert /etc/pane-relay/cert.pem --key /etc/pane-relay/key.pem \
   --dns 0.0.0.0:53 \
-  --public-ip 203.0.113.10
+  --public-ip 203.0.113.10 \
+  --direct-quic 0.0.0.0:7842
 ```
+
+`--direct-quic` is optional. It helps phones and computers find a direct
+path to each other; without it they still connect.
 
 `pane-relay --help` and [relay/README.md](../relay/README.md) list every
 flag, including connection and byte limits, the blocklist, and several
@@ -62,8 +67,17 @@ relay the Pane app's keys: `--apns-key-path`, `--apns-key-id`,
 `--apns-team-id` and `--fcm-service-account`. Without them, set the keys on
 each computer instead ([Native mobile](NATIVE_MOBILE.md)).
 
+## Direct paths
+
+The relay is also the meeting point for direct QUIC paths between a computer
+and its devices, at `https://us.relay.relay.example.com/` on the same port
+443. Pane learns this address from the relay (`directRelay` in
+`GET /v1/relays`), so there is nothing to configure.
+
 ## What the relay sees
 
 Which computer each connection is for (the TLS server name), IP addresses,
 timing and byte counts. It never decrypts traffic: each computer ends TLS
-with its own key. It logs no payloads, tokens or URLs.
+with its own key. It logs no payloads, tokens or URLs. Packets on direct
+paths are encrypted between the two ends; the relay sees their iroh endpoint
+ids, IP addresses and byte counts.

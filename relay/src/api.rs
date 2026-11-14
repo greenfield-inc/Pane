@@ -62,6 +62,12 @@ pub async fn serve(state: Arc<State>, mut s: BoxStream, peer: IpAddr) {
                 }
             }
         }
+        ("GET", p) if crate::direct::PATHS.contains(&p) => {
+            let mut head = req.head;
+            head.extend_from_slice(&rest);
+            crate::direct::proxy(state, s, head, peer).await;
+            return;
+        }
         ("GET", "/healthz") => {
             let body =
                 json!({"ok": true, "region": state.cfg.region, "computers": state.computers()});
@@ -128,13 +134,24 @@ fn relays(state: &State) -> serde_json::Value {
         .relays
         .0
         .iter()
-        .map(|(region, host)| json!({"region": region, "host": host}))
+        .map(|(region, host)| relay_entry(state, region, host))
         .collect();
     if list.is_empty() {
         let host = format!("{}.relay.{}", state.cfg.region, state.domain);
-        list.push(json!({"region": state.cfg.region, "host": host}));
+        list.push(relay_entry(state, &state.cfg.region, &host));
     }
     json!({ "relays": list })
+}
+
+/// One `/v1/relays` entry. Relays serve https on 443 (often through a port
+/// forward), so `directRelay` names a port only in --dev or when `host` does.
+fn relay_entry(state: &State, region: &str, host: &str) -> serde_json::Value {
+    let direct = if state.cfg.dev && !host.contains(':') {
+        format!("https://{host}:{}/", state.https_port)
+    } else {
+        format!("https://{host}/")
+    };
+    json!({"region": region, "host": host, "directRelay": direct})
 }
 
 fn iso(t: SystemTime) -> String {

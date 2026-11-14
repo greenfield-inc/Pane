@@ -63,6 +63,8 @@ pub struct Request {
     pub method: String,
     pub path: String,
     headers: Vec<(String, String)>,
+    /// The request head as received.
+    pub head: Vec<u8>,
 }
 
 impl Request {
@@ -113,6 +115,7 @@ pub async fn read_request<S: AsyncRead + Unpin>(s: &mut S) -> io::Result<(Reques
             method,
             path,
             headers,
+            head: buf,
         },
         rest,
     ))

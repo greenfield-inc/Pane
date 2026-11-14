@@ -125,11 +125,37 @@ TLS with its own certificate.
 | Request | Answer |
 | --- | --- |
 | `GET /healthz` | `200 {"ok":true,"region":"us","computers":<n>}` |
-| `GET /v1/relays` | `{"relays":[{"region":"us","host":"us.relay.<D>"},...]}` |
+| `GET /v1/relays` | `{"relays":[{"region":"us","host":"us.relay.<D>","directRelay":"https://us.relay.<D>/"},...]}` |
 | `GET /v1/status/<id>` | `{"state":"online" \| "asleep" \| "offline","since":"<ISO time or null>"}` |
 | `GET /pair` | The pairing landing page (the QR's address; the secret stays in the `#fragment`). |
 | `GET /.well-known/apple-app-site-association` | iOS universal links for `/pair`. |
 | `GET /.well-known/assetlinks.json` | Android app links for `/pair`. |
+| `GET /relay`, `GET /ping` | The iroh relay for direct paths (below). |
+
+## Direct paths
+
+Every relay is also an [iroh](https://iroh.computer) relay, the meeting point
+for direct QUIC paths between a computer and its phones and desktops
+(`pane-direct` in `direct/`, ALPN `pane/direct/1`). Both ends pass the same
+relay URL, the `directRelay` of the computer's region from `GET /v1/relays`:
+
+```sh
+pane-direct serve   --relay-url https://us.relay.<D>/ ...   # the computer
+pane-direct connect --relay-url https://us.relay.<D>/ ...   # a phone or desktop
+```
+
+The relay serves iroh's relay protocol on its https listener: a websocket at
+`/relay` and the latency probe at `/ping`. iroh endpoints prove their key to
+the relay and exchange end-to-end encrypted QUIC packets through it until
+they find a direct path, then send directly. `directRelay` is on port 443
+unless the `--relays` host names a port (or, in `--dev`, the listener's port).
+
+QUIC address discovery, which tells an endpoint its public address, runs on
+UDP when the relay has `--direct-quic` (clients expect port 7842). Without
+it, endpoints still connect, through the relay or over the addresses they
+already know.
+
+Any iroh endpoint may use the relay. Limits apply per client IP (below).
 
 ## Registry (helper)
 
@@ -145,8 +171,11 @@ that also runs the helper updates it in memory.
 - Per computer: 50 MB and 100 new client connections a minute. Over the
   limit the relay slows the computer's connections, and past twice the limit
   it closes them with `over-limit`.
-- Total open client connections (`--max-connections`, default 20,000); new
-  ones beyond it are refused.
+- Per client IP on the iroh relay: the same 50 MB and 100 new connections a
+  minute (`--limit-bytes-per-min`, `--limit-conns-per-min`). Over the limit
+  the relay slows that IP's connections, and past twice the limit closes them.
+- Total open client connections (`--max-connections`, default 20,000,
+  counting iroh relay connections); new ones beyond it are refused.
 - Idle client connections close after 10 minutes with no bytes either way.
 - Blocked ids: a file (`--blocklist`), one id per line, reread when it
   changes. A blocked id's control connection gets `close` `blocked`.
@@ -154,4 +183,6 @@ that also runs the helper updates it in memory.
 ## Privacy
 
 The relay never logs or stores payload bytes, tokens or URLs. Logs carry
-ids, client IPs, byte counts, timing and close reasons.
+ids, client IPs, byte counts, timing and close reasons. On the iroh relay it
+sees iroh endpoint ids and IPs; the packets it forwards are encrypted between
+the endpoints.

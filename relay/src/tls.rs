@@ -30,13 +30,15 @@ pub fn load(cert: &Path, key: &Path) -> Result<Arc<ServerConfig>, Error> {
     server_config(certs, key)
 }
 
-/// A self-signed certificate for <D>, *.<D> and *.relay.<D>. Writes its PEM to the
+/// A self-signed certificate for <D>, *.<D>, *.relay.<D>, localhost and 127.0.0.1. Writes its PEM to the
 /// temp directory so local agents can trust it, and returns the config and that path.
 pub fn dev(domain: &str) -> Result<(Arc<ServerConfig>, std::path::PathBuf), Error> {
     let names = vec![
         domain.to_string(),
         format!("*.{domain}"),
         format!("*.relay.{domain}"),
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
     ];
     let ck = rcgen::generate_simple_self_signed(names)?;
     let path = std::env::temp_dir().join(format!("pane-relay-dev-{domain}.pem"));

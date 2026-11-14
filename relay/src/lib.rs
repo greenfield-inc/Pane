@@ -5,6 +5,7 @@ mod alerts;
 mod api;
 mod client;
 pub mod config;
+mod direct;
 mod dns;
 pub mod id;
 mod io;
@@ -39,10 +40,13 @@ const REGISTRY_RESYNC: Duration = Duration::from_secs(60);
 pub struct Relay {
     pub https_addr: SocketAddr,
     pub dns_addr: Option<SocketAddr>,
+    /// The QUIC address discovery socket, with --direct-quic.
+    pub direct_quic_addr: Option<SocketAddr>,
     /// The self-signed certificate's PEM file in --dev mode.
     pub dev_cert: Option<PathBuf>,
     shutdown: CancellationToken,
     task: JoinHandle<()>,
+    direct: iroh_relay::server::Server,
 }
 
 impl Relay {
@@ -50,6 +54,7 @@ impl Relay {
     pub async fn shutdown(self) {
         self.shutdown.cancel();
         let _ = self.task.await;
+        let _ = self.direct.shutdown().await;
     }
 }
 
@@ -82,7 +87,17 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         .transpose()?;
     let blocklist = cfg.blocklist.clone();
     let alerts = alerts::Alerts::load(&cfg)?;
-    let state = Arc::new(State::new(cfg, domain, registry, alerts));
+    let direct = direct::spawn(cfg.direct_quic, &tls).await?;
+    let direct_addr = direct.http_addr().ok_or("iroh relay has no address")?;
+    let direct_quic_addr = direct.quic_addr();
+    let state = Arc::new(State::new(
+        cfg,
+        domain,
+        registry,
+        alerts,
+        direct_addr,
+        https_addr.port(),
+    ));
     let mut blocklist_mtime = None;
     if let Some(path) = &blocklist {
         reload_blocklist(&state, path, &mut blocklist_mtime).await;
@@ -115,13 +130,15 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         state.tracker.close();
         let _ = tokio::time::timeout(Duration::from_secs(3), state.tracker.wait()).await;
     });
-    tracing::info!(%https_addr, ?dns_addr, "relay listening");
+    tracing::info!(%https_addr, ?dns_addr, ?direct_quic_addr, "relay listening");
     Ok(Relay {
         https_addr,
         dns_addr,
+        direct_quic_addr,
         dev_cert,
         shutdown,
         task,
+        direct,
     })
 }
 

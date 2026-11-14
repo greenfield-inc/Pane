@@ -85,6 +85,11 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_REGISTRY_URL")]
     pub registry_url: Option<String>,
 
+    /// UDP address for QUIC address discovery, which direct-path clients use to learn
+    /// their public address. Clients expect port 7842. Off unless set.
+    #[arg(long, env = "PANE_RELAY_DIRECT_QUIC")]
+    pub direct_quic: Option<SocketAddr>,
+
     /// File of blocked ids, one per line; reread when it changes.
     #[arg(long, env = "PANE_RELAY_BLOCKLIST")]
     pub blocklist: Option<PathBuf>,
