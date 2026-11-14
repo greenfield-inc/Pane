@@ -74,6 +74,10 @@ Every frame has a `t` field. Unknown frame types are ignored.
 Over the per-address control connection limit, the relay sends that
 `over-limit` error in place of the challenge.
 
+After `full`, `over-limit` or `blocked`, as an error or a `close`, Pane waits
+5 minutes before connecting again; after any other failure it retries within
+10 seconds.
+
 A second control connection for the same id replaces the first, which gets
 `{"t":"close","code":"replaced"}`.
 

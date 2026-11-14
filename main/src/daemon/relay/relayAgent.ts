@@ -75,6 +75,9 @@ const MAX_FRAME_BYTES = 64 * 1024;
  * 10 s cap has every computer back well inside the 30 s phones get to reconnect.
  */
 const RETRY_MS = [1_000, 2_000, 4_000, 8_000, 10_000];
+/** After the relay refuses this computer (full, over its limits, blocked), wait this long before asking again. */
+const REFUSED_RETRY_MS = 5 * 60_000;
+const REFUSAL_CODES = new Set(['full', 'over-limit', 'blocked']);
 
 /**
  * The computer's one outgoing control connection to its relay (relay/PROTOCOL.md): proves the
@@ -85,6 +88,8 @@ export class RelayAgent {
   private control: tls.TLSSocket | null = null;
   private stopped = true;
   private attempt = 0;
+  /** Set when the relay refused this computer, so the next retry waits REFUSED_RETRY_MS. */
+  private refused = false;
   private retryTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
   private lastHeard = 0;
@@ -243,13 +248,17 @@ export class RelayAgent {
         return;
       case 'error':
         if (frame.req !== undefined) this.settle(frame, new RelayRequestError(String(frame.code ?? 'error'), String(frame.message ?? frame.code ?? 'Relay error')));
-        else this.control?.destroy(new Error(`The relay refused this computer: ${String(frame.message ?? frame.code)}`));
+        else {
+          this.refused = REFUSAL_CODES.has(String(frame.code));
+          this.control?.destroy(new Error(`The relay refused this computer: ${String(frame.message ?? frame.code)}`));
+        }
         return;
       case 'ping':
         this.send({ t: 'pong' });
         return;
       case 'close':
         this.options.log?.(`[relay] the relay closed the connection: ${String(frame.code)} ${String(frame.message ?? '')}`);
+        this.refused = REFUSAL_CODES.has(String(frame.code));
         this.control?.destroy(new Error(`The relay closed the connection (${String(frame.code)}).`));
         return;
       default:
@@ -308,7 +317,8 @@ export class RelayAgent {
 
   private scheduleRetry(reason: string): void {
     if (this.stopped || this.retryTimer) return;
-    const delay = RETRY_MS[Math.min(this.attempt, RETRY_MS.length) - 1] ?? RETRY_MS[RETRY_MS.length - 1];
+    const delay = this.refused ? REFUSED_RETRY_MS : RETRY_MS[Math.min(this.attempt, RETRY_MS.length) - 1] ?? RETRY_MS[RETRY_MS.length - 1];
+    this.refused = false;
     this.setState({ status: 'connecting', attempt: this.attempt, lastError: reason });
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;

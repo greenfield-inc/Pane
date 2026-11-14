@@ -20,7 +20,7 @@ const RELAY_HOST = `us.relay.${DOMAIN}`;
  * signature, announces each raw client connection with `open`, and splices it to the computer's
  * data connection. Clients connect to it as plain TCP standing in for the relay's port 443.
  */
-async function startFakeRelay() {
+async function startFakeRelay(options: { refuse?: string } = {}) {
   const agents: tls.TLSSocket[] = [];
   const waiting = new Map<string, net.Socket>();
   const hellos: JsonObject[] = [];
@@ -50,6 +50,10 @@ async function startFakeRelay() {
               verifier.update(`pane-relay-v1:${nonce}`);
               const key = createPublicKey({ key: Buffer.from(String(frame.spki), 'base64url'), format: 'der', type: 'spki' });
               verified.push(verifier.verify(key, Buffer.from(String(frame.sig), 'base64url')));
+              if (options.refuse) {
+                socket.end(`${JSON.stringify({ t: 'error', code: options.refuse, message: 'refused' })}\n`);
+                continue;
+              }
               socket.write(`${JSON.stringify({ t: 'welcome', id: 'x', domain: DOMAIN, region: 'us' })}\n`);
               agents.push(socket);
             } else if (frame.t === 'txt') {
@@ -201,4 +205,28 @@ describe('relay agent', () => {
     await waitFor(() => streams[0].destroyed, 'the stream to close');
     expect(agent.getState().status).toBe('online');
   });
+
+  it('waits minutes, not seconds, before retrying a relay that refused this computer', async () => {
+    const relay = await startFakeRelay({ refuse: 'full' });
+    cleanups.push(relay.close);
+    const key = await loadComputerKey({ read: async () => fixture('computer.key').toString(), write: async () => undefined });
+    const agent = new RelayAgent({
+      relayHost: RELAY_HOST,
+      connectHost: '127.0.0.1',
+      relayPort: relay.controlPort,
+      key,
+      displayName: () => 'Studio Mac',
+      localAddresses: () => [],
+      ca: fixture('ca.pem'),
+      onClient: (stream) => stream.destroy(),
+    });
+    cleanups.push(() => agent.stop());
+    agent.start();
+    await waitFor(() => relay.hellos.length === 1, 'the first hello');
+    // An ordinary drop retries within a second or two; a refusal must not.
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    expect(relay.hellos).toHaveLength(1);
+    expect(agent.getState()).toMatchObject({ status: 'connecting' });
+  }, 10_000);
 });
+
