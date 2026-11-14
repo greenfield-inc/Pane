@@ -1,8 +1,10 @@
-import { createHash } from 'node:crypto';
+import { createHash, X509Certificate } from 'node:crypto';
+import https from 'node:https';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import tls, { type PeerCertificate } from 'node:tls';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
 
@@ -141,7 +143,7 @@ function decodeResult<T>(channel: string, result: JsonValue | undefined, resultS
 }
 
 /** Failures that happen before a connection exists, so no request was sent. */
-const CONNECT_ERROR_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
+const CONNECT_ERROR_CODES = new Set(['ERR_KEY_PIN_MISMATCH', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
 
 function errorCodeOf(cause: unknown): string {
   return cause instanceof Error && 'code' in cause ? String(cause.code) : '';
@@ -179,6 +181,42 @@ export interface RemoteDaemonTarget {
   baseUrl: string;
   /** A linked computer's token (QR pairing); Tailscale machines are reached by login instead. */
   token?: string;
+  /** A linked computer's key: base64url SHA-256 of its SubjectPublicKeyInfo. Any other key is refused before the token is sent. */
+  fingerprint?: string;
+}
+
+/**
+ * A certificate check that also requires the linked computer's own key, so a certificate issued
+ * to anyone else for the same name (such as by whoever runs its relay's DNS) is refused.
+ */
+function pinnedServerIdentity(fingerprint: string, machine: string): (host: string, certificate: PeerCertificate) => Error | undefined {
+  return (host, certificate) => {
+    const identity = tls.checkServerIdentity(host, certificate);
+    if (identity) return identity;
+    const key = new X509Certificate(certificate.raw).publicKey.export({ format: 'der', type: 'spki' });
+    if (createHash('sha256').update(key).digest('base64url') === fingerprint) return undefined;
+    return Object.assign(new Error(`${machine} presented a key it did not link with, so runpane did not send the request`), { code: 'ERR_KEY_PIN_MISMATCH' });
+  };
+}
+
+/** `fetch` for a linked computer: the same POST over https, with its key pinned (fetch takes no certificate check). */
+function pinnedFetch(url: string, init: { headers: Record<string, string>; body: string; signal?: AbortSignal }, fingerprint: string, machine: string): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const request = https.request(url, {
+      method: 'POST',
+      headers: init.headers,
+      signal: init.signal,
+      checkServerIdentity: pinnedServerIdentity(fingerprint, machine),
+    }, (response) => {
+      let text = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => { text += chunk; });
+      response.on('end', () => resolve(new Response(text || null, { status: response.statusCode ?? 502 })));
+      response.on('error', reject);
+    });
+    request.on('error', (error) => reject(init.signal?.aborted ? init.signal.reason : error));
+    request.end(init.body);
+  });
 }
 
 const remoteInvokeResponseSchema = boundary.union(
@@ -215,16 +253,14 @@ export async function invokeRemoteDaemon<T>(
   const body: RemoteInvokeBody = { channel, args };
   const caller = daemonCaller();
   if (caller) body.caller = caller;
-  const headers = new Headers({ 'Content-Type': 'application/json' });
-  if (target.token) headers.set('Authorization', `Bearer ${target.token}`);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (target.token) headers.Authorization = `Bearer ${target.token}`;
   let response: Response;
   try {
-    response = await fetch(`${target.baseUrl}/invoke`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined,
-    });
+    const init = { method: 'POST', headers, body: JSON.stringify(body), signal: Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined };
+    response = target.fingerprint
+      ? await pinnedFetch(`${target.baseUrl}/invoke`, init, target.fingerprint, target.machine)
+      : await fetch(`${target.baseUrl}/invoke`, init);
   } catch (error) {
     if (error instanceof Error && error.name === 'TimeoutError') {
       throw new PaneDaemonClientError(

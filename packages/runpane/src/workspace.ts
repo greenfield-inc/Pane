@@ -36,7 +36,7 @@ export interface TailnetMachine {
   /** Signed in to this machine's own login. Other people's machines let in only who their visibility allows. */
   mine: boolean;
   /** A computer linked through QR pairing: reached at its relay address with its link token, Tailscale or not. */
-  linked?: { baseUrl: string; token: string };
+  linked?: { baseUrl: string; token: string; fingerprint: string };
 }
 
 export type Tailnet =
@@ -233,7 +233,7 @@ function describeMachine(machine: TailnetMachine): string {
 }
 
 export function workspaceTarget(machine: TailnetMachine): RemoteDaemonTarget {
-  if (machine.linked) return { machine: machine.name, baseUrl: machine.linked.baseUrl, token: machine.linked.token };
+  if (machine.linked) return { machine: machine.name, ...machine.linked };
   return { machine: machine.name, baseUrl: `https://${machine.dnsName}:${workspaceHttpsPort()}` };
 }
 
@@ -242,7 +242,7 @@ const linkedComputersSchema = boundary.array(boundary.object({
   name: boundary.string,
   address: boundary.string,
   token: boundary.string,
-  fingerprint: boundary.string,
+  fingerprint: boundary.nonEmptyString,
 }));
 
 /** "lowercase-with-dashes" for a computer name, so it reads like a Tailscale machine name. */
@@ -271,7 +271,7 @@ async function readLinkedMachines(paneDir?: string): Promise<TailnetMachine[]> {
       self: false,
       owner: 'you',
       mine: true,
-      linked: { baseUrl: computer.address, token: computer.token },
+      linked: { baseUrl: computer.address, token: computer.token, fingerprint: computer.fingerprint },
     };
     try {
       const info = await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS);
