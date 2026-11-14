@@ -19,6 +19,11 @@ const SESSION_WORKING_AFTER_MS = 10_000;
 const SESSION_IDLE_AFTER_MS = 10_000;
 /** The host re-evaluates on this cadence, the same as the terminal status poll. */
 const SESSION_ACTIVITY_TICK_MS = 500;
+/**
+ * The member list (which tabs each Session counts) reads Panes and panels from the database, so
+ * it is rebuilt at most this often, and at once when a Session changes (invalidateMembers).
+ */
+const MEMBERS_REFRESH_MS = 2_000;
 
 export interface SessionActivityMembers {
   sessionId: string;
@@ -115,6 +120,7 @@ export interface SessionActivitySources {
 export class SessionActivityService extends EventEmitter {
   private readonly rollup = new SessionActivityRollup();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private members: { list: SessionActivityMembers[]; at: number } | null = null;
 
   constructor(private readonly sources: SessionActivitySources) {
     super();
@@ -135,7 +141,8 @@ export class SessionActivityService extends EventEmitter {
     const now = this.sources.now?.() ?? Date.now();
     let changes: SessionActivity[];
     try {
-      changes = this.rollup.update(this.sources.members(), panelId => this.sources.isMidTurn(panelId, now), now);
+      if (!this.members || now - this.members.at >= MEMBERS_REFRESH_MS) this.members = { list: this.sources.members(), at: now };
+      changes = this.rollup.update(this.members.list, panelId => this.sources.isMidTurn(panelId, now), now);
     } catch (error) {
       console.error('[SessionActivity] Could not update Session activity:', error);
       return;
@@ -145,5 +152,10 @@ export class SessionActivityService extends EventEmitter {
 
   snapshot(): SessionActivity[] {
     return this.rollup.snapshot();
+  }
+
+  /** A Session was created, archived, or gained or lost a Pane: read the members on the next tick. */
+  invalidateMembers(): void {
+    this.members = null;
   }
 }

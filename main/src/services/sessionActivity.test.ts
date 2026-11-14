@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SessionActivityRollup, type SessionActivityMembers } from './sessionActivity';
+import { SessionActivityRollup, SessionActivityService, type SessionActivityMembers } from './sessionActivity';
 
 const session = (overrides: Partial<SessionActivityMembers> = {}): SessionActivityMembers => ({
   sessionId: 's1',
@@ -119,5 +119,24 @@ describe('SessionActivityRollup', () => {
     const rollup = new SessionActivityRollup();
     rollup.update([session({ sessionId: 'x' }), session({ sessionId: 'y' })], () => false, 0);
     expect(rollup.snapshot().map(item => item.sessionId).sort()).toEqual(['x', 'y']);
+  });
+});
+
+describe('SessionActivityService', () => {
+  it('rebuilds the Session member list at most every 2 s, and at once when told a Session changed', () => {
+    let now = 0;
+    let reads = 0;
+    const service = new SessionActivityService({
+      members: () => { reads += 1; return [session()]; },
+      isMidTurn: () => false,
+      now: () => now,
+    });
+    for (; now < 2_000; now += 500) service.tick();
+    expect(reads).toBe(1);
+    service.tick();
+    expect(reads).toBe(2);
+    service.invalidateMembers();
+    service.tick();
+    expect(reads).toBe(3);
   });
 });

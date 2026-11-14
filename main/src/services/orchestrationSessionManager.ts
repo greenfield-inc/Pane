@@ -117,6 +117,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   ) {
     super();
     this.setMaxListeners(100);
+    this.on('changed', () => this.liveActivity.invalidateMembers());
   }
 
   async initialize(): Promise<void> {
@@ -747,7 +748,8 @@ export class OrchestrationSessionManager extends EventEmitter {
   activityMembers(): SessionActivityMembers[] {
     return this.store.memberships().filter(session => !session.archived).map(session => ({
       sessionId: session.id,
-      orchestratorPanelIds: session.panelIds,
+      // Only tabs that exist: a Session keeps a panel id for each agent, most never created.
+      orchestratorPanelIds: session.panelIds.filter(panelId => panelManager.getPanel(panelId) !== undefined),
       panes: session.associations.filter(association => this.sessionManager.getSession(association.paneId)?.archived === false).map(association => ({
         paneId: association.paneId,
         panelIds: (association.panelIds.length > 0
