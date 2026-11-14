@@ -204,6 +204,8 @@ export class NotifyService {
       const instructionsChanged = this.applySettings(notifySettings(config));
       // "Show cards on" moves the strip and the chime at once, not on the next poll.
       this.queue.pollInUse();
+      // Turning Approvals back on can bring back a saved card with no queue change.
+      this.syncInUsePoll();
       // The block names the `pane` skill only while it is installed.
       if (homeSkillChanged && !instructionsChanged && this.lastSettings.enabled) this.syncInstructions(true);
       // The floating windows read the palette when they load, so a new palette recreates them.

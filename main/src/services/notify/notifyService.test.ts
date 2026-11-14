@@ -8,6 +8,8 @@ describe('NotifyService in-use poll', () => {
   let idleSeconds: number;
   let reads: number;
   let service: NotifyService;
+  let config: AppConfig;
+  let configManager: EventEmitter;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -15,12 +17,14 @@ describe('NotifyService in-use poll', () => {
     // Away when Pane starts: the start-up sweep reads that.
     idleSeconds = 600;
     reads = 0;
+    config = { machineId: 'mini' };
     class FakeConfigManager extends EventEmitter {
-      getConfig(): AppConfig { return { machineId: 'mini' }; }
+      getConfig(): AppConfig { return config; }
     }
+    configManager = new FakeConfigManager();
     service = new NotifyService({
       // SAFETY: NotifyService reads only getConfig() and 'config-updated' from its ConfigManager.
-      configManager: new FakeConfigManager() as ConfigManager,
+      configManager: configManager as ConfigManager,
       getMainWindow: () => null,
       findPane: () => undefined,
       rendererArguments: () => [],
@@ -58,5 +62,21 @@ describe('NotifyService in-use poll', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(changes).toHaveBeenCalled();
     expect(service.queue.snapshot().stripSurface).toBeNull();
+  });
+
+  it('reads in use again when Approvals come back on with a saved question', async () => {
+    idleSeconds = 0;
+    // Asked an hour ago, so it is past its quiet grace and on the strip.
+    service.queue.addWorkerQuestion({ id: 'q1', question: 'Ship it?', source: { name: 'feature', agent: 'Claude', paneId: 'p1', panelId: 't1' }, at: Date.now() - 3_600_000 });
+    const setApprovals = (enabled: boolean) => {
+      config = { ...config, notify: { ...config.notify, enabled } };
+      configManager.emit('config-updated', config);
+    };
+    setApprovals(false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    setApprovals(true);
+    reads = 0;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reads).toBeGreaterThanOrEqual(2);
   });
 });
