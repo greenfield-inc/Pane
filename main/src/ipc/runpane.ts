@@ -1572,7 +1572,8 @@ export function registerRunpaneHandlers(
         });
       }
 
-      // A paused tab stays paused until someone resumes it by name: `--panel`, or its Pane or Session.
+      // A paused terminal tab stays paused until someone resumes it by name: `--panel`, or its Pane or Session.
+      // An auto-paused chat tab is left too: it resumes when opened or sent a message.
       candidates = candidates.filter(candidate => !isPanelPaused(candidate.panelId));
       const exited = await Promise.all(candidates.map(candidate => terminalPanelManager.hasLaunchCommandExited(candidate.panelId)));
       const stopped = candidates.filter((candidate, index) => !candidate.running || exited[index]);
@@ -2314,7 +2315,7 @@ function sessionToPaneSummary(session: Session, project: Project): RunpanePaneSu
     createdAt: toIsoString(session.createdAt),
     lastActivity: toIsoString(session.lastActivity),
     inactiveSince: paneInactiveSince({ createdAt: session.createdAt, lastViewedAt: session.lastViewedAt, panels },
-      panelId => terminalPanelManager.getLastActivity(panelId)).toISOString(),
+      panelId => terminalPanelManager.getLastActivity(panelId) ?? getChatTabManager().lastActivity(panelId)).toISOString(),
     paused: session.paused,
     archived: session.archived || undefined,
     ownership: session.worktreeOwnership ?? 'pane',

@@ -233,8 +233,8 @@ stopped until `runpane panels resume --panel <id>`, `runpane panes resume
 `panels resume --session` and `--all-stopped` skip them. The watch reports
 `PAUSED` (`panel.paused`) and `UNPAUSED` (`panel.unpaused`). Leave paused
 workers paused unless the person asks. `runpane panes list --json` shows each
-Pane's `paused` mark and `inactiveSince` (its last terminal output, input or
-selection).
+Pane's `paused` mark and `inactiveSince` (its last terminal output or input,
+chat agent activity, or selection).
 
 Work an agent sends with `panels create`, `panes create` (with a prompt), or
 `panels submit` expects that report; `--no-expect-report` sends without
