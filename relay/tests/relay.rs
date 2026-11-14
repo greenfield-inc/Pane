@@ -1322,6 +1322,36 @@ fn unix_now() -> i64 {
         .as_secs() as i64
 }
 
+/// Asks the relay to send phone `token` a grant for `agent`, as a computer does when a phone
+/// registers; returns the grant the phone receives and every request the provider got.
+async fn grant(
+    agent: &mut Agent,
+    provider: &mut Provider,
+    platform: &str,
+    token: &str,
+) -> (String, Vec<Received>) {
+    agent
+        .send(
+            json!({"t": "grant", "req": "g", "platform": platform, "token": token,
+            "hostProfileId": "h1"}),
+        )
+        .await;
+    assert_eq!(agent.next().await["t"], "ok");
+    let mut sent = vec![provider.next().await];
+    while let Ok(r) = provider.received.try_recv() {
+        sent.push(r);
+    }
+    let found = sent.iter().find_map(|r| {
+        let body: Value = serde_json::from_slice(&r.body).ok()?;
+        let g = match platform {
+            "ios" => &body["paneGrant"],
+            _ => &body["message"]["data"]["paneGrant"],
+        };
+        g.as_str().map(String::from)
+    });
+    (found.expect("a grant push"), sent)
+}
+
 /// Starts a relay with APNs keys pointing at `apns` (sandbox at `<url>/sandbox`); returns it
 /// with the key the relay signs with.
 async fn apns_env(apns: &Provider) -> (Env, SigningKey) {
@@ -1356,13 +1386,25 @@ async fn ios_alerts_reach_apns_with_a_signed_provider_token() {
     let (env, key) = apns_env(&apns).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
 
+    // The grant reaches the phone as a silent push it hands to this computer.
+    let (g, sent) = grant(&mut agent, &mut apns, "ios", "abcdef0123").await;
+    assert!(g.starts_with(&format!("{}.", agent.id)), "{g}");
+    let r = &sent[0];
+    assert_eq!(r.path, "/3/device/abcdef0123");
+    assert_eq!(header(r, "apns-push-type"), Some("background"));
+    assert_eq!(header(r, "apns-priority"), Some("5"));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&r.body).unwrap(),
+        json!({"aps": {"content-available": 1}, "paneGrant": g, "hostProfileId": "h1"})
+    );
+
     // A Notify clear, as Pane sends it (mobilePushSender.ts).
     let payload = json!({"aps": {"content-available": 1}, "notifyClear": true,
         "eventId": "e1", "hostProfileId": "h1", "notifyId": "n1"});
     agent
         .send(
             json!({"t": "alert", "req": "7", "platform": "ios", "token": "abcdef0123",
-            "pushType": "background", "collapseId": "session-1", "payload": payload}),
+            "pushType": "background", "collapseId": "session-1", "payload": payload, "grant": g}),
         )
         .await;
     assert_eq!(
@@ -1393,7 +1435,8 @@ async fn ios_alerts_reach_apns_with_a_signed_provider_token() {
     agent
         .send(
             json!({"t": "alert", "req": "8", "platform": "ios", "token": "abcdef0123",
-            "pushType": "alert", "payload": {"aps": {"alert": {"title": "Build", "body": "Build is blocked"}}}}),
+            "pushType": "alert", "payload": {"aps": {"alert": {"title": "Build", "body": "Build is blocked"}}},
+            "grant": g}),
         )
         .await;
     assert_eq!(agent.next().await["t"], "ok");
@@ -1416,11 +1459,13 @@ async fn bad_device_token_retries_the_apns_sandbox_once() {
     .await;
     let (env, _) = apns_env(&apns).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let (beef, _) = grant(&mut agent, &mut apns, "ios", "beef").await;
+    let (dead, _) = grant(&mut agent, &mut apns, "ios", "dead").await;
 
     agent
         .send(
             json!({"t": "alert", "req": "1", "platform": "ios", "token": "beef",
-            "pushType": "alert", "payload": {"aps": {}}}),
+            "pushType": "alert", "payload": {"aps": {}}, "grant": beef}),
         )
         .await;
     assert_eq!(
@@ -1434,7 +1479,7 @@ async fn bad_device_token_retries_the_apns_sandbox_once() {
     agent
         .send(
             json!({"t": "alert", "req": "2", "platform": "ios", "token": "dead",
-            "pushType": "alert", "payload": {"aps": {}}}),
+            "pushType": "alert", "payload": {"aps": {}}, "grant": dead}),
         )
         .await;
     assert_eq!(
@@ -1511,12 +1556,16 @@ async fn fcm_env(extra: &[&str]) -> (Env, Provider) {
 async fn android_alerts_reach_fcm_with_an_access_token() {
     let (env, mut fcm) = fcm_env(&[]).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let (g, sent) = grant(&mut agent, &mut fcm, "android", "fcm-device-token").await;
 
     let message = json!({"token": "fcm-device-token", "data": {"eventId": "e1", "notifyClear": "1"},
         "android": {"priority": "high"}});
     for req in ["1", "2"] {
         agent
-            .send(json!({"t": "alert", "req": req, "platform": "android", "message": message}))
+            .send(
+                json!({"t": "alert", "req": req, "platform": "android", "message": message,
+                "grant": g}),
+            )
             .await;
         assert_eq!(
             agent.next().await,
@@ -1525,10 +1574,10 @@ async fn android_alerts_reach_fcm_with_an_access_token() {
         );
     }
 
-    // One token request (cached for the second alert), then the two sends.
-    let t = fcm.next().await;
+    // One token request (cached for every later send), the grant push, then the two sends.
+    let t = &sent[0];
     assert_eq!(t.path, "/token");
-    let form = String::from_utf8(t.body).unwrap();
+    let form = String::from_utf8(t.body.clone()).unwrap();
     let assertion = form
         .strip_prefix("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=")
         .unwrap();
@@ -1552,6 +1601,11 @@ async fn android_alerts_reach_fcm_with_an_access_token() {
     )
     .verify(input.as_bytes(), &sig)
     .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&sent[1].body).unwrap(),
+        json!({"message": {"token": "fcm-device-token", "android": {"priority": "high"},
+            "data": {"paneGrant": g, "hostProfileId": "h1"}}})
+    );
 
     for _ in 0..2 {
         let send = fcm.next().await;
@@ -1612,15 +1666,16 @@ async fn android_alerts_without_a_key_use_the_metadata_server_token() {
     ])
     .await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let (g, _) = grant(&mut agent, &mut fcm, "android", "fcm-device-token").await;
     for req in ["1", "2"] {
         agent
             .send(json!({"t": "alert", "req": req, "platform": "android",
-                "message": {"token": "fcm-device-token", "data": {}}}))
+                "message": {"token": "fcm-device-token", "data": {}}, "grant": g}))
             .await;
         assert_eq!(agent.next().await["status"], 200);
     }
 
-    // One metadata request (the token is cached for the second alert).
+    // One metadata request (the token is cached for the alerts).
     let head = tokio::time::timeout(WAIT, metadata.recv())
         .await
         .unwrap()
@@ -1646,9 +1701,10 @@ async fn android_alerts_without_a_key_use_the_metadata_server_token() {
 async fn alerts_past_the_hourly_limit_are_throttled() {
     let (env, mut fcm) = fcm_env(&["--limit-alerts-per-hour", "2"]).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let (g, _) = grant(&mut agent, &mut fcm, "android", "fcm-device-token").await;
     let alert = |req: &str| {
         json!({"t": "alert", "req": req, "platform": "android",
-        "message": {"token": "fcm-device-token", "data": {}}})
+        "message": {"token": "fcm-device-token", "data": {}}, "grant": g})
     };
     for req in ["1", "2"] {
         agent.send(alert(req)).await;
@@ -1661,8 +1717,8 @@ async fn alerts_past_the_hourly_limit_are_throttled() {
         (Some("3"), Some("throttled"))
     );
 
-    // A token request and two sends; the throttled alert never reached FCM.
-    for _ in 0..3 {
+    // Two sends; the throttled alert never reached FCM.
+    for _ in 0..2 {
         fcm.next().await;
     }
     assert!(fcm.received.try_recv().is_err());
@@ -1670,22 +1726,107 @@ async fn alerts_past_the_hourly_limit_are_throttled() {
 
 #[tokio::test]
 async fn alerts_to_one_device_are_capped_across_computers() {
-    let (env, _fcm) = fcm_env(&["--limit-alerts-per-token-per-hour", "2"]).await;
+    let (env, mut fcm) = fcm_env(&["--limit-alerts-per-token-per-hour", "2"]).await;
     let mut a = Agent::connect(&env, &SigningKey::generate()).await;
     let mut b = Agent::connect(&env, &SigningKey::generate()).await;
-    let alert = |req: &str, token: &str| {
+    let (a1, _) = grant(&mut a, &mut fcm, "android", "phone-1").await;
+    let (b1, _) = grant(&mut b, &mut fcm, "android", "phone-1").await;
+    let (b2, _) = grant(&mut b, &mut fcm, "android", "phone-2").await;
+    let alert = |req: &str, token: &str, grant: &str| {
         json!({"t": "alert", "req": req, "platform": "android",
-        "message": {"token": token, "data": {"eventId": "e1"}}})
+        "message": {"token": token, "data": {"eventId": "e1"}}, "grant": grant})
     };
     for req in ["1", "2"] {
-        a.send(alert(req, "phone-1")).await;
+        a.send(alert(req, "phone-1", &a1)).await;
         assert_eq!(a.next().await["t"], "ok");
     }
     // Another computer, same phone: over the phone's limit.
-    b.send(alert("3", "phone-1")).await;
+    b.send(alert("3", "phone-1", &b1)).await;
     assert_eq!(b.next().await["code"], "throttled");
-    b.send(alert("4", "phone-2")).await;
+    b.send(alert("4", "phone-2", &b2)).await;
     assert_eq!(b.next().await["t"], "ok");
+}
+
+#[tokio::test]
+async fn alerts_need_the_grant_the_phone_received_for_that_computer() {
+    let (env, mut fcm) = fcm_env(&[]).await;
+    let mut a = Agent::connect(&env, &SigningKey::generate()).await;
+    let mut b = Agent::connect(&env, &SigningKey::generate()).await;
+    let alert = |token: &str, grant: Option<&str>| {
+        let mut v = json!({"t": "alert", "req": "1", "platform": "android",
+            "message": {"token": token, "data": {"eventId": "e1"}}});
+        if let Some(g) = grant {
+            v["grant"] = json!(g);
+        }
+        v
+    };
+
+    // No grant yet: refused before anything reaches FCM.
+    a.send(alert("phone-1", None)).await;
+    assert_eq!(a.next().await["code"], "unbound");
+    assert!(fcm.received.try_recv().is_err());
+
+    let (g, _) = grant(&mut a, &mut fcm, "android", "phone-1").await;
+    a.send(alert("phone-1", Some(&g))).await;
+    assert_eq!(a.next().await["t"], "ok");
+
+    // A grant works only for the computer and the phone it names.
+    let at = a.id.len() + 1;
+    let flipped = if &g[at..=at] == "A" { "B" } else { "A" };
+    let forged = format!("{}{flipped}{}", &g[..at], &g[at + 1..]);
+    b.send(alert("phone-1", Some(&g))).await;
+    assert_eq!(b.next().await["code"], "unbound");
+    for (token, grant) in [
+        ("phone-2", g.as_str()),
+        ("phone-1", &forged),
+        ("phone-1", "garbage"),
+    ] {
+        a.send(alert(token, Some(grant))).await;
+        assert_eq!(a.next().await["code"], "unbound", "{token} {grant}");
+    }
+}
+
+#[tokio::test]
+async fn grants_hold_on_every_relay_that_shares_the_registry_secret() {
+    let key = SigningKey::generate();
+    let (first, mut fcm) = fcm_env(&["--registry-secret", "shared"]).await;
+    let mut agent = Agent::connect(&first, &key).await;
+    let (g, _) = grant(&mut agent, &mut fcm, "android", "phone-1").await;
+    let alert = json!({"t": "alert", "req": "1", "platform": "android",
+        "message": {"token": "phone-1", "data": {}}, "grant": g});
+
+    // The computer moves to another region's relay.
+    let (second, _fcm2) = fcm_env(&["--registry-secret", "shared"]).await;
+    let mut moved = Agent::connect(&second, &key).await;
+    moved.send(alert.clone()).await;
+    assert_eq!(moved.next().await["t"], "ok");
+
+    let (other, _fcm3) = fcm_env(&["--registry-secret", "other"]).await;
+    let mut elsewhere = Agent::connect(&other, &key).await;
+    elsewhere.send(alert).await;
+    assert_eq!(elsewhere.next().await["code"], "unbound");
+}
+
+#[tokio::test]
+async fn grant_pushes_are_capped_per_phone_apart_from_alerts() {
+    let (env, mut fcm) = fcm_env(&["--limit-alerts-per-token-per-hour", "1"]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let ask = json!({"t": "grant", "req": "g", "platform": "android", "token": "phone-1",
+        "hostProfileId": "h1"});
+    let (g, _) = grant(&mut agent, &mut fcm, "android", "phone-1").await;
+    for _ in 1..10 {
+        agent.send(ask.clone()).await;
+        assert_eq!(agent.next().await["t"], "ok");
+    }
+    agent.send(ask).await;
+    assert_eq!(agent.next().await["code"], "throttled");
+
+    // The phone's alert hour is untouched by its grants.
+    agent
+        .send(json!({"t": "alert", "req": "1", "platform": "android",
+            "message": {"token": "phone-1", "data": {}}, "grant": g}))
+        .await;
+    assert_eq!(agent.next().await["t"], "ok");
 }
 
 #[tokio::test]

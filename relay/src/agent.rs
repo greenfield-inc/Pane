@@ -243,10 +243,14 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
                 };
                 let _ = tx.send(Out::Frame(frame(answer)));
             }
-            "alert" => {
+            "alert" | "grant" => {
                 let (state, tx, id) = (state.clone(), tx.clone(), id.clone());
                 tokio::spawn(async move {
-                    let mut answer = state.alerts.deliver(&id, &v).await;
+                    let mut answer = if v["t"] == "alert" {
+                        state.alerts.deliver(&id, &v).await
+                    } else {
+                        state.alerts.send_grant(&id, &v).await
+                    };
                     answer["req"] = req;
                     let _ = tx.send(Out::Frame(frame(answer)));
                 });

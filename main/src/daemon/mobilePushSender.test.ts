@@ -5,7 +5,7 @@ import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { MobilePushSender, setRelayPushChannel, STABLE_IDLE_MS, type MobilePushTransport } from './mobilePushSender';
-import type { RelayAlert } from './relay/relayAgent';
+import { RelayRequestError, type RelayAlert } from './relay/relayAgent';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { encodePaneRemoteConnection } from '../../../shared/types/remoteDaemon';
 import { ConfigManager } from '../services/configManager';
@@ -146,14 +146,15 @@ describe('MobilePushSender', () => {
     };
     const sent: RelayAlert[] = [];
     let answer = { status: 200, body: '' };
-    setRelayPushChannel({ available: () => true, send: async (alert) => { sent.push(alert); return answer; } });
+    setRelayPushChannel({ available: () => true, id: () => 'studio', send: async (alert) => { sent.push(alert); return answer; }, grant: async () => ({ status: 200, body: '' }) });
     try {
       const sender = new MobilePushSender(manager, providers);
       expect(sender.getStatus('client-1', 'ios', 'install-1')).toMatchObject({ provider: 'ready', message: 'Alerts go through Pane\'s servers.' });
       await sender.register('client-1', { platform: 'ios', token: 'apns-token', installationId: 'install-1', hostProfileId: 'relay-studio' });
+      await sender.confirmGrant('client-1', { platform: 'ios', installationId: 'install-1', grant: 'studio.sig' });
       await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
       expect(sent).toEqual([expect.objectContaining({
-        platform: 'ios', token: 'apns-token', pushType: 'alert',
+        platform: 'ios', token: 'apns-token', pushType: 'alert', grant: 'studio.sig',
         payload: expect.objectContaining({ paneId: 'pane-1', aps: expect.objectContaining({ alert: expect.objectContaining({ body: expect.stringContaining('is blocked') }) }) }),
       })]);
 
@@ -162,6 +163,65 @@ describe('MobilePushSender', () => {
       await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
       expect(sent).toHaveLength(2);
       expect(manager.config.host.mobilePush.registrations[0]?.revokedAt).toBeDefined();
+    } finally {
+      setRelayPushChannel(null);
+    }
+  });
+
+  it('alerts through the relay only with the grant this phone confirmed for this computer', async () => {
+    setEnvironment({});
+    const config = createDefaultRemoteDaemonConfig();
+    config.host.clients = [{ id: 'client-1', label: 'Phone', tokenHash: 'hash', createdAt: '2026-11-14T00:00:00.000Z' }];
+    const manager = new ConfigManagerStub(config);
+    const providers: MobilePushTransport = {
+      apns: async () => { throw new Error('no direct APNs without keys'); },
+      fcm: async () => { throw new Error('no direct FCM without keys'); },
+    };
+    const sent: RelayAlert[] = [];
+    const grants: unknown[] = [];
+    let answer: () => Promise<{ status: number; body: string }> = async () => ({ status: 200, body: '' });
+    setRelayPushChannel({
+      available: () => true, id: () => 'studio',
+      send: async (alert) => { sent.push(alert); return answer(); },
+      grant: async (request) => { grants.push(request); return { status: 200, body: '' }; },
+    });
+    const blocked = async (sender: MobilePushSender) => {
+      await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'working', reason: 'working', agentType: 'claude' });
+      await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
+    };
+    const register = (sender: MobilePushSender, token: string) => sender.register('client-1', { platform: 'android', token, installationId: 'install-1', hostProfileId: 'profile-1' });
+    try {
+      const sender = new MobilePushSender(manager, providers);
+
+      // Registering asks the relay to push the phone a grant; until the phone hands it back, nothing is sent.
+      await register(sender, 'fcm-token');
+      await vi.waitFor(() => expect(grants).toEqual([{ platform: 'android', token: 'fcm-token', hostProfileId: 'profile-1' }]));
+      await blocked(sender);
+      expect(sent).toEqual([]);
+
+      // A grant for another computer is refused; this computer's is kept and goes with each alert.
+      expect(await sender.confirmGrant('client-1', { platform: 'android', installationId: 'install-1', grant: 'laptop.sig' })).toEqual({ ok: false });
+      expect(await sender.confirmGrant('client-1', { platform: 'android', installationId: 'install-1', grant: 'studio.sig' })).toEqual({ ok: true });
+      await blocked(sender);
+      expect(sent).toEqual([expect.objectContaining({ platform: 'android', grant: 'studio.sig' })]);
+
+      // Reconnecting with the same token keeps the grant; a rotated token needs a new one.
+      await register(sender, 'fcm-token');
+      expect(grants).toHaveLength(1);
+      await register(sender, 'fcm-token-2');
+      await vi.waitFor(() => expect(grants).toHaveLength(2));
+      await blocked(sender);
+      expect(sent).toHaveLength(1);
+
+      // A relay that no longer accepts the grant drops it, so the next connect asks again.
+      await sender.confirmGrant('client-1', { platform: 'android', installationId: 'install-1', grant: 'studio.sig2' });
+      answer = async () => { throw new RelayRequestError('unbound', 'This phone has not confirmed this computer.'); };
+      await blocked(sender);
+      expect(sent).toHaveLength(2);
+      expect(manager.config.host.mobilePush.registrations[0]?.relayGrant).toBeUndefined();
+      expect(manager.config.host.mobilePush.registrations[0]?.revokedAt).toBeUndefined();
+      await register(sender, 'fcm-token-2');
+      await vi.waitFor(() => expect(grants).toHaveLength(3));
     } finally {
       setRelayPushChannel(null);
     }

@@ -13,7 +13,7 @@ import { ComputerCertificate, LETS_ENCRYPT_DIRECTORY } from './computerCertifica
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
 import { computerHost, localAddressHost } from './computerNames';
 import { PairingExchange, type PairedEvent, type PairingExchangeRequest, type PairingExchangeResult } from './pairingExchange';
-import { RelayAgent, type RelayAgentState, type RelayAlert } from './relayAgent';
+import { RelayAgent, type RelayAgentState, type RelayAlert, type RelayGrantRequest } from './relayAgent';
 import { findPaneDirect, PaneDirectProcess } from './paneDirect';
 import { DEFAULT_RELAY_DOMAIN } from '../../../../shared/remoteClient/relay';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
@@ -120,6 +120,18 @@ export class RelayService {
       return Promise.reject(new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so the alert was not sent.', 'Turn on phone access in Settings › Remote Access.'));
     }
     return this.agent.sendAlert(alert);
+  }
+
+  requestGrant(request: RelayGrantRequest): Promise<{ status: number; body: string }> {
+    if (!this.agent) {
+      return Promise.reject(new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so the phone could not confirm it for alerts.', 'Turn on phone access in Settings › Remote Access.'));
+    }
+    return this.agent.requestGrant(request);
+  }
+
+  /** This computer's relay id, once its key exists. */
+  computerId(): string | null {
+    return this.key?.id ?? null;
   }
 
   /** Before the computer sleeps: phones show "Asleep since …". */

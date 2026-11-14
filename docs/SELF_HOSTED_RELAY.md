@@ -115,6 +115,12 @@ service account to the VM, give the VM the `cloud-platform` access scope, and
 pass `--fcm-project <project id>`. The relay gets its tokens from the VM's
 metadata server.
 
+A computer alerts only phones that confirmed it: the relay pushes each phone a
+grant for the computer, and the Pane app hands it back to that computer
+([relay protocol](../relay/PROTOCOL.md#alerts)). Grants are signed with a key
+from `--registry-secret`. Without it, grants end when the relay restarts and
+phones confirm again the next time they connect.
+
 ## Direct paths
 
 The relay is also the meeting point for direct QUIC paths between a computer

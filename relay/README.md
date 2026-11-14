@@ -69,7 +69,7 @@ Every flag also reads the environment variable in brackets.
 | `--dns-responses-per-sec` | 50 | UDP answers a second per client /24 (IPv6 /56); past it answers are truncated (TC=1) so resolvers retry over TCP |
 | `--ns` [`PANE_RELAY_NS`] | `ns1.<D>,ns2.<D>` | Name servers for the zone's NS and SOA records |
 | `--ns-ip` [`PANE_RELAY_NS_IP`] | | `ns1=1.2.3.4,ns2=5.6.7.8`: each name server's IPv4 by its first label; others get `--public-ip` |
-| `--registry-secret` [`PANE_RELAY_REGISTRY_SECRET`] | | Bearer secret for `POST /v1/registry` |
+| `--registry-secret` [`PANE_RELAY_REGISTRY_SECRET`] | | Bearer secret for `POST /v1/registry`; also the key for alert grants, so relays that share it accept each other's grants (without it, grants end when the relay restarts) |
 | `--registry-url` [`PANE_RELAY_REGISTRY_URL`] | | Comma-separated `https://<host>/v1/registry` of every helper other than this relay; each gets every update and a full re-post every 60 s |
 | `--direct-quic` [`PANE_RELAY_DIRECT_QUIC`] | off | UDP address for QUIC address discovery on direct paths; clients expect port 7842, such as `0.0.0.0:7842` |
 | `--blocklist` [`PANE_RELAY_BLOCKLIST`] | | File of blocked ids, one per line, reread every 5 s when it changes |
