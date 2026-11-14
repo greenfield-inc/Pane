@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { NotifyAnswer } from '../../shared/types/notify';
 import { describe, expect, it } from 'vitest';
-import { GlassesApp } from '../src/app';
+import { GlassesApp, UNDO_MS } from '../src/app';
 import { DemoSource } from '../src/demo';
 import { BRIGHT, DIMMER, type Page } from '../src/display';
 import type { ListMarks } from '../src/homeList';
@@ -46,9 +46,12 @@ function outputOf(page: Page | undefined): string {
   return halves.flatMap((box) => (box.kind === 'text' ? box.lines : [])).join(' / ');
 }
 
+/** A home row without its status mark and age, which homeList.test.ts checks; these tests check order and selection. */
+const plainRow = (line: string) => line.replace(/^(> | {3})[●◐○■×◇] /u, '$1').replace(/ · (?:now|\d+[mhd])$/u, '');
+
 /** Each text box's lines and each list's items, in page order; images have no text. */
 function textOf(page: Page | undefined): string[] {
-  return (page?.boxes ?? []).flatMap((box) => (box.kind === 'list' ? [box.items.join(' | ')] : box.kind === 'text' ? [box.lines.join(' / ')] : []));
+  return (page?.boxes ?? []).flatMap((box) => (box.kind === 'list' ? [box.items.join(' | ')] : box.kind === 'text' ? [box.lines.map(plainRow).join(' / ')] : []));
 }
 
 function start() {
@@ -84,7 +87,7 @@ describe('home', () => {
       '   studi  fix-login · needs you',
       '   studi  token-refresh · needs you',
       '   studi  Planner · needs you',
-      '   devbo  docs-pass · PR #482 opened. Checks are running.',
+      '   devbo  docs-pass · PR #482 opened. Checks are runn…',
       '   studi  nightly · Tests green on studio-mac.',
     ]);
   });
@@ -94,7 +97,7 @@ describe('home', () => {
     await press({ type: 'down' });
     expect(text().slice(1, 3)).toEqual(['   + New Session on studio-mac · hold to say it', '> studi  fix-login · needs you']);
     for (let row = 1; row < 7; row += 1) await press({ type: 'down' });
-    expect(text().slice(1, 3)).toEqual(['   studi  docs-pass · Codex · needs you', '> devbo  api-server · shell · idle']);
+    expect(text().slice(1, 3)).toEqual(['   studi  docs-pass · Codex', '> devbo  api-server · shell']);
     await press({ type: 'up' });
     await press({ type: 'up' });
     expect(text()[6]).toBe('> studi  nightly · Tests green on studio-mac.');
@@ -108,18 +111,86 @@ describe('home', () => {
 });
 
 describe('answering', () => {
-  it('answers by ring, removes the card and confirms on the next page', async () => {
-    const { text, press, source } = start();
+  it('answers by ring after the undo hold, removes the card and confirms on the next page', async () => {
+    const { text, press, source, clock } = start();
     await press({ type: 'down' });
     await press({ type: 'press' });
     expect(text().at(-1)).toBe('Stub the clock | Loosen retry | Something else (hold to say it)');
     expect(text()[0]).toContain('The refresh mock returns 401');
     await press({ type: 'select', index: 1 });
+    expect(text()[1]).toBe('Sent · double press to undo /  / Loosen retry');
+    await clock.advance(UNDO_MS - 1);
+    expect(source.cards().map((card) => card.paneName)).toContain('fix-login');
+    await clock.advance(1);
     expect(source.cards().map((card) => card.paneName)).not.toContain('fix-login');
     expect(text().slice(0, 3)).toEqual(['Answered fix-login: Loosen retry', '   + New Session on studio-mac · hold to say it', '> studi  token-refresh · needs you']);
   });
 
-  it('answers by voice: hold listens, release sends the words at once', async () => {
+  it('opens a waiting card from outside, as opening Pane from its notification does', async () => {
+    const { app, text, source } = start();
+    const card = source.cards().find((candidate) => candidate.paneName === 'token-refresh');
+    if (!card) throw new Error('the demo has token-refresh');
+    app.showCard(card.key);
+    await settle();
+    expect(text().at(-1)).toBe('Stub the clock | Loosen retry to 2 s | Mock the endpoint | Read the whole question | Something else (hold to say it)');
+  });
+
+  it('sends an answer another app asked for only after a press on the glasses, then the undo hold', async () => {
+    const { app, text, press, source, clock } = start();
+    const card = source.cards().find((candidate) => candidate.paneName === 'fix-login');
+    if (!card) throw new Error('the demo has fix-login');
+    app.confirm({ kind: 'answer', key: card.key, answer: { text: 'stub it' }, summary: '"stub it"' });
+    await settle();
+    expect(text()).toEqual(['Glassly AI · answer', '"stub it" /  / Press to send it; double press to cancel.', 'press = do it   double press = cancel']);
+    await press({ type: 'double' });
+    await clock.advance(UNDO_MS);
+    expect(source.cards().map((candidate) => candidate.paneName)).toContain('fix-login');
+    app.confirm({ kind: 'answer', key: card.key, answer: { text: 'stub it' }, summary: '"stub it"' });
+    await press({ type: 'press' });
+    expect(text()[1]).toBe('Sent · double press to undo /  / "stub it"');
+    await clock.advance(UNDO_MS);
+    expect(source.cards().map((candidate) => candidate.paneName)).not.toContain('fix-login');
+  });
+
+  it('does nothing on a press after a request from another app lapsed', async () => {
+    const { app, text, press, source, clock } = start();
+    let started = 0;
+    source.createSession = async () => { started += 1; throw new Error('not here'); };
+    const [computer] = source.computers();
+    if (!computer) throw new Error('the demo has a computer');
+    app.confirm({ kind: 'session', computerId: computer.id, machine: computer.name, goal: 'Find why checkout charges twice', expiresAt: clock.now + 120_000 });
+    await clock.advance(120_000);
+    await press({ type: 'press' });
+    expect(started).toBe(0);
+    expect(text().join(' ')).toContain('waited more than 2 minutes');
+  });
+
+  it('takes an answer back with a double press on the undo screen, and sends nothing', async () => {
+    const { text, press, source, clock } = start();
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    await press({ type: 'select', index: 0 });
+    await press({ type: 'double' });
+    expect(text().at(-1)).toBe('Stub the clock | Loosen retry | Something else (hold to say it)');
+    await clock.advance(UNDO_MS * 2);
+    expect(source.cards().map((card) => card.paneName)).toContain('fix-login');
+  });
+
+  it('sends nothing when the card was answered on a computer during the undo hold', async () => {
+    const { press, source, clock, text } = start();
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    await press({ type: 'select', index: 0 });
+    const card = source.cards().find((candidate) => candidate.paneName === 'fix-login');
+    if (card) await source.answer(card, { choice: 'Stub the clock' });
+    const sent: NotifyAnswer[] = [];
+    source.answer = async (_card, answer) => { sent.push(answer); };
+    await clock.advance(UNDO_MS);
+    expect(sent).toEqual([]);
+    expect(text()[0]).not.toMatch(/^Answered/);
+  });
+
+  it('answers by voice: hold listens, release holds the words for undo, then sends them', async () => {
     const { text, press, clock, mic, source } = start();
     await press({ type: 'down' });
     await press({ type: 'hold' });
@@ -129,6 +200,7 @@ describe('answering', () => {
     await press({ type: 'release' });
     await settle();
     expect(mic).toEqual([true, false]);
+    await clock.advance(UNDO_MS);
     expect(source.cards().map((card) => card.paneName)).not.toContain('fix-login');
     expect(text()[0]).toMatch(/^Answered fix-login: "stub the clock and rerun/);
   });
@@ -173,7 +245,7 @@ describe('Panes and the terminal', () => {
     if (asked) await started.source.answer(asked, { choice: 'Stub the clock' });
     // Below the New row, token-refresh and Planner's questions, and the two info cards.
     for (let row = 0; row < 5; row += 1) await started.press({ type: 'down' });
-    expect(started.text()[6]).toBe('> studi  fix-login · Claude · working');
+    expect(started.text()[6]).toBe('> studi  fix-login · Claude');
     await started.press({ type: 'press' });
     return started;
   }
@@ -861,14 +933,14 @@ describe('going back keeps your place', () => {
     const { text, press } = await openScriptedRow(['a', 'b', 'c', 'd'].map(paneRow), 2);
     expect(text()[0]).toBe('c · shell · idle');
     await press({ type: 'double' });
-    expect(text()[4]).toBe('> studi  c · Claude · stopped');
+    expect(text()[4]).toBe('> studi  c · Claude');
   });
 
   it('selects the row now in its place when the Pane you left was archived', async () => {
     const { source, text, press } = await openScriptedRow(['a', 'b', 'c', 'd'].map(paneRow), 2);
     source.rows = ['a', 'b', 'd'].map(paneRow);
     await press({ type: 'double' });
-    expect(text()[4]).toBe('> studi  d · Claude · stopped');
+    expect(text()[4]).toBe('> studi  d · Claude');
   });
 });
 
@@ -879,7 +951,7 @@ describe('the open list', () => {
     source.changed();
     source.rows = [{ ...paneRow('older'), activityAt: 10 }, { ...paneRow('just-made'), activityAt: 20 }];
     source.changed();
-    expect(text().slice(2, 4)).toEqual(['   studi  just-made · Claude · stopped', '   studi  older · Claude · stopped']);
+    expect(text().slice(2, 4)).toEqual(['   studi  just-made · Claude', '   studi  older · Claude']);
   });
 
   it("opens each row on its own computer, though two computers have a Pane with the same id", async () => {
@@ -890,7 +962,7 @@ describe('the open list', () => {
     ];
     source.rows = [{ ...paneRow('api'), activityAt: 2 }];
     source.changed();
-    expect(text().slice(2, 4)).toEqual(['   studi  api · Claude · stopped', '   build  api · Claude · stopped']);
+    expect(text().slice(2, 4)).toEqual(['   studi  api · Claude', '   build  api · Claude']);
     await press({ type: 'down' });
     await press({ type: 'down' });
     await press({ type: 'press' });
@@ -963,7 +1035,7 @@ describe('computers that could not join', () => {
     await press({ type: 'down' });
     expect(text().slice(1)).toEqual([
       '   + New Session on studio-mac · hold to say it',
-      '   studi  fix-checkout · Claude · stopped',
+      '   studi  fix-checkout · Claude',
       '> offic  office-pc · update Pane there',
       '   old-l  old-laptop · revoked here · pair from phone',
       '   nas  nas · needs its password',
@@ -1119,12 +1191,12 @@ describe('an info card', () => {
 
   it('has a row below the questions that opens its message, and the row clears once read', async () => {
     const { text, press } = withInfo();
-    expect(text()).toEqual(['All computers · 1 needs you', '   + New Session on studio-mac · hold to say it', '> studi  pane-q1 · needs you', '   studi  pane-i1 · Tests pass', '   studi  a · Claude · stopped', ' ', ' ']);
+    expect(text()).toEqual(['All computers · 1 needs you', '   + New Session on studio-mac · hold to say it', '> studi  pane-q1 · needs you', '   studi  pane-i1 · Tests pass', '   studi  a · Claude', ' ', ' ']);
     await press({ type: 'down' });
     await press({ type: 'press' });
     expect(text()).toEqual(['pane-i1 · studio-mac', 'Tests pass /  / All 212 tests pass on studio-mac.', 'double press = back']);
     await press({ type: 'double' });
-    expect(text().slice(0, 5)).toEqual(['All computers · 1 needs you', '   + New Session on studio-mac · hold to say it', '   studi  pane-q1 · needs you', '> studi  a · Claude · stopped', ' ']);
+    expect(text().slice(0, 5)).toEqual(['All computers · 1 needs you', '   + New Session on studio-mac · hold to say it', '   studi  pane-q1 · needs you', '> studi  a · Claude', ' ']);
   });
 
   it('is what the terminal footer offers, and a double press there selects its row', async () => {
@@ -1147,7 +1219,7 @@ describe('a new question', () => {
     source.changed();
     source.cardList = [card('q1', 10)];
     source.changed();
-    expect(text().slice(0, 4)).toEqual(['All computers · 1 needs you', '   + New Session on studio-mac · hold to say it', '> studi  pane-q1 · needs you', '   studi  a · Claude · stopped']);
+    expect(text().slice(0, 4)).toEqual(['All computers · 1 needs you', '   + New Session on studio-mac · hold to say it', '> studi  pane-q1 · needs you', '   studi  a · Claude']);
   });
 
   it('leaves the row you selected further down alone', () => {
@@ -1158,7 +1230,7 @@ describe('a new question', () => {
     app.handle({ type: 'down' });
     source.cardList = [card('q1', 10)];
     source.changed();
-    expect(text().slice(2, 5)).toEqual(['   studi  pane-q1 · needs you', '   studi  a · Claude · stopped', '> studi  b · Claude · stopped']);
+    expect(text().slice(2, 5)).toEqual(['   studi  pane-q1 · needs you', '   studi  a · Claude', '> studi  b · Claude']);
   });
 });
 
@@ -1310,22 +1382,24 @@ describe('ambient mode', () => {
     });
 
     it('press opens the newest card, and its choice reaches the computer', async () => {
-      const { source, text, press } = await quiet([card('a', 1)]);
+      const { source, text, press, clock } = await quiet([card('a', 1)]);
       raise(source, fromBuild('nightly', 10));
       await press({ type: 'press' });
       expect(text()[0]).toContain('title nightly');
       await press({ type: 'select', index: 0 });
+      await clock.advance(UNDO_MS);
       expect(source.answers).toEqual([['build:nightly', { choice: 'Yes' }]]);
     });
 
     it('hold answers the newest card by voice', async () => {
-      const { source, text, press } = await quiet();
+      const { source, text, press, clock } = await quiet();
       source.dictation = 'restore it';
       raise(source, fromBuild('nightly', 10));
       await press({ type: 'hold' });
       expect(text()[0]).toBe('Answering pane-nightly · listening');
       await press({ type: 'release' });
       await settle();
+      await clock.advance(UNDO_MS);
       expect(source.answers).toEqual([['build:nightly', { text: 'restore it' }]]);
     });
 

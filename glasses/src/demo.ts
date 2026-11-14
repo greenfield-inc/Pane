@@ -2,7 +2,7 @@
 // Even review needs it, and anyone can try every screen before pairing.
 import type { NotifyAnswer } from '../../shared/types/notify';
 import { CHOICE_KEYS, GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type SessionRequest, type TerminalKey, type TerminalScreen, type UnjoinedComputer } from './model';
-import type { Cancel } from './timers';
+import type { Cancel } from './platform';
 
 const MINUTE = 60_000;
 const SPOKEN = 'stub the clock and rerun only the auth suite';

@@ -1,0 +1,122 @@
+{
+  "packageName": "com.runpane.glasses",
+  "version": "0.1.0",
+  "name": "Pane",
+  "description": "Answer your coding agents from your glasses: Pane's cards, terminals and new Sessions from every computer you pair, over your own Tailscale network.",
+  "tagline": "Answer your coding agents from your glasses",
+  "icon": "icon.png",
+  "type": "standard",
+  "sdkVersion": "0.4.0",
+  "minHostVersion": "0.4.0",
+  "entry": {
+    "background": "background/index.js",
+    "ui": "ui/index.html"
+  },
+  "permissions": [
+    {
+      "type": "MICROPHONE",
+      "required": false,
+      "description": "Hold to talk: your voice goes to your own Pane computer, or to Glassly's speech-to-text when that computer has no speech key."
+    },
+    {
+      "type": "POST_NOTIFICATIONS",
+      "required": false,
+      "description": "Pops up a new question from your agents while Pane is behind another miniapp and you're away from your computers."
+    },
+    {
+      "type": "CALENDAR",
+      "required": false,
+      "description": "Holds those pop-ups during a timed meeting, then tells you how many waited."
+    }
+  ],
+  "hardwareRequirements": [
+    {
+      "type": "DISPLAY",
+      "level": "REQUIRED"
+    },
+    {
+      "type": "MICROPHONE",
+      "level": "OPTIONAL"
+    }
+  ],
+  "alwaysOn": true,
+  "actions": [
+    {
+      "id": "list_waiting",
+      "description": "List the questions your coding agents are waiting on in Pane, on every paired computer. Use when the user asks what needs them in Pane.",
+      "visibility": "public",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "id": "pr_status",
+      "description": "Report the pull request state of Pane's Panes and Sessions. Use when the user asks about a PR in Pane, optionally naming the Pane.",
+      "visibility": "public",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pane": {
+            "type": "string",
+            "description": "Part of the Pane or Session name, such as nightly-backup"
+          }
+        }
+      }
+    },
+    {
+      "id": "answer_card",
+      "description": "Prepare an answer to a question waiting in Pane. Nothing is sent until the user presses once on the glasses to confirm. Use when the user asks to answer a Pane question.",
+      "visibility": "public",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pane": {
+            "type": "string",
+            "description": "Part of the asking Pane's name"
+          },
+          "answer": {
+            "type": "string",
+            "description": "One of the question's choices, or the words to send"
+          }
+        },
+        "required": [
+          "answer"
+        ]
+      }
+    },
+    {
+      "id": "start_session",
+      "description": "Prepare a new Pane Session on one of the user's computers. Nothing starts until the user presses once on the glasses to confirm. Use when the user asks Pane to start working on something.",
+      "visibility": "public",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "What the Session is for"
+          },
+          "computer": {
+            "type": "string",
+            "description": "Part of the computer's name; the first reachable one when left out"
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      }
+    }
+  ],
+  "widgets": [
+    {
+      "id": "pane_status",
+      "name": "Pane",
+      "sizes": [
+        "SM",
+        "MD",
+        "EX"
+      ],
+      "defaultSize": "SM"
+    }
+  ]
+}

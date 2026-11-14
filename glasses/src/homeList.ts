@@ -6,8 +6,7 @@
 // - homeRows(computers, cards, unjoined, newOn): the merged rows, in order. Identity is `key` (computer + id).
 // - homeListPage(rows, view, clock): the page that shows them, in the LIST_MARKS style.
 // - outlineRowAt(rows, index): the row a native list press names (outline marks only).
-import { BRIGHT, DIM, DIMMER, LIST_PAD, MAX_LIST_ITEMS, type Box, type Brightness, type ImageBox, type Page, type TextBox } from './display';
-import { drawLogoStrip, type StripMark } from './logos';
+import { BRIGHT, DIM, DIMMER, LIST_PAD, MAX_LIST_ITEMS, type Box, type Brightness, type ImageBox, type Page, type StripMark, type TextBox } from './page';
 import type { Card, Computer, MachineOs, PaneEntry, UnjoinedComputer } from './model';
 import { SCREEN_H, SCREEN_W, fitLine, wrapClamped, LINE_H } from './text';
 
@@ -102,6 +101,39 @@ function awayText(row: HomeRow, clock: (epochMs: number) => string): string | nu
   }
 }
 
+/**
+ * A row's status mark, drawn by the glasses' own font: needs you ●, working ◐, idle ○,
+ * stopped ■, away ×, a message ◇. The new-Session row has none.
+ */
+function statusMark(row: HomeRow): string {
+  if (row.kind === 'new') return '';
+  if (row.status !== 'live' || row.kind === 'computer') return '×';
+  if (row.kind === 'question') return '●';
+  if (row.kind === 'info') return '◇';
+  switch (row.entry.status) {
+    case 'needs you': return '●';
+    case 'working': return '◐';
+    case 'stopped': return '■';
+    case 'idle': return '○';
+  }
+}
+
+/** How long ago, short: "now", "3m", "2h", "4d". */
+function age(epochMs: number, now: number): string {
+  const minutes = Math.floor(Math.max(0, now - epochMs) / 60_000);
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+/** When the row last changed: a card's arrival, an entry's last activity. */
+function rowTime(row: HomeRow): number | undefined {
+  if (row.kind === 'question' || row.kind === 'info') return row.card.createdAt;
+  if (row.kind === 'entry') return row.entry.activityAt;
+  return undefined;
+}
+
 /** The row's words after its mark and computer letters. */
 function rowText(row: HomeRow, clock: (epochMs: number) => string): string {
   const away = awayText(row, clock);
@@ -115,7 +147,8 @@ function rowText(row: HomeRow, clock: (epochMs: number) => string): string {
     case 'entry': {
       const { entry } = row;
       if (away) return `${entry.name} · ${away}`;
-      return entry.kind === 'session' ? `${entry.name} · Session · ${entry.status}` : `${entry.name} · ${entry.agent} · ${entry.status}`;
+      // The mark before the row says its status.
+      return entry.kind === 'session' ? `${entry.name} · Session` : `${entry.name} · ${entry.agent}`;
     }
     case 'computer':
       return `${row.machine} · ${row.reason ?? away ?? ''}`;
@@ -132,6 +165,16 @@ export interface HomeListView {
   confirmation?: string;
   /** Overrides LIST_MARKS, for the dev gallery. */
   marks?: ListMarks;
+  /** The time now, for each row's age; rows show no age without it. */
+  now?: number;
+}
+
+/** A row as one line: its status mark and computer letters, its words, and its age while live. */
+function rowLine(row: HomeRow, view: HomeListView, clock: (epochMs: number) => string): string {
+  const mark = statusMark(row);
+  const time = rowTime(row);
+  const when = view.now !== undefined && time !== undefined && row.status === 'live' ? ` · ${age(time, view.now)}` : '';
+  return `${mark ? `${mark} ` : ''}${letters(row)}${rowText(row, clock)}${when}`;
 }
 
 const BAR_H = 32;
@@ -175,7 +218,7 @@ export function homeListPage(rows: readonly HomeRow[], view: HomeListView, clock
     const row = shown[index];
     const isSelected = first + index === selected;
     const brightness: Brightness = isSelected ? BRIGHT : row && row.status !== 'live' && row.kind !== 'new' ? DIMMER : DIM;
-    const text = row ? `${isSelected ? '> ' : '   '}${letters(row)}${rowText(row, clock)}` : ' ';
+    const text = row ? `${isSelected ? '> ' : '   '}${rowLine(row, view, clock)}` : ' ';
     boxes.push({
       kind: 'text', name: `row${index}`, x: TEXT_X, y: BAR_H + index * ROW_H, w: SCREEN_W - TEXT_X, h: ROW_H, pad: ROW_PAD,
       lines: [fitLine(text, SCREEN_W - TEXT_X - 2 * ROW_PAD - 4)], brightness, capture: index === 0,
@@ -193,7 +236,7 @@ function logoStrip(name: string, y: number, marks: StripMark[]): ImageBox {
   return {
     kind: 'image', name, x: STRIP_X, y, w: STRIP_W, h: STRIP_ROWS * ROW_H,
     key: marks.map((mark) => (mark.blank ? 'blank' : `${mark.os ?? 'computer'}${mark.dim ? ':dim' : ''}`)).join(','),
-    draw: () => drawLogoStrip(marks, { width: STRIP_W, height: STRIP_ROWS * ROW_H, rowHeight: ROW_H }),
+    marks, rowHeight: ROW_H,
   };
 }
 
@@ -207,6 +250,8 @@ type OutlineItem = { row: HomeRow; text: string } | { row: null; text: string };
 
 function outlineItems(rows: readonly HomeRow[], clock: (epochMs: number) => string): OutlineItem[] {
   const mark = (row: HomeRow) => `${OUTLINE_MARKS[row.slot % OUTLINE_MARKS.length]} ${letters(row)}`;
+  // Outline marks name the computer, so a live entry says its status in words.
+  const words = (row: HomeRow) => `${rowText(row, clock)}${row.kind === 'entry' && row.status === 'live' ? ` · ${row.entry.status}` : ''}`;
   const live = rows.filter((row) => row.status === 'live');
   // Each away computer folds into one row, at the end so it always shows.
   const away = new Map<string, { first: HomeRow; count: number }>();
@@ -222,7 +267,7 @@ function outlineItems(rows: readonly HomeRow[], clock: (epochMs: number) => stri
     return { row: first, text: `${mark(first)}${awayText(first, clock) ?? ''} · ${panes} · retry` };
   });
   const room = MAX_LIST_ITEMS - folded.length;
-  const items: OutlineItem[] = live.map((row) => ({ row, text: `${mark(row)}${rowText(row, clock)}` }));
+  const items: OutlineItem[] = live.map((row) => ({ row, text: `${mark(row)}${words(row)}` }));
   // A list longer than the firmware shows folds its oldest rows, above the away computers.
   const kept = items.length > room ? [...items.slice(0, room - 1), { row: null, text: `· ${items.length - room + 1} older Panes ·` }] : items;
   return [...kept, ...folded];

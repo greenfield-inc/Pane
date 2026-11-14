@@ -1,8 +1,7 @@
 // One function per glasses screen in the design reference (mockups v2: C3 card, T3 terminal; the home
 // list is homeList.ts).
 // Each returns a page of boxes at G2 scale; nothing here touches the bridge.
-import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ImageBox, type ListBox, type Page, type TextBox } from './display';
-import { drawLogoStrip } from './logos';
+import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ImageBox, type ListBox, type Page, type TextBox } from './page';
 import { JOIN_REASONS, type Card, type Computer, type HostRefusal, type MachineOs, type PaneEntry } from './model';
 import { isRule } from './terminal';
 import { LINE_H, SCREEN_H, SCREEN_W, fitLine, textWidth, wrap, wrapClamped } from './text';
@@ -79,7 +78,7 @@ export function firstRunPage(): Page {
 }
 
 export type CardRow =
-  | { kind: 'choice'; label: string }
+  | { kind: 'choice'; label: string; recommended?: true }
   | { kind: 'approve'; approved: boolean; label: string }
   | { kind: 'read-all'; label: string }
   | { kind: 'voice'; label: string }
@@ -106,7 +105,8 @@ export function cardRows(card: Card): CardRow[] {
   if (card.ui === 'approve') {
     rows.push({ kind: 'approve', approved: true, label: 'Approve' }, { kind: 'approve', approved: false, label: 'Not yet' });
   } else {
-    for (const label of card.ui === 'ask' ? card.suggestions : card.choices) rows.push({ kind: 'choice', label });
+    if (card.ui === 'ask') for (const label of card.suggestions) rows.push({ kind: 'choice', label });
+    else card.choices.forEach((label, index) => rows.push(index === card.recommended ? { kind: 'choice', label, recommended: true } : { kind: 'choice', label }));
   }
   if (questionCut(card)) rows.push({ kind: 'read-all', label: 'Read the whole question' });
   const voice = card.ui === 'approve' ? 'Say why (hold)' : card.ui === 'ask' ? 'Say it (hold)' : 'Something else (hold to say it)';
@@ -114,11 +114,20 @@ export function cardRows(card: Card): CardRow[] {
   return rows;
 }
 
+/** A card's choices; the recommended one is starred, and starts highlighted where the host draws the highlight. */
+function choiceList(card: Card, selected?: number): ListBox {
+  const rows = cardRows(card);
+  const box = list('choices', CHOICES_Y, SCREEN_H - CHOICES_Y, rows.map((row) => (row.kind === 'choice' && row.recommended ? `★ ${row.label}` : row.label)));
+  const start = selected ?? rows.findIndex((row) => row.kind === 'choice' && row.recommended === true);
+  if (start > 0) box.selected = start;
+  return box;
+}
+
 /**
  * C3: dimmed terminal context, the question, the choices. The choices keep their four rows first,
  * the question gets up to three lines (cut with "…"), and the context takes what is left.
  */
-export function cardPage(card: Card, contextLines: readonly string[]): Page {
+export function cardPage(card: Card, contextLines: readonly string[], selected?: number): Page {
   const { lines: question } = wrapClamped(questionText(card), innerWidth(BAR_PAD), QUESTION_MAX_LINES);
   const questionH = question.length * LINE_H + 9;
   const questionY = CHOICES_Y - questionH;
@@ -131,7 +140,7 @@ export function cardPage(card: Card, contextLines: readonly string[]): Page {
   }
   boxes.push(
     { kind: 'text', name: 'question', x: 0, y: questionY, w: SCREEN_W, h: questionH, pad: BAR_PAD, lines: question, brightness: BRIGHT },
-    list('choices', CHOICES_Y, SCREEN_H - CHOICES_Y, cardRows(card).map((row) => row.label)),
+    choiceList(card, selected),
   );
   return { boxes };
 }
@@ -143,6 +152,28 @@ export function fullQuestionPage(card: Card): Page {
     boxes: [
       header(`${card.paneName} asks · full question`),
       { kind: 'text', name: 'body', x: 0, y: 36, w: SCREEN_W, h: 252, pad: BODY_PAD, lines: wrap(text, innerWidth(BODY_PAD)), brightness: BRIGHT, capture: true },
+    ],
+  };
+}
+
+/** Something asked for from outside the glasses (Glassly's assistant), waiting for one press here. */
+export function confirmPage(title: string, what: string): Page {
+  return {
+    boxes: [
+      header(title),
+      body(what, { y: 36, h: 220, capture: true }),
+      footer('press = do it   double press = cancel'),
+    ],
+  };
+}
+
+/** An answer held on the glasses before it is sent: a double press takes it back. */
+export function undoPage(card: Card, summary: string): Page {
+  return {
+    boxes: [
+      header(`${card.paneName} · ${card.machine}`),
+      body(`Sent · double press to undo\n\n${summary}`, { y: 36, h: 220, capture: true }),
+      footer('goes to the computer in 5 s'),
     ],
   };
 }
@@ -427,7 +458,7 @@ const LOGO_W = 24;
 function logo(name: string, x: number, y: number, os: MachineOs | null): ImageBox {
   return {
     kind: 'image', name, x, y, w: LOGO_W, h: BAR_H, key: os ?? 'computer',
-    draw: () => drawLogoStrip([{ os, dim: false }], { width: LOGO_W, height: BAR_H, rowHeight: BAR_H }),
+    marks: [{ os, dim: false }], rowHeight: BAR_H,
   };
 }
 

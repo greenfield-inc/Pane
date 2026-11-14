@@ -743,7 +743,8 @@ export class NotifyService {
     }
   }
 
-  private inUse(): boolean {
+  /** Whether someone used this computer in the last 2 minutes; unknown counts as in use. */
+  inUse(): boolean {
     const idle = this.deps.idleSeconds?.();
     return idle === undefined || idle < IN_USE_SECONDS;
   }

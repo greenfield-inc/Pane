@@ -443,7 +443,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     return warnings.length && !('unavailable' in result) ? { ...result, warnings } : result;
   });
 
-  commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
+  // Only the read carries `inUse`: in the published state it would churn events and echo between machines.
+  commandRegistry.register('notify:remote-snapshot', async (): Promise<NotifySharedState> => ({ ...notify.sharedState(), inUse: notify.inUse() }));
   // An approval's Summary (P4): the asker's page or Pane's template, served with no scripts or network.
   commandRegistry.register('notify:summary-page', async (id: PaneCommandValue, options?: PaneCommandValue): Promise<NotifySummaryPage> => {
     const wanted = decodeBoundary(id, boundary.nonEmptyString);

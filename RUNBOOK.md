@@ -18,7 +18,8 @@ build of the Remote PWA, and over-the-air updates for the phone app.
 | Native runtime check | `Native Runtime` (`native-runtime.yml`) | pull requests that touch `native/` or `pnpm-lock.yaml` | Fails when the phone app's native code changed without a `runtimeVersion` bump, and labels bumped PRs `native-change` |
 | Android build check | `Native Android Build` (`native-android.yml`) | pull requests and pushes to `main` whose Expo Android fingerprint changed, or that change the workflow; weekly; manual | Builds the Android dev client APK with the Firebase config. Pull requests build `arm64-v8a` only; pushes to `main`, the weekly run and manual runs build all four ABIs, one job per ABI |
 | Website notification | `Notify website on release` (`notify-website.yml`) | manual only | Re-sends the release event to the website repo; tag releases already do this from `Build & Release` |
-| PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux, macOS and Windows, the runpane wrapper matrix, and the Playwright smoke suite |
+| PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux, macOS and Windows (glasses included, with the Glassly miniapp build), the runpane wrapper matrix, and the Playwright smoke suite |
+| Glasses app on Glassly | none: published by hand (see [Glassly release](#glassly-release)) | a person, after QA on real G2 | Submits `com.runpane.glasses` to the Glassly store for review |
 | React review | `React Doctor` (`react-doctor.yml`) | pull requests that touch `frontend/` | Comments on new React findings; advisory, never blocks |
 | Traffic snapshot | `GitHub traffic → PostHog` (`traffic-snapshot.yml`) | daily 06:00 UTC | Copies GitHub traffic and release download counts into PostHog |
 
@@ -195,6 +196,24 @@ The phone app's update server, Cloud Run service `pane-native-updates`, lives
 in the same project and uses the same registry, deploy identity and runtime
 service account. `native-updates.yml` names the service itself, and the
 first deploy creates it.
+
+## Glassly release
+
+The glasses app's Glassly build ([`glasses/glassly/`](glasses/glassly)) goes to the Glassly store
+by hand, from a computer with [Bun](https://bun.sh) and a Glassly account in the `com.runpane`
+developer org. Submitting is public, so ask first.
+
+1. Raise `version` in `glasses/glassly/miniapp.json`. Set `minHostVersion` to the first Glassly
+   app release that posts notifications, once Glassly ships it.
+2. `pnpm --filter @pane/glasses-glassly run pack` builds, checks and writes
+   `glasses/glassly/build/com.runpane.glasses-<version>.zip`.
+3. In `glasses/glassly`: `bun x glassly login` once, then `bun x glassly publish`. It signs the
+   bundle with this computer's key, uploads it and submits it for Glassly's review.
+4. For a test install without the store, `bun x glassly release` serves the zip on the local
+   network and prints a QR for the Glassly app's developer scanner.
+
+Ship a Pane desktop release with the glasses' voice-socket admission first: a computer on an older
+Pane gets Glassly's speech-to-text instead of its own Deepgram key and never reports "in use".
 
 ## Secrets and variables
 

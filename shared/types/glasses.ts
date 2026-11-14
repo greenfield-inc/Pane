@@ -136,8 +136,9 @@ export function decodeGlassesPairingCode(input: string): GlassesPairingCode {
   }
   const code = decodeBoundary(parsed, pairingCodeSchema);
   for (const computer of code.computers) {
-    const url = new URL(computer.url);
-    if (url.protocol !== 'https:' || !url.hostname.endsWith('.ts.net')) {
+    // No URL class: the glasses' Glassly runtime has none.
+    const host = /^https:\/\/([^/?#@:]+)(?::\d+)?(?:[/?#]|$)/i.exec(computer.url)?.[1]?.toLowerCase();
+    if (!host?.endsWith('.ts.net')) {
       throw new Error(`The code names ${computer.url}, which is not a Tailscale address. Copy it again from the Pane app.`);
     }
     if (!computer.secret.startsWith(GLASSES_PAIRING_SECRET_PREFIX)) {
