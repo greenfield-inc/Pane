@@ -26,6 +26,10 @@ export interface ComputerTlsServer {
   close(): Promise<void>;
 }
 
+/** Errors from software that is not a TLS client: plain HTTP, other protocols, port scanners. */
+const PROBE_ERRORS = new Set(['ERR_SSL_HTTP_REQUEST', 'ERR_SSL_WRONG_VERSION_NUMBER', 'ECONNRESET']);
+const PROBE_SUMMARY_MS = 60 * 60_000;
+
 /**
  * Ends client TLS with this computer's certificate and pipes the plain stream to the loopback
  * listener for the requested name, as Tailscale Serve's TLS-terminated forward does.
@@ -34,6 +38,8 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
   const open = new Set<Duplex>();
   /** The client IP for each forwarded connection, by the loopback port it comes from. */
   const clients = new Map<number, string>();
+  let probes = 0;
+  let probesSince = 0;
   const SNICallback = (servername: string, callback: (error: Error | null, context?: tls.SecureContext) => void) => {
     const context = parseComputerName(servername, options.id, options.domain) ? options.secureContext() : null;
     if (context) callback(null, context);
@@ -41,7 +47,18 @@ export function createComputerTlsServer(options: ComputerTlsServerOptions): Comp
   };
   const server = tls.createServer({ SNICallback, ALPNProtocols: ['http/1.1'] });
 
-  const clientError = (error: Error) => options.log?.(`[relay] client TLS failed: ${error.message}`);
+  const clientError = (error: Error & { code?: string }) => {
+    if (!PROBE_ERRORS.has(error.code ?? '')) {
+      options.log?.(`[relay] client TLS failed: ${error.message}`);
+      return;
+    }
+    // Other software on the network probes the local port; one line an hour says how often.
+    probes += 1;
+    if (Date.now() - probesSince < PROBE_SUMMARY_MS) return;
+    options.log?.(`[relay] ignored ${probes} connection${probes === 1 ? '' : 's'} that did not start TLS (${error.code}); phones always use TLS`);
+    probes = 0;
+    probesSince = Date.now();
+  };
 
   // Node sets `servername` on server-side sockets from the ClientHello; its typings omit it.
   const forward = (socket: tls.TLSSocket & { servername?: string | false }, peer: string) => {
