@@ -1,5 +1,8 @@
 import { decodeUpdateIntent } from '../../../../shared/remoteClient/updateIntent';
 import { pinnedServerIdentity } from '../relay/keyPinning';
+import { DirectPath } from '../relay/directPath';
+import { findPaneDirect } from '../relay/paneDirect';
+import { RELAY_CLIENT_COMMANDS } from '../../../../shared/types/relay';
 import { EventEmitter } from 'events';
 import { lookup as defaultLookup, Resolver } from 'dns';
 import http, { type IncomingMessage, type RequestOptions } from 'http';
@@ -151,6 +154,15 @@ const remoteEventEnvelopeSchema: BoundarySchema<RemoteDaemonEventEnvelope> = bou
   timestamp: boundary.string,
 });
 
+/** The part of `relay:client:computer`'s answer the direct path needs; null from a computer with phone access off. */
+const relayComputerDirectSchema = boundary.nullable(boundary.object({
+  direct: boundary.optional(boundary.object({
+    nodeId: boundary.nonEmptyString,
+    addrs: boundary.array(boundary.string),
+    relayUrls: boundary.array(boundary.string),
+  })),
+}));
+
 const REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS = 30_000;
 /** A request safe to repeat keeps retrying as long as an outage may last. */
 const REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS = 300_000;
@@ -212,6 +224,8 @@ export class RemotePaneClient {
   ) => void;
   private readonly onResyncRequired?: () => void | Promise<void>;
   private readonly dnsLookup: LookupFunction;
+  /** A relay profile's direct QUIC path and the probes that pick between it and the relay; null without `pane-direct`. */
+  private readonly direct: DirectPath | null;
   private eventParser = new PaneSseParser();
   private eventRequest: http.ClientRequest | null = null;
   private eventResponse: IncomingMessage | null = null;
@@ -256,6 +270,10 @@ export class RemotePaneClient {
     this.onConnectionStateChange = options.onConnectionStateChange;
     this.onResyncRequired = options.onResyncRequired;
     this.dnsLookup = options.dnsLookup ?? defaultLookup;
+    const directBin = profile.relay ? findPaneDirect() : null;
+    this.direct = profile.relay && directBin
+      ? new DirectPath({ bin: directBin, baseUrl: this.normalizedBaseUrl, fingerprint: profile.relay.fingerprint, label: profile.label })
+      : null;
   }
 
   /** A codeless profile without a password relies on Tailscale identity alone. */
@@ -322,6 +340,7 @@ export class RemotePaneClient {
       this.eventRequest.destroy();
     }
     this.eventRequest = null;
+    void this.direct?.close();
   }
 
   /** True while the host de-duplicates writes: a write issued while reconnecting waits instead of being refused. */
@@ -350,7 +369,7 @@ export class RemotePaneClient {
     const lookup = createTailscaleFallbackLookup(this.profile, endpoint, this.dnsLookup);
     const options: ClientOptions & { lookup?: LookupFunction } = { headers: this.authorizationHeader() };
     if (lookup) options.lookup = lookup;
-    if (this.profile.relay) options.agent = new https.Agent({ checkServerIdentity: pinnedServerIdentity(this.profile.relay.fingerprint, this.profile.label) });
+    if (this.profile.relay) options.agent = this.direct?.agent() ?? new https.Agent({ checkServerIdentity: pinnedServerIdentity(this.profile.relay.fingerprint, this.profile.label) });
     endpoint.protocol = endpoint.protocol === 'https:' ? 'wss:' : 'ws:';
     return new WebSocket(endpoint, options);
   }
@@ -451,6 +470,7 @@ export class RemotePaneClient {
     this.eventRequest?.destroy();
     this.eventResponse = null;
     this.eventRequest = null;
+    void this.direct?.update(undefined);
   }
 
   /** Sleep does not extend an outage that was already in progress. */
@@ -711,6 +731,7 @@ export class RemotePaneClient {
                   this.clearDeadline();
                   this.recovery.reset();
                   this.reportStatus('connected', 'workspace restored');
+                  void this.refreshDirectPath();
                 }
                 if (!settled) { settled = true; resolve(); }
               }, error => {
@@ -787,6 +808,18 @@ export class RemotePaneClient {
     });
   }
 
+  /** Asks the computer for its direct endpoint after each connect, so a changed address or restarted helper is picked up. */
+  private async refreshDirectPath(): Promise<void> {
+    if (!this.direct) return;
+    try {
+      const computer = decodeBoundary(await this.invokeRequest(RELAY_CLIENT_COMMANDS.computer, []), relayComputerDirectSchema);
+      await this.direct.update(computer?.direct);
+    } catch (error) {
+      // An older computer without direct paths, or a failed request: the relay keeps carrying everything.
+      console.warn(`[Pane remote daemon] ${this.profile.label}: no direct path: ${getErrorMessage(error, 'unknown error')}`);
+    }
+  }
+
   private buildRequestOptions(endpoint: URL, options: RequestOptions): RemoteRequestOptions {
     const lookup = createTailscaleFallbackLookup(this.profile, endpoint, this.dnsLookup);
     const requestOptions: RemoteRequestOptions = { ...options };
@@ -796,6 +829,7 @@ export class RemotePaneClient {
     if (endpoint.protocol === 'https:') {
       requestOptions.servername = endpoint.hostname;
       if (this.profile.relay) requestOptions.checkServerIdentity = pinnedServerIdentity(this.profile.relay.fingerprint, this.profile.label);
+      if (this.direct) requestOptions.agent = this.direct.agent();
     }
     return requestOptions;
   }
