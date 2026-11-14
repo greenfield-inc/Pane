@@ -139,6 +139,30 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_LIMIT_CONNS_PER_MIN", default_value_t = 100)]
     pub limit_conns_per_min: u64,
 
+    /// Per client address: new control connections a minute before slowing (refused at twice this).
+    #[arg(
+        long,
+        env = "PANE_RELAY_LIMIT_AGENT_CONNS_PER_MIN",
+        default_value_t = 60
+    )]
+    pub limit_agent_conns_per_min: u64,
+
+    /// Per client address: computers new to this relay an hour; past it they are refused.
+    #[arg(long, env = "PANE_RELAY_LIMIT_NEW_IDS_PER_HOUR", default_value_t = 20)]
+    pub limit_new_ids_per_hour: u64,
+
+    /// Computers the registry holds; past it, new ones are refused with `full`.
+    #[arg(long, env = "PANE_RELAY_MAX_COMPUTERS", default_value_t = 250_000)]
+    pub max_computers: usize,
+
+    /// Forget a computer offline this long (tests).
+    #[arg(long, hide = true, default_value_t = 7 * 24 * 3600)]
+    pub registry_ttl_secs: u64,
+
+    /// Clear an offline computer's TXT values this long after they were set (tests).
+    #[arg(long, hide = true, default_value_t = 600)]
+    pub txt_ttl_secs: u64,
+
     /// Per client address across all computers: bytes a minute before slowing (refused at twice this).
     #[arg(
         long,

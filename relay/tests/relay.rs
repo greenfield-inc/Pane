@@ -209,7 +209,9 @@ impl Agent {
         let (rd, mut writer) = tokio::io::split(s);
         let mut rd = BufReader::new(rd);
         let challenge = read_frame(&mut rd).await.unwrap();
-        assert_eq!(challenge["t"], "challenge");
+        if challenge["t"] != "challenge" {
+            return Err(challenge);
+        }
         let nonce = challenge["nonce"].as_str().unwrap();
         let signed = match sign {
             Sign::Correctly => format!("pane-relay-v1:{nonce}"),
@@ -758,7 +760,17 @@ async fn fake_helper(answer: bool) -> (String, mpsc::UnboundedReceiver<Value>) {
 #[tokio::test]
 async fn the_resync_posts_every_computer_to_a_helper_in_one_request() {
     let (url, mut posts) = fake_helper(true).await;
-    let env = Env::start(&["--registry-url", &url, "--registry-resync-secs", "1"]).await;
+    let env = Env::start(&[
+        "--registry-url",
+        &url,
+        "--registry-resync-secs",
+        "1",
+        "--limit-agent-conns-per-min",
+        "1000",
+        "--limit-new-ids-per-hour",
+        "1000",
+    ])
+    .await;
     let mut agents = Vec::new();
     for _ in 0..100 {
         agents.push(Agent::connect(&env, &SigningKey::generate()).await);
@@ -813,6 +825,110 @@ async fn a_helper_that_never_answers_does_not_delay_the_blocklist() {
         assert!(Instant::now() < deadline, "the blocklist was not applied");
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+/// Connects with `key` and returns the refusal's code, or "welcome".
+async fn connect_code(env: &Env, key: &SigningKey) -> String {
+    match Agent::try_connect(env, key, Sign::Correctly).await {
+        Ok(_) => "welcome".into(),
+        Err(e) => e["code"].as_str().unwrap().into(),
+    }
+}
+
+#[tokio::test]
+async fn new_computers_are_capped_per_address_and_in_total() {
+    let env = Env::start(&["--limit-new-ids-per-hour", "2"]).await;
+    let keys: Vec<SigningKey> = (0..3).map(|_| SigningKey::generate()).collect();
+    assert_eq!(connect_code(&env, &keys[0]).await, "welcome");
+    assert_eq!(connect_code(&env, &keys[1]).await, "welcome");
+    assert_eq!(connect_code(&env, &keys[2]).await, "over-limit");
+    // A computer the relay already knows still connects.
+    assert_eq!(connect_code(&env, &keys[0]).await, "welcome");
+
+    let env = Env::start(&["--max-computers", "1"]).await;
+    assert_eq!(connect_code(&env, &keys[0]).await, "welcome");
+    assert_eq!(connect_code(&env, &keys[1]).await, "full");
+    assert_eq!(connect_code(&env, &keys[0]).await, "welcome");
+}
+
+#[tokio::test]
+async fn control_connections_are_slowed_then_refused_per_address() {
+    let env = Env::start(&["--limit-agent-conns-per-min", "2"]).await;
+    let key = SigningKey::generate();
+    for _ in 0..2 {
+        let started = Instant::now();
+        assert_eq!(connect_code(&env, &key).await, "welcome");
+        assert!(started.elapsed() < SLOWED);
+    }
+    for _ in 0..2 {
+        let started = Instant::now();
+        assert_eq!(connect_code(&env, &key).await, "welcome");
+        assert!(started.elapsed() >= SLOWED);
+    }
+    assert_eq!(connect_code(&env, &key).await, "over-limit");
+}
+
+/// The TXT values DNS answers for `name`.
+async fn txt_values(server: SocketAddr, name: String) -> Vec<Vec<u8>> {
+    let m = dns_query(server, name, RecordType::TXT, false).await;
+    m.answers
+        .iter()
+        .filter_map(|r| match &r.data {
+            RData::TXT(t) => Some(t.txt_data.concat()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn offline_computers_lose_their_txt_values_then_their_names() {
+    let env = Env::start(&[
+        "--dns",
+        "127.0.0.1:0",
+        "--public-ip",
+        "203.0.113.10",
+        "--txt-ttl-secs",
+        "1",
+        "--registry-ttl-secs",
+        "8",
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let id = agent.id.clone();
+    agent
+        .send(json!({"t": "txt", "req": "1", "values": ["token-abc"]}))
+        .await;
+    assert_eq!(agent.next().await, json!({"t": "ok", "req": "1"}));
+    let txt_name = format!("_acme-challenge.{id}.{D}.");
+    assert_eq!(
+        txt_values(env.dns(), txt_name.clone()).await,
+        vec![b"token-abc".to_vec()]
+    );
+    // The connection closes once the test agent's reader also gives up (5 s).
+    drop(agent);
+
+    // The TXT values go first; the name still resolves.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !txt_values(env.dns(), txt_name.clone()).await.is_empty() {
+        assert!(Instant::now() < deadline, "TXT values were kept offline");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let a = || dns_query(env.dns(), format!("{id}.{D}."), RecordType::A, false);
+    assert_eq!(a_records(&a().await), vec![Ipv4Addr::new(203, 0, 113, 10)]);
+
+    // Then the whole entry and its status.
+    let deadline = Instant::now() + Duration::from_secs(16);
+    while a().await.metadata.response_code != ResponseCode::NXDomain {
+        assert!(
+            Instant::now() < deadline,
+            "offline computer was never forgotten"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert_eq!(
+        env.status(&id).await,
+        json!({"state": "offline", "since": null})
+    );
 }
 
 #[tokio::test]

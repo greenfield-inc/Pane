@@ -77,6 +77,9 @@ Every flag also reads the environment variable in brackets.
 | `--limit-conns-per-min` | 100 | New connections, counted like `--limit-bytes-per-min` |
 | `--limit-ip-bytes-per-min` | 200000000 | Per client address across all computers; slowed above it, refused above twice it |
 | `--limit-ip-conns-per-min` | 400 | New connections, counted like `--limit-ip-bytes-per-min` |
+| `--limit-agent-conns-per-min` | 60 | Control connections per client address; slowed above it, refused above twice it |
+| `--limit-new-ids-per-hour` | 20 | Computers new to this relay per client address; refused above it |
+| `--max-computers` | 250000 | Computers the registry holds; new ones past it are refused |
 | `--idle-timeout-secs` | 600 | Close client connections idle this long |
 | `--android-cert-sha256` | | App signing fingerprints for `assetlinks.json` |
 | `--apns-key-path`, `--apns-key-id`, `--apns-team-id` [`PANE_RELAY_APNS_KEY_PATH`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID`] | | The Pane app's APNs auth key (.p8), its key id and team id; without them iOS alerts answer `unconfigured` |

@@ -240,8 +240,9 @@ async fn registry_post(
         let error = "expected {id, region, local, txt, online} or an array of them";
         return respond_json(s, 400, &json!({ "error": error })).await;
     }
-    for update in &updates {
-        state.registry.apply(update);
+    let refused = updates.iter().filter(|u| !state.registry.apply(u)).count();
+    if refused > 0 {
+        tracing::warn!(refused, "registry full: new computers not added");
     }
     respond_json(s, 200, &json!({"ok": true})).await
 }

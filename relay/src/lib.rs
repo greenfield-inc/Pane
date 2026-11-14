@@ -95,6 +95,7 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
         &cfg.registry_url,
         cfg.registry_secret.clone(),
         cfg.provider_ca.as_deref(),
+        cfg.max_computers,
     )?;
     let listener = TcpListener::bind(cfg.listen_addr()).await?;
     let https_addr = listener.local_addr()?;
@@ -263,7 +264,7 @@ async fn maintenance(state: Arc<State>, blocklist: Option<PathBuf>, mut mtime: O
         if let Some(path) = &blocklist {
             reload_blocklist(&state, path, &mut mtime).await;
         }
-        state.prune_usage();
+        state.prune();
         state.alerts.prune();
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::id::{random_b64url, verify_hello};
 use crate::io::BoxStream;
-use crate::state::{Charge, Level, Out, State, frame};
+use crate::state::{Charge, Level, Out, State, frame, source};
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -15,6 +15,7 @@ const MAX_FRAME: u64 = 64 * 1024;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 const SILENCE_TIMEOUT: Duration = Duration::from_secs(75);
 const MAX_TXT_VALUES: usize = 8;
+const SLOW_CONN_DELAY: Duration = Duration::from_secs(1);
 
 enum ReadError {
     Closed,
@@ -73,6 +74,18 @@ fn parse_local(v: &Value) -> Vec<Ipv4Addr> {
 pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
     let (rd, mut wr) = tokio::io::split(stream);
     let mut rd = BufReader::new(rd);
+    let source = source(peer);
+    match state.charge(Charge::AgentConns(&source), 0, 1) {
+        Level::Over => {
+            let message = "Too many control connections from this address; try again in a minute.";
+            tracing::info!(%peer, "control connection refused: too many this minute");
+            let _ = write_line(&mut wr, &error("over-limit", message)).await;
+            let _ = wr.shutdown().await;
+            return;
+        }
+        Level::Slow => tokio::time::sleep(SLOW_CONN_DELAY).await,
+        Level::Ok => {}
+    }
 
     let nonce = random_b64url::<32>();
     if write_line(&mut wr, &frame(json!({"t": "challenge", "nonce": nonce})))
@@ -105,15 +118,29 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
             return;
         }
     };
-    if state.is_blocked(&id) || state.over_limit(&id) {
-        let (code, message) = if state.is_blocked(&id) {
-            ("blocked", "This computer is blocked on this relay.")
-        } else {
-            (
-                "over-limit",
-                "This computer sent too many control frames; try again in a minute.",
-            )
-        };
+    let refusal = if state.is_blocked(&id) {
+        Some(("blocked", "This computer is blocked on this relay."))
+    } else if state.over_limit(&id) {
+        Some((
+            "over-limit",
+            "This computer sent too many control frames; try again in a minute.",
+        ))
+    } else if state.registry.get(&id).is_some() {
+        None
+    } else if state.registry.is_full() {
+        Some((
+            "full",
+            "This relay has no room for new computers; try another relay.",
+        ))
+    } else if state.charge(Charge::NewIds(&source), 0, 1) != Level::Ok {
+        Some((
+            "over-limit",
+            "Too many new computers from this address this hour; try again later.",
+        ))
+    } else {
+        None
+    };
+    if let Some((code, message)) = refusal {
         tracing::info!(id, %peer, code, "control connection refused");
         let _ = write_line(&mut wr, &error(code, message)).await;
         let _ = wr.shutdown().await;

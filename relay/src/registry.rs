@@ -29,6 +29,8 @@ pub struct Entry {
     pub txt: Vec<String>,
     pub online: bool,
     pub last_seen: SystemTime,
+    /// When `txt` was last set.
+    pub txt_at: SystemTime,
 }
 
 /// A relay's own ACME challenge values for one of its names, such as
@@ -154,6 +156,7 @@ pub struct Registry {
     /// ACME TXT values by name; `true` marks this relay's own, which it re-posts.
     acme: Mutex<HashMap<String, (Vec<String>, bool)>>,
     helpers: Vec<Arc<Helper>>,
+    max_entries: usize,
 }
 
 impl Registry {
@@ -163,6 +166,7 @@ impl Registry {
         urls: &[String],
         secret: Option<String>,
         extra_ca: Option<&Path>,
+        max_entries: usize,
     ) -> Result<Self, crate::Error> {
         let tls = client_config(extra_ca)?;
         let helpers = urls
@@ -177,25 +181,57 @@ impl Registry {
             entries: Mutex::default(),
             acme: Mutex::default(),
             helpers,
+            max_entries,
         })
     }
 
-    pub fn apply(&self, u: &Update) {
+    /// Applies an update; false when it is for a new computer and the registry is full.
+    pub fn apply(&self, u: &Update) -> bool {
         let mut entries = self.entries.lock().unwrap();
+        if !entries.contains_key(&u.id) && entries.len() >= self.max_entries {
+            return false;
+        }
+        let now = SystemTime::now();
         let entry = entries.entry(u.id.clone()).or_insert_with(|| Entry {
             region: u.region.clone(),
             local: Vec::new(),
             txt: Vec::new(),
             online: false,
-            last_seen: SystemTime::now(),
+            last_seen: now,
+            txt_at: now,
         });
         entry.region = u.region.clone();
         entry.local = u.local.clone();
-        if let Some(txt) = &u.txt {
+        if let Some(txt) = &u.txt
+            && *txt != entry.txt
+        {
             entry.txt = txt.clone();
+            entry.txt_at = now;
         }
         entry.online = u.online;
-        entry.last_seen = SystemTime::now();
+        entry.last_seen = now;
+        true
+    }
+
+    /// True when the registry has no room for a computer it does not know.
+    pub fn is_full(&self) -> bool {
+        self.entries.lock().unwrap().len() >= self.max_entries
+    }
+
+    /// Clears TXT values of offline computers set more than `txt_ttl` ago (an
+    /// ACME check takes seconds), and forgets computers offline more than `ttl`.
+    pub fn prune(&self, ttl: Duration, txt_ttl: Duration) {
+        let now = SystemTime::now();
+        let age = |t: SystemTime| now.duration_since(t).unwrap_or_default();
+        self.entries.lock().unwrap().retain(|_, e| {
+            if e.online {
+                return true;
+            }
+            if age(e.txt_at) >= txt_ttl {
+                e.txt.clear();
+            }
+            age(e.last_seen) < ttl
+        });
     }
 
     pub fn get(&self, id: &str) -> Option<Entry> {
@@ -237,7 +273,7 @@ impl Registry {
     /// Applies the update here and queues it for every helper. With TXT values,
     /// waits as `wait` does; other updates return at once.
     pub async fn publish(&self, update: Update) -> Result<(), String> {
-        self.apply(&update);
+        let _ = self.apply(&update);
         if update.txt.is_none() {
             for helper in &self.helpers {
                 helper.push_updates(vec![update.clone()], None);

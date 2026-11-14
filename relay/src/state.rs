@@ -55,6 +55,7 @@ struct Usage {
 }
 
 const MINUTE: Duration = Duration::from_secs(60);
+const HOUR: Duration = Duration::from_secs(3600);
 /// A control connection sending more frames than this a minute is cut off.
 const MAX_FRAMES_PER_MIN: u64 = 600;
 
@@ -68,6 +69,10 @@ pub enum Charge<'a> {
     Direct(&'a str),
     /// A computer's own control frames, by id.
     Frames(&'a str),
+    /// Control connections, by source.
+    AgentConns(&'a str),
+    /// Computers new to this relay, by source.
+    NewIds(&'a str),
 }
 
 /// The address a client is counted under: IPv4 as is, IPv6 by its /64, the
@@ -283,6 +288,18 @@ impl State {
                 cfg.limit_conns_per_min,
             ),
             Charge::Frames(id) => (format!("frames {id}"), MINUTE, u64::MAX, MAX_FRAMES_PER_MIN),
+            Charge::AgentConns(source) => (
+                format!("agent {source}"),
+                MINUTE,
+                u64::MAX,
+                cfg.limit_agent_conns_per_min,
+            ),
+            Charge::NewIds(source) => (
+                format!("new {source}"),
+                HOUR,
+                u64::MAX,
+                cfg.limit_new_ids_per_hour,
+            ),
         };
         let mut usage = self.usage.lock().unwrap();
         let now = Instant::now();
@@ -329,12 +346,21 @@ impl State {
         Duration::from_secs_f64(n as f64 * 60.0 / self.cfg.limit_bytes_per_min.max(1) as f64)
     }
 
-    pub fn prune_usage(&self) {
+    /// Drops expired counters, and computers offline past the registry TTL.
+    pub fn prune(&self) {
         let now = Instant::now();
         self.usage
             .lock()
             .unwrap()
             .retain(|_, u| now.duration_since(u.start) < u.window);
+        let ttl = Duration::from_secs(self.cfg.registry_ttl_secs);
+        let txt_ttl = Duration::from_secs(self.cfg.txt_ttl_secs);
+        self.registry.prune(ttl, txt_ttl);
+        let wall = SystemTime::now();
+        self.status.lock().unwrap().retain(|_, st| {
+            st.presence == Presence::Online
+                || wall.duration_since(st.since).unwrap_or_default() < ttl
+        });
     }
 
     /// Updates the registry for a computer connected here.

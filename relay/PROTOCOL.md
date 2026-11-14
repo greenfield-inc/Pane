@@ -66,7 +66,13 @@ Every frame has a `t` field. Unknown frame types are ignored.
    IPv4 addresses (may be empty). `name` is the display name shown on the
    landing page (at most 60 characters).
 3. relay: `{"t":"welcome","id":"<id>","domain":"<D>","region":"us"}`, or
-   `{"t":"error","code":"<code>","message":"<text>"}` and close.
+   `{"t":"error","code":"<code>","message":"<text>"}` and close. Codes:
+   `bad-hello`, `bad-version`, `bad-signature`, `blocked`, `over-limit`
+   (see [Limits](#limits)) and `full` (the
+   registry holds `--max-computers` and this id is new).
+
+Over the per-address control connection limit, the relay sends that
+`over-limit` error in place of the challenge.
 
 A second control connection for the same id replaces the first, which gets
 `{"t":"close","code":"replaced"}`.
@@ -191,7 +197,7 @@ The zone's name servers are `ns1.<D>` and `ns2.<D>` (`--ns`); each answers
 with its `--ns-ip` address, so the A records match the glue at the
 registrar.
 
-## Limits (starting values, all flags)
+## Limits
 
 Limits count each client by its address: an IPv4 address, or the /64 that
 holds an IPv6 address. A client over a limit is slowed, and past twice the
@@ -206,6 +212,15 @@ computer and its other clients carry on.
   minute (the per-computer flags).
 - Per computer, its own control connection: past 1,200 frames a minute the
   relay closes it with `over-limit` and refuses it until the minute ends.
+- Per client address, control connections: 60 a minute
+  (`--limit-agent-conns-per-min`), slowed past it and refused past twice it.
+- Per client address, computers new to the relay: 20 an hour
+  (`--limit-new-ids-per-hour`); past it they get `over-limit`.
+- Computers in the registry: 250,000 (`--max-computers`); past it a new
+  computer gets `full`, and a helper skips new ids it is sent.
+- A computer offline for 7 days is forgotten: its names answer NXDOMAIN and
+  its status `since` is null. An offline computer's TXT values are cleared
+  10 minutes after it set them; an online computer keeps them.
 - Total open client connections (`--max-connections`, default 20,000,
   counting iroh relay connections); new ones beyond it are refused.
 - Idle client connections close after 10 minutes with no bytes either way.
