@@ -22,7 +22,7 @@ interface GlasslyChecks {
 /** Glassly's runtime guard and manifest check, from the pinned CLI source, bundled for Node. */
 export async function glasslyChecks(): Promise<GlasslyChecks> {
   const cli = await pinnedPackage('cli');
-  const out = join(root, 'node_modules', '.cache', 'pane-pinned', 'glassly-checks.mjs');
+  const out = join(root, '.cache', 'glassly-checks.mjs');
   await build({
     stdin: {
       contents: `export { findUnsupportedBackgroundApis } from ${JSON.stringify(join(cli, 'src', 'build-helpers.ts'))};\nexport { validateManifest } from ${JSON.stringify(join(cli, 'src', 'manifest.ts'))};`,

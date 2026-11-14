@@ -314,7 +314,10 @@ only a project's own `src/`); `pnpm --filter @pane/glasses-glassly pack` writes
 `glasses/glassly/build/com.runpane.glasses-<version>.zip`. For a phone, run `bun x glassly dev` in
 `glasses/glassly` on a computer on the phone's Wi-Fi and scan its QR in the Glassly app. Glassly's
 CLI and device profiles are read from pinned npm tarballs (`glasses/glassly/scripts/pinned.ts`);
-`glasses/test/glassly.test.ts` checks every screen against Glassly's own G2 profile.
+`glasses/test/glassly.test.ts` checks every screen against Glassly's own G2 profile, and
+`pnpm --filter @pane/glasses-glassly gallery` writes `glasses/glassly/build/gallery.html`: every
+gallery screen as the Glassly build draws it on each Glassly device profile, with a red flag on any
+screen past a profile's limit.
 
 Joining other computers is `glasses/src/autoJoin.ts`; the host side is the `runpane:glasses:vouch`
 command. The home list is `glasses/src/homeList.ts`. The firmware list can't show images, so the app draws its

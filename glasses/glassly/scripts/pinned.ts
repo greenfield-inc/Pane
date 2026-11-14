@@ -21,7 +21,7 @@ const PINNED = {
 export type PinnedName = keyof typeof PINNED;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const cache = join(root, 'node_modules', '.cache', 'pane-pinned');
+const cache = join(root, '.cache', 'pinned');
 
 /** Writes each regular file of a tar archive under `dir`. */
 function untar(archive: Uint8Array, dir: string): void {
