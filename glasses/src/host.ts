@@ -287,6 +287,11 @@ const sessionsSchema = boundary.object({
       favoritePinnedAt: boundary.optional(boundary.string),
       createdAt: boundary.optional(boundary.string),
       lastActivity: boundary.optional(boundary.string),
+      gitStatus: boundary.optional(boundary.object({
+        prNumber: boundary.optional(boundary.number),
+        prState: boundary.optional(boundary.string),
+        prTitle: boundary.optional(boundary.string),
+      })),
     })),
   }))),
   error: boundary.optional(boundary.string),
@@ -729,6 +734,15 @@ export class HostConnection {
     for (const entry of workspace?.entries ?? []) {
       if (entry.baseline && entry.panelId) this.statuses.set(entry.panelId, statusOf(entry.to, entry.running ?? true));
     }
+    // Each Pane's pull request from the git status the computer already caches, by Pane id.
+    const prs = new Map<string, NonNullable<PaneEntry['pr']>>();
+    for (const pane of (sessions.data ?? []).flatMap((project) => project.sessions)) {
+      const git = pane.gitStatus;
+      if (git?.prNumber === undefined) continue;
+      const pr: NonNullable<PaneEntry['pr']> = { number: git.prNumber, state: git.prState ?? 'OPEN' };
+      if (git.prTitle) pr.title = git.prTitle;
+      prs.set(pane.id, pr);
+    }
     const named = (orchestration?.data?.sessions ?? []).filter((session) => !session.archived);
     const internal = new Set((orchestration?.data?.sessions ?? []).map((session) => session.internalSessionId));
     const pinnedSessions: PaneEntry[] = [];
@@ -737,6 +751,8 @@ export class HostConnection {
       const panelId = decodeOptionalBoundary(session.panelIds[session.agent], boundary.string);
       if (!panelId) continue;
       const row: PaneEntry = { kind: 'session', id: session.id, name: session.name, agent: agentLabel(session.agent), status: 'idle', panelId };
+      const pr = prs.get(session.internalSessionId);
+      if (pr) row.pr = pr;
       const activityAt = epochOf(session.updatedAt);
       if (activityAt !== undefined) row.activityAt = activityAt;
       (session.isPinned ? pinnedSessions : sessionEntries).push(row);
@@ -755,6 +771,8 @@ export class HostConnection {
       const chosen = ranked.reduce<(typeof ranked)[number] | undefined>((best, candidate) => (!best || candidate.rank > best.rank ? candidate : best), undefined);
       if (!chosen) return null;
       const entry: PaneEntry = { kind: 'pane', id: pane.id, name: pane.name, agent: agentLabel(chosen.agentType), status: 'idle', panelId: chosen.panel.id };
+      const pr = prs.get(pane.id);
+      if (pr) entry.pr = pr;
       const activityAt = epochOf(pane.lastActivity ?? pane.createdAt);
       if (activityAt !== undefined) entry.activityAt = activityAt;
       return entry;

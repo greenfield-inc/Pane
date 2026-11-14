@@ -15,6 +15,7 @@ import {
   ambientPage,
   bannerPage,
   cardPage,
+  confirmPage,
   undoPage,
   cardRows,
   connectingPage,
@@ -92,6 +93,11 @@ function cursorRows(rows: readonly string[]): string[] {
   return at >= 0 ? filled.slice(at, at + 2) : filled.slice(-2);
 }
 
+/** What another app (Glassly's assistant) asked the glasses to do, staged for a press. */
+export type ConfirmRequest =
+  | { kind: 'answer'; key: string; answer: NotifyAnswer; summary: string }
+  | { kind: 'session'; computerId: string; machine: string; goal: string };
+
 export interface AppDeps {
   source: PaneSource;
   show(page: Page): void;
@@ -165,7 +171,9 @@ const NEW_TERMINAL: Omit<TerminalState, 'computerId' | 'entry'> = {
 
 type View =
   | { name: 'home' }
-  | { name: 'card'; key: string; context: string[] }
+  | { name: 'card'; key: string; context: string[]; selected?: number }
+  /** A request from Glassly's assistant, waiting for one press: nothing happens without it. */
+  | { name: 'confirm'; request: ConfirmRequest }
   | { name: 'full'; key: string }
   | { name: 'info'; key: string }
   | { name: 'voice-answer'; key: string; transcript: string }
@@ -337,7 +345,7 @@ export class GlassesApp {
         return this.homePage();
       case 'card': {
         const card = this.card(view.key);
-        return card ? cardPage(card, view.context) : this.homePage();
+        return card ? cardPage(card, view.context, view.selected) : this.homePage();
       }
       case 'full': {
         const card = this.card(view.key);
@@ -350,6 +358,12 @@ export class GlassesApp {
       case 'voice-answer': {
         const card = this.deps.source.cards().find((candidate) => candidate.key === view.key);
         return card ? voiceAnswerPage(card, view.transcript) : this.homePage();
+      }
+      case 'confirm': {
+        const { request } = view;
+        return request.kind === 'answer'
+          ? confirmPage('Glassly AI · answer', `${request.summary}\n\nPress to send it; double press to cancel.`)
+          : confirmPage(`Glassly AI · new Session on ${request.machine}`, `${request.goal}\n\nPress to start it; double press to cancel.`);
       }
       case 'undo': {
         const card = this.deps.source.cards().find((candidate) => candidate.key === view.key);
@@ -489,6 +503,7 @@ export class GlassesApp {
         }
         break;
       case 'voice-answer': if (gesture.type === 'release') void this.finishVoiceAnswer(view.key); break;
+      case 'confirm': this.onConfirm(view.request, gesture); break;
       // A double press here undoes the answer (nothing was sent) instead of going back.
       case 'undo':
         if (gesture.type === 'double') {
@@ -757,15 +772,19 @@ export class GlassesApp {
       return;
     }
     this.go({ ...view, transcript: text, starting: true });
+    await this.startSessionNow(view.computerId, view.machine, request);
+  }
+
+  private async startSessionNow(computerId: string, machine: string, request: SessionRequest): Promise<void> {
     let entry: PaneEntry;
     try {
-      entry = await this.deps.source.createSession(view.computerId, request);
+      entry = await this.deps.source.createSession(computerId, request);
     } catch (error) {
-      this.showProblem(`New Session on ${view.machine} · not started`, error, { name: 'home' });
+      this.showProblem(`New Session on ${machine} · not started`, error, { name: 'home' });
       return;
     }
-    this.deps.lastSessionComputer.write(view.computerId);
-    this.openTerminal(view.computerId, entry);
+    this.deps.lastSessionComputer.write(computerId);
+    this.openTerminal(computerId, entry);
   }
 
   /** Double press while listening: stops listening and starts nothing. */
@@ -1141,12 +1160,41 @@ export class GlassesApp {
    * Opens a waiting card as a press on its row does: what opening Pane from a notification
    * shows. A card no longer waiting leaves the screen as it is.
    */
-  showCard(key: string): void {
+  showCard(key: string, choice?: number): void {
     const card = this.card(key);
     if (!card?.waiting) return;
     this.endQuiet();
     this.touched();
     this.openCard(card);
+    // A choice named from outside (Glassly's assistant) starts selected, so one press answers.
+    const view = this.view;
+    if (choice !== undefined && view.name === 'card' && view.key === key) {
+      this.view = { ...view, selected: choice };
+      this.render();
+    }
+  }
+
+  /** Shows a request from another app for one press; a double press drops it. Nothing runs without the press. */
+  confirm(request: ConfirmRequest): void {
+    if (request.kind === 'answer' && !this.card(request.key)?.waiting) return;
+    this.endQuiet();
+    this.touched();
+    this.go({ name: 'confirm', request });
+  }
+
+  private onConfirm(request: ConfirmRequest, gesture: Gesture): void {
+    if (gesture.type === 'double') {
+      this.goHome();
+      return;
+    }
+    if (gesture.type !== 'press') return;
+    if (request.kind === 'answer') {
+      const card = this.card(request.key);
+      if (card?.waiting) this.sendAnswer(card, request.answer, request.summary);
+      else this.goHome();
+      return;
+    }
+    void this.startSessionNow(request.computerId, request.machine, sessionRequest(request.goal));
   }
 
   setAmbient(on: boolean): void {

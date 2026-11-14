@@ -94,6 +94,8 @@ export interface PaneEntry {
   panelId: string;
   /** Epoch ms of its last activity on its computer, when known. */
   activityAt?: number;
+  /** Its branch's pull request, as the computer last read it from GitHub. */
+  pr?: { number: number; state: string; title?: string };
 }
 
 /** A menu choice's number: Claude Code and Codex pick that choice when it is pressed. */

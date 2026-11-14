@@ -12,6 +12,7 @@ import { PollClock } from '../../../src/polling';
 import { firstRunPage, pairingFailedPage } from '../../../src/screens';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PhoneCommand, PhoneComputer, PhoneFrame, PhoneState } from '../channels';
+import { PaneActions, type Staged } from './actions';
 import { glanceText } from './glance';
 import { Notifier, meetingAt } from './notifier';
 import { ListFocus, capturedList, renderPage, scrollableText } from './render';
@@ -59,6 +60,16 @@ function clock(epochMs: number): string {
 function pageText(page: Page): string {
   return page.boxes.flatMap((box) => (box.kind === 'list' ? [box.items.map((item) => `· ${item}`).join('\n')] : box.kind === 'text' ? [box.lines.join('\n')] : [])).join('\n────\n');
 }
+
+const actionParamsSchema = boundary.object({
+  pane: boundary.optional(boundary.string),
+  answer: boundary.optional(boundary.string),
+  goal: boundary.optional(boundary.string),
+  computer: boundary.optional(boundary.string),
+});
+const ACTION_IDS = ['list_waiting', 'pr_status', 'answer_card', 'start_session'] as const;
+/** The one notification a staged Action request posts. */
+const STAGED_ID = 'pane-action-confirm';
 
 const commandSchema = boundary.union(
   boundary.object({ type: boundary.literal('hello') }),
@@ -175,10 +186,42 @@ registerMiniapp(async (session) => {
   readCalendar();
   every(readCalendar, CALENDAR_READ_MS);
   every(notify, MEETING_CHECK_MS);
-  /** Pane came to the front: show the question its newest notification asked. */
+  // ---------- Actions for Glassly's assistant ----------
+  // A change an Action asks for waits here for one press on the glasses, and lapses unconfirmed.
+  let staged: Staged | null = null;
+  let lapse: Cancel | null = null;
+  const dropStaged = () => {
+    staged = null;
+    lapse?.cancel();
+    lapse = null;
+    void session.sendRequest({ type: 'miniapp_notification_dismiss', id: STAGED_ID }).catch(() => {});
+  };
+  const actions = new PaneActions({
+    source: () => source,
+    now: Date.now,
+    stage: (next) => {
+      dropStaged();
+      staged = next;
+      lapse = later(dropStaged, Math.max(0, next.expiresAt - Date.now()));
+      void session.sendRequest({ type: 'miniapp_notification_post', id: STAGED_ID, title: next.title, content: 'Open Pane and press once. It lapses in 2 minutes.' }).catch(() => {});
+    },
+  });
+  for (const id of ACTION_IDS) {
+    session.actions.handle(id, (params, context) => actions.handle(id, decodeOptionalBoundary(params, actionParamsSchema) ?? {}, context.callerPackageName));
+  }
+
+  /** Pane came to the front: show what a staged Action asks for, else the newest notified question. */
   const openNotified = () => {
+    if (tier.kind !== 'full') return;
+    const waiting = staged;
+    if (waiting && Date.now() < waiting.expiresAt) {
+      dropStaged();
+      if (waiting.show.kind === 'card') app?.showCard(waiting.show.key, waiting.show.choice);
+      else app?.confirm(waiting.show.request);
+      return;
+    }
     const key = notifier.opened();
-    if (key && tier.kind === 'full') app?.showCard(key);
+    if (key) app?.showCard(key);
   };
 
   const publish = () => {

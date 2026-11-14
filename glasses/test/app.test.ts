@@ -135,6 +135,23 @@ describe('answering', () => {
     expect(text().at(-1)).toBe('Stub the clock | Loosen retry to 2 s | Mock the endpoint | Read the whole question | Something else (hold to say it)');
   });
 
+  it('sends an answer another app asked for only after a press on the glasses, then the undo hold', async () => {
+    const { app, text, press, source, clock } = start();
+    const card = source.cards().find((candidate) => candidate.paneName === 'fix-login');
+    if (!card) throw new Error('the demo has fix-login');
+    app.confirm({ kind: 'answer', key: card.key, answer: { text: 'stub it' }, summary: '"stub it"' });
+    await settle();
+    expect(text()).toEqual(['Glassly AI · answer', '"stub it" /  / Press to send it; double press to cancel.', 'press = do it   double press = cancel']);
+    await press({ type: 'double' });
+    await clock.advance(UNDO_MS);
+    expect(source.cards().map((candidate) => candidate.paneName)).toContain('fix-login');
+    app.confirm({ kind: 'answer', key: card.key, answer: { text: 'stub it' }, summary: '"stub it"' });
+    await press({ type: 'press' });
+    expect(text()[1]).toBe('Sent · double press to undo /  / "stub it"');
+    await clock.advance(UNDO_MS);
+    expect(source.cards().map((candidate) => candidate.paneName)).not.toContain('fix-login');
+  });
+
   it('takes an answer back with a double press on the undo screen, and sends nothing', async () => {
     const { text, press, source, clock } = start();
     await press({ type: 'down' });

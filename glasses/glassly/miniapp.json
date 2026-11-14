@@ -39,5 +39,72 @@
       "level": "OPTIONAL"
     }
   ],
-  "alwaysOn": true
+  "alwaysOn": true,
+  "actions": [
+    {
+      "id": "list_waiting",
+      "description": "List the questions your coding agents are waiting on in Pane, on every paired computer. Use when the user asks what needs them in Pane.",
+      "visibility": "public",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "id": "pr_status",
+      "description": "Report the pull request state of Pane's Panes and Sessions. Use when the user asks about a PR in Pane, optionally naming the Pane.",
+      "visibility": "public",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pane": {
+            "type": "string",
+            "description": "Part of the Pane or Session name, such as nightly-backup"
+          }
+        }
+      }
+    },
+    {
+      "id": "answer_card",
+      "description": "Prepare an answer to a question waiting in Pane. Nothing is sent until the user presses once on the glasses to confirm. Use when the user asks to answer a Pane question.",
+      "visibility": "public",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pane": {
+            "type": "string",
+            "description": "Part of the asking Pane's name"
+          },
+          "answer": {
+            "type": "string",
+            "description": "One of the question's choices, or the words to send"
+          }
+        },
+        "required": [
+          "answer"
+        ]
+      }
+    },
+    {
+      "id": "start_session",
+      "description": "Prepare a new Pane Session on one of the user's computers. Nothing starts until the user presses once on the glasses to confirm. Use when the user asks Pane to start working on something.",
+      "visibility": "public",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "What the Session is for"
+          },
+          "computer": {
+            "type": "string",
+            "description": "Part of the computer's name; the first reachable one when left out"
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      }
+    }
+  ]
 }

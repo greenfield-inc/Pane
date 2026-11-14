@@ -14,6 +14,7 @@ import { ListFocus, renderPage, scrollableText } from '../glassly/src/background
 import { tierOf } from '../glassly/src/background/tier';
 import { TouchMapper } from '../glassly/src/background/touch';
 import { glasslyDictation } from '../glassly/src/background/transcription';
+import { PaneActions, STAGED_MS, type Staged } from '../glassly/src/background/actions';
 import { Notifier, SUMMARY_ID, meetingAt, type Asked, type Poster } from '../glassly/src/background/notifier';
 
 /** Every device profile Glassly 0.4.0 ships, by file name, read from the pinned engine tarball. */
@@ -237,5 +238,49 @@ describe('notifications', () => {
     expect(meetingAt([{ title: 'Offsite', startsAt: '2026-11-14T00:00:00Z', endsAt: '2026-11-15T00:00:00Z', allDay: true }], at)).toBeNull();
     expect(meetingAt([{ title: 'Design review', startsAt: '2026-11-14T10:00:00Z', endsAt: '2026-11-14T11:00:00Z', allDay: false }], at)).toEqual({ title: 'Design review' });
     expect(meetingAt([{ title: 'Design review', startsAt: '2026-11-14T10:00:00Z', endsAt: '2026-11-14T10:30:00Z', allDay: false }], at)).toBeNull();
+  });
+});
+
+describe('Actions for Glassly AI', () => {
+  async function demoActions() {
+    const source = new DemoSource(() => ({ cancel() {} }));
+    // The demo stands in for paired computers here; Actions refuse a real demo.
+    Object.defineProperty(source, 'demo', { value: false });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const staged: Staged[] = [];
+    const answered: string[] = [];
+    source.answer = async (card) => { answered.push(card.key); };
+    const actions = new PaneActions({ source: () => source, now: () => 1_000, stage: (request) => staged.push(request) });
+    return { source, actions, staged, answered };
+  }
+
+  it("answers only Glassly's assistant", async () => {
+    const { actions } = await demoActions();
+    expect(actions.handle('list_waiting', {}, 'com.example.other')).toEqual({ ok: false, error: "Pane's actions answer only Glassly's assistant." });
+    expect(actions.handle('list_waiting', {}, 'com.glassly.assistant')).toMatchObject({ ok: true });
+  });
+
+  it('lists what the glasses list, and nothing more', async () => {
+    const { actions, source } = await demoActions();
+    const result = actions.handle('list_waiting', {}, 'com.glassly.assistant');
+    const waiting = source.cards().filter((card) => card.waiting);
+    expect(result).toEqual({ ok: true, waiting: waiting.map((card) => ({ computer: card.machine, pane: card.paneName, question: card.title, choices: card.ui === 'approve' ? ['Approve', 'Not yet'] : card.choices })) });
+  });
+
+  it('stages an answer for one press on the glasses, selected on its card, and sends nothing itself', async () => {
+    const { actions, staged, answered } = await demoActions();
+    expect(actions.handle('answer_card', { pane: 'token-refresh', answer: 'mock the endpoint' }, 'com.glassly.assistant')).toEqual({ ok: true, message: 'Waiting for you to confirm on the glasses: open Pane and press once.' });
+    expect(staged).toEqual([{ show: { kind: 'card', key: expect.stringContaining('q2'), choice: 2 }, title: 'Confirm on the glasses: token-refresh → Mock the endpoint', expiresAt: 1_000 + STAGED_MS }]);
+    expect(answered).toEqual([]);
+  });
+
+  it('stages free words and a new Session as requests to confirm, starting nothing', async () => {
+    const { actions, staged, source } = await demoActions();
+    let started = 0;
+    source.createSession = async () => { started += 1; throw new Error('not here'); };
+    actions.handle('answer_card', { pane: 'fix-login', answer: 'stub it and rerun' }, 'com.glassly.ai');
+    actions.handle('start_session', { goal: 'Find why checkout charges twice' }, 'com.glassly.ai');
+    expect(staged.map((request) => request.show.kind === 'confirm' && request.show.request.kind)).toEqual(['answer', 'session']);
+    expect(started).toBe(0);
   });
 });

@@ -115,11 +115,11 @@ export function cardRows(card: Card): CardRow[] {
 }
 
 /** A card's choices; the recommended one is starred, and starts highlighted where the host draws the highlight. */
-function choiceList(card: Card): ListBox {
+function choiceList(card: Card, selected?: number): ListBox {
   const rows = cardRows(card);
   const box = list('choices', CHOICES_Y, SCREEN_H - CHOICES_Y, rows.map((row) => (row.kind === 'choice' && row.recommended ? `★ ${row.label}` : row.label)));
-  const recommended = rows.findIndex((row) => row.kind === 'choice' && row.recommended === true);
-  if (recommended > 0) box.selected = recommended;
+  const start = selected ?? rows.findIndex((row) => row.kind === 'choice' && row.recommended === true);
+  if (start > 0) box.selected = start;
   return box;
 }
 
@@ -127,7 +127,7 @@ function choiceList(card: Card): ListBox {
  * C3: dimmed terminal context, the question, the choices. The choices keep their four rows first,
  * the question gets up to three lines (cut with "…"), and the context takes what is left.
  */
-export function cardPage(card: Card, contextLines: readonly string[]): Page {
+export function cardPage(card: Card, contextLines: readonly string[], selected?: number): Page {
   const { lines: question } = wrapClamped(questionText(card), innerWidth(BAR_PAD), QUESTION_MAX_LINES);
   const questionH = question.length * LINE_H + 9;
   const questionY = CHOICES_Y - questionH;
@@ -140,7 +140,7 @@ export function cardPage(card: Card, contextLines: readonly string[]): Page {
   }
   boxes.push(
     { kind: 'text', name: 'question', x: 0, y: questionY, w: SCREEN_W, h: questionH, pad: BAR_PAD, lines: question, brightness: BRIGHT },
-    choiceList(card),
+    choiceList(card, selected),
   );
   return { boxes };
 }
@@ -152,6 +152,17 @@ export function fullQuestionPage(card: Card): Page {
     boxes: [
       header(`${card.paneName} asks · full question`),
       { kind: 'text', name: 'body', x: 0, y: 36, w: SCREEN_W, h: 252, pad: BODY_PAD, lines: wrap(text, innerWidth(BODY_PAD)), brightness: BRIGHT, capture: true },
+    ],
+  };
+}
+
+/** Something asked for from outside the glasses (Glassly's assistant), waiting for one press here. */
+export function confirmPage(title: string, what: string): Page {
+  return {
+    boxes: [
+      header(title),
+      body(what, { y: 36, h: 220, capture: true }),
+      footer('press = do it   double press = cancel'),
     ],
   };
 }
