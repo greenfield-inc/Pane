@@ -30,6 +30,10 @@ import { useRemoteListeningPorts } from './hooks/useRemoteListeningPorts';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
+import { pairingErrorText, pairThisBrowser, takePairingSecret } from './runtime/relayBrowserPairing';
+import { RelayOfflineBanner } from './components/RelayOfflineBanner';
+import { getClientLabel, getRuntimeId, RemoteDaemonBrowserClient } from './runtime/remoteDaemonBrowserClient';
+import { linkWithSavedRelayComputers } from '../../../shared/remoteClient/relay';
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
 import { consumeNativePushRoute, getNativePushStatus, installNativePushRouting, revokeNativePush, setupNativePush, updateNativePushControls, type NativePushRoute } from './runtime/nativePush';
 import { findFirstSessionId, phoneShows, useRemoteSessionStore, visibleTabs } from './stores/remoteSessionStore';
@@ -580,16 +584,41 @@ export function RemotePwaApp() {
     void connectProfile(profile).then(applyRoute).catch(() => {});
   }, [activeProfile?.id, adapter, connectProfile, loadPanels, pendingPushRoute, profilesLoading, requestView, savedProfiles, selectSession, setLastError]);
 
+  const pairFromLink = useCallback(async (secret: string) => {
+    setLastError(null);
+    try {
+      const [computer, ...linked] = await pairThisBrowser(window, secret, {
+        fetch: (url, init) => fetch(url, init),
+        label: getClientLabel(),
+        phoneId: getRuntimeId(),
+      });
+      if (!computer) return;
+      const before = savedProfiles;
+      setSavedProfiles(previous => [...previous.filter(profile => !linked.some(added => added.id === profile.id || added.baseUrl === profile.baseUrl)), ...linked]);
+      await connectProfile(computer);
+      void linkWithSavedRelayComputers(computer, linked, before, profile => new RemoteDaemonBrowserClient(profile))
+        .catch(error => console.warn('[relay] linking failed', error));
+    } catch (error) {
+      setLastError(error instanceof Error ? pairingErrorText(error) : 'Pairing failed.');
+    }
+  }, [connectProfile, savedProfiles, setLastError]);
+
   // Reconnects to the last used host once on open; a notification tap picks its own host instead.
   useEffect(() => {
     if (profilesLoading || !pushRouteChecked || autoConnectStartedRef.current) return;
     autoConnectStartedRef.current = true;
+    // Opened from the pairing page's "Continue in browser": pair with the computer that served this page.
+    const pairingSecret = takePairingSecret(window);
+    if (pairingSecret) {
+      void pairFromLink(pairingSecret);
+      return;
+    }
     // saveProfile keeps the last connected profile first.
     const profile = savedProfiles[0];
     if (!profile || pendingPushRoute || isAutoConnectPaused()) return;
     setReconnectingProfile(profile);
     void connectProfile(profile).catch(() => {}).finally(() => setReconnectingProfile(null));
-  }, [connectProfile, pendingPushRoute, profilesLoading, pushRouteChecked, savedProfiles]);
+  }, [connectProfile, pairFromLink, pendingPushRoute, profilesLoading, pushRouteChecked, savedProfiles]);
 
   const connectCode = useCallback(async (code: string) => {
     setLastError(null);
@@ -984,6 +1013,9 @@ export function RemotePwaApp() {
     void loadPanels(selectedSessionId, adapter);
   }, [adapter, loadPanels, selectedSessionId]);
 
+  const offlineBanner = (
+    <RelayOfflineBanner relay={(activeProfile ?? reconnectingProfile ?? savedProfiles[0])?.relay !== undefined} connected={connectionStatus === 'connected'} />
+  );
   if (profilesLoading) return <main className="flex min-h-dvh items-center justify-center bg-bg-primary text-text-secondary">Loading saved connections…</main>;
   if (reconnectingProfile && (!adapter || !activeProfile)) {
     return (
@@ -1001,19 +1033,23 @@ export function RemotePwaApp() {
   }
   if (!adapter || !activeProfile) {
     return (
-      <RemoteConnectionScreen
-        savedProfiles={savedProfiles}
-        error={lastError}
-        errorKind={connectionErrorKind}
-        onConnectCode={connectCode}
-        onConnectProfile={async profile => { await connectProfile(profile); }}
-        onForgetProfile={forgetProfile}
-      />
+      <>
+        {offlineBanner}
+        <RemoteConnectionScreen
+          savedProfiles={savedProfiles}
+          error={lastError}
+          errorKind={connectionErrorKind}
+          onConnectCode={connectCode}
+          onConnectProfile={async profile => { await connectProfile(profile); }}
+          onForgetProfile={forgetProfile}
+        />
+      </>
     );
   }
 
   return (
     <div className="flex h-dvh min-h-dvh w-full overflow-hidden bg-bg-primary text-text-primary">
+      {offlineBanner}
       <ErrorDialog
         isOpen={creationFailure !== null}
         onClose={() => setCreationFailure(null)}

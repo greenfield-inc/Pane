@@ -15,7 +15,8 @@ import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestra
 import type { ImportSession } from '../../../shared/types/sessionImport';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSessionStore } from '../stores/sessionStore';
-import { AgentStep, SessionsStepBody, SessionsStepFooter } from './FirstRunSteps';
+import { AgentStep, PhoneStepBody, SessionsStepBody, SessionsStepFooter } from './FirstRunSteps';
+import { PairPhoneDialog } from './PairPhoneDialog';
 import { sessionsToBringIn } from './sessionImport/sessionImportCopy';
 
 type OnboardingEnvironmentStatus = 'detecting' | 'git_missing' | 'gh_ready' | 'gh_missing' | 'gh_not_authenticated' | 'gh_missing_scopes' | 'gh_not_ready';
@@ -187,7 +188,7 @@ export function SupportPaneDialog({ isOpen, onClose }: SupportPaneDialogProps) {
 
 
 type OnboardingEntry = 'migrate_sessions' | 'found_repo' | 'chosen_folder' | 'github_clone' | 'sample_repo';
-type FirstRunStep = 'agent' | 'sessions' | 'project';
+type FirstRunStep = 'agent' | 'sessions' | 'project' | 'phone';
 type WslState = { status: 'loading' } | { status: 'ready'; result: WslRepos } | { status: 'unavailable' };
 type SampleState = { status: 'idle' } | { status: 'running' } | { status: 'failed'; reason: string };
 
@@ -344,6 +345,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   // null until the user toggles a row; until then only the newest repo is checked.
   const [checkedOverride, setCheckedOverride] = useState<ReadonlySet<string> | null>(null);
   const [isCloning, setIsCloning] = useState(false);
+  const [isPairing, setIsPairing] = useState(false);
   const [sample, setSample] = useState<SampleState>({ status: 'idle' });
   const [error, setError] = useState<string | null>(null);
   const [isOpening, setIsOpening] = useState(false);
@@ -369,6 +371,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
     setError(null);
     setCheckedOverride(null);
     setIsCloning(false);
+    setIsPairing(false);
     setIsOpening(false);
     setSample({ status: 'idle' });
     // Started now so step 2 rarely waits; a failed scan counts as nothing found.
@@ -480,10 +483,20 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
     return true;
   };
 
+  /** After the hand-off: a first launch ends on the phone step; a reopen from Home just closes. */
+  const finish = () => {
+    if (fromHome) {
+      onClose();
+      return;
+    }
+    setIsCloning(false);
+    setStep('phone');
+  };
+
   const complete = async (properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }): Promise<boolean> => {
     if (!(await handOff(properties.entry === 'migrate_sessions' ? 'migrate' : 'project'))) return false;
     track('onboarding_completed', properties);
-    onClose();
+    finish();
     return true;
   };
 
@@ -646,10 +659,31 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   const handleSkip = async () => {
     track('onboarding_skipped', { step: env ? getEnvironmentStatus(env) : 'detecting' });
     setError(null);
-    if (await handOff('project')) onClose();
+    if (await handOff('project')) finish();
   };
 
   if (!isOpen) return null;
+
+  if (step === 'phone') {
+    if (isPairing) return <PairPhoneDialog isOpen onClose={onClose} />;
+    return (
+      <Modal ariaLabel="Take your agents with you" isOpen={isOpen} onClose={onClose} size="md" initialFocusRef={titleRef} closeOnOverlayClick={false}>
+        <div className="p-6 border-b border-border-primary">
+          <div className="flex items-center">
+            <img src={paneLogo} alt="Pane" className="h-10 w-10 mr-3" />
+            <h1 ref={titleRef} tabIndex={-1} className="text-lg font-semibold text-text-primary outline-none">Take your agents with you</h1>
+          </div>
+        </div>
+        <ModalBody>
+          <PhoneStepBody />
+        </ModalBody>
+        <ModalFooter className="flex justify-between items-center">
+          <Button variant="ghost" onClick={onClose}>Skip for now</Button>
+          <Button variant="primary" onClick={() => setIsPairing(true)}>Pair a phone</Button>
+        </ModalFooter>
+      </Modal>
+    );
+  }
 
   if (isCloning) {
     return (
