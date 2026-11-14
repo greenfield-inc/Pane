@@ -27,7 +27,7 @@ interface Pending {
 
 interface PairingExchangeDeps {
   now?: () => number;
-  /** Saves the new client record in `remoteDaemon.host.clients`. */
+  /** Saves the new client record in `remoteDaemon.host.clients`, replacing earlier records of the same phone. */
   addClient(record: RemoteDaemonClientRecord): Promise<void>;
   log?: (line: string) => void;
 }
@@ -73,7 +73,7 @@ export class PairingExchange {
     return () => this.listeners.delete(listener);
   }
 
-  async exchange(secret: string, label: string): Promise<PairingExchangeResult> {
+  async exchange(secret: string, label: string, phoneId?: string): Promise<PairingExchangeResult> {
     const now = this.now();
     this.prune(now);
     if (now < this.lockedUntil) {
@@ -99,6 +99,7 @@ export class PairingExchange {
       label: cleanLabel(label),
       createdAt: new Date(now).toISOString(),
       tokenHash: sha256(token).toString('hex'),
+      ...(phoneId ? { phoneId: phoneId.slice(0, 100) } : {}),
     };
     await this.deps.addClient(client);
     for (const listener of this.listeners) listener({ clientId: client.id, label: client.label });

@@ -117,6 +117,7 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'ports:',
   'orchestration-sessions:',
   'projects:',
+  'relay:',
   'prompts:',
   'resource-monitor:',
   'runpane:',

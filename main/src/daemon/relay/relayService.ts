@@ -4,7 +4,7 @@ import net from 'net';
 import os from 'os';
 import path from 'path';
 import type { RemoteDaemonClientRecord, RemoteRelaySettings } from '../../../../shared/types/remoteDaemon';
-import type { RelayPairingInfo, RelayStatus } from '../../../../shared/types/relay';
+import type { RelayComputer, RelayPairingInfo, RelayStatus } from '../../../../shared/types/relay';
 import { loadComputerKey, type ComputerKey, type KeyStore } from './computerKey';
 import { ComputerCertificate, LETS_ENCRYPT_DIRECTORY } from './computerCertificate';
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
@@ -135,14 +135,14 @@ export class RelayService {
   }
 
   /** The pairing listener's `POST /pair/exchange`. */
-  async exchangeSecret(secret: string, label: string): Promise<PairingExchangeResult & { computer?: RelayComputerInfo }> {
-    const result = await this.exchange.exchange(secret, label);
+  async exchangeSecret(secret: string, label: string, phoneId?: string): Promise<PairingExchangeResult & { computer?: RelayComputer }> {
+    const result = await this.exchange.exchange(secret, label, phoneId);
     if (!result.ok) return result;
     return { ...result, computer: this.computerInfo() };
   }
 
   /** What a paired phone stores about this computer. */
-  computerInfo(): RelayComputerInfo | undefined {
+  computerInfo(): RelayComputer | undefined {
     const status = this.getStatus();
     if (!this.key || !status.address || !status.domain) return undefined;
     return {
@@ -293,16 +293,6 @@ export class RelayService {
   }
 }
 
-export interface RelayComputerInfo {
-  id: string;
-  name: string;
-  domain: string;
-  address: string;
-  /** Same-network addresses, tried before the relay. */
-  local: string[];
-  /** base64url SHA-256 of the computer's public key; the Pane app checks it. */
-  fingerprint: string;
-}
 
 function parseHostPort(value: string): { host: string; port: number } {
   const match = /^(.+?)(?::(\d+))?$/u.exec(value.trim());

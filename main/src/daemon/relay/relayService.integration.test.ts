@@ -11,6 +11,11 @@ import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../
 import { PaneCommandRegistry } from '../commandRegistry';
 import { PaneRemoteHttpApiServer } from '../httpApiServer';
 import { RelayService } from './relayService';
+import { createComputerCaller, RelayLinks } from './relayLinks';
+import { registerRelayCommands } from './relayCommands';
+import { RelayPreviews } from './relayPreviews';
+import type { AppConfig } from '../../types/config';
+import type { ConfigManager } from '../../services/configManager';
 
 /**
  * The computer side end to end: the Rust relay (with its DNS helper), Pebble validating DNS-01
@@ -58,10 +63,11 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
   let pebbleDirectory = '';
   let pebbleCa = '';
   let pebbleRoot = '';
-  let service: RelayService;
-  let server: PaneRemoteHttpApiServer;
-  let config: RemoteDaemonConfig;
-  const secrets = new Map<string, string>();
+  let env: NodeJS.ProcessEnv = {};
+  let dial = { host: '127.0.0.1', port: 0 };
+  let extraCa = '';
+  let studio: Computer;
+  let laptop: Computer;
 
   beforeAll(async () => {
     const folder = mkdtempSync(join(tmpdir(), 'pane-relay-it-'));
@@ -101,44 +107,91 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
       }).on('error', reject);
     });
 
-    config = createDefaultRemoteDaemonConfig();
-    config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
-    config.relay = { enabled: true, relayAddress: `us.relay.${DOMAIN}:${relayPort}` };
     const relayCaFile = join(folder, 'relay-ca.pem');
     writeFileSync(relayCaFile, relayCa);
     const pebbleCaFile = join(folder, 'pebble-ca.pem');
     writeFileSync(pebbleCaFile, pebbleCa);
-
-    service = new RelayService({
-      settings: () => config.relay,
-      onSettingsChanged: () => () => undefined,
-      secrets: { read: async (key) => secrets.get(key) ?? null, write: async (key, value) => { secrets.set(key, value); } },
-      dataDir: folder,
-      serverPort: () => server.getAddress()?.port ?? null,
-      previewPort: () => null,
-      displayName: () => 'Studio Mac',
-      addClient: async (record) => { config.host.clients = [...config.host.clients, record]; },
-      env: {
-        PANE_RELAY_CONNECT_HOST: '127.0.0.1',
-        PANE_RELAY_CA: relayCaFile,
-        PANE_ACME_DIRECTORY: pebbleDirectory,
-        PANE_ACME_CA: pebbleCaFile,
-      },
-    });
-    const registry = new PaneCommandRegistry();
-    registry.register('sessions:get-all-with-projects', () => [{ id: 'session-1' }]);
-    server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) }, {
-      pairing: { exchange: (secret, label) => service.exchangeSecret(secret, label) },
-    });
-    await server.start();
-    service.start();
+    const extraCaFile = join(folder, 'pebble-root.pem');
+    writeFileSync(extraCaFile, pebbleRoot);
+    env = {
+      PANE_RELAY_CONNECT_HOST: '127.0.0.1',
+      PANE_RELAY_CA: relayCaFile,
+      PANE_ACME_DIRECTORY: pebbleDirectory,
+      PANE_ACME_CA: pebbleCaFile,
+    };
+    dial = { host: '127.0.0.1', port: relayPort };
+    extraCa = pebbleRoot;
+    studio = await startComputer('Studio Mac', join(folder, 'studio'));
+    laptop = await startComputer('Travel Laptop', join(folder, 'laptop'));
   }, 60_000);
 
   afterAll(async () => {
-    await service?.stop();
-    await server?.stop();
+    for (const computer of [studio, laptop]) {
+      await computer?.service.stop();
+      await computer?.server.stop();
+    }
     for (const child of children) child.kill();
   });
+
+  interface Computer {
+    service: RelayService;
+    links: RelayLinks;
+    server: PaneRemoteHttpApiServer;
+    registry: PaneCommandRegistry;
+    config(): RemoteDaemonConfig;
+  }
+
+  async function startComputer(name: string, dataDir: string): Promise<Computer> {
+    let config = createDefaultRemoteDaemonConfig();
+    config.host.config = { ...config.host.config, enabled: true, listenHost: '127.0.0.1', listenPort: 0 };
+    config.relay = { enabled: true, relayAddress: `us.relay.${DOMAIN}:${relayPort}` };
+    const secrets = new Map<string, string>();
+    const configManager = {
+      getConfig: () => ({ remoteDaemon: config }) as AppConfig,
+      updateConfigWith: async (update: (current: AppConfig) => Partial<AppConfig>) => {
+        const patch = update({ remoteDaemon: config } as AppConfig);
+        if (patch.remoteDaemon) config = patch.remoteDaemon;
+        return {};
+      },
+    };
+    let server: PaneRemoteHttpApiServer | null = null;
+    const service = new RelayService({
+      settings: () => config.relay,
+      onSettingsChanged: () => () => undefined,
+      secrets: { read: async (key) => secrets.get(key) ?? null, write: async (key, value) => { secrets.set(key, value); } },
+      dataDir,
+      serverPort: () => server?.getAddress()?.port ?? null,
+      previewPort: () => null,
+      displayName: () => name,
+      addClient: async (record) => { config = { ...config, host: { ...config.host, clients: [...config.host.clients, record] } }; },
+      env,
+    });
+    const links = new RelayLinks({
+      config: configManager,
+      self: () => service.computerInfo(),
+      call: createComputerCaller({ dial, extraCa }),
+      disconnect: (ids) => server?.disconnectClients(ids),
+      connectedClientIds: () => new Set(),
+    });
+    const registry = new PaneCommandRegistry();
+    registry.register('sessions:get-all-with-projects', () => [{ id: `${name} session` }]);
+    registerRelayCommands(registry, service, new RelayPreviews({
+      id: () => null, domain: () => null, isForwardedPort: () => false, clientActive: () => false,
+    }), links, configManager as unknown as Pick<ConfigManager, 'updateConfigWith'>);
+    server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) }, {
+      pairing: {
+        exchange: async ({ secret, label, phoneId }) => {
+          const result = await service.exchangeSecret(secret, label, phoneId);
+          if (!result.ok) return result;
+          return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId }, []) };
+        },
+      },
+    });
+    await server.start();
+    service.start();
+    await until(() => service.getStatus().phase === 'ready', `${name} to be ready with a certificate`);
+    return { service, links, server, registry, config: () => config };
+  }
 
   /** A phone's https request to the computer's name, through the relay's port. */
   function phoneRequest(host: string, method: string, path: string, body?: object, token?: string) {
@@ -167,30 +220,75 @@ describe.skipIf(!RELAY_BIN || !PEBBLE_BIN || !PEBBLE_DIR)('phone access through 
     });
   }
 
-  it('gets a certificate, shows a QR, and a phone pairs and calls the server through the relay', async () => {
-    const status = await until(() => {
-      const current = service.getStatus();
-      return current.phase === 'ready' ? current : null;
-    }, 'the relay to be ready with a certificate');
-    expect(status.address).toBe(`https://${status.id}.${DOMAIN}`);
-
-    const qr = new URL(service.createPairingCode().url);
+  async function pair(computer: Computer, label: string, phoneId: string) {
+    const qr = new URL(computer.service.createPairingCode().url);
     expect(qr.host).toBe(DOMAIN);
     const fragment = new URLSearchParams(qr.hash.slice(1));
-    expect(fragment.get('c')).toBe(status.id);
+    const host = `${fragment.get('c')}.${DOMAIN}`;
+    const paired = await phoneRequest(host, 'POST', '/pair/exchange', { secret: fragment.get('s'), label, phoneId });
+    return { paired, fragment, host };
+  }
 
-    const host = `${status.id}.${DOMAIN}`;
-    const paired = await phoneRequest(host, 'POST', '/pair/exchange', { secret: fragment.get('s'), label: 'Ana’s iPhone' });
+  async function invoke(host: string, token: string, channel: string, args: unknown[] = []) {
+    return phoneRequest(host, 'POST', '/invoke', { channel, args }, token);
+  }
+
+  it('gets a certificate, shows a QR, and a phone pairs and calls the server through the relay', async () => {
+    const status = studio.service.getStatus();
+    expect(status.address).toBe(`https://${status.id}.${DOMAIN}`);
+
+    const { paired, fragment, host } = await pair(studio, 'Ana’s iPhone', 'phone-ana');
+    expect(fragment.get('c')).toBe(status.id);
     expect(paired.status).toBe(200);
     const computer = paired.json.computer as { fingerprint: string };
     // The app pins the computer's key: the certificate it saw carries the key the exchange named.
     expect(createHash('sha256').update(paired.peerKey).digest('base64url')).toBe(computer.fingerprint);
 
-    const token = String(paired.json.token);
-    const sessions = await phoneRequest(host, 'POST', '/invoke', { channel: 'sessions:get-all-with-projects', args: [] }, token);
-    expect(sessions.status).toBe(200);
+    const sessions = await invoke(host, String(paired.json.token), 'sessions:get-all-with-projects');
+    expect(sessions.json).toMatchObject({ ok: true, result: [{ id: 'Studio Mac session' }] });
 
     const again = await phoneRequest(host, 'POST', '/pair/exchange', { secret: fragment.get('s'), label: 'Second phone' });
     expect(again).toMatchObject({ status: 410, json: { error: { code: 'ERR_PAIRING_CODE_USED' } } });
+  }, 90_000);
+
+  it('links the computers a phone pairs with, so a second phone that scans one reaches both, until removed or unlinked', async () => {
+    // Ana pairs with both computers; her app links them (the orchestration the phone runs).
+    const a = await pair(studio, 'Ana’s iPhone', 'phone-ana');
+    const b = await pair(laptop, 'Ana’s iPhone', 'phone-ana');
+    const studioInfo = a.paired.json.computer;
+    const laptopInfo = b.paired.json.computer;
+    const tokenA = String(a.paired.json.token);
+    const tokenB = String(b.paired.json.token);
+    const laptopForStudio = await invoke(b.host, tokenB, 'relay:client:mint-link', [{ peer: studioInfo }]);
+    const studioForLaptop = await invoke(a.host, tokenA, 'relay:client:mint-link', [{ peer: laptopInfo }]);
+    expect((await invoke(a.host, tokenA, 'relay:client:save-link', [{ peer: laptopInfo, token: (laptopForStudio.json.result as { token: string }).token }])).status).toBe(200);
+    expect((await invoke(b.host, tokenB, 'relay:client:save-link', [{ peer: studioInfo, token: (studioForLaptop.json.result as { token: string }).token }])).status).toBe(200);
+
+    // Devices on the laptop says who linked the studio.
+    const laptopDevices = await laptop.registry.invoke('relay:devices', []) as Array<{ kind: string; label: string; linkedBy?: string }>;
+    expect(laptopDevices).toContainEqual(expect.objectContaining({ kind: 'computer', label: 'Studio Mac', linkedBy: 'Ana’s iPhone' }));
+
+    // Ben scans only the studio and gets the laptop too.
+    const ben = await pair(studio, 'Ben’s Pixel', 'phone-ben');
+    const linked = ben.paired.json.linked as Array<{ computer: { id: string; name: string }; token: string }>;
+    expect(linked.map((grant) => grant.computer.name)).toEqual(['Travel Laptop']);
+    const benOnLaptop = await invoke(b.host, linked[0].token, 'sessions:get-all-with-projects');
+    expect(benOnLaptop.json).toMatchObject({ ok: true, result: [{ id: 'Travel Laptop session' }] });
+
+    // "Remove from all your computers" on Ben's row on the studio.
+    const benRecord = studio.config().host.clients.find((client) => client.phoneId === 'phone-ben');
+    const removal = await studio.registry.invoke('relay:remove-phone-everywhere', [{ clientId: benRecord?.id }]) as { removed: string[]; notReached: string[] };
+    expect(removal).toEqual({ removed: expect.arrayContaining(['Studio Mac', 'Travel Laptop']), notReached: [] });
+    expect((await invoke(b.host, linked[0].token, 'sessions:get-all-with-projects')).status).toBe(403);
+    expect((await invoke(a.host, String(ben.paired.json.token), 'sessions:get-all-with-projects')).status).toBe(403);
+
+    // "Unlink from all your computers" on the laptop's row on the studio.
+    const unlink = await studio.registry.invoke('relay:unlink-computer-everywhere', [{ computerId: (laptopInfo as { id: string }).id }]) as { removed: string[]; notReached: string[] };
+    expect(unlink.notReached).toEqual([]);
+    expect(studio.config().client.profiles.some((profile) => profile.relay)).toBe(false);
+    expect(laptop.config().client.profiles.some((profile) => profile.relay)).toBe(false);
+    expect(laptop.config().host.clients.some((client) => client.kind === 'computer')).toBe(false);
+    // Ana's own pairings stay.
+    expect((await invoke(b.host, tokenB, 'sessions:get-all-with-projects')).status).toBe(200);
   }, 90_000);
 });

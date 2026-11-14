@@ -253,7 +253,7 @@ interface PaneRemoteHttpApiServerOptions {
 }
 
 export interface PairingRoute {
-  exchange(secret: string, label: string): Promise<{ ok: true; token: string; client: { id: string } } & JsonObjectLike | { ok: false; status: number; code: string; message: string }>;
+  exchange(request: { secret: string; label: string; phoneId?: string }): Promise<{ ok: true; token: string; client: { id: string } } & JsonObjectLike | { ok: false; status: number; code: string; message: string }>;
 }
 
 type JsonObjectLike = Record<string, unknown>;
@@ -793,7 +793,7 @@ export class PaneRemoteHttpApiServer {
       this.writeMethodNotAllowed(response, 'POST');
       return;
     }
-    let body: { secret?: unknown; label?: unknown };
+    let body: { secret?: unknown; label?: unknown; phoneId?: unknown };
     try {
       body = JSON.parse(await readRequestBody(request, MAX_UNAUTHENTICATED_REQUEST_BODY_BYTES)) as typeof body;
     } catch {
@@ -804,7 +804,11 @@ export class PaneRemoteHttpApiServer {
       this.writeJson(response, 400, { ok: false, error: { code: 'ERR_PAIRING_BAD_REQUEST', message: 'The pairing code is missing.' } });
       return;
     }
-    const result = await pairing.exchange(body.secret, typeof body.label === 'string' ? body.label : '');
+    const result = await pairing.exchange({
+      secret: body.secret,
+      label: typeof body.label === 'string' ? body.label : '',
+      ...(typeof body.phoneId === 'string' && body.phoneId ? { phoneId: body.phoneId } : {}),
+    });
     if (!result.ok) {
       this.writeJson(response, result.status, { ok: false, error: { code: result.code, message: result.message } });
       return;

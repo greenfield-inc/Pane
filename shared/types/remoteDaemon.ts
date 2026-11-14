@@ -80,10 +80,19 @@ export interface RemoteDaemonClientRecord {
   createdAt: string;
   tokenHash: string;
   lastUsedAt?: string;
-  /** "glasses": a Pane glasses app token, admitted only on the workspace listener with its narrow scope. Absent: a paired client with full access. */
-  kind?: 'glasses';
-  /** Glasses only: the install id of the phone that paired them; pairing again from that phone replaces them. */
+  /**
+   * "glasses": a Pane glasses app token, admitted only on the workspace listener with its narrow scope.
+   * "computer": a linked computer (QR pairing), with full access. Absent: a paired phone or client with full access.
+   */
+  kind?: 'glasses' | 'computer';
+  /** The install id of the phone: for glasses, the phone that paired them; for a QR-paired phone, the phone itself. */
   phoneId?: string;
+  /** Linked computers only: the computer's relay id. */
+  computerId?: string;
+  /** Shown as "Linked by <name>": the phone whose scan linked this computer, or the computer that handed this phone its token. */
+  linkedBy?: string;
+  /** A phone token handed out by a linked computer: that computer's relay id, so unlinking it revokes the token. */
+  grantedBy?: string;
 }
 
 export interface RemotePaneConnectionProfile {
@@ -101,6 +110,16 @@ export interface RemotePaneConnectionProfile {
    */
   tailnetMachine?: string;
   tailnetDomain?: string;
+  /** A computer reached through a relay (QR pairing): its id and key fingerprint. */
+  relay?: RemoteRelayProfile;
+}
+
+export interface RemoteRelayProfile {
+  computerId: string;
+  /** base64url SHA-256 of the computer's public key; connections to any other key are refused. */
+  fingerprint: string;
+  /** Shown as "Linked by <name>" when a phone's scan linked it. */
+  linkedBy?: string;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -566,8 +585,11 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   createdAt: boundary.nonEmptyString,
   tokenHash: boundary.nonEmptyString,
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
-  kind: boundary.optional(boundary.literal('glasses')),
+  kind: boundary.optional(boundary.enumeration('glasses', 'computer')),
   phoneId: boundary.optional(boundary.nonEmptyString),
+  computerId: boundary.optional(boundary.nonEmptyString),
+  linkedBy: boundary.optional(boundary.nonEmptyString),
+  grantedBy: boundary.optional(boundary.nonEmptyString),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({
   kind: boundary.enumeration('ssh', 'tailscale', 'manual'),
@@ -585,6 +607,11 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
   tunnel: boundary.optional(remoteTunnelSchema),
   tailnetMachine: boundary.optional(boundary.nonEmptyString),
   tailnetDomain: boundary.optional(boundary.nonEmptyString),
+  relay: boundary.optional(boundary.object({
+    computerId: boundary.nonEmptyString,
+    fingerprint: boundary.nonEmptyString,
+    linkedBy: boundary.optional(boundary.nonEmptyString),
+  })),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {

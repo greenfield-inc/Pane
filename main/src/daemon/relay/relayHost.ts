@@ -10,9 +10,14 @@ import type { PairingRoute } from '../httpApiServer';
 import { registerRelayCommands } from './relayCommands';
 import { RelayPreviews } from './relayPreviews';
 import { RelayService, type RelaySecretStore } from './relayService';
+import { createComputerCaller, RelayLinks } from './relayLinks';
+import { disconnectActiveRemoteHostClients } from '../remoteTransportController';
+import { remoteHostRuntimeStateStore } from '../remoteHostRuntimeState';
+import { readFileSync } from 'fs';
 
 export interface RelayHost {
   service: RelayService;
+  links: RelayLinks;
   previews: RelayPreviews;
   pairing: PairingRoute;
   suspend(): void;
@@ -74,23 +79,48 @@ export async function createRelayHost(deps: {
     previewPort: () => proxy?.port ?? null,
     displayName: computerDisplayName,
     addClient: async (record) => {
+      // Pairing the same phone again replaces its earlier token here.
+      const replaced = (remote()?.host.clients ?? []).filter((client) => client.kind === undefined && record.phoneId !== undefined && client.phoneId === record.phoneId).map((client) => client.id);
       await configManager.updateConfigWith((current) => {
-        const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
-        return { remoteDaemon: { ...remote, host: { ...remote.host, clients: [...remote.host.clients, record] } } };
+        const config = normalizeRemoteDaemonConfig(current.remoteDaemon);
+        return { remoteDaemon: { ...config, host: { ...config.host, clients: [...config.host.clients.filter((client) => !replaced.includes(client.id)), record] } } };
       });
+      if (replaced.length) disconnectActiveRemoteHostClients(replaced);
     },
     log: deps.log,
   });
   const relay = service;
+  const dial = process.env.PANE_RELAY_DIAL ? /^(.+):(\d+)$/u.exec(process.env.PANE_RELAY_DIAL) : null;
+  const links = new RelayLinks({
+    config: configManager,
+    self: () => relay.computerInfo(),
+    call: createComputerCaller({
+      dial: dial ? { host: dial[1], port: Number(dial[2]) } : undefined,
+      extraCa: process.env.PANE_RELAY_EXTRA_CA ? readFileSync(process.env.PANE_RELAY_EXTRA_CA, 'utf8') : undefined,
+    }),
+    disconnect: (ids) => {
+      disconnectActiveRemoteHostClients(ids);
+      for (const id of ids) previews.revokeClient(id);
+    },
+    connectedClientIds: () => new Set(remoteHostRuntimeStateStore.getState().connectedClients.map((client) => client.clientId).filter((id): id is string => id !== null)),
+    log: deps.log,
+  });
   proxy = await servePreviews(previews.route, deps.files);
-  registerRelayCommands(deps.commandRegistry, relay, previews, configManager);
+  registerRelayCommands(deps.commandRegistry, relay, previews, links, configManager);
   relay.onStatus((status) => getPaneEventSink().send('relay:status-changed', status));
   relay.onPaired((event) => getPaneEventSink().send('relay:paired', event));
   relay.start();
   return {
     service: relay,
     previews,
-    pairing: { exchange: (secret, label) => relay.exchangeSecret(secret, label) },
+    links,
+    pairing: {
+      exchange: async ({ secret, label, phoneId }) => {
+        const result = await relay.exchangeSecret(secret, label, phoneId);
+        if (!result.ok) return result;
+        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId }, []) };
+      },
+    },
     suspend: () => relay.suspend(),
     resume: () => relay.resume(),
     stop: async () => {
