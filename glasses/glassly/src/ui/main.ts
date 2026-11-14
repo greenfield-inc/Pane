@@ -37,6 +37,7 @@ const command = (value: PhoneCommand) => bus?.send('command', value);
 function render(state: PhoneState): void {
   ui.status.textContent = state.status;
   ui.demo.hidden = state.paired > 0 || state.demo;
+  ui.pairing.hidden = state.paired > 0;
   ui.forget.hidden = state.paired === 0;
   ui.ambient.checked = state.ambient;
   ui.readAloud.checked = state.readAloud;

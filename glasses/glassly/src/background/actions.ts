@@ -35,6 +35,8 @@ export type ActionResult =
   | { ok: false; error: string };
 
 const text = (value: string | undefined) => value?.trim() ?? '';
+/** What the glasses offer to press on a card: approve's two rows, an ask's suggestions, or its choices. */
+const choicesOf = (card: Card) => (card.ui === 'approve' ? ['Approve', 'Not yet'] : card.ui === 'ask' ? card.suggestions : card.choices);
 const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }) === 0;
 const matches = (name: string, wanted: string) => name.toLowerCase().includes(wanted.toLowerCase());
 
@@ -47,7 +49,7 @@ export class PaneActions {
     if (!source || source.demo) return { ok: false, error: 'Pane on these glasses is not paired with a computer yet.' };
     switch (action) {
       case 'list_waiting':
-        return { ok: true, waiting: source.cards().filter((card) => card.waiting).map((card) => ({ computer: card.machine, pane: card.paneName, question: card.title, choices: card.ui === 'approve' ? ['Approve', 'Not yet'] : card.choices })) };
+        return { ok: true, waiting: source.cards().filter((card) => card.waiting).map((card) => ({ computer: card.machine, pane: card.paneName, question: card.title, choices: choicesOf(card) })) };
       case 'pr_status': {
         const name = text(params.pane);
         const prs: Array<{ computer: string; pane: string; pr: number; state: string; title?: string }> = [];
@@ -77,15 +79,15 @@ export class PaneActions {
     const card = found[0];
     if (!card || found.length > 1) return { ok: false, error: card ? `More than one question matches ${pane}; name the Pane.` : 'No question is waiting there.' };
     const expiresAt = this.deps.now() + STAGED_MS;
-    const choices = card.ui === 'approve' ? ['Approve', 'Not yet'] : card.ui === 'ask' ? card.suggestions : card.choices;
+    const choices = choicesOf(card);
     const choice = choices.findIndex((label) => same(label, answer));
     if (choice >= 0) {
       this.deps.stage({ show: { kind: 'card', key: card.key, choice }, title: `Confirm on the glasses: ${card.paneName} → ${choices[choice]}`, expiresAt });
     } else {
       const summary = `"${answer}"`;
       const request: ConfirmRequest = card.ui === 'approve'
-        ? { kind: 'answer', key: card.key, answer: { approved: false, note: answer }, summary: `Not yet, ${summary}` }
-        : { kind: 'answer', key: card.key, answer: { text: answer }, summary };
+        ? { kind: 'answer', key: card.key, answer: { approved: false, note: answer }, summary: `Not yet, ${summary}`, expiresAt }
+        : { kind: 'answer', key: card.key, answer: { text: answer }, summary, expiresAt };
       this.deps.stage({ show: { kind: 'confirm', request }, title: `Confirm on the glasses: ${card.paneName} → ${summary}`, expiresAt });
     }
     return { ok: true, message: 'Waiting for you to confirm on the glasses: open Pane and press once.' };
@@ -96,10 +98,11 @@ export class PaneActions {
     const live = source.computers().filter((computer) => computer.status === 'live');
     const computer = wanted ? live.find((candidate) => matches(candidate.name, wanted)) : live[0];
     if (!computer) return { ok: false, error: wanted ? `${wanted} isn't reachable from the glasses.` : 'None of your computers is reachable.' };
+    const expiresAt = this.deps.now() + STAGED_MS;
     this.deps.stage({
-      show: { kind: 'confirm', request: { kind: 'session', computerId: computer.id, machine: computer.name, goal } },
+      show: { kind: 'confirm', request: { kind: 'session', computerId: computer.id, machine: computer.name, goal, expiresAt } },
       title: `Confirm on the glasses: new Session on ${computer.name}`,
-      expiresAt: this.deps.now() + STAGED_MS,
+      expiresAt,
     });
     return { ok: true, message: 'Waiting for you to confirm on the glasses: open Pane and press once.' };
   }

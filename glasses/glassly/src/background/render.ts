@@ -2,7 +2,7 @@
 // their highlight itself; Glassly has no list element, so this draws a list as one text element
 // with a "> " on the highlighted row and keeps the highlight here (see ListFocus).
 import type { RenderElement } from '@glassly/miniapp';
-import { LIST_PAD, TEXT_PAD, listItems, textContent, type Box, type Brightness, type ListBox, type Page, type TextBox } from '../../../src/page';
+import { LIST_PAD, MAX_LIST_ITEMS, TEXT_PAD, textContent, type Box, type Brightness, type ListBox, type Page, type TextBox } from '../../../src/page';
 import { LINE_H, fitLine, textWidth } from '../../../src/text';
 
 /** What one Glassly display takes per frame. */
@@ -34,7 +34,8 @@ function linesThatFit(box: TextBox): number {
 
 /** The rows a list box shows: a window around the highlight, the highlighted row marked. */
 function listLines(box: ListBox, selected: number): string[] {
-  const items = listItems(box);
+  // Glassly draws a list as text, so Even's 63-byte item limit doesn't apply; the width cut adds "…".
+  const items = box.items.slice(0, MAX_LIST_ITEMS);
   // Drawn as text, rows sit a text line apart, so more of them fit than in Even's 40 px list rows.
   const rows = Math.max(1, Math.floor((box.h - 2 * LIST_PAD) / LINE_H));
   const at = Math.max(0, Math.min(selected, items.length - 1));
@@ -145,7 +146,8 @@ export class ListFocus {
   show(page: Page): ListSelection {
     const lists = page.boxes.filter((box): box is ListBox => box.kind === 'list');
     const scrollable = scrollableText(page);
-    const key = JSON.stringify([lists.map((box) => [box.name, box.items]), scrollable ? [scrollable.name, scrollable.lines] : null]);
+    // A page asking for a different starting row (a choice named by Glassly AI) starts there afresh.
+    const key = JSON.stringify([lists.map((box) => [box.name, box.items, box.selected ?? 0]), scrollable ? [scrollable.name, scrollable.lines] : null]);
     if (key !== this.key) {
       this.key = key;
       this.rows = new Map(lists.map((box) => [box.name, Math.max(0, Math.min(box.selected ?? 0, box.items.length - 1))]));
@@ -157,7 +159,7 @@ export class ListFocus {
   /** Moves the highlight of `list`; false when it was already at that end. */
   move(list: ListBox, step: 1 | -1): boolean {
     const at = this.rows.get(list.name) ?? 0;
-    const next = Math.max(0, Math.min(at + step, Math.min(list.items.length, listItems(list).length) - 1));
+    const next = Math.max(0, Math.min(at + step, Math.min(list.items.length, MAX_LIST_ITEMS) - 1));
     if (next === at) return false;
     this.rows.set(list.name, next);
     return true;

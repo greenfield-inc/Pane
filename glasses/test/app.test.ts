@@ -152,6 +152,19 @@ describe('answering', () => {
     expect(source.cards().map((candidate) => candidate.paneName)).not.toContain('fix-login');
   });
 
+  it('does nothing on a press after a request from another app lapsed', async () => {
+    const { app, text, press, source, clock } = start();
+    let started = 0;
+    source.createSession = async () => { started += 1; throw new Error('not here'); };
+    const [computer] = source.computers();
+    if (!computer) throw new Error('the demo has a computer');
+    app.confirm({ kind: 'session', computerId: computer.id, machine: computer.name, goal: 'Find why checkout charges twice', expiresAt: clock.now + 120_000 });
+    await clock.advance(120_000);
+    await press({ type: 'press' });
+    expect(started).toBe(0);
+    expect(text().join(' ')).toContain('waited more than 2 minutes');
+  });
+
   it('takes an answer back with a double press on the undo screen, and sends nothing', async () => {
     const { text, press, source, clock } = start();
     await press({ type: 'down' });

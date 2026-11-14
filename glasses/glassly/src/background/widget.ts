@@ -86,6 +86,11 @@ export class StatusWidget {
       return true;
     }
     if (event.type !== 'tap' || !card) return false;
+    if (card.key !== this.cardKey && !this.sending) {
+      // A newer question arrived since the last draw: show it before a tap can answer it.
+      this.deps.redraw();
+      return true;
+    }
     if (this.sending) {
       // A tap during the hold takes the answer back; nothing was sent.
       this.sending.timer.cancel();

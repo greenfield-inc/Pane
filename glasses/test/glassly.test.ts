@@ -108,6 +108,19 @@ describe('the renderer', () => {
     expect(focus.selectedIn(list)).toBe(3);
   });
 
+  it('highlights the choice Glassly AI named, though the same card is already on the glasses', () => {
+    const focus = new ListFocus();
+    const list = (page: Page) => page.boxes.find((box) => box.kind === 'list');
+    const shown = cardPage(card, []);
+    focus.show(shown);
+    const named = cardPage(card, [], 2);
+    focus.show(named);
+    const box = list(named);
+    if (box?.kind !== 'list') throw new Error('a card has a choice list');
+    expect(focus.selectedIn(box)).toBe(2);
+    expect(text(renderPage(named, focus.show(named), { maxText: 6 })).at(-1)?.split('\n')[2]).toBe('> Mock the endpoint');
+  });
+
   it('scrolls a question longer than the screen by swipe, as Even firmware scrolls its text box', () => {
     const long: Card = { ...card, title: Array.from({ length: 40 }, (_, index) => `Line ${index} of a long question.`).join(' ') };
     const page = fullQuestionPage(long);

@@ -94,9 +94,13 @@ function cursorRows(rows: readonly string[]): string[] {
 }
 
 /** What another app (Glassly's assistant) asked the glasses to do, staged for a press. */
-export type ConfirmRequest =
+export type ConfirmRequest = (
   | { kind: 'answer'; key: string; answer: NotifyAnswer; summary: string }
-  | { kind: 'session'; computerId: string; machine: string; goal: string };
+  | { kind: 'session'; computerId: string; machine: string; goal: string }
+) & {
+  /** Epoch ms after which a press does nothing: the request lapsed unconfirmed. */
+  expiresAt?: number;
+};
 
 export interface AppDeps {
   source: PaneSource;
@@ -1188,6 +1192,10 @@ export class GlassesApp {
       return;
     }
     if (gesture.type !== 'press') return;
+    if (request.expiresAt !== undefined && this.deps.now() >= request.expiresAt) {
+      this.showProblem('Glassly AI · lapsed', new GlassesError('ERR_GLASSES_REQUEST_LAPSED', 'This request waited more than 2 minutes, so nothing was sent or started.', 'Ask Glassly again.'), { name: 'home' });
+      return;
+    }
     if (request.kind === 'answer') {
       const card = this.card(request.key);
       if (card?.waiting) this.sendAnswer(card, request.answer, request.summary);
