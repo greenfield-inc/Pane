@@ -4,6 +4,7 @@ import type { AnalyticsIdentity, AppConfig } from '../types/config';
 import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared/types/paneChat';
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../shared/types/appearance';
 import { DEFAULT_AUTO_PAUSE_HOURS } from '../../../shared/types/autoPause';
+import { DEFAULT_BACKGROUND_ACTIVITY } from '../../../shared/types/backgroundActivity';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { customLinkSchema, type CustomLink } from '../../../shared/types/customLinks';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
@@ -165,7 +166,7 @@ export class ConfigManager extends EventEmitter {
       keepAwakeWhileSessionsActive: true,
       keepAwakeWhilePluggedIn: false,
       keepAwakeOnBattery: false,
-      backgroundActivity: 'balanced',
+      backgroundActivity: DEFAULT_BACKGROUND_ACTIVITY,
       resumePausedOnOpen: false,
       autoPauseEnabled: true,
       autoPauseAfterHours: DEFAULT_AUTO_PAUSE_HOURS,

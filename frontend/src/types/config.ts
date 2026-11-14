@@ -5,6 +5,7 @@ import type { MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
+import type { BackgroundActivityProfile } from '../../../shared/types/backgroundActivity';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
 import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
@@ -101,7 +102,7 @@ export interface AppConfig {
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
   // When Pane pauses its own background checks (ports, usage) while nobody is looking (default balanced)
-  backgroundActivity?: 'performance' | 'balanced' | 'batterySaver';
+  backgroundActivity?: BackgroundActivityProfile;
   // Pause: selecting a paused Pane or Session chat resumes it (default off)
   resumePausedOnOpen?: boolean;
   // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)

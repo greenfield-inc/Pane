@@ -7,12 +7,11 @@ import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { VersionInfo } from '../../../types/session';
 import { API } from '../../../utils/api';
-import type { AppConfig, HtmlFileOpenMode } from '../../../types/config';
+import type { HtmlFileOpenMode } from '../../../types/config';
 import { htmlFileOpenModeOf } from '../../../stores/configStore';
+import { DEFAULT_BACKGROUND_ACTIVITY, type BackgroundActivityProfile } from '../../../../../shared/types/backgroundActivity';
 import { KeepAwakeSetting } from './KeepAwakeSetting';
 import { PauseSettings } from './PauseSettings';
-
-type BackgroundActivityProfile = NonNullable<AppConfig['backgroundActivity']>;
 
 interface GeneralSettingsProps {
   persistence: SettingsPersistence;
@@ -130,7 +129,7 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
           <SegmentedControl<BackgroundActivityProfile>
             label="Background checks"
             columns={3}
-            value={config.backgroundActivity ?? 'balanced'}
+            value={config.backgroundActivity ?? DEFAULT_BACKGROUND_ACTIVITY}
             options={[
               { id: 'performance', label: 'Performance' },
               { id: 'balanced', label: 'Balanced' },

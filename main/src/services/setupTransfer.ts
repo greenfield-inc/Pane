@@ -1,4 +1,5 @@
 import { isValidAutoPauseHours } from '../../../shared/types/autoPause';
+import { BACKGROUND_ACTIVITY_PROFILES } from '../../../shared/types/backgroundActivity';
 import { isDeepStrictEqual } from 'node:util';
 import type { AppConfig } from '../types/config';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
@@ -478,7 +479,7 @@ const sectionSchemas = {
     keepAwakeWhileSessionsActive: booleanField,
     keepAwakeWhilePluggedIn: booleanField,
     keepAwakeOnBattery: booleanField,
-    backgroundActivity: boundary.optional(boundary.enumeration('performance', 'balanced', 'batterySaver')),
+    backgroundActivity: boundary.optional(boundary.enumeration(...BACKGROUND_ACTIVITY_PROFILES)),
     resumePausedOnOpen: booleanField,
     autoPauseEnabled: booleanField,
     autoPauseAfterHours: boundary.optional(boundary.refine(boundary.number, isValidAutoPauseHours, 'expected whole hours from 1 to 720')),

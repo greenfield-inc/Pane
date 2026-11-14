@@ -1,7 +1,8 @@
 import { EventEmitter } from 'events';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../types/config';
-import { BackgroundActivity, type BackgroundActivityProfile } from './backgroundActivity';
+import type { BackgroundActivityProfile } from '../../../shared/types/backgroundActivity';
+import { BackgroundActivity } from './backgroundActivity';
 
 class Config extends EventEmitter {
   config: AppConfig = {};

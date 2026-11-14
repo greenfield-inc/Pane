@@ -1,6 +1,7 @@
 import type { CustomCommandResume } from './customCommandResume';
 import type { PaneChatAgent } from './paneChat';
 import type { VoiceTranscriptionMode } from './voiceTranscription';
+import type { BackgroundActivityProfile } from './backgroundActivity';
 import type { WorktreeFileSyncEntry } from './worktreeFileSync';
 import type { AppearanceMode, Theme } from './appearance';
 import type { SessionRetention } from './orchestrationSession';
@@ -109,7 +110,7 @@ export interface SetupPreferenceConfig {
   keepAwakeWhileSessionsActive?: boolean;
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
-  backgroundActivity?: 'performance' | 'balanced' | 'batterySaver';
+  backgroundActivity?: BackgroundActivityProfile;
   resumePausedOnOpen?: boolean;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;

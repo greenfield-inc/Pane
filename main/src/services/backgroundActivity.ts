@@ -3,12 +3,9 @@ import { EventEmitter } from 'events';
 import { readFile } from 'fs/promises';
 import { powerMonitor } from 'electron';
 import type { AppConfig } from '../types/config';
+import { DEFAULT_BACKGROUND_ACTIVITY, type BackgroundActivityProfile } from '../../../shared/types/backgroundActivity';
 import { readLinuxOnBattery } from './linuxPowerSupply';
 import { remoteEventStreams } from '../daemon/remoteEventStreams';
-
-export type BackgroundActivityProfile = NonNullable<AppConfig['backgroundActivity']>;
-
-const DEFAULT_BACKGROUND_ACTIVITY: BackgroundActivityProfile = 'balanced';
 
 /** A Low Power Mode read is reused this long, so switching apps doesn't start a process each time. */
 const LOW_POWER_CACHE_MS = 60_000;
@@ -16,6 +13,11 @@ const LOW_POWER_READ_TIMEOUT_MS = 2_000;
 const LINUX_PLATFORM_PROFILE = '/sys/firmware/acpi/platform_profile';
 /** Where no unlock event fires (Linux), the lock is read this often while away, so an unlock is seen without a click. */
 const AWAY_LOCK_RECHECK_MS = 30_000;
+/**
+ * `getSystemIdleState` answers `locked` before it compares idle time with this threshold, so the
+ * threshold never changes a lock read; it only splits `idle` from `active`, which Pane ignores.
+ */
+const IDLE_THRESHOLD_SECONDS = 60;
 
 type PowerEvent = 'lock-screen' | 'unlock-screen' | 'suspend' | 'resume' | 'on-ac' | 'on-battery';
 
@@ -192,7 +194,7 @@ function electronEnvironment(): BackgroundActivityEnvironment {
     },
     lockEvents: process.platform === 'darwin' || process.platform === 'win32',
     // `locked` also covers a running screensaver on macOS; Linux answers only on desktops with a ScreenSaver D-Bus service.
-    isLocked: () => powerMonitor.getSystemIdleState(60) === 'locked',
+    isLocked: () => powerMonitor.getSystemIdleState(IDLE_THRESHOLD_SECONDS) === 'locked',
     isOnBattery: () => (linux ? readLinuxOnBattery() : powerMonitor.isOnBatteryPower()),
     readLowPower,
     remoteStreams: remoteEventStreams,
