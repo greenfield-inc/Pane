@@ -257,7 +257,8 @@ export class RelayService {
       this.terminator = createComputerTlsServer({
         id: key.id,
         domain,
-        secureContext: () => certificate.secureContext(),
+        // An expired certificate is never served: connections wait for the renewal.
+        secureContext: () => (certificate.isValid() ? certificate.secureContext() : null),
         target: (name) => (name.kind === 'server' ? this.deps.serverPort() : this.deps.previewPort()),
         log: this.deps.log,
       });
