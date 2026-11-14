@@ -491,7 +491,8 @@ runpane sessions resume --session <S> --json                         # the Sessi
 
 `UNPAUSED` (`panel.unpaused`) means it was resumed; `READY` follows as usual.
 `runpane panes list --json` shows each Pane's `paused` mark and
-`inactiveSince` (its last terminal output, input or selection).
+`inactiveSince` (its last terminal output or input, chat agent activity or
+selection).
 
 A worker cut off by sleep or a network error usually ends its turn on an API
 error and sits at its prompt. That turn end is a READY, with a MISSING REPORT
