@@ -113,6 +113,8 @@ function refusal(code: string, maker: string): PaneError {
       return new PaneError(code, `This code was already used: each link works once, so ${maker} was not linked.`, `Copy a new link from Add a device › Computer on ${maker}.`);
     case 'ERR_PAIRING_CODE_EXPIRED':
       return new PaneError(code, `This code expired, so ${maker} was not linked.`, `Copy a new link from Add a device › Computer on ${maker}.`);
+    case 'ERR_PAIRING_CODE_INVALID':
+      return new PaneError(code, `${maker} has no such link waiting, so it was not linked.`, `Copy a new link from Add a device › Computer on ${maker}.`);
     case 'ERR_PAIRING_LOCKED':
       return new PaneError(code, `${maker} paused pairing for 15 minutes after several wrong codes, so it was not linked.`, 'Try the link again in 15 minutes.');
     default:

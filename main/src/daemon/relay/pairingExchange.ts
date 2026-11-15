@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import type { RemoteDaemonClientRecord } from '../../../../shared/types/remoteDaemon';
 import type { RelayLinkLifetime } from '../../../../shared/types/relay';
+import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 
 const LINK_LIFETIME_MS = {
   '10m': 10 * 60_000,
@@ -45,8 +46,22 @@ interface Pending {
   spentAt: number | null;
 }
 
+/** Where waiting links are kept across restarts: only their hashes, lifetimes and times. */
+export interface PendingLinkStore {
+  read(): string | null;
+  write(text: string): void;
+}
+
+const savedSchema = boundary.array(boundary.object({
+  hash: boundary.nonEmptyString,
+  lifetime: boundary.enumeration('10m', '1h', '24h'),
+  expiresAt: boundary.number,
+  spentAt: boundary.nullable(boundary.number),
+}));
+
 interface PairingExchangeDeps {
   now?: () => number;
+  store?: PendingLinkStore;
   /** Saves the new client record in `remoteDaemon.host.clients`, replacing earlier records of the same phone or computer. */
   addClient(record: RemoteDaemonClientRecord): Promise<void>;
   log?: (line: string) => void;
@@ -54,6 +69,14 @@ interface PairingExchangeDeps {
 
 function sha256(value: string): Buffer {
   return createHash('sha256').update(value).digest();
+}
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }
 
 function cleanLabel(label: string, fallback: string): string {
@@ -75,6 +98,24 @@ export class PairingExchange {
 
   constructor(private readonly deps: PairingExchangeDeps) {
     this.now = deps.now ?? Date.now;
+    let text: string | null = null;
+    try {
+      text = deps.store?.read() ?? null;
+    } catch (error) {
+      deps.log?.(`[pairing] could not read the waiting links, so links made before this start won't work: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const saved = text === null ? undefined : decodeOptionalBoundary(safeJson(text), savedSchema);
+    for (const entry of saved ?? []) this.pending.push({ ...entry, hash: Buffer.from(entry.hash, 'hex') });
+  }
+
+  /** Keeps the waiting and recently used links, so a link made before Pane restarts still works after. */
+  private save(): void {
+    if (!this.deps.store) return;
+    try {
+      this.deps.store.write(JSON.stringify(this.pending.map((entry) => ({ ...entry, hash: entry.hash.toString('hex') }))));
+    } catch (error) {
+      this.deps.log?.(`[pairing] could not save the waiting links, so they stop working if Pane restarts: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /** A new secret. At most 16 wait at once: a 17th spends the oldest 10-minute one, else the oldest. */
@@ -86,6 +127,7 @@ export class PairingExchange {
     const secret = randomBytes(32).toString('base64url');
     const expiresAt = now + LINK_LIFETIME_MS[lifetime];
     this.pending.push({ hash: sha256(secret), lifetime, expiresAt, spentAt: null });
+    this.save();
     return { secret, expiresAt: new Date(expiresAt).toISOString() };
   }
 
@@ -103,6 +145,7 @@ export class PairingExchange {
     const found = this.find(secret, source, now);
     if (!found.ok) return found;
     found.entry.spentAt = now;
+    this.save();
     const token = randomBytes(32).toString('base64url');
     const client: RemoteDaemonClientRecord = {
       id: randomUUID(),
@@ -128,7 +171,7 @@ export class PairingExchange {
     const entry = this.pending.find((candidate) => timingSafeEqual(candidate.hash, presented));
     if (!entry) {
       this.recordFailure(source, now);
-      return { ok: false, status: 403, code: 'ERR_PAIRING_CODE_INVALID', message: 'This computer has no such code waiting: it was already used, it expired, or Pane restarted since it was made. Ask for a new link, or scan the code it shows now.' };
+      return { ok: false, status: 403, code: 'ERR_PAIRING_CODE_INVALID', message: 'This computer has no such link or code waiting, so nothing was paired. Ask for a new link, or scan the code it shows now.' };
     }
     if (entry.spentAt !== null && entry.expiresAt > entry.spentAt) {
       return { ok: false, status: 410, code: 'ERR_PAIRING_CODE_USED', message: 'This code was already used. Ask for a new link, or scan the new code on the computer.' };

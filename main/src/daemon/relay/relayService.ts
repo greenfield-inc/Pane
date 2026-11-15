@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { promises as fs, readFileSync } from 'fs';
+import { existsSync, mkdirSync, promises as fs, readFileSync, writeFileSync } from 'fs';
 import https from 'https';
 import net from 'net';
 import os from 'os';
@@ -86,7 +86,18 @@ export class RelayService {
 
   constructor(private readonly deps: RelayServiceDeps) {
     this.env = deps.env ?? process.env;
-    this.exchange = new PairingExchange({ addClient: deps.addClient, log: deps.log });
+    const pendingFile = path.join(deps.dataDir, 'relay', 'pending-links.json');
+    this.exchange = new PairingExchange({
+      addClient: deps.addClient,
+      log: deps.log,
+      store: deps.dataDir ? {
+        read: () => (existsSync(pendingFile) ? readFileSync(pendingFile, 'utf8') : null),
+        write: (text) => {
+          mkdirSync(path.dirname(pendingFile), { recursive: true });
+          writeFileSync(pendingFile, text, { mode: 0o600 });
+        },
+      } : undefined,
+    });
   }
 
   start(): void {

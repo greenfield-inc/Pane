@@ -115,6 +115,19 @@ describe('QR pairing exchange', () => {
     expect(await exchange.exchange({ secret: longLink, label: 'Phone', source: PHONE })).toMatchObject({ ok: true });
   });
 
+  it('keeps a waiting link through a Pane restart, and it still works only once', async () => {
+    let file: string | null = null;
+    let now = Date.parse('2026-11-15T09:00:00Z');
+    const start = () => new PairingExchange({ now: () => now, addClient: async () => {}, store: { read: () => file, write: (text) => { file = text; } } });
+    const { secret } = start().createSecret('24h');
+    expect(file).not.toContain(secret);
+
+    now += 23 * 60 * 60_000;
+    const restarted = start();
+    await expect(restarted.exchange({ secret, label: 'Studio Mac', source: PHONE })).resolves.toMatchObject({ ok: true });
+    await expect(start().exchange({ secret, label: 'Studio Mac', source: PHONE })).resolves.toMatchObject({ ok: false, code: 'ERR_PAIRING_CODE_USED' });
+  });
+
   it('records a computer that redeems a secret as a linked computer', async () => {
     const { exchange, saved } = setup();
     const { secret } = exchange.createSecret('1h');
