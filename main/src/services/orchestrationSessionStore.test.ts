@@ -364,4 +364,17 @@ describe('OrchestrationSessionStore', () => {
 
     expect(new OrchestrationSessionStore(filePath).read().sessions[0].associations).toEqual([]);
   });
+
+  it("keeps where each machine's next catch-up starts through a reload, and through a Session write", () => {
+    const filePath = createStorePath();
+    const remote = { paneId: 'pane-devbox', panelIds: [], attachedAt: '2026-09-16T12:00:00.000Z', machine: { id: 'tailnet-devbox', label: 'parsa-devbox' } };
+    const store = new OrchestrationSessionStore(filePath);
+    store.write({ version: ORCHESTRATION_SESSION_STORE_VERSION, sessions: [createRecord({ associations: [remote] })] });
+    store.saveRemoteCursor('tailnet-devbox', { epoch: 'e-1', gen: 42 });
+    store.write(store.read());
+
+    const reloaded = new OrchestrationSessionStore(filePath);
+    expect(reloaded.remoteCursor('tailnet-devbox')).toEqual({ epoch: 'e-1', gen: 42 });
+    expect(reloaded.remoteMember('pane-devbox')).toMatchObject({ sessionId: 'session-1', machine: { label: 'parsa-devbox' } });
+  });
 });

@@ -86,7 +86,7 @@ export const AGENTS_CONFIG = {
           "--permission-mode",
           "default",
           "--strict-mcp-config",
-          "--disallowedTools=Bash,Edit,Write,NotebookEdit"
+          "--tools=Read,Grep,Glob"
         ],
         "output": "result-json"
       }
@@ -166,6 +166,9 @@ export const AGENTS_CONFIG = {
           "--json",
           "--ephemeral",
           "--skip-git-repo-check",
+          "--ignore-user-config",
+          "--disable",
+          "apps",
           "-s",
           "read-only"
         ],
@@ -318,7 +321,7 @@ export const AGENTS_CONFIG = {
           "plan"
         ],
         "env": {
-          "OPENCODE_CONFIG_CONTENT": "{\"permission\":{\"edit\":\"deny\",\"bash\":\"deny\"}}"
+          "OPENCODE_CONFIG_CONTENT": "{\"permission\":{\"edit\":\"deny\",\"bash\":\"deny\"},\"tools\":{\"*_*\":false}}"
         },
         "output": "opencode-jsonl"
       }

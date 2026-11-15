@@ -7,8 +7,14 @@ import { boundary, decodeOptionalBoundary } from '../../../shared/validation/bou
 import { reasonOf } from '../../../shared/paneError';
 import { workspaceEntrySchema } from './workspaceJournalSchema';
 
-/** The entries a member Pane's machine sends to a Session on another computer. */
-export const REMOTE_MEMBER_KINDS: ReadonlySet<RunpaneWorkspaceEntryKind> = new Set<RunpaneWorkspaceEntryKind>(['agent.report', 'agent.blocked', 'panel.exited']);
+/**
+ * The entries a member Pane's machine sends to a Session on another computer. `agent.busy` clears
+ * a blocked item once the worker moves on, as it does for a local Pane.
+ */
+export const REMOTE_MEMBER_KINDS: ReadonlySet<RunpaneWorkspaceEntryKind> = new Set<RunpaneWorkspaceEntryKind>(['agent.report', 'agent.blocked', 'agent.busy', 'panel.exited']);
+
+/** Journal resets one catch-up follows (a truncated cursor, then a new epoch) before it gives up until the next connect. */
+const MAX_RESETS = 3;
 
 /** How many entries one catch-up read asks for; a longer backlog is read in pages. */
 const PAGE = 256;
@@ -21,12 +27,13 @@ export interface RemoteMemberEventsDeps {
   };
   journal: {
     append(entry: Omit<RunpaneWorkspaceEntry, 'gen' | 'at'>): RunpaneWorkspaceEntry;
-    /** The newest entry recorded from this machine, which is where its next catch-up starts. */
-    latestFromMachine(machineId: string): RunpaneWorkspaceEntry | undefined;
   };
   members: {
     remoteMember(paneId: string): { machine: OrchestrationMemberMachine } | undefined;
     remoteMemberPaneIds(machineId: string): string[];
+    /** Where the machine's next catch-up starts: the newest entry recorded from it. */
+    remoteCursor(machineId: string): JournalPosition | undefined;
+    saveRemoteCursor(machineId: string, cursor: JournalPosition): void;
   };
 }
 
@@ -41,10 +48,17 @@ interface JournalCursor {
   epoch?: string;
 }
 
+/** An entry's place in a machine's journal. */
+interface JournalPosition {
+  epoch: string;
+  gen: number;
+}
+
 const waitResultSchema = boundary.object({
   epoch: boundary.string,
   entries: boundary.array(boundary.json),
-  reset: boundary.optional(boundary.json),
+  reset: boundary.optional(boundary.object({ reason: boundary.string })),
+  dropped: boundary.optional(boundary.number),
 });
 
 /**
@@ -98,8 +112,9 @@ export class RemoteMemberEvents {
   }
 
   private async readBacklog(machineId: string, paneIds: string[]): Promise<void> {
-    const latest = this.deps.journal.latestFromMachine(machineId)?.machine;
+    const latest = this.deps.members.remoteCursor(machineId);
     let request: JournalCursor = latest ? { since: latest.gen, epoch: latest.epoch } : { since: 0 };
+    let resets = 0;
     for (;;) {
       const result = decodeOptionalBoundary(await this.deps.machines.invoke(machineId, 'runpane:workspace:wait', [{
         ...request,
@@ -109,9 +124,12 @@ export class RemoteMemberEvents {
         kinds: [...REMOTE_MEMBER_KINDS],
       }]), waitResultSchema);
       if (!result) throw new Error('its journal read had an unexpected shape');
-      // Its journal started over: everything in the new one is unread.
       if (result.reset !== undefined) {
-        request = { since: 0, epoch: result.epoch };
+        if (++resets > MAX_RESETS) throw new Error(`its journal kept resetting (${result.reset.reason})`);
+        // Older entries rolled out of its journal: read on from the oldest it still keeps.
+        if (result.reset.reason === 'cursor-truncated' && result.dropped !== undefined) request = { since: request.since + result.dropped, epoch: result.epoch };
+        // Its journal started over: everything in the new one is unread.
+        else request = { since: 0, epoch: result.epoch };
         continue;
       }
       const entries = result.entries.flatMap(raw => decodeOptionalBoundary(raw, workspaceEntrySchema) ?? []);
@@ -126,7 +144,7 @@ export class RemoteMemberEvents {
     if (!REMOTE_MEMBER_KINDS.has(entry.kind) || entry.replay || entry.baseline || entry.machine) return;
     const member = this.deps.members.remoteMember(entry.paneId);
     if (member?.machine.id !== machineId) return;
-    const latest = this.deps.journal.latestFromMachine(machineId)?.machine;
+    const latest = this.deps.members.remoteCursor(machineId);
     if (latest && latest.epoch === epoch && entry.gen <= latest.gen) return;
     this.deps.journal.append({
       kind: entry.kind,
@@ -142,5 +160,6 @@ export class RemoteMemberEvents {
       screenLines: entry.screenLines,
       machine: { id: machineId, label: member.machine.label, epoch, gen: entry.gen },
     });
+    this.deps.members.saveRemoteCursor(machineId, { epoch, gen: entry.gen });
   }
 }

@@ -121,6 +121,8 @@ interface TabMessage {
   answer: boolean;
   /** A reply's line: marks that reply delivered, or passes it to the next reader when its tab can't take it. */
   reply?: string;
+  /** The asking tab's Pane, which says which machine a Session member on another computer is on. */
+  paneId?: string;
 }
 
 /** Which item Autopilot's action left in place: for a rewrite, the new one. */
@@ -185,7 +187,7 @@ export interface NotifyQueueEnvironment {
    * Types into a tab when an agent is at its prompt. `busy`: try again later. `gone`: the tab is no
    * more. `unsupported`: Pane can't see what runs in that terminal (Windows, WSL, the PTY host).
    */
-  typeIntoTab?: (panelId: string, text: string) => Promise<'delivered' | 'busy' | 'gone' | 'unsupported'>;
+  typeIntoTab?: (panelId: string, text: string, paneId?: string) => Promise<'delivered' | 'busy' | 'gone' | 'unsupported'>;
   /** Whether a tab still exists (an orchestrator that relayed a question). Absent: yes. */
   tabAlive?: (panelId: string) => boolean;
   /** Autopilot's chat tab, while Autopilot is on; it reads replies no one else can (D-258). */
@@ -1205,6 +1207,7 @@ export class NotifyQueue extends EventEmitter {
     if (to?.reply && this.tabMessages.some(message => message.reply === to.reply)) return;
     // One line: a newline in an answer would submit early, and a control character is a key press.
     const message: TabMessage = { itemId: item.id, panelId, text: text.replace(/\p{Cc}+/gu, ' '), answer };
+    if (!to && item.source.paneId) message.paneId = item.source.paneId;
     if (to?.reply) message.reply = to.reply;
     this.tabMessages.push(message);
     this.flushTabMessages();
@@ -1219,7 +1222,7 @@ export class NotifyQueue extends EventEmitter {
       this.tabsTyping.add(message.panelId);
       if (message.reply) this.repliesTyping.add(message.reply);
       let again = false;
-      void type(message.panelId, message.text).then((outcome) => {
+      void type(message.panelId, message.text, message.paneId).then((outcome) => {
         if (outcome === 'busy') return;
         again = true;
         this.tabMessages = this.tabMessages.filter(other => other !== message);
