@@ -70,6 +70,11 @@ pub struct Config {
     )]
     pub acme_directory: String,
 
+    /// The CA domain the DNS helper names in CAA records: the only CA that may issue for <D> and
+    /// computer names, with no wildcard for all of <D>. Empty serves no CAA records.
+    #[arg(long, env = "PANE_RELAY_CAA_ISSUER", default_value = "letsencrypt.org")]
+    pub caa_issuer: String,
+
     /// Development mode: generate a self-signed certificate when --cert/--key are absent.
     #[arg(long, env = "PANE_RELAY_DEV")]
     pub dev: bool,

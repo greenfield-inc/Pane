@@ -4,7 +4,8 @@ use crate::agent::is_private;
 use crate::id::is_valid_id;
 use crate::state::{State, prefix};
 use hickory_proto::op::{Edns, Message, MessageType, OpCode, ResponseCode};
-use hickory_proto::rr::rdata::{A, NS, SOA, TXT};
+use hickory_proto::rr::rdata::caa::KeyValue;
+use hickory_proto::rr::rdata::{A, CAA, NS, SOA, TXT};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -44,6 +45,16 @@ fn ns_names(state: &State) -> Vec<String> {
 
 fn name(s: &str) -> Name {
     Name::from_ascii(format!("{s}.")).unwrap_or_else(|_| Name::root())
+}
+
+/// The CAA issuer: `--caa-issuer` as a domain without the trailing dot (RFC 8659), or None
+/// when it is empty and no CAA records are served.
+fn caa_issuer(state: &State) -> Option<Name> {
+    let issuer = state.cfg.caa_issuer.trim().trim_end_matches('.');
+    if issuer.is_empty() {
+        return None;
+    }
+    Name::from_ascii(issuer).ok()
 }
 
 fn soa(state: &State) -> SOA {
@@ -106,6 +117,15 @@ fn lookup(state: &State, qname: &str, qtype: RecordType) -> Lookup {
                     .map(|n| RData::NS(NS(name(n))))
                     .collect(),
                 RecordType::SOA => vec![RData::SOA(soa(state))],
+                // One CA, and no `*.<D>`: that one certificate would cover every computer's name.
+                RecordType::CAA => caa_issuer(state)
+                    .map(|issuer| {
+                        vec![
+                            RData::CAA(CAA::new_issue(false, Some(issuer), Vec::new())),
+                            RData::CAA(CAA::new_issuewild(false, None, Vec::new())),
+                        ]
+                    })
+                    .unwrap_or_default(),
                 _ => Vec::new(),
             };
             return Lookup::Found(records);
@@ -124,6 +144,18 @@ fn lookup(state: &State, qname: &str, qtype: RecordType) -> Lookup {
             (a(state.cfg.region_addr(region)), None)
         }
         [id] if is_valid_id(id) => match state.registry.get(id) {
+            // A computer's own names, `*.<id>.<D>` included, only through DNS-01 at Let's Encrypt.
+            Some(_) if qtype == RecordType::CAA => {
+                let dns01 = || vec![KeyValue::new("validationmethods", "dns-01")];
+                let issuer = caa_issuer(state);
+                return Lookup::Found(match issuer {
+                    Some(issuer) => vec![
+                        RData::CAA(CAA::new_issue(false, Some(issuer.clone()), dns01())),
+                        RData::CAA(CAA::new_issuewild(false, Some(issuer), dns01())),
+                    ],
+                    None => Vec::new(),
+                });
+            }
             Some(e) => (a(state.cfg.region_addr(&e.region)), None),
             None => return Lookup::NxDomain,
         },
@@ -246,21 +278,36 @@ pub fn answer(state: &State, query: &[u8], max_len: usize) -> Option<Vec<u8>> {
     truncated.to_vec().ok()
 }
 
+/// The most client prefixes the rate limiter tracks at once.
+const RATE_PREFIXES: usize = 65_536;
+
 /// Response-rate limiting: answers per client prefix in the current second.
 #[derive(Default)]
 struct Rate {
     seen: HashMap<IpAddr, (Instant, u32)>,
+    pruned: Option<Instant>,
 }
 
 impl Rate {
-    /// Counts one answer for `ip`'s /24 (IPv6 /56); false past `limit` this second.
-    fn admit(&mut self, ip: IpAddr, limit: u32) -> bool {
-        let now = Instant::now();
-        if self.seen.len() > 65_536 {
-            self.seen
-                .retain(|_, (start, _)| now.duration_since(*start) < Duration::from_secs(1));
+    /// Counts one answer for `ip`'s /24 (IPv6 /56); false past `limit` this second. While the
+    /// table is full, new prefixes are over the limit: pruning it runs at most once a second, so
+    /// a flood from spoofed sources can't make every packet scan the whole table.
+    fn admit(&mut self, ip: IpAddr, limit: u32, now: Instant) -> bool {
+        let key = prefix(ip, 24, 56);
+        if self.seen.len() >= RATE_PREFIXES && !self.seen.contains_key(&key) {
+            if self
+                .pruned
+                .is_none_or(|at| now.duration_since(at) >= Duration::from_secs(1))
+            {
+                self.seen
+                    .retain(|_, (start, _)| now.duration_since(*start) < Duration::from_secs(1));
+                self.pruned = Some(now);
+            }
+            if self.seen.len() >= RATE_PREFIXES {
+                return false;
+            }
         }
-        let (start, count) = self.seen.entry(prefix(ip, 24, 56)).or_insert((now, 0));
+        let (start, count) = self.seen.entry(key).or_insert((now, 0));
         if now.duration_since(*start) >= Duration::from_secs(1) {
             *start = now;
             *count = 0;
@@ -287,7 +334,7 @@ pub async fn serve_udp(state: Arc<State>, socket: UdpSocket) {
             .unwrap_or(512)
             .clamp(512, 1232);
         // Over the rate, max 0 truncates every answer to its header and question.
-        let max = if rate.admit(from.ip(), state.cfg.dns_responses_per_sec) {
+        let max = if rate.admit(from.ip(), state.cfg.dns_responses_per_sec, Instant::now()) {
             max
         } else {
             0
@@ -324,5 +371,39 @@ async fn tcp_conn(state: &State, mut s: TcpStream) -> std::io::Result<()> {
         };
         s.write_u16(resp.len() as u16).await?;
         s.write_all(&resp).await?;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    fn client(n: u32) -> IpAddr {
+        // One address per /24.
+        IpAddr::V4(Ipv4Addr::from(n << 8))
+    }
+
+    #[test]
+    fn a_full_table_turns_new_clients_away_until_a_second_passes_without_scanning_per_packet() {
+        let mut rate = Rate::default();
+        let start = Instant::now();
+        for n in 0..RATE_PREFIXES as u32 {
+            assert!(rate.admit(client(n), 20, start));
+        }
+        // Spoofed sources in fresh /24s within the same second: refused, and the table is not rescanned.
+        let flood = Instant::now();
+        for n in 0..100_000u32 {
+            assert!(!rate.admit(client(RATE_PREFIXES as u32 + n), 20, start));
+        }
+        assert!(
+            flood.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            flood.elapsed()
+        );
+        // A client already counted this second is still answered.
+        assert!(rate.admit(client(7), 20, start));
+        // A second later the old entries are dropped and new clients are answered again.
+        assert!(rate.admit(client(1_000_000), 20, start + Duration::from_secs(1)));
     }
 }

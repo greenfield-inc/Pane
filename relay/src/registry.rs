@@ -447,21 +447,23 @@ pub fn acme_mac(secret: &str, secs: u64, path: &str, body: &[u8]) -> String {
     )
 }
 
-/// Checks an `acme_mac` value against the secret, the request and the clock.
-pub fn acme_mac_ok(secret: &str, given: &str, path: &str, body: &[u8]) -> bool {
-    let Some(secs) = given
+/// The time an `acme_mac` value was made, when it is within the window of the clock.
+pub fn acme_mac_fresh(given: &str) -> Option<u64> {
+    let secs = given
         .strip_prefix("Pane-HMAC ")
         .and_then(|v| v.split(' ').next())
-        .and_then(|t| t.parse::<u64>().ok())
-    else {
-        return false;
-    };
+        .and_then(|t| t.parse::<u64>().ok())?;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    if now.abs_diff(secs) > ACME_MAC_WINDOW_SECS {
+    (now.abs_diff(secs) <= ACME_MAC_WINDOW_SECS).then_some(secs)
+}
+
+/// Checks an `acme_mac` value against the secret, the request and the clock.
+pub fn acme_mac_ok(secret: &str, given: &str, path: &str, body: &[u8]) -> bool {
+    let Some(secs) = acme_mac_fresh(given) else {
         return false;
-    }
+    };
     let want = acme_mac(secret, secs, path, body);
     want.len() == given.len()
         && want
