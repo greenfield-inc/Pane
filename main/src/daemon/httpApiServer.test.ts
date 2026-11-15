@@ -1080,10 +1080,11 @@ describe('PaneRemoteHttpApiServer', () => {
 });
 
 describe('QR-paired phones and linked computers', () => {
-  const STUDIO = { id: 'studiostudiostud', name: 'Studio Mac', domain: 'runpane.net', address: 'https://studiostudiostud.runpane.net', local: [], fingerprint: 'studio-key' };
-  const ROGUE = { id: 'roguerogueroguer', name: 'Totally your laptop', domain: 'runpane.net', address: 'https://roguerogueroguer.runpane.net', local: [], fingerprint: 'rogue-key' };
-  const BUILD_BOX = { id: 'buildboxbuildbox', name: 'Build Box', domain: 'runpane.net', address: 'https://buildboxbuildbox.runpane.net', local: [], fingerprint: 'build-key' };
-  const LAPTOP = { id: 'laptoplaptoplapt', name: 'Travel Laptop', domain: 'runpane.net', address: 'https://laptoplaptoplapt.runpane.net', local: [], fingerprint: 'laptop-key' };
+  // Real computer ids and key fingerprints: the id is the first 80 bits of the fingerprint, in base32.
+  const STUDIO = { id: 'kqyutsssbsalgvyf', name: 'Studio Mac', domain: 'runpane.net', address: 'https://kqyutsssbsalgvyf.runpane.net', local: [], fingerprint: 'VDFJylIMgLNXBfifCTjEhM6xs4EiuRSX7-xqISiCiWk' };
+  const ROGUE = { id: 'jkbgxxed5x35pv6o', name: 'Totally your laptop', domain: 'runpane.net', address: 'https://jkbgxxed5x35pv6o.runpane.net', local: [], fingerprint: 'SoJr3IPt99fXzhVYcdF9L_FH_TlSBJ7Rv-Xy_e5b-1g' };
+  const BUILD_BOX = { id: 'q5j35n3lgltya74u', name: 'Build Box', domain: 'runpane.net', address: 'https://q5j35n3lgltya74u.runpane.net', local: [], fingerprint: 'h1O-t2sy54B_lBiz16e7PmqNnHCkiRt-_yW5pJDj4C8' };
+  const LAPTOP = { id: 'dohp3zsqmo4uk2kn', name: 'Travel Laptop', domain: 'runpane.net', address: 'https://dohp3zsqmo4uk2kn.runpane.net', local: [], fingerprint: 'G4795lBjuUVpTRcds0IPBq5CcLguVvcUvt3LbgEP4j0' };
 
   /**
    * This computer, with a QR-paired phone (`phone-token`) and Studio Mac linked by an earlier scan
@@ -1181,8 +1182,8 @@ describe('QR-paired phones and linked computers', () => {
   });
 
   it.each([
-    ['another relay domain', { ...ROGUE, domain: 'evil.example', address: 'https://roguerogueroguer.evil.example' }],
-    ['an address outside its id', { ...ROGUE, address: 'https://studiostudiostud.runpane.net' }],
+    ['another relay domain', { ...ROGUE, domain: 'evil.example', address: 'https://jkbgxxed5x35pv6o.evil.example' }],
+    ['an address outside its id', { ...ROGUE, address: 'https://kqyutsssbsalgvyf.runpane.net' }],
     ['an address off the relay', { ...ROGUE, address: 'https://evil.example' }],
   ])('refuses to link a peer at %s, and changes nothing', async (_case, peer) => {
     const computer = await startComputer();
@@ -1196,6 +1197,26 @@ describe('QR-paired phones and linked computers', () => {
       expect.objectContaining({ label: 'Ana’s iPhone' }),
       expect.objectContaining({ label: 'Studio Mac' }),
     ]);
+  });
+
+  it('refuses to link a peer whose key fingerprint is not the one its id names, so a phone cannot swap the pinned key', async () => {
+    const computer = await startComputer();
+    const swapped = { ...STUDIO, fingerprint: ROGUE.fingerprint };
+
+    for (const [channel, request] of [['relay:client:mint-link', { peer: { ...ROGUE, fingerprint: STUDIO.fingerprint } }], ['relay:client:save-link', { peer: swapped, token: 'stolen' }]] as const) {
+      await expect(computer.invoke('phone-token', channel, request))
+        .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_LINK_KEY_MISMATCH' } } });
+    }
+    await expect(computer.registry.invoke('relay:linked-computers', [])).resolves.toEqual([expect.objectContaining({ name: 'Studio Mac' })]);
+  });
+
+  it('hands out tokens on its linked computers only to a paired phone, never to a linked computer, whose own removal would not revoke them', async () => {
+    const computer = await startComputer({ phoneId: 'pane-native-ana' });
+
+    await expect(computer.invoke('studio-token', 'relay:client:computers', { known: [] }))
+      .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_PHONE_ONLY' } } });
+    expect(computer.call).not.toHaveBeenCalled();
+    await expect(computer.invoke('phone-token', 'relay:client:computers', { known: [] })).resolves.toMatchObject({ statusCode: 200 });
   });
 
   it('names the computers an unlinked computer was removed from, never the unlinked computer itself', async () => {

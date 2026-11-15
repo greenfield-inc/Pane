@@ -26,6 +26,12 @@ id = lowercase base32 (RFC 4648, no padding) of the first 10 bytes of
 That gives 16 characters from `a-z2-7`. Only the key holder can use the id,
 so the relay needs no name registration and no database of owners.
 
+The key fingerprint the Pane apps pin is base64url `sha256(SubjectPublicKeyInfo
+DER)`, so its first 80 bits are the id. Apps and computers refuse a computer
+whose fingerprint does not start with its id (`relayKeyMatchesId`), so a pin
+saved from a scanned id always names that computer's own key, even if someone
+else holds a certificate for `<id>.<D>`.
+
 | Name | Resolves to | Served by |
 | --- | --- | --- |
 | `<D>` | relay apex addresses | relay API, pairing landing page, app-link files |

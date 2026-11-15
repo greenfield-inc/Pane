@@ -12,7 +12,7 @@ import {
 import type { RelayComputer, RelayComputerGrant, RelayDevice } from '../../../../shared/types/relay';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../../types/config';
-import { isRelayComputerUnder } from '../../../../shared/remoteClient/relay';
+import { isRelayComputerUnder, relayKeyMatchesId } from '../../../../shared/remoteClient/relay';
 
 /** Commands only a linked computer may call, with its link token. */
 export const RELAY_COMPUTER_COMMANDS = {
@@ -167,6 +167,13 @@ export class RelayLinks {
     if (!domain) {
       throw new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so it was not linked.', 'Turn on phone access in Settings › Remote Access, then scan both computers again.');
     }
+    if (!relayKeyMatchesId(peer)) {
+      throw new PaneError(
+        'ERR_RELAY_LINK_KEY_MISMATCH',
+        `${peer.name}'s key fingerprint is not the one its id ${peer.id} names, so it was not linked.`,
+        'Scan both computers again with the Pane app.',
+      );
+    }
     if (!isRelayComputerUnder(peer, domain)) {
       throw new PaneError(
         'ERR_RELAY_LINK_OUTSIDE_DOMAIN',
@@ -271,7 +278,8 @@ export class RelayLinks {
 
   /** A paired phone's "Your computers" refresh. */
   computersFor(callerClientId: string, known: readonly string[]): Promise<RelayComputerGrant[]> {
-    const phone = this.caller(callerClientId);
+    // A phone only: a token handed to a linked computer would outlive that computer's removal.
+    const phone = this.callerPhone(callerClientId);
     return this.grantsFor({ label: phone.label, phoneId: phone.phoneId }, known);
   }
 
