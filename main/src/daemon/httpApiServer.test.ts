@@ -1,6 +1,7 @@
 import http from 'http';
 import zlib from 'zlib';
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
+import type { AddressInfo } from 'net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRemoteDaemonConfig, NATIVE_APP_WEBSOCKET_ORIGIN, type RemoteDaemonClientRecord, type RemoteDaemonConfig, type RemoteInvokeRequest } from '../../../shared/types/remoteDaemon';
 import { PaneCommandRegistry, teammatePaneCaller } from './commandRegistry';
@@ -351,6 +352,37 @@ describe('PaneRemoteHttpApiServer', () => {
     });
   });
 
+  describe('with "Require pairing" turned off', () => {
+    async function startUnpaired(relayEnabled: boolean) {
+      const registry = new PaneCommandRegistry();
+      registry.register('sessions:get-all', async () => [{ id: 'session-1' }]);
+      const config = createEnabledRemoteConfig({ pairingRequired: false });
+      config.relay = { enabled: relayEnabled };
+      const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config));
+      activeServers.push(server);
+      await server.start();
+      return server;
+    }
+    const call = { channel: 'sessions:get-all', args: [] };
+
+    it('still requires a token while phone access through the relay is on, since the relay forwards the internet to this listener', async () => {
+      const server = await startUnpaired(true);
+      await expect(requestJson(server, 'POST', '/invoke', call)).resolves.toMatchObject({ statusCode: 401, body: { ok: false } });
+      await expect(requestJson(server, 'POST', '/invoke', call, 'secret-token')).resolves.toMatchObject({ statusCode: 200 });
+    });
+
+    it('answers a local caller without a token, but refuses a web page on another site and a rebound host name', async () => {
+      const server = await startUnpaired(false);
+      const port = server.getAddress()?.port;
+      await expect(requestJson(server, 'POST', '/invoke', call)).resolves.toMatchObject({ statusCode: 200 });
+      await expect(requestJson(server, 'POST', '/invoke', call, undefined, { Origin: `http://127.0.0.1:${port}` })).resolves.toMatchObject({ statusCode: 200 });
+      await expect(requestJson(server, 'POST', '/invoke', call, undefined, { Origin: 'https://evil.example' }))
+        .resolves.toMatchObject({ statusCode: 401, body: { ok: false, error: { code: 'ERR_REMOTE_DAEMON_AUTH_REQUIRED' } } });
+      await expect(requestJson(server, 'POST', '/invoke', call, undefined, { Host: `evil.example:${port}`, Origin: `http://evil.example:${port}` }))
+        .resolves.toMatchObject({ statusCode: 401 });
+    });
+  });
+
   it.each(['credentials:shared:get', 'credentials:shared:apply'])(
     'refuses %s when the host does not require pairing, so no unpaired caller reads keys', async channel => {
       const registry = new PaneCommandRegistry();
@@ -422,6 +454,50 @@ describe('PaneRemoteHttpApiServer', () => {
       .resolves.toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'travel-laptop' } } });
     await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:machine:info', args: [] }, 'secret-token'))
       .resolves.toMatchObject({ statusCode: 403, body: { ok: false, error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } } });
+  });
+
+  describe('a paired device removed while its streams are open', () => {
+    async function startWithRemovableClient(options: { deepgramListenEndpoint?: string } = {}) {
+      const registry = new PaneCommandRegistry();
+      let config = createEnabledRemoteConfig();
+      const server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) }, { heartbeatIntervalMs: 50, ...options });
+      activeServers.push(server);
+      await server.start();
+      const remove = () => { config = { ...config, host: { ...config.host, clients: [] } }; };
+      return { server, remove };
+    }
+
+    it('loses its event stream within a heartbeat, even when no event is sent', async () => {
+      const { server, remove } = await startWithRemovableClient();
+      const stream = await openEventStream(server, 'secret-token');
+      await stream.nextEvent();
+      remove();
+      await expect(Promise.race([stream.ended.then(() => 'ended'), new Promise((resolve) => setTimeout(() => resolve('still open'), 1000))])).resolves.toBe('ended');
+    });
+
+    it('loses its voice stream within a heartbeat', async () => {
+      const upstream = new WebSocketServer({ port: 0 });
+      let upstreamClosed = false;
+      upstream.on('connection', (socket) => socket.once('close', () => { upstreamClosed = true; }));
+      await new Promise<void>((resolve) => upstream.once('listening', resolve));
+      vi.stubEnv('DEEPGRAM_API_KEY', 'test-key-0123456789abcdef');
+      try {
+        // SAFETY: a TCP server that is listening reports an AddressInfo.
+        const { server, remove } = await startWithRemovableClient({ deepgramListenEndpoint: `ws://127.0.0.1:${(upstream.address() as AddressInfo).port}` });
+        const socket = new WebSocket(`ws://127.0.0.1:${server.getAddress()?.port}/voice/deepgram-stream?access_token=secret-token`);
+        let closed = false;
+        socket.once('close', () => { closed = true; });
+        await new Promise<void>((resolve, reject) => {
+          socket.once('open', () => resolve());
+          socket.once('error', reject);
+        });
+        remove();
+        await vi.waitFor(() => expect([closed, upstreamClosed]).toEqual([true, true]), { timeout: 1000 });
+      } finally {
+        vi.unstubAllEnvs();
+        await new Promise<void>((resolve) => upstream.close(() => resolve()));
+      }
+    });
   });
 
   it('records when a paired phone last reached this computer, saving it at most once a minute', async () => {

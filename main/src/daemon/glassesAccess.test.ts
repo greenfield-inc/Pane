@@ -299,6 +299,19 @@ describe('glasses on the workspace listener', () => {
     expect((await input('\r')).status).toBe(200);
   });
 
+  it('passes glasses only the panel and the text they dictated, never attachments or other submit options', async () => {
+    const host = await setup();
+    const { token } = await host.pair();
+    const response = await host.invoke('runpane:panels:submit', [{
+      panelId: 'panel-1', input: 'fix the tests', source: 'user', asFilePointer: true, attachments: ['/Users/owner/.ssh/id_ed25519'], interrupt: true,
+    }], host.fromGlasses(token));
+    expect(response.status).toBe(200);
+    expect(host.calls.at(-1)).toEqual({ channel: 'runpane:panels:submit', args: [{ panelId: 'panel-1', input: 'fix the tests', source: 'user' }] });
+    const malformed = await host.invoke('runpane:panels:submit', [{ panelId: 'panel-1' }], host.fromGlasses(token));
+    expect(malformed.status).toBe(400);
+    expect(host.calls).toHaveLength(1);
+  });
+
   it('streams Notify, status and list events to glasses, never terminal output, and closes the stream on revoke', async () => {
     const host = await setup({ heartbeatIntervalMs: 50 });
     const { token } = await host.pair();
