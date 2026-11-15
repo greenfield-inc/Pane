@@ -42,6 +42,9 @@ function onThisComputerOnly(): void {
   }
 }
 
+/** How long a link waits for phone access to start: connecting and, the first time, getting a certificate. */
+const RELAY_READY_TIMEOUT_MS = 120_000;
+
 export function registerRelayCommands(
   registry: PaneCommandRegistry,
   relay: Pick<RelayService, 'getStatus' | 'createPairingCode' | 'computerInfo'>,
@@ -53,21 +56,40 @@ export function registerRelayCommands(
   registry.register(RELAY_COMMANDS.status, () => relay.getStatus());
 
   // Turning phone access on also turns on the pairing listener the relay forwards to.
+  const setEnabled = (on: boolean) => configManager.updateConfigWith((current) => {
+    const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
+    return {
+      remoteDaemon: {
+        ...remote,
+        host: on ? { ...remote.host, config: { ...remote.host.config, enabled: true, pairingRequired: true } } : remote.host,
+        relay: { ...remote.relay, enabled: on },
+      },
+    };
+    });
   registry.register(RELAY_COMMANDS.setEnabled, async (enabled: PaneCommandValue) => {
     onThisComputerOnly();
-    const on = decodeBoundary(enabled, boundary.boolean);
-    await configManager.updateConfigWith((current) => {
-      const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
-      return {
-        remoteDaemon: {
-          ...remote,
-          host: on ? { ...remote.host, config: { ...remote.host.config, enabled: true, pairingRequired: true } } : remote.host,
-          relay: { ...remote.relay, enabled: on },
-        },
-      };
-    });
+    await setEnabled(decodeBoundary(enabled, boundary.boolean));
     return relay.getStatus();
   });
+
+  /** Links are made over the relay: a computer with phone access off (one with no screen, say) turns it on and waits for it. */
+  const relayReady = async (): Promise<void> => {
+    if (relay.computerInfo()) return;
+    await setEnabled(true);
+    const deadline = Date.now() + RELAY_READY_TIMEOUT_MS;
+    for (;;) {
+      const status = relay.getStatus();
+      if (status.phase === 'ready' && relay.computerInfo()) return;
+      if (status.phase === 'error' || Date.now() > deadline) {
+        throw new PaneError(
+          'ERR_RELAY_NOT_READY',
+          `Phone access did not get ready on this computer${status.lastError ? `: ${status.lastError}` : ''}, so the link was not used.`,
+          'Check this computer can reach the internet, then run the same command again; the link still works until it expires.',
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  };
 
   registry.register(RELAY_COMMANDS.setAddress, async (address: PaneCommandValue) => {
     onThisComputerOnly();
@@ -93,9 +115,11 @@ export function registerRelayCommands(
     onThisComputerOnly();
     return linking.preview(decodeBoundary(request, linkRequestSchema).link);
   });
-  registry.register(RELAY_COMMANDS.redeemLink, (request: PaneCommandValue) => {
+  registry.register(RELAY_COMMANDS.redeemLink, async (request: PaneCommandValue) => {
     onThisComputerOnly();
-    return linking.redeem(decodeBoundary(request, linkRequestSchema).link);
+    const { link } = decodeBoundary(request, linkRequestSchema);
+    await relayReady();
+    return linking.redeem(link);
   });
 
   // Called by paired phones and linked computers; the HTTP server supplies the caller.

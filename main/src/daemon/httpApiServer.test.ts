@@ -1470,6 +1470,29 @@ describe('workspace identity mode', () => {
   };
   const passwordIs = (expected: string) => (secret: string) => (secret === expected ? 'valid' as const : 'invalid' as const);
 
+  it('takes a linked computer\'s or phone\'s token from any login (D-51), and only the linked computer runs machine commands', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:machine:info', () => ({ hostname: 'devbox' }));
+    registry.register('sessions:get-all', () => []);
+    const config = createDefaultRemoteDaemonConfig();
+    config.host.clients = [
+      { id: 'mac', label: 'Mac', createdAt: '2026-11-15T00:00:00Z', tokenHash: hashRemoteDaemonToken('mac-link'), kind: 'computer', computerId: 'macmacmacmacmac0' },
+      { id: 'phone', label: 'iPhone', createdAt: '2026-11-15T00:00:00Z', tokenHash: hashRemoteDaemonToken('phone-token') },
+    ];
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config), {
+      workspace: { listenPort: 0, pathSecret: 'serve-secret', access: () => ownerOnly() },
+    });
+    activeServers.push(server);
+    await server.start();
+
+    // Under "Only me", a teammate login with no token is refused; the same login carrying a link's token is let in.
+    expect((await requestJson(server, 'POST', invokePath, invoke, undefined, as(teammate, 'mac-link'))).body).toEqual({ ok: true, result: { hostname: 'devbox' } });
+    expect((await requestJson(server, 'POST', invokePath, { channel: 'sessions:get-all', args: [] }, undefined, as(teammate, 'phone-token'))).statusCode).toBe(200);
+    const phoneMachine = await requestJson(server, 'POST', invokePath, invoke, undefined, as(owner, 'phone-token'));
+    expect(phoneMachine.statusCode).toBe(403);
+    expect(phoneMachine.body).toMatchObject({ error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } });
+  });
+
   it('under "Only me", refuses a different Tailscale login on the same tailnet', async () => {
     const server = await startWorkspaceServer(() => ownerOnly());
     const response = await requestJson(server, 'POST', invokePath, invoke, undefined, as(teammate));

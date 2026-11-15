@@ -1002,7 +1002,9 @@ export class PaneRemoteHttpApiServer {
     const linkedComputer = auth.client?.kind === 'computer' && invokeRequest.channel.startsWith('runpane:machine:');
     // A paired phone or linked computer holds a token only the owner's QR gave out, so it manages this computer's glasses.
     const pairedDeviceGlasses = Boolean(this.glasses && auth.client) && invokeRequest.channel.startsWith('runpane:glasses:');
-    if (!this.workspace && !linkedComputer && !pairedDeviceGlasses && WORKSPACE_ONLY_CHANNEL_PREFIXES.some((prefix) => invokeRequest.channel.startsWith(prefix))) {
+    // A token on the Tailscale listener (D-51) gets what it gets on every other listener, not the owner's Tailscale identity.
+    const ownerIdentity = this.workspace !== undefined && !auth.client;
+    if (!ownerIdentity && !linkedComputer && !pairedDeviceGlasses && WORKSPACE_ONLY_CHANNEL_PREFIXES.some((prefix) => invokeRequest.channel.startsWith(prefix))) {
       this.writeJson(response, 403, {
         ok: false,
         error: {
@@ -1050,7 +1052,8 @@ export class PaneRemoteHttpApiServer {
 
     const login = getSingleHeaderValue(request.headers['tailscale-user-login'])?.trim().toLowerCase();
     // A teammate the workspace lets in may use this computer, but never its Pane secrets.
-    const teammate = this.workspace && !this.workspaceOwnerLogin(request) ? login || 'another tailnet user' : null;
+    // A paired token is the owner's own device, whichever Tailscale login carried it.
+    const teammate = ownerIdentity && !this.workspaceOwnerLogin(request) ? login || 'another tailnet user' : null;
     await this.respondToInvoke(request, response, invokeRequest.requestId, auth.client?.id ?? (login ? `login:${login}` : 'open'), () => this.commandRegistry.invokeRemote(
       invokeRequest.channel,
       this.getInvokeArgsForRequest(invokeRequest, auth, request),
