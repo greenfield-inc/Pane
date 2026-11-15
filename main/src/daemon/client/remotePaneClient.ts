@@ -1202,7 +1202,7 @@ export class RemotePaneClient {
   /**
    * The stream has missed a heartbeat: move to the first other route whose host answers. When none
    * does, the host itself may be down, so the connection stays as it is until the heartbeat limit,
-   * as with one route, and the banner keeps today's timing.
+   * as with one route, and the banner keeps its usual timing.
    */
   private async moveIfAnotherRouteAnswers(): Promise<void> {
     this.failoverTimer = null;

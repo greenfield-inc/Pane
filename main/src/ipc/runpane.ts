@@ -1,4 +1,5 @@
 import { getChatTabManager } from '../services/chatTabs';
+import { computerTailnetName } from '../../../shared/types/remoteComputers';
 import { decodeChatPanelState } from '../services/chatTabs/state';
 import { createChatTab } from './chatTabs';
 import { chatTabLastMessage, chatTabNoTerminal, chatTabOutput, chatTabScreen, submitChatTab, waitForChatTab } from './runpaneChatTabs';
@@ -7310,9 +7311,9 @@ const remoteAssociationRequestSchema = boundary.object({
   panelIds: boundary.optional(boundary.array(boundary.nonEmptyString)),
 });
 
-/** The saved machine a name refers to: its Tailscale machine name, its label, or its profile id. */
+/** The saved computer a name refers to: its Tailscale machine name, its label, or its id. */
 function savedMachineProfile(config: AppConfig, name: string): { id: string; label: string } | undefined {
   const wanted = name.trim().toLowerCase().replace(/\..*$/, '');
-  return (config.remoteDaemon?.client.profiles ?? []).find(profile => [profile.tailnetMachine, profile.label, profile.id]
+  return (config.remoteDaemon?.client.computers ?? []).find(computer => [computerTailnetName(computer)?.machine, computer.label, computer.id]
     .some(value => value?.toLowerCase() === wanted || value?.toLowerCase() === name.trim().toLowerCase()));
 }

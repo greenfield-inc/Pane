@@ -117,8 +117,9 @@ found route needs no new pairing.
 
 Pane connects on the first route that answers. When the connection goes
 silent for 8 seconds, Pane checks the other routes and moves to the first that
-answers, before the "Can't reach" banner appears and without closing your
-Panes. When none answers, the banner shows after the usual 30 seconds. While
+answers, before the connection banner appears and without closing your Panes.
+When none answers, Pane reconnects as it always does, after 12 seconds without
+a heartbeat. While
 on a farther route, Pane checks the nearer ones every minute, and when the
 network changes or the computer wakes, and moves back to the first that
 answers.
