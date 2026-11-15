@@ -107,19 +107,19 @@ describe('buildMachineList', () => {
 
   // Journey 1: the Mac linked by the relay and on the tailnet is one row.
   it('joins a Tailscale machine to the saved computer with its install id, under the name the computer has', () => {
-    const mac: RemoteComputer = { id: 'relay-mac', label: 'Parsas-MacBook-Pro', machineId: 'install-mac', os: 'macOS', routes: [relay('macrelay')] };
+    const mac: RemoteComputer = { id: 'relay-mac', label: 'Studio-Mac', machineId: 'install-mac', os: 'macOS', routes: [relay('macrelay')] };
     const list = buildMachineList(input({
       computers: [mac],
-      tailnet: listing([tailnetMachine('parsas-macbook-pro', 'macOS', 'available', { machineId: 'install-mac' })]),
+      tailnet: listing([tailnetMachine('studio-mac', 'macOS', 'available', { machineId: 'install-mac' })]),
     }));
-    expect(list.map((machine) => machine.name)).toEqual(['studio-mac', 'Parsas-MacBook-Pro']);
-    expect(byName(list, 'Parsas-MacBook-Pro').tailnet?.name).toBe('parsas-macbook-pro');
+    expect(list.map((machine) => machine.name)).toEqual(['studio-mac', 'Studio-Mac']);
+    expect(byName(list, 'Studio-Mac').tailnet?.name).toBe('studio-mac');
   });
 
   it('joins a Tailscale machine whose install id is not known yet by its name', () => {
-    const mac: RemoteComputer = { id: 'relay-mac', label: 'Parsas-MacBook-Pro', routes: [relay('macrelay')] };
-    const list = buildMachineList(input({ computers: [mac], tailnet: listing([tailnetMachine('parsas-macbook-pro', 'macOS', 'available')]) }));
-    expect(list.map((machine) => machine.name)).toEqual(['studio-mac', 'Parsas-MacBook-Pro']);
+    const mac: RemoteComputer = { id: 'relay-mac', label: 'Studio-Mac', routes: [relay('macrelay')] };
+    const list = buildMachineList(input({ computers: [mac], tailnet: listing([tailnetMachine('studio-mac', 'macOS', 'available')]) }));
+    expect(list.map((machine) => machine.name)).toEqual(['studio-mac', 'Studio-Mac']);
   });
 
   // Journey 16: same name, different install ids, two rows.

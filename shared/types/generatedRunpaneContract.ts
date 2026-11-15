@@ -8770,7 +8770,7 @@ export const RUNPANE_CONTRACT = {
       ],
       [
         "link",
-        "https://runpane.net/pair#s=secret&c=odkk3nfdl5dsozxr&n=parsa-devbox",
+        "https://runpane.net/pair#s=secret&c=k7xq2m4n8p3r5t6v&n=parsa-devbox",
         "--yes",
         "--json"
       ]

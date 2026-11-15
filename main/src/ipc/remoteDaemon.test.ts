@@ -879,7 +879,7 @@ describe('remote daemon IPC', () => {
     const initialConfig = createDefaultRemoteDaemonConfig();
     initialConfig.host.config.enabled = true;
     initialConfig.host.access = tailscaleAccess('https://parsa-devbox.taila5e94c.ts.net', '100.115.232.35');
-    const liveAccess = tailscaleAccess('https://parsa-devbox.tail3c2c57.ts.net', '100.65.125.102');
+    const liveAccess = tailscaleAccess('https://parsa-devbox.tail1234.ts.net', '100.65.125.102');
     vi.mocked(readConfiguredTailscaleServeAccess).mockResolvedValue({
       ok: true, access: liveAccess, tailnet: 'bloomapi.org.github', reapplied: true,
     });
@@ -903,7 +903,7 @@ describe('remote daemon IPC', () => {
     const payload = decodePaneRemoteConnection(response.data?.connectionCode ?? '');
     expect(payload).toMatchObject({
       label: 'Office Mac mini',
-      baseUrl: 'https://parsa-devbox.tail3c2c57.ts.net',
+      baseUrl: 'https://parsa-devbox.tail1234.ts.net',
       tunnel: {
         kind: 'tailscale',
         tailscaleIp: '100.65.125.102',
@@ -913,7 +913,7 @@ describe('remote daemon IPC', () => {
     expect(remoteHostRuntimeStateStore.getState().tailnetNotice).toMatchObject({
       tone: 'info',
       title: 'Moved to tailnet bloomapi.org.github',
-      message: expect.stringContaining('New connection codes use https://parsa-devbox.tail3c2c57.ts.net'),
+      message: expect.stringContaining('New connection codes use https://parsa-devbox.tail1234.ts.net'),
     });
     expect(configManager.getConfig().remoteDaemon?.host.clients).toHaveLength(1);
     expectConnectionCodeAuthenticates(configManager, response.data?.connectionCode);

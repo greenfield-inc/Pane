@@ -440,7 +440,7 @@ test('workspace list shows a saved computer without its route tokens', posixOnly
 
 // ---------------------------------------------------------------- runpane link
 
-const LINK = 'https://runpane.net/pair#s=secret&c=odkk3nfdl5dsozxr&n=parsa-devbox';
+const LINK = 'https://runpane.net/pair#s=secret&c=k7xq2m4n8p3r5t6v&n=parsa-devbox';
 
 /** This computer's Pane answering a link's preview and redemption. */
 async function withLinkPane(preview, check) {
