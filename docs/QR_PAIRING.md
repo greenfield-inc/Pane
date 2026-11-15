@@ -11,6 +11,10 @@ computer, on any network. No account, no Tailscale, no port forwarding.
 3. Tap the link. It opens the Pane app, or Pane in the phone's browser when
    the app is not installed.
 
+The iPhone app is in TestFlight. To get it, ask to join on
+[Discord](https://discord.gg/BdMyubeAZn); the dialog and the pairing page
+link there.
+
 The phone shows the computer's sessions a few seconds later. The code works
 once and expires after 10 minutes; the dialog shows a new one after each use.
 

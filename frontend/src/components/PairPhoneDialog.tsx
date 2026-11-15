@@ -6,6 +6,7 @@ import { Button } from './ui/Button';
 import { useRelayPairing, type PairingView } from '../hooks/useRelayPairing';
 import { requestOpenSettings } from '../utils/openSettings';
 import { cn } from '../utils/cn';
+import { DISCORD_INVITE_URL, DiscordIcon } from './DiscordIcon';
 
 /** The code box and its caption keep this footprint in every state. */
 const CODE_BOX = 'h-[200px] w-[200px]';
@@ -145,6 +146,18 @@ export function PairPhoneDialog({ isOpen, onClose }: { isOpen: boolean; onClose:
                 </li>
               ))}
             </ol>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-text-secondary">
+              <span>No Pane app yet? It&apos;s in TestFlight.</span>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                icon={<DiscordIcon className="h-3.5 w-3.5 text-discord" />}
+                onClick={() => void window.electronAPI.openExternal(DISCORD_INVITE_URL)}
+              >
+                Ask to join on Discord
+              </Button>
+            </div>
             <p className="flex gap-2 text-xs text-text-tertiary">
               <ShieldCheck className="mt-px h-3.5 w-3.5 flex-none" aria-hidden="true" />
               On the same Wi-Fi your phone connects directly. Anywhere else, Pane&apos;s servers carry the connection.
