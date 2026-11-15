@@ -244,6 +244,15 @@ impl Registry {
     /// the one offline longest; false when every computer is online.
     pub fn apply(&self, u: &Update) -> bool {
         let mut entries = self.entries.lock().unwrap();
+        // A computer that moved relays: its old relay's offline update can arrive after the
+        // new relay's online one. It says nothing about where the computer is now.
+        if !u.online
+            && entries
+                .get(&u.id)
+                .is_some_and(|e| e.online && e.region != u.region)
+        {
+            return true;
+        }
         if !entries.contains_key(&u.id) && entries.len() >= self.max_entries {
             let oldest = entries
                 .iter()
@@ -360,27 +369,31 @@ impl Registry {
         wait(replies).await
     }
 
-    /// Queues the current entry of each of `ids`, and this relay's own ACME
-    /// values, for every helper without waiting: a restarted helper relearns them.
-    pub fn resync(&self, ids: &[String]) {
-        if self.helpers.is_empty() {
-            return;
-        }
+    /// Marks each of `ids`, the computers connected to this relay, online in
+    /// `region`, and queues them with this relay's own ACME values for every helper
+    /// without waiting: a restarted helper relearns them, and an entry a late update
+    /// from another relay overwrote is put right.
+    pub fn resync(&self, region: &str, ids: &[String]) {
         let updates: Vec<Update> = {
-            let entries = self.entries.lock().unwrap();
+            let mut entries = self.entries.lock().unwrap();
             ids.iter()
                 .filter_map(|id| {
-                    let e = entries.get(id)?;
+                    let e = entries.get_mut(id)?;
+                    e.region = region.to_string();
+                    e.online = true;
                     Some(Update {
                         id: id.clone(),
                         region: e.region.clone(),
                         local: e.local.clone(),
                         txt: Some(e.txt.clone()),
-                        online: e.online,
+                        online: true,
                     })
                 })
                 .collect()
         };
+        if self.helpers.is_empty() {
+            return;
+        }
         let own: Vec<AcmeTxt> = {
             let acme = self.acme.lock().unwrap();
             acme.iter()
