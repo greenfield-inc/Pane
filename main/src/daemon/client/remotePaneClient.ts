@@ -33,7 +33,13 @@ import { decodeListeningPortsSnapshot, type ListeningPortsSnapshot } from '../..
 import { localTargetOf } from '../../../../shared/utils/browserUrl';
 import { createPortTunnel, type PortTunnel } from './portTunnel';
 import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_WRITES_BUSY_CODE } from '../../../../shared/remoteClient/readChannels';
-import { RecoveryCycle, backoffDelayMs } from '../../../../shared/remoteClient/recoveryCycle';
+import {
+  RecoveryCycle,
+  RELAY_MAX_RECONNECT_DELAY_MS,
+  STALE_STREAM_TIMEOUT_MS,
+  backoffDelayMs,
+  relayRecoveryCycle,
+} from '../../../../shared/remoteClient/recoveryCycle';
 import { PaneError } from '../../../../shared/paneError';
 import type {
   RemoteConnectionCheck,
@@ -172,10 +178,6 @@ const REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS = 30_000;
 const REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS = 300_000;
 /** Answers that mean the request was cut off, not refused; only these are retried. */
 const INTERRUPTION_CODES = new Set(['ERR_REMOTE_TRANSPORT', 'ERR_REMOTE_DELIVERY_UNKNOWN', 'ERR_REMOTE_STALE_RESPONSE']);
-/** The host sends a heartbeat every 5 s; two missed, with room for a slow one, mean the path is dead. */
-const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 12_000;
-/** A computer behind Pane's relay is retried this often at most, so it is back within seconds of an outage ending. */
-const RELAY_MAX_RECONNECT_DELAY_MS = 5_000;
 const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
 const REMOTE_DAEMON_RESTORE_TIMEOUT_MS = 30_000;
 const REMOTE_DAEMON_REQUEST_TIMEOUT_MS = 15_000;
@@ -268,14 +270,14 @@ export class RemotePaneClient {
     this.initialHandshakeTimeoutMs = options.initialHandshakeTimeoutMs
       ?? REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS;
     this.heartbeatStaleTimeoutMs = options.heartbeatStaleTimeoutMs
-      ?? REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS;
+      ?? STALE_STREAM_TIMEOUT_MS;
     this.restoreTimeoutMs = options.restoreTimeoutMs ?? REMOTE_DAEMON_RESTORE_TIMEOUT_MS;
     this.requestTimeoutMs = options.requestTimeoutMs ?? REMOTE_DAEMON_REQUEST_TIMEOUT_MS;
-    this.maxRetryDelayMs = options.reconnectMaxDelayMs ?? REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS;
+    this.maxRetryDelayMs = options.reconnectMaxDelayMs
+      ?? (profile.relay ? RELAY_MAX_RECONNECT_DELAY_MS : REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS);
     this.writeResendBudgetMs = options.reconnectDurationMs ?? REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS;
-    // A computer reached through a relay is never given up on while the app is open (D-15), as on the phone; only a revoked token stops it.
     this.recovery = profile.relay
-      ? new RecoveryCycle(Math.random, Number.POSITIVE_INFINITY, options.reconnectMaxDelayMs ?? RELAY_MAX_RECONNECT_DELAY_MS)
+      ? relayRecoveryCycle(this.maxRetryDelayMs)
       : new RecoveryCycle(Math.random, this.writeResendBudgetMs, this.maxRetryDelayMs);
     this.onConnectionStateChange = options.onConnectionStateChange;
     this.onResyncRequired = options.onResyncRequired;
