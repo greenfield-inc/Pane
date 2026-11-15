@@ -277,6 +277,51 @@ describe('linking computers with a one-time link', () => {
     ]);
   });
 
+  it('"Unlink from all your computers" removes only that computer; the links it carried between the others stay', async () => {
+    const net = network();
+    const mac = net.add('Mac', 'macmacmacmacmac0');
+    const linux = net.add('Linux', 'linlinlinlinlin0');
+    const windows = net.add('Windows', 'winwinwinwinwin0');
+    const nas = net.add('NAS', 'nasnasnasnasnas0');
+    await linux.redeem(await mac.link());
+    await nas.redeem(await windows.link());
+    await windows.redeem(await mac.link());
+    const macOnWindows = windows.config().client.computers.find((computer) => computer.label === 'Mac');
+
+    await windows.registry.invoke('relay:unlink-computer-everywhere', [{ computerId: macOnWindows?.id ?? '' }]);
+
+    const rest = [linux, windows, nas];
+    for (const from of rest) {
+      expect(from.listed(), `${from.name}'s list`).toEqual(rest.filter((other) => other !== from).map((other) => other.name).sort());
+      expect(await net.reaches(from, mac), `${from.name} reaches Mac`).toBe(false);
+      for (const to of rest) if (to !== from) expect(await net.reaches(from, to), `${from.name} reaches ${to.name}`).toBe(true);
+    }
+    expect(mac.listed()).toEqual([]);
+  });
+
+  it('"Not you? Unlink" after a group join undoes the whole join', async () => {
+    const net = network();
+    const mac = net.add('Mac', 'macmacmacmacmac0');
+    const linux = net.add('Linux', 'linlinlinlinlin0');
+    const windows = net.add('Windows', 'winwinwinwinwin0');
+    const nas = net.add('NAS', 'nasnasnasnasnas0');
+    await linux.redeem(await mac.link());
+    await nas.redeem(await windows.link());
+    await windows.redeem(await mac.link());
+    const { computerId } = mac.paired[mac.paired.length - 1];
+
+    await mac.registry.invoke('relay:unlink-computer-everywhere', [{ computerId, linksItMade: true }]);
+
+    expect(mac.listed()).toEqual(['Linux']);
+    expect(linux.listed()).toEqual(['Mac']);
+    for (const ours of [mac, linux]) {
+      for (const theirs of [windows, nas]) {
+        expect(await net.reaches(ours, theirs), `${ours.name} reaches ${theirs.name}`).toBe(false);
+        expect(await net.reaches(theirs, ours), `${theirs.name} reaches ${ours.name}`).toBe(false);
+      }
+    }
+  });
+
   it('refuses a link from a computer claiming a linked computer\'s id with another key, and leaves the link unused', async () => {
     const net = network();
     const mac = net.add('Mac', 'macmacmacmacmac0');

@@ -103,21 +103,23 @@ function withoutLinks(computer: RemoteComputer, relayIds: ReadonlySet<string>): 
 }
 
 /**
- * Removes clients here with everything they vouched for: links a removed phone or computer minted,
- * and for each computer whose link goes, the phone tokens it handed out and the routes that call it.
+ * Removes clients here with everything they vouched for: links a removed phone minted, and for each
+ * computer whose link goes, the phone tokens it handed out and the routes that call it. Links a
+ * removed computer minted between others stay unless `linksItMade` asks for them too.
  */
 export function revokeClients(
   remote: RemoteDaemonConfig,
-  seed: { clients?: (client: RemoteDaemonClientRecord) => boolean; computers?: readonly string[] },
+  seed: { clients?: (client: RemoteDaemonClientRecord) => boolean; computers?: readonly string[]; linksItMade?: boolean },
 ) {
   const clients = new Set(remote.host.clients.filter((client) => seed.clients?.(client) === true).map((client) => client.id));
   const computers = new Set(seed.computers);
+  const minters = new Set(remote.host.clients.filter((client) => client.kind === undefined || seed.linksItMade === true).map((client) => client.id));
   for (let grew = true; grew;) {
     grew = false;
     for (const client of remote.host.clients) {
       const linkedComputer = client.kind === 'computer' ? client.computerId : undefined;
       if (!clients.has(client.id)) {
-        const vouched = (client.mintedBy !== undefined && clients.has(client.mintedBy))
+        const vouched = (client.mintedBy !== undefined && minters.has(client.mintedBy) && clients.has(client.mintedBy))
           || (linkedComputer !== undefined && computers.has(linkedComputer))
           || (client.grantedBy !== undefined && computers.has(client.grantedBy));
         if (!vouched) continue;
@@ -407,10 +409,10 @@ export class RelayLinks {
     await this.revokeLocally({ clients: (client) => client.kind === undefined && client.phoneId === phoneId });
   }
 
-  /** Forgets a computer here: its link both ways, and phone tokens it handed out. */
-  async forgetComputer(computerId: string, callerClientId: string): Promise<void> {
+  /** Forgets a computer here: its link both ways, phone tokens it handed out, and with `linksItMade` the links it made. */
+  async forgetComputer(computerId: string, callerClientId: string, linksItMade = false): Promise<void> {
     this.callerComputer(callerClientId);
-    await this.revokeLocally({ computers: [computerId] });
+    await this.revokeLocally({ computers: [computerId], linksItMade });
   }
 
   devices(): RelayDevice[] {
@@ -452,8 +454,12 @@ export class RelayLinks {
     return { removed, notReached };
   }
 
-  /** "Unlink from all your computers" on a linked computer's row; `id` is its relay id or its id in `client.computers`. */
-  async unlinkComputerEverywhere(id: string): Promise<{ removed: string[]; notReached: string[] }> {
+  /**
+   * "Unlink from all your computers" on a linked computer's row, which removes only that computer, and
+   * "Not you? Unlink", which with `linksItMade` also undoes the links it made between the two groups.
+   * `id` is its relay id or its id in `client.computers`.
+   */
+  async unlinkComputerEverywhere(id: string, linksItMade = false): Promise<{ removed: string[]; notReached: string[] }> {
     const computerId = this.relayIdOf(id);
     const targets = this.linked();
     // The computers it is removed from: this one, and each other linked computer that answers.
@@ -466,13 +472,13 @@ export class RelayLinks {
         ? targets.filter((other) => other.relay.computerId !== computerId).map((other) => other.relay.computerId).concat(this.deps.self()?.id ?? [])
         : [computerId];
       try {
-        for (const id of forget) await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.forgetComputer, [{ computerId: id }]);
+        for (const id of forget) await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.forgetComputer, [{ computerId: id, linksItMade }]);
         if (!unlinked) removed.push(profile.label);
       } catch {
         notReached.push(profile.label);
       }
     }));
-    await this.revokeLocally({ computers: [computerId] });
+    await this.revokeLocally({ computers: [computerId], linksItMade });
     return { removed, notReached };
   }
 

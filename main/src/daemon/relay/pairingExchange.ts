@@ -128,7 +128,7 @@ export class PairingExchange {
     const entry = this.pending.find((candidate) => timingSafeEqual(candidate.hash, presented));
     if (!entry) {
       this.recordFailure(source, now);
-      return { ok: false, status: 403, code: 'ERR_PAIRING_CODE_INVALID', message: 'This code is not from this computer. Scan the code it shows now.' };
+      return { ok: false, status: 403, code: 'ERR_PAIRING_CODE_INVALID', message: 'This computer has no such code waiting: it was already used, it expired, or Pane restarted since it was made. Ask for a new link, or scan the code it shows now.' };
     }
     if (entry.spentAt !== null && entry.expiresAt > entry.spentAt) {
       return { ok: false, status: 410, code: 'ERR_PAIRING_CODE_USED', message: 'This code was already used. Ask for a new link, or scan the new code on the computer.' };

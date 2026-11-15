@@ -1206,7 +1206,7 @@ describe('QR-paired phones and linked computers', () => {
     await expect(computer.invoke('studio-token', 'runpane:machine:info')).resolves.toMatchObject({ statusCode: 200 });
   });
 
-  it('lets a linked computer link computers, and unlinking it revokes the links it made', async () => {
+  it('lets a linked computer link computers, and "Not you? Unlink" on it revokes the links it made', async () => {
     const computer = await startComputer();
     const minted = await computer.mint('studio-token', BUILD_BOX);
     await expect(computer.invoke('studio-token', 'relay:client:save-link', { peer: BUILD_BOX, token: 'token-for-build-box' })).resolves.toMatchObject({ statusCode: 200 });
@@ -1216,7 +1216,7 @@ describe('QR-paired phones and linked computers', () => {
       expect.objectContaining({ id: BUILD_BOX.id, name: 'Build Box', token: 'token-for-build-box' }),
     ]);
 
-    await computer.registry.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: STUDIO.id }]);
+    await computer.registry.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: STUDIO.id, linksItMade: true }]);
 
     await expect(computer.invoke(minted, 'runpane:machine:info'))
       .resolves.toMatchObject({ statusCode: 403, body: { error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID' } } });

@@ -30,6 +30,8 @@ const previewTargetSchema = boundary.union(
 
 const peerRequestSchema = boundary.object({ peer: relayComputerSchema });
 const linkRequestSchema = boundary.object({ link: boundary.nonEmptyString });
+/** `linksItMade`: also undo the links that computer made between others ("Not you? Unlink" undoes a whole join). */
+const unlinkRequestSchema = boundary.object({ computerId: boundary.nonEmptyString, linksItMade: boundary.optional(boundary.boolean) });
 const pairingCodeSchema = boundary.optional(boundary.object({ expiresIn: boundary.optional(boundary.enumeration('10m', '1h', '24h')) }));
 
 function onThisComputerOnly(): void {
@@ -44,6 +46,8 @@ function onThisComputerOnly(): void {
 
 /** How long a link waits for phone access to start: connecting and, the first time, getting a certificate. */
 const RELAY_READY_TIMEOUT_MS = 120_000;
+/** How long an error may last while phone access starts before the link gives up on it. */
+const RELAY_ERROR_GRACE_MS = 15_000;
 
 export function registerRelayCommands(
   registry: PaneCommandRegistry,
@@ -77,13 +81,16 @@ export function registerRelayCommands(
     if (relay.computerInfo()) return;
     await setEnabled(true);
     const deadline = Date.now() + RELAY_READY_TIMEOUT_MS;
+    // Starting reports errors that clear on their own (the listener still binding, the first connect), so only one that lasts ends the wait.
+    let failingSince: number | null = null;
     for (;;) {
       const status = relay.getStatus();
       if (status.phase === 'ready' && relay.computerInfo()) return;
-      if (status.phase === 'error' || Date.now() > deadline) {
+      failingSince = status.phase === 'error' ? failingSince ?? Date.now() : null;
+      if ((failingSince !== null && Date.now() - failingSince > RELAY_ERROR_GRACE_MS) || Date.now() > deadline) {
         throw new PaneError(
           'ERR_RELAY_NOT_READY',
-          `Phone access did not get ready on this computer${status.lastError ? `: ${status.lastError}` : ''}, so the link was not used.`,
+          `Phone access did not get ready on this computer, so the link was not used${status.lastError ? `: ${status.lastError.replace(/\.$/u, '')}` : ''}.`,
           'Check this computer can reach the internet, then run the same command again; the link still works until it expires.',
         );
       }
@@ -152,7 +159,8 @@ export function registerRelayCommands(
     return null;
   });
   registry.register(RELAY_COMPUTER_COMMANDS.forgetComputer, async (request: PaneCommandValue, from: PaneCommandValue) => {
-    await links.forgetComputer(decodeBoundary(request, boundary.object({ computerId: boundary.nonEmptyString })).computerId, caller(from));
+    const { computerId, linksItMade } = decodeBoundary(request, unlinkRequestSchema);
+    await links.forgetComputer(computerId, caller(from), linksItMade === true);
     return null;
   });
 
@@ -178,6 +186,7 @@ export function registerRelayCommands(
   });
   registry.register(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, (request: PaneCommandValue) => {
     onThisComputerOnly();
-    return links.unlinkComputerEverywhere(decodeBoundary(request, boundary.object({ computerId: boundary.nonEmptyString })).computerId);
+    const { computerId, linksItMade } = decodeBoundary(request, unlinkRequestSchema);
+    return links.unlinkComputerEverywhere(computerId, linksItMade === true);
   });
 }
