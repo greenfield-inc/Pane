@@ -4,7 +4,7 @@ import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './bou
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
-import { ProtocolError, ProtocolErrorCode, Server, serveStdio, StdioServerTransport, type AuthInfo, type McpRequestContext } from './mcpSdk';
+import { ProtocolError, ProtocolErrorCode, Server, serveStdio, StdioServerTransport, type AuthInfo, type JSONRPCMessage, type McpRequestContext } from './mcpSdk';
 import { getWrapperVersion } from './version';
 import type { RunpaneFailure } from './errors';
 import { agentsIntroForInstructions, claudeMdHasPaneBlock, scratchRule } from './paneIntro';
@@ -72,7 +72,7 @@ const openingMessage = boundary.object({
 });
 
 /** The name a message gives its client, if any. */
-function clientNameOf(message: unknown): string | undefined {
+function clientNameOf(message: JSONRPCMessage): string | undefined {
   try {
     const params = decodeBoundary(message, openingMessage).params;
     return params?.clientInfo?.name ?? params?._meta?.['io.modelcontextprotocol/clientInfo']?.name;
