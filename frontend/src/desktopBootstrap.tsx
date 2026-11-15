@@ -7,6 +7,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { BrowserFallback } from './components/BrowserFallback';
 import { stripIpcWrapper } from './utils/ipcErrorMessage';
 import { startCaretRest } from './services/caretRest';
+import { startLaunchOutlineFallback } from './utils/launchOutline';
 import './styles/markdown-preview.css';
 import './styles/notebook-preview.css';
 
@@ -48,6 +49,7 @@ export function mountDesktopRenderer(): void {
   if (mounted) return;
   mounted = true;
   startCaretRest();
+  startLaunchOutlineFallback();
 
   // Global error handlers catch failures outside React error boundaries.
   window.addEventListener('unhandledrejection', (event) => {

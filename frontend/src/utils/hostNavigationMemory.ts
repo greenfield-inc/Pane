@@ -4,7 +4,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { API } from './api';
 import { focusChatSoon } from '../services/regionFocus';
-import { dropLaunchOutline } from './launchOutline';
+import { dropLaunchOutline, whileLaunchOutline } from './launchOutline';
 import { loadChatTabRoute } from '../components/panels/chatTabRouteModule';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import type { HostNavigationMemory, LaunchChat, PaneNavigationView } from '../../../shared/types/hostNavigation';
@@ -219,6 +219,16 @@ export async function restoreLaunchChat(): Promise<void> {
   }
   focusChatSoon(chat.panelId, { untilInput: true });
   await now.setActiveSession(chat.paneId);
+  // Anything that opens another Pane or view before the chat takes over (a key, a pane:// link) drops the outline.
+  const leftLaunchPane = () => useSessionStore.getState().activeSessionId !== chat.paneId || useNavigationStore.getState().activeView !== 'sessions';
+  if (leftLaunchPane()) {
+    dropLaunchOutline();
+    return;
+  }
+  const check = () => { if (leftLaunchPane()) dropLaunchOutline(); };
+  const unsubscribeSessions = useSessionStore.subscribe(check);
+  const unsubscribeNavigation = useNavigationStore.subscribe(check);
+  whileLaunchOutline(() => { unsubscribeSessions(); unsubscribeNavigation(); });
 }
 
 /**

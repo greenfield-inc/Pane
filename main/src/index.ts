@@ -450,6 +450,8 @@ function readSavedWindowState() {
 
 /** The chat this launch reopens, for the window's first frame; none when it cannot be read. */
 function readLaunchChatArg(): string[] {
+  // A pane:// link that launched Pane opens its own view, not the launch chat.
+  if (pendingPaneLink) return [];
   try {
     const uiState = new UIStateManager(databaseService, () => getActiveRemoteHostId(configManager.getConfig().remoteDaemon));
     const outline = uiState.getLaunchChatOutline(databaseService);

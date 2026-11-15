@@ -15,18 +15,34 @@ export interface LaunchDraft {
   send: boolean;
 }
 
-/** How long the main area waits for the launch chat after the app's first render. */
+/** How long the outline waits, from the app's start, for the app's first render and the launch chat. */
 const CHAT_WAIT_MS = 10_000;
 
 /** Text typed into the box before the person went elsewhere, waiting for that chat to mount. */
 let held: { panelId: string; draft: LaunchDraft } | null = null;
 /** A mounted chat waiting to take the box: for its own box to settle, or an IME composition to end. */
 let waiting: (() => void) | null = null;
-/** Stops what revealApp set up to drop the outline. */
-let stopWatching = () => {};
+/** Run when the outline goes: what was set up to drop it. */
+const onRemove = new Set<() => void>();
 
 const outline = () => document.getElementById('pane-launch-outline');
 const launchBox = () => outline()?.querySelector<HTMLTextAreaElement>('textarea[data-launch-composer]') ?? null;
+
+/**
+ * The app has started: the outline goes within CHAT_WAIT_MS whatever happens next, also when the
+ * app never renders its data (a failed first read) or the chat never mounts.
+ */
+export function startLaunchOutlineFallback(): void {
+  if (!outline()) return;
+  const timer = setTimeout(dropLaunchOutline, CHAT_WAIT_MS);
+  onRemove.add(() => clearTimeout(timer));
+}
+
+/** Runs `stop` when the outline goes; for watchers that drop it. */
+export function whileLaunchOutline(stop: () => void): void {
+  if (outline()) onRemove.add(stop);
+  else stop();
+}
 
 /** The app's first render with data is on screen (main has been told). */
 export function revealApp(): void {
@@ -51,16 +67,13 @@ export function revealApp(): void {
   const leave = (event: MouseEvent) => {
     if (!(event.target instanceof Node) || !root.contains(event.target)) dropLaunchOutline();
   };
-  const timer = setTimeout(dropLaunchOutline, CHAT_WAIT_MS);
   window.addEventListener('mousedown', leave, true);
-  stopWatching = () => {
-    clearTimeout(timer);
-    window.removeEventListener('mousedown', leave, true);
-  };
+  onRemove.add(() => window.removeEventListener('mousedown', leave, true));
 }
 
 function remove(root: HTMLElement): void {
-  stopWatching();
+  for (const stop of onRemove) stop();
+  onRemove.clear();
   root.remove();
 }
 
@@ -88,12 +101,15 @@ const SETTLE_MS = 500;
  * The chat tab `panelId` is mounting: `apply` gets its share of the launch outline, if any. The
  * outline goes in the frame where the chat's box (`chatBox`) first sits exactly where the outline's
  * box is: a mounting tab lays out at zero width first. An IME composition in the box finishes
- * there first. Returns a cleanup for a tab that unmounts before then.
+ * there first. Another chat mounting first drops the outline. Returns a cleanup for a tab that
+ * unmounts before then, which drops it too.
  */
 export function takeLaunchDraft(panelId: string, chatBox: () => HTMLElement | null, apply: (draft: LaunchDraft) => void): () => void {
   const root = outline();
   const box = launchBox();
-  if (!root || box?.dataset.launchComposer !== panelId) {
+  // Another chat opened first: the person or a link went elsewhere.
+  if (root && box && box.dataset.launchComposer !== panelId) dropLaunchOutline();
+  if (!root || !box || box.dataset.launchComposer !== panelId) {
     if (held?.panelId === panelId) {
       const { draft } = held;
       held = null;
@@ -149,5 +165,10 @@ export function takeLaunchDraft(panelId: string, chatBox: () => HTMLElement | nu
   frame = requestAnimationFrame(everyFrame);
   // After the input method's own handler (index.html), so the text is final.
   box.addEventListener('compositionend', check);
-  return stop;
+  return () => {
+    stop();
+    // The chat closed before it took over (the person moved on). React's development remount
+    // registers again at once, so the check waits a microtask.
+    queueMicrotask(() => { if (!waiting && launchBox()?.dataset.launchComposer === panelId) dropLaunchOutline(); });
+  };
 }
