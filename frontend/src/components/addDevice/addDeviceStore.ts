@@ -168,7 +168,8 @@ export const useAddDeviceStore = create<AddDeviceState>((set, get) => {
       try {
         const result: { removed: string[]; notReached: string[] } = await window.electronAPI.invoke(
           RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere,
-          { computerId: maker.computerId },
+          // "Not you?" undoes the whole join, so the links this computer made go with it.
+          { computerId: maker.computerId, linksItMade: true },
         );
         outcome = result.notReached.length > 0
           ? `Unlinked ${maker.label}. ${result.notReached.join(', ')} didn't answer; Pane removes it there when they come back.`
@@ -188,6 +189,8 @@ export const useAddDeviceStore = create<AddDeviceState>((set, get) => {
 export function startAddDeviceListeners(): () => void {
   const { events } = window.electronAPI;
   const offOpened = events.onRelayLinkOpened(({ link }: RelayLinkOpenedEvent) => {
+    // The full-page confirm replaces whatever the dialog showed, an earlier "Linked with" included.
+    useAddDeviceStore.getState().close();
     void useAddDeviceStore.getState().startLink(link, 'opened');
   });
   const offPaired = events.onRelayPaired((event: RelayPairedEvent) => {

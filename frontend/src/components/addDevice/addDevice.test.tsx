@@ -163,6 +163,17 @@ describe('A pane://pair link opened on this computer', () => {
     expect(buttons(renderFlow())).toEqual(['Not mine, cancel', 'Link Build Box']);
     expect(callsTo('relay:redeem-link')).toEqual([]);
   });
+
+  it('closes an earlier "Linked with" dialog so the full-page confirm is on top', async () => {
+    await useAddDeviceStore.getState().copyLink();
+    emitPaired({ kind: 'computer', label: 'Lab PC', computerId: 'lab-pc' });
+    expect(useAddDeviceStore.getState().isOpen).toBe(true);
+
+    emitOpened({ link: LINK });
+    await vi.waitFor(() => expect(useAddDeviceStore.getState().flow.step).toBe('confirm'));
+
+    expect(useAddDeviceStore.getState()).toMatchObject({ isOpen: false, maker: null });
+  });
 });
 
 describe('The computer that made the link', () => {
@@ -181,7 +192,7 @@ describe('The computer that made the link', () => {
 
     await useAddDeviceStore.getState().unlinkMaker();
 
-    expect(callsTo('relay:unlink-computer-everywhere')).toEqual([[{ computerId: 'build-box' }]]);
+    expect(callsTo('relay:unlink-computer-everywhere')).toEqual([[{ computerId: 'build-box', linksItMade: true }]]);
     expect(text(renderMaker())).toContain('Unlinked Build Box from all your computers.');
   });
 });
