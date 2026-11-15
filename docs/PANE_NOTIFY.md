@@ -632,7 +632,9 @@ To remove the block, turn Approvals off in Settings → Approvals. Pane writes i
 again when you turn Approvals back on, or at the next launch with Approvals on.
 
 The `pane` MCP server's instructions say only to call `notify` instead of asking
-in the terminal. Cursor, which gets no user-level block, learns the rest from
+in the terminal. Claude Code gets that line, the agents intro and the scratch
+rule from its CLAUDE.md block, so while the block is there the server leaves
+all three out of its instructions to Claude Code. Cursor, which gets no user-level block, learns the rest from
 the `notify` tool's description and the repository's managed `AGENTS.md` block,
 which also carries the secrets rule.
 

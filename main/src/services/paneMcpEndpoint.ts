@@ -133,7 +133,7 @@ export class PaneMcpEndpoint {
           // Pane points only agents it measured holding a call open (Claude: 40 minutes over HTTP) at this endpoint.
           clientFor: (auth) => {
             const tab = auth && this.tabs.get(auth.token);
-            return tab ? { name: tab.agentLabel, waitsLong: true } : undefined;
+            return tab ? { name: tab.agentLabel, waitsLong: true, env: tab.env } : undefined;
           },
           onerror: (error) => console.warn('[PaneMcp]', error.message),
         }),
