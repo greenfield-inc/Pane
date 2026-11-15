@@ -341,4 +341,26 @@ describe('OrchestrationSessionStore', () => {
       sessions: [createRecord()],
     })).toThrow('missing Session missing');
   });
+
+  it('keeps a remote member through a reload, out of the file an older Pane reads', () => {
+    const filePath = createStorePath();
+    const local = { paneId: 'pane-local', panelIds: [], attachedAt: '2026-09-16T12:00:00.000Z' };
+    const remote = { ...local, paneId: 'pane-devbox', machine: { id: 'tailnet-devbox', label: 'parsa-devbox' }, name: 'Windows build' };
+    new OrchestrationSessionStore(filePath).write({ version: ORCHESTRATION_SESSION_STORE_VERSION, sessions: [createRecord({ associations: [local, remote] })] });
+
+    expect(new OrchestrationSessionStore(filePath).read().sessions[0].associations).toEqual([local, remote]);
+    // An older Pane reads only this file: it sees the local member and nothing it would rewrite away.
+    const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8')) as OrchestrationSessionStoreData;
+    expect(onDisk.sessions[0].associations).toEqual([local]);
+  });
+
+  it('forgets a remote member once it is detached', () => {
+    const filePath = createStorePath();
+    const remote = { paneId: 'pane-devbox', panelIds: [], attachedAt: '2026-09-16T12:00:00.000Z', machine: { id: 'tailnet-devbox', label: 'parsa-devbox' } };
+    const store = new OrchestrationSessionStore(filePath);
+    store.write({ version: ORCHESTRATION_SESSION_STORE_VERSION, sessions: [createRecord({ associations: [remote] })] });
+    store.write({ version: ORCHESTRATION_SESSION_STORE_VERSION, sessions: [createRecord({ associations: [] })] });
+
+    expect(new OrchestrationSessionStore(filePath).read().sessions[0].associations).toEqual([]);
+  });
 });

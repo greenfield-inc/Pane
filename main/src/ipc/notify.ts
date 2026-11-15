@@ -256,8 +256,12 @@ const panelAgentSchema = boundary.object({ agentType: boundary.optional(boundary
 type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
   sessionManager: Pick<AppServices['sessionManager'], 'getSession'> & Partial<Pick<AppServices['sessionManager'], 'on' | 'off'>>;
   databaseService?: Pick<AppServices['databaseService'], 'getAllProjects'> & Partial<Pick<AppServices['databaseService'], 'getSession' | 'getPanel'>>;
+  /** Names the machine of a remote Session member's tab. */
+  workspaceJournal?: Pick<NonNullable<AppServices['workspaceJournal']>, 'machineOfPanel'>;
   /** Files each Approvals item under its Session. */
   orchestrationSessionManager?: {
+    /** A Session member on another saved machine; its Pane and tabs are not in this computer's database. */
+    remoteMember?(paneId: string): unknown;
     approvalSession(paneId: string, panelId?: string): NotifySession | undefined;
     approvalSessionsById(): Map<string, NotifySession>;
     approvalSessionRecord(sessionId: string): { name: string; paneId: string; archived: boolean } | undefined;
@@ -374,7 +378,9 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     inbox: services.sessionInbox,
     store: services.approvalStore,
     importOutcome: services.approvalImport,
-    askerPaneGone: (item) => askerPaneGone(services.databaseService, item),
+    askerPaneGone: (item) => (item.source.paneId && services.orchestrationSessionManager?.remoteMember?.(item.source.paneId)
+      ? undefined
+      : askerPaneGone(services.databaseService, item)),
     onAskersChanged: (listener) => {
       const stopPanels = panelManager.onPanelDeleted?.(listener);
       const manager = services.sessionManager;
@@ -388,6 +394,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     },
     typeIntoTab: async (panelId, text) => {
       const panel = panelManager.getPanel(panelId);
+      const memberMachine = panel ? undefined : services.workspaceJournal?.machineOfPanel(panelId);
+      if (memberMachine && memberMachines) return typeIntoMemberTab(memberMachines, memberMachine, panelId, text);
       if (!panel) return 'gone';
       if (panel.type === 'chat') {
         if (getChatTabManager().agentState(panelId) !== 'idle') return 'busy';
@@ -412,7 +420,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     },
     idleSeconds: () => (hasHeadlessDaemonLaunchArg() ? Infinity : idleSeconds()),
     cardsOn: () => cardsOnStatus(services.configManager.getConfig(), readingMachines.has, machineList?.() ?? []),
-    tabAlive: (panelId) => panelManager.getPanel(panelId) !== undefined,
+    tabAlive: (panelId) => panelManager.getPanel(panelId) !== undefined || services.workspaceJournal?.machineOfPanel(panelId) !== undefined,
   });
 
   notifyBeforeQuit = () => notify.queue.prepareForQuit();
@@ -570,7 +578,22 @@ function startClaudePrompts(notify: NotifyService, services: NotifyServices): vo
 }
 
 /** What Notify uses of the machine connections (main/src/services/machineConnections.ts). */
-export type NotifyMachines = Pick<MachineConnections, 'subscribe' | 'list' | 'read' | 'run'>;
+export type NotifyMachines = Pick<MachineConnections, 'subscribe' | 'list' | 'read' | 'run'> & Partial<Pick<MachineConnections, 'invokeOn'>>;
+
+/** The saved machines, for typing an answer into a remote Session member's tab. */
+let memberMachines: NotifyMachines | null = null;
+
+/** Types an answer into a Session member's tab on another saved machine, as its own Pane would. */
+async function typeIntoMemberTab(machines: NotifyMachines, machineId: string, panelId: string, text: string): Promise<'delivered' | 'busy'> {
+  try {
+    const result = await machines.invokeOn?.(machineId, 'runpane:panels:submit', [{ panelId, input: text, expectReport: false }]);
+    return decodeOptionalBoundary(result, boundary.object({ ok: boundary.optional(boundary.boolean) }))?.ok === false ? 'busy' : 'delivered';
+  } catch (error) {
+    // Its machine is away or the agent is mid-turn: the next sweep tries again.
+    console.warn(`[Notify] Couldn't type into ${machineId}'s tab ${panelId} yet:`, error);
+    return 'busy';
+  }
+}
 
 interface SavedMachinesLink {
   machines: NotifyMachines;
@@ -593,6 +616,7 @@ export function prepareNotifyForQuit(): void {
  * that machine's own connection, for as long as the connections run. Call after `registerNotifyHandlers`.
  */
 export function followSavedMachines(machines: NotifyMachines): void {
+  memberMachines = machines;
   followMachines?.(machines);
 }
 

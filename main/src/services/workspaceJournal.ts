@@ -307,6 +307,23 @@ export class WorkspaceJournal implements PaneEventSink {
     this.paneById.set(metadata.paneId, metadata);
   }
 
+  /** The saved machine a remote Session member's tab runs on, from the entries recorded from it. */
+  machineOfPanel(panelId: string): string | undefined {
+    for (let index = this.ring.length - 1; index >= 0; index--) {
+      const entry = this.ring[index];
+      if (entry.panelId === panelId && entry.machine) return entry.machine.id;
+    }
+    return undefined;
+  }
+
+  /** The newest entry recorded from a remote Session member's machine (`RemoteMemberEvents`). */
+  latestFromMachine(machineId: string): RunpaneWorkspaceEntry | undefined {
+    for (let index = this.ring.length - 1; index >= 0; index--) {
+      if (this.ring[index].machine?.id === machineId) return this.ring[index];
+    }
+    return undefined;
+  }
+
   append(entry: Omit<RunpaneWorkspaceEntry, 'gen' | 'at'>): RunpaneWorkspaceEntry {
     return this.deliver(entry).entry;
   }

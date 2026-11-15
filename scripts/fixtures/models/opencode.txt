@@ -1,0 +1,6 @@
+opencode/beam-free
+opencode/big-pickle
+opencode/deepseek-v4.1-flash-free
+opencode/flint-40b-free
+opencode/glm-5.3-flash-free
+opencode/iceman-free

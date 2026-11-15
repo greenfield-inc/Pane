@@ -25,6 +25,15 @@ export interface RunpaneSessionListResult {
   selectedSessionId?: string;
 }
 
+/** `sessions associate-remote`: a Pane on another saved machine joined this computer's Session. */
+export interface RunpaneRemoteAssociationResult {
+  ok: true;
+  session: OrchestrationSessionRecord;
+  machine: { id: string; label: string };
+  /** Set when that machine's Pane can't send this Pane's reports here yet. */
+  warning?: { code: string; message: string; next: string };
+}
+
 export interface RunpaneSessionResult {
   ok: true;
   session: OrchestrationSessionRecord;
@@ -254,6 +263,18 @@ export interface RunpaneWorkspaceEntry {
   screenLines?: string[];
   /** The Notify item of an `item.created` or `item.answered` entry (`runpane autopilot stack push --item <id>`). */
   itemId?: string;
+  /**
+   * Set on an entry a remote Session member's machine sent: that saved machine, and the entry's
+   * journal epoch and generation there, so each one is recorded once.
+   */
+  machine?: RunpaneWorkspaceEntryMachine;
+}
+
+export interface RunpaneWorkspaceEntryMachine {
+  id: string;
+  label: string;
+  epoch: string;
+  gen: number;
 }
 
 export interface RunpaneWorkspacePanelSummary {

@@ -24,6 +24,8 @@ export interface MachineState {
   onlineSince?: string;
   /** The machine's install id ("Show cards on" names it by this): this computer's own, or a saved machine's from its last connection. Absent until it answers, and from releases before it. */
   installId?: string;
+  /** Whether the machine's Pane sends its Session members' reports; absent until it first answers. */
+  workspaceEntries?: boolean;
 }
 
 /** The reads `machines:read` serves; each takes the arguments the same channel takes today. */
@@ -61,6 +63,7 @@ export const MACHINE_EVENT_CHANNELS = [
   'permission:resolved',
   'notify:shared-changed',
   'remote:settings-changed',
+  'workspace:entry',
 ] as const;
 export type MachineEventChannel = typeof MACHINE_EVENT_CHANNELS[number];
 
