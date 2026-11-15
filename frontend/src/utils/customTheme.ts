@@ -99,7 +99,7 @@ function filterRules(rules: CSSRuleList, owner: { deleteRule(index: number): voi
       for (const keyframe of Array.from(rule.cssRules)) {
         if (keyframe instanceof CSSKeyframeRule) cleanDeclarations(keyframe.style);
       }
-    } else if (!(rule instanceof CSSLayerStatementRule)) {
+    } else if (!(rule instanceof CSSLayerStatementRule || rule instanceof CSSNamespaceRule)) {
       owner.deleteRule(index);
     }
   }
@@ -120,7 +120,12 @@ export function applyCustomThemeStyles(theme: CustomTheme | null, doc: Document 
     sheet.replaceSync('');
     return;
   }
-  // A constructed sheet ignores @import.
-  sheet.replaceSync(`${customThemeColorRule(theme.colors)}\n${theme.css ?? ''}`);
-  filterRules(sheet.cssRules, sheet);
+  // A constructed sheet ignores @import. A theme the filter can't clean shows no custom styles rather than a blank window.
+  try {
+    sheet.replaceSync(`${customThemeColorRule(theme.colors)}\n${theme.css ?? ''}`);
+    filterRules(sheet.cssRules, sheet);
+  } catch (error) {
+    sheet.replaceSync('');
+    console.warn('[customTheme] Pane could not apply the Custom theme CSS, so it shows the base theme:', error);
+  }
 }
