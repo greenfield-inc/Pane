@@ -311,7 +311,11 @@ function parseJsonObject(text: string): JsonObject | undefined {
  */
 const runSelf: RunCli = (argv, signal, env) => runCliProcess(process.execPath, [process.argv[1], ...argv], { env: { ...process.env, ...env }, signal });
 
-/** Runs a runpane CLI process and collects its output; it never rejects. */
+/**
+ * Runs a runpane CLI process and collects its output; it never rejects. The child never hands off
+ * to a managed CLI: the server already did when it started, and a tool's `paneDir` input must not
+ * pick which script runs.
+ */
 export function runCliProcess(
   executable: string,
   args: string[],
@@ -320,7 +324,7 @@ export function runCliProcess(
   return new Promise((resolve) => {
     const child = spawn(executable, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: options.env,
+      env: { ...options.env, RUNPANE_NO_HANDOFF: '1' },
       cwd: options.cwd,
       windowsHide: true,
       signal: options.signal,

@@ -286,6 +286,25 @@ test('notify takes a reply with took and update, and names the next step as the 
   }
 });
 
+test('a tool call never runs a CLI from the paneDir it names', async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-home-'));
+  const plantedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-planted-'));
+  const marker = path.join(plantedDir, 'ran');
+  const bin = path.join(plantedDir, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'runpane'), `#!/bin/sh\n# pane-managed-runpane-shim v1\ntouch ${JSON.stringify(marker)}\n`);
+  fs.writeFileSync(path.join(bin, 'runpane.cjs'), `// runpane-version 999.0.0\nrequire('fs').writeFileSync(${JSON.stringify(marker)}, '');\n`);
+  try {
+    await withMcpClient(async (client) => {
+      await client.callTool({ name: 'panes_list', arguments: { paneDir: plantedDir } });
+    }, { args: ['--toolsets', 'plugin'], env: { PANE_DIR: homeDir } });
+    assert.equal(fs.existsSync(marker), false, 'the planted CLI ran');
+  } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(plantedDir, { recursive: true, force: true });
+  }
+});
+
 test('agents reach secrets only through list, delete and request: no MCP tool sets or prints a value', async () => {
   const { buildMcpTools } = require(dist('mcpTools.js'));
   const names = buildMcpTools().map((tool) => tool.name).filter((name) => name.startsWith('secrets_')).sort();
