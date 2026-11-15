@@ -278,7 +278,9 @@ export function approvalColumnTabCount(column: HTMLElement): number {
 /**
  * The tab keys (next, previous, a number) show another of the column's tabs:
  * Decide, Summary, the references, the origin chat. Focus stays
- * in the column; if it was in the tab that went away, it lands on the column.
+ * in the column; if it was in the tab that went away, it lands on the tab
+ * just shown, so the next tab key still reaches Pane (a Summary frame or a
+ * page would keep it).
  */
 export function showApprovalColumnTab(column: HTMLElement, pick: (current: number, count: number) => number): void {
   const tabs = approvalColumnTabs(column);
@@ -286,7 +288,9 @@ export function showApprovalColumnTab(column: HTMLElement, pick: (current: numbe
   if (!next) return;
   next.click();
   requestAnimationFrame(() => {
-    if (column.isConnected && !column.contains(document.activeElement)) focusInside(column);
+    if (!column.isConnected || column.contains(document.activeElement)) return;
+    if (next.isConnected) next.focus({ preventScroll: true });
+    else focusInside(column);
   });
 }
 

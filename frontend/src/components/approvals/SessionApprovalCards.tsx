@@ -9,6 +9,10 @@ import { relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import { dockApprovals, latestReplied, questionsOf, referenceCount, statusKey } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
+import { ApprovalKeyTip } from './ApprovalColumn';
+import { Tooltip } from '../ui/Tooltip';
+import { useHotkeyStore } from '../../stores/hotkeyStore';
+import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 
 /**
  * A Session chat's approvals (P6, D-347): one compact card at a time above the composer, its
@@ -52,6 +56,7 @@ function CompactCard({ item, index, total, open, onStep, onOpen }: {
   const qn = approvalQn(item);
   const who = item.source.autopilot ? 'Autopilot' : item.source.session?.orchestrator ? `${item.source.session.name} orchestrator` : item.source.name;
   const references = referenceCount(item);
+  const openKeys = useHotkeyStore((state) => state.hotkeys.get('open-session-approval')?.keys ?? '');
   const stepButton = 'inline-flex h-6 w-6 items-center justify-center rounded-md border border-border-secondary text-text-secondary hover:bg-surface-hover disabled:opacity-40';
   return (
     // The card open on the right gets a darker neutral outline and an "Open" label; blue stays for
@@ -85,10 +90,13 @@ function CompactCard({ item, index, total, open, onStep, onOpen }: {
           <button type="button" className="shrink-0 hover:text-text-primary hover:underline" onClick={() => onOpen('summary')} data-testid="session-approval-card-summary">Summary</button>
         </span>
         {!open && (
-          <button type="button" onClick={() => onOpen()}
-            className="ml-2 inline-flex h-7 shrink-0 items-center gap-0.5 rounded-lg bg-interactive px-3 text-[13px] font-medium text-text-on-interactive hover:bg-interactive-hover" data-testid="session-approval-card-open">
-            Open <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
+          // The tooltip names the key that opens it from the chat (⌥⌘A); no badge (D-381).
+          <Tooltip content={<ApprovalKeyTip label="Open" keys={openKeys ? formatKeyDisplay(openKeys) : ''} />} side="top">
+            <button type="button" onClick={() => onOpen()}
+              className="ml-2 inline-flex h-7 shrink-0 items-center gap-0.5 rounded-lg bg-interactive px-3 text-[13px] font-medium text-text-on-interactive hover:bg-interactive-hover" data-testid="session-approval-card-open">
+              Open <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </Tooltip>
         )}
       </div>
     </div>
