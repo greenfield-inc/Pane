@@ -162,6 +162,15 @@ never `ask`. Pane saves the value as a Pane secret and returns only saved or
 declined; run commands with it through `runpane secrets exec`. If it returns
 `unavailable`, ask the person to save it in Pane under Settings > Secrets.
 
+## Restyle Pane
+
+Only when the person asks to change how Pane itself looks: call `theme_read`
+(or `runpane theme read`) for the tokens, current values, stable selectors and
+guide, then `theme_set` (`runpane theme set --colors <json> --css <text>`).
+Pane restyles within a second. You can't see the result: make small changes,
+then ask the person how it looks. A request about their project's styles edits
+the project, not Pane.
+
 ## When something looks missing
 
 - Pane keeps its data in `~/.pane` (or `$PANE_DIR`): `bin/` the CLI shims,

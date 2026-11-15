@@ -833,7 +833,7 @@ function QuestionCard({
     <div
       ref={rootRef}
       className={cardShell(form, narrow, className)}
-      data-testid="notify-card"
+      data-testid="notify-card" data-pane-part="notify-card"
       data-notify-ui={item.ui}
       // The floating strip takes the keyboard only when clicked, so typing elsewhere never answers it.
       onPointerDown={() => void onFieldFocusRequest?.()}
@@ -926,7 +926,7 @@ function CardFooter({ left, right }: { left: ReactNode; right: ReactNode }) {
 
 function SentLine({ item, onCommand }: NotifyCardProps) {
   return (
-    <div className="flex w-max min-w-[360px] max-w-[560px] items-center gap-2 rounded-[24px] bg-surface-primary py-3 pl-4 pr-3.5 text-[13px] text-text-tertiary shadow-modal ring-1 ring-border-secondary" data-testid="notify-card" data-notify-view="sent">
+    <div className="flex w-max min-w-[360px] max-w-[560px] items-center gap-2 rounded-[24px] bg-surface-primary py-3 pl-4 pr-3.5 text-[13px] text-text-tertiary shadow-modal ring-1 ring-border-secondary" data-testid="notify-card" data-pane-part="notify-card" data-notify-view="sent">
       <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-status-success text-text-on-status-success" aria-hidden="true">
         <Check className="h-3 w-3" strokeWidth={3} />
       </span>
@@ -965,7 +965,7 @@ export function UnreachableNotice({ item, className }: { item: NotifyItem; class
 function InTerminalCard({ item, form, queue, narrow, onCommand, menuPlacement, machineMark, className }: NotifyCardProps) {
   const inbox = form === 'inbox';
   return (
-    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-ui={item.ui} data-notify-view="in-terminal">
+    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-pane-part="notify-card" data-notify-ui={item.ui} data-notify-view="in-terminal">
       <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       <div
         className={cn(inbox ? 'px-3.5 pt-1 text-[14.5px] font-semibold leading-snug' : 'px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em]', 'line-clamp-3 text-text-primary')}
@@ -988,7 +988,7 @@ function InTerminalCard({ item, form, queue, narrow, onCommand, menuPlacement, m
 function ExpiredCard({ item, form, narrow, onCommand, menuPlacement, machineMark, related, className }: NotifyCardProps) {
   const reopen = form === 'inbox' && canReopen(item) && !item.unreachable;
   return (
-    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-view="expired">
+    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-pane-part="notify-card" data-notify-view="expired">
       <CardHeader item={item} form={form} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       {/* On Approvals, the same type and inset as the answered and waiting cards beside it. */}
       <div className={form === 'inbox' ? 'line-clamp-3 px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-tertiary' : 'line-clamp-3 px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-tertiary'}>{item.title}</div>
@@ -1028,7 +1028,7 @@ function AnsweredCard(props: NotifyCardProps) {
   }
   const correction = item.corrections?.at(-1);
   return (
-    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-view="answered">
+    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-pane-part="notify-card" data-notify-view="answered">
       <CardHeader item={item} form={form} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       <div className="px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-tertiary">{item.title}</div>
       <div className="px-3.5 pb-3 pt-2.5">
@@ -1088,7 +1088,7 @@ function UpdatedLine({ item, onCommand, hideAt = null, hideAfterMs = 6000 }: Not
   return (
     <div
       className="w-max min-w-[360px] max-w-[560px] overflow-hidden rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary"
-      data-testid="notify-card"
+      data-testid="notify-card" data-pane-part="notify-card"
       data-notify-view="updated"
       onMouseEnter={() => onCommand({ type: 'hover-info', id: item.id, hovering: true })}
       onMouseLeave={() => onCommand({ type: 'hover-info', id: item.id, hovering: false })}
@@ -1115,7 +1115,7 @@ function InfoLine({ item, onCommand, hideAt = null, hideAfterMs = 6000, onOpenUr
   return (
     <div
       className="w-max min-w-[360px] max-w-[560px] overflow-hidden rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary"
-      data-testid="notify-card"
+      data-testid="notify-card" data-pane-part="notify-card"
       data-notify-view="info"
       onMouseEnter={() => onCommand({ type: 'hover-info', id: item.id, hovering: true })}
       onMouseLeave={() => onCommand({ type: 'hover-info', id: item.id, hovering: false })}

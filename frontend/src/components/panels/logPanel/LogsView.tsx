@@ -45,7 +45,7 @@ export const LogsView: React.FC<LogsViewProps> = ({ panelId, sessionId, isVisibl
     logContainerRef.current = element;
     registerScrollSurface(element);
   }, [registerScrollSurface]);
-  const { theme } = useTheme();
+  const { themeRevision } = useTheme();
 
   // ANSI → HTML converter using the active theme's terminal palette
   // (--color-terminal-* tokens), so log colours match the terminal panel.
@@ -54,7 +54,7 @@ export const LogsView: React.FC<LogsViewProps> = ({ panelId, sessionId, isVisibl
   const [terminalPalette, setTerminalPalette] = useState(getTerminalTheme);
   useEffect(() => {
     setTerminalPalette(getTerminalTheme());
-  }, [theme]);
+  }, [themeRevision]);
   const ansiConverter = useMemo(() => {
     const p = terminalPalette;
     return new AnsiToHtml({

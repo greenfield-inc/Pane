@@ -98,6 +98,7 @@ export const Modal: React.FC<ModalProps> = ({
         />
         <Dialog.Content
           ref={contentRef}
+          data-pane-part="dialog"
           aria-modal="true"
           aria-describedby={undefined}
           className={cn(

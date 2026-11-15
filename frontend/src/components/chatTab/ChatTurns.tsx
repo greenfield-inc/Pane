@@ -132,7 +132,7 @@ function TodoList({ entries }: { entries: PlanEntry[] }) {
 
 function Item({ item, waiting, actions, live }: { item: TurnItem; waiting: ReadonlySet<string>; actions: ChatTurnActions; live: boolean }) {
   switch (item.type) {
-    case 'text': return <div data-anchor-id={item.id}><Markdown text={item.text} live={live} /></div>;
+    case 'text': return <div data-pane-part="chat-message" data-anchor-id={item.id}><Markdown text={item.text} live={live} /></div>;
     case 'thought': return <details className="chat-thought"><summary><Brain aria-hidden="true" />Thinking</summary><div className="whitespace-pre-wrap">{item.text}</div></details>;
     case 'image': return <img className="chat-image" alt="Sent by the agent" src={`data:${item.mimeType};base64,${item.data}`} />;
     case 'plan': return <TodoList entries={item.entries} />;
@@ -155,7 +155,7 @@ function UserMessage({ turn }: { turn: ChatTurn }) {
   const custom = userMessage?.(turn.user.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'));
   if (custom !== undefined) return <>{custom}</>;
   return <div className="chat-user-row" title={messageTime(turn.startedAt)?.full}>
-    <div className="chat-user" data-anchor-id={turn.user.id}>{turn.user.parts.map((part, index) => part.type === 'text'
+    <div className="chat-user" data-pane-part="chat-message" data-anchor-id={turn.user.id}>{turn.user.parts.map((part, index) => part.type === 'text'
       ? <span key={`${turn.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
       : part.type === 'content' ? <UserImage key={`${turn.id}:${index}`} content={part.content} /> : null)}</div>
     {userMarkdown(turn) && <div className="chat-message-actions"><ChatCopyButton label="Copy message" text={() => userMarkdown(turn)} /></div>}

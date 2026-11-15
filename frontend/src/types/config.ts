@@ -8,7 +8,7 @@ import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscri
 import type { BackgroundActivityProfile } from '../../../shared/types/backgroundActivity';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
-import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
+import type { AppearanceMode, ThemeChoice } from '../../../shared/types/appearance';
 import type { AnalyticsEnvironment } from '../../../shared/types/analyticsEnvironment';
 import type { KeyboardShortcutOverrides } from '../../../shared/utils/keyboardBindings';
 import type { SessionRetention } from '../../../shared/types/orchestrationSession';
@@ -115,9 +115,9 @@ export interface AppConfig {
   chatIdleReleaseMinutes?: number;
   // Theme preference
   appearanceMode?: AppearanceMode;
-  theme?: Theme;
-  systemLightTheme?: Theme;
-  systemDarkTheme?: Theme;
+  theme?: ThemeChoice;
+  systemLightTheme?: ThemeChoice;
+  systemDarkTheme?: ThemeChoice;
   // Opt-in high contrast mode: raises muted chrome text to AAA and the terminal's
   // minimumContrastRatio so dim CLI output stays legible
   highContrast?: boolean;
@@ -260,8 +260,8 @@ export interface UpdateConfigRequest {
   chatIdleReleaseMinutes?: number;
   theme?: AppConfig['theme'];
   appearanceMode?: AppearanceMode;
-  systemLightTheme?: Theme;
-  systemDarkTheme?: Theme;
+  systemLightTheme?: ThemeChoice;
+  systemDarkTheme?: ThemeChoice;
   highContrast?: boolean;
   uiScale?: number;
   notifications?: AppConfig['notifications'];
