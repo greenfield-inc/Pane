@@ -484,6 +484,24 @@ Inspect that receiver before retrying to avoid creating a duplicate Pane.
 
 `runpane handoff --help` lists every option. Model selection works for Claude, Codex and Cursor. Effort selection works for Claude and Codex; Cursor effort is rejected before committing or sending.
 
+## Asking another model
+
+`runpane ask` asks one agent one read-only question and prints its answer: the
+agent's own headless mode runs once, on this machine or another (`--machine`),
+in a saved repository (`--repo`; a WSL repository runs in WSL) or a Pane's
+worktree (`--pane`), and refuses edits and shell commands. `runpane models`
+lists each installed agent's models and its sign-in, live, for this machine,
+another one, or every saved machine (`--all`).
+
+```bash
+runpane ask --agent claude --model sonnet --prompt "Is this migration safe to run twice?" --json
+runpane ask --agent codex --machine parsa-devbox --repo "Pane (win)" --prompt-file question.md
+runpane models --agent opencode --search deepseek
+```
+
+The MCP tools are `agents_ask` and `models`. `runpane ask --help` and
+`runpane models --help` list every option.
+
 ## Attribution
 
 npm package downloads use `source=npm` when requesting release artifacts from

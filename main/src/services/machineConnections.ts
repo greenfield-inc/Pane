@@ -3,9 +3,11 @@ import { RemotePaneClient } from '../daemon/client/remotePaneClient';
 import type { ConfigManager } from './configManager';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../shared/paneError';
-import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '../../../shared/types/remoteDaemon';
-import type { OrchestrationPaneOverview } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationPanelOverview } from '../../../shared/types/orchestrationSession';
+import { configuredAgentSchema } from '../../../shared/agents';
+import { agentReportFields } from './workspaceJournalSchema';
 import type { RemoteMachineAccess } from './orchestrationSessionManager';
 import {
   LOCAL_MACHINE_ID,
@@ -365,7 +367,41 @@ function connectionKey(profile: RemotePaneConnectionProfile): string {
 
 /** How long a Session overview waits for a member's machine before showing it unreachable. */
 const MEMBER_READ_TIMEOUT_MS = 4_000;
-const paneOverviewResultSchema = boundary.object({ pane: boundary.jsonObject });
+const panelOverviewSchema: BoundarySchema<OrchestrationPanelOverview> = boundary.object({
+  panelId: boundary.string,
+  title: boundary.string,
+  type: boundary.optional(boundary.enumeration('terminal', 'chat', 'diff', 'explorer', 'editor', 'logs', 'dashboard', 'setup-tasks', 'browser', 'notes')),
+  agentType: boundary.optional(configuredAgentSchema),
+  state: boundary.enumeration('blocked', 'working', 'idle', 'unknown'),
+  initialized: boundary.boolean,
+  lastActivityAt: boundary.optional(boundary.string),
+  missing: boundary.optional(boundary.boolean),
+  report: boundary.optional(boundary.object({ ...agentReportFields, data: boundary.optional(boundary.jsonObject) })),
+});
+/** A member's row as its machine's `runpane:panes:overview` returns it. */
+const paneOverviewResultSchema = boundary.object({
+  pane: boundary.object({
+    paneId: boundary.string,
+    name: boundary.string,
+    worktreePath: boundary.optional(boundary.string),
+    branch: boundary.optional(boundary.string),
+    archived: boundary.boolean,
+    missing: boundary.boolean,
+    panels: boundary.array(panelOverviewSchema),
+    git: boundary.optional(boundary.object({
+      state: boundary.string,
+      ahead: boundary.optional(boundary.number),
+      behind: boundary.optional(boundary.number),
+      hasUncommittedChanges: boundary.optional(boundary.boolean),
+      hasUntrackedFiles: boundary.optional(boundary.boolean),
+      prNumber: boundary.optional(boundary.number),
+      prUrl: boundary.optional(boundary.string),
+      prTitle: boundary.optional(boundary.string),
+      prState: boundary.optional(boundary.string),
+    })),
+    report: boundary.optional(boundary.object({ ...agentReportFields, panelId: boundary.string })),
+  }),
+});
 
 /** The Session manager's view of the saved machines: remote members' rows and whether each machine sends their reports. */
 export function remoteMachineAccess(machines: MachineConnections): RemoteMachineAccess {
@@ -377,8 +413,7 @@ export function remoteMachineAccess(machines: MachineConnections): RemoteMachine
       if (state.workspaceEntries === false) return 'older-pane';
       try {
         const result = decodeBoundary(await machines.invokeOn(machineId, 'runpane:panes:overview', [{ paneId }], MEMBER_READ_TIMEOUT_MS), paneOverviewResultSchema);
-        // SAFETY: the member's machine built this row with the same OrchestrationPaneOverview type.
-        return result.pane as unknown as OrchestrationPaneOverview;
+        return result.pane;
       } catch {
         return 'unreachable';
       }

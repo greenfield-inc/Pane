@@ -1173,11 +1173,11 @@ const PANEL_TYPE_LABELS = {
 } satisfies Record<ToolPanelType, string | null>;
 
 /** What a remote member's row adds after its machine's name. */
-const REMOTE_STATE_NOTES: Record<NonNullable<OrchestrationSessionOverview['panes'][number]['machine']>['state'], string> = {
+const REMOTE_STATE_NOTES = {
   online: '',
   unreachable: ' · unreachable',
-  'older-pane': ' · older Pane: update it there for its reports to arrive',
-};
+  'older-pane': ' · needs a Pane update',
+} satisfies Record<NonNullable<OrchestrationSessionOverview['panes'][number]['machine']>['state'], string>;
 
 function PaneOverviewCard({ pane }: { pane: OrchestrationSessionOverview['panes'][number] }) {
   const setActiveSession = useSessionStore(state => state.setActiveSession);
@@ -1193,7 +1193,7 @@ function PaneOverviewCard({ pane }: { pane: OrchestrationSessionOverview['panes'
   return (
     <div className="mt-2 rounded border border-border-primary bg-surface-secondary p-2">
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0"><p className="truncate font-medium text-text-primary">{pane.name}</p><p className="truncate text-[10px] text-text-muted">{remote && `On ${remote.label} · `}{pane.branch || 'Branch unknown'}{pane.archived ? ' · archived' : pane.missing ? ' · missing' : ''}{remote && REMOTE_STATE_NOTES[remote.state]}</p></div>
+        <div className="min-w-0"><p className="truncate font-medium text-text-primary">{pane.name}</p><p className="truncate text-[10px] text-text-muted">{remote ? `On ${remote.label}${pane.branch ? ` · ${pane.branch}` : ''}` : pane.branch || 'Branch unknown'}{pane.archived ? ' · archived' : pane.missing ? ' · missing' : ''}{remote && REMOTE_STATE_NOTES[remote.state]}</p></div>
         {!readOnly && <button type="button" onClick={openPane} className="flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] text-interactive hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive">Open Pane</button>}
       </div>
       {pane.panels.length > 0 && <div className="-mx-1 mt-1">{pane.panels.map(panel => {

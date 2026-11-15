@@ -456,7 +456,8 @@ function invalidAgentError(value: string): Error {
 const WAIT_FOR_RESULT_COMMANDS: ReadonlySet<string> = new Set(['panels submit', 'panels create', 'panes create']);
 
 function validateWaitForResultArgs(parsed: ParsedArgs): void {
-  if (parsed.waitTimeoutMs !== undefined && !parsed.waitForResult) {
+  // `ask` bounds its one agent turn with --timeout.
+  if (parsed.waitTimeoutMs !== undefined && !parsed.waitForResult && parsed.command !== 'ask') {
     throw new Error('--timeout only applies with --wait.');
   }
   if (!parsed.waitForResult) return;

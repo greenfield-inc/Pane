@@ -261,7 +261,7 @@ type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
   /** Files each Approvals item under its Session. */
   orchestrationSessionManager?: {
     /** A Session member on another saved machine; its Pane and tabs are not in this computer's database. */
-    remoteMember?(paneId: string): unknown;
+    remoteMember?(paneId: string): { machine: { label: string } } | undefined;
     approvalSession(paneId: string, panelId?: string): NotifySession | undefined;
     approvalSessionsById(): Map<string, NotifySession>;
     approvalSessionRecord(sessionId: string): { name: string; paneId: string; archived: boolean } | undefined;
@@ -370,6 +370,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     },
     sessionsById: () => services.orchestrationSessionManager?.approvalSessionsById() ?? new Map(),
     sessionRecord: services.orchestrationSessionManager ? (sessionId) => services.orchestrationSessionManager?.approvalSessionRecord(sessionId) : undefined,
+    memberMachine: (paneId) => services.orchestrationSessionManager?.remoteMember?.(paneId)?.machine.label,
     onSessionsChanged: (listener) => {
       const sessions = services.orchestrationSessionManager;
       sessions?.on('changed', listener);

@@ -23,9 +23,11 @@ function setup() {
       invoke: async (_machineId, channel, args): Promise<PaneCommandValue> => {
         if (!online) throw new Error('offline');
         expect(channel).toBe('runpane:workspace:wait');
+        // SAFETY: RemoteMemberEvents sends one wait request with these fields; the test reads its own call.
         const request = args[0] as { since: number; epoch?: string; paneIds: string[]; kinds: RunpaneWorkspaceEntry['kind'][]; limit: number };
         if (request.epoch && request.epoch !== devbox.epoch) return { epoch: devbox.epoch, entries: [], reset: { reason: 'epoch-changed' } };
         const read = devbox.readAfter(request.since, { paneIds: request.paneIds, kinds: request.kinds }, request.limit);
+        // SAFETY: a JSON round trip of journal entries is a PaneCommandValue, as the daemon sends it.
         return JSON.parse(JSON.stringify({ epoch: devbox.epoch, entries: read.entries })) as PaneCommandValue;
       },
     },
