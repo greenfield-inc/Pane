@@ -103,27 +103,39 @@ it, with a grant:
 
 1. When a phone registers its device token, the computer sends `grant` with
    that token and the phone's id for the computer (`hostProfileId`). The phone
-   registers on every connect, so the computer asks again for the same
-   registration and token at most every 10 minutes while it waits.
+   registers on every connect, so while it waits the computer asks again for
+   the same registration and token only 20 to 30 minutes (a random wait) after
+   it last asked.
 2. The relay pushes the token a silent message holding the grant,
-   `<computer id>.<base64url HMAC-SHA256 over "<id>\n<platform>\n<token>">`:
+   `<computer id>.<day>.<base64url HMAC-SHA256 over "<id>\n<platform>\n<token>\n<day>">`,
+   where `<day>` is the issue day in whole days since the Unix epoch (UTC):
    on iOS a `background` push with `{"aps":{"content-available":1},"paneGrant":"<grant>","hostProfileId":"<id>"}`,
    on Android a high-priority data message with `paneGrant` and `hostProfileId`.
 3. The Pane app hands the grant to the saved computer `hostProfileId` names
    (`mobile:push-grant`). That computer keeps it only if it starts with its
    own id, and sends it with every alert to that token.
+4. A grant works for 30 days after its issue day. Once a grant is over 15
+   days old, the computer asks for a fresh one when the phone registers or an
+   alert goes out, with the same 20 to 30 minute wait between asks, and keeps
+   sending the old one until the phone hands back the new one. A phone that
+   stays paired and opens Pane, or gets an alert, within those 15 days
+   renews without the person seeing anything.
 
 Only the phone receives the grant, and it hands it only to a computer it is
-paired with, so someone holding a leaked device token can't alert it. The
+paired with, so someone holding a leaked device token can't alert it, and a
+computer the phone signed out of stops reaching it within 30 days. The
 grant key comes from `--registry-secret`, so every relay that shares the
 secret accepts the same grants and a computer keeps its grants when it moves
 to another region. A relay without the secret makes a random key at start,
-and its grants end when it restarts. An alert whose grant is missing or wrong
-is refused with `unbound`; the computer then drops the grant and asks for a
+and its grants end when it restarts. An alert whose grant is missing, wrong,
+over 30 days old or dated after tomorrow is refused with `unbound`; the computer then drops the grant and asks for a
 new one when the phone next registers. Until it holds a grant, the computer
 tells the phone it is waiting (`PUSH_AWAITING_PHONE`) instead of ready.
-Each phone gets at most 10 grant pushes an hour, counted separately from its
-alerts, and each computer at most `--limit-alerts-per-hour` of them an hour.
+Each computer may send each phone at most 3 grant pushes an hour, so a
+computer key asking for a leaked token spends only its own hour and never
+blocks the phone's real computers. Each computer sends at most
+`--limit-alerts-per-hour` grant pushes an hour in all. Grant pushes are
+counted apart from alerts.
 
 The computer builds the alert payload exactly as it would send it itself,
 and adds `"grant":"<grant>"` to the frame:

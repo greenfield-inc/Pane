@@ -1771,7 +1771,7 @@ async fn alerts_need_the_grant_the_phone_received_for_that_computer() {
     assert_eq!(a.next().await["t"], "ok");
 
     // A grant works only for the computer and the phone it names.
-    let at = a.id.len() + 1;
+    let at = g.rfind('.').unwrap() + 1;
     let flipped = if &g[at..=at] == "A" { "B" } else { "A" };
     let forged = format!("{}{flipped}{}", &g[..at], &g[at + 1..]);
     b.send(alert("phone-1", Some(&g))).await;
@@ -1864,18 +1864,23 @@ async fn grants_hold_on_every_relay_that_shares_the_registry_secret() {
 }
 
 #[tokio::test]
-async fn grant_pushes_are_capped_per_phone_apart_from_alerts() {
+async fn grant_pushes_are_capped_per_computer_and_phone_apart_from_alerts() {
     let (env, mut fcm) = fcm_env(&["--limit-alerts-per-token-per-hour", "1"]).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
     let ask = json!({"t": "grant", "req": "g", "platform": "android", "token": "phone-1",
         "hostProfileId": "h1"});
     let (g, _) = grant(&mut agent, &mut fcm, "android", "phone-1").await;
-    for _ in 1..10 {
+    for _ in 1..3 {
         agent.send(ask.clone()).await;
         assert_eq!(agent.next().await["t"], "ok");
     }
-    agent.send(ask).await;
+    agent.send(ask.clone()).await;
     assert_eq!(agent.next().await["code"], "throttled");
+
+    // Another computer key asking for the same phone spends only its own hour.
+    let mut other = Agent::connect(&env, &SigningKey::generate()).await;
+    other.send(ask).await;
+    assert_eq!(other.next().await["t"], "ok");
 
     // The phone's alert hour is untouched by its grants.
     agent
@@ -1883,6 +1888,49 @@ async fn grant_pushes_are_capped_per_phone_apart_from_alerts() {
             "message": {"token": "phone-1", "data": {}}, "grant": g}))
         .await;
     assert_eq!(agent.next().await["t"], "ok");
+}
+
+#[tokio::test]
+async fn grants_name_their_issue_day_and_expire_after_30_days() {
+    let (env, mut fcm) = fcm_env(&["--registry-secret", "shared"]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let (g, _) = grant(&mut agent, &mut fcm, "android", "phone-1").await;
+    let today = unix_now() / 86_400;
+    let parts: Vec<&str> = g.split('.').collect();
+    assert_eq!(parts[..2], [agent.id.as_str(), today.to_string().as_str()]);
+
+    // The grant key as PROTOCOL.md defines it: HMAC(secret, "pane alert grant v1").
+    let derived = ring::hmac::sign(
+        &ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b"shared"),
+        b"pane alert grant v1",
+    );
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, derived.as_ref());
+    let id = agent.id.clone();
+    let issued = |day: i64| {
+        let tag = ring::hmac::sign(&key, format!("{id}\nandroid\nphone-1\n{day}").as_bytes());
+        format!("{id}.{day}.{}", BASE64URL_NOPAD.encode(tag.as_ref()))
+    };
+    assert_eq!(issued(today), g);
+    let alert = |grant: String| {
+        json!({"t": "alert", "req": "1", "platform": "android",
+            "message": {"token": "phone-1", "data": {}}, "grant": grant})
+    };
+    for (day, answer) in [
+        (today - 30, "ok"),
+        (today - 31, "unbound"),
+        (today + 2, "unbound"),
+    ] {
+        agent.send(alert(issued(day))).await;
+        let got = agent.next().await;
+        let got = got["code"].as_str().unwrap_or(got["t"].as_str().unwrap());
+        assert_eq!(got, answer, "issued on day {day}, today {today}");
+    }
+
+    // The day is signed: moving it forward breaks the grant.
+    agent
+        .send(alert(format!("{}.{}.{}", parts[0], today + 1, parts[2])))
+        .await;
+    assert_eq!(agent.next().await["code"], "unbound");
 }
 
 #[tokio::test]

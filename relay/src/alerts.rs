@@ -1,8 +1,8 @@
 //! Push alerts that computers send through the relay with the Pane app's keys
 //! (PROTOCOL.md, Alerts): APNs over HTTP/2 with an ES256 token, FCM v1 with an
 //! OAuth2 token from a service account key or, keyless, from the GCE metadata server.
-//! Each alert carries a grant: a MAC over (computer, platform, token) that the relay
-//! pushed to that token, so only a computer the phone handed it to can alert the phone.
+//! Each alert carries a grant: a MAC over (computer, platform, token, issue day) that the relay
+//! pushed to that token, so only a computer the phone handed it to can alert the phone, for 30 days.
 
 use crate::Error;
 use crate::config::Config;
@@ -27,8 +27,11 @@ const FCM_SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
 const FCM_DEFAULT_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const MAX_ANSWER_BODY: usize = 2048;
 const MAX_READ_BODY: usize = 64 * 1024;
-/// Grant pushes one phone may get an hour, apart from its alerts.
-const GRANTS_PER_TOKEN_PER_HOUR: usize = 10;
+/// Grant pushes one computer may send one phone an hour, apart from its alerts.
+const GRANTS_PER_COMPUTER_AND_TOKEN_PER_HOUR: usize = 3;
+/// Days a grant works after the day the relay issued it.
+const GRANT_DAYS: u64 = 30;
+const DAY_SECS: u64 = 86_400;
 
 pub struct Alerts {
     apns: Option<Apns>,
@@ -38,7 +41,7 @@ pub struct Alerts {
     token_limit: usize,
     /// Signs grants; relays that share the registry secret share it.
     grant_key: hmac::Key,
-    /// Sliding hours by `<what> <id>` and `<what> <platform> <device token>`.
+    /// Sliding hours by computer, by device, and for grants by computer and device.
     windows: Mutex<HashMap<String, Window>>,
 }
 
@@ -336,22 +339,37 @@ impl Alerts {
         })
     }
 
+    /// `<id>.<issue day>.<tag>`, the day counted in whole days since the Unix epoch.
     fn grant(&self, id: &str, platform: &str, token: &str) -> String {
+        let day = now_secs() / DAY_SECS;
         let tag = hmac::sign(
             &self.grant_key,
-            format!("{id}\n{platform}\n{token}").as_bytes(),
+            format!("{id}\n{platform}\n{token}\n{day}").as_bytes(),
         );
-        format!("{id}.{}", BASE64URL_NOPAD.encode(tag.as_ref()))
+        format!("{id}.{day}.{}", BASE64URL_NOPAD.encode(tag.as_ref()))
     }
 
+    /// Accepts a grant signed for this computer, platform and token, issued within the last
+    /// 30 days (and no later than tomorrow, for relays whose clocks differ).
     fn granted(&self, id: &str, platform: &str, token: &str, grant: &str) -> bool {
-        let Some(tag) = grant.strip_prefix(id).and_then(|g| g.strip_prefix('.')) else {
+        let Some((day, tag)) = grant
+            .strip_prefix(id)
+            .and_then(|g| g.strip_prefix('.'))
+            .and_then(|g| g.split_once('.'))
+        else {
             return false;
         };
+        let Ok(issued) = day.parse::<u64>() else {
+            return false;
+        };
+        let today = now_secs() / DAY_SECS;
+        if issued > today + 1 || today.saturating_sub(issued) > GRANT_DAYS {
+            return false;
+        }
         let Ok(tag) = BASE64URL_NOPAD.decode(tag.as_bytes()) else {
             return false;
         };
-        let message = format!("{id}\n{platform}\n{token}");
+        let message = format!("{id}\n{platform}\n{token}\n{issued}");
         hmac::verify(&self.grant_key, message.as_bytes(), &tag).is_ok()
     }
 
@@ -383,7 +401,7 @@ impl Alerts {
         if !self.granted(id, platform, token, grant) {
             tracing::info!(id, platform, "alert refused: no valid grant");
             return json!({"t": "error", "code": "unbound",
-                "message": "This phone has not confirmed this computer. It does when it next connects to the computer."});
+                "message": "This phone has not confirmed this computer, or its confirmation is over 30 days old. It confirms again when it next connects to the computer."});
         }
         let checks = [
             (format!("id {id}"), self.limit, "computer"),
@@ -421,10 +439,11 @@ impl Alerts {
         }
         let checks = [
             (format!("grants id {id}"), self.limit, "computer"),
+            // Keyed by computer too, so a computer key asking for a leaked token spends only its own hour.
             (
-                format!("grants token {platform} {token}"),
-                GRANTS_PER_TOKEN_PER_HOUR,
-                "device",
+                format!("grants {id} {platform} {token}"),
+                GRANTS_PER_COMPUTER_AND_TOKEN_PER_HOUR,
+                "computer and device",
             ),
         ];
         if let Err(message) = self.admit(id, "grants", &checks) {

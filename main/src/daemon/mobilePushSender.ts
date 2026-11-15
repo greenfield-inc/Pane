@@ -54,13 +54,17 @@ class ProviderDeliveryError extends Error {
 class UnboundGrantError extends ProviderDeliveryError {}
 
 const MAX_RECENT_EVENTS = 64;
-/** A relay grant is `<16-character computer id>.<43-character signature>`; anything far longer is not one. */
-const MAX_GRANT_LENGTH = 100;
+/** A relay grant after this computer's id: `.<issue day since the Unix epoch>.<signature>`. */
+const GRANT_AFTER_ID = /^\.(\d{1,7})\.[A-Za-z0-9_-]{1,64}$/;
+/** The relay accepts a grant for 30 days; past half that, the computer asks for a fresh one. */
+const GRANT_RENEW_AFTER_DAYS = 15;
 /**
- * The phone registers on every connect, and the relay allows 10 grant pushes per phone an hour, so a
- * registration still waiting for its grant asks again only this long after it last asked.
+ * The phone registers on every connect, so a registration that needs a grant asks again only 20 to
+ * 30 minutes after it last asked: two computers waiting on one phone send it at most six silent
+ * pushes an hour, and the jitter keeps them from asking together.
  */
-const GRANT_RETRY_MS = 10 * 60_000;
+const GRANT_RETRY_MS = 20 * 60_000;
+const GRANT_RETRY_JITTER_MS = 10 * 60_000;
 /** Phones one owner login keeps registered on a host; registering one more drops the oldest. */
 const MAX_OWNER_REGISTRATIONS = 10;
 /**
@@ -108,8 +112,8 @@ export class MobilePushSender {
   private readonly finishTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Each Notify question's waits so far, and whether it waits now: Undo makes it wait, and alert, again. */
   private readonly questionRounds = new Map<string, { round: number; open: boolean }>();
-  /** When each registration last asked the relay for a grant, by `<registration id> <token>`. */
-  private readonly grantAsked = new Map<string, number>();
+  /** When each registration may next ask the relay for a grant, by `<registration id> <token>`. */
+  private readonly grantRetryAt = new Map<string, number>();
 
   constructor(
     private readonly configManager: MobilePushConfigManager,
@@ -163,12 +167,7 @@ export class MobilePushSender {
     if (previous?.relayGrant && previous.token === request.token) registration.relayGrant = previous.relayGrant;
     registrations.push(registration);
     await this.save(configWithRegistrations(config, withinOwnerLimit(registrations, clientId)));
-    const relay = relayFor(registration.platform, this.configManager.getConfig().apns);
-    const asked = `${registration.id} ${registration.token}`;
-    if (relay && !registration.relayGrant && Date.now() - (this.grantAsked.get(asked) ?? -Infinity) >= GRANT_RETRY_MS) {
-      this.grantAsked.set(asked, Date.now());
-      requestGrant(relay, { platform: registration.platform, token: registration.token, hostProfileId: registration.hostProfileId });
-    }
+    this.askForGrant(registration);
     return this.getStatus(clientId, request.platform, request.installationId);
   }
 
@@ -179,7 +178,7 @@ export class MobilePushSender {
   async confirmGrant(clientId: string, request: { platform: RemoteMobilePlatform; installationId: string; grant: string }): Promise<{ ok: boolean }> {
     return this.mutate(async () => {
       const id = relayPush?.id();
-      if (!id || !request.grant.startsWith(`${id}.`) || request.grant.length > MAX_GRANT_LENGTH) return { ok: false };
+      if (!id || !request.grant.startsWith(id) || !GRANT_AFTER_ID.test(request.grant.slice(id.length))) return { ok: false };
       const config = this.config();
       const live = config.host.mobilePush.registrations.find(item => (
         item.clientId === clientId && item.platform === request.platform && item.installationId === request.installationId && !item.revokedAt
@@ -404,6 +403,7 @@ export class MobilePushSender {
     for (const registration of updatedConfig.host.mobilePush.registrations) {
       if (!isLive(this.config(), registration) || !isEnabled(registration, kind)) continue;
       if (registration.recentEventIds.includes(eventId)) continue;
+      this.askForGrant(registration);
       try {
         await this.deliver(registration, eventId, event, kind);
         await this.markDelivered(registration.id, eventId);
@@ -501,9 +501,23 @@ export class MobilePushSender {
     console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind, ...failure });
   }
 
+  /**
+   * Asks the relay to push the phone a grant for this computer when the registration goes through
+   * the relay and has none, or one past half its 30 days (relay/PROTOCOL.md, Alerts). The old grant
+   * keeps alerts going until the phone hands back the new one.
+   */
+  private askForGrant(registration: RemoteMobilePushRegistration): void {
+    const relay = relayFor(registration.platform, this.configManager.getConfig().apns);
+    if (!relay || !grantNeedsRenewal(registration.relayGrant)) return;
+    const key = `${registration.id} ${registration.token}`;
+    if (Date.now() < (this.grantRetryAt.get(key) ?? 0)) return;
+    this.grantRetryAt.set(key, Date.now() + GRANT_RETRY_MS + Math.random() * GRANT_RETRY_JITTER_MS);
+    requestGrant(relay, { platform: registration.platform, token: registration.token, hostProfileId: registration.hostProfileId });
+  }
+
   private async dropGrant(id: string): Promise<void> {
     // The relay refused the grant, so the next registration asks for a new one at once.
-    for (const key of this.grantAsked.keys()) if (key.startsWith(`${id} `)) this.grantAsked.delete(key);
+    for (const key of this.grantRetryAt.keys()) if (key.startsWith(`${id} `)) this.grantRetryAt.delete(key);
     const config = this.config();
     await this.save(configWithRegistrations(config, config.host.mobilePush.registrations.map(item => {
       if (item.id !== id) return item;
@@ -564,6 +578,11 @@ function relayFor(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | u
 }
 function hasKeys(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): boolean {
   return platform === 'ios' ? readApnsCredentials(apns) !== null : readFcmCredentials() !== null;
+}
+/** Whether a registration has no grant, or one issued over 15 days ago. */
+function grantNeedsRenewal(grant: string | undefined): boolean {
+  const issued = Number(grant?.split('.')[1]);
+  return !Number.isFinite(issued) || Math.floor(Date.now() / 86_400_000) - issued > GRANT_RENEW_AFTER_DAYS;
 }
 /** Has the relay push the phone a grant for this computer; the phone hands it back with `mobile:push-grant`. */
 function requestGrant(relay: RelayPushChannel, request: RelayGrantRequest): void {
