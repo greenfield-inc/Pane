@@ -21,12 +21,17 @@ interface Check {
  * check passes, so it is safe to run again after each step.
  */
 export async function runRelayInit(args: string[]): Promise<number> {
-  let values: { domain?: string; 'public-ip'?: string; resolver?: string };
+  let values: { domain?: string; 'public-ip'?: string; resolver?: string; help?: boolean };
   try {
-    ({ values } = parseArgs({ args, options: { domain: { type: 'string' }, 'public-ip': { type: 'string' }, resolver: { type: 'string' } } }));
+    ({ values } = parseArgs({ args, options: { domain: { type: 'string' }, 'public-ip': { type: 'string' }, resolver: { type: 'string' }, help: { type: 'boolean', short: 'h' } } }));
   } catch (cause) {
     throw usageError(cause instanceof Error ? cause.message : String(cause));
   }
+  if (values.help) {
+    console.log(`Usage: ${USAGE}\n\nPrints the DNS records, ports, start command and Pane setting a relay on <relay domain> needs, then checks them.\nExits 0 once every check passes. Guide: ${GUIDE}`);
+    return 0;
+  }
+  if (values.domain && /[/:]/u.test(values.domain)) throw usageError(`--domain takes a name such as relay.example.com, not a URL or host:port ("${values.domain}")`);
   const domain = values.domain?.trim().toLowerCase().replace(/\.$/u, '') ?? '';
   const labels = domain.split('.');
   if (labels.length < 3 || !labels.every((label) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/u.test(label))) {
