@@ -50,3 +50,4 @@ export {
   saveRemoteProfiles,
   type RemoteKeyValueStorage,
 } from './storage';
+export { terminalSnapshotText, type HostTerminalSnapshot } from './terminalSnapshot';
