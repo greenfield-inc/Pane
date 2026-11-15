@@ -494,7 +494,10 @@ describe('RemotePaneClient routes (D-51)', () => {
     near.setHeartbeatInterval(20);
     far.setHeartbeatInterval(20);
     const statuses: string[] = [];
+    let resyncs = 0;
     const client = new RemotePaneClient(routeProfile(near.baseUrl), {
+      // Each route change refetches host state, terminals included, as a reconnect does.
+      onResyncRequired: () => { resyncs += 1; },
       routes: [
         { routeId: 'tailscale:near', kind: 'tailscale', profile: routeProfile(near.baseUrl) },
         { routeId: 'relay:far', kind: 'relay', profile: routeProfile(far.baseUrl) },
@@ -514,10 +517,39 @@ describe('RemotePaneClient routes (D-51)', () => {
     await waitFor(() => client.routeId === 'relay:far' && statuses.at(-1) === 'connected', 2_000);
     expect(statuses).not.toContain('error');
     expect(client.profile.baseUrl).toBe(far.baseUrl);
+    expect(resyncs).toBe(2);
 
     near.setEventsReady(true);
     near.setHeartbeatInterval(20);
     await waitFor(() => client.routeId === 'tailscale:near' && statuses.at(-1) === 'connected', 2_000);
+    expect(resyncs).toBe(3);
+    await client.disconnect();
+  });
+
+  it('stays connected for the full heartbeat limit when no other route answers', async () => {
+    const near = await createTestRemoteServer();
+    const far = await createTestRemoteServer();
+    activeServers.push(near);
+    near.setHeartbeatInterval(20);
+    const statuses: Array<{ status: string; at: number }> = [];
+    const client = new RemotePaneClient(routeProfile(near.baseUrl), {
+      routes: [
+        { routeId: 'lan:near', kind: 'lan', profile: routeProfile(near.baseUrl) },
+        { routeId: 'relay:far', kind: 'relay', profile: routeProfile(far.baseUrl) },
+      ],
+      // Scaled: the 8 s silence limit and today's 20 s heartbeat limit.
+      failoverStaleTimeoutMs: 100,
+      heartbeatStaleTimeoutMs: 800,
+      onConnectionStateChange: (status) => statuses.push({ status, at: Date.now() }),
+    });
+    await client.connect();
+    await far.close();
+
+    near.setHeartbeatInterval(0);
+    const silentAt = Date.now();
+    await waitFor(() => statuses.some(({ status }) => status === 'reconnecting'), 3_000);
+    const droppedAfter = statuses.find(({ status }) => status === 'reconnecting')!.at - silentAt;
+    expect(droppedAfter).toBeGreaterThanOrEqual(700);
     await client.disconnect();
   });
 
@@ -1032,6 +1064,34 @@ describe('RemotePaneClientController', () => {
     controller.resume();
     await waitFor(() => controller.getConnectionState().status === 'connected' && !controller.getConnectionState().check);
     await controller.switchToLocalMode();
+  });
+
+  it('switches over the next route when the first is Tailscale and Tailscale is signed out here', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const remoteConfig = createDefaultRemoteDaemonConfig();
+    remoteConfig.client.computers = [{
+      id: 'studio-mac',
+      label: 'studio-mac',
+      routes: [
+        { id: 'tailscale:https://studio-mac.tail1234.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://studio-mac.tail1234.ts.net:8443', token: 'link-token', tailnetMachine: 'studio-mac', tailnetDomain: 'tail1234.ts.net' },
+        { id: `public:${server.baseUrl}`, kind: 'public', source: 'link', baseUrl: server.baseUrl, token: 'link-token' },
+      ],
+    }];
+    const controller = createController();
+    controller.initialize({
+      configManager: createConfigManagerStub(remoteConfig),
+      rendererEventSink: { send() {} },
+      resolveTailnetMachineUrl: async () => { throw new Error('Tailscale is signed out. Open Tailscale and sign in.'); },
+      checkDependencies: { lookupTailnetMachine: async () => ({ kind: 'tailscale-down', reason: 'Tailscale is signed out', fix: 'Open Tailscale and sign in.' }) },
+    });
+
+    await controller.activateProfile({
+      id: 'studio-mac', label: 'studio-mac', baseUrl: 'https://studio-mac.tail1234.ts.net:8443', token: 'link-token', transport: 'http+sse', tailnetMachine: 'studio-mac', tailnetDomain: 'tail1234.ts.net',
+    });
+
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(controller.getConnectionState()).toMatchObject({ activeRouteId: `public:${server.baseUrl}` });
   });
 
   it('restores the saved local state when a manual activation fails', async () => {

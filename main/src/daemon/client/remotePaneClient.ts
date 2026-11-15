@@ -53,6 +53,7 @@ import {
   runSshCommand,
   versionRow,
   type ConnectionCheckDependencies,
+  type ProbeOutcome,
 } from './connectionChecks';
 
 interface RemoteConnectionStateMetadata {
@@ -72,6 +73,12 @@ export interface RemoteRouteCandidate {
   routeId: string;
   kind: ComputerRouteKind;
   profile: RemotePaneConnectionProfile;
+}
+
+/** One route's probe: the profile it was probed with and what the probe found. */
+interface RouteProbe {
+  profile: RemotePaneConnectionProfile;
+  outcome: ProbeOutcome;
 }
 
 interface RemotePaneClientOptions {
@@ -201,9 +208,9 @@ const REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS = 300_000;
 const INTERRUPTION_CODES = new Set(['ERR_REMOTE_TRANSPORT', 'ERR_REMOTE_DELIVERY_UNKNOWN', 'ERR_REMOTE_STALE_RESPONSE']);
 const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
 /**
- * With another route to move to, a stream silent this long counts as dropped: the host sends a
- * heartbeat every 5 s, so this is one missed heartbeat and margin. Moving routes then fits in the
- * 10 s before the "Can't reach" banner shows.
+ * With another route, a stream silent this long has the other routes checked: the host sends a
+ * heartbeat every 5 s, so this is one missed heartbeat and margin. Moving to one that answers then
+ * fits in the 10 s before the "Can't reach" banner shows.
  */
 const ROUTE_FAILOVER_STALE_TIMEOUT_MS = 8_000;
 /** How long one route gets to answer before the next is tried. */
@@ -281,6 +288,7 @@ export class RemotePaneClient {
   private eventResponse: IncomingMessage | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatStaleTimer: NodeJS.Timeout | null = null;
+  private failoverTimer: NodeJS.Timeout | null = null;
   private lastSeenAt: string | null = null;
   private closedByClient = false;
   /** Set while the system sleeps: no stream, heartbeat or reconnect until resume(). */
@@ -643,8 +651,11 @@ export class RemotePaneClient {
     timeoutMs: number,
     profile: RemotePaneConnectionProfile = this.currentProfile,
   ): Promise<{ statusCode: number } | { code: string | undefined; message: string }> {
+    const options = this.buildRequestOptions(endpoint, { method: 'GET', headers }, profile);
+    // A probe tests the route itself, so it opens its own connection: a kept-alive socket from before a network change may be dead.
+    options.agent ??= false;
     return new Promise((resolve) => {
-      const request = createRequest(endpoint, this.buildRequestOptions(endpoint, { method: 'GET', headers }, profile), (response) => {
+      const request = createRequest(endpoint, options, (response) => {
         response.resume();
         resolve({ statusCode: response.statusCode ?? 0 });
       });
@@ -1159,21 +1170,54 @@ export class RemotePaneClient {
     this.lastSeenAt = timestamp;
     this.clearHeartbeatStaleTimer();
     if (!this.closedByClient && !this.suspended) {
-      const staleMs = this.routes.length > 1 ? Math.min(this.failoverStaleTimeoutMs, this.heartbeatStaleTimeoutMs) : this.heartbeatStaleTimeoutMs;
+      const staleMs = this.heartbeatStaleTimeoutMs;
       this.heartbeatStaleTimer = setTimeout(() => {
         this.handleUnexpectedDisconnect(
           `Remote daemon heartbeat timed out after ${staleMs}ms`,
           true,
         );
       }, staleMs);
+      if (this.routes.length > 1 && this.failoverStaleTimeoutMs < staleMs) {
+        this.failoverTimer = setTimeout(() => void this.moveIfAnotherRouteAnswers(), this.failoverStaleTimeoutMs);
+      }
     }
     return timestamp;
+  }
+
+  /**
+   * The stream has missed a heartbeat: move to the first other route whose host answers. When none
+   * does, the host itself may be down, so the connection stays as it is until the heartbeat limit,
+   * as with one route, and the banner keeps today's timing.
+   */
+  private async moveIfAnotherRouteAnswers(): Promise<void> {
+    this.failoverTimer = null;
+    const generation = this.streamGeneration;
+    const current = this.routeIndex;
+    for (const index of this.routeOrder(this.routes[current]?.routeId)) {
+      if (index === current) continue;
+      let prepared: RemotePaneConnectionProfile;
+      try {
+        prepared = this.prepareRoute ? await this.prepareRoute(this.routes[index]) : this.routes[index].profile;
+      } catch {
+        continue;
+      }
+      const health = await this.checkHealthAt(prepared, ROUTE_ATTEMPT_TIMEOUT_MS);
+      if (generation !== this.streamGeneration || this.status !== 'connected' || this.closedByClient || this.suspended) return;
+      if (health.kind !== 'running') continue;
+      console.info(`[Pane remote daemon] ${this.currentProfile.label}: ${this.routes[current]?.kind} went silent; moving to ${this.routes[index].kind}`);
+      await this.moveToRoute(index);
+      return;
+    }
   }
 
   private clearHeartbeatStaleTimer(): void {
     if (this.heartbeatStaleTimer) {
       clearTimeout(this.heartbeatStaleTimer);
       this.heartbeatStaleTimer = null;
+    }
+    if (this.failoverTimer) {
+      clearTimeout(this.failoverTimer);
+      this.failoverTimer = null;
     }
   }
 }
@@ -1912,13 +1956,13 @@ export class RemotePaneClientController extends EventEmitter {
   }
 
   /**
-   * Starts a checklist for `profile` and runs its probe stages. Throws when one fails, naming the
-   * stage, so the connect stops before it touches the current connection.
+   * Starts a checklist for `profile` and runs its probe stages on each of its computer's routes,
+   * nearest first, stopping at the first that passes. When none passes it throws, naming the
+   * nearest route's failed stage, so the connect stops before it touches the current connection.
    */
   private async runProbes(profile: RemotePaneConnectionProfile): Promise<void> {
     const id = ++this.checkSequence;
     const sighting = this.sightings.get(profile.id);
-    this.checkProfile = profile;
     this.hostFixes = new Map();
     this.check = {
       id,
@@ -1932,22 +1976,56 @@ export class RemotePaneClientController extends EventEmitter {
       hostVersion: sighting?.version ?? null,
     };
     this.publishState();
-    const outcome = await probeHost(profile, new RemotePaneClient(profile, { dnsLookup: this.dnsLookup }), this.checkDependencies, (rows) => this.updateCheck(id, { rows }));
-    if (this.check?.id !== id) {
-      throw new PaneError('ERR_REMOTE_CHECK_SUPERSEDED', `The connection to ${profile.label} was replaced by a newer one.`, 'Wait for the newer connection to finish.');
+    const routes = this.routesFor(profile);
+    const candidates = routes.length > 1 ? routes : [{ ...routes[0], profile }];
+    let nearest: RouteProbe | null = null;
+    for (const route of candidates) {
+      const probe = await this.probeRoute(id, route, routes.length > 1);
+      if (this.check?.id !== id) {
+        throw new PaneError('ERR_REMOTE_CHECK_SUPERSEDED', `The connection to ${profile.label} was replaced by a newer one.`, 'Wait for the newer connection to finish.');
+      }
+      if (!probe.outcome.failedCheck) {
+        this.checkProfile = probe.profile;
+        this.hostFixes = probe.outcome.hostFixes;
+        if (probe.outcome.hostVersion) this.recordHostVersion(profile.id, probe.outcome.hostVersion);
+        this.updateCheck(id, {
+          address: probe.outcome.address,
+          rows: probe.outcome.rows.map((row) => (row.stage === 'version' ? { ...row, status: 'running' } : row)),
+        });
+        return;
+      }
+      nearest ??= probe;
     }
-    this.hostFixes = outcome.hostFixes;
-    if (outcome.hostVersion) this.recordHostVersion(profile.id, outcome.hostVersion);
+    // SAFETY: `candidates` is never empty and every candidate either returned or set `nearest`.
+    const { profile: failedProfile, outcome } = nearest as RouteProbe;
     const failed = outcome.rows.find((row) => row.status === 'failed');
-    if (failed && outcome.failedCheck) {
-      this.updateCheck(id, { rows: outcome.rows, address: outcome.address, outcome: 'failed' });
-      this.trackCheckFailure(outcome.failedCheck);
-      throw new PaneError('ERR_REMOTE_CHECK_FAILED', `${failed.label}.`, failed.detail ?? 'Use the fix on the connection checklist, then retry.');
+    this.checkProfile = failedProfile;
+    this.hostFixes = outcome.hostFixes;
+    this.updateCheck(id, { route: routeOf(failedProfile), rows: outcome.rows, address: outcome.address, outcome: 'failed' });
+    if (outcome.failedCheck) this.trackCheckFailure(outcome.failedCheck);
+    throw new PaneError('ERR_REMOTE_CHECK_FAILED', `${failed?.label ?? `Can't reach ${profile.label}`}.`, failed?.detail ?? 'Use the fix on the connection checklist, then retry.');
+  }
+
+  /**
+   * Probes one route, showing it on the checklist. With several routes an SSH route's tunnel is
+   * opened first; a route that cannot be readied fails at "Host reachable".
+   */
+  private async probeRoute(id: number, route: RemoteRouteCandidate, prepare: boolean): Promise<RouteProbe> {
+    let profile = route.profile;
+    this.updateCheck(id, { route: routeOf(profile), address: addressOf(profile), rows: initialRows(profile) });
+    // A Tailscale route's probe looks the machine up itself.
+    if (prepare && !tailnetMachineRef(profile)) {
+      try {
+        profile = await this.prepareRoute(route);
+      } catch (error) {
+        const rows = initialRows(profile).map((row): RemoteConnectionCheckRow => (row.stage === 'reachable'
+          ? { ...row, status: 'failed', label: `Can't reach ${profile.label}`, detail: getErrorMessage(error, 'The route could not be opened.') }
+          : row));
+        return { profile, outcome: { rows, failedCheck: 'host_unreachable', hostVersion: null, address: addressOf(profile), hostFixes: new Map() } };
+      }
     }
-    this.updateCheck(id, {
-      address: outcome.address,
-      rows: outcome.rows.map((row) => (row.stage === 'version' ? { ...row, status: 'running' } : row)),
-    });
+    const outcome = await probeHost(profile, new RemotePaneClient(profile, { dnsLookup: this.dnsLookup }), this.checkDependencies, (rows) => this.updateCheck(id, { rows }));
+    return { profile, outcome };
   }
 
   /**
@@ -2037,7 +2115,7 @@ export class RemotePaneClientController extends EventEmitter {
     return (this.check?.rows ?? []).map((candidate) => (candidate.stage === row.stage ? row : candidate));
   }
 
-  private updateCheck(id: number, update: Partial<Pick<RemoteConnectionCheck, 'rows' | 'outcome' | 'address'>>): void {
+  private updateCheck(id: number, update: Partial<Pick<RemoteConnectionCheck, 'rows' | 'outcome' | 'address' | 'route'>>): void {
     if (this.check?.id !== id) return;
     this.check = { ...this.check, ...update };
     this.publishState();
