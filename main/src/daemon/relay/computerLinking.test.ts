@@ -40,7 +40,7 @@ interface Computer {
  * client, as the listener does.
  */
 /** A computer key's fingerprint and the id it names: the first 80 bits of the key's SHA-256 in base32 (relay/PROTOCOL.md). */
-function relayIdentity(seed: string): { id: string; fingerprint: string } {
+function relayIdentity(seed: string): Pick<RelayComputer, 'id' | 'fingerprint'> {
   const digest = createHash('sha256').update(seed).digest();
   const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
   let bits = '';
