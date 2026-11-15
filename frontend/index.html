@@ -125,10 +125,10 @@
           node.append(...children);
           return node;
         };
-        const part = (name, node) => { node.dataset.launchOutline = name; return node; };
+        // Decorative, except the message box, which takes typing and so stays in the accessibility tree.
+        const part = (name, node) => { node.dataset.launchOutline = name; node.setAttribute('aria-hidden', 'true'); return node; };
         const outline = el('div', 'flex flex-col bg-bg-primary', { position: 'fixed', inset: '0', zIndex: '2147483000' });
         outline.id = 'pane-launch-outline';
-        outline.setAttribute('aria-hidden', 'true');
         if (hasTitleBar) {
           outline.append(part('title', el('div', 'pane-window-title-bar relative flex-shrink-0 bg-bg-chrome', { height: '38px', boxShadow: 'inset 0 calc(-1 * var(--border-hairline)) 0 var(--color-border-primary)', WebkitAppRegion: 'drag' },
             el('div', 'absolute inset-y-0 left-0 bg-surface-secondary', { width: `${sidebarWidth}px`, borderRight: edge }))));
@@ -137,7 +137,9 @@
         outline.append(el('div', 'relative flex min-h-0 flex-1', {},
           part('sidebar', el('div', 'pane-sidebar-shell flex-shrink-0 bg-surface-secondary', { width: `${sidebarWidth}px` })), main));
         // The launch chat, laid out as SessionView's default layout draws a Pane with one group of tabs.
-        const chat = api.launchChat;
+        // A reload is not a launch: the person is already somewhere else in the app.
+        const reload = performance.getEntriesByType('navigation')[0]?.type === 'reload';
+        const chat = reload ? undefined : api.launchChat;
         const swapped = chat?.dockTerminal && read('pane-layout-swapped') === 'true';
         if (chat && !swapped) {
           const sessionWidth = Math.max(0, innerWidth - sidebarWidth);
@@ -155,17 +157,19 @@
           input.placeholder = 'Ask anything';
           input.setAttribute('aria-label', 'Message');
           input.dataset.launchComposer = chat.panelId;
-          // Enter sends once the chat is ready (D-62); Shift+Enter is a new line, and IME keys are the input method's.
+          // Enter sends this text once the chat is ready (D-62): typing after it takes the send back.
+          // Shift+Enter is a new line, and IME keys are the input method's.
           input.addEventListener('keydown', (event) => {
             if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
             event.preventDefault();
-            input.dataset.send = 'pending';
+            if (input.value.trim()) input.dataset.send = 'pending';
           });
           // An IME composition finishes here before the chat takes the text (src/utils/launchOutline.ts).
           input.addEventListener('compositionstart', () => { input.dataset.composing = 'true'; });
           input.addEventListener('compositionend', () => { delete input.dataset.composing; });
           // Grows with its text as the chat's box does (react-textarea-autosize), up to the CSS max-height.
           input.addEventListener('input', () => {
+            delete input.dataset.send;
             input.style.height = 'auto';
             input.style.height = `${input.scrollHeight}px`;
           });
@@ -191,6 +195,8 @@
                   el('div', 'h-8 border-b border-border-primary bg-surface-primary')) : ''),
               inspector ? el('div', 'flex-shrink-0 border-l border-border-primary bg-bg-primary', { width: `${inspector}px` },
                 el('div', 'h-8 border-b border-border-primary bg-surface-secondary')) : ''));
+          main.removeAttribute('aria-hidden');
+          for (const node of main.querySelectorAll('div, button')) if (!node.contains(input)) node.setAttribute('aria-hidden', 'true');
           document.body.append(outline);
           input.focus({ preventScroll: true });
         } else {

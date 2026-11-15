@@ -185,6 +185,8 @@ const PASTE_LIMIT = 1024 * 1024;
 
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
 const NO_ACTIONS: ChatTurnActions = {};
+/** How long after the handover an Enter pressed before the chat loaded may still send. */
+const LAUNCH_SEND_MS = 5_000;
 const NO_RENDERING: ChatRendering = {};
 
 export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
@@ -369,17 +371,18 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     return () => { run.mounted -= 1; unsubscribe(); };
   }, [runtime, viewer]);
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
-  // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends once (D-62).
-  const launchSend = useRef(false);
-  /** The handover can land after mount, once the box settles: this re-runs the send check then. */
-  const [launchHandedOver, setLaunchHandedOver] = useState(false);
+  // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text
+  // once (D-62) if the chat can send it soon after; an edit or a chat that stays unable drops it.
+  const launchSend = useRef<{ text: string; until: number } | null>(null);
+  /** Re-runs the launch send check: the handover can land after mount, once the box settles, and the send window closes. */
+  const [launchTick, setLaunchTick] = useState(0);
   useLayoutEffect(() => {
     const input = () => document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
     return takeLaunchDraft(panelId, input, draft => {
       viewer.setDraft(draft.text);
       runtime.thread.composer.setText(draft.text);
-      launchSend.current = draft.send;
-      setLaunchHandedOver(true);
+      if (draft.send) launchSend.current = { text: draft.text, until: Date.now() + LAUNCH_SEND_MS };
+      setLaunchTick(tick => tick + 1);
       const box = input();
       if (!box) return;
       // Set here, not on React's next render, so the text and caret show in the same frame.
@@ -390,10 +393,20 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     });
   }, [panelId, runtime, viewer]);
   useEffect(() => {
-    if (!launchSend.current || sendDisabled) return;
-    launchSend.current = false;
+    const pending = launchSend.current;
+    if (!pending) return;
+    if (Date.now() > pending.until || runtime.thread.composer.getState().text !== pending.text) {
+      launchSend.current = null;
+      return;
+    }
+    if (sendDisabled) {
+      // Re-checked when the window closes, so a chat that never becomes able to send never sends.
+      const timer = setTimeout(() => setLaunchTick(tick => tick + 1), pending.until - Date.now() + 1);
+      return () => clearTimeout(timer);
+    }
+    launchSend.current = null;
     void runtime.thread.composer.send();
-  }, [runtime, sendDisabled, launchHandedOver]);
+  }, [runtime, sendDisabled, launchTick]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {
