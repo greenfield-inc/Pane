@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { RunpaneError } from './errors';
@@ -70,4 +71,20 @@ export function scratchRule(): string {
 /** The Pane and Tab working rules, for instruction text that states where a feature's agents go. */
 export function paneAndTabRules(): string {
   return RUNPANE_CONTRACT.agentContext.workspaceRules.filter((rule) => rule.startsWith('Pane:') || rule.startsWith('Tab:')).join(' ');
+}
+
+/** How the block Pane keeps in ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md begins, whatever its note says. */
+export const PANE_NOTIFY_BLOCK_PREFIX = '<!-- pane-notify:begin';
+
+/**
+ * Whether Claude Code's user CLAUDE.md carries Pane's block, which states the agents intro, the
+ * scratch rule and how to reach the person. Pane writes the block only while Notify is on.
+ */
+export function claudeMdHasPaneBlock(env: NodeJS.ProcessEnv = process.env): boolean {
+  const dir = env.CLAUDE_CONFIG_DIR?.trim() || path.join(os.homedir(), '.claude');
+  try {
+    return fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8').includes(PANE_NOTIFY_BLOCK_PREFIX);
+  } catch {
+    return false;
+  }
 }

@@ -4,4 +4,4 @@ export {
   createMcpHandler, hostHeaderValidationResponse, localhostAllowedHostnames, localhostAllowedOrigins, originValidationResponse,
   ProtocolError, ProtocolErrorCode, Server, type AuthInfo, type McpRequestContext,
 } from '@modelcontextprotocol/server';
-export { serveStdio } from '@modelcontextprotocol/server/stdio';
+export { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';

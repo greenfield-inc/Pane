@@ -9,6 +9,7 @@ import { withClaudePromptHooks } from './claudePrompts';
 import { PaneMcpEndpoint, paneMcpTabSettings, setPaneMcpEndpoint, withPaneMcpConfig, type PaneMcpTab } from './paneMcpEndpoint';
 import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
 import { TabListener } from './tabListener';
+import { syncNotifyInstructions } from './notify/notifyInstructions';
 
 const appDir = mkdtempSync(path.join(os.tmpdir(), 'pane-mcp-endpoint-'));
 
@@ -96,6 +97,18 @@ function callRepos(grant: { url: string; token: string }, init: { token?: string
   return fetch(grant.url, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params }), signal: init.signal });
 }
 
+/** The instructions the endpoint answers a 2025-era `initialize` with, as Claude Code sends it. */
+async function instructionsFor(grant: { url: string; token: string }): Promise<string> {
+  const response = await fetch(grant.url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${grant.token}` },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '1' } } }),
+  });
+  const text = await response.text();
+  const data = text.split('\n').find(line => line.startsWith('data: '));
+  return decodeBoundary(JSON.parse(data ? data.slice('data: '.length) : text), boundary.object({ result: boundary.object({ instructions: boundary.string }) })).result.instructions;
+}
+
 /** fetch never sends a Host header of its own choosing, so this one request goes through node:http. */
 function statusWithHost(grant: { url: string; token: string }, host: string): Promise<number | undefined> {
   const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
@@ -147,6 +160,22 @@ describe('PaneMcpEndpoint', () => {
   it("names a client that didn't name itself on the request after the tab's agent, so notify keeps its long wait", async () => {
     const ran = await ranAs(await callRepos(grantOf(start().grant(tab('panel-a')))));
     expect(ran).toMatchObject({ agent: 'Claude', returnAfter: null });
+  });
+
+  it("leaves out what Claude's CLAUDE.md block already says, and only while the block is there", async () => {
+    const claudeDir = mkdtempSync(path.join(os.tmpdir(), 'pane-mcp-claude-'));
+    vi.stubEnv('CLAUDE_CONFIG_DIR', claudeDir);
+    const grant = grantOf(start().grant(tab('panel-a')));
+
+    const without = await instructionsFor(grant);
+    syncNotifyInstructions(true, { homeSkill: true }, { CLAUDE_CONFIG_DIR: claudeDir });
+    const beside = await instructionsFor(grant);
+
+    expect(without).toContain('Scratch: in Pane');
+    expect(without).toContain('`notify` asks the person');
+    expect(beside).not.toContain('Scratch: in Pane');
+    expect(beside).not.toContain('`notify` asks the person');
+    expect(beside).toContain('`docs_search` and `docs_read` answer how Pane works.');
   });
 
   it('refuses a request without a token, with a made-up token, and after the tab closes', async () => {
