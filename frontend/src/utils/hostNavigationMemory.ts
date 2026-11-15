@@ -206,7 +206,7 @@ export async function restoreLaunchChat(): Promise<void> {
   const sessions = useSessionStore.getState();
   if (sessions.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') return;
   if (!sessions.sessions.some(session => session.id === chat.paneId)) return;
-  focusChatSoon(chat.panelId);
+  focusChatSoon(chat.panelId, { untilInput: true });
   await sessions.setActiveSession(chat.paneId);
 }
 

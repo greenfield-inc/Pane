@@ -520,7 +520,8 @@ const OWNS_ENTER = [
     'checkbox', 'radio', 'switch', 'slider', 'spinbutton', 'treeitem', 'gridcell', 'row'].map(role => `[role="${role}"]`),
 ].join(', ');
 /** Menus, pickers and dialogs: Enter there is theirs, as is everything inside them. */
-const OVERLAY = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"], [role="menu"], [role="listbox"], [role="tree"], [role="grid"]';
+const DIALOG = 'dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]';
+const OVERLAY = `${DIALOG}, [role="menu"], [role="listbox"], [role="tree"], [role="grid"]`;
 
 const FOCUSED_SPLIT = '[data-focus-region="main"] [data-panel-group-id][data-group-focused="true"]';
 
@@ -579,14 +580,17 @@ let cancelChatWait: (() => void) | null = null;
  * while the view settles: a Pane that opens hands focus to a scroll surface
  * (its commit history) when its main tab has none of its own. Given a panel
  * id, only that chat's box is taken, never another split's. The wait ends on
- * a click, a key, or focus moving to a control, terminal or the sidebar.
+ * a click, a key, or focus moving to a control, terminal or the sidebar. At
+ * launch (`untilInput`) nobody has acted yet, so only a click, a key or a
+ * dialog ends it: focus the opening Pane moves itself (its changes list) is
+ * taken back.
  */
-export function focusChatSoon(panelId?: string): void {
+export function focusChatSoon(panelId?: string, { untilInput = false }: { untilInput?: boolean } = {}): void {
   cancelChatWait?.();
   const landed = document.activeElement;
   // Focus on no control (the page, a region, a scroll surface) is still free to move.
   const isFree = (element: Element | null) => !element || element === document.body || element === landed
-    || (regionOf(element) !== 'sidebar' && !element.closest(OWNS_ENTER) && !element.closest(OVERLAY));
+    || (untilInput ? !element.closest(DIALOG) : regionOf(element) !== 'sidebar' && !element.closest(OWNS_ENTER) && !element.closest(OVERLAY));
   const target = () => (panelId ? composerOf(panelId) : chatComposerOnScreen());
   let box: HTMLElement | null = null;
   let frame = 0;
