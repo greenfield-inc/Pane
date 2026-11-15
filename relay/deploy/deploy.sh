@@ -118,10 +118,15 @@ token=\$(metadata service-accounts/default/token | tr -d '\n' | sed -E 's/.*"acc
 internal_ip=\$(metadata network-interfaces/0/ip)
 [ -n "\$token" ] && [ -n "\$internal_ip" ]
 secret() { curl -sf -H "Authorization: Bearer \$token" "https://secretmanager.googleapis.com/v1/projects/$PROJECT/secrets/\$1/versions/latest:access" | tr -d '\n' | sed -E 's/.*"data": *"([^"]+)".*/\1/' | base64 -d; }
-install -d -m 0700 -o 65532 -g 65532 /var/lib/pane-relay
+# The relay (uid 65532) owns its data: directories 0700, the secret files 0600.
+# install -d also resets an existing directory, such as an acme cache an older
+# script left without its x bit.
+install -d -m 0700 -o 65532 -g 65532 /var/lib/pane-relay /var/lib/pane-relay/acme
 secret pane-relay-registry-secret > /var/lib/pane-relay/registry-secret
 secret pane-relay-apns-key > /var/lib/pane-relay/apns-key.p8 || rm -f /var/lib/pane-relay/apns-key.p8
-chown 65532:65532 /var/lib/pane-relay/* && chmod 0600 /var/lib/pane-relay/*
+for f in /var/lib/pane-relay/registry-secret /var/lib/pane-relay/apns-key.p8; do
+  if [ -e "\$f" ]; then chown 65532:65532 "\$f" && chmod 0600 "\$f"; fi
+done
 # COS keeps /root read-only, so docker gets its own config directory, outside the
 # container's /data, signed in with this VM's token.
 docker_config=/var/lib/pane-relay-docker
