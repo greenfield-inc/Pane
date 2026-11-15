@@ -326,21 +326,32 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   });
   /** The runtime the draft's attachments went back into: once, though development mode runs the effect twice. */
   const restoredInto = useRef<typeof runtime | undefined>(undefined);
-  useEffect(() => {
+  // A layout effect, so leaving ends the restore before assistant-ui disposes the composer
+  // (a microtask queued on unmount), which would cancel the adds still waiting.
+  useLayoutEffect(() => {
     const composer = runtime.thread.composer;
     const saved = restoredInto.current === runtime ? [] : draftAttachments.get(viewer) ?? [];
     restoredInto.current = runtime;
     composer.setText(viewer.snapshot().draft);
+    const save = () => draftAttachments.set(viewer, composer.getState().attachments);
+    // Until every saved attachment is back, the saved list stays whole: a file copying again can
+    // take seconds, and leaving meanwhile keeps them all for next time.
+    let restoring = saved.length > 0;
     // In their order: a file already copied to the chat's machine comes back with its path; an
-    // image (or a file still copying) is added again from the file itself.
+    // image (or a file still copying) is added again from the file itself. One that fails says
+    // why through attachmentAddError, below.
     void (async () => {
       for (const { id, type, name, contentType, content, file } of saved) {
         const restored = content ? { id, type, name, contentType, content } : file;
         if (restored) await composer.addAttachment(restored).catch(() => undefined);
       }
+      if (!restoring) return;
+      restoring = false;
+      save();
     })();
     // Sending empties the composer's attachments, and with them the saved ones.
-    return composer.subscribe(() => draftAttachments.set(viewer, composer.getState().attachments));
+    const unsubscribe = composer.subscribe(() => { if (!restoring) save(); });
+    return () => { restoring = false; unsubscribe(); };
   }, [runtime, viewer]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.

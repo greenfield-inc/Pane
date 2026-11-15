@@ -146,3 +146,15 @@ test("a draft's attachments stay with it when you leave the chat and come back, 
   await expect(box).toHaveValue('');
   await expect(chips(page)).toHaveCount(0);
 });
+
+test('leaving again while a file is still copying keeps every attachment of the draft', async ({ page }) => {
+  await open(page, 'files=1&holdCopies=1');
+  await drop(page, [{ name: 'log.txt', type: 'text/plain' }, { name: 'shot.png', type: 'image/png' }]);
+  await expect(chips(page).filter({ hasText: 'log.txt' })).toContainText('Copying…');
+  // Coming back starts copying log.txt again, which holds up shot.png; leave before it finishes.
+  await page.evaluate(() => window.qaSwitchAway());
+  await page.evaluate(() => window.qaSwitchAway());
+  await page.evaluate(() => window.qaReleaseCopies?.());
+  await expect(chips(page)).toHaveText(['log.txt', 'shot.png']);
+  await expect(chips(page).filter({ hasText: 'log.txt' })).not.toContainText('Copying…');
+});
