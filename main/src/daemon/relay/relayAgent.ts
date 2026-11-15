@@ -360,8 +360,6 @@ function upgrade(options: RelayAgentOptions, path: string): Promise<{ stream: tl
       ca: options.ca ? [...tls.rootCertificates, options.ca.toString()] : undefined,
       ALPNProtocols: ['http/1.1'],
     });
-    // Frames and the computer's TLS records go out at once, not held for the relay's ACK.
-    socket.setNoDelay(true);
     const timer = setTimeout(() => socket.destroy(new Error(`${options.relayHost} did not answer within 15 seconds.`)), 15_000);
     let head = Buffer.alloc(0);
     const onData = (chunk: Buffer) => {
