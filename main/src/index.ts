@@ -548,6 +548,9 @@ async function createWindow() {
       win.webContents.send(APP_MENU_ACTION_CHANNEL, pendingMenuAction);
       pendingMenuAction = null;
     }
+    // A pane:// link that launched Pane opens once the renderer can act on it.
+    paneLinksReady = true;
+    if (pendingPaneLink) openPaneLink(pendingPaneLink);
   };
   const onRendererReady = (event: IpcMainEvent) => {
     if (event.sender === win.webContents) revealWindow('renderer ready');
@@ -1453,8 +1456,6 @@ if (launchRemoteSetup) {
 
   await createWindow();
   console.log('[Main] Window created successfully');
-  paneLinksReady = true;
-  if (pendingPaneLink) openPaneLink(pendingPaneLink);
 
   analyticsManager.startHeartbeat();
 
