@@ -69,6 +69,7 @@ import type {
 // verification step rejects any remaining require other than Electron itself.
 import { boundary, decodeBoundary, type JsonObject } from '../../shared/validation/boundaryDecoder';
 import { decodeAppearanceSnapshotArg, type ThemeChoice } from '../../shared/types/appearance';
+import { decodeLaunchChatArg } from '../../shared/types/hostNavigation';
 import type { CustomThemeState } from '../../shared/types/customTheme';
 
 interface LogEntry {
@@ -403,6 +404,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // its first render instead of awaiting IPC and flashing the wrong layout.
   windowControlsOverlayEnabled: process.argv.includes(WINDOW_CONTROLS_OVERLAY_ARG),
   appearanceSnapshot: decodeAppearanceSnapshotArg(process.argv),
+  // The chat this launch reopens, drawn in the window's first frame (frontend/index.html).
+  launchChat: decodeLaunchChatArg(process.argv),
   setTitleBarOverlay: (colors: WindowControlsOverlayColors): Promise<IPCResponse> =>
     invokeIpc('window:set-title-bar-overlay', colors),
   setBackgroundColor: (payload: { theme: ThemeChoice; color: string }): Promise<IPCResponse> =>
@@ -412,7 +415,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     get: (): Promise<IPCResponse<CustomThemeState>> => ipcRenderer.invoke('custom-theme:get'),
     reset: (): Promise<IPCResponse> => ipcRenderer.invoke('custom-theme:reset'),
   },
-  // The window stays hidden until the first render with data; see createWindow.
+  // The first render with data: main then sends menu actions and pane:// links; see createWindow.
   notifyRendererReady: (): void => ipcRenderer.send('window:renderer-ready'),
 
   // Version checking

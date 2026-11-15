@@ -36,7 +36,11 @@ remote PWA / mobile ──HTTP + SSE──▶ daemon ◀──socket── runpa
   that module, and run `pnpm build:main` to check the bundle still loads.
 - **Renderer** (`frontend/src`) is React with Zustand stores
   (`frontend/src/stores`). `frontend/index.html` is the desktop app;
-  `frontend/remote.html` is the Remote PWA that `mobile/` also bundles.
+  `frontend/remote.html` is the Remote PWA that `mobile/` also bundles. The
+  desktop window shows on its first frame, the launch outline that an inline
+  script in `index.html` draws before any app code loads: the title bar,
+  sidebar and, when launch reopens a chat, that chat's message box, which the
+  chat takes over as it mounts (`frontend/src/utils/launchOutline.ts`).
 - **Daemon** (`main/src/daemon`) serves the command registry over a local
   socket (a `pane-daemon-*` directory under the system temp directory, or a
   named pipe on Windows). The `runpane` CLI talks to it. For Remote Pane it also

@@ -43,6 +43,8 @@ export type ElectronApiMockOptions = {
   /** Whether main handed the title bar to the page (Window Controls Overlay). */
   windowControlsOverlayEnabled?: boolean;
   appearanceSnapshot?: boolean;
+  /** The chat this launch reopens: main's answer, and the outline it draws in the first frame (index.html). */
+  launchChat?: { paneId: string; panelId: string; dockTerminal?: boolean; sessionChat?: boolean };
   availableShells?: Array<Record<string, string>>;
   configReadDelayMs?: number;
   configGetFailures?: number;
@@ -172,6 +174,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const feedbackSubmissions: SubmitFeedbackRequest[] = [];
     const openedExternalUrls: string[] = [];
     const panelCreates: JsonObject[] = [];
+    const chatSends: Array<{ panelId: string; request: JsonObject }> = [];
     const diffManifestCalls: Array<{ sessionId: string; scope: DiffScope }> = [];
     const fileDiffCalls: Array<{ sessionId: string; scope: DiffScope; path: string }> = [];
     const clone = <T>(value: T): T => structuredClone(value);
@@ -984,7 +987,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         // The chat loads a moment late, as a real one does, so tests exercise the wait for it.
         get: (panelId: string) => new Promise((resolve) => { setTimeout(() => resolve(view(panelId)), 300); }),
         history: () => Promise.resolve([]),
-        send: () => Promise.resolve({ status: 'sent' }),
+        send: (panelId: string, request: JsonObject) => {
+          chatSends.push({ panelId, request: clone(request) });
+          return Promise.resolve({ operationId: request.operationId, generation: 1, fingerprint: 'mock', state: 'accepted' });
+        },
         receipt: () => Promise.resolve(undefined),
         unqueue: done, sendNow: done, editQueued: done, clear: done, stopTask: done, configure: done, cancel: done,
         permission: done, answer: done, restart: done, resume: done, dismissBanner: done,
@@ -1022,6 +1028,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       getPlatform: () => Promise.resolve(mockOptions.platform ?? 'linux'),
       windowControlsOverlayEnabled: mockOptions.windowControlsOverlayEnabled === true,
       appearanceSnapshot: mockOptions.appearanceSnapshot === false ? undefined : clone(mockOptions.appearance.seeded),
+      launchChat: mockOptions.launchChat && {
+        panelId: mockOptions.launchChat.panelId,
+        dockTerminal: mockOptions.launchChat.dockTerminal ?? false,
+        sessionChat: mockOptions.launchChat.sessionChat ?? false,
+      },
       setTitleBarOverlay: (colors: JsonObject) => {
         titleBarOverlayWrites.push(clone(colors));
         return success();
@@ -1924,7 +1935,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getNavigationMemory: (hostId: string | null) =>
           success(clone(navigationMemories.get(hostId ?? '') ?? null)),
-        getLaunchChat: () => success(null),
+        getLaunchChat: () => success(mockOptions.launchChat ? { paneId: mockOptions.launchChat.paneId, panelId: mockOptions.launchChat.panelId } : null),
         saveNavigationMemory: (hostId: string | null, memory: JsonObject) => {
           navigationMemories.set(hostId ?? '', clone(memory));
           return success();
@@ -1953,6 +1964,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       value: {
         getConfig() {
           return clone(configState);
+        },
+        getChatSends() {
+          return clone(chatSends);
         },
         getAutopilotInstructionSaves() {
           return clone(autopilotSaves);

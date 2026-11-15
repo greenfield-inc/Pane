@@ -2,7 +2,9 @@ import { existsSync } from 'node:fs';
 import { DatabaseService } from '../database/database';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { decodeHostNavigationMemory } from '../../../shared/types/hostNavigation';
-import type { HostNavigationMemory, LaunchChat } from '../../../shared/types/hostNavigation';
+import type { HostNavigationMemory, LaunchChat, LaunchChatOutline } from '../../../shared/types/hostNavigation';
+import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
+import type { ToolPanel } from '../../../shared/types/panels';
 import { decodeSessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import { decodeSessionPanelLayout } from '../../../shared/types/panels';
@@ -37,6 +39,11 @@ type UiStateStore = Pick<DatabaseService, 'getUIState' | 'setUIState' | 'deleteU
 interface LaunchPanes {
   getSession(id: string): { archived?: boolean; worktree_path: string } | undefined;
   getPanel(id: string): { sessionId: string; type: string } | null;
+}
+
+/** The launch outline also reads the Pane's tabs, for its terminal strip. */
+interface LaunchOutlinePanes extends LaunchPanes {
+  getPanelsForSession(sessionId: string): ToolPanel[];
 }
 
 function groupTab(node: PanelLayoutNode, groupId: string | undefined): string | null {
@@ -265,6 +272,19 @@ class UIStateManager {
     const panel = panelId ? panes.getPanel(panelId) : null;
     if (!panelId || panel?.sessionId !== memory.paneId || panel.type !== 'chat') return null;
     return { paneId: memory.paneId, panelId };
+  }
+
+  /** The launch chat for the window's first frame, when its Pane shows one group of tabs. */
+  getLaunchChatOutline(panes: LaunchOutlinePanes): LaunchChatOutline | null {
+    const chat = this.getLaunchChat(panes);
+    if (!chat || this.getPaneLayout(null, chat.paneId)?.root.type !== 'group') return null;
+    const tabs = panes.getPanelsForSession(chat.paneId);
+    const state = tabs.find(tab => tab.id === chat.panelId)?.state.customState;
+    return {
+      panelId: chat.panelId,
+      dockTerminal: !!getDockTerminalPanel(tabs),
+      sessionChat: !!state && 'orchestrationSessionId' in state && !!state.orchestrationSessionId,
+    };
   }
 
   getExpandedState(): ExpandedUiState {

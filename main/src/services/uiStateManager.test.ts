@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { UIStateManager } from './uiStateManager';
+import type { SessionPanelLayout, ToolPanel } from '../../../shared/types/panels';
 
 function createUiStateDb() {
   const values = new Map<string, string>();
@@ -202,5 +203,44 @@ describe('UIStateManager launch chat', () => {
 
   it('stays on Home while another computer is the active host', () => {
     expect(setUp({ remoteHostId: 'host-b' })).toBeNull();
+  });
+});
+
+describe('UIStateManager launch chat outline', () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'pane-launch-outline-'));
+  const tab = (id: string, type: ToolPanel['type'], customState: ToolPanel['state']['customState'] = {}): ToolPanel => ({
+    id, sessionId: 'pane-1', type, title: id, state: { isActive: false, customState }, metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+  });
+  const chat = tab('chat', 'chat');
+  const shell = tab('shell', 'terminal');
+  const agent = tab('agent', 'terminal', { agentType: 'claude' });
+
+  function outline(root: SessionPanelLayout['root'], tabs: ToolPanel[]) {
+    const manager = new UIStateManager(createUiStateDb());
+    manager.saveNavigationMemory(null, { view: 'sessions', projectId: null, paneId: 'pane-1' });
+    manager.savePaneLayout(null, 'pane-1', { version: 1, root, focusedGroupId: 'g' });
+    return manager.getLaunchChatOutline({
+      getSession: (id: string) => id === 'pane-1' ? { worktree_path: worktree } : undefined,
+      getPanel: (id: string) => tabs.find(tab => tab.id === id) ?? null,
+      getPanelsForSession: () => tabs,
+    });
+  }
+  const group = { type: 'group' as const, id: 'g', panelIds: ['chat', 'shell'], activePanelId: 'chat' };
+
+  it('draws the chat above the terminal strip when the Pane has a plain terminal', () => {
+    expect(outline(group, [chat, shell])).toEqual({ panelId: 'chat', dockTerminal: true, sessionChat: false });
+  });
+
+  it('draws no strip when every terminal runs an agent', () => {
+    expect(outline({ ...group, panelIds: ['chat', 'agent'] }, [chat, agent])).toEqual({ panelId: 'chat', dockTerminal: false, sessionChat: false });
+  });
+
+  it("knows a Session's chat, which has its own placeholder", () => {
+    const sessionChat = tab('chat', 'chat', { orchestrationSessionId: 'session-1' });
+    expect(outline({ ...group, panelIds: ['chat'] }, [sessionChat])).toEqual({ panelId: 'chat', dockTerminal: false, sessionChat: true });
+  });
+
+  it('leaves a split layout to the app', () => {
+    expect(outline({ type: 'split', id: 's', direction: 'row', sizes: [50, 50], children: [group, { ...group, id: 'h', activePanelId: 'shell' }] }, [chat, shell])).toBeNull();
   });
 });

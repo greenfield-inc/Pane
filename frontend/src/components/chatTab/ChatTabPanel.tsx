@@ -31,6 +31,7 @@ import { ChatCopyButton } from './ChatCopyButton';
 import { useChatAgents } from '../../stores/chatAgentsStore';
 import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
+import { takeLaunchDraft } from '../../utils/launchOutline';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -278,6 +279,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     }
   };
 
+  const sendDisabled = disabled || !!snapshot.pendingDelivery || copying > 0;
   const runtime = useExternalStoreRuntime({
     messages, convertMessage: toAssistantMessage,
     // The host queues a message sent while the agent works, so the composer never locks
@@ -285,7 +287,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     isRunning: false,
     isLoading: !snapshot.transcript && view?.status !== 'stopped',
     // A file still copying to the chat's machine has no path yet to send.
-    isSendDisabled: disabled || !!snapshot.pendingDelivery || copying > 0,
+    isSendDisabled: sendDisabled,
     unstable_persistsHistory: true, unstable_enableToolInvocations: false,
     adapters: attachments ? { attachments } : undefined,
     onNew: async message => {
@@ -366,6 +368,27 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     const unsubscribe = composer.subscribe(() => { if (run.done) save(); });
     return () => { run.mounted -= 1; unsubscribe(); };
   }, [runtime, viewer]);
+  // The launch outline's message box (index.html) hands over as this tab first paints: its text and
+  // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends once (D-62).
+  const launchSend = useRef(false);
+  useLayoutEffect(() => {
+    const draft = takeLaunchDraft(panelId);
+    if (!draft) return;
+    viewer.setDraft(draft.text);
+    runtime.thread.composer.setText(draft.text);
+    launchSend.current = draft.send;
+    const input = document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
+    if (!input || !draft.focused) return;
+    // Set here, not on React's next render, so the caret is in place in the first frame.
+    input.value = draft.text;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(draft.selectionStart, draft.selectionEnd);
+  }, [panelId, runtime, viewer]);
+  useEffect(() => {
+    if (!launchSend.current || sendDisabled) return;
+    launchSend.current = false;
+    void runtime.thread.composer.send();
+  }, [runtime, sendDisabled]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {

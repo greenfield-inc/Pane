@@ -4,6 +4,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { API } from './api';
 import { focusChatSoon } from '../services/regionFocus';
+import { dropLaunchOutline } from './launchOutline';
 import { loadChatTabRoute } from '../components/panels/chatTabRouteModule';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import type { HostNavigationMemory, LaunchChat, PaneNavigationView } from '../../../shared/types/hostNavigation';
@@ -202,15 +203,20 @@ export function prepareLaunchChat(): void {
 export async function restoreLaunchChat(): Promise<void> {
   prepareLaunchChat();
   const chat = await launchChat;
-  if (!chat) return;
   const sessions = useSessionStore.getState();
-  if (sessions.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') return;
-  if (!sessions.sessions.some(session => session.id === chat.paneId)) return;
+  if (!chat || sessions.activeSessionId || useNavigationStore.getState().activeView !== 'sessions'
+    || !sessions.sessions.some(session => session.id === chat.paneId)) {
+    dropLaunchOutline();
+    return;
+  }
   // The Pane opens once the chat's code is in, so the tab renders without a
   // loading fallback (and its 300 ms reveal throttle).
   await loadChatTabRoute().catch(() => undefined);
   const now = useSessionStore.getState();
-  if (now.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') return;
+  if (now.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') {
+    dropLaunchOutline();
+    return;
+  }
   focusChatSoon(chat.panelId, { untilInput: true });
   await now.setActiveSession(chat.paneId);
 }

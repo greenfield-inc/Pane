@@ -7,7 +7,6 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { BrowserFallback } from './components/BrowserFallback';
 import { stripIpcWrapper } from './utils/ipcErrorMessage';
 import { startCaretRest } from './services/caretRest';
-import './index.css';
 import './styles/markdown-preview.css';
 import './styles/notebook-preview.css';
 

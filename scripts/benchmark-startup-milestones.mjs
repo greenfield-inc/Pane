@@ -149,10 +149,14 @@ function cdp(wsUrl) {
   return {
     opened,
     close: () => ws.close(),
+    // A renderer or browser thread that stops answering ends the run instead of hanging it.
     send(method, params = {}) {
       const msgId = ++id;
       ws.send(JSON.stringify({ id: msgId, method, params }));
-      return new Promise((resolve) => pending.set(msgId, resolve));
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`${method} got no answer in 30 s`)), 30_000);
+        pending.set(msgId, (message) => { clearTimeout(timer); resolve(message); });
+      });
     },
   };
 }
@@ -258,7 +262,7 @@ const keys = ['mainLoaded', 'ready', 'window', 'firstPaint', 'shown', 'navStart'
 for (const app of apps) {
   console.log(`${app.label}: milestone   p50    p75   (ms from spawn, n=${runs.filter((r) => r.app === app.label).length})`);
   for (const key of keys) {
-    const vals = runs.filter((r) => r.app === app.label).map((r) => r[key]).filter((v) => typeof v === 'number').sort((a, b) => a - b);
+    const vals = runs.filter((r) => r.app === app.label).map((r) => r[key]).filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
     if (vals.length) console.log(`  ${key.padEnd(11)} ${String(pct(vals, 0.5)).padStart(5)}  ${String(pct(vals, 0.75)).padStart(5)}`);
   }
 }

@@ -33,6 +33,31 @@ export interface LaunchChat {
   panelId: string;
 }
 
+/**
+ * The launch chat as the window's first frame draws it (frontend/index.html): its message box
+ * sits above the Pane's terminal strip when the Pane has a dock terminal, and a Session's chat
+ * has its own placeholder. Only for a Pane that shows one group of tabs; in a split the box's
+ * place is the app's to work out.
+ */
+export interface LaunchChatOutline {
+  panelId: string;
+  dockTerminal: boolean;
+  sessionChat: boolean;
+}
+
+/** The outline travels in the window's start arguments, like the appearance snapshot, so it is there before the first paint. */
+const LAUNCH_CHAT_ARG_PREFIX = '--pane-launch-chat=';
+
+export function encodeLaunchChatArg(outline: LaunchChatOutline): string {
+  return LAUNCH_CHAT_ARG_PREFIX + [outline.panelId, ...(outline.dockTerminal ? ['dock'] : []), ...(outline.sessionChat ? ['session'] : [])].join(',');
+}
+
+export function decodeLaunchChatArg(argv: readonly string[]): LaunchChatOutline | undefined {
+  const value = argv.find(argument => argument.startsWith(LAUNCH_CHAT_ARG_PREFIX))?.slice(LAUNCH_CHAT_ARG_PREFIX.length);
+  const [panelId, ...flags] = value?.split(',') ?? [];
+  return panelId ? { panelId, dockTerminal: flags.includes('dock'), sessionChat: flags.includes('session') } : undefined;
+}
+
 const hostNavigationMemorySchema: BoundarySchema<HostNavigationMemory> = boundary.object({
   view: boundary.enumeration(...PANE_NAVIGATION_VIEWS),
   projectId: boundary.nullable(boundary.number),

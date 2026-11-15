@@ -157,6 +157,8 @@ interface ElectronAPI {
   // first render already knows whether the page owns the title bar.
   windowControlsOverlayEnabled: boolean;
   appearanceSnapshot?: import('../../../shared/types/appearance').AppearanceSnapshot;
+  /** The chat this launch reopens, drawn in the window's first frame (index.html); absent when there is none. */
+  launchChat?: import('../../../shared/types/hostNavigation').LaunchChatOutline;
   setTitleBarOverlay: (colors: { color: string; symbolColor: string }) => Promise<IPCResponse>;
   setBackgroundColor: (payload: { theme: import('../../../shared/types/appearance').ThemeChoice; color: string }) => Promise<IPCResponse>;
   customTheme?: {

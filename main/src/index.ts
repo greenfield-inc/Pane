@@ -123,6 +123,7 @@ import { setupAutoUpdater } from './autoUpdater';
 import { getUpdateCapabilities } from './utils/updateCapabilities';
 import { UIStateManager } from './services/uiStateManager';
 import { getActiveRemoteHostId } from '../../shared/types/remoteDaemon';
+import { encodeLaunchChatArg } from '../../shared/types/hostNavigation';
 import { cancelRestartToUpdate, setUpdateAvailable, setUpdateReady, startRestartToUpdate } from './services/restartToUpdate/restartToUpdate';
 import type { CliManagerFactory } from './services/cliManagerFactory';
 import { setupConsoleWrapper } from './utils/consoleWrapper';
@@ -180,8 +181,10 @@ let shutdownInProgress = false;
 // On macOS, closing the window hides it unless Pane is quitting.
 let appIsQuitting = false;
 let mainWindowRevealed = false;
+// The renderer's first render with data; menu actions and pane:// links wait for it.
+let rendererReady = false;
 let flushWindowState: (() => void) | null = null;
-// A menu action chosen before the window is revealed waits for the renderer.
+// A menu action chosen before the renderer is ready waits for it.
 let pendingMenuAction: AppMenuAction | null = null;
 const RENDERER_READY_CHANNEL = 'window:renderer-ready';
 const RENDERER_READY_TIMEOUT_MS = 3_000;
@@ -318,7 +321,7 @@ function openPaneLink(link: string): void {
 let powerSaveManager: PowerSaveManager | null = null;
 
 function sendMenuAction(action: AppMenuAction): void {
-  if (!mainWindowRevealed || !mainWindow || mainWindow.isDestroyed()) {
+  if (!rendererReady || !mainWindow || mainWindow.isDestroyed()) {
     pendingMenuAction = action;
     return;
   }
@@ -445,6 +448,18 @@ function readSavedWindowState() {
   }
 }
 
+/** The chat this launch reopens, for the window's first frame; none when it cannot be read. */
+function readLaunchChatArg(): string[] {
+  try {
+    const uiState = new UIStateManager(databaseService, () => getActiveRemoteHostId(configManager.getConfig().remoteDaemon));
+    const outline = uiState.getLaunchChatOutline(databaseService);
+    return outline ? [encodeLaunchChatArg(outline)] : [];
+  } catch (error) {
+    console.warn('[Main] Could not read the chat this launch reopens:', error);
+    return [];
+  }
+}
+
 async function createWindow() {
   // Strip iframe-blocking headers for localhost URLs (enables embedded browser panel)
   session.defaultSession.webRequest.onHeadersReceived(
@@ -509,7 +524,7 @@ async function createWindow() {
 
   const mainWindowOptions: BrowserWindowConstructorOptions = {
     ...(restoredBounds ?? { width: 1400, height: 900 }),
-    // Shown once the renderer has painted its first frame with data.
+    // Shown on its first painted frame: the launch outline (frontend/index.html).
     show: false,
     backgroundColor: appearanceOptions.backgroundColor,
     webPreferences: {
@@ -522,6 +537,7 @@ async function createWindow() {
       additionalArguments: [
         ...appearanceOptions.additionalArguments,
         ...(windowControlsOverlay ? [WINDOW_CONTROLS_OVERLAY_ARG] : []),
+        ...readLaunchChatArg(),
       ],
     },
   };
@@ -546,9 +562,7 @@ async function createWindow() {
   mainWindow = win;
   ensureNativeThemeForwarding(() => mainWindow);
 
-  const revealWindow = (reason: 'renderer ready' | 'timeout') => {
-    clearTimeout(revealFallback);
-    ipcMain.removeListener(RENDERER_READY_CHANNEL, onRendererReady);
+  const revealWindow = (reason: 'first paint' | 'timeout') => {
     if (mainWindowRevealed || win.isDestroyed()) return;
     mainWindowRevealed = true;
     console.log(`[Main] Showing window (${reason})`);
@@ -556,6 +570,12 @@ async function createWindow() {
     if (savedWindowState?.isMaximized) win.maximize();
     else win.show();
     if (savedWindowState?.isFullScreen) win.setFullScreen(true);
+  };
+  const markRendererReady = () => {
+    clearTimeout(rendererFallback);
+    ipcMain.removeListener(RENDERER_READY_CHANNEL, onRendererReady);
+    if (rendererReady || win.isDestroyed()) return;
+    rendererReady = true;
     if (pendingMenuAction) {
       win.webContents.send(APP_MENU_ACTION_CHANNEL, pendingMenuAction);
       pendingMenuAction = null;
@@ -565,11 +585,15 @@ async function createWindow() {
     if (pendingPaneLink) openPaneLink(pendingPaneLink);
   };
   const onRendererReady = (event: IpcMainEvent) => {
-    if (event.sender === win.webContents) revealWindow('renderer ready');
+    if (event.sender === win.webContents) markRendererReady();
   };
+  win.once('ready-to-show', () => revealWindow('first paint'));
   ipcMain.on(RENDERER_READY_CHANNEL, onRendererReady);
-  // A renderer that fails before its first render must not leave the window hidden.
-  const revealFallback = setTimeout(() => revealWindow('timeout'), RENDERER_READY_TIMEOUT_MS);
+  // A renderer that fails before its first paint or render must not leave the window hidden.
+  const rendererFallback = setTimeout(() => {
+    revealWindow('timeout');
+    markRendererReady();
+  }, RENDERER_READY_TIMEOUT_MS);
 
   flushWindowState = trackWindowState(win, (state) => {
     try {
@@ -853,6 +877,7 @@ async function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
     mainWindowRevealed = false;
+    rendererReady = false;
     // No window is no one looking; a new window's renderer reports itself on screen.
     paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused: false, visible: false });
   });
@@ -1613,7 +1638,7 @@ if (launchRemoteSetup) {
 
     app.on('activate', () => {
       if (mainWindow) {
-        // Before the first reveal, the renderer-ready gate decides when to show.
+        // Before the first reveal, the window's first paint decides when to show.
         if (mainWindowRevealed) showMainWindow();
         return;
       }
