@@ -10,7 +10,7 @@ In Claude Code:
 /plugin install pane@claude-plugins-official
 ```
 
-Or browse `/plugin` and pick **Pane**. In Claude Desktop and Cowork, open **Customize > Plugins**. Then install the Pane app from [runpane.com](https://runpane.com), open it, keep it running while you use the plugin, and restart your Claude session.
+Or browse `/plugin` and pick **Pane**. In Claude Desktop and Cowork, open **Customize > Plugins**. Then install the Pane app from [runpane.com](https://runpane.com), open it, keep it running while you use the plugin, and restart your Claude session. If Pane was already running when you installed the plugin, restart Pane too so it removes its own copies of the tools and skills.
 
 ## What you get
 
@@ -33,7 +33,7 @@ Without the Pane app, the skills still load and each tool answers with an error 
 
 ## With the Pane app
 
-Pane registers its own `pane` tools and skills with Claude Code. While this plugin is on, Pane removes its own copies when it starts, so Claude sees one set. Turn the plugin off and restart Pane to bring Pane's copies back. Claude sessions that Pane starts in its own terminal and chat tabs use the Pane app's built-in server instead of the plugin's. Codex and Cursor are not affected.
+Pane registers its own `pane` tools and skills with Claude Code. While this plugin is on, Pane removes its own copies when it starts, so Claude sees one set. If Pane is already running when you turn the plugin on, restart Pane. Turn the plugin off and restart Pane to bring Pane's copies back. Claude sessions that Pane starts in its own terminal and chat tabs use the Pane app's built-in server instead of the plugin's. Codex and Cursor are not affected.
 
 ## What it runs, sends and fetches
 
@@ -46,7 +46,7 @@ The privacy policy is at [runpane.com/privacy](https://runpane.com/privacy#claud
 ## Notes for reviewers
 
 - **No account.** Pane has no sign-in. To test, install Pane from [runpane.com](https://runpane.com) (macOS, Windows or Linux), open it, add any git repository, then try the prompts above.
-- **Pinned server, newer tools.** The plugin pins one `runpane` release. With the Pane app installed, that release hands calls to the app's own newer `runpane`, so the tool list and server text come from your Pane release. Pane's CI checks every release for the policy points this plugin relies on: no catch-all tools in the `plugin` set, accurate read-only and destructive annotations, and server text that describes tools without steering the model.
+- **Pinned server, newer tools.** The plugin pins one `runpane` release. With the Pane app installed, that release hands calls to the app's own newer `runpane`, so the tool list and server text come from your Pane release. Before every release, Pane's CI checks the exact tool list of the `plugin` set (no catch-all tools), that `doctor` only takes diagnosis inputs, that the PR watch tools are marked as changing state, that no tool is marked both read-only and destructive, that a tool's `paneDir` input never picks which CLI runs, and that the server text describes tools without steering the model.
 - **`panels_input`** sends keys to another agent's terminal. It is how Pane answers an agent's menus; the server's instructions tell Claude to ask you before it answers a trust or permission prompt there.
 
 ## Support
