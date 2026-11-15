@@ -248,6 +248,8 @@ export interface RemoteMobilePushRegistration {
   notifyButtons?: boolean;
   /** The APNs endpoint that accepted this token after the key's own environment refused it. */
   apnsEnvironment?: 'sandbox' | 'production';
+  /** The relay's grant for this computer and token, which the phone received as a push and handed back (relay/PROTOCOL.md, Alerts). */
+  relayGrant?: string;
   createdAt: string;
   updatedAt: string;
   revokedAt?: string;
@@ -820,6 +822,8 @@ function normalizeRemoteMobilePushSettings(value: JsonValue | undefined): Remote
     if (revokedAt) normalized.revokedAt = revokedAt;
     if (raw.notifyButtons === true) normalized.notifyButtons = true;
     if (raw.apnsEnvironment === 'sandbox' || raw.apnsEnvironment === 'production') normalized.apnsEnvironment = raw.apnsEnvironment;
+    const relayGrant = readOptionalString(raw.relayGrant);
+    if (relayGrant) normalized.relayGrant = relayGrant;
     return [normalized];
   });
   const decodedAttentionSequence = decodeOptionalBoundary(settings.attentionSequence, boundary.number);

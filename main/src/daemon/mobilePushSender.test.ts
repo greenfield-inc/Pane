@@ -5,7 +5,7 @@ import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { MobilePushSender, setRelayPushChannel, STABLE_IDLE_MS, type MobilePushTransport } from './mobilePushSender';
-import type { RelayAlert } from './relay/relayAgent';
+import { RelayRequestError, type RelayAlert } from './relay/relayAgent';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { encodePaneRemoteConnection } from '../../../shared/types/remoteDaemon';
 import { ConfigManager } from '../services/configManager';
@@ -145,15 +145,18 @@ describe('MobilePushSender', () => {
       fcm: async () => { throw new Error('no direct FCM without keys'); },
     };
     const sent: RelayAlert[] = [];
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-14T12:00:00.000Z'));
     let answer = { status: 200, body: '' };
-    setRelayPushChannel({ available: () => true, send: async (alert) => { sent.push(alert); return answer; } });
+    setRelayPushChannel({ available: () => true, id: () => 'studio', send: async (alert) => { sent.push(alert); return answer; }, grant: async () => ({ status: 200, body: '' }) });
     try {
       const sender = new MobilePushSender(manager, providers);
       expect(sender.getStatus('client-1', 'ios', 'install-1')).toMatchObject({ provider: 'ready', message: 'Alerts go through Pane\'s servers.' });
       await sender.register('client-1', { platform: 'ios', token: 'apns-token', installationId: 'install-1', hostProfileId: 'relay-studio' });
+      await sender.confirmGrant('client-1', { platform: 'ios', installationId: 'install-1', grant: 'studio.20771.sig' });
       await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
       expect(sent).toEqual([expect.objectContaining({
-        platform: 'ios', token: 'apns-token', pushType: 'alert',
+        platform: 'ios', token: 'apns-token', pushType: 'alert', grant: 'studio.20771.sig',
         payload: expect.objectContaining({ paneId: 'pane-1', aps: expect.objectContaining({ alert: expect.objectContaining({ body: expect.stringContaining('is blocked') }) }) }),
       })]);
 
@@ -165,6 +168,113 @@ describe('MobilePushSender', () => {
     } finally {
       setRelayPushChannel(null);
     }
+  });
+
+  it('alerts through the relay only with the grant this phone confirmed for this computer', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-14T12:00:00.000Z'));
+    // 2026-11-14 is day 20771 since the Unix epoch.
+    const grantFor = (computer: string, daysAgo: number) => `${computer}.${20771 - daysAgo}.sig`;
+    setEnvironment({});
+    const config = createDefaultRemoteDaemonConfig();
+    config.host.clients = [{ id: 'client-1', label: 'Phone', tokenHash: 'hash', createdAt: '2026-11-14T00:00:00.000Z' }];
+    const manager = new ConfigManagerStub(config);
+    const providers: MobilePushTransport = {
+      apns: async () => { throw new Error('no direct APNs without keys'); },
+      fcm: async () => { throw new Error('no direct FCM without keys'); },
+    };
+    const sent: RelayAlert[] = [];
+    const grants: unknown[] = [];
+    let answer: () => Promise<{ status: number; body: string }> = async () => ({ status: 200, body: '' });
+    setRelayPushChannel({
+      available: () => true, id: () => 'studio',
+      send: async (alert) => { sent.push(alert); return answer(); },
+      grant: async (request) => { grants.push(request); return { status: 200, body: '' }; },
+    });
+    const blocked = async (sender: MobilePushSender) => {
+      await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'working', reason: 'working', agentType: 'claude' });
+      await sender.observeStatus({ sessionId: 'pane-1', panelId: 'panel-1', state: 'blocked', reason: 'prompt', agentType: 'claude' });
+    };
+    const register = (sender: MobilePushSender, token: string) => sender.register('client-1', { platform: 'android', token, installationId: 'install-1', hostProfileId: 'profile-1' });
+    const confirm = (sender: MobilePushSender, grant: string) => sender.confirmGrant('client-1', { platform: 'android', installationId: 'install-1', grant });
+    const minutes = (n: number) => vi.setSystemTime(Date.now() + n * 60_000);
+    try {
+      const sender = new MobilePushSender(manager, providers);
+
+      // Registering asks the relay to push the phone a grant; until the phone hands it back, nothing is
+      // sent and the phone's row says it is waiting, not On.
+      expect(await register(sender, 'fcm-token')).toMatchObject({ provider: 'ready', code: 'PUSH_AWAITING_PHONE', message: expect.stringContaining('Open Pane on this phone') });
+      await vi.waitFor(() => expect(grants).toEqual([{ platform: 'android', token: 'fcm-token', hostProfileId: 'profile-1' }]));
+      await blocked(sender);
+      expect(sent).toEqual([]);
+
+      // The phone re-registers on every connect; a waiting computer asks again only after 20 to 30
+      // minutes, so two waiting computers stay within the phone's silent pushes.
+      await register(sender, 'fcm-token');
+      minutes(19);
+      await register(sender, 'fcm-token');
+      expect(grants).toHaveLength(1);
+      minutes(11);
+      await register(sender, 'fcm-token');
+      await vi.waitFor(() => expect(grants).toHaveLength(2));
+
+      // A grant for another computer, or with no issue day, is refused; this computer's is kept and goes with each alert.
+      for (const grant of ['laptop.20771.sig', 'studio2.20771.sig', 'studio.sig']) expect(await confirm(sender, grant)).toEqual({ ok: false });
+      expect(await confirm(sender, grantFor('studio', 0))).toEqual({ ok: true });
+      expect(sender.getStatus('client-1', 'android', 'install-1')).toMatchObject({ provider: 'ready', code: 'PUSH_READY' });
+      await blocked(sender);
+      expect(sent).toEqual([expect.objectContaining({ platform: 'android', grant: grantFor('studio', 0) })]);
+
+      // Reconnecting with the same token keeps the grant; a rotated token needs a new one.
+      await register(sender, 'fcm-token');
+      expect(grants).toHaveLength(2);
+      await register(sender, 'fcm-token-2');
+      await vi.waitFor(() => expect(grants).toHaveLength(3));
+      await blocked(sender);
+      expect(sent).toHaveLength(1);
+
+      // Grants last 30 days. Past 15, the computer silently asks for a fresh one while the old one
+      // keeps alerts going; the fresh one replaces it.
+      await confirm(sender, grantFor('studio', 14));
+      minutes(30);
+      await register(sender, 'fcm-token-2');
+      expect(grants).toHaveLength(3);
+      await confirm(sender, grantFor('studio', 16));
+      await register(sender, 'fcm-token-2');
+      await vi.waitFor(() => expect(grants).toHaveLength(4));
+      expect(sender.getStatus('client-1', 'android', 'install-1')).toMatchObject({ code: 'PUSH_READY' });
+      minutes(30);
+      await blocked(sender);
+      expect(sent.at(-1)).toMatchObject({ grant: grantFor('studio', 16) });
+      await vi.waitFor(() => expect(grants).toHaveLength(5));
+      await confirm(sender, grantFor('studio', 0));
+      await blocked(sender);
+      expect(sent.at(-1)).toMatchObject({ grant: grantFor('studio', 0) });
+      expect(grants).toHaveLength(5);
+
+      // A relay that no longer accepts the grant drops it, so the next connect asks again.
+      answer = async () => { throw new RelayRequestError('unbound', 'This phone has not confirmed this computer.'); };
+      await blocked(sender);
+      expect(manager.config.host.mobilePush.registrations[0]?.relayGrant).toBeUndefined();
+      expect(manager.config.host.mobilePush.registrations[0]?.revokedAt).toBeUndefined();
+      await register(sender, 'fcm-token-2');
+      await vi.waitFor(() => expect(grants).toHaveLength(6));
+    } finally {
+      setRelayPushChannel(null);
+    }
+  });
+
+  it('says the relay is reconnecting, not that keys are missing, while its connection is down', () => {
+    setEnvironment({});
+    const config = createDefaultRemoteDaemonConfig();
+    const sender = new MobilePushSender(new ConfigManagerStub(config));
+    setRelayPushChannel({ available: () => false, id: () => 'studio', send: async () => ({ status: 200, body: '' }), grant: async () => ({ status: 200, body: '' }) });
+    try {
+      expect(sender.getStatus('client-1', 'ios', 'install-1')).toMatchObject({ provider: 'unavailable', code: 'PUSH_RELAY_RECONNECTING' });
+    } finally {
+      setRelayPushChannel(null);
+    }
+    expect(sender.getStatus('client-1', 'ios', 'install-1')).toMatchObject({ provider: 'missing-config', code: 'ERR_APNS_NOT_CONFIGURED' });
   });
 
   describe('attention timing and copy', () => {

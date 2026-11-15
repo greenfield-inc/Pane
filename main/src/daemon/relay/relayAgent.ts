@@ -53,12 +53,18 @@ export class RelayRequestError extends Error {
   }
 }
 
-export type RelayAlert =
+/** An alert as the computer builds it for the provider (relay/PROTOCOL.md, Alerts). */
+export type RelayAlertPayload =
   | { platform: 'ios'; token: string; pushType: 'alert' | 'background'; collapseId?: string; payload: object }
   | { platform: 'android'; message: object };
+/** `grant`: what the phone handed back from the relay's grant push for this computer and token. */
+export type RelayAlert = RelayAlertPayload & { grant: string };
+
+/** Asks the relay to push the phone a grant for this computer; `hostProfileId` tells the phone which computer it is for. */
+export interface RelayGrantRequest { platform: 'ios' | 'android'; token: string; hostProfileId: string }
 
 /** A request to the relay; its answer is an `ok` or `error` frame with the same `req`. */
-type RelayRequest = { t: 'txt'; values: string[] } | ({ t: 'alert' } & RelayAlert);
+type RelayRequest = { t: 'txt'; values: string[] } | ({ t: 'alert' } & RelayAlert) | ({ t: 'grant' } & RelayGrantRequest);
 
 /** A frame the computer sends to the relay (relay/PROTOCOL.md). */
 type ComputerFrame =
@@ -144,6 +150,12 @@ export class RelayAgent {
   /** Delivers a push alert with the Pane app's keys held by the relay (relay/PROTOCOL.md, Alerts). */
   async sendAlert(alert: RelayAlert): Promise<{ status: number; body: string }> {
     const answer = await this.request({ t: 'alert', ...alert });
+    return { status: answer.status ?? 0, body: answer.body ?? '' };
+  }
+
+  /** Has the relay push the phone a grant for this computer, which the phone hands back with `mobile:push-grant`. */
+  async requestGrant(request: RelayGrantRequest): Promise<{ status: number; body: string }> {
+    const answer = await this.request({ t: 'grant', ...request });
     return { status: answer.status ?? 0, body: answer.body ?? '' };
   }
 

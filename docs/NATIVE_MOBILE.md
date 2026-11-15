@@ -88,7 +88,7 @@ For your own Firebase project, create a sender service account with `roles/fireb
 
 **Service-account key.** Where key creation is allowed, `PANE_FCM_SERVICE_ACCOUNT_PATH=/secure/path/service-account.json` still works and takes precedence over impersonation.
 
-**Through the relay.** A computer with neither APNs nor FCM keys sends its alerts through the relay it is connected to for [QR pairing](QR_PAIRING.md), which holds the Pane app's keys; the computer builds the same payload and the relay only signs and posts it, at most 60 alerts an hour per computer. Keys set on the computer always win.
+**Through the relay.** A computer with neither APNs nor FCM keys sends its alerts through the relay it is connected to for [QR pairing](QR_PAIRING.md), which holds the Pane app's keys; the computer builds the same payload and the relay only signs and posts it, at most 60 alerts an hour per computer. The relay sends a phone's alerts only from a computer the phone confirmed: when the phone registers, the relay pushes it a silent grant for that computer, and the Pane app hands the grant back to that computer (`mobile:push-grant`), which sends it with each alert. A grant lasts 30 days, and the computer quietly gets a fresh one while the phone stays paired ([relay protocol](../relay/PROTOCOL.md#alerts)). Keys set on the computer always win.
 
 Do not commit any provider credential. CI gets the Firebase app config from the `PANE_ANDROID_GOOGLE_SERVICES_JSON` secret (see `native/README.md`); that file identifies the app and is not a sending credential.
 

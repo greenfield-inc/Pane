@@ -12,7 +12,7 @@ import { invokeChannel } from '@/daemon';
 import { createDaemonClient } from '@/daemon/createClient';
 import { isDemoProfile } from '@/features/demo/demoHost';
 
-import { devicePush, getInstallationId } from './device';
+import { devicePush, getInstallationId, isLastToken } from './device';
 import { createWriteGate, preferencesFrom, registerEverywhere, type PushHost, type PushPreferences, type PushSetupResult } from './registration';
 
 /** Per phone, not per computer: every computer gets the same switches. */
@@ -148,7 +148,8 @@ export function PushRegistrationSync() {
     const appState = AppState.addEventListener('change', status => {
       if (status === 'active') requestPushRegistration();
     });
-    const token = Notifications.addPushTokenListener(() => requestPushRegistration());
+    // Registering asks the OS for the token, which can fire this listener with the same token: only a new one re-registers.
+    const token = Notifications.addPushTokenListener(next => { if (!isLastToken(String(next.data))) requestPushRegistration(); });
     return () => {
       appState.remove();
       token.remove();

@@ -19,13 +19,23 @@ Notifications.setNotificationHandler({
   },
 });
 
+let lastToken: string | null = null;
+
 export const devicePush: Omit<PushDeps, 'invoke'> = {
   platform: Platform.OS === 'android' ? 'android' : 'ios',
   getPermission: async () => permissionState(await Notifications.getPermissionsAsync()),
   requestPermission: async () => permissionState(await Notifications.requestPermissionsAsync()),
-  getDeviceToken: () => withTimeout(Notifications.getDevicePushTokenAsync().then(token => String(token.data)), TOKEN_TIMEOUT_MS),
+  getDeviceToken: () => withTimeout(Notifications.getDevicePushTokenAsync().then(token => {
+    lastToken = String(token.data);
+    return lastToken;
+  }), TOKEN_TIMEOUT_MS),
   getInstallationId,
 };
+
+/** Whether `token` is the one this phone last registered. Asking for the token can report it again unchanged. */
+export function isLastToken(token: string): boolean {
+  return token === lastToken;
+}
 
 /**
  * Removes a Pane's delivered "is blocked" and "finished" alerts, and its workers' when it is a

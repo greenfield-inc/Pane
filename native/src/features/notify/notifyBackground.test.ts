@@ -4,9 +4,13 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 const native = vi.hoisted(() => ({
   task: undefined as undefined | ((body: { data: unknown }) => Promise<void>),
   schedule: vi.fn((_request: { content: { categoryIdentifier?: string } }) => Promise.resolve('alert-id')),
+  profiles: [] as { id: string }[],
+  appState: { currentState: 'background' },
+  refresh: vi.fn(),
+  invoke: vi.fn((_client: { profile: string }, _channel: string, _args: unknown[]) => Promise.resolve({ ok: true })),
 }));
 
-vi.mock('react-native', () => ({ Platform: { OS: 'android' }, AppState: { currentState: 'background' } }));
+vi.mock('react-native', () => ({ Platform: { OS: 'android' }, AppState: native.appState }));
 vi.mock('expo-task-manager', () => ({
   defineTask: (_name: string, task: typeof native.task) => { native.task = task; },
 }));
@@ -23,10 +27,18 @@ vi.mock('expo-notifications', () => ({
   dismissNotificationAsync: () => Promise.resolve(),
   scheduleNotificationAsync: native.schedule,
 }));
-vi.mock('@/auth/hosts', () => ({ loadHosts: () => Promise.resolve({ profiles: [] }) }));
+vi.mock('@/auth/hosts', () => ({ loadHosts: () => Promise.resolve({ profiles: native.profiles }) }));
 vi.mock('@/auth/secureStore', () => ({ secureStore: {} }));
-vi.mock('@/daemon/createClient', () => ({ CLIENT_LABEL: 'Pane', DEVICE_LABEL: 'Phone', getRuntimeId: () => Promise.resolve('runtime'), streamingFetch: fetch }));
-vi.mock('@/features/notifications/device', () => ({ clearPaneNotifications: () => Promise.resolve(), dismissNotifyAlerts: () => Promise.resolve() }));
+vi.mock('@/daemon/createClient', () => ({
+  CLIENT_LABEL: 'Pane', DEVICE_LABEL: 'Phone', getRuntimeId: () => Promise.resolve('runtime'), streamingFetch: fetch,
+  createDaemonClient: (profile: { id: string }) => ({ profile: profile.id }),
+}));
+vi.mock('@/daemon/invoke', () => ({ invokeChannel: native.invoke }));
+vi.mock('@/features/notifications/usePushSetup', () => ({ requestPushRegistration: native.refresh }));
+vi.mock('@/features/notifications/device', () => ({
+  clearPaneNotifications: () => Promise.resolve(), dismissNotifyAlerts: () => Promise.resolve(),
+  devicePush: { platform: 'android' }, getInstallationId: () => Promise.resolve('install-1'),
+}));
 
 beforeAll(async () => {
   await import('./notifyBackground');
@@ -48,5 +60,32 @@ describe('Android question alerts', () => {
   it('give a secret request no buttons, so its value is never typed into a notification reply', async () => {
     const content = await alertFor('secret');
     expect(content.categoryIdentifier).toBeUndefined();
+  });
+});
+
+describe('relay grants', () => {
+  it('hands the grant to the paired computer the push names, and to no other', async () => {
+    native.profiles = [{ id: 'host-1' }, { id: 'host-2' }];
+    native.schedule.mockClear();
+    await native.task?.({ data: { data: { hostProfileId: 'host-1', paneGrant: 'studio.sig' } } });
+    expect(native.invoke.mock.calls).toEqual([[{ profile: 'host-1' }, 'mobile:push-grant', [{ platform: 'android', installationId: 'install-1', grant: 'studio.sig' }]]]);
+    expect(native.schedule).not.toHaveBeenCalled();
+
+    // A grant for a computer this phone never paired with goes nowhere.
+    native.invoke.mockClear();
+    await native.task?.({ data: { data: { hostProfileId: 'stranger', paneGrant: 'other.sig' } } });
+    expect(native.invoke).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the alert rows once the computer keeps the grant while Pane is open', async () => {
+    native.profiles = [{ id: 'host-1' }];
+    native.appState.currentState = 'active';
+    native.refresh.mockClear();
+    native.invoke.mockResolvedValueOnce({ ok: false });
+    await native.task?.({ data: { data: { hostProfileId: 'host-1', paneGrant: 'other.sig' } } });
+    expect(native.refresh).not.toHaveBeenCalled();
+    await native.task?.({ data: { data: { hostProfileId: 'host-1', paneGrant: 'studio.sig' } } });
+    expect(native.refresh).toHaveBeenCalledTimes(1);
+    native.appState.currentState = 'background';
   });
 });

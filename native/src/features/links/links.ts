@@ -44,6 +44,17 @@ export function parsePushTarget(request: unknown): OpenTarget | null {
   return withPane(base, stringField(data, 'paneId'), stringField(data, 'panelId'));
 }
 
+/**
+ * Pane's relay confirms a computer for this phone's alerts by pushing a grant for that computer
+ * (relay/PROTOCOL.md, Alerts); the phone hands it to the saved computer `host` names.
+ */
+export function parseGrantPush(value: unknown): { host: string; grant: string } | null {
+  const data = [pushData(value), field(value, 'data')].find(candidate => stringField(candidate, 'paneGrant') !== undefined);
+  const host = stringField(data, 'hostProfileId');
+  const grant = stringField(data, 'paneGrant');
+  return host && grant ? { host, grant } : null;
+}
+
 /** A Notify question's alert, as the host sends it (main/src/daemon/mobilePushSender.ts, observeQuestion). */
 export interface NotifyPush {
   host: string;
