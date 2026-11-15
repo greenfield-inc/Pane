@@ -216,7 +216,9 @@ default agent), reading and typing
 into terminals, pressing one key at a time, dictation, and Notify. The keys are ↑, ↓, Enter, Esc,
 Tab and the digits 1 to 9, one per request, and nothing else: text, two keys at once, Ctrl-C,
 Ctrl-D, ← → and 0 are refused before they reach the terminal (`ERR_GLASSES_KEY_REFUSED`), logged
-without the input, and not counted toward the lockout. These keys are enough to answer an agent's permission menu, so the
+without the input, and not counted toward the lockout. Dictation sends only the Pane and the
+text: attachments and other submit options are dropped, and a request without text is refused
+(`ERR_GLASSES_SUBMIT_REFUSED`). These keys are enough to answer an agent's permission menu, so the
 glasses can approve what an agent asks to do. Opening a stopped Pane restarts its saved agent or command,
 in its own folder.
 

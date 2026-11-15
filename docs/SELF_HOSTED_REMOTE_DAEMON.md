@@ -300,7 +300,10 @@ In `Settings > Remote Access > Advanced Remote Host`:
 1. Enable `Enable remote daemon listener`.
 2. Keep `Listen Host` on `127.0.0.1`.
 3. Keep or change `Listen Port`, default `42137`.
-4. Leave `Require pairing / saved bearer tokens` enabled.
+4. Leave `Require pairing / saved bearer tokens` enabled. Turned off, the
+   listener answers only callers that address it as `127.0.0.1`, `localhost`
+   or `[::1]` with no web page from another site behind them, and it still
+   requires a token while phone access through the relay is on.
 5. Leave `Allow direct HTTP on loopback` enabled.
 6. Click `Apply Host Settings`.
 

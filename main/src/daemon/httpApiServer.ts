@@ -22,7 +22,7 @@ import { remoteEventStreams } from './remoteEventStreams';
 import {
   GLASSES_CHANNELS,
   GLASSES_EVENT_CHANNELS,
-  glassesKeyInput,
+  glassesKeyInput, glassesSubmitInput,
   glassesSessionInput,
   glassesSource,
   type GlassesAccess,
@@ -338,6 +338,24 @@ class RemoteDaemonBadRequestError extends Error {
   }
 }
 
+/**
+ * "Require pairing" off lets callers in without a token, but never while phone access is on: the relay
+ * and the same-network port forward the internet and the LAN to this listener.
+ */
+function pairingWaived(remoteConfig: RemoteDaemonConfig): boolean {
+  return !remoteConfig.host.config.pairingRequired && remoteConfig.relay?.enabled !== true;
+}
+
+const LOOPBACK_HOST_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+/** A caller addressing this computer by a loopback name, and no web page from another origin (cross-site requests and DNS rebinding). */
+function isLoopbackBrowserCaller(request: IncomingMessage): boolean {
+  const host = request.headers.host ?? '';
+  if (!LOOPBACK_HOST_NAMES.has(host.replace(/:\d+$/u, '').toLowerCase())) return false;
+  const origin = request.headers.origin;
+  return origin === undefined || origin === `http://${host}`;
+}
+
 export class PaneRemoteHttpApiServer {
   private server: http.Server | null = null;
   private voiceDeepgramWss: WebSocketServer | null = null;
@@ -591,8 +609,8 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
-    const auth = glasses ? { ok: true as const } : this.authenticateRequest(request, url.searchParams.get('access_token'));
-    if (!auth.ok) {
+    const auth = glasses ? null : this.authenticateRequest(request, url.searchParams.get('access_token'));
+    if (auth && !auth.ok) {
       writeRawHttpError(socket, auth.statusCode, auth.error.message);
       return;
     }
@@ -609,9 +627,10 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
+    const glassesClient = glasses?.client;
+    const identity = glassesClient ? glassesIdentity(glassesClient) : auth?.ok ? this.admittedIdentity(request, auth, url) : null;
     wss.handleUpgrade(request, socket, head, (client) => {
-      const glassesClient = glasses?.client;
-      if (glassesClient) this.trackAdmittedSocket(client, glassesIdentity(glassesClient));
+      if (identity) this.trackAdmittedSocket(client, identity);
       this.handleDeepgramProxySocket(client, deepgramApiKey);
     });
   }
@@ -646,17 +665,7 @@ export class PaneRemoteHttpApiServer {
       writeRawHttpError(socket, 503, 'Port forwarding is not available');
       return;
     }
-    const identity: AdmittedIdentity = {
-      remoteClientId: auth.client?.id ?? null,
-      remoteClientTokenHash: auth.client?.tokenHash ?? null,
-      workspaceCredentials: this.workspace
-        ? {
-          login: request.headers['tailscale-user-login'],
-          authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
-        }
-        : null,
-      glassesOrigin: null,
-    };
+    const identity = this.admittedIdentity(request, auth, url);
     wss.handleUpgrade(request, socket, head, (client) => {
       this.trackAdmittedSocket(client, identity);
       // By name, so a service on either IPv4 or IPv6 loopback answers.
@@ -668,6 +677,21 @@ export class PaneRemoteHttpApiServer {
       });
       client.once('close', () => upstream.destroy());
     });
+  }
+
+  /** Who an admitted WebSocket belongs to, so a later revoke or narrower access closes it. */
+  private admittedIdentity(request: IncomingMessage, auth: Extract<RemoteRequestAuthResult, { ok: true }>, url: URL): AdmittedIdentity {
+    return {
+      remoteClientId: auth.client?.id ?? null,
+      remoteClientTokenHash: auth.client?.tokenHash ?? null,
+      workspaceCredentials: this.workspace
+        ? {
+          login: request.headers['tailscale-user-login'],
+          authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
+        }
+        : null,
+      glassesOrigin: null,
+    };
   }
 
   /**
@@ -1346,6 +1370,17 @@ export class PaneRemoteHttpApiServer {
       }
       args = [key];
     }
+    if (channel === 'runpane:panels:submit') {
+      const submit = invokeRequest.args.length === 1 ? glassesSubmitInput(invokeRequest.args[0]) : null;
+      if (!submit) {
+        // Logged without the input, which could be anything the request carried.
+        this.glassesRefused(glasses, admission.source, 'submit');
+        refuse(400, 'ERR_GLASSES_SUBMIT_REFUSED', 'Glasses can send only a panel and the text they dictated. Nothing was sent.',
+          'Update the Pane glasses app, then try again.');
+        return;
+      }
+      args = [submit];
+    }
     if (channel === 'orchestration-sessions:create') {
       const input = invokeRequest.args.length === 1 ? glassesSessionInput(invokeRequest.args[0]) : null;
       if (!input) {
@@ -1455,7 +1490,7 @@ export class PaneRemoteHttpApiServer {
       };
     }
 
-    if (!remoteConfig.host.config.pairingRequired) {
+    if (pairingWaived(remoteConfig) && isLoopbackBrowserCaller(request)) {
       return {
         ok: true,
         client: null,
@@ -1560,7 +1595,7 @@ export class PaneRemoteHttpApiServer {
       return false;
     }
 
-    if (!remoteConfig.host.config.pairingRequired) {
+    if (pairingWaived(remoteConfig)) {
       return true;
     }
 
@@ -1600,7 +1635,7 @@ export class PaneRemoteHttpApiServer {
       return;
     }
     // A revoked device loses its stream within one heartbeat, even when no event is sent.
-    if (client.glassesOrigin !== null && !this.isStillAdmitted(client)) {
+    if (!this.isStillAdmitted(client)) {
       this.dropEventClient(clientConnectionId);
       return;
     }
