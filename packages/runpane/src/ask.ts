@@ -83,6 +83,8 @@ interface RunOptions {
   cwd?: string;
   env?: Readonly<Record<string, string>>;
   timeoutMs: number;
+  /** Written to the agent's stdin; only for a run on this machine. */
+  input?: string;
 }
 
 async function run(place: Place, argv: string[], options: RunOptions): Promise<RunResult> {
@@ -121,14 +123,14 @@ async function runInWsl(place: Place, argv: string[], options: { cwd?: string; e
 
 function runHere(argv: string[], options: RunOptions): Promise<RunResult> {
   const env = { ...process.env, ...options.env };
-  // No shell: the prompt reaches the agent as one argument. A Windows .cmd shim runs through cmd
-  // with each argument quoted, and is refused when cmd can't pass one literally.
+  // No shell. A Windows .cmd shim runs through cmd, which can't pass every character literally,
+  // so the prompt goes on stdin rather than the command line.
   const [file, args, verbatim] = windowsBatchCommand(argv, env) ?? [argv[0], argv.slice(1), false];
   return new Promise((resolve) => {
     const child = spawn(file, args, {
       cwd: options.cwd,
       env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: 'pipe',
       // Its own process group, so a timeout stops everything the agent started.
       detached: process.platform !== 'win32',
       windowsHide: true,
@@ -150,6 +152,9 @@ function runHere(argv: string[], options: RunOptions): Promise<RunResult> {
       clearTimeout(timer);
       resolve({ exitCode: null, stdout, stderr: stderr + error.message, timedOut, missing: error.code === 'ENOENT' });
     });
+    // An agent may exit without reading stdin; that pipe error is ignored and its exit code says what happened.
+    child.stdin.on('error', () => {});
+    child.stdin.end(options.input);
     child.on('close', (exitCode) => {
       clearTimeout(timer);
       resolve({ exitCode, stdout, stderr, timedOut, missing: process.platform === 'win32' && exitCode !== 0 && NOT_FOUND.test(stderr) });
@@ -324,8 +329,10 @@ export async function runAsk(parsed: ParsedArgs): Promise<number> {
   const requested = parsed.waitTimeoutMs ?? DEFAULT_ASK_TIMEOUT_MS;
   const timeoutMs = place.remote ? Math.min(requested, MAX_REMOTE_TIMEOUT_MS) : requested;
   const executable = entry.executables[0];
-  const argv = [executable, ...entry.ask.args, ...(model && entry.models ? [entry.models.flag, model] : []), prompt];
-  const result = await run(place, argv, { cwd, env: entry.ask.env, timeoutMs });
+  // Every agent reads its prompt from stdin when given none, so here it never meets cmd.exe's quoting.
+  // A remote run has no stdin; its shell quotes the prompt as an argument.
+  const argv = [executable, ...entry.ask.args, ...(model && entry.models ? [entry.models.flag, model] : []), ...(place.remote ? [prompt] : [])];
+  const result = await run(place, argv, { cwd, env: entry.ask.env, timeoutMs, input: place.remote ? undefined : prompt });
   const where = describePlace(place);
   if (result.missing) {
     throw new RunpaneError('ERR_ASK_AGENT_MISSING', `${entry.label} is not installed on ${where}, so it could not answer (${result.stderr.trim().split('\n')[0]}).`, `Install it there: ${entry.install.command}`);

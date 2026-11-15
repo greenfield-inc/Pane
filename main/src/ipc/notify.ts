@@ -596,7 +596,7 @@ let memberMachines: NotifyMachines | null = null;
 const NOTIFY_TYPE_INTO_TAB = 'notify:type-into-tab';
 
 /** What typing an owed answer into a tab came to. */
-type TabTypeOutcome = 'delivered' | 'busy' | 'gone' | 'unsupported';
+type TabTypeOutcome = 'delivered' | 'busy' | 'gone' | 'unsupported' | 'outdated';
 const tabTypeOutcomeSchema = boundary.enumeration('delivered', 'busy', 'gone', 'unsupported');
 
 /**
@@ -608,7 +608,8 @@ async function typeIntoMemberTab(machines: NotifyMachines, machineId: string, pa
     const outcome = decodeOptionalBoundary(await machines.invokeOn?.(machineId, NOTIFY_TYPE_INTO_TAB, [{ panelId, text }]), tabTypeOutcomeSchema);
     return outcome ?? 'busy';
   } catch (error) {
-    // Its machine is away, or its Pane predates remote members: the next sweep tries again.
+    // Its Pane predates remote members, so it never will; otherwise its machine is away and the next sweep tries again.
+    if (error instanceof PaneError && error.code === 'ERR_UNKNOWN_CHANNEL') return 'outdated';
     console.warn(`[Notify] Couldn't type into ${machineId}'s tab ${panelId} yet:`, error);
     return 'busy';
   }

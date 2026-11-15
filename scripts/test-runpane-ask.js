@@ -41,3 +41,26 @@ test('says sign-in in the agent\'s own words', () => {
   assert.equal(describeSignIn('json-logged-in', '{\n  "loggedIn": true,\n  "authMethod": "claude.ai"\n}\n', ''), 'signed in (claude.ai)');
   assert.equal(describeSignIn('text', '', 'Logged in using ChatGPT\n'), 'Logged in using ChatGPT');
 });
+
+test('passes a prompt with quotes, %, ! and line breaks to the agent unchanged, Windows .cmd shims included', () => {
+  const { spawnSync } = require('node:child_process');
+  const os = require('node:os');
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-ask-'));
+  // A stand-in Codex that answers with the prompt it was given, installed the way npm installs it.
+  const agent = 'const prompt = require("node:fs").readFileSync(0, "utf8") || process.argv.at(-1);\n'
+    + 'console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: prompt } }));\n';
+  if (process.platform === 'win32') {
+    fs.writeFileSync(path.join(bin, 'codex.js'), agent);
+    fs.writeFileSync(path.join(bin, 'codex.cmd'), '@node "%~dp0codex.js" %*\r\n');
+  } else {
+    fs.writeFileSync(path.join(bin, 'codex'), `#!${process.execPath}\n${agent}`, { mode: 0o755 });
+  }
+  const prompt = 'Why does "npm test" print 100% then stop!?\nSecond line: %PATH% and !VAR!';
+  const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'cli.js'), 'ask', '--agent', 'codex', '--prompt', prompt, '--json'], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` },
+  });
+  fs.rmSync(bin, { recursive: true, force: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).answer, prompt);
+});
