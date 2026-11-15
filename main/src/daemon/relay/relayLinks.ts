@@ -181,6 +181,10 @@ export class RelayLinks {
     const phone = this.callerPhone(callerClientId);
     this.checkPeer(peer);
     if (peer.id === this.deps.self()?.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'A computer cannot link with itself.', 'Scan another computer.');
+    // A phone that scans a computer again offers its links again. Replacing a working link would cut off the peer's open connection.
+    if (this.linked().some((profile) => profile.relay.computerId === peer.id) && this.remote().host.clients.some((client) => client.kind === 'computer' && client.computerId === peer.id)) {
+      throw new PaneError('ERR_RELAY_ALREADY_LINKED', `${peer.name} is already linked with this computer, so nothing changed.`, 'Nothing to do; to link it again, unlink it first.');
+    }
     const { token, tokenHash } = newToken();
     const record: RemoteDaemonClientRecord = {
       id: randomUUID(),

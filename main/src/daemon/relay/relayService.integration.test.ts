@@ -347,5 +347,11 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     expect(again.status).toBe(200);
     expect(again.json.linked).toEqual([]);
     expect((await invoke(a.host, tokenA, 'sessions:get-all-with-projects')).status).toBe(200);
+
+    // The app then offers to link the laptop with the studio it already has; they are linked, so nothing is replaced.
+    const studioToLaptop = studio.config().client.profiles.find((profile) => profile.relay?.computerId === laptopInfo.id)?.token;
+    const relink = await invoke(b.host, String(again.json.token), 'relay:client:mint-link', [{ peer: studioInfo }]);
+    expect(relink.json).toMatchObject({ ok: false, error: { code: 'ERR_RELAY_ALREADY_LINKED' } });
+    expect((await invoke(b.host, String(studioToLaptop), 'sessions:get-all-with-projects')).status).toBe(200);
   }, 90_000);
 });

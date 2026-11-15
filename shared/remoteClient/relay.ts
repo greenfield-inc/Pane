@@ -6,7 +6,7 @@ import {
 } from '../types/relay';
 import type { RemotePaneConnectionProfile, RemoteRelayProfile } from '../types/remoteDaemon';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
-import type { RemoteFetch } from './remoteDaemonClient';
+import { RemoteRequestError, type RemoteFetch } from './remoteDaemonClient';
 
 /** Pane's relay domain. A `pane://pair` link without `d=` names a computer under it. */
 export const DEFAULT_RELAY_DOMAIN = 'runpane.net';
@@ -202,7 +202,12 @@ export async function linkRelayComputers(added: RelayLinkPeer, others: readonly 
     await other.client.invoke(RELAY_CLIENT_COMMANDS.saveLink, [{ peer: added.computer, token: forOther.token }]);
     await added.client.invoke(RELAY_CLIENT_COMMANDS.saveLink, [{ peer: other.computer, token: forAdded.token }]);
   }));
-  return peers.flatMap((peer, index) => (results[index]?.status === 'rejected' ? [peer.computer.id] : []));
+  return peers.flatMap((peer, index) => {
+    const result = results[index];
+    // A computer that is already linked with the peer keeps its link, and the pair counts as linked.
+    const alreadyLinked = result?.status === 'rejected' && result.reason instanceof RemoteRequestError && result.reason.code === 'ERR_RELAY_ALREADY_LINKED';
+    return result?.status === 'rejected' && !alreadyLinked ? [peer.computer.id] : [];
+  });
 }
 
 /**
