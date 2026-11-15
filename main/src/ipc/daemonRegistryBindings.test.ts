@@ -101,6 +101,7 @@ const ORCHESTRATION_SESSION_CHANNELS = [
   'orchestration-sessions:set-agent',
   'orchestration-sessions:associate',
   'orchestration-sessions:detach',
+  'orchestration-sessions:activity-list',
   'orchestration-sessions:overview',
 ] as const;
 

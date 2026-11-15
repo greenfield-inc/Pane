@@ -47,6 +47,7 @@ import {
 import { sharedEmulatorThread, type RemoteTerminalEmulator, type TerminalEmulatorHostConnection } from './terminalEmulatorClient';
 import type { ScreenState } from './terminalEmulatorHost';
 import { AgentStatusMonitor } from './agentStatus/agentStatusMonitor';
+import { runpaneWaits, terminalMidTurn } from './agentStatus/midTurn';
 import { blockedPromptKey, blockedScreenLines, detectAgentState } from './agentStatus/manifestEngine';
 import { getManifestForAgent } from './agentStatus/manifests';
 import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
@@ -352,6 +353,8 @@ interface TerminalProcess {
   bypassWarningAnswered?: boolean;
   /** Last status scan, reused while the emulator pushes no new screen. */
   lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
+  /** When the status poll last saw the screen (text or title) change, for the Session's mid-turn test. */
+  screenChangedAt?: number;
   /** A native Claude Session's own folder, whose trust menu the status poll answers until Claude is first ready. */
   claudeTrustFolder?: string;
   /** The screen Pane last answered the trust menu on, so one frame gets one key. */
@@ -2830,6 +2833,22 @@ export class TerminalPanelManager extends EventEmitter {
     return this.agentStatusMonitor.getState(panelId);
   }
 
+  /**
+   * The Session icon's stricter test (midTurn.ts): a known agent with its working chrome on a
+   * screen that is still changing, and no runpane waiting call open. Read from the status
+   * poll's last scan, so it is at most one poll old.
+   */
+  isMidTurn(panelId: string, now: number = Date.now()): boolean {
+    const terminal = this.terminals.get(panelId);
+    if (!terminal || terminal.destroying || !terminal.lastStatusScan) return false;
+    return terminalMidTurn({
+      agentKnown: terminal.agentType !== undefined,
+      detection: terminal.lastStatusScan.detection,
+      screenChangedAt: terminal.screenChangedAt,
+      waiting: runpaneWaits.isWaiting(panelId),
+    }, now);
+  }
+
   private emitActivityStatus(terminal: TerminalProcess): void {
     this.sendRendererEvent('panel:activityStatus', {
       panelId: terminal.panelId,
@@ -2921,6 +2940,7 @@ export class TerminalPanelManager extends EventEmitter {
         const manifest = getManifestForAgent(terminal.agentType);
         let detection = terminal.lastStatusScan?.screen === screen ? terminal.lastStatusScan.detection : null;
         if (!detection) {
+          terminal.screenChangedAt = Date.now();
           detection = detectAgentState(manifest, {
             screen: screen.screenText,
             oscTitle: screen.oscTitle,

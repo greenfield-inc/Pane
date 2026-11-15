@@ -309,6 +309,38 @@ ignored, timestamps are kept), `sessions:sort-panes` (`{ order: "newest" |
 "oldest" }`) and `sessions:get-pane-order` (`{ newPanes: "top" | "bottom",
 chosen }`).
 
+### The Session row's icon
+
+A Session row's icon spins only while the Session really works, and is an empty
+grey ring otherwise; it is never red (the amber approvals count and the expanded
+Pane rows show what needs you). It spins once the orchestrator's agent tab, or
+an agent tab in one of the Session's Panes (not archived), has been mid-turn
+without a break for 10 s, and stops 10 s after the last one ends, so a short
+wake-up never shows. Mid-turn is stricter than a Pane's own status dot:
+
+- A terminal agent needs its working chrome on screen (the spinner in its title,
+  its thinking or working line), and that screen must have changed in the last
+  15 s. Output alone (a dev server, typing, a redraw) never counts, and a frozen
+  spinner stops counting.
+- A chat tab needs an open turn that sent an update in the last 5 minutes, or a
+  tool call still running.
+- A tab waiting on `runpane watch`, `runpane panels wait`, `runpane notify` or
+  `runpane secrets request` is waiting, not working. A chat tab counts as
+  waiting only while the tool call it is running is that wait; one sent to the
+  background doesn't hide its real turns. A terminal tab counts as waiting
+  while any such call from it is open, so an orchestrator in a terminal tab
+  with a background watch or card open doesn't spin the Session on its own;
+  its workers do.
+- A permission prompt, a menu, a usage-limit screen, a plain shell, and anything
+  Pane cannot tell, read as idle.
+
+The host that runs the agents decides this once and tells every client, so the
+sidebar, All machines (each machine's Sessions by that machine) and the web and
+phone apps agree; while a client can't reach the host it shows the Session
+idle, and a reconnect reads it again. "N working" counts the Panes with
+a working tab by the same rule. A machine that is offline, or too old to report
+it, shows its Sessions idle.
+
 The experimental **Attention inbox** (Settings > Advanced > Experimental) turns
 the Projects list into an Inbox of the Panes that need you: an agent waiting on
 input or approval, an agent that completed a real turn since Pane started (it

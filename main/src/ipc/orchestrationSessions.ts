@@ -210,6 +210,9 @@ export function registerOrchestrationSessionHandlers(
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:detach');
 
+  // The baseline for `orchestration-sessions:activity`: every open Session's current activity.
+  commandRegistry.register('orchestration-sessions:activity-list', () => invokeSafely(async () => requireManager().liveActivity.snapshot()));
+  commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:activity-list');
   commandRegistry.register('orchestration-sessions:overview', async (value: PaneCommandValue) => {
     return invokeSafely(() => requireManager().overview(decodeSelector(value)));
   });

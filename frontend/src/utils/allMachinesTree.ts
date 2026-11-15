@@ -2,7 +2,7 @@ import { rollupAgentState, toAgentDisplayStatus } from './agentStatus';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { AgentDisplayStatus, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { NotifySharedState } from '../../../shared/types/notify';
-import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionRecord, SessionActivity } from '../../../shared/types/orchestrationSession';
 import type { PanePermissionRequest } from '../../../shared/types/permissions';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
@@ -25,6 +25,8 @@ export interface MachineSnapshot {
   sessions: OrchestrationSessionRecord[];
   /** `panels:agent-statuses`. */
   statuses: PanelAgentStatusEvent[];
+  /** `orchestration-sessions:activity-list`: empty from a host too old to have it. */
+  activity: SessionActivity[];
   /** `notify:remote-snapshot`. */
   notify: Pick<NotifySharedState, 'items'> | null;
   /** `permission:getPending`. */
@@ -57,7 +59,10 @@ export interface AllMachinesSession {
   machine: MachineRef;
   offline: boolean;
   session: OrchestrationSessionRecord;
-  status: AgentDisplayStatus;
+  /** The Session's activity as its own machine decides it; idle while the machine is offline. */
+  activity: SessionActivity['state'];
+  /** Panes with a tab working, by the same machine's rule. */
+  workingPanes: number;
   /** Its Panes on the same machine. */
   panes: AllMachinesPane[];
 }
@@ -187,14 +192,17 @@ export function buildAllMachinesTree(views: readonly MachineView[], arrangement:
       }
     }
 
+    const activity = new Map(snapshot.activity.map(item => [item.sessionId, item]));
     for (const session of snapshot.sessions) {
       if (session.archived) continue;
+      const live = offline ? undefined : activity.get(session.id);
       sessions.push({
         key: `${machine.id}:${session.id}`,
         machine,
         offline,
         session,
-        status: statusOf(session.internalSessionId),
+        activity: live?.state ?? 'idle',
+        workingPanes: live?.workingPanes ?? 0,
         panes: session.associations.flatMap(association => paneById.get(association.paneId) ?? []),
       });
     }

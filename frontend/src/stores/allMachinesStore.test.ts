@@ -65,11 +65,32 @@ describe('All machines feed', () => {
     expect(readsOf('build')).toEqual([]);
     expect(readsOf('devbox').sort()).toEqual([
       'notify:remote-snapshot',
+      'orchestration-sessions:activity-list',
       'orchestration-sessions:list',
       'panels:agent-statuses',
       'permission:getPending',
       'sessions:get-all-with-projects',
     ]);
+  });
+
+  it('re-reads only a machine\'s Session activity when it sends an activity change', async () => {
+    read.mockImplementation((machineId: string, channel: string) => Promise.resolve({ machineId, data: { success: true, data: channel === 'orchestration-sessions:activity-list' ? [{ sessionId: 's1', state: 'working', workingPanes: 1 }] : [] } }));
+    emit({ type: 'event', machineId: 'build', channel: 'orchestration-sessions:activity', args: [] });
+    await vi.runAllTimersAsync();
+    expect(readsOf('build')).toEqual(['orchestration-sessions:activity-list']);
+    expect(useAllMachinesStore.getState().snapshots.build?.activity).toEqual([{ sessionId: 's1', state: 'working', workingPanes: 1 }]);
+  });
+
+  it('reads no Session activity, without a warning, from a host too old to have it', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    read.mockImplementation((machineId: string, channel: string) => channel === 'orchestration-sessions:activity-list'
+      ? Promise.reject(new Error('No handler registered for orchestration-sessions:activity-list'))
+      : Promise.resolve({ machineId, data: { success: true, data: [] } }));
+    emit({ type: 'event', machineId: 'build', channel: 'orchestration-sessions:activity', args: [] });
+    await vi.runAllTimersAsync();
+    expect(useAllMachinesStore.getState().snapshots.build?.activity).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('keeps the newer list when an older read of it lands later', async () => {
