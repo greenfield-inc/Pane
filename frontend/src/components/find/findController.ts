@@ -218,6 +218,18 @@ export function closeFind(panelId: string): void {
   target?.adapter.restoreFocus?.();
 }
 
+/** Closes any open bar whose content sits inside `container`; true when one was open (Esc closes find first). */
+export function closeFindWithin(container: { contains(node: Element): boolean }): boolean {
+  let closed = false;
+  for (const [panelId, target] of targets) {
+    const root = target.root();
+    if (!root || !getFindBar(panelId).open || !container.contains(root)) continue;
+    closeFind(panelId);
+    closed = true;
+  }
+  return closed;
+}
+
 export function resetFindForTests(): void {
   targets.clear();
   useFindStore.setState({ bars: {} });

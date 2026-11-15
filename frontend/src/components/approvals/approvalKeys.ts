@@ -51,7 +51,8 @@ export function focusFirstQuestion(column: HTMLElement): void {
   const option = Array.from(column.querySelectorAll<HTMLElement>('[role="radiogroup"] [role="radio"][tabindex="0"]')).find(isShown);
   const target = option ?? column.querySelector<HTMLElement>('[data-testid="approval-reply-box"]') ?? column;
   if (target === column && !column.hasAttribute('tabindex')) column.setAttribute('tabindex', '-1');
-  target.focus({ preventScroll: false });
+  // Focus follows a ⌘ key here, so ask for the ring browsers otherwise keep for plain keys.
+  target.focus({ preventScroll: false, focusVisible: true });
 }
 
 /** Waits a few frames for something that is about to render, then acts on it. */

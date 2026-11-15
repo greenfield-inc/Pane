@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   closeFind,
+  closeFindWithin,
   getFindBar,
   openFind,
   refreshFind,
@@ -279,5 +280,28 @@ describe('find controller', () => {
     syncFindMode('summary');
     refreshFind('summary');
     expect(adapter.calls.filter(call => call.startsWith('search'))).toEqual([]);
+  });
+});
+
+describe('closeFindWithin', () => {
+  beforeEach(() => resetFindForTests());
+
+  it('closes an open bar whose content sits inside the container, and only that one', () => {
+    const column = { contains: (node: Element) => node === inside };
+    // SAFETY: the controller only compares roots by identity through `contains`; no DOM runs here.
+    const inside = {} as Element;
+    // SAFETY: as above, an identity-only stand-in for an element outside the column.
+    const outside = {} as Element;
+    const columnAdapter = fakeAdapter();
+    registerFindTarget('column', { adapter: columnAdapter, root: () => inside });
+    registerFindTarget('split', { adapter: fakeAdapter(), root: () => outside });
+    openFind('column');
+    openFind('split');
+    expect(closeFindWithin(column)).toBe(true);
+    expect(getFindBar('column').open).toBe(false);
+    expect(columnAdapter.calls).toContain('clear');
+    expect(getFindBar('split').open).toBe(true);
+    // Nothing left open inside: the next Esc may leave the column.
+    expect(closeFindWithin(column)).toBe(false);
   });
 });
