@@ -64,9 +64,15 @@ function respond(nth) {
     return { run: args.slice(rest + 1), env: script['secrets exec']?.env ?? {} };
   }
   const scripted = script[command] ?? script[args[0]];
-  if (scripted) return { body: scripted };
+  if (scripted) return { body: withName(scripted) };
   if (examples[command]) return { body: examples[command] };
   return { code: 1, body: { ok: false, error: { code: 'ERR_EVAL_NO_ANSWER', message: `runpane ${command} has no scripted answer in this eval.` } } };
+}
+
+/** A scripted answer with every "$NAME" replaced by the call's --name, so a created Pane is named as asked. */
+function withName(body) {
+  const name = optionValue('--name') ?? 'pane';
+  return JSON.parse(JSON.stringify(body).replaceAll('$NAME', name.replace(/["\\]/g, '')));
 }
 
 function notify(replies, nth) {

@@ -5,7 +5,7 @@ description: Use whenever you work with Pane (the desktop app that runs coding a
 
 # Pane
 
-In Pane, work flows from a Session to Panes to tabs. A Session is a workstream: the person or an orchestrator opens it, and every Pane it starts stays attached to it. Each feature gets one Pane, a git worktree on its own branch, and everything for that feature (the agent that builds it, its reviews, QA and fixes) runs as tabs inside it. Scratch files go in $PANE_SCRATCH_DIR inside the Pane. When the feature is done, archive the Pane and Pane cleans up its worktree, tabs and scratch files.
+In Pane, work flows from a Session to Panes to tabs. A Session is a workstream: the person or an orchestrator opens it, and every Pane created or adopted from inside it joins it. When you are in one ($PANE_SESSION_DIR is set: you orchestrate it or your Pane belongs to it), start new Panes from there (each result's `association` names the Session they joined); when you are in none, work with several parts starts a new Session. Each feature gets one Pane, a git worktree on its own branch, and everything for that feature (the agent that builds it, its reviews, QA and fixes) runs as tabs inside it. Scratch files go in $PANE_SCRATCH_DIR inside the Pane. When the feature is done, archive the Pane and Pane cleans up its worktree, tabs and scratch files.
 
 - Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. When the feature is done, archive the Pane and Pane cleans it up.
 

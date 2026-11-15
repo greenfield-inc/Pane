@@ -36,7 +36,7 @@ const LogsPanel: React.FC<LogsPanelProps> = ({ panel, isActive }) => {
           <div className="flex items-center gap-2">
             {isRunning ? (
               <>
-                <div className="w-2 h-2 bg-status-success rounded-full animate-pulse" />
+                <div className="w-2 h-2 bg-status-success rounded-full animate-attention-pulse" />
                 <span className="text-sm text-text-secondary">Running: {logsState.command}</span>
               </>
             ) : (

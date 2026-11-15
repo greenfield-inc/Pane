@@ -1,0 +1,38 @@
+[package]
+name = "pane-relay"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Pane relay: routes TLS by SNI to Pane computers, plus the relay API and DNS helper"
+license = "AGPL-3.0-only"
+publish = false
+
+[dependencies]
+bytes = "1.12.1"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+data-encoding = "2.11.1"
+getrandom = "0.4.3"
+h2 = "0.4.19"
+hickory-proto = { version = "0.26.3", default-features = false, features = ["std"] }
+http = "1.5.0"
+instant-acme = { version = "0.8.5", default-features = false, features = ["ring", "hyper-rustls", "rcgen"] }
+iroh-relay = { version = "=1.4.1", default-features = false, features = ["server"] }
+p256 = { version = "0.14.0", features = ["ecdsa", "pkcs8"] }
+ring = "0.17.14"
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-native-certs = "0.8.5"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+time = { version = "0.3.55", features = ["formatting"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal", "fs"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12", "logging"] }
+tokio-util = { version = "0.7.20", features = ["rt"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "ansi"] }
+x509-parser = "0.18.1"
+
+[profile.release]
+lto = "thin"
+strip = true

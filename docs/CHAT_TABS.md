@@ -396,7 +396,7 @@ The latest turn says when it finished (D-202): "Worked for 27s · 2:04 PM", or
 "2:04 PM" alone when it did nothing but answer. An older time reads "Yesterday
 4:12 PM" or "Nov 3, 4:12 PM", in the person's locale. Every other message shows
 its time on hover; on the phone, a long press shows it. A conversation reopened
-after a restart has no times for its earlier turns.
+after a restart keeps the times of its last 200 turns; older turns show none.
 
 The conversation stays in the order things happened (D-193). Claude can start a
 turn by itself, for example when a background command finishes. Pane sees that
@@ -439,6 +439,13 @@ marked *Stopped when Pane closed*; a message sent then continues the same
 conversation. If the agent exits, the tab shows why with **Restart**, which
 loads the same conversation.
 
+Auto-pause (Settings > Pause) stops the agent of a chat tab idle for
+`chatIdleReleaseMinutes` (30 by default), which frees its memory. It skips the
+Pane on screen and a tab that is working, holds a queued message or waits on the
+person. The paused tab keeps showing its conversation and controls; opening it,
+sending it a message or using its model, mode or `/resume` controls resumes the
+agent in the same conversation.
+
 ## Cost
 
 - No process polling: Pane learns about the adapter's exit from its own events,
@@ -449,6 +456,15 @@ loads the same conversation.
   about 700 messages: **Earlier messages** pages older ones in
   (`chat-tab:history`) and drops the newest, **Newer messages** pages back
   down, and the jump-to-latest arrow returns to the live end.
+- Only the chat tab on screen renders. A hidden tab is unmounted and holds no
+  transcript; showing it reads the newest window from the host once.
+- A streaming reply redraws at most once per stream frame (`STREAM_FRAME_MS` in
+  `shared/constants/streamCadence.ts`, also the terminals' output interval when
+  no one is typing), and its markdown is parsed block by block, so an update
+  re-parses only the block being written. A reply with link definitions,
+  footnotes or a raw HTML block that can span blank lines is parsed whole, and
+  so is a reply shown after its turn ended, which keeps opening a long chat
+  fast.
 - A queued message keeps only a preview in the tab's saved state; its full text
   and images wait in a file beside it until they are sent.
 - A tool step's update sends only the fields that changed; command output is sent

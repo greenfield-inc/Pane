@@ -1,4 +1,5 @@
-import { isValidAutoPauseHours } from '../../../shared/types/autoPause';
+import { isValidAutoPauseHours, isValidChatReleaseMinutes } from '../../../shared/types/autoPause';
+import { BACKGROUND_ACTIVITY_PROFILES } from '../../../shared/types/backgroundActivity';
 import { isDeepStrictEqual } from 'node:util';
 import type { AppConfig } from '../types/config';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
@@ -73,8 +74,8 @@ const PREFERENCE_CONFIG_KEYS = [
   'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'keyboardShortcutOverrides',
   'kittyKeyboardEnabled', 'terminalCopyOnSelect', 'terminalReferencesEnabled',
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
-  'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'terminalPowerMode',
-  'resumePausedOnOpen', 'autoPauseEnabled', 'autoPauseAfterHours',
+  'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'backgroundActivity', 'terminalPowerMode',
+  'resumePausedOnOpen', 'autoPauseEnabled', 'autoPauseAfterHours', 'chatIdleReleaseMinutes',
   'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'notesEnabled',
   'sessionCreationPreferences',
 ] as const satisfies readonly (keyof SetupPreferences)[];
@@ -127,9 +128,11 @@ const FIELD_LABELS = {
   keepAwakeWhileSessionsActive: 'Keep awake',
   keepAwakeWhilePluggedIn: 'Keep awake when plugged in',
   keepAwakeOnBattery: 'Keep awake on battery',
+  backgroundActivity: 'Background checks',
   resumePausedOnOpen: 'Resume paused Panes when opened',
   autoPauseEnabled: 'Auto-pause idle Panes',
   autoPauseAfterHours: 'Auto-pause after',
+  chatIdleReleaseMinutes: 'Pause idle chat tabs after',
   terminalPowerMode: 'Terminal power mode',
   retention: 'Session retention',
   voiceTranscriptionMode: 'Voice transcription',
@@ -477,9 +480,11 @@ const sectionSchemas = {
     keepAwakeWhileSessionsActive: booleanField,
     keepAwakeWhilePluggedIn: booleanField,
     keepAwakeOnBattery: booleanField,
+    backgroundActivity: boundary.optional(boundary.enumeration(...BACKGROUND_ACTIVITY_PROFILES)),
     resumePausedOnOpen: booleanField,
     autoPauseEnabled: booleanField,
     autoPauseAfterHours: boundary.optional(boundary.refine(boundary.number, isValidAutoPauseHours, 'expected whole hours from 1 to 720')),
+    chatIdleReleaseMinutes: boundary.optional(boundary.refine(boundary.number, isValidChatReleaseMinutes, 'expected whole minutes from 5 to 1440')),
     terminalPowerMode: boundary.optional(boundary.enumeration('performance', 'batterySaver')),
     retention: boundary.optional(boundary.object({ sessionActivity: boundary.optional(boundary.number), sessionInbox: boundary.optional(boundary.number) })),
     voiceTranscriptionMode: boundary.optional(boundary.enumeration('recorded', 'streaming')),

@@ -76,6 +76,7 @@ import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpa
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
+import type { RelayStatus } from '../../../shared/types/relay';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
 import type {
@@ -578,6 +579,8 @@ interface ElectronAPI {
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => () => void;
+    onRelayStatusChanged: (callback: (status: RelayStatus) => void) => () => void;
+    onRelayPaired: (callback: (event: { clientId: string; label: string }) => void) => () => void;
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
     /** A phone or another window saved settings on this host; refetch the config. */
     onRemoteSettingsChanged: (callback: () => void) => () => void;
@@ -762,8 +765,6 @@ interface ElectronAPI {
   // Resource monitor
   resourceMonitor: {
     getSnapshot: () => Promise<IPCResponse>;
-    startActive: () => Promise<IPCResponse>;
-    stopActive: () => Promise<IPCResponse>;
   };
 
   // Agent subscription usage
@@ -814,6 +815,8 @@ interface ElectronAPI {
   window: {
     consumeUncleanShutdown: () => Promise<boolean>;
     isFocused: () => Promise<boolean>;
+    /** Tells main whether the window is on screen, so Pane knows when nobody is looking. */
+    reportVisibility: (visible: boolean) => void;
     /** Raises the window and opens a pane:// link, like one opened from the OS. */
     openPaneLink: (link: string) => Promise<void>;
   };

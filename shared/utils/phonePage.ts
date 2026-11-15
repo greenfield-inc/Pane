@@ -80,3 +80,38 @@ function offReason(ports: ListeningPortsSnapshot | null): string {
   const reason = ports.phone?.state === 'off' ? ports.phone.reason : 'starting';
   return `Phone pages from ${ports.host} are unavailable right now (${reason}). Pane checks again every minute.`;
 }
+
+/**
+ * A page on a computer reached through a relay: what to ask `relay:client:preview-address` for,
+ * and the parts of the saved URL the one-time address it returns has to carry.
+ */
+export interface RelayPreview {
+  ask: { port: number } | { files: string };
+  /** What the address bar reads. */
+  address: string;
+  /** A dev server's path; the files address already has the file's. */
+  pathname?: string;
+  search: string;
+  hash: string;
+}
+
+/** Null for a page that is not on the computer (load it as it is). Throws on an invalid URL. */
+export function relayPreview(url: string, panelId: string): RelayPreview | null {
+  const parsed = new URL(url);
+  if (parsed.protocol === 'file:') {
+    const name = parsed.pathname.slice(parsed.pathname.lastIndexOf('/') + 1);
+    return { ask: { files: `/file/${encodeURIComponent(panelId)}/${name}` }, address: decodeURIComponent(name), search: parsed.search, hash: parsed.hash };
+  }
+  if (!LOOPBACK_HOSTS.has(parsed.hostname)) return null;
+  const port = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80));
+  return { ask: { port }, address: `localhost:${port}${parsed.pathname}${parsed.search}${parsed.hash}`, pathname: parsed.pathname, search: parsed.search, hash: parsed.hash };
+}
+
+/** The one-time address the computer returned, with the saved page's path, query and fragment. */
+export function relayPreviewSrc(ticketUrl: string, preview: RelayPreview): string {
+  const src = new URL(ticketUrl);
+  if (preview.pathname) src.pathname = preview.pathname;
+  new URLSearchParams(preview.search).forEach((value, key) => src.searchParams.append(key, value));
+  src.hash = preview.hash;
+  return src.href;
+}

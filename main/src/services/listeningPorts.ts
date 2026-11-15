@@ -73,6 +73,9 @@ export interface ListeningPortMonitor {
   /** Refreshes at 6 s polls while terminals or agents print and just after, else every minute while watched, and less often when a read is slow, until `stop`. */
   start(): void;
   stop(): void;
+  /** Stops polling while paused (nobody is looking); unpausing reads at once and polls again. `refresh` still reads. */
+  setPaused(paused: boolean): void;
+  isPaused(): boolean;
 }
 
 interface ListeningSocket {
@@ -103,6 +106,7 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
   let inFlight: Promise<ListeningPortsSnapshot> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let running = false;
+  let paused = false;
   // Only the socket read paces polling: probes wait on other programs, and
   // the process table is read only when a new owner appears.
   let socketReadMs = 0;
@@ -180,12 +184,15 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
     return now - lastReadAt >= PORTS_QUIET_INTERVAL_MS && (options.watched?.() ?? true);
   };
 
+  const nextDelay = () => Math.max(POLL_INTERVAL_MS, socketReadMs / MAX_POLL_DUTY);
   const schedule = (delayMs: number) => {
+    if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
+      timer = null;
       void Promise.resolve().then(() => (due() ? refresh() : current)).catch(error => {
         console.warn('[ListeningPorts] refresh_failed:', error);
       }).finally(() => {
-        if (running) schedule(Math.max(POLL_INTERVAL_MS, socketReadMs / MAX_POLL_DUTY));
+        if (running && !paused && !timer) schedule(nextDelay());
       });
     }, delayMs);
     timer.unref?.();
@@ -197,13 +204,27 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
     start() {
       if (running) return;
       running = true;
-      schedule(0);
+      if (!paused) schedule(0);
     },
     stop() {
       running = false;
       if (timer) clearTimeout(timer);
       timer = null;
     },
+    setPaused(next) {
+      if (next === paused) return;
+      paused = next;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      if (paused || !running) return;
+      // Back from away: list what started meanwhile now, then poll as before.
+      void refresh().catch(error => {
+        console.warn('[ListeningPorts] refresh_failed:', error);
+      }).finally(() => {
+        if (running && !paused && !timer) schedule(nextDelay());
+      });
+    },
+    isPaused: () => paused,
   };
 }
 

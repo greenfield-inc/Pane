@@ -702,6 +702,22 @@ describe('AutopilotManager: the person\'s own instructions (D-196)', () => {
     expect(manager.instructions().status).toBe('next-start');
   });
 
+  it('paused, it stops watching the file and Go on delivers an edit made meanwhile', async () => {
+    const f = fake();
+    const manager = new AutopilotManager(f.ports);
+    await manager.setEnabled(true);
+    await manager.start();
+    manager.pause();
+    expect(f.watchers.has(file())).toBe(false);
+    fs.writeFileSync(file(), 'Be brief.\n');
+    manager.goOn();
+    expect(f.watchers.has(file())).toBe(true);
+    const lines = f.sent.slice(-2).map(entry => entry.text);
+    expect(lines[0]).toMatch(/^\[Pane · Instructions\][\s\S]*Be brief\./);
+    expect(lines[1]).toMatch(/^\[Pane · Go on\]/);
+    expect(manager.instructions().status).toBe('applied');
+  });
+
   it('refuses instructions too long to be a brief, changing nothing', async () => {
     const f = fake();
     const manager = new AutopilotManager(f.ports);

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { RemoteRequestError } from '@shared/remoteClient';
 import { revokeGlassesOnComputers } from '@shared/glassesRevoke';
-import { decodeGlassesPairingCode } from '@shared/types/glasses';
+import { relayProfile } from '@shared/remoteClient/relay';
+import { decodeGlassesPairingCode, encodeGlassesPairingCode } from '@shared/types/glasses';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine } from '@shared/types/workspaceAccess';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
@@ -12,6 +13,7 @@ import {
   glassesDeviceName,
   listGlassesOnComputers,
   pairableComputers,
+  relayGlassesComputers,
   type GlassesInvoke,
 } from './glassesPairing';
 
@@ -70,6 +72,34 @@ describe('createGlassesPairingCode', () => {
     const { computers } = pairableComputers([machine('studio-mac', 'available')], DOMAIN, []);
     const result = await createGlassesPairingCode(computers, PHONE, async () => { throw new Error('offline'); });
     expect(result).toMatchObject({ code: null, paired: [] });
+  });
+});
+
+describe('relayGlassesComputers', () => {
+  const relayed = (name: string, id: string): RemotePaneConnectionProfile => relayProfile({
+    computer: { id, name, domain: 'runpane.net', address: `https://${id}.runpane.net`, local: [], fingerprint: 'fp' },
+    token: `token-${id}`,
+  });
+
+  it('asks each computer paired by QR at its relay address with the phone\'s token, once for a computer also on Tailscale', async () => {
+    const { computers: tailnet } = pairableComputers([machine('studio-mac', 'available')], DOMAIN, []);
+    const relay = relayGlassesComputers([relayed('Studio-Mac', 'k3x9studio'), relayed('Ana\'s Travel Laptop', 'q7travel')], tailnet);
+    expect(relay.map(computer => computer.machine)).toEqual([{ name: 'Ana\'s Travel Laptop', dnsName: 'q7travel.runpane.net', url: 'https://q7travel.runpane.net' }]);
+
+    const asked: string[] = [];
+    const result = await createGlassesPairingCode([...tailnet, ...relay], PHONE, async (profile) => {
+      asked.push(profile.token);
+      return { secret: `pgs_${profile.label}`, expiresAt: '2026-10-28T08:10:00.000Z' };
+    });
+    expect(asked.sort()).toEqual(['', 'token-q7travel']);
+    // The glasses app reads the relay address as one of your computers.
+    expect(decodeGlassesPairingCode(result.code ?? '').computers.map(computer => computer.url))
+      .toEqual(['https://q7travel.runpane.net', `https://studio-mac.${DOMAIN}:8443`]);
+  });
+
+  it('is refused by the glasses app when a code names any other address', () => {
+    const code = encodeGlassesPairingCode({ v: 1, expiresAt: '2026-10-28T08:10:00.000Z', computers: [{ name: 'x', url: 'https://x.attacker.example', secret: 'pgs_x' }] });
+    expect(() => decodeGlassesPairingCode(code)).toThrow('not a Tailscale or Pane relay address');
   });
 });
 

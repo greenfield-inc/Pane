@@ -7,17 +7,22 @@ import { CHAT_TERMINAL_LIMIT } from '../../../../shared/types/chatTab';
 const terminalMeta = boundary.object({ terminal_output_delta: boundary.optional(boundary.string), terminal_output: boundary.optional(boundary.string) });
 import type { AgentChatMessage, AgentChatPart } from '../../../../shared/types/agentChat';
 import { chatMessageSchema } from '../../../../shared/types/chatTabDecoders';
-import { patchTool, type ChatTabChange, type ChatTabEvent, type ChatTabTranscript, type ChatToolPatch } from '../../../../shared/types/chatTab';
+import { patchTool, type ChatTabChange, type ChatTabEvent, type ChatTabTranscript, type ChatToolPatch, type ChatTurnTime } from '../../../../shared/types/chatTab';
 
 export interface ChatTranscriptOptions {
   /** Where messages that leave the memory window are kept for paging. */
   spoolFile: string;
   windowMessages?: number;
   windowBytes?: number;
+  /** Time rows saved by earlier generations; history replay puts each back after the message it followed. */
+  turnTimes?: readonly ChatTurnTime[];
 }
 
 /** Marks the end of a live turn, for the folded turn line (duration and how it ended). */
 export interface TurnMarker { type: 'pane_turn'; stopReason: string; startedAt: string; endedAt: string }
+
+/** A live turn's end: the time row to show, and the same row to save when a replay can put it back. */
+export interface TurnEnd { event?: ChatTabEvent; saved?: ChatTurnTime }
 
 /**
  * The ACP-to-view mapping for one chat tab generation. There is no cap that
@@ -42,10 +47,16 @@ export class ChatTranscript {
   private sequence = 0;
   private readonly windowMessages: number;
   private readonly windowBytes: number;
+  private readonly turnTimes: Map<string, ChatTurnTime>;
+  /** The newest message created, when the agent gives its id again on replay. */
+  private anchor?: string;
+  /** A saved time row whose message just replayed; it goes in before the next new message. */
+  private restore?: ChatTurnTime;
 
   constructor(readonly panelId: string, readonly generation: number, private readonly options: ChatTranscriptOptions) {
     this.windowMessages = options.windowMessages ?? 1000;
     this.windowBytes = options.windowBytes ?? 24 * 1024 * 1024;
+    this.turnTimes = new Map((options.turnTimes ?? []).map(turn => [turn.after, turn]));
     mkdirSync(path.dirname(options.spoolFile), { recursive: true, mode: 0o700 });
     rmSync(options.spoolFile, { force: true });
   }
@@ -88,16 +99,30 @@ export class ChatTranscript {
     return undefined;
   }
 
-  endTurn(marker?: TurnMarker): ChatTabEvent | undefined {
+  /**
+   * Ends a live turn. With a marker, also returns the time row to save, keyed by the turn's last
+   * message the agent replays with the same id; none when the turn made no such message.
+   */
+  endTurn(marker?: TurnMarker): TurnEnd {
     this.chunk = undefined;
     this.echo = undefined;
-    if (!marker) return undefined;
-    return this.commit({ type: 'replace', message: { id: `turn:${++this.sequence}`, role: 'assistant', parts: [{ type: 'content', content: { ...marker } }] } });
+    const after = this.anchor;
+    this.anchor = undefined;
+    if (!marker) return {};
+    const event = this.commit({ type: 'replace', message: { id: `turn:${++this.sequence}`, role: 'assistant', parts: [{ type: 'content', content: { ...marker } }] } });
+    return { event, saved: after ? { after, stopReason: marker.stopReason, startedAt: marker.startedAt, endedAt: marker.endedAt } : undefined };
+  }
+
+  /** History replay finished: the last replayed turn's time row goes in now. */
+  replayed(): void {
+    this.anchor = undefined;
+    this.insertRestored();
   }
 
   /** The prompt as Pane sent it. An echo of the same text from the agent is folded into it. */
   userMessage(operationId: string, content: ContentBlock[]): ChatTabEvent[] {
     this.chunk = undefined;
+    this.anchor = undefined;
     this.sequence++; // The next to-do list is this prompt's own.
     const events: ChatTabEvent[] = [];
     const id = `user:${operationId}`;
@@ -203,11 +228,15 @@ export class ChatTranscript {
     let message: AgentChatMessage;
     if (index === undefined) {
       if (change.type === 'tool') return undefined;
+      if (this.restore && !id.startsWith('turn:')) this.insertRestored();
       index = this.count();
       message = change.type === 'replace' ? structuredClone(change.message) : { id, role: change.role, parts: [structuredClone(change.part)] };
       this.indexes.set(id, index);
       this.residentMessages.push(message);
       this.residentSizes.push(0);
+      // Only a turn whose last message replays with the same id can find its place again.
+      this.anchor = replayedId(id) ? id : undefined;
+      if (this.anchor) this.restore = this.turnTimes.get(this.anchor);
     } else {
       const local = index - this.base;
       message = this.residentMessages[local];
@@ -230,6 +259,14 @@ export class ChatTranscript {
     const event: ChatTabEvent = { panelId: this.panelId, generation: this.generation, revision: this.revision, index, change: structuredClone(change) };
     this.evict();
     return event;
+  }
+
+  private insertRestored(): void {
+    const turn = this.restore;
+    this.restore = undefined;
+    if (!turn) return;
+    const marker: TurnMarker = { type: 'pane_turn', stopReason: turn.stopReason, startedAt: turn.startedAt, endedAt: turn.endedAt };
+    this.commit({ type: 'replace', message: { id: `turn:${turn.after}`, role: 'assistant', parts: [{ type: 'content', content: { ...marker } }] } });
   }
 
   private evict(): void {
@@ -270,6 +307,11 @@ export class ChatTranscript {
     try { rmSync(this.options.spoolFile, { force: true }); }
     catch (error) { console.warn(`[ChatTabs] A chat tab's transcript spool was not deleted (${this.options.spoolFile}): ${error instanceof Error ? error.message : String(error)}.`); }
   }
+}
+
+/** Ids the agent gives again when it replays history: its own message ids and tool call ids. Pane's own ids are rebuilt per generation. */
+function replayedId(id: string): boolean {
+  return id.startsWith('tool:') || !/^(user|assistant|turn|plan|update):/.test(id);
 }
 
 function estimateSize(message: AgentChatMessage): number {

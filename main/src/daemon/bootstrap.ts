@@ -22,6 +22,7 @@ import { CliToolRegistry } from '../services/cliToolRegistry';
 import type { AbstractCliManager } from '../services/panels/cli/AbstractCliManager';
 import { GitDiffManager } from '../services/gitDiffManager';
 import { GitStatusManager } from '../services/gitStatusManager';
+import { onFetch } from '../services/worktreeBaseRefresh';
 import { ExecutionTracker } from '../services/executionTracker';
 import { WorktreeNameGenerator } from '../services/worktreeNameGenerator';
 import { RunCommandManager } from '../services/runCommandManager';
@@ -36,6 +37,7 @@ import { isLockOwnerLive } from '../ipc/runpane';
 import { isPaneDaemonListening, PaneDaemonServer } from './server';
 import { decideInstanceDuties, type InstanceDuties } from './instanceDuties';
 import { PaneRemoteHttpApiServer } from './httpApiServer';
+import { createRelayHost } from './relay/relayHost';
 import { PaneRemoteTransportController } from './remoteTransportController';
 import { PaneWorkspaceHostController } from './workspaceHost';
 import { runRemoteSetupCommand } from './remote-setup-command';
@@ -59,6 +61,7 @@ import { panelManager } from '../services/panelManager';
 import { pausedMarkOf, type TerminalPanelState } from '../../../shared/types/panels';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { createListeningPortMonitor } from '../services/listeningPorts';
+import { BackgroundActivity } from '../services/backgroundActivity';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import { PhonePreviewHost } from './phonePreviews';
 import { createPreviewFiles } from './previewProxy';
@@ -247,7 +250,15 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     skipValidation: true,
   });
   const gitDiffManager = new GitDiffManager(logger, analyticsManager);
+  // Desktop only: a headless host has no window or person to wait for, so it keeps today's behaviour.
+  const backgroundActivity = mode === 'desktop' ? new BackgroundActivity(configManager, { logger }) : null;
   const gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, logger, databaseService);
+  // Every fetch into a project (Fetch button, dashboard, branch list, new worktree, an agent's own) updates its Panes' ahead/behind.
+  onFetch(projectPath => {
+    gitStatusManager.refreshProjectAfterFetch(projectPath).catch(error => {
+      logger.warn(`[GitStatus] Could not update ${projectPath} after a fetch: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
   const executionTracker = new ExecutionTracker(sessionManager, gitDiffManager);
   const worktreeNameGenerator = new WorktreeNameGenerator(configManager);
   const runCommandManager = new RunCommandManager(databaseService);
@@ -422,6 +433,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     loopManager,
     workspaceCursorStore,
     namedLockService,
+    backgroundActivity: backgroundActivity ?? undefined,
   };
 
   const services: AppServices = {
@@ -432,22 +444,28 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const commandRegistry = registerIpcHandlers(services);
   const autoPauser = new AutoPauser({
     now: () => Date.now(),
-    settings: () => ({ enabled: configManager.getConfig().autoPauseEnabled, hours: configManager.getConfig().autoPauseAfterHours }),
+    settings: () => ({ enabled: configManager.getConfig().autoPauseEnabled, hours: configManager.getConfig().autoPauseAfterHours, chatMinutes: configManager.getConfig().chatIdleReleaseMinutes }),
     panes: () => databaseService.getAllSessions(undefined, { includeHidden: true }).map(row => {
       const pane = sessionManager.getSession(row.id);
       return { id: row.id, archived: pane?.archived ?? true, createdAt: pane?.createdAt ?? new Date(), lastViewedAt: pane?.lastViewedAt };
     }),
     panels: paneId => panelManager.getPanelsForSession(paneId),
-    liveActivity: panelId => terminalPanelManager.getLastActivity(panelId),
-    agentState: panelId => terminalPanelManager.getAgentStatus(panelId),
+    liveActivity: panelId => terminalPanelManager.getLastActivity(panelId) ?? getChatTabManager().lastActivity(panelId),
+    agentState: panelId => panelManager.getPanel(panelId)?.type === 'chat' ? getChatTabManager().agentState(panelId) : terminalPanelManager.getAgentStatus(panelId),
     hasOpenNotify: panelIds => services.notifyService?.queue.hasOpenFor(panelIds) ?? false,
     focusedPaneId: () => (options.getMainWindow()?.isFocused() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined),
+    shownPaneId: () => {
+      const window = options.getMainWindow();
+      return window?.isVisible() && !window.isMinimized() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined;
+    },
     heldByUpdate: panel => {
       // SAFETY: auto-pause only passes terminal panels; their custom state is TerminalPanelState.
       const hold = (panel.state.customState as TerminalPanelState | undefined)?.updateResumeHold;
       return !!hold && updateHoldIsLive(hold);
     },
     pause: (paneId, mark) => pausePanes(commandRegistry, [paneId], mark),
+    chatRunning: panelId => getChatTabManager().isRunning(panelId),
+    pauseChats: (panelIds, mark) => getChatTabManager().pause(panelIds, mark),
     testThresholdMs: Number(process.env.PANE_AUTO_PAUSE_TEST_THRESHOLD_MS) || undefined,
   });
   configManager.on('config-updated', () => autoPauser.sync());
@@ -470,8 +488,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       void phonePreviews.update(snapshot);
     },
   });
-  // Every listed port is forwarded to signed-in clients, Pane's own included.
-  const isForwardedPort = (port: number) => listeningPortMonitor.snapshot().ports.some(listed => listed.port === port);
+  // Ports pause while nobody is looking and catch up the moment someone is.
+  backgroundActivity?.on('change', (away: boolean) => listeningPortMonitor.setPaused(away));
+  listeningPortMonitor.setPaused(backgroundActivity?.isAway() ?? false);
+  // Every listed port is forwarded to signed-in clients, Pane's own included. While polling is
+  // paused the list can be old, so a port missing from it is read once before it is refused.
+  const isListed = (port: number) => listeningPortMonitor.snapshot().ports.some(listed => listed.port === port);
+  const isForwardedPort = async (port: number) => isListed(port)
+    || (listeningPortMonitor.isPaused() && (await listeningPortMonitor.refresh()).ports.some(listed => listed.port === port));
   // On by default only for the desktop Pane that owns ~/.pane; other data dirs opt in through config.
   const workspaceHost = new PaneWorkspaceHostController(
     commandRegistry,
@@ -484,16 +508,17 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     options.app.getVersion(),
   );
   registerWorkspaceCommands(commandRegistry, workspaceHost, configManager, options.app.getVersion());
+  const phonePreviewFiles = createPreviewFiles({
+    getPanel: panelId => panelManager.getPanel(panelId),
+    resolvePath: async (sessionId, filePath) => decodeBoundary(
+      await commandRegistry.invoke('file:getPath', [{ sessionId, filePath }]),
+      boundary.object({ success: boundary.literal(true), path: boundary.string }),
+    ).path,
+  });
   const phonePreviews = new PhonePreviewHost({
     workspace: workspaceHost,
     paneDir: getAppDirectory(),
-    files: createPreviewFiles({
-      getPanel: panelId => panelManager.getPanel(panelId),
-      resolvePath: async (sessionId, filePath) => decodeBoundary(
-        await commandRegistry.invoke('file:getPath', [{ sessionId, filePath }]),
-        boundary.object({ success: boundary.literal(true), path: boundary.string }),
-      ).path,
-    }),
+    files: phonePreviewFiles,
     onChange: () => publishPorts(),
   });
   let latestPorts: ListeningPortsSnapshot | null = null;
@@ -505,7 +530,26 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   commandRegistry.register('ports:phone-address', async (port: number) => { await phonePreviews.request(port); });
 
   let paneDaemonServer: PaneDaemonServer | null = null;
-  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort, options.app.getVersion());
+  // Phone access through Pane's relays (QR pairing); idle until turned on in Remote Access.
+  const relayHost = startRemoteTransport
+    ? await createRelayHost({
+      commandRegistry,
+      configManager,
+      dataDir: getAppDirectory(),
+      // A relay phone's open event stream keeps port reads running, so the snapshot is current.
+      isForwardedPort: isListed,
+      files: phonePreviewFiles,
+      log: line => logger.info(line),
+    }).catch((cause: unknown) => {
+      logger.error('[Pane relay] Failed to start', cause instanceof Error ? cause : new Error(String(cause)));
+      return null;
+    })
+    : null;
+  if (relayHost) {
+    powerMonitor.on('suspend', () => relayHost.suspend());
+    powerMonitor.on('resume', () => relayHost.resume());
+  }
+  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort, options.app.getVersion(), relayHost?.pairing, workspaceHost.glasses);
   const remoteHostTailnetMonitor = new RemoteHostTailnetMonitor(configManager);
   try {
     paneDaemonServer = new PaneDaemonServer(commandRegistry, getAppDirectory());
@@ -612,8 +656,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       setPaneMcpEndpoint(undefined);
       paneMcpEndpoint.detachAll();
       await tabListener.stop();
-      resourceMonitorService.stop();
       listeningPortMonitor.stop();
+      backgroundActivity?.dispose();
       await spotlightManager.disableAll();
       await sessionManager.cleanup();
       await runCommandManager.stopAllRunCommands();
@@ -625,6 +669,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       workspaceJournal.dispose();
       await permissionIpcServer?.stop();
       remoteHostTailnetMonitor.stop();
+      await relayHost?.stop();
       await remoteTransportController.stopWatchingAndShutdown();
       // The workspace handler first: phone handler removal can use up the rest of the budget.
       await workspaceHost.shutdown();

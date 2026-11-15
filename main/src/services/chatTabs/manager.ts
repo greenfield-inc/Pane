@@ -1,17 +1,20 @@
 import { createHash } from 'crypto';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import path from 'path';
 import type { ContentBlock, InitializeResponse, McpServer, NewSessionRequest, SessionInfo } from '@agentclientprotocol/sdk';
 import type { AgentState, PanelAgentStatusEvent } from '../../../../shared/types/agentStatus';
 import type { AgentChatMessage, AgentChatReceipt } from '../../../../shared/types/agentChat';
-import type { ToolPanel } from '../../../../shared/types/panels';
-import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabView } from '../../../../shared/types/chatTab';
+import type { TerminalPausedMark, ToolPanel } from '../../../../shared/types/panels';
+import { CHAT_CONVERSATION_LIMIT, CHAT_FULL_ACCESS_CONTROL, type ChatPanelState, type ChatTabConversation, type ChatTabSwitchBanner, type ChatTabEvent, type ChatTabAnswer, type ChatTabProblem, type ChatTabQueuedPrompt, type ChatTabSend, type ChatTabStatus, type ChatTabTranscript, type ChatTabView, type ChatTurnTime } from '../../../../shared/types/chatTab';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
 import { ChatTabRuntime, chatFailure, isAuthRequired, type RuntimeExit } from './runtime';
-import { ChatTranscript } from './transcript';
+import { ChatTranscript, type TurnMarker } from './transcript';
+import type { PauseOutcome } from '../terminalPanelManager';
 import { QueuedBodies } from './queuedBodies';
 import { agentConfig, agentLabel } from '../../../../shared/agents';
+import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
@@ -97,9 +100,21 @@ interface Tab {
   approveOnce?: boolean;
   /** The terminal sign-in the agent last advertised, kept after it stops signed out. */
   signIn?: { args: string[]; env?: Record<string, string> };
+  /** The composer's controls as the running agent last offered them, shown (locked) while it restarts. */
+  shown?: Pick<ChatTabView, 'controls' | 'commands' | 'canAttachImages'>;
+  /** The newest window of the conversation, shown while a restart replays its history; read from disk for a tab paused before Pane restarted. */
+  held?: ChatTabTranscript;
+  /** A pause is ending the agent; a start waits for it, so a send or open during the stop is delivered after it. */
+  pausing?: Promise<void>;
+  /** This start resumes a paused tab. */
+  resuming?: boolean;
+  /** When the agent last sent an update or was sent a message, in ms since the epoch. */
+  activeAt?: number;
 }
 
 const DEFAULT_VIEW_LIMIT = 200;
+/** Time rows kept per conversation; older turns lose theirs after a restart. */
+const TURN_TIMES_LIMIT = 200;
 const RECEIPT_LIMIT = 256;
 const PROMPT_BYTES_LIMIT = 8 * 1024 * 1024;
 /** Characters of a queued prompt kept in the tab's saved state for the queue list. */
@@ -127,7 +142,7 @@ export class ChatTabManager {
     return this.lastUpdateAt;
   }
 
-  /** The tab's view. Opening a tab that is not running starts it, unless it stopped for a reason. */
+  /** The tab's view. Opening a tab that is not running starts it, unless it stopped for a reason; a paused tab resumes. */
   view(panelId: string, limit = DEFAULT_VIEW_LIMIT, start = true): ChatTabView {
     const state = this.required(panelId);
     const tab = this.tab(panelId);
@@ -137,24 +152,36 @@ export class ChatTabManager {
 
   history(panelId: string, before: number, limit: number): AgentChatMessage[] {
     this.required(panelId);
-    return this.tab(panelId).transcript?.history(before, Math.min(500, limit)) ?? [];
+    const tab = this.tab(panelId);
+    if (tab.transcript && replayed(tab)) return tab.transcript.history(before, Math.min(500, limit));
+    const held = tab.held;
+    if (!held) return [];
+    const end = Math.min(before, held.start + held.messages.length) - held.start;
+    return structuredClone(held.messages.slice(Math.max(0, end - Math.min(500, limit)), Math.max(0, end)));
   }
 
   /** The conversation's messages for readers such as runpane; pages through spooled history without copying it all at once. */
   messages(panelId: string): Iterable<AgentChatMessage> {
     this.required(panelId);
-    return this.tab(panelId).transcript?.all() ?? [];
+    const tab = this.tab(panelId);
+    if (tab.transcript && replayed(tab)) return tab.transcript.all();
+    return tab.held?.messages ?? tab.transcript?.all() ?? [];
   }
 
   lastMessage(panelId: string, role: AgentChatMessage['role'] = 'assistant', accept: (message: AgentChatMessage) => boolean = () => true): AgentChatMessage | undefined {
-    return this.tab(panelId).transcript?.last(role, accept);
+    const tab = this.tab(panelId);
+    if (tab.transcript && replayed(tab)) return tab.transcript.last(role, accept);
+    if (!tab.held) return tab.transcript?.last(role, accept);
+    const found = [...(tab.held?.messages ?? [])].reverse().find(message => message.role === role && accept(message));
+    return found && structuredClone(found);
   }
 
   /** The tab's status as agent status (sidebar, tabs, runpane), without starting it. */
   agentState(panelId: string): AgentState {
     const state = this.options.store.state(panelId);
     if (!state) return 'unknown';
-    return toAgentState(this.snapshot(panelId, state, this.tab(panelId), 0));
+    const tab = this.tab(panelId);
+    return publishedState(this.snapshot(panelId, state, tab, 0), tab);
   }
 
   /** The terminal sign-in the tab's agent advertised, when it runs as its own CLI. */
@@ -171,6 +198,58 @@ export class ChatTabManager {
   /** The installed versions running tabs of `agent` launched from: their folders must stay. */
   launchedVersions(agent: string): Set<string> {
     return new Set([...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() && tab.launch?.agentVersion && this.options.store.state(panelId)?.agent === agent ? [tab.launch.agentVersion] : []));
+  }
+
+  /** When the tab's agent last sent an update or was sent a message; undefined when it has not run. */
+  lastActivity(panelId: string): Date | undefined {
+    const at = this.tabs.get(panelId)?.activeAt;
+    return at === undefined ? undefined : new Date(at);
+  }
+
+  /** The tab has work in flight: a turn, a queued message, a pending approval or question, a background task, or a start. */
+  busy(panelId: string): boolean {
+    const state = this.options.store.state(panelId);
+    const tab = this.tabs.get(panelId);
+    if (!state || !tab) return false;
+    const runtime = tab.runtime;
+    return !!state.turn || !!state.queue?.length || !!tab.starting || tab.delivering || tab.clearing === true
+      || !!runtime && (runtime.isRunning() || runtime.isWorkingAlone() || runtime.permissions().length > 0 || runtime.questions().length > 0 || runtime.tasks().length > 0);
+  }
+
+  /**
+   * Auto-pause: end these tabs' agents and mark them paused. Only a running tab with no work in flight
+   * pauses, so a pause never cuts off a turn, an approval, a question or a queued message. The
+   * conversation stays on screen and readable; opening the tab or sending to it resumes it.
+   */
+  async pause(panelIds: readonly string[], mark: TerminalPausedMark): Promise<PauseOutcome> {
+    const outcome: PauseOutcome = { paused: [], failed: [] };
+    for (const panelId of panelIds) {
+      const state = this.options.store.state(panelId);
+      const tab = this.tabs.get(panelId);
+      // Only a running agent pauses: a stopped tab keeps its problem, an unstarted one has nothing to stop.
+      if (!state || !tab?.runtime?.isAlive() || state.status === 'stopped' || tab.pausing) continue;
+      if (this.busy(panelId)) {
+        outcome.failed.push({ panelId, error: 'Its agent is working, waiting on an answer, or has messages queued, so it was left running. The next sweep tries again.' });
+        continue;
+      }
+      const pausing = this.stopForPause(panelId, tab, mark);
+      tab.pausing = pausing.catch(() => undefined).finally(() => { if (tab.pausing === settled) tab.pausing = undefined; });
+      const settled = tab.pausing;
+      try {
+        await pausing;
+        outcome.paused.push(panelId);
+      } catch (error) {
+        outcome.failed.push({ panelId, error: reasonOf(error) });
+      }
+    }
+    return outcome;
+  }
+
+  private async stopForPause(panelId: string, tab: Tab, mark: TerminalPausedMark): Promise<void> {
+    this.update(panelId, current => ({ ...current, paused: mark }));
+    this.savePaused(panelId, tab);
+    await this.end(tab);
+    this.publish(panelId);
   }
 
   runningPanelIds(): string[] { return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() ? [panelId] : []); }
@@ -190,9 +269,18 @@ export class ChatTabManager {
   ensure(panelId: string): Promise<void> {
     const tab = this.tab(panelId);
     if (tab.runtime?.isAlive()) return Promise.resolve();
+    // A send or open during a pause starts the agent once the pause has stopped it.
+    if (tab.pausing) {
+      return tab.pausing.then(() => {
+        // A tab closed or stopped for a problem during the pause stays as it is.
+        if (this.tabs.get(panelId) !== tab || this.options.store.state(panelId)?.status === 'stopped') return;
+        return this.ensure(panelId);
+      });
+    }
     // Publish after the start settles: while it runs, every view says `starting`.
     tab.starting ??= this.start(panelId, tab).finally(() => {
       tab.starting = undefined;
+      tab.resuming = false;
       // A tab closed while it started is gone; nothing is published for it.
       if (this.tabs.get(panelId) !== tab) return;
       this.publish(panelId);
@@ -300,6 +388,7 @@ export class ChatTabManager {
       // The release clears the runtime at once; the state below is saved before anything can start again,
       // so a send or a view during the stop starts the new conversation, never the old one.
       const releasing = this.release(tab);
+      forgetConversation(tab);
       const interrupted = this.required(panelId).turn;
       tab.notice = undefined;
       tab.ownTurnStartedAt = undefined;
@@ -371,7 +460,7 @@ export class ChatTabManager {
 
   async configure(panelId: string, configId: string, value: string): Promise<void> {
     if (configId === CHAT_FULL_ACCESS_CONTROL) { await this.setFullAccess(panelId, value === FULL_ACCESS_ON); return; }
-    const runtime = this.liveRuntime(panelId);
+    const runtime = await this.wokenRuntime(panelId);
     if (runtime.isRunning()) throw new PaneError('CHAT_CONFIG_BUSY', 'Settings cannot change while the agent is working. Nothing changed.', 'Wait for the turn to end, or press Stop.');
     await runtime.configure(configId, value);
     this.update(panelId, state => ({ ...state, settings: { ...state.settings, [configId]: value } }));
@@ -401,7 +490,7 @@ export class ChatTabManager {
   /** The folder's past conversations for the picker, newest first, with this tab's and other tabs' marked. */
   async conversations(panelId: string): Promise<ChatTabConversation[]> {
     const state = this.required(panelId);
-    const runtime = this.liveRuntime(panelId);
+    const runtime = await this.wokenRuntime(panelId);
     const elsewhere = this.options.openConversations?.(panelId) ?? new Map();
     const { sessions } = await runtime.list(state.cwd);
     return newestFirst(sessions).map(session => {
@@ -436,6 +525,7 @@ export class ChatTabManager {
     if (open) throw new PaneError('CHAT_RESUME_OPEN_ELSEWHERE', `That conversation is open in tab "${open.title}", so it was not opened here.`, 'Switch to that tab, or close it first and pick again.');
     console.log(`[ChatTabs] ${panelId} continues conversation ${sessionId}${state.acpSessionId ? ` instead of ${state.acpSessionId}` : ''}.`);
     this.update(panelId, current => ({ ...current, acpSessionId: sessionId, open: undefined, banner: undefined, clearedAt: undefined, turn: undefined }));
+    forgetConversation(this.tab(panelId));
     await this.restart(panelId);
   }
 
@@ -458,6 +548,7 @@ export class ChatTabManager {
     await this.end(tab);
     tab.transcript?.dispose();
     this.bodies.clear(panelId);
+    try { rmSync(this.pausedFile(panelId), { force: true }); } catch (error) { console.warn(`[ChatTabs] ${panelId}: could not remove its paused view:`, error); }
     this.tabs.delete(panelId);
     this.options.onClosed?.(panelId);
   }
@@ -486,17 +577,23 @@ export class ChatTabManager {
     const panel = this.options.store.panel(panelId);
     if (!panel) throw new PaneError('CHAT_PANEL_MISSING', 'This chat tab no longer exists.', 'Open another chat tab.');
     tab.generation = tab.run = this.lastGeneration = Math.max(Date.now(), this.lastGeneration + 1);
+    // Viewers keep seeing the conversation while the restart replays it.
+    if (tab.transcript && tab.transcript.count() > 0) tab.held = tab.transcript.snapshot(DEFAULT_VIEW_LIMIT);
     tab.transcript?.dispose();
     tab.transcript = undefined;
     tab.notice = undefined;
     const generation = tab.generation;
-    this.update(panelId, state => ({ ...state, status: 'starting', problem: undefined }));
+    // A resume from pause reads as idle while it starts; a crash Restart does not (watch must not see READY early).
+    tab.resuming = !!this.required(panelId).paused;
+    this.update(panelId, state => ({ ...state, status: 'starting', problem: undefined, paused: undefined }));
     this.publish(panelId);
     let launch: ResolvedLaunch;
     let transcript: ChatTranscript;
     try {
       // Inside the try: a chat-tabs folder that cannot be written leaves the tab stopped with Restart, not starting.
-      transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages });
+      const saved = this.required(panelId);
+      const turnTimes = saved.turnTimes && saved.turnTimes.sessionId === saved.acpSessionId ? saved.turnTimes.turns : undefined;
+      transcript = tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages, turnTimes });
       launch = await this.options.launcher.resolve(panel, this.required(panelId));
     } catch (error) {
       const failure = chatFailure(error, { code: 'CHAT_LAUNCH_FAILED', next: 'Press Restart.' });
@@ -510,7 +607,7 @@ export class ChatTabManager {
       command: launch.command,
       generation,
       onUpdate: update => {
-        this.lastUpdateAt = Date.now();
+        this.lastUpdateAt = tab.activeAt = Date.now();
         let event: ChatTabEvent | undefined;
         try { event = transcript.accept(update); }
         catch (error) {
@@ -553,6 +650,7 @@ export class ChatTabManager {
         if (state.acpSessionId) {
           tab.loading = true;
           try { await runtime.load({ ...request, sessionId: state.acpSessionId }); } finally { tab.loading = false; }
+          transcript.replayed();
         } else {
           const created = await runtime.create(request);
           this.update(panelId, current => ({ ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings } }));
@@ -564,7 +662,7 @@ export class ChatTabManager {
       const interrupted = this.required(panelId).turn;
       if (interrupted) {
         // The turn's own row reads "Stopped when Pane closed."
-        transcript.endTurn({ type: 'pane_turn', stopReason: 'interrupted', startedAt: interrupted.startedAt, endedAt: new Date().toISOString() });
+        this.endTurn(panelId, tab, { type: 'pane_turn', stopReason: 'interrupted', startedAt: interrupted.startedAt, endedAt: new Date().toISOString() });
         this.update(panelId, current => ({
           ...current, turn: undefined,
           receipts: current.receipts?.map(receipt => receipt.operationId === interrupted.operationId && receipt.state === 'accepted' ? { ...receipt, state: 'failed', error: 'Pane closed before the turn finished.' } : receipt),
@@ -574,6 +672,8 @@ export class ChatTabManager {
       if (tab.run !== generation) return;
       const { notice } = this.required(panelId);
       if (notice) tab.notice = notice;
+      tab.held = undefined;
+      tab.activeAt = Date.now();
       this.update(panelId, current => ({ ...current, status: 'idle', notice: undefined }));
       this.publish(panelId);
       this.sendInitialInput(panelId);
@@ -581,6 +681,7 @@ export class ChatTabManager {
     } catch (error) {
       if (tab.run !== generation) return;
       tab.runtime = undefined;
+      tab.held = undefined;
       await runtime.stop().catch(() => undefined);
       const failure = chatFailure(error, { code: 'CHAT_START_FAILED', next: 'Press Restart. If it fails again, check the agent is installed and signed in on this machine.' });
       this.stopWith(panelId, problemFrom(failure, this.required(panelId).agent, this.name));
@@ -661,6 +762,7 @@ export class ChatTabManager {
       return;
     }
     tab.delivering = true;
+    tab.activeAt = Date.now();
     const generation = tab.generation;
     const content: ContentBlock[] = [
       ...(body.text ? [{ type: 'text' as const, text: body.text }] : []),
@@ -675,7 +777,7 @@ export class ChatTabManager {
       if (tab.run !== generation) return;
       tab.delivering = false;
       if (!this.options.store.state(panelId)) return;
-      const marker = tab.transcript?.endTurn({ type: 'pane_turn', stopReason, startedAt, endedAt: new Date().toISOString() });
+      const marker = this.endTurn(panelId, tab, { type: 'pane_turn', stopReason, startedAt, endedAt: new Date().toISOString() });
       if (marker) this.options.send('chat-tab:event', marker);
       tab.notice = stopReason === 'refusal' ? 'The agent declined this request.' : stopReason === 'max_tokens' ? 'The reply hit the length limit.' : stopReason === 'max_turn_requests' ? 'The turn hit its step limit.' : undefined;
       this.update(panelId, current => ({
@@ -700,13 +802,54 @@ export class ChatTabManager {
   private ownTurn(panelId: string, tab: Tab, outcome: 'started' | 'end_turn' | 'cancelled' | 'error'): void {
     if (outcome === 'started') tab.ownTurnStartedAt = new Date().toISOString();
     else if (tab.ownTurnStartedAt) {
-      const marker = tab.transcript?.endTurn({ type: 'pane_turn', stopReason: outcome, startedAt: tab.ownTurnStartedAt, endedAt: new Date().toISOString() });
+      const marker = this.endTurn(panelId, tab, { type: 'pane_turn', stopReason: outcome, startedAt: tab.ownTurnStartedAt, endedAt: new Date().toISOString() });
       tab.ownTurnStartedAt = undefined;
       if (marker && !tab.loading) this.options.send('chat-tab:event', marker);
     }
     if (tab.loading) return;
     this.publish(panelId);
     if (outcome !== 'started') this.drain(panelId);
+  }
+
+  /** Ends a turn in the transcript and saves its time row, so a restart's replay shows it again. */
+  private endTurn(panelId: string, tab: Tab, marker: TurnMarker): ChatTabEvent | undefined {
+    const ended = tab.transcript?.endTurn(marker);
+    const saved = ended?.saved;
+    // A turn that ends while history replays is the agent's own, already saved: its rows come back from the replay.
+    if (saved && !tab.loading) {
+      this.update(panelId, current => current.acpSessionId ? { ...current, turnTimes: withTurnTime(current, current.acpSessionId, saved) } : current);
+    }
+    return ended?.event;
+  }
+
+  private pausedFile(panelId: string): string { return path.join(this.options.spoolDirectory, safeName(panelId), 'paused.json'); }
+
+  /** What a paused tab shows until its agent is back: the newest window and the composer's controls, kept on disk through a Pane restart. */
+  private savePaused(panelId: string, tab: Tab): void {
+    const sessionId = this.options.store.state(panelId)?.acpSessionId;
+    const held = tab.transcript && tab.transcript.count() > 0 ? tab.transcript.snapshot(DEFAULT_VIEW_LIMIT) : tab.held;
+    if (!sessionId || !held) return;
+    try {
+      const file = this.pausedFile(panelId);
+      mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+      writeFileSync(file, JSON.stringify({ sessionId, held: boundedWindow(held), shown: tab.shown }), { mode: 0o600 });
+    } catch (error) {
+      // Only the look after a Pane restart depends on it; the tab still pauses and resumes.
+      console.warn(`[ChatTabs] ${panelId}'s paused view was not saved: ${reasonOf(error)}`);
+    }
+  }
+
+  private loadPaused(panelId: string, tab: Tab): void {
+    const state = this.options.store.state(panelId);
+    if (!state?.paused || !state.acpSessionId) return;
+    try {
+      const saved = decodeOptionalBoundary(JSON.parse(readFileSync(this.pausedFile(panelId), 'utf8')), chatPausedViewSchema);
+      if (!saved || saved.sessionId !== state.acpSessionId) return;
+      tab.held = { ...saved.held, panelId, generation: 0 };
+      if (saved.shown) tab.shown = saved.shown;
+    } catch {
+      // No saved view: the tab looks as any tab does while it starts.
+    }
   }
 
   private exited(panelId: string, generation: number, exit: RuntimeExit): void {
@@ -752,6 +895,13 @@ export class ChatTabManager {
     await runtime?.stop();
   }
 
+  /** The running agent; a paused tab's controls stay live, so using one resumes its agent first. A stopped tab stays stopped. */
+  private async wokenRuntime(panelId: string): Promise<ChatTabRuntime> {
+    const state = this.required(panelId);
+    if (state.status !== 'stopped' && (state.paused || this.tabs.get(panelId)?.pausing)) await this.ensure(panelId);
+    return this.liveRuntime(panelId);
+  }
+
   private liveRuntime(panelId: string): ChatTabRuntime {
     this.required(panelId);
     const runtime = this.tabs.get(panelId)?.runtime;
@@ -761,6 +911,10 @@ export class ChatTabManager {
 
   private snapshot(panelId: string, state: ChatPanelState, tab: Tab, limit: number): ChatTabView {
     const runtime = tab.runtime?.isAlive() && !tab.loading ? tab.runtime : undefined;
+    if (runtime) tab.shown = { controls: [...runtime.controls(), ...fullAccessControl(state)], commands: runtime.commands(), canAttachImages: runtime.supportsImages() };
+    // A stopped tab offers nothing; a starting or paused one keeps showing what its agent last offered.
+    const shown = state.status === 'stopped' ? undefined : tab.shown;
+    const ready = tab.transcript && replayed(tab);
     const permissions = runtime ? runtime.permissions().map(permission => ({
       id: permission.id, generation: tab.generation,
       title: permission.request.toolCall.title ?? 'Approval needed',
@@ -774,12 +928,12 @@ export class ChatTabManager {
     })) : [];
     const view: ChatTabView = {
       panelId, agent: state.agent, generation: tab.generation, status: this.status(state, tab), problem: state.problem, notice: tab.notice,
-      canAttachImages: tab.runtime?.supportsImages() ?? false,
-      controls: runtime ? [...runtime.controls(), ...fullAccessControl(state)] : [], commands: runtime?.commands() ?? [],
+      canAttachImages: tab.runtime?.supportsImages() ?? shown?.canAttachImages ?? false,
+      controls: shown?.controls ?? [], commands: shown?.commands ?? [],
       permissions, questions, queue: state.queue ?? [],
       // While history replays the window is incomplete; viewers fetch it once the tab has started.
-      transcript: tab.transcript && limit > 0 && !tab.loading && !tab.starting ? tab.transcript.snapshot(limit) : undefined,
-      messageCount: tab.transcript?.count() ?? 0,
+      transcript: limit <= 0 ? undefined : ready ? tab.transcript!.snapshot(limit) : tab.held && heldWindow(tab.held, limit),
+      messageCount: ready || !tab.held ? tab.transcript?.count() ?? 0 : tab.held.start + tab.held.messages.length,
       ...extras(state, runtime),
     };
     if (state.banner) view.banner = state.banner;
@@ -801,7 +955,7 @@ export class ChatTabManager {
     this.options.send('chat-tab:view', view);
     if (agentConfig(view.agent)?.chat?.legacyClients) this.options.send('chat-tab:state', view);
     this.options.onView?.(view);
-    const agentState = toAgentState(view);
+    const agentState = publishedState(view, tab);
     if (tab.published === agentState) return;
     const previous = tab.published;
     tab.published = agentState;
@@ -818,7 +972,11 @@ export class ChatTabManager {
 
   private tab(panelId: string): Tab {
     let tab = this.tabs.get(panelId);
-    if (!tab) { tab = { generation: 0, run: 0, loading: false, delivering: false }; this.tabs.set(panelId, tab); }
+    if (!tab) {
+      tab = { generation: 0, run: 0, loading: false, delivering: false };
+      this.tabs.set(panelId, tab);
+      this.loadPaused(panelId, tab);
+    }
     return tab;
   }
 
@@ -837,6 +995,41 @@ function toAgentState(view: ChatTabView): AgentState {
   if (view.status === 'blocked' || (view.status === 'stopped' && view.problem)) return 'blocked';
   if (view.status === 'working' || view.status === 'starting') return 'working';
   return view.status === 'idle' ? 'idle' : 'unknown';
+}
+
+/** The tab moves to another conversation: what it showed is not held through the start. */
+function forgetConversation(tab: Tab): void {
+  tab.transcript?.dispose();
+  tab.transcript = undefined;
+  tab.held = undefined;
+}
+
+/** The transcript holds the whole conversation: no start is replaying it. Until then readers get the held window. */
+function replayed(tab: Tab): boolean { return !tab.loading && !tab.starting; }
+
+/** A held window small enough to save: the newest messages that fit in 2 MiB. */
+function boundedWindow(held: ChatTabTranscript): ChatTabTranscript {
+  let window = held;
+  while (window.messages.length > 1 && JSON.stringify(window.messages).length > 2 * 1024 * 1024) window = heldWindow(window, Math.floor(window.messages.length / 2));
+  return window;
+}
+
+/** The newest `limit` messages of a held window. */
+function heldWindow(held: ChatTabTranscript, limit: number): ChatTabTranscript {
+  const messages = held.messages.slice(-limit);
+  return { ...held, start: held.start + held.messages.length - messages.length, messages: structuredClone(messages) };
+}
+
+/** The conversation's time rows with `turn` added, newest kept; another conversation's rows are dropped. */
+function withTurnTime(state: ChatPanelState, sessionId: string, turn: ChatTurnTime): NonNullable<ChatPanelState['turnTimes']> {
+  const turns = state.turnTimes?.sessionId === sessionId ? state.turnTimes.turns : [];
+  return { sessionId, turns: [...turns, turn].slice(-TURN_TIMES_LIMIT) };
+}
+
+/** A resume from pause with nothing to send reads as idle, so the tab and sidebar do not flash a spinner. */
+function publishedState(view: ChatTabView, tab: Tab): AgentState {
+  if (view.status === 'starting' && tab.resuming && view.queue.length === 0) return 'idle';
+  return toAgentState(view);
 }
 
 function promptSize(body: Pick<ChatTabSend, 'text' | 'images'>): number {

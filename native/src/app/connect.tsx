@@ -1,5 +1,5 @@
 import * as Linking from 'expo-linking';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -7,22 +7,46 @@ import { useHostsStore } from '@/auth/hostsStore';
 import { PRIVACY_POLICY_URL } from '@/features/app/privacyPolicy';
 import { ComputersScreen } from '@/features/computers/ComputersScreen';
 import { ConnectForm } from '@/features/pairing/ConnectForm';
+import { PairingCamera } from '@/features/pairing/PairingCamera';
 import { useTheme } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Button, Icon, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
 
-const SETUP_GUIDE_URL = 'https://runpane.com/docs/remote-daemon';
+/** Pane on runpane.com, for someone who has the app but no Pane on a computer yet. */
+const GET_PANE_URL = 'https://runpane.com';
 
-/** First launch: find your computers over Tailscale, connect with a code, read the setup guide, or try the demo. */
+/**
+ * First launch opens on the camera: scan the code in Pane on your computer. Below it: paste a
+ * connection code, use Tailscale instead (Your computers), or try the demo.
+ */
 export default function ConnectScreen() {
   const theme = useTheme();
   const startDemo = useHostsStore(state => state.startDemo);
-  const [mode, setMode] = useState<'menu' | 'connect' | 'computers'>('menu');
+  const [mode, setMode] = useState<'camera' | 'connect' | 'computers'>('camera');
+
+  if (mode === 'camera') {
+    return (
+      <PairingCamera
+        caption="Scan the code in Pane on your computer"
+        actions={(
+          <>
+            <Button testID="connect-open-form" title="Paste a connection code" variant="secondary" onPress={() => setMode('connect')} />
+            <Button testID="connect-computers" title="Use Tailscale instead" variant="secondary" onPress={() => setMode('computers')} />
+            <View style={styles.links}>
+              <Button testID="connect-try-demo" title="Try a demo" variant="plain" onPress={startDemo} />
+              <Button testID="connect-get-pane" title="Get Pane for your computer" variant="plain" onPress={() => void Linking.openURL(GET_PANE_URL)} />
+              <Button testID="connect-privacy" title="Privacy policy" variant="plain" onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)} />
+            </View>
+          </>
+        )}
+      />
+    );
+  }
 
   if (mode === 'computers') {
     return (
       <SafeAreaView style={[styles.fill, { backgroundColor: theme.colors.background }]}>
-        <Pressable testID="computers-back" accessibilityRole="button" onPress={() => setMode('menu')} style={[styles.back, styles.backBar]} hitSlop={8}>
+        <Pressable testID="computers-back" accessibilityRole="button" onPress={() => setMode('camera')} style={[styles.back, styles.backBar]} hitSlop={8}>
           <Icon ios="arrow.left" android="arrow_back" size={16} color={theme.colors.textSecondary} />
           <Text variant="callout" tone="secondary">Back</Text>
         </Pressable>
@@ -35,62 +59,21 @@ export default function ConnectScreen() {
     <SafeAreaView style={[styles.fill, { backgroundColor: theme.colors.background }]}>
       {/* iOS insets the scroll view for the keyboard itself; Android (edge-to-edge) needs padding. */}
       <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'android' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={[styles.content, mode === 'connect' && styles.contentTop]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
+        <ScrollView contentContainerStyle={[styles.content, styles.contentTop]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets>
           <View style={styles.header}>
             <IconTile ios="desktopcomputer" android="desktop_windows" />
             <View style={styles.headerText}>
-              <Text variant="title">Remote Pane</Text>
-              <Text variant="subhead" tone="secondary">Use Pane on your computers.</Text>
+              <Text variant="title">Pane</Text>
+              <Text variant="subhead" tone="secondary">Watch and steer your agents from your phone, wherever you are.</Text>
             </View>
           </View>
-
-          {mode === 'menu' ? (
-            <View style={styles.cards}>
-              <MenuCard
-                testID="connect-computers"
-                icon={<IconTile ios="desktopcomputer" android="desktop_windows" />}
-                title="Your computers"
-                description="Connect to Pane on your computers over Tailscale."
-                action="Find computers"
-                onPress={() => setMode('computers')}
-              />
-              <MenuCard
-                testID="connect-open-form"
-                icon={<IconTile ios="doc.on.clipboard" android="content_paste" />}
-                title="Connect with a code"
-                description="Paste a pane-remote:// code from a host."
-                action="Open connection form"
-                onPress={() => setMode('connect')}
-              />
-              <MenuCard
-                testID="connect-setup-guide"
-                icon={<IconTile ios="book" android="menu_book" />}
-                title="Set up a remote host"
-                description="Run Pane on a server or VM and create a code."
-                action="Open setup guide"
-                onPress={() => void Linking.openURL(SETUP_GUIDE_URL)}
-              />
-              <MenuCard
-                testID="connect-try-demo"
-                icon={<IconTile ios="play.circle" android="play_circle" />}
-                title="Try a demo"
-                description="Look around with sample computers. Nothing connects."
-                action="Start the demo"
-                onPress={startDemo}
-              />
-              <Pressable testID="connect-privacy" accessibilityRole="link" onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)} style={styles.privacy} hitSlop={8}>
-                <Text variant="footnote" tone="secondary">Privacy policy</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={[styles.card, cardStyle(theme)]}>
-              <Pressable testID="connect-back" accessibilityRole="button" onPress={() => setMode('menu')} style={styles.back} hitSlop={8}>
-                <Icon ios="arrow.left" android="arrow_back" size={16} color={theme.colors.textSecondary} />
-                <Text variant="callout" tone="secondary">Back</Text>
-              </Pressable>
-              <ConnectForm />
-            </View>
-          )}
+          <View style={[styles.card, cardStyle(theme)]}>
+            <Pressable testID="connect-back" accessibilityRole="button" onPress={() => setMode('camera')} style={styles.back} hitSlop={8}>
+              <Icon ios="arrow.left" android="arrow_back" size={16} color={theme.colors.textSecondary} />
+              <Text variant="callout" tone="secondary">Back</Text>
+            </Pressable>
+            <ConnectForm />
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -103,28 +86,6 @@ function IconTile({ ios, android }: Pick<IconProps, 'ios' | 'android'>) {
     <View style={[styles.tile, { backgroundColor: theme.colors.surfaceRaised, borderRadius: theme.radius.md }]}>
       <Icon ios={ios} android={android} size={20} color={theme.colors.accent} />
     </View>
-  );
-}
-
-function MenuCard({ icon, title, description, action, onPress, testID }: {
-  icon: ReactNode; title: string; description: string; action: string; onPress: () => void; testID: string;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [styles.card, cardStyle(theme), pressed && { backgroundColor: theme.colors.surfacePressed }]}
-    >
-      {icon}
-      <Text variant="headline" style={styles.cardTitle}>{title}</Text>
-      <Text variant="subhead" tone="secondary">{description}</Text>
-      <View style={styles.action}>
-        <Text variant="callout" tone="accent" style={styles.actionText}>{action}</Text>
-        <Icon ios="arrow.right" android="arrow_forward" size={14} color={theme.colors.accentText} />
-      </View>
-    </Pressable>
   );
 }
 
@@ -151,12 +112,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 24 },
   headerText: { flex: 1 },
   tile: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  cards: { gap: 12 },
   card: { borderWidth: 1, padding: 16, gap: 8 },
-  cardTitle: { marginTop: 4 },
-  action: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
-  actionText: { fontWeight: '600' },
   back: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start' },
   backBar: { paddingHorizontal: 16, paddingTop: 8 },
-  privacy: { alignSelf: 'center', paddingVertical: 8 },
+  links: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
 });

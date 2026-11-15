@@ -50,7 +50,6 @@ export interface RemoteDaemonConnectedClient {
   deviceLabel: string | null;
   remoteAddress: string | null;
   connectedAt: string;
-  lastSeenAt: string;
 }
 
 /** What Settings shows about this host's tailnet: a problem and its fix, or that the host moved. */
@@ -80,10 +79,21 @@ export interface RemoteDaemonClientRecord {
   createdAt: string;
   tokenHash: string;
   lastUsedAt?: string;
-  /** "glasses": a Pane glasses app token, admitted only on the workspace listener with its narrow scope. Absent: a paired client with full access. */
-  kind?: 'glasses';
-  /** Glasses only: the install id of the phone that paired them; pairing again from that phone replaces them. */
+  /**
+   * "glasses": a Pane glasses app token, admitted only on the workspace listener with its narrow scope.
+   * "computer": a linked computer (QR pairing), with full access. Absent: a paired phone or client with full access.
+   */
+  kind?: 'glasses' | 'computer';
+  /** The install id of the phone: for glasses, the phone that paired them; for a QR-paired phone, the phone itself. */
   phoneId?: string;
+  /** Linked computers only: the computer's relay id. */
+  computerId?: string;
+  /** Shown as "Linked by <name>": the phone whose scan linked this computer, or the computer that handed this phone its token. */
+  linkedBy?: string;
+  /** A phone token handed out by a linked computer: that computer's relay id, so unlinking it revokes the token. */
+  grantedBy?: string;
+  /** Linked computers only: the client id of the phone whose scan minted this link, so removing that phone revokes it. */
+  mintedBy?: string;
 }
 
 export interface RemotePaneConnectionProfile {
@@ -101,6 +111,16 @@ export interface RemotePaneConnectionProfile {
    */
   tailnetMachine?: string;
   tailnetDomain?: string;
+  /** A computer reached through a relay (QR pairing): its id and key fingerprint. */
+  relay?: RemoteRelayProfile;
+}
+
+export interface RemoteRelayProfile {
+  computerId: string;
+  /** base64url SHA-256 of the computer's public key; connections to any other key are refused. */
+  fingerprint: string;
+  /** Shown as "Linked by <name>" when a phone's scan linked it. */
+  linkedBy?: string;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -228,6 +248,8 @@ export interface RemoteMobilePushRegistration {
   notifyButtons?: boolean;
   /** The APNs endpoint that accepted this token after the key's own environment refused it. */
   apnsEnvironment?: 'sandbox' | 'production';
+  /** The relay's grant for this computer and token, which the phone received as a push and handed back (relay/PROTOCOL.md, Alerts). */
+  relayGrant?: string;
   createdAt: string;
   updatedAt: string;
   revokedAt?: string;
@@ -262,6 +284,14 @@ export interface RemoteDaemonClientSettings {
 export interface RemoteDaemonConfig {
   host: RemoteDaemonHostSettings;
   client: RemoteDaemonClientSettings;
+  /** Phone access through Pane's relays (QR pairing). Absent: off. */
+  relay?: RemoteRelaySettings;
+}
+
+export interface RemoteRelaySettings {
+  enabled: boolean;
+  /** "Relay address": a self-hosted relay's `host[:port]`. Absent: Pane's relays. */
+  relayAddress?: string;
 }
 
 export interface RemoteDaemonConnectionPair {
@@ -558,8 +588,12 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   createdAt: boundary.nonEmptyString,
   tokenHash: boundary.nonEmptyString,
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
-  kind: boundary.optional(boundary.literal('glasses')),
+  kind: boundary.optional(boundary.enumeration('glasses', 'computer')),
   phoneId: boundary.optional(boundary.nonEmptyString),
+  computerId: boundary.optional(boundary.nonEmptyString),
+  linkedBy: boundary.optional(boundary.nonEmptyString),
+  grantedBy: boundary.optional(boundary.nonEmptyString),
+  mintedBy: boundary.optional(boundary.nonEmptyString),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({
   kind: boundary.enumeration('ssh', 'tailscale', 'manual'),
@@ -577,6 +611,11 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
   tunnel: boundary.optional(remoteTunnelSchema),
   tailnetMachine: boundary.optional(boundary.nonEmptyString),
   tailnetDomain: boundary.optional(boundary.nonEmptyString),
+  relay: boundary.optional(boundary.object({
+    computerId: boundary.nonEmptyString,
+    fingerprint: boundary.nonEmptyString,
+    linkedBy: boundary.optional(boundary.nonEmptyString),
+  })),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {
@@ -737,7 +776,7 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
     hostSettings.access = access;
   }
 
-  return {
+  const normalized: RemoteDaemonConfig = {
     host: hostSettings,
     client: {
       profiles: [...profiles],
@@ -745,6 +784,14 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
       mode: activeProfileId && client.mode === 'remote' ? 'remote' : 'local',
     },
   };
+  const relay = readJsonObject(config.relay);
+  if (relay) {
+    const relaySettings: RemoteRelaySettings = { enabled: readBoolean(relay.enabled, false) };
+    const relayAddress = readOptionalString(relay.relayAddress)?.trim();
+    if (relayAddress) relaySettings.relayAddress = relayAddress;
+    normalized.relay = relaySettings;
+  }
+  return normalized;
 }
 
 function normalizeRemoteMobilePushSettings(value: JsonValue | undefined): RemoteMobilePushSettings {
@@ -775,6 +822,8 @@ function normalizeRemoteMobilePushSettings(value: JsonValue | undefined): Remote
     if (revokedAt) normalized.revokedAt = revokedAt;
     if (raw.notifyButtons === true) normalized.notifyButtons = true;
     if (raw.apnsEnvironment === 'sandbox' || raw.apnsEnvironment === 'production') normalized.apnsEnvironment = raw.apnsEnvironment;
+    const relayGrant = readOptionalString(raw.relayGrant);
+    if (relayGrant) normalized.relayGrant = relayGrant;
     return [normalized];
   });
   const decodedAttentionSequence = decodeOptionalBoundary(settings.attentionSequence, boundary.number);

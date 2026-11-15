@@ -188,6 +188,8 @@ const WAKE_PROBE_WINDOW_MS = 4_000;
 const WAKE_PROBE_TIMEOUT_MS = 2_000;
 /** Phones allow only a few connections per host; the stream and restore reads need the rest. */
 const WAKE_PROBES_IN_FLIGHT = 2;
+/** A computer behind Pane's servers is retried this often at most, so it is back within seconds of an outage ending. */
+const RELAY_MAX_RECONNECT_DELAY_MS = 5_000;
 
 /** Platform-neutral client for a Pane daemon's HTTP + SSE API. */
 export class RemoteDaemonClient {
@@ -201,7 +203,7 @@ export class RemoteDaemonClient {
   private runtimeId: string | null = null;
   private abortController: AbortController | null = null;
   private reconnectTimer: RemoteTimer | null = null;
-  private readonly recovery = new RecoveryCycle();
+  private readonly recovery: RecoveryCycle;
   private wakeProbes: AbortController | null = null;
   private wake: { wokeAt: number; firstAnswerAt: number | null; attempts: number; lastError: string | null } | null = null;
   private deadlineTimer: RemoteTimer | null = null;
@@ -238,6 +240,10 @@ export class RemoteDaemonClient {
     this.resolveRuntimeId = options.runtimeId;
     this.staleStreamTimeoutMs = options.staleStreamTimeoutMs;
     this.schedule = options.schedule ?? scheduleWithGlobals;
+    // A computer reached through a relay is never given up on while the app is open (D-15); only a revoked token stops it.
+    this.recovery = options.profile.relay
+      ? new RecoveryCycle(Math.random, Number.POSITIVE_INFINITY, RELAY_MAX_RECONNECT_DELAY_MS)
+      : new RecoveryCycle();
   }
 
   getState(): RemoteDaemonConnectionState {
@@ -720,6 +726,7 @@ export class RemoteDaemonClient {
   }
 
   private armDeadline(): void {
+    if (!Number.isFinite(this.recovery.remainingMs)) return;
     this.deadlineTimer ??= this.schedule(() => this.stopRecovery(RECONNECT_GAVE_UP_MESSAGE), this.recovery.remainingMs);
   }
 

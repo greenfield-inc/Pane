@@ -617,6 +617,9 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     parsed = ParsedArgs(command=command)
     if parsed.command == "secrets exec":
         parsed.exec_command = take_exec_command(args)
+    if parsed.command == "relay":
+        # Every word after `relay` is pane-relay's; this package points to npx instead.
+        del args[:]
     if parsed.command == "inbox ack":
         while args and not args[0].startswith("-"):
             parsed.inbox_ids.append(args.pop(0))
@@ -1792,6 +1795,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "install": lambda parsed, context: install_or_update(parsed, context),
     "update": lambda parsed, context: run_update(parsed),
     "mcp": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "relay": lambda parsed, context: run_unsupported_contract(parsed, context),
     "panes git-status": lambda parsed, context: run_daemon_action(parsed, contract_command(parsed.command)["daemonAction"]),
     "panes commit": lambda parsed, context: run_daemon_action(parsed, contract_command(parsed.command)["daemonAction"]),
     "panes push": lambda parsed, context: run_daemon_action(parsed, contract_command(parsed.command)["daemonAction"]),

@@ -35,6 +35,18 @@ const view: ChatTabView = {
     { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Nothing is waiting on you right now.' }] },
   ] },
 };
+// ?pending=1: the latest message is yours and the agent's reply has not started (with ?working, only the Working row shows).
+if (params.has('pending') && params.has('conversation')) view.transcript!.messages.pop();
+// ?long=1: enough turns to scroll, for what shows above the composer at the bottom.
+if (params.has('long')) {
+  const messages = view.transcript!.messages;
+  view.transcript!.messages = [...Array.from({ length: 4 }, (_, round) => messages.map(message => ({ ...message, id: `${message.id}:${round}` }))).flat(), ...messages];
+}
+// ?permission=1: an approval docked above the composer.
+if (params.has('permission')) {
+  view.permissions = [{ id: 'perm', generation: 1, title: 'Run pnpm test', toolCall: { kind: 'execute', title: 'pnpm test', rawInput: { command: 'pnpm test' } }, options: [option('allow', 'Allow once'), option('always', 'Always allow'), option('reject', 'Reject')].map(({ value, name }) => ({ optionId: value, name, kind: value === 'reject' ? 'reject_once' : value === 'always' ? 'allow_always' : 'allow_once' })) }];
+  view.status = 'blocked';
+}
 // ?banner=most-recent|none|known-empty|list-failed: what Switch to chat did (D-282); ✕ closes it.
 const bannerParam = params.get('banner');
 const banner: ChatTabSwitchBanner | undefined = bannerParam === 'most-recent' || bannerParam === 'none' || bannerParam === 'known-empty' ? { kind: bannerParam }

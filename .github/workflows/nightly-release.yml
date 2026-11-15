@@ -136,6 +136,10 @@ jobs:
           echo 'CXXFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
 
       # electron-builder rebuilds the native modules per arch on macOS.
+      # afterPack builds the pane-direct helper (direct/) for each packaged arch.
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
       - run: pnpm install --frozen-lockfile ${{ runner.os == 'macOS' && '--ignore-scripts' || '' }}
 
       - name: Stamp prerelease version
@@ -192,6 +196,10 @@ jobs:
             ~/AppData/Local/electron-builder/Cache
           key: windows-${{ matrix.arch }}-electron-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: windows-${{ matrix.arch }}-electron-
+
+      # afterPack builds the pane-direct helper (direct/) for each packaged arch.
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
 
       - run: pnpm install --frozen-lockfile
 

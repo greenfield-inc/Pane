@@ -33,7 +33,7 @@ async function dismissDialogs(page: Page): Promise<void> {
   const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
     let dismissed = false;
-    for (const name of ['No thanks', 'Get Started', 'Skip']) {
+    for (const name of ['No thanks', 'Get Started', 'Skip', 'Skip for now']) {
       const button = page.getByRole('button', { name, exact: true });
       if (await button.isVisible().catch(() => false)) { await button.click().catch(() => undefined); dismissed = true; }
     }

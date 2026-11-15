@@ -130,6 +130,16 @@ describe('buildMachineList', () => {
     expect(byName(list, 'build-box')).toMatchObject({ active: true, action: 'password', subtitle: 'Linux · Needs password' });
   });
 
+  it('says which phone linked a computer paired through Pane\'s servers', () => {
+    const relay = (id: string, label: string, linkedBy?: string): RemotePaneConnectionProfile => ({
+      id, label, baseUrl: `https://${id}.runpane.net`, token: 'synthetic', transport: 'http+sse',
+      relay: linkedBy ? { computerId: id, fingerprint: 'f', linkedBy } : { computerId: id, fingerprint: 'f' },
+    });
+    const list = buildMachineList(input({ tailnet: null, localName: null, profiles: [relay('linkedpc', 'Travel Laptop', "Ana's iPhone"), relay('pairedpc', 'Office PC')] }));
+    expect(byName(list, 'Travel Laptop').subtitle).toBe("Linked by Ana's iPhone");
+    expect(byName(list, 'Office PC').subtitle).toBe('Paired with a QR code');
+  });
+
   it('keeps saved Tailscale machines pickable before the listing answers', () => {
     const list = buildMachineList(input({ tailnet: null, localName: null }));
     expect(list.map((machine) => [machine.name, machine.subtitle, machine.action])).toEqual([
@@ -174,7 +184,7 @@ describe('buildMachineList', () => {
 describe('getHostingSummary', () => {
   it('summarizes hosting when this machine also serves remote clients', () => {
     const idle = createDefaultRemoteDaemonHostRuntimeState();
-    const client = { id: 'phone', clientId: null, label: null, deviceLabel: 'iPhone', remoteAddress: null, connectedAt: '', lastSeenAt: '' };
+    const client = { id: 'phone', clientId: null, label: null, deviceLabel: 'iPhone', remoteAddress: null, connectedAt: '' };
     expect(getHostingSummary({ ...idle, status: 'live', connectedClients: [client] })).toBe('Hosting · 1 client connected');
     expect(getHostingSummary({ ...idle, status: 'error' })).toBe('Hosting offline');
     expect(getHostingSummary(idle)).toBeNull();

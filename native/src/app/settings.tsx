@@ -54,7 +54,7 @@ export default function SettingsScreen() {
           title="Add a machine"
           accent
           leading={<View style={[styles.addTile, { backgroundColor: theme.colors.selected }]}><Icon ios="plus" android="add" size={14} color={theme.colors.accentText} /></View>}
-          onPress={() => router.push('/computers')}
+          onPress={() => router.push('/hosts/new')}
         />
       </ListSection>
 

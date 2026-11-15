@@ -1,3 +1,4 @@
+import { RelayRequestError, type RelayAlert, type RelayAlertPayload, type RelayGrantRequest } from './relay/relayAgent';
 import { createHash, createPrivateKey, createSign, randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import os from 'os';
@@ -49,8 +50,21 @@ type ApnsEnvironment = ApnsCredentialConfig['environment'];
 class ProviderDeliveryError extends Error {
   constructor(readonly status: number, readonly body: string, message: string) { super(message); }
 }
+/** The relay no longer accepts this registration's grant: the phone confirms again when it next registers. */
+class UnboundGrantError extends ProviderDeliveryError {}
 
 const MAX_RECENT_EVENTS = 64;
+/** A relay grant after this computer's id: `.<issue day since the Unix epoch>.<signature>`. */
+const GRANT_AFTER_ID = /^\.(\d{1,7})\.[A-Za-z0-9_-]{1,64}$/;
+/** The relay accepts a grant for 30 days; past half that, the computer asks for a fresh one. */
+const GRANT_RENEW_AFTER_DAYS = 15;
+/**
+ * The phone registers on every connect, so a registration that needs a grant asks again only 20 to
+ * 30 minutes after it last asked: two computers waiting on one phone send it at most six silent
+ * pushes an hour, and the jitter keeps them from asking together.
+ */
+const GRANT_RETRY_MS = 20 * 60_000;
+const GRANT_RETRY_JITTER_MS = 10 * 60_000;
 /** Phones one owner login keeps registered on a host; registering one more drops the oldest. */
 const MAX_OWNER_REGISTRATIONS = 10;
 /**
@@ -98,6 +112,8 @@ export class MobilePushSender {
   private readonly finishTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Each Notify question's waits so far, and whether it waits now: Undo makes it wait, and alert, again. */
   private readonly questionRounds = new Map<string, { round: number; open: boolean }>();
+  /** When each registration may next ask the relay for a grant, by `<registration id> <token>`. */
+  private readonly grantRetryAt = new Map<string, number>();
 
   constructor(
     private readonly configManager: MobilePushConfigManager,
@@ -113,6 +129,11 @@ export class MobilePushSender {
     if (registration) {
       status.needsInputEnabled = registration.needsInputEnabled;
       status.completedEnabled = registration.completedEnabled;
+      // Alerts through the relay wait for the phone to hand back its grant (relay/PROTOCOL.md, Alerts).
+      if (!registration.relayGrant && relayFor(platform, this.configManager.getConfig().apns)) {
+        status.code = 'PUSH_AWAITING_PHONE';
+        status.message = 'Waiting for this phone to confirm this computer. Open Pane on this phone while it is connected.';
+      }
     }
     return status;
   }
@@ -143,9 +164,31 @@ export class MobilePushSender {
     };
     if (request.notifyButtons) registration.notifyButtons = true;
     if (previous?.apnsEnvironment) registration.apnsEnvironment = previous.apnsEnvironment;
+    if (previous?.relayGrant && previous.token === request.token) registration.relayGrant = previous.relayGrant;
     registrations.push(registration);
     await this.save(configWithRegistrations(config, withinOwnerLimit(registrations, clientId)));
+    this.askForGrant(registration);
     return this.getStatus(clientId, request.platform, request.installationId);
+  }
+
+  /**
+   * Keeps the grant the phone received from the relay for this computer and its token. A grant
+   * naming another computer is refused: that computer asked the relay, not this one.
+   */
+  async confirmGrant(clientId: string, request: { platform: RemoteMobilePlatform; installationId: string; grant: string }): Promise<{ ok: boolean }> {
+    return this.mutate(async () => {
+      const id = relayPush?.id();
+      if (!id || !request.grant.startsWith(id) || !GRANT_AFTER_ID.test(request.grant.slice(id.length))) return { ok: false };
+      const config = this.config();
+      const live = config.host.mobilePush.registrations.find(item => (
+        item.clientId === clientId && item.platform === request.platform && item.installationId === request.installationId && !item.revokedAt
+      ));
+      if (!live) return { ok: false };
+      await this.save(configWithRegistrations(config, config.host.mobilePush.registrations.map(item => (
+        item.id === live.id ? { ...item, relayGrant: request.grant } : item
+      ))));
+      return { ok: true };
+    });
   }
 
   async updateControls(
@@ -268,10 +311,7 @@ export class MobilePushSender {
         if (open) await this.markDelivered(registration.id, eventId);
         console.log('[Pane mobile push] Delivered', { platform: registration.platform, kind: open ? 'question' : 'question-clear' });
       } catch (error) {
-        if (error instanceof ProviderDeliveryError && isInvalidTokenResponse(error)) await this.revokeRegistration(registration.id);
-        const status = error instanceof ProviderDeliveryError ? error.status : undefined;
-        const reason = error instanceof ProviderDeliveryError ? providerReason(error.body) : undefined;
-        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind: open ? 'question' : 'question-clear', status, reason });
+        await this.deliveryFailed(registration, open ? 'question' : 'question-clear', error instanceof ProviderDeliveryError ? error : null);
       }
     }
   }
@@ -290,7 +330,8 @@ export class MobilePushSender {
     const buttons = notifyButtons(item);
     if (registration.platform === 'ios') {
       const credentials = readApnsCredentials(this.configManager.getConfig().apns);
-      if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
+      const relay = credentials ? null : relayForPush();
+      if (!credentials && !relay) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
       const payload: JsonObject = { ...routing };
       if (open) {
         const aps: JsonObject = { alert: { title, body }, sound: 'default', 'thread-id': threadId };
@@ -306,11 +347,14 @@ export class MobilePushSender {
         payload.notifyClear = true;
         payload.aps = { 'content-available': 1 };
       }
-      await this.sendApns(registration, credentials, { collapseId, payload, pushType: open ? 'alert' : 'background' });
+      const pushType = open ? 'alert' : 'background';
+      if (credentials) await this.sendApns(registration, credentials, { collapseId, payload, pushType });
+      else if (relay) await sendThroughRelay(relay, registration, { platform: 'ios', token: registration.token, pushType, collapseId, payload }, 'APNs alert');
       return;
     }
     const credentials = readFcmCredentials();
-    if (!credentials) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
+    const relay = credentials ? null : relayForPush();
+    if (!credentials && !relay) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
     // A build that draws buttons builds the alert itself, so it gets data only; older builds get the system alert.
     let message: JsonObject;
     if (!registration.notifyButtons) {
@@ -326,6 +370,10 @@ export class MobilePushSender {
         data.notifyClear = '1';
       }
       message = { token: registration.token, android: { priority: 'high' }, data };
+    }
+    if (!credentials) {
+      if (relay) await sendThroughRelay(relay, registration, { platform: 'android', message }, 'FCM alert');
+      return;
     }
     const response = await this.transport.fcm({
       token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.projectId, payload: { message },
@@ -355,15 +403,13 @@ export class MobilePushSender {
     for (const registration of updatedConfig.host.mobilePush.registrations) {
       if (!isLive(this.config(), registration) || !isEnabled(registration, kind)) continue;
       if (registration.recentEventIds.includes(eventId)) continue;
+      this.askForGrant(registration);
       try {
         await this.deliver(registration, eventId, event, kind);
         await this.markDelivered(registration.id, eventId);
         console.log('[Pane mobile push] Delivered', { platform: registration.platform, kind });
       } catch (error) {
-        if (error instanceof ProviderDeliveryError && isInvalidTokenResponse(error)) await this.revokeRegistration(registration.id);
-        const status = error instanceof ProviderDeliveryError ? error.status : undefined;
-        const reason = error instanceof ProviderDeliveryError ? providerReason(error.body) : undefined;
-        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind, status, reason });
+        await this.deliveryFailed(registration, kind, error instanceof ProviderDeliveryError ? error : null);
       }
     }
   }
@@ -379,19 +425,27 @@ export class MobilePushSender {
     const payload: JsonObject = { ...routing, aps: { alert: { title, body }, sound: 'default', 'thread-id': subject.groupPaneId } };
     if (registration.platform === 'ios') {
       const credentials = readApnsCredentials(this.configManager.getConfig().apns);
-      if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
-      await this.sendApns(registration, credentials, { collapseId, payload });
+      const relay = credentials ? null : relayForPush();
+      if (credentials) await this.sendApns(registration, credentials, { collapseId, payload });
+      else if (relay) await sendThroughRelay(relay, registration, { platform: 'ios', token: registration.token, pushType: 'alert', collapseId, payload }, 'APNs alert');
+      else throw new ProviderDeliveryError(503, '', 'APNs is not configured');
       return;
     }
+    const message: JsonObject = {
+      token: registration.token, notification: { title, body },
+      android: { notification: { tag: collapseId } },
+      data: routing,
+    };
     const credentials = readFcmCredentials();
-    if (!credentials) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
+    if (!credentials) {
+      const relay = relayForPush();
+      if (!relay) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
+      await sendThroughRelay(relay, registration, { platform: 'android', message }, 'FCM alert');
+      return;
+    }
     const response = await this.transport.fcm({
       token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.projectId,
-      payload: { message: {
-        token: registration.token, notification: { title, body },
-        android: { notification: { tag: collapseId } },
-        data: routing,
-      } },
+      payload: { message },
     });
     if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'FCM rejected notification');
   }
@@ -439,6 +493,40 @@ export class MobilePushSender {
     await this.save(configWithRegistrations(config, registrations));
   }
 
+  /** Drops a grant the relay refused, revokes a token the provider refused, and logs why. */
+  private async deliveryFailed(registration: RemoteMobilePushRegistration, kind: string, error: ProviderDeliveryError | null): Promise<void> {
+    if (error instanceof UnboundGrantError) await this.dropGrant(registration.id);
+    else if (error && isInvalidTokenResponse(error)) await this.revokeRegistration(registration.id);
+    const failure = error ? { status: error.status, reason: providerReason(error.body), message: error.message } : {};
+    console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind, ...failure });
+  }
+
+  /**
+   * Asks the relay to push the phone a grant for this computer when the registration goes through
+   * the relay and has none, or one past half its 30 days (relay/PROTOCOL.md, Alerts). The old grant
+   * keeps alerts going until the phone hands back the new one.
+   */
+  private askForGrant(registration: RemoteMobilePushRegistration): void {
+    const relay = relayFor(registration.platform, this.configManager.getConfig().apns);
+    if (!relay || !grantNeedsRenewal(registration.relayGrant)) return;
+    const key = `${registration.id} ${registration.token}`;
+    if (Date.now() < (this.grantRetryAt.get(key) ?? 0)) return;
+    this.grantRetryAt.set(key, Date.now() + GRANT_RETRY_MS + Math.random() * GRANT_RETRY_JITTER_MS);
+    requestGrant(relay, { platform: registration.platform, token: registration.token, hostProfileId: registration.hostProfileId });
+  }
+
+  private async dropGrant(id: string): Promise<void> {
+    // The relay refused the grant, so the next registration asks for a new one at once.
+    for (const key of this.grantRetryAt.keys()) if (key.startsWith(`${id} `)) this.grantRetryAt.delete(key);
+    const config = this.config();
+    await this.save(configWithRegistrations(config, config.host.mobilePush.registrations.map(item => {
+      if (item.id !== id) return item;
+      const dropped = { ...item };
+      delete dropped.relayGrant;
+      return dropped;
+    })));
+  }
+
   private async revokeRegistration(id: string): Promise<void> {
     const config = this.config();
     const now = new Date().toISOString();
@@ -469,6 +557,54 @@ export class MobilePushSender {
   }
 }
 
+/** A relay that delivers alerts with the Pane app's keys, for a computer that has none (QR pairing). */
+export interface RelayPushChannel {
+  available(): boolean;
+  /** This computer's relay id, which its grants start with. */
+  id(): string | null;
+  send(alert: RelayAlert): Promise<ProviderResponse>;
+  grant(request: RelayGrantRequest): Promise<ProviderResponse>;
+}
+let relayPush: RelayPushChannel | null = null;
+export function setRelayPushChannel(channel: RelayPushChannel | null): void {
+  relayPush = channel;
+}
+function relayForPush(): RelayPushChannel | null {
+  return relayPush?.available() ? relayPush : null;
+}
+/** The relay path for a platform this computer has no keys for. */
+function relayFor(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): RelayPushChannel | null {
+  return hasKeys(platform, apns) ? null : relayForPush();
+}
+function hasKeys(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): boolean {
+  return platform === 'ios' ? readApnsCredentials(apns) !== null : readFcmCredentials() !== null;
+}
+/** Whether a registration has no grant, or one issued over 15 days ago. */
+function grantNeedsRenewal(grant: string | undefined): boolean {
+  const issued = Number(grant?.split('.')[1]);
+  return !Number.isFinite(issued) || Math.floor(Date.now() / 86_400_000) - issued > GRANT_RENEW_AFTER_DAYS;
+}
+/** Has the relay push the phone a grant for this computer; the phone hands it back with `mobile:push-grant`. */
+function requestGrant(relay: RelayPushChannel, request: RelayGrantRequest): void {
+  void relay.grant(request).then(
+    response => { if (!isSuccess(response.status)) console.warn('[Pane mobile push] Grant push failed', { platform: request.platform, status: response.status, reason: providerReason(response.body) }); },
+  ).catch(error => console.warn('[Pane mobile push] Grant push failed', { platform: request.platform, reason: error instanceof Error ? error.message : String(error) }));
+}
+/** Sends an alert through the relay with the grant this phone handed back for this computer. */
+async function sendThroughRelay(relay: RelayPushChannel, registration: RemoteMobilePushRegistration, alert: RelayAlertPayload, what: string): Promise<void> {
+  const grant = registration.relayGrant;
+  if (!grant) throw new ProviderDeliveryError(503, '', 'This phone has not confirmed this computer with Pane\'s servers yet; it does the next time it connects');
+  let response: ProviderResponse;
+  try {
+    response = await relay.send({ ...alert, grant });
+  } catch (error) {
+    const code = error instanceof RelayRequestError ? error.code : 'provider';
+    if (code === 'unbound') throw new UnboundGrantError(503, '', `Pane's servers did not send the ${what}: the phone's confirmation for this computer is no longer valid`);
+    throw new ProviderDeliveryError(code === 'throttled' ? 429 : 503, '', `Pane's servers did not send the ${what}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, `${what} rejected`);
+}
+
 /** One host config has one serial mutation stream across IPC and SSE delivery. */
 export function getMobilePushSender(configManager: MobilePushConfigManager, options?: MobilePushSenderOptions): MobilePushSender {
   const existing = senderByConfigManager.get(configManager);
@@ -479,6 +615,10 @@ export function getMobilePushSender(configManager: MobilePushConfigManager, opti
 }
 
 function providerReadiness(platform: RemoteMobilePlatform, apns: ApnsCredentialConfig | undefined): Pick<RemoteMobilePushStatus, 'provider' | 'code' | 'message'> {
+  if (relayFor(platform, apns)) return { provider: 'ready', code: 'PUSH_READY', message: 'Alerts go through Pane\'s servers.' };
+  if (relayPush && !hasKeys(platform, apns)) {
+    return { provider: 'unavailable', code: 'PUSH_RELAY_RECONNECTING', message: 'This computer is reconnecting to Pane\'s servers. Alerts start again when it is back.' };
+  }
   if (platform === 'ios') return readApnsCredentials(apns)
     ? { provider: 'ready', code: 'PUSH_READY', message: 'APNs delivery is configured.' }
     : { provider: 'missing-config', code: 'ERR_APNS_NOT_CONFIGURED', message: 'This host has no valid APNs configuration.' };

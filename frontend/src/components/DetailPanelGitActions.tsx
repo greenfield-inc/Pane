@@ -147,7 +147,7 @@ function ActionPair({
 }
 
 export function DetailPanelGitActions({ actions = [], isMerging, gitCommands, gitStatus }: DetailPanelGitActionsProps) {
-  const fetchedAgo = gitStatus?.lastChecked ? formatTimeAgo(gitStatus.lastChecked) : null;
+  const fetchedAgo = gitStatus?.lastFetchedAt ? formatTimeAgo(gitStatus.lastFetchedAt) : null;
   return (
     <div className="px-2 pt-3 pb-1">
       <h3 className="mb-1 px-2 text-[10px] font-semibold uppercase leading-4 tracking-wider text-text-tertiary">Actions</h3>

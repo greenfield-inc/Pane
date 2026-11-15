@@ -51,13 +51,13 @@ import type {
   OrchestrationSessionUpdateInput,
 } from '../../shared/types/orchestrationSession';
 import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
-import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
 import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
+import type { RelayStatus } from '../../shared/types/relay';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -252,14 +252,6 @@ try {
       window.dispatchEvent(new CustomEvent('script-closing', { detail: data }));
     } catch (e) {
       console.error('Failed to dispatch script-closing to window:', e);
-    }
-  });
-
-  ipcRenderer.on('resource-monitor:update', (_event: Electron.IpcRendererEvent, data: ResourceSnapshot) => {
-    try {
-      window.dispatchEvent(new CustomEvent('resource-monitor:update', { detail: data }));
-    } catch (e) {
-      console.error('Failed to dispatch resource-monitor:update to window:', e);
     }
   });
 
@@ -980,6 +972,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('ports:changed', wrappedCallback);
       return () => ipcRenderer.removeListener('ports:changed', wrappedCallback);
     },
+    /** This computer's relay (QR pairing) moved to a new phase. */
+    onRelayStatusChanged: (callback: (status: RelayStatus) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, status: RelayStatus) => callback(status);
+      ipcRenderer.on('relay:status-changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('relay:status-changed', wrappedCallback);
+    },
+    /** A phone used this computer's pairing code. */
+    onRelayPaired: (callback: (event: { clientId: string; label: string }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, paired: { clientId: string; label: string }) => callback(paired);
+      ipcRenderer.on('relay:paired', wrappedCallback);
+      return () => ipcRenderer.removeListener('relay:paired', wrappedCallback);
+    },
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkTarget) => callback(target);
       ipcRenderer.on('pane:open-link', wrappedCallback);
@@ -1341,8 +1345,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Resource monitor
   resourceMonitor: {
     getSnapshot: (): Promise<IPCResponse> => invokeIpc('resource-monitor:get-snapshot'),
-    startActive: (): Promise<IPCResponse> => invokeIpc('resource-monitor:start-active'),
-    stopActive: (): Promise<IPCResponse> => invokeIpc('resource-monitor:stop-active'),
   },
 
   // Agent subscription usage
@@ -1408,6 +1410,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   window: {
     consumeUncleanShutdown: async (): Promise<boolean> => decodeBoundary(await invokeIpc('app:consume-unclean-shutdown'), boundary.boolean),
     isFocused: async (): Promise<boolean> => decodeBoundary(await invokeIpc('window:is-focused'), boundary.boolean),
+    reportVisibility: (visible: boolean): void => {
+      ipcRenderer.send('window:visibility-changed', visible);
+    },
     openPaneLink: async (link: string): Promise<void> => {
       await invokeIpc('window:open-pane-link', link);
     },
