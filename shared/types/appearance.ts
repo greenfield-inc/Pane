@@ -44,6 +44,13 @@ export const isTheme = (value: unknown): value is Theme =>
   // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Establishes the primitive representation before the closed-map membership check.
   typeof value === 'string' && Object.prototype.hasOwnProperty.call(THEME_CLASSES, value);
 
+/** The Custom theme (shared/types/customTheme.ts): selectable wherever a palette is, and shown as its base palette. */
+export const CUSTOM_THEME_ID = 'custom' as const;
+export type ThemeChoice = Theme | typeof CUSTOM_THEME_ID;
+
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Type guard at config, argv and IPC boundaries.
+export const isThemeChoice = (value: unknown): value is ThemeChoice => value === CUSTOM_THEME_ID || isTheme(value);
+
 export const isLightTheme = (theme: Theme): theme is LightTheme =>
   THEME_CLASSES[theme][0] === 'light';
 
@@ -54,13 +61,14 @@ export type AppearanceMode = 'system' | 'fixed';
 
 export interface AppearanceConfig {
   appearanceMode: AppearanceMode;
-  theme: Theme;
-  /** Any palette: a slot is named for the OS appearance it follows, not the palette's own base. */
-  systemLightTheme: Theme;
-  systemDarkTheme: Theme;
+  theme: ThemeChoice;
+  /** Any palette or Custom: a slot is named for the OS appearance it follows, not the palette's own base. */
+  systemLightTheme: ThemeChoice;
+  systemDarkTheme: ThemeChoice;
 }
 
-export const DEFAULT_APPEARANCE: AppearanceConfig = {
+/** Every slot holds a shipped palette by default; Custom is only ever chosen. */
+export const DEFAULT_APPEARANCE: AppearanceConfig & { theme: Theme; systemLightTheme: Theme; systemDarkTheme: Theme } = {
   appearanceMode: 'system',
   theme: 'folio',
   systemLightTheme: 'folio',
@@ -117,14 +125,14 @@ export function normalizeAppearance(raw: unknown): NormalizedAppearance {
     const appearanceMode = source.appearanceMode === 'system' || source.appearanceMode === 'fixed'
       ? source.appearanceMode
       : DEFAULT_APPEARANCE.appearanceMode;
-    const theme = isTheme(source.theme) ? source.theme : DEFAULT_APPEARANCE.theme;
-    const systemLightTheme = isTheme(source.systemLightTheme) ? source.systemLightTheme : DEFAULT_APPEARANCE.systemLightTheme;
-    const systemDarkTheme = isTheme(source.systemDarkTheme) ? source.systemDarkTheme : DEFAULT_APPEARANCE.systemDarkTheme;
+    const theme = isThemeChoice(source.theme) ? source.theme : DEFAULT_APPEARANCE.theme;
+    const systemLightTheme = isThemeChoice(source.systemLightTheme) ? source.systemLightTheme : DEFAULT_APPEARANCE.systemLightTheme;
+    const systemDarkTheme = isThemeChoice(source.systemDarkTheme) ? source.systemDarkTheme : DEFAULT_APPEARANCE.systemDarkTheme;
 
     if (Object.prototype.hasOwnProperty.call(source, 'appearanceMode') && source.appearanceMode !== 'system' && source.appearanceMode !== 'fixed') {
       diagnostics.push('invalid appearanceMode; restored system');
     }
-    if (Object.prototype.hasOwnProperty.call(source, 'theme') && !isTheme(source.theme)) {
+    if (Object.prototype.hasOwnProperty.call(source, 'theme') && !isThemeChoice(source.theme)) {
       diagnostics.push(`invalid theme; restored ${DEFAULT_APPEARANCE.theme}`);
     }
     if (Object.prototype.hasOwnProperty.call(source, 'systemLightTheme') && systemLightTheme !== source.systemLightTheme) {
@@ -143,7 +151,7 @@ export function normalizeAppearance(raw: unknown): NormalizedAppearance {
   return { appearance, diagnostics, migrated } satisfies NormalizedAppearance;
 }
 
-export const resolveAppearanceTheme = (appearance: AppearanceConfig, prefersDark: boolean): Theme =>
+export const resolveAppearanceTheme = (appearance: AppearanceConfig, prefersDark: boolean): ThemeChoice =>
   appearance.appearanceMode === 'fixed'
     ? appearance.theme
     : prefersDark ? appearance.systemDarkTheme : appearance.systemLightTheme;

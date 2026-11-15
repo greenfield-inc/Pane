@@ -156,7 +156,11 @@ interface ElectronAPI {
   windowControlsOverlayEnabled: boolean;
   appearanceSnapshot?: import('../../../shared/types/appearance').AppearanceSnapshot;
   setTitleBarOverlay: (colors: { color: string; symbolColor: string }) => Promise<IPCResponse>;
-  setBackgroundColor: (payload: { theme: import('../../../shared/types/appearance').Theme; color: string }) => Promise<IPCResponse>;
+  setBackgroundColor: (payload: { theme: import('../../../shared/types/appearance').ThemeChoice; color: string }) => Promise<IPCResponse>;
+  customTheme?: {
+    get: () => Promise<IPCResponse<import('../../../shared/types/customTheme').CustomThemeState>>;
+    reset: () => Promise<IPCResponse>;
+  };
   notifyRendererReady: () => void;
 
   // Version checking
@@ -658,6 +662,7 @@ interface ElectronAPI {
     // Terminal font config events
     onTerminalFontUpdated: (callback: (data: { terminalFontFamily: string; terminalFontSize: number }) => void) => () => void;
     onNativeAppearanceUpdated: (callback: (data: { prefersDark: boolean }) => void) => () => void;
+    onCustomThemeUpdated?: (callback: (state: import('../../../shared/types/customTheme').CustomThemeState) => void) => () => void;
 
     removeAllListeners: (channel: string) => void;
   };

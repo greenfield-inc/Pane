@@ -661,6 +661,56 @@
       "localControl": true
     },
     {
+      "name": "theme read",
+      "summary": "Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.",
+      "usage": [
+        "runpane theme read [--json] [--pane-dir <path>]"
+      ],
+      "wrappers": [
+        "npm"
+      ],
+      "toolsets": [
+        "core"
+      ],
+      "jsonSchemas": [
+        "themeReadResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "theme set",
+      "summary": "Restyle Pane itself, only when the person asks to change Pane's look: write the Custom theme (a base theme, colour tokens and CSS) and select it, or switch to another theme. Pane restyles within a second.",
+      "usage": [
+        "runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json] [--pane-dir <path>]",
+        "runpane theme set --theme <id> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ],
+      "toolsets": [
+        "core"
+      ],
+      "jsonSchemas": [
+        "themeSetResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "theme reset",
+      "summary": "Delete the Custom theme and go back to the theme it was built on.",
+      "usage": [
+        "runpane theme reset [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
       "name": "panes list",
       "summary": "List Pane sessions in a saved repository.",
       "usage": [
@@ -2939,6 +2989,21 @@
         "name": "--because",
         "value": "<why>",
         "description": "autopilot answer only: why, recorded on the item: a D-n, a document or the person's words."
+      },
+      {
+        "name": "--colors",
+        "value": "<json>",
+        "description": "Colour token overrides as a JSON object; null removes one."
+      },
+      {
+        "name": "--css",
+        "value": "<text>",
+        "description": "CSS for the Custom theme; replaces the current CSS, and empty text removes it."
+      },
+      {
+        "name": "--theme",
+        "value": "<id>",
+        "description": "A theme id to select: custom or one of the shipped themes."
       }
     ],
     "localBoolean": [
@@ -3126,6 +3191,10 @@
         "  runpane secrets delete --project <project> --name <name> --yes",
         "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
         "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "  runpane theme read [--json]",
+        "  runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
+        "  runpane theme set --theme <id> [--json]",
+        "  runpane theme reset [--json]",
         "  runpane sessions list [--json] [--pane-dir <path>]",
         "  runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
         "  runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
@@ -3473,6 +3542,32 @@
         "  --reason <text>                What you need it for",
         "  --json                         Print machine-readable output",
         "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "theme": [
+        "  runpane theme <read|set|reset> [options]",
+        "Restyles Pane itself: one Custom theme, built on a shipped theme, with colour tokens and CSS. Pane restyles within a second.",
+        "Use it only when the person asks to change how Pane looks.",
+        "  runpane theme read [--json]",
+        "  runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
+        "  runpane theme set --theme <id> [--json]",
+        "  runpane theme reset [--json]"
+      ],
+      "theme read": [
+        "  runpane theme read [--json] [--pane-dir <path>]",
+        "Shows the selected theme, the Custom theme, each colour token and its current value, the stable selectors for CSS, and the guide."
+      ],
+      "theme set": [
+        "  runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
+        "  runpane theme set --theme <id> [--json]",
+        "Writes the Custom theme and selects it. Colours merge (null removes one); --css replaces the CSS. Nothing is written when a value is refused.",
+        "  --base <theme>                 Shipped theme to build on",
+        "  --colors <json>                {\"--color-border-primary\": \"#262b33\"}",
+        "  --css <text>                   CSS for [data-pane-part] selectors; no remote files",
+        "  --theme <id>                   Switch to this theme instead"
+      ],
+      "theme reset": [
+        "  runpane theme reset [--json] [--pane-dir <path>]",
+        "Deletes the Custom theme and selects the theme it was built on."
       ],
       "panes": [
         "Pane session commands.",
@@ -5452,6 +5547,32 @@
         "  --reason <text>                What you need it for",
         "  --json                         Print machine-readable output",
         "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "theme": [
+        "  python -m runpane theme <read|set|reset> [options]",
+        "Restyles Pane itself: one Custom theme, built on a shipped theme, with colour tokens and CSS. Pane restyles within a second.",
+        "Use it only when the person asks to change how Pane looks.",
+        "  python -m runpane theme read [--json]",
+        "  python -m runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
+        "  python -m runpane theme set --theme <id> [--json]",
+        "  python -m runpane theme reset [--json]"
+      ],
+      "theme read": [
+        "  python -m runpane theme read [--json] [--pane-dir <path>]",
+        "Shows the selected theme, the Custom theme, each colour token and its current value, the stable selectors for CSS, and the guide."
+      ],
+      "theme set": [
+        "  python -m runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
+        "  python -m runpane theme set --theme <id> [--json]",
+        "Writes the Custom theme and selects it. Colours merge (null removes one); --css replaces the CSS. Nothing is written when a value is refused.",
+        "  --base <theme>                 Shipped theme to build on",
+        "  --colors <json>                {\"--color-border-primary\": \"#262b33\"}",
+        "  --css <text>                   CSS for [data-pane-part] selectors; no remote files",
+        "  --theme <id>                   Switch to this theme instead"
+      ],
+      "theme reset": [
+        "  python -m runpane theme reset [--json] [--pane-dir <path>]",
+        "Deletes the Custom theme and selects the theme it was built on."
       ],
       "panes": [
         "Pane session commands.",
@@ -17618,6 +17739,202 @@
         }
       },
       "additionalProperties": false
+    },
+    "customTheme": {
+      "type": "object",
+      "required": [
+        "base",
+        "colors"
+      ],
+      "properties": {
+        "base": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "colors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "css": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "themeReadResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "selected",
+        "showing",
+        "showingPalette",
+        "custom",
+        "ignoredBecause",
+        "file",
+        "bases",
+        "tokens",
+        "parts",
+        "cssLimit",
+        "guide"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "selected": {
+          "type": "object",
+          "required": [
+            "appearanceMode",
+            "theme",
+            "systemLightTheme",
+            "systemDarkTheme"
+          ],
+          "properties": {
+            "appearanceMode": {
+              "enum": [
+                "system",
+                "fixed"
+              ]
+            },
+            "theme": {
+              "type": "string"
+            },
+            "systemLightTheme": {
+              "type": "string"
+            },
+            "systemDarkTheme": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "showing": {
+          "type": "string",
+          "description": "The theme on screen now: custom or a shipped id."
+        },
+        "showingPalette": {
+          "type": "string",
+          "description": "The shipped theme on screen, or the Custom theme's base."
+        },
+        "custom": {
+          "anyOf": [
+            {
+              "$ref": "#/jsonSchemas/customTheme"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ignoredBecause": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why Pane ignored custom-theme.json, or null."
+        },
+        "file": {
+          "type": "string"
+        },
+        "bases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tokens": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cssLimit": {
+          "type": "number"
+        },
+        "guide": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "themeSetResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "selected",
+        "custom"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "selected": {
+          "type": "string"
+        },
+        "custom": {
+          "anyOf": [
+            {
+              "$ref": "#/jsonSchemas/customTheme"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "file": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "themeResetResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "removed",
+        "selected",
+        "file"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "selected": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "file": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "agentContext": {
@@ -24034,6 +24351,131 @@
         "notes": [
           "Errors: AUTOPILOT_OFF (off), AUTOPILOT_ONLY (not Autopilot's tab), AUTOPILOT_CANNOT_ANSWER (a permission prompt: it stays the person's), ERR_APPROVALS_MACHINE_OFFLINE (the item's machine is offline; nothing is queued), ERR_APPROVALS_OWNER_TOO_OLD (its machine runs an older Pane).",
           "The result's id is the new item's. Put that one on the stack."
+        ]
+      },
+      "theme read": {
+        "name": "theme read",
+        "summary": "Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.",
+        "details": "Run this before `runpane theme set`. tokens lists every colour token, with its value in the main window when Pane is open; parts lists the selectors custom CSS may target; guide says how to write a theme. ignoredBecause says why a hand-edited custom-theme.json was ignored.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane theme read --json"
+        ],
+        "jsonSchemas": [
+          "themeReadResult"
+        ],
+        "notes": [
+          "Use it only when the person asks to change how Pane itself looks, not their project's styles."
+        ]
+      },
+      "theme set": {
+        "name": "theme set",
+        "summary": "Restyle Pane itself, only when the person asks to change Pane's look: write the Custom theme (a base theme, colour tokens and CSS) and select it, or switch to another theme. Pane restyles within a second.",
+        "details": "Writes custom-theme.json in Pane's data folder and selects Custom where the person sees it now; every Pane window restyles within a second with no restart. Colours merge into the current Custom theme (null removes one), --css replaces its CSS, and the base defaults to the theme on screen. Nothing is written when a value is refused. --theme switches to another theme and leaves the Custom theme on disk. You cannot see the result: make small changes, then ask the person how it looks.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--base",
+            "value": "<theme>",
+            "required": false,
+            "description": "The shipped theme to build on; defaults to the Custom theme's base, or the theme on screen."
+          },
+          {
+            "name": "--colors",
+            "value": "<json>",
+            "required": false,
+            "description": "Colour token overrides, such as {\"--color-border-primary\": \"#30363d\"}. Values are hex, rgb() or rgba(); null removes an override.",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          {
+            "name": "--css",
+            "value": "<text>",
+            "required": false,
+            "description": "CSS that targets the stable [data-pane-part] selectors, up to 20,000 characters. No @import, src(), image-set() or remote url(). Replaces the current CSS; empty text removes it."
+          },
+          {
+            "name": "--name",
+            "value": "<text>",
+            "required": false,
+            "description": "A name for the Custom theme, shown in Settings."
+          },
+          {
+            "name": "--theme",
+            "value": "<id>",
+            "required": false,
+            "description": "Switch to this theme instead: custom or a shipped theme id. Use it alone."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane theme set --colors '{\"--color-border-primary\": \"#262b33\"}' --json",
+          "runpane theme set --css '[data-pane-part=\"tab\"] { border-radius: 8px !important; }' --json",
+          "runpane theme set --theme dusk --json"
+        ],
+        "jsonSchemas": [
+          "themeSetResult"
+        ],
+        "notes": [
+          "Restyle Pane only when the person asks to change Pane's look. Requests about their project's styles edit the project instead."
+        ]
+      },
+      "theme reset": {
+        "name": "theme reset",
+        "summary": "Delete the Custom theme and go back to the theme it was built on.",
+        "details": "Deletes custom-theme.json and selects its base theme. Works from any shell while Pane runs, even when a theme made Pane unreadable.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane theme reset"
+        ],
+        "notes": [
+          "The person's way back from any Custom theme; an agent switches away with `runpane theme set --theme <id>` instead."
         ]
       }
     },

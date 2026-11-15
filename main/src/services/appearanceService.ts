@@ -6,10 +6,13 @@ import {
   themeBase,
   type AppearanceConfig,
   type AppearanceSnapshot,
-  type Theme,
+  type ThemeChoice,
 } from '../../../shared/types/appearance';
+import { paletteForChoice } from '../../../shared/types/customTheme';
+import type { Theme } from '../../../shared/types/appearance';
 
-export type StoredBackgroundColors = Partial<Record<Theme, string>>;
+/** Keyed by theme choice: Custom keeps its own colour, since its background can differ from its base's. */
+export type StoredBackgroundColors = Partial<Record<ThemeChoice, string>>;
 export interface WindowAppearanceOptions {
   additionalArguments: string[];
   backgroundColor: string;
@@ -25,10 +28,10 @@ export function resolveOsPrefersDark(): boolean {
   return lastOsPrefersDark;
 }
 
-export function applyNativeThemeSource(appearance: AppearanceConfig): void {
+export function applyNativeThemeSource(appearance: AppearanceConfig, customBase: Theme | null = null): void {
   nativeTheme.themeSource = appearance.appearanceMode === 'system'
     ? 'system'
-    : themeBase(appearance.theme);
+    : themeBase(paletteForChoice(appearance.theme, customBase));
 }
 
 export const buildAppearanceSnapshot = (appearance: AppearanceConfig): AppearanceSnapshot => ({
@@ -42,19 +45,21 @@ export function resolveWindowBackgroundColor(
   appearance: AppearanceConfig,
   osPrefersDark: boolean,
   storedColors: StoredBackgroundColors,
+  customBase: Theme | null = null,
 ): string {
   const theme = resolveAppearanceTheme(appearance, osPrefersDark);
-  return storedColors[theme] ?? (themeBase(theme) === 'light' ? '#ffffff' : '#0d1117');
+  return storedColors[theme] ?? (themeBase(paletteForChoice(theme, customBase)) === 'light' ? '#ffffff' : '#0d1117');
 }
 
 export function buildWindowAppearanceOptions(
   appearance: AppearanceConfig,
   osPrefersDark: boolean,
   storedColors: StoredBackgroundColors,
+  customBase: Theme | null = null,
 ): WindowAppearanceOptions {
   return {
     additionalArguments: [`${APPEARANCE_ARG_PREFIX}${encodeAppearanceSnapshotArg(buildAppearanceSnapshot(appearance))}`],
-    backgroundColor: resolveWindowBackgroundColor(appearance, osPrefersDark, storedColors),
+    backgroundColor: resolveWindowBackgroundColor(appearance, osPrefersDark, storedColors, customBase),
   };
 }
 

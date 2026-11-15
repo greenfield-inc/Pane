@@ -12,6 +12,36 @@ At startup the persisted config selects Electron's `nativeTheme` source. Main pa
 
 On Linux, System depends on the desktop environment and Chromium exposing `prefers-color-scheme`. Desktops that do not publish an appearance preference may remain on their reported default slot.
 
+## Custom theme
+
+An agent can restyle Pane when the person asks ("Tone down Pane's borders"). It writes one Custom theme, `custom-theme.json` in Pane's data folder beside `config.json`, through `runpane theme set` or the `theme_set` MCP tool. Pane restyles the main window and notify cards within a second, terminal colours included, with no restart.
+
+```json
+{
+  "base": "dusk",
+  "name": "Quiet Dusk",
+  "colors": { "--color-border-primary": "#262b33" },
+  "css": "[data-pane-part=\"tab\"] { border-radius: 8px !important; }"
+}
+```
+
+- `base` is one of the 27 shipped themes. The Custom theme takes its light or dark family and fills every token it doesn't set.
+- `colors` sets `--color-*` tokens to hex, `rgb()` or `rgba()` values. `runpane theme read` lists every token with its current value.
+- `css` is up to 20,000 characters (the file up to 32 KB), applied after Pane's own styles.
+- `name` is optional and shows in Settings.
+
+`runpane theme set` merges colours into the current Custom theme (`null` removes one), replaces the CSS when `--css` is given, and selects Custom where the person sees it now: as the Fixed theme, or in the System slot of the base's family. `runpane theme set --theme <id>` switches to another theme and keeps the file. High contrast still wins over Custom colours for the tokens it sets.
+
+**Stable selectors.** CSS should target only `[data-pane-part="<name>"]`: `app`, `sidebar`, `sidebar-pane`, `main`, `tab-bar`, `tab`, `panel`, `terminal`, `chat-message`, `chat-composer`, `button`, `input`, `dialog`, `settings`, `notify-card`. These stay across releases (a test keeps them). Tailwind classes, DOM shape and `data-testid` may change in any release. Terminal text is drawn on a canvas, so it takes colour tokens only.
+
+**No remote files.** Pane refuses CSS with `@import`, `src()`, `image-set()` or a `url()` that isn't a `data:` or `#id` address, and writes nothing. The renderer filters the parsed rules again and drops any declaration that could still fetch, such as an escaped `url(`.
+
+**Hand edits.** Pane reloads the file when it changes. An invalid file is ignored whole: Pane shows the base theme, and Settings > Appearance and `runpane theme read` give the reason.
+
+**Reset.** Each of these deletes the Custom theme and returns to its base: Settings > Appearance > Custom theme > Reset, View > Reset Custom Theme (macOS), `runpane theme reset` from any shell, or deleting the file. There is no readability check, so use one of these when a theme makes Pane hard to read.
+
+A setup export carries Custom as its base theme. Remote clients and the phone apps don't use the Custom theme.
+
 ## App icon
 
 `pnpm generate-icons` renders the general app assets from

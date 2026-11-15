@@ -13,6 +13,7 @@ import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
 import { runNotify } from './notify';
 import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
+import { runThemeRead, runThemeReset, runThemeSet } from './theme';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo } from './daemonClient';
@@ -262,6 +263,9 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'secrets delete': async (parsed) => runSecretsDelete(parsed),
   'secrets exec': async (parsed) => runSecretsExec(parsed),
   'secrets request': async (parsed) => runSecretsRequest(parsed),
+  'theme read': async (parsed) => runThemeRead(parsed),
+  'theme set': async (parsed) => runThemeSet(parsed),
+  'theme reset': async (parsed) => runThemeReset(parsed),
   'panes list': async (parsed, telemetryContext) => {
     return runPanesList(parsed);
   },
