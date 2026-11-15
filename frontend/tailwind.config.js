@@ -169,6 +169,7 @@ const config = {
           'DEFAULT': 'var(--discord-primary, #5865F2)',
           'hover': 'var(--discord-hover, #4752C4)',
           'secondary': 'var(--discord-secondary, #7289DA)',
+          'foreground': 'var(--discord-foreground, #FFFFFF)',
         },
         // Modal colors
         'modal': {

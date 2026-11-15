@@ -691,7 +691,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
           )}
 
           <div className="mt-4 flex items-center gap-3 rounded-lg border border-border-primary bg-surface-secondary px-4 py-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-discord text-white">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-discord text-discord-foreground">
               <DiscordIcon className="w-4 h-4" />
             </div>
             <p className="flex-1 text-sm text-text-primary">Chat with the team and other Pane users.</p>
