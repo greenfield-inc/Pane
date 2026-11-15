@@ -45,7 +45,8 @@ The app still accepts `pane-remote://` connection codes.
    other computer.
 3. The first computer shows **Linked with &lt;computer&gt;**. If you don't
    know that computer, choose **Not you? Unlink &lt;computer&gt;**. That undoes
-   the whole link, including the links it made with the rest of your group.
+   the link: your computers and the ones it brought stop reaching each other,
+   and each group stays as it was before.
 
 On a computer with no screen, run `runpane link '<link>'` instead. It asks
 before joining two groups of computers (see

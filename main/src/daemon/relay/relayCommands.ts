@@ -30,8 +30,7 @@ const previewTargetSchema = boundary.union(
 
 const peerRequestSchema = boundary.object({ peer: relayComputerSchema });
 const linkRequestSchema = boundary.object({ link: boundary.nonEmptyString });
-/** `linksItMade`: also undo the links that computer made between others ("Not you? Unlink" undoes a whole join). */
-const unlinkRequestSchema = boundary.object({ computerId: boundary.nonEmptyString, linksItMade: boundary.optional(boundary.boolean) });
+const unlinkRequestSchema = boundary.object({ computerId: boundary.nonEmptyString });
 const pairingCodeSchema = boundary.optional(boundary.object({ expiresIn: boundary.optional(boundary.enumeration('10m', '1h', '24h')) }));
 
 function onThisComputerOnly(): void {
@@ -159,8 +158,7 @@ export function registerRelayCommands(
     return null;
   });
   registry.register(RELAY_COMPUTER_COMMANDS.forgetComputer, async (request: PaneCommandValue, from: PaneCommandValue) => {
-    const { computerId, linksItMade } = decodeBoundary(request, unlinkRequestSchema);
-    await links.forgetComputer(computerId, caller(from), linksItMade === true);
+    await links.forgetComputer(decodeBoundary(request, unlinkRequestSchema).computerId, caller(from));
     return null;
   });
 
@@ -186,7 +184,10 @@ export function registerRelayCommands(
   });
   registry.register(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, (request: PaneCommandValue) => {
     onThisComputerOnly();
-    const { computerId, linksItMade } = decodeBoundary(request, unlinkRequestSchema);
-    return links.unlinkComputerEverywhere(computerId, linksItMade === true);
+    return links.unlinkComputerEverywhere(decodeBoundary(request, unlinkRequestSchema).computerId);
+  });
+  registry.register(RELAY_DEVICE_COMMANDS.undoJoin, (request: PaneCommandValue) => {
+    onThisComputerOnly();
+    return links.undoJoin(decodeBoundary(request, unlinkRequestSchema).computerId);
   });
 }

@@ -1216,7 +1216,7 @@ describe('QR-paired phones and linked computers', () => {
       expect.objectContaining({ id: BUILD_BOX.id, name: 'Build Box', token: 'token-for-build-box' }),
     ]);
 
-    await computer.registry.invoke(RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere, [{ computerId: STUDIO.id, linksItMade: true }]);
+    await computer.registry.invoke(RELAY_DEVICE_COMMANDS.undoJoin, [{ computerId: STUDIO.id }]);
 
     await expect(computer.invoke(minted, 'runpane:machine:info'))
       .resolves.toMatchObject({ statusCode: 403, body: { error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID' } } });

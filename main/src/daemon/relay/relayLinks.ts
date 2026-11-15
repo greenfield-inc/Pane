@@ -409,10 +409,10 @@ export class RelayLinks {
     await this.revokeLocally({ clients: (client) => client.kind === undefined && client.phoneId === phoneId });
   }
 
-  /** Forgets a computer here: its link both ways, phone tokens it handed out, and with `linksItMade` the links it made. */
-  async forgetComputer(computerId: string, callerClientId: string, linksItMade = false): Promise<void> {
+  /** Forgets a computer here: its link both ways and the phone tokens it handed out. */
+  async forgetComputer(computerId: string, callerClientId: string): Promise<void> {
     this.callerComputer(callerClientId);
-    await this.revokeLocally({ computers: [computerId], linksItMade });
+    await this.revokeLocally({ computers: [computerId] });
   }
 
   devices(): RelayDevice[] {
@@ -455,13 +455,14 @@ export class RelayLinks {
   }
 
   /**
-   * "Unlink from all your computers" on a linked computer's row, which removes only that computer, and
-   * "Not you? Unlink", which with `linksItMade` also undoes the links it made between the two groups.
+   * "Unlink from all your computers" on a linked computer's row: that computer forgets every linked
+   * computer and each forgets it. The links it carried between the others stay.
    * `id` is its relay id or its id in `client.computers`.
    */
-  async unlinkComputerEverywhere(id: string, linksItMade = false): Promise<{ removed: string[]; notReached: string[] }> {
+  async unlinkComputerEverywhere(id: string): Promise<{ removed: string[]; notReached: string[] }> {
     const computerId = this.relayIdOf(id);
     const targets = this.linked();
+    const self = this.deps.self()?.id;
     // The computers it is removed from: this one, and each other linked computer that answers.
     const removed = [this.deps.self()?.name ?? 'This computer'];
     const notReached: string[] = [];
@@ -469,17 +470,47 @@ export class RelayLinks {
       const unlinked = profile.relay.computerId === computerId;
       // The unlinked computer forgets this one and the rest; the others forget it.
       const forget = unlinked
-        ? targets.filter((other) => other.relay.computerId !== computerId).map((other) => other.relay.computerId).concat(this.deps.self()?.id ?? [])
+        ? targets.filter((other) => other.relay.computerId !== computerId).map((other) => other.relay.computerId).concat(self ?? [])
         : [computerId];
-      try {
-        for (const id of forget) await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.forgetComputer, [{ computerId: id, linksItMade }]);
-        if (!unlinked) removed.push(profile.label);
-      } catch {
-        notReached.push(profile.label);
-      }
+      if (!await this.tell(profile, forget)) notReached.push(profile.label);
+      else if (!unlinked) removed.push(profile.label);
     }));
-    await this.revokeLocally({ computers: [computerId], linksItMade });
+    await this.revokeLocally({ computers: [computerId] });
     return { removed, notReached };
+  }
+
+  /**
+   * "Not you? Unlink" on the computer that made the link: undoes the join `id` made. This computer
+   * and the computers it was linked with before forget every computer the join brought, and those
+   * forget them. Both groups stay as they were before. Returns the names of the computers unlinked.
+   */
+  async undoJoin(id: string): Promise<{ removed: string[]; notReached: string[] }> {
+    const remote = this.remote();
+    const before = this.linked();
+    // The join's links here are the joining computer's and every link it minted, so they are what goes with it.
+    const after = new Set(revokeClients(remote, { computers: [this.relayIdOf(id)], linksItMade: true }).remote.client.computers
+      .flatMap((computer) => computerRelayId(computer) ?? []));
+    const brought = before.filter((profile) => !after.has(profile.relay.computerId));
+    const stay = before.filter((profile) => after.has(profile.relay.computerId));
+    const ours = stay.map((profile) => profile.relay.computerId).concat(this.deps.self()?.id ?? []);
+    const theirs = brought.map((profile) => profile.relay.computerId);
+    const notReached: string[] = [];
+    await Promise.all([
+      ...brought.map(async (profile) => { if (!await this.tell(profile, ours)) notReached.push(profile.label); }),
+      ...stay.map(async (profile) => { if (!await this.tell(profile, theirs)) notReached.push(profile.label); }),
+    ]);
+    await this.revokeLocally({ computers: theirs });
+    return { removed: brought.map((profile) => profile.label), notReached };
+  }
+
+  /** Asks a linked computer to forget each of `computerIds`; false when it does not answer. */
+  private async tell(profile: LinkedComputer, computerIds: readonly string[]): Promise<boolean> {
+    try {
+      for (const computerId of computerIds) await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.forgetComputer, [{ computerId }]);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async revokeLocally(seed: Parameters<typeof revokeClients>[1]): Promise<void> {

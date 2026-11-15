@@ -42,7 +42,7 @@ const invoke = vi.fn(async (channel: string, ..._args: object[]): Promise<object
     case 'relay:redeem-link': return redeem();
     case 'computers:routes-report': return { machineId: 'm-build', name: 'Build Box' };
     case 'relay:pairing-code': return { url: LINK, expiresAt: '2026-11-15T10:00:00Z' };
-    case 'relay:unlink-computer-everywhere': return { removed: ['Studio Mac', 'Build Box'], notReached: [] };
+    case 'relay:undo-join': return { removed: ['Build Box', 'NAS'], notReached: [] };
     default: throw new Error(`unexpected ${channel}`);
   }
 });
@@ -177,7 +177,7 @@ describe('A pane://pair link opened on this computer', () => {
 });
 
 describe('The computer that made the link', () => {
-  it('shows who used it, with "Not you? Unlink" that unlinks it everywhere', async () => {
+  it('shows who used it, with "Not you? Unlink" that undoes the link', async () => {
     await useAddDeviceStore.getState().copyLink();
     useAddDeviceStore.getState().close();
 
@@ -192,7 +192,7 @@ describe('The computer that made the link', () => {
 
     await useAddDeviceStore.getState().unlinkMaker();
 
-    expect(callsTo('relay:unlink-computer-everywhere')).toEqual([[{ computerId: 'build-box', linksItMade: true }]]);
-    expect(text(renderMaker())).toContain('Unlinked Build Box from all your computers.');
+    expect(callsTo('relay:undo-join')).toEqual([[{ computerId: 'build-box' }]]);
+    expect(text(renderMaker())).toContain('Unlinked Build Box, NAS from your computers.');
   });
 });

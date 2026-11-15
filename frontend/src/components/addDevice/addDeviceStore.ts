@@ -167,13 +167,13 @@ export const useAddDeviceStore = create<AddDeviceState>((set, get) => {
       let outcome: string;
       try {
         const result: { removed: string[]; notReached: string[] } = await window.electronAPI.invoke(
-          RELAY_DEVICE_COMMANDS.unlinkComputerEverywhere,
-          // "Not you?" undoes the whole join, so the links this computer made go with it.
-          { computerId: maker.computerId, linksItMade: true },
+          RELAY_DEVICE_COMMANDS.undoJoin,
+          { computerId: maker.computerId },
         );
+        const unlinked = result.removed.length > 0 ? result.removed.join(', ') : maker.label;
         outcome = result.notReached.length > 0
-          ? `Unlinked ${maker.label}. ${result.notReached.join(', ')} didn't answer; Pane removes it there when they come back.`
-          : `Unlinked ${maker.label} from all your computers.`;
+          ? `Unlinked ${unlinked}. ${result.notReached.join(', ')} didn't answer; Pane removes the link there when they come back.`
+          : `Unlinked ${unlinked} from your computers.`;
       } catch (cause) {
         outcome = `${maker.label} is still linked: ${ipcErrorMessage(cause, "Pane couldn't reach your other computers")}. Try again.`;
       }

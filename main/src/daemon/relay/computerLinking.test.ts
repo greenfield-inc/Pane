@@ -255,7 +255,7 @@ describe('linking computers with a one-time link', () => {
     expect(await net.reaches(windows, mac)).toBe(true);
   });
 
-  it('"Not you? Unlink" removes the new computer everywhere; one also on the tailnet stays as a Tailscale row', async () => {
+  it('"Unlink from all your computers" removes the computer everywhere; one also on the tailnet stays as a Tailscale row', async () => {
     const net = network();
     const mac = net.add('Mac', 'macmacmacmacmac0');
     const linux = net.add('Linux', 'linlinlinlinlin0');
@@ -299,7 +299,7 @@ describe('linking computers with a one-time link', () => {
     expect(mac.listed()).toEqual([]);
   });
 
-  it('"Not you? Unlink" after a group join undoes the whole join', async () => {
+  it('"Not you? Unlink" after a group join leaves both groups as they were', async () => {
     const net = network();
     const mac = net.add('Mac', 'macmacmacmacmac0');
     const linux = net.add('Linux', 'linlinlinlinlin0');
@@ -310,15 +310,39 @@ describe('linking computers with a one-time link', () => {
     await windows.redeem(await mac.link());
     const { computerId } = mac.paired[mac.paired.length - 1];
 
-    await mac.registry.invoke('relay:unlink-computer-everywhere', [{ computerId, linksItMade: true }]);
+    const result = await mac.registry.invoke('relay:undo-join', [{ computerId }]);
 
-    expect(mac.listed()).toEqual(['Linux']);
-    expect(linux.listed()).toEqual(['Mac']);
-    for (const ours of [mac, linux]) {
-      for (const theirs of [windows, nas]) {
-        expect(await net.reaches(ours, theirs), `${ours.name} reaches ${theirs.name}`).toBe(false);
-        expect(await net.reaches(theirs, ours), `${theirs.name} reaches ${ours.name}`).toBe(false);
+    expect(result).toEqual({ removed: expect.arrayContaining(['Windows', 'NAS']), notReached: [] });
+    for (const group of [[mac, linux], [windows, nas]]) {
+      const others = [mac, linux, windows, nas].filter((computer) => !group.includes(computer));
+      for (const from of group) {
+        expect(from.listed(), `${from.name}'s list`).toEqual(group.filter((other) => other !== from).map((other) => other.name));
+        for (const to of group) if (to !== from) expect(await net.reaches(from, to), `${from.name} reaches ${to.name}`).toBe(true);
+        for (const to of others) expect(await net.reaches(from, to), `${from.name} reaches ${to.name}`).toBe(false);
       }
+    }
+  });
+
+  it('"Not you? Unlink" on a lone computer that a group joined leaves the group linked', async () => {
+    const net = network();
+    const [mac, linux, windows, nas] = [['Mac', 'macmacmacmacmac0'], ['Linux', 'linlinlinlinlin0'], ['Windows', 'winwinwinwinwin0'], ['NAS', 'nasnasnasnasnas0']]
+      .map(([name, seed]) => net.add(name, seed));
+    await linux.redeem(await mac.link());
+    await windows.redeem(await mac.link());
+    await nas.redeem(await mac.link());
+    const lone = net.add('Studio', 'stustustustustu0');
+    await linux.redeem(await lone.link());
+    const { computerId } = lone.paired[lone.paired.length - 1];
+
+    await lone.registry.invoke('relay:undo-join', [{ computerId }]);
+
+    const group = [mac, linux, windows, nas];
+    expect(lone.listed()).toEqual([]);
+    for (const from of group) {
+      expect(from.listed(), `${from.name}'s list`).toEqual(group.filter((other) => other !== from).map((other) => other.name).sort());
+      expect(await net.reaches(from, lone), `${from.name} reaches Studio`).toBe(false);
+      expect(await net.reaches(lone, from), `Studio reaches ${from.name}`).toBe(false);
+      for (const to of group) if (to !== from) expect(await net.reaches(from, to), `${from.name} reaches ${to.name}`).toBe(true);
     }
   });
 

@@ -156,4 +156,6 @@ export const RELAY_DEVICE_COMMANDS = {
   removePhoneEverywhere: 'relay:remove-phone-everywhere',
   /** `{computerId}` → `{removed: string[], notReached: string[]}` */
   unlinkComputerEverywhere: 'relay:unlink-computer-everywhere',
+  /** "Not you? Unlink" on the computer that made the link. `{computerId}` → `{removed, notReached}` (computer names). */
+  undoJoin: 'relay:undo-join',
 } as const;
