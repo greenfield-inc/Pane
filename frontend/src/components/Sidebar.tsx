@@ -122,7 +122,6 @@ interface SidebarProps {
   onAboutClick: () => void;
   onSettingsClick: () => void;
   onRemoteSettingsClick: () => void;
-  onAddMachineClick: () => void;
   /** Opens Remote Access with this Tailscale machine's password field. */
   onMachinePasswordRequest: (machineName: string) => void;
   width: number;
@@ -153,7 +152,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onAddMachineClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
+export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   // Maximize spreads the sidebar over the main area; minimize collapses it to its rail (P4).
   const shellRef = useRef<HTMLDivElement>(null);
@@ -359,7 +358,6 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
       allMachines={{ selected: allMachines, machines: savedMachines, onSelect: () => setAllMachines(true) }}
       onNeedsPassword={(machine) => onMachinePasswordRequest(machine.name)}
       onOpenChange={(open) => { if (open) void refreshMachines(); }}
-      onAddMachine={onAddMachineClick}
       onOpenRemoteAccess={onRemoteSettingsClick}
     />
   );

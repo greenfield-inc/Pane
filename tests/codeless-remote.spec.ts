@@ -24,42 +24,44 @@ async function openRemoteAccess(page: Page, options: { remoteConnectError?: stri
 }
 
 test.describe('Remote Access', () => {
-  test('lists every machine and connects to one without a code', async ({ page }) => {
+  test('lists every computer and connects to one without a code', async ({ page }) => {
     await openRemoteAccess(page);
-    await expect(page.getByTestId('active-machine')).toContainText('devbox');
-    await expect(page.getByTestId('active-machine')).toContainText('Linux · This computer · Agents run here');
-    await expect(page.getByText('On parsa.github')).toBeVisible();
+    const devbox = page.getByTestId('machine-devbox');
+    await expect(devbox).toContainText('Linux · Agents run here');
     const studio = page.getByTestId('machine-studio-mac');
-    await expect(studio).toContainText('macOS · Ready · Never connected');
+    await expect(studio).toContainText('macOS · Online · Not linked');
     await expect(page.getByTestId('machine-linux-box').getByRole('button', { name: /^Switch/ })).toHaveCount(0);
-    await expect(page.getByTestId('machine-team-builder')).toContainText('Needs password · Never connected · teammate@github');
+    await expect(page.getByTestId('machine-team-builder')).toContainText('Needs password · Not linked · teammate@github');
     await page.screenshot({ path: 'test-results/codeless-remote/01-machines.png', fullPage: true });
 
-    await page.getByRole('button', { name: 'Add a machine' }).click();
-    await expect(page.getByLabel('Connection Code')).toBeVisible();
-    await page.screenshot({ path: 'test-results/codeless-remote/07-add-with-code.png', fullPage: true });
-    await page.getByRole('button', { name: 'Cancel' }).click();
-
     await studio.getByRole('button', { name: 'Switch to studio-mac' }).click();
-    const active = page.getByTestId('active-machine');
-    await expect(active).toContainText('studio-mac');
-    await expect(active).toContainText('macOS · Agents run here · Connected over Tailscale');
+    await expect(studio).toContainText('macOS · Agents run here');
+    await expect(studio.getByLabel('Tailscale, in use')).toBeVisible();
     await page.screenshot({ path: 'test-results/codeless-remote/02-connected.png', fullPage: true });
 
-    await active.getByRole('button', { name: 'Switch back to devbox' }).click();
-    await expect(active).toContainText('Linux · This computer · Agents run here');
-    await expect(page.getByTestId('machine-studio-mac')).toContainText('macOS · Ready');
-    await expect(page.getByTestId('machine-studio-mac')).not.toContainText('Never connected');
+    await devbox.getByRole('button', { name: 'Switch to devbox' }).click();
+    await expect(devbox).toContainText('Linux · Agents run here');
+    await expect(studio).toContainText('macOS · Online');
+    await expect(studio).not.toContainText('Not linked');
+  });
+
+  test('pastes a connection code from the Tailscale tab', async ({ page }) => {
+    await openRemoteAccess(page);
+    await page.getByRole('tab', { name: 'Tailscale' }).click();
+    await expect(page.getByText('On parsa.github')).toBeVisible();
+    await page.getByRole('button', { name: 'Paste a connection code' }).click();
+    await expect(page.getByLabel('Connection Code')).toBeVisible();
+    await page.screenshot({ path: 'test-results/codeless-remote/07-add-with-code.png', fullPage: true });
   });
 
   test('keeps a failed connection retryable', async ({ page }) => {
     await openRemoteAccess(page, { remoteConnectError: 'studio-mac did not answer.' });
-    await page.getByTestId('machine-studio-mac').getByRole('button', { name: 'Switch to studio-mac' }).click();
-    const active = page.getByTestId('active-machine');
-    await expect(active).toContainText('studio-mac did not answer.');
-    await expect(active).toContainText('Connection failed · Retry');
-    await expect(active.getByRole('button', { name: 'Retry' })).toBeEnabled();
-    await expect(active.getByRole('button', { name: 'Switch back to devbox' })).toBeVisible();
+    const studio = page.getByTestId('machine-studio-mac');
+    await studio.getByRole('button', { name: 'Switch to studio-mac' }).click();
+    await expect(studio).toContainText('studio-mac did not answer.');
+    await expect(studio).toContainText('Connection failed · Retry');
+    await expect(studio.getByRole('button', { name: 'Retry studio-mac' })).toBeEnabled();
+    await expect(page.getByTestId('machine-devbox').getByRole('button', { name: 'Switch to devbox' })).toBeVisible();
   });
 
   test('asks for the password of a protected machine', async ({ page }) => {
@@ -69,31 +71,32 @@ test.describe('Remote Access', () => {
     await builder.getByLabel('Password for team-builder').fill('correct horse');
     await page.screenshot({ path: 'test-results/codeless-remote/03-password-prompt.png', fullPage: true });
     await builder.getByRole('button', { name: 'Connect' }).click();
-    await expect(page.getByTestId('active-machine')).toContainText('Windows · Agents run here');
+    await expect(builder).toContainText('Windows · Agents run here');
   });
 
-  test('repairs the active machine\'s password from its card', async ({ page }) => {
+  test('repairs the active machine\'s password from its row', async ({ page }) => {
     await openRemoteAccess(page, { remoteConnectError: 'team-builder refused the password.' });
     const builder = page.getByTestId('machine-team-builder');
     await builder.getByRole('button', { name: 'Switch to team-builder' }).click();
     await builder.getByLabel('Password for team-builder').fill('wrong horse');
     await builder.getByRole('button', { name: 'Connect' }).click();
 
-    const active = page.getByTestId('active-machine');
-    await expect(active).toContainText('Windows · Needs password');
-    await active.getByRole('button', { name: 'Enter password' }).click();
-    const field = active.getByLabel('Password for team-builder');
+    await expect(builder).toContainText('Windows · Needs password');
+    await builder.getByRole('button', { name: 'Enter password for team-builder' }).click();
+    const field = builder.getByLabel('Password for team-builder');
     await expect(field).toBeFocused();
     await field.fill('correct horse');
     await page.screenshot({ path: 'test-results/codeless-remote/09-active-password.png', fullPage: true });
-    await active.getByRole('button', { name: 'Connect' }).click();
-    await expect(active).toContainText('team-builder refused the password.');
+    await builder.getByRole('button', { name: 'Connect' }).click();
+    await expect(builder).toContainText('team-builder refused the password.');
   });
 
   test('shows a machine\'s details and forgets a saved one', async ({ page }) => {
     await openRemoteAccess(page);
-    await page.getByTestId('machine-studio-mac').getByRole('button', { name: 'Switch to studio-mac' }).click();
-    await page.getByTestId('active-machine').getByRole('button', { name: 'studio-mac details' }).click();
+    const studio = page.getByTestId('machine-studio-mac');
+    await studio.getByRole('button', { name: 'Switch to studio-mac' }).click();
+    await studio.getByRole('button', { name: 'studio-mac routes and details' }).click();
+    await studio.getByRole('button', { name: 'Colour and details' }).click();
     await expect(page.getByRole('heading', { name: 'studio-mac' })).toBeVisible();
     await expect(page.getByText('studio-mac.tail1234.ts.net', { exact: true })).toBeVisible();
     await expect(page.getByText('2.5.0', { exact: true })).toBeVisible();
@@ -102,11 +105,12 @@ test.describe('Remote Access', () => {
 
     await page.getByRole('button', { name: 'Forget studio-mac' }).click();
     await expect(page.getByRole('heading', { name: 'Remote Access', exact: true })).toBeVisible();
-    await expect(page.getByTestId('machine-studio-mac')).toContainText('Never connected');
+    await expect(page.getByTestId('machine-studio-mac')).toContainText('Not linked');
   });
 
   test('defaults to "Only me" and warns before widening to the whole tailnet', async ({ page }) => {
     await openRemoteAccess(page);
+    await page.getByRole('tab', { name: 'Tailscale' }).click();
     await expect(page.getByRole('heading', { name: /^Access/ })).toHaveText('Accesson devbox');
     const visibility = page.getByRole('radiogroup', { name: 'Who can connect to this computer' });
     await expect(visibility.getByRole('radio', { name: 'Only me' })).toHaveAttribute('aria-checked', 'true');
@@ -129,6 +133,7 @@ test.describe('Remote Access', () => {
 
   test('turns password protection on and off', async ({ page }) => {
     await openRemoteAccess(page);
+    await page.getByRole('tab', { name: 'Tailscale' }).click();
     await page.getByRole('button', { name: 'Set Password' }).click();
     await page.getByLabel('Password', { exact: true }).fill('short');
     await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
@@ -154,6 +159,7 @@ test.describe('Remote Access', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.getByRole('button', { name: 'Settings' }).first().click();
     await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
+    await page.getByRole('tab', { name: /^Phones and glasses/ }).click();
     const glasses = page.locator('[data-setting-id="remote-glasses"]');
     await expect(glasses).toContainText('Even G2');
     await expect(glasses).toContainText('Refused');
@@ -178,6 +184,7 @@ test.describe('Remote Access', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.getByRole('button', { name: 'Settings' }).first().click();
     await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
+    await page.getByRole('tab', { name: /^Phones and glasses/ }).click();
     const glasses = page.locator('[data-setting-id="remote-glasses"]');
     await glasses.scrollIntoViewIfNeeded();
     await page.screenshot({ path: 'test-results/codeless-remote/glasses-revoke-everywhere-before.png', fullPage: true });
@@ -202,6 +209,7 @@ test.describe('Remote Access', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.getByRole('button', { name: 'Settings' }).first().click();
     await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
+    await page.getByRole('tab', { name: /^Phones and glasses/ }).click();
     const glasses = page.locator('[data-setting-id="remote-glasses"]');
     await glasses.getByRole('button', { name: 'Revoke Even G2 · Parsa\'s iPhone on all my computers' }).click();
     await expect(glasses.getByRole('status')).toHaveText(failure);

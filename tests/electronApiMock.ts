@@ -22,6 +22,7 @@ import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/
 import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
+import type { ComputerRoute, RemoteComputer } from '../shared/types/remoteComputers';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -148,6 +149,8 @@ export type ElectronApiMockOptions = {
   };
   /** Client records this computer's host holds: phones, linked computers, glasses. */
   hostClients?: RemoteDaemonClientRecord[];
+  /** Saved computers with their routes, listed before the ones saved during the test. */
+  computers?: RemoteComputer[];
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -213,6 +216,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         clients: clone(mockOptions.hostClients ?? []),
       },
       client: {
+        computers: clone(mockOptions.computers ?? []),
         profiles: [],
         activeProfileId: null,
         mode: 'local',
@@ -542,7 +546,28 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
     };
 
+    // The seeded computers, then one computer per connection saved during the test (main converts the same way).
+    const seededComputers: RemoteComputer[] = clone(mockOptions.computers ?? []);
+    const computerOfProfile = (profile: RemotePaneConnectionProfile): RemoteComputer => {
+      const kind = profile.relay ? 'relay' : profile.tailnetMachine ? 'tailscale' : 'public';
+      const route: ComputerRoute = {
+        id: `${kind}:${profile.baseUrl}`,
+        kind,
+        source: profile.relay ? 'link' : profile.tailnetMachine ? 'found' : 'manual',
+        baseUrl: profile.baseUrl,
+        token: profile.token,
+      };
+      if (profile.tailnetMachine) route.tailnetMachine = profile.tailnetMachine;
+      if (profile.tailnetDomain) route.tailnetDomain = profile.tailnetDomain;
+      if (profile.relay) route.relay = { computerId: profile.relay.computerId, fingerprint: profile.relay.fingerprint };
+      return { id: profile.id, label: profile.label, routes: [route] };
+    };
     const syncRemoteDaemonConfig = () => {
+      const seededIds = new Set(seededComputers.map((computer) => computer.id));
+      remoteDaemonConfig.client.computers = [
+        ...seededComputers,
+        ...remoteDaemonConfig.client.profiles.filter((profile) => !seededIds.has(profile.id)).map(computerOfProfile),
+      ];
       configState.remoteDaemon = clone(remoteDaemonConfig);
     };
 
@@ -780,10 +805,35 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         syncRemoteDaemonConfig();
         return Promise.resolve(clone(relayStatus));
       }
+      if (channel === 'computers:set-public-url') {
+        // SAFETY: the renderer sends { url } to this command.
+        const { url } = args[0] as { url: string | null };
+        if (url !== null && !url.startsWith('https://')) {
+          return Promise.reject(new Error(`Error invoking remote method 'computers:set-public-url': Error [ERR_PUBLIC_URL_NOT_HTTPS]: ${url} is not an HTTPS address. Next: Enter the https:// address your proxy serves.`));
+        }
+        if (url === null) delete remoteDaemonConfig.host.publicUrl;
+        else remoteDaemonConfig.host.publicUrl = url;
+        syncRemoteDaemonConfig();
+        return Promise.resolve({ machineId: 'install-devbox', name: 'devbox', ...(url ? { publicUrl: url } : {}) });
+      }
+      if (channel === 'computers:reorder-routes') {
+        // SAFETY: the renderer sends { computerId, routeIds } to this command.
+        const { computerId, routeIds } = args[0] as { computerId: string; routeIds: string[] };
+        const computer = seededComputers.find((candidate) => candidate.id === computerId);
+        if (!computer) return Promise.reject(new Error(`Error invoking remote method 'computers:reorder-routes': Error: No saved computer ${computerId}.`));
+        computer.routes = routeIds.flatMap((routeId) => computer.routes.filter((route) => route.id === routeId));
+        syncRemoteDaemonConfig();
+        return Promise.resolve(clone(computer));
+      }
       if (channel === 'relay:remove-phone-everywhere' || channel === 'relay:unlink-computer-everywhere') {
         // SAFETY: the renderer sends { clientId } or { computerId } to these two commands.
         const target = args[0] as { clientId?: string; computerId?: string };
         remoteDaemonConfig.host.clients = remoteDaemonConfig.host.clients.filter((client) => client.id !== target.clientId && (!target.computerId || client.computerId !== target.computerId));
+        // Unlinking a computer drops its relay routes; a computer left with none goes from the list.
+        for (const computer of seededComputers) {
+          computer.routes = computer.routes.filter((route) => !target.computerId || route.relay?.computerId !== target.computerId);
+        }
+        seededComputers.splice(0, seededComputers.length, ...seededComputers.filter((computer) => computer.routes.length > 0));
         syncRemoteDaemonConfig();
         return Promise.resolve(clone(relayOptions.everywhere ?? { removed: ['devbox'], notReached: [] }));
       }
@@ -1700,6 +1750,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         deleteConnectionProfile: (profileId: string) => {
           remoteDaemonConfig.client.profiles = remoteDaemonConfig.client.profiles.filter((profile) => profile.id !== profileId);
+          const seededAt = seededComputers.findIndex((computer) => computer.id === profileId);
+          if (seededAt >= 0) seededComputers.splice(seededAt, 1);
           if (remoteDaemonConfig.client.activeProfileId === profileId) {
             remoteDaemonConfig.client.activeProfileId = null;
             remoteDaemonConfig.client.mode = 'local';
@@ -1723,17 +1775,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             remoteDaemonConfig.client.mode = updates.mode;
           }
 
+          syncRemoteDaemonConfig();
           if (remoteDaemonConfig.client.mode === 'remote' && remoteDaemonConfig.client.activeProfileId) {
-            const activeProfile = remoteDaemonConfig.client.profiles.find(
-              (profile) => profile.id === remoteDaemonConfig.client.activeProfileId
+            const activeComputer = remoteDaemonConfig.client.computers.find(
+              (computer) => computer.id === remoteDaemonConfig.client.activeProfileId
             );
-            const failure = activeProfile ? mockOptions.remoteConnectError ?? null : 'Missing remote profile';
+            const failure = activeComputer ? mockOptions.remoteConnectError ?? null : 'Missing remote profile';
             setRemoteConnectionState({
               mode: 'remote',
               status: failure ? 'error' : 'connected',
               activeProfileId: remoteDaemonConfig.client.activeProfileId,
-              activeProfileLabel: activeProfile?.label ?? null,
-              activeBaseUrl: activeProfile?.baseUrl ?? null,
+              activeProfileLabel: activeComputer?.label ?? null,
+              activeBaseUrl: activeComputer?.routes[0]?.baseUrl ?? null,
+              activeRouteId: failure ? null : activeComputer?.routes[0]?.id ?? null,
               lastError: failure,
             });
           } else {
@@ -1743,6 +1797,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
               activeProfileId: remoteDaemonConfig.client.activeProfileId,
               activeProfileLabel: null,
               activeBaseUrl: null,
+              activeRouteId: null,
               lastError: null,
             });
           }
@@ -1776,8 +1831,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           const list: TailnetMachineList = clone(mockOptions.tailnetMachines ?? { ok: true, tailnet: 'example.github', domain: 'tail1234.ts.net', machines: [] });
           if (list.ok) {
             for (const machine of list.machines) {
-              const profile = remoteDaemonConfig.client.profiles.find((candidate) => candidate.tailnetMachine === machine.name);
-              if (profile) machine.profileId = profile.id;
+              const computer = remoteDaemonConfig.client.computers.find((candidate) => candidate.routes.some((route) => route.tailnetMachine === machine.name));
+              if (computer) machine.profileId = computer.id;
             }
           }
           return success(list);

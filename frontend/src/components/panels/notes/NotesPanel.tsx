@@ -33,7 +33,7 @@ const OLDER_HOST = 'runs an older Pane';
 export default function NotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps) {
   const machine = useConfigStore(state => {
     const client = state.config?.remoteDaemon?.client;
-    return client?.mode === 'remote' ? client.profiles.find(profile => profile.id === client.activeProfileId)?.label : undefined;
+    return client?.mode === 'remote' ? client.computers.find(computer => computer.id === client.activeProfileId)?.label : undefined;
   });
   const [olderHost, setOlderHost] = useState(false);
   const [context, setContext] = useState<NoteContext>();
