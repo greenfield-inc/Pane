@@ -324,34 +324,48 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       }));
     },
   });
-  /** The runtime the draft's attachments went back into: once, though development mode runs the effect twice. */
-  const restoredInto = useRef<typeof runtime | undefined>(undefined);
-  // A layout effect, so leaving ends the restore before assistant-ui disposes the composer
-  // (a microtask queued on unmount), which would cancel the adds still waiting.
+  /**
+   * The draft's attachments going back into this runtime's composer: once, though development
+   * mode runs the effect twice. `mounted` counts the effect runs still in place.
+   */
+  const restore = useRef<{ runtime: typeof runtime; done: boolean; mounted: number } | undefined>(undefined);
+  // A layout effect: its cleanup runs as the panel leaves, before assistant-ui disposes the
+  // composer (a microtask queued on unmount) and cancels the adds still waiting.
   useLayoutEffect(() => {
     const composer = runtime.thread.composer;
-    const saved = restoredInto.current === runtime ? [] : draftAttachments.get(viewer) ?? [];
-    restoredInto.current = runtime;
-    composer.setText(viewer.snapshot().draft);
     const save = () => draftAttachments.set(viewer, composer.getState().attachments);
-    // Until every saved attachment is back, the saved list stays whole: a file copying again can
-    // take seconds, and leaving meanwhile keeps them all for next time.
-    let restoring = saved.length > 0;
-    // In their order: a file already copied to the chat's machine comes back with its path; an
-    // image (or a file still copying) is added again from the file itself. One that fails says
-    // why through attachmentAddError, below.
-    void (async () => {
-      for (const { id, type, name, contentType, content, file } of saved) {
-        const restored = content ? { id, type, name, contentType, content } : file;
-        if (restored) await composer.addAttachment(restored).catch(() => undefined);
-      }
-      if (!restoring) return;
-      restoring = false;
-      save();
-    })();
+    let current = restore.current;
+    if (!current || current.runtime !== runtime) {
+      const restoring = { runtime, done: false, mounted: 0 };
+      current = restore.current = restoring;
+      composer.setText(viewer.snapshot().draft);
+      const saved = draftAttachments.get(viewer) ?? [];
+      // In their order: a file already copied to the chat's machine comes back with its path; an
+      // image (or a file still copying) is added again from the file itself. One the chat now
+      // refuses says why through attachmentAddError, below.
+      void (async () => {
+        for (const { id, type, name, contentType, content, file } of saved) {
+          const restored = content ? { id, type, name, contentType, content } : file;
+          if (!restored) continue;
+          // On to the next once this one shows, without waiting for a file to copy again.
+          const count = composer.getState().attachments.length;
+          let stopWatching = () => {};
+          const shown = new Promise<void>(resolve => {
+            stopWatching = composer.subscribe(() => { if (composer.getState().attachments.length > count) resolve(); });
+          });
+          await Promise.race([composer.addAttachment(restored).catch(() => undefined), shown]);
+          stopWatching();
+        }
+        restoring.done = true;
+        // Left before every attachment was back: the saved list stays whole for next time.
+        if (restoring.mounted > 0) save();
+      })();
+    }
+    const run = current;
+    run.mounted += 1;
     // Sending empties the composer's attachments, and with them the saved ones.
-    const unsubscribe = composer.subscribe(() => { if (!restoring) save(); });
-    return () => { restoring = false; unsubscribe(); };
+    const unsubscribe = composer.subscribe(() => { if (run.done) save(); });
+    return () => { run.mounted -= 1; unsubscribe(); };
   }, [runtime, viewer]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.

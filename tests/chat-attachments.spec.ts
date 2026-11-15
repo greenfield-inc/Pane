@@ -151,10 +151,11 @@ test('leaving again while a file is still copying keeps every attachment of the 
   await open(page, 'files=1&holdCopies=1');
   await drop(page, [{ name: 'log.txt', type: 'text/plain' }, { name: 'shot.png', type: 'image/png' }]);
   await expect(chips(page).filter({ hasText: 'log.txt' })).toContainText('Copying…');
-  // Coming back starts copying log.txt again, which holds up shot.png; leave before it finishes.
+  // Coming back starts copying log.txt again; leave before it finishes, then come back.
   await page.evaluate(() => window.qaSwitchAway());
   await page.evaluate(() => window.qaSwitchAway());
+  // Both show while log.txt is still copying.
+  await expect(chips(page)).toHaveText(['log.txtCopying…', 'shot.png']);
   await page.evaluate(() => window.qaReleaseCopies?.());
   await expect(chips(page)).toHaveText(['log.txt', 'shot.png']);
-  await expect(chips(page).filter({ hasText: 'log.txt' })).not.toContainText('Copying…');
 });
