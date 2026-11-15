@@ -50,7 +50,7 @@ jobs:
             - '.github/workflows/quality.yml'
           relay:
             - 'relay/**'
-            - 'packages/runpane/src/relay.ts'
+            - 'packages/runpane/src/relay*.ts'
             - 'scripts/test-runpane-relay.js'
             - 'direct/**'
             - 'main/src/daemon/relay/**'

@@ -320,7 +320,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `agents doctor`: Diagnose whether a built-in agent command is available in a Pane repository environment.
 - `agent-context`: Print token-efficient Pane command context for coding agents.
 - `mcp`: Run the Pane MCP server over stdio so coding agents can call runpane commands as tools.
-- `relay`: Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags.
+- `relay`: Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags; init prints and checks the DNS records it needs.
 - `repos list`: List repositories saved in the running Pane app.
 - `repos add`: Register an existing git repository with the running Pane app.
 - `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
@@ -447,6 +447,7 @@ runpane agent-context [--json]
 runpane agent-context --command <command> [--json]
 runpane mcp [--toolsets <name,...>] [--read-only]
 runpane relay [pane-relay flags...]
+runpane relay init --domain <relay domain> [--public-ip <IPv4>] [--resolver <ip[:port]>]
 runpane repos list [--json] [--pane-dir <path>]
 runpane repos add --path <path> [--name <name>] [--json] [--yes] [--pane-dir <path>]
 runpane repos get [--repo <selector>] [--json] [--pane-dir <path>]
