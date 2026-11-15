@@ -10,7 +10,7 @@ open-source binary, `pane-relay` ([`relay/`](../relay)); its wire protocol is
 
 ## Start one in five minutes
 
-This needs Pane 2.4.226 or later: that release is the first with the relay
+This needs Pane 2.4.227 or later: that release is the first with the relay
 image, `compose.yaml` and `runpane relay init`.
 
 You need:
@@ -104,7 +104,7 @@ docker compose up -d
 ```
 
 `PANE_RELAY_VERSION` in `.env` picks another release instead, such as
-`PANE_RELAY_VERSION=2.4.226`; images start with 2.4.226. Certificates
+`PANE_RELAY_VERSION=2.4.227`; images start with 2.4.227. Certificates
 renew on their own, without a restart, and live in the `pane-relay` Docker
 volume.
 
