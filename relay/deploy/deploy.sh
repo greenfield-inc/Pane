@@ -93,6 +93,9 @@ NS_IPS="ns1=${IP_us},ns2=${IP_eu}"
 
 # 3. The VMs. The startup script reads secrets from Secret Manager with the VM's
 #    own identity and (re)starts the container; rerunning it updates the image.
+#    gcloud reads it from a file: --metadata splits its value on commas.
+startup_file=$(mktemp)
+trap 'rm -f "$startup_file"' EXIT
 for line in "${RELAYS[@]}"; do
   read -r name region zone ns <<<"$line"
   # A helper updates itself in memory, so it lists only the other helper.
@@ -106,8 +109,8 @@ for line in "${RELAYS[@]}"; do
   startup=$(cat <<EOF
 #!/bin/bash
 set -euo pipefail
-token=\$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
-secret() { curl -sf -H "Authorization: Bearer \$token" "https://secretmanager.googleapis.com/v1/projects/$PROJECT/secrets/\$1/versions/latest:access" | sed -E 's/.*"data":"([^"]+)".*/\1/' | base64 -d; }
+token=\$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | tr -d '\n' | sed -E 's/.*"access_token": *"([^"]+)".*/\1/')
+secret() { curl -sf -H "Authorization: Bearer \$token" "https://secretmanager.googleapis.com/v1/projects/$PROJECT/secrets/\$1/versions/latest:access" | tr -d '\n' | sed -E 's/.*"data": *"([^"]+)".*/\1/' | base64 -d; }
 install -d -m 0700 -o 65532 -g 65532 /var/lib/pane-relay
 secret pane-relay-registry-secret > /var/lib/pane-relay/registry-secret
 secret pane-relay-apns-key > /var/lib/pane-relay/apns-key.p8 || rm -f /var/lib/pane-relay/apns-key.p8
@@ -132,8 +135,9 @@ docker run -d --name pane-relay --restart always \
   --fcm-project $PROJECT \${apns} ${ANDROID_SHA:+--android-cert-sha256 $ANDROID_SHA}
 EOF
 )
+  printf '%s\n' "$startup" >"$startup_file"
   if exists compute instances describe "pane-relay-$name" --zone "$zone"; then
-    gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata "startup-script=$startup"
+    gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata-from-file "startup-script=$startup_file"
     gc compute instances reset "pane-relay-$name" --zone "$zone"
   else
     # Secret Manager accepts only the cloud-platform scope, so the scope stays
@@ -141,7 +145,7 @@ EOF
     gc compute instances create "pane-relay-$name" --zone "$zone" --machine-type "$MACHINE" \
       --image-family cos-stable --image-project cos-cloud --tags pane-relay \
       --address "pane-relay-$name" --service-account "$SA" --scopes cloud-platform \
-      --metadata "startup-script=$startup"
+      --metadata-from-file "startup-script=$startup_file"
   fi
 done
 
