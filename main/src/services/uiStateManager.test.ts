@@ -228,17 +228,13 @@ describe('UIStateManager launch chat outline', () => {
   const group = { type: 'group' as const, id: 'g', panelIds: ['chat', 'shell'], activePanelId: 'chat' };
 
   it('draws the chat above the terminal strip when the Pane has a plain terminal', () => {
-    expect(outline(group, [chat, shell])).toEqual({ panelId: 'chat', dockTerminal: true, sessionChat: false });
+    expect(outline(group, [chat, shell])).toEqual({ panelId: 'chat', dockTerminal: true });
   });
 
   it('draws no strip when every terminal runs an agent', () => {
-    expect(outline({ ...group, panelIds: ['chat', 'agent'] }, [chat, agent])).toEqual({ panelId: 'chat', dockTerminal: false, sessionChat: false });
+    expect(outline({ ...group, panelIds: ['chat', 'agent'] }, [chat, agent])).toEqual({ panelId: 'chat', dockTerminal: false });
   });
 
-  it("knows a Session's chat, which has its own placeholder", () => {
-    const sessionChat = tab('chat', 'chat', { orchestrationSessionId: 'session-1' });
-    expect(outline({ ...group, panelIds: ['chat'] }, [sessionChat])).toEqual({ panelId: 'chat', dockTerminal: false, sessionChat: true });
-  });
 
   it('leaves a split layout to the app', () => {
     expect(outline({ type: 'split', id: 's', direction: 'row', sizes: [50, 50], children: [group, { ...group, id: 'h', activePanelId: 'shell' }] }, [chat, shell])).toBeNull();

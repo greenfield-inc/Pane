@@ -278,13 +278,7 @@ class UIStateManager {
   getLaunchChatOutline(panes: LaunchOutlinePanes): LaunchChatOutline | null {
     const chat = this.getLaunchChat(panes);
     if (!chat || this.getPaneLayout(null, chat.paneId)?.root.type !== 'group') return null;
-    const tabs = panes.getPanelsForSession(chat.paneId);
-    const state = tabs.find(tab => tab.id === chat.panelId)?.state.customState;
-    return {
-      panelId: chat.panelId,
-      dockTerminal: !!getDockTerminalPanel(tabs),
-      sessionChat: !!state && 'orchestrationSessionId' in state && !!state.orchestrationSessionId,
-    };
+    return { panelId: chat.panelId, dockTerminal: !!getDockTerminalPanel(panes.getPanelsForSession(chat.paneId)) };
   }
 
   getExpandedState(): ExpandedUiState {

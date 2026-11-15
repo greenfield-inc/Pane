@@ -152,7 +152,7 @@
             : clamp(Math.round(preferred('pane-bottom-terminal-height:v2', 'pane-bottom-terminal-height', 100, 500, 200) ?? Math.round(centerHeight * 0.32)), ...terminalBounds);
           const input = el('textarea', 'chat-input', {});
           input.rows = 1;
-          input.placeholder = chat.sessionChat ? 'Ask the Session anything' : 'Ask anything';
+          input.placeholder = 'Ask anything';
           input.setAttribute('aria-label', 'Message');
           input.dataset.launchComposer = chat.panelId;
           // Enter sends once the chat is ready (D-62); Shift+Enter is a new line, and IME keys are the input method's.

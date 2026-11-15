@@ -44,7 +44,7 @@ export type ElectronApiMockOptions = {
   windowControlsOverlayEnabled?: boolean;
   appearanceSnapshot?: boolean;
   /** The chat this launch reopens: main's answer, and the outline it draws in the first frame (index.html). */
-  launchChat?: { paneId: string; panelId: string; dockTerminal?: boolean; sessionChat?: boolean };
+  launchChat?: { paneId: string; panelId: string; dockTerminal?: boolean };
   availableShells?: Array<Record<string, string>>;
   configReadDelayMs?: number;
   configGetFailures?: number;
@@ -1031,7 +1031,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       launchChat: mockOptions.launchChat && {
         panelId: mockOptions.launchChat.panelId,
         dockTerminal: mockOptions.launchChat.dockTerminal ?? false,
-        sessionChat: mockOptions.launchChat.sessionChat ?? false,
       },
       setTitleBarOverlay: (colors: JsonObject) => {
         titleBarOverlayWrites.push(clone(colors));
