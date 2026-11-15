@@ -1,6 +1,6 @@
 name: Deploy Pane relays
 
-# Manual only: creates or updates the three relay VMs on Google Compute Engine.
+# Manual only: creates or updates the relay VMs on Google Compute Engine.
 # It spends money and changes production, so run it only with Parsa's go-ahead.
 # Runbook: relay/deploy/RUNBOOK.md
 on:

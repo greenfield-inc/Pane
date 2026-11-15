@@ -36,9 +36,10 @@ certificate. The computer holds the private key; it never leaves the
 computer.
 
 - **Same Wi-Fi:** the Pane app connects to the computer directly.
-- **Anywhere else:** Pane's servers in the US, EU and Asia pass the encrypted
-  connection along without reading it. The Pane app and desktop also find a
-  direct internet path when both networks allow it, the way Tailscale does.
+- **Anywhere else:** Pane's servers in the central and western US, the EU
+  and Asia pass the encrypted connection along without reading it. The Pane
+  app and desktop also find a direct internet path when both networks allow
+  it, the way Tailscale does.
 
 Pane's servers see which computer a connection is for, IP addresses, timing
 and byte counts. They never see what you type, what your agents print, your

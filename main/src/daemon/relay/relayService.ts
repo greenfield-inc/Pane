@@ -18,7 +18,7 @@ import { findPaneDirect, PaneDirectProcess } from './paneDirect';
 import { DEFAULT_RELAY_DOMAIN } from '../../../../shared/remoteClient/relay';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 
-const PANE_RELAYS = ['us', 'eu', 'asia'].map((region) => `${region}.relay.${DEFAULT_RELAY_DOMAIN}`);
+const PANE_RELAYS = ['us', 'eu', 'asia', 'west'].map((region) => `${region}.relay.${DEFAULT_RELAY_DOMAIN}`);
 /** The port same-network phones reach this computer on; another free port when it is taken. */
 const LOCAL_PORT = 42138;
 const RENEW_CHECK_MS = 12 * 60 * 60_000;
