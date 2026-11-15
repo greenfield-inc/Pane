@@ -134,7 +134,8 @@ import { worktreePoolManager } from './services/worktreePoolManager';
 import { removePaneFsmonitorConfig } from './services/gitPerformanceConfig';
 import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
-import { MachineConnections } from './services/machineConnections';
+import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
+import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
@@ -1212,6 +1213,17 @@ async function initializeServices() {
   powerMonitor.on('resume', () => machines.resume());
   // The Notify inbox, badge and tray count cover every saved machine, in any mode.
   followSavedMachines(machineConnections);
+  // A Session's members on saved machines: their reports reach this computer's journal and overview.
+  const sessionsManager = services.orchestrationSessionManager;
+  if (sessionsManager && services.workspaceJournal) {
+    const remoteMembers = new RemoteMemberEvents({
+      machines: { subscribe: listener => machines.subscribe(listener), invoke: (machineId, channel, args) => machines.invokeOn(machineId, channel, args) },
+      journal: services.workspaceJournal,
+      members: sessionsManager,
+    });
+    remoteMembers.start();
+    sessionsManager.setRemoteMachines(remoteMachineAccess(machines));
+  }
 
   // Read before the first identity lookup overwrites it, so the renderer can
   // tell when the desktop id changed since the last launch.

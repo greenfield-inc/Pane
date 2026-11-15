@@ -571,11 +571,30 @@ runpane lock list --json
   they're done. Workers then queue behind it instead of asking.
 - `sessions overview` shows the Session's locks and who holds each.
 
-## Hand work to another machine
+## Work on other machines
 
-`runpane handoff` moves a task to a fresh agent on this or another machine:
-the agent fills in `runpane handoff --template`, then runs
-`runpane handoff "<destination>" --note-file <note> [--push]`.
+- **A worker on another machine:** create its Pane there from this Session:
+  `runpane workspace <machine> panes create --repo <repo there> --name <name>
+  --tool-command "<agent> <its model flag> <model> ..." --source agent --yes --json`.
+  The repository must be saved there (`runpane workspace <machine> repos list
+  --json`); pick a WSL repository to run in WSL. Check `association.ok` and
+  `association.machine`: the Pane joins this Session, and its reports, blocked
+  questions and exits reach your watch and Approvals like a local worker's.
+  `ERR_MACHINE_NOT_SAVED` means the machine isn't saved on this computer: the
+  Pane runs but reports nowhere; ask the person to add the machine. An
+  `association.code` of `ERR_MACHINE_OLDER_PANE` means that machine's Pane needs
+  updating first. Read or message the worker with `runpane workspace <machine>
+  panels ...`.
+- **A question for another model:** `runpane ask --agent <agent> [--model <m>]
+  [--machine <name>] [--repo <repo> | --pane <id>] --prompt "<question>" --json`
+  runs one read-only turn and returns the answer, leaving no tab. Use it for
+  second opinions and questions; work that edits files goes to a tab. Run
+  several as parallel background commands to ask several models at once.
+- **Which models exist:** `runpane models [--agent <a>] [--search <text>]
+  [--machine <name> | --all] --json`.
+- **Moving your own task:** `runpane handoff` moves a task to a fresh agent on
+  this or another machine: the agent fills in `runpane handoff --template`,
+  then runs `runpane handoff "<destination>" --note-file <note> [--push]`.
 
 ## Keep the Session tidy
 

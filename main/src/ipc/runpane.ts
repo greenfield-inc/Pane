@@ -218,6 +218,7 @@ import type {
   RunpaneInboxListResult,
   RunpaneSessionListResult,
   RunpaneSessionResult,
+  RunpaneRemoteAssociationResult,
   RunpaneSessionOverviewResult,
   RunpaneSessionSelector,
   RunpaneLockAcquireRequest,
@@ -249,7 +250,9 @@ import type {
   OrchestrationSessionRecord,
   OrchestrationSessionSelector,
   OrchestrationSessionUpdateInput,
+  OrchestrationPaneOverview,
 } from '../../../shared/types/orchestrationSession';
+import type { AppConfig } from '../types/config';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import { getAppDirectory } from '../utils/appDirectory';
 import { collectRemoteDaemonExecutableHealthAsync } from '../daemon/remoteDaemonExecutableHealth';
@@ -289,6 +292,8 @@ const RUNPANE_CHANNELS = [
   'runpane:sessions:update',
   'runpane:sessions:set-agent',
   'runpane:sessions:associate',
+  'runpane:sessions:associate-remote',
+  'runpane:panes:overview',
   'runpane:sessions:detach',
   'runpane:sessions:overview',
   'runpane:locks:acquire',
@@ -789,6 +794,44 @@ export function registerRunpaneHandlers(
       const session = await manager.associate(normalized.selector, normalized.association);
       return { ok: true, session };
     }, result => ({ resultCount: 1 }));
+  });
+
+  // A Pane another machine created for this computer's Session (`runpane workspace <machine> panes create`).
+  commandRegistry.register('runpane:sessions:associate-remote', async (request: PaneCommandValue): Promise<RunpaneRemoteAssociationResult> => {
+    return withRunpaneAction(services, 'sessions:associate-remote', {}, async () => {
+      const manager = requireOrchestrationSessionManager(services);
+      const normalized = decodeBoundary(request, remoteAssociationRequestSchema);
+      const profile = savedMachineProfile(services.configManager.getConfig(), normalized.machine);
+      if (!profile) {
+        throw new PaneError('ERR_MACHINE_NOT_SAVED',
+          `${normalized.machine} is not a saved machine on this computer, so its Pane ${normalized.name} can't join the Session: only saved machines send their reports here. The Pane was created there and keeps running.`,
+          `Save ${normalized.machine} on this computer (the machine switcher > Add a machine). Panes this Session creates there afterwards join it.`);
+      }
+      const machine = { id: profile.id, label: profile.label };
+      const session = await manager.associateRemote(parseOrchestrationSessionSelector(normalized.selector), {
+        paneId: normalized.paneId,
+        name: normalized.name,
+        panelIds: normalized.panelIds,
+        machine,
+      });
+      const result: RunpaneRemoteAssociationResult = { ok: true, session, machine };
+      if (manager.remoteMachineForwardsReports(profile.id) === false) {
+        result.warning = {
+          code: 'ERR_MACHINE_OLDER_PANE',
+          message: `Pane on ${profile.label} is older than remote Session members, so reports, blocked questions and exits from this Pane won't reach this Session.`,
+          next: `Update Pane on ${profile.label} (runpane workspace ${normalized.machine} exec -- runpane update), then reconnect it.`,
+        };
+      }
+      return result;
+    }, () => ({ resultCount: 1 }));
+  });
+
+  // One Pane's overview row, for a Session on another computer that this Pane belongs to.
+  commandRegistry.register('runpane:panes:overview', async (request: PaneCommandValue): Promise<{ ok: true; pane: OrchestrationPaneOverview }> => {
+    return withRunpaneAction(services, 'panes:overview', {}, async () => {
+      const { paneId } = decodeBoundary(request, boundary.object({ paneId: boundary.nonEmptyString }));
+      return { ok: true, pane: await requireOrchestrationSessionManager(services).paneOverview(paneId) };
+    }, () => ({ resultCount: 1 }));
   });
 
   commandRegistry.register('runpane:sessions:detach', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
@@ -7257,4 +7300,19 @@ function optionalAgentId(value: PaneCommandValue): RunpaneAgentId | undefined {
   } catch {
     return undefined;
   }
+}
+
+const remoteAssociationRequestSchema = boundary.object({
+  selector: boundary.json,
+  machine: boundary.nonEmptyString,
+  paneId: boundary.nonEmptyString,
+  name: boundary.nonEmptyString,
+  panelIds: boundary.optional(boundary.array(boundary.nonEmptyString)),
+});
+
+/** The saved machine a name refers to: its Tailscale machine name, its label, or its profile id. */
+function savedMachineProfile(config: AppConfig, name: string): { id: string; label: string } | undefined {
+  const wanted = name.trim().toLowerCase().replace(/\..*$/, '');
+  return (config.remoteDaemon?.client.profiles ?? []).find(profile => [profile.tailnetMachine, profile.label, profile.id]
+    .some(value => value?.toLowerCase() === wanted || value?.toLowerCase() === name.trim().toLowerCase()));
 }

@@ -159,6 +159,35 @@
           "registryIds": [
             "claude-acp"
           ]
+        },
+        "models": {
+          "flag": "--model",
+          "effortFlag": "--effort",
+          "aliases": [
+            "fable",
+            "opus",
+            "sonnet",
+            "haiku"
+          ],
+          "status": {
+            "args": [
+              "auth",
+              "status"
+            ],
+            "format": "json-logged-in"
+          }
+        },
+        "ask": {
+          "args": [
+            "-p",
+            "--output-format",
+            "json",
+            "--permission-mode",
+            "default",
+            "--strict-mcp-config",
+            "--tools=Read,Grep,Glob"
+          ],
+          "output": "result-json"
         }
       },
       "codex": {
@@ -211,6 +240,38 @@
           "registryIds": [
             "codex-acp"
           ]
+        },
+        "models": {
+          "flag": "-m",
+          "effortConfig": "model_reasoning_effort",
+          "list": {
+            "args": [
+              "debug",
+              "models"
+            ],
+            "format": "json-models"
+          },
+          "status": {
+            "args": [
+              "login",
+              "status"
+            ],
+            "format": "text"
+          }
+        },
+        "ask": {
+          "args": [
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--ignore-user-config",
+            "--disable",
+            "apps",
+            "-s",
+            "read-only"
+          ],
+          "output": "codex-jsonl"
         }
       },
       "cursor": {
@@ -264,6 +325,32 @@
           "registryIds": [
             "cursor"
           ]
+        },
+        "models": {
+          "flag": "--model",
+          "list": {
+            "args": [
+              "models"
+            ],
+            "format": "dash-lines"
+          },
+          "status": {
+            "args": [
+              "status"
+            ],
+            "format": "text"
+          }
+        },
+        "ask": {
+          "args": [
+            "-p",
+            "--trust",
+            "--mode",
+            "ask",
+            "--output-format",
+            "json"
+          ],
+          "output": "result-json"
         }
       },
       "opencode": {
@@ -307,6 +394,35 @@
             "opencode",
             "opencode-v2"
           ]
+        },
+        "models": {
+          "flag": "--model",
+          "list": {
+            "args": [
+              "models"
+            ],
+            "format": "lines"
+          },
+          "status": {
+            "args": [
+              "auth",
+              "list"
+            ],
+            "format": "text"
+          }
+        },
+        "ask": {
+          "args": [
+            "run",
+            "--format",
+            "json",
+            "--agent",
+            "plan"
+          ],
+          "env": {
+            "OPENCODE_CONFIG_CONTENT": "{\"permission\":{\"edit\":\"deny\",\"bash\":\"deny\"},\"tools\":{\"*_*\":false}}"
+          },
+          "output": "opencode-jsonl"
         }
       },
       "pi": {
@@ -344,7 +460,10 @@
         },
         "transcriptDirs": [
           ".pi/agent/sessions"
-        ]
+        ],
+        "models": {
+          "flag": "--model"
+        }
       }
     }
   },
@@ -871,6 +990,46 @@
         "npm"
       ],
       "localControl": true
+    },
+    {
+      "name": "ask",
+      "summary": "Ask any agent and model one read-only question, on this or another machine, and get its answer: no tab is opened and nothing is left behind.",
+      "usage": [
+        "runpane ask --agent <claude|codex|cursor|opencode> (--prompt \"<question>\" | --prompt-file <path|->) [--model <model>] [--machine <name>] [--repo <selector> | --pane <pane-id>] [--timeout <duration>] [--json]"
+      ],
+      "mutates": false,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true,
+      "mcpName": "agents_ask",
+      "openWorld": true,
+      "toolsets": [
+        "core",
+        "agents"
+      ],
+      "jsonSchemas": [
+        "askResult"
+      ]
+    },
+    {
+      "name": "models",
+      "summary": "List the models each installed agent offers, on this machine, another one, or every saved machine, with what each agent reports about its sign-in. Read live on every call.",
+      "usage": [
+        "runpane models [--agent <codex|claude|cursor|opencode|pi>] [--search <text>] [--machine <name> | --all] [--json]"
+      ],
+      "mutates": false,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true,
+      "openWorld": true,
+      "toolsets": [
+        "agents"
+      ],
+      "jsonSchemas": [
+        "modelsResult"
+      ]
     },
     {
       "name": "watch",
@@ -2793,12 +2952,12 @@
       {
         "name": "--machine",
         "value": "<name>",
-        "description": "Handoff destination machine; overrides the machine in the destination text."
+        "description": "Machine to run on: the handoff destination (overrides the destination text), or where ask and models run."
       },
       {
         "name": "--model",
         "value": "<model>",
-        "description": "Model for the receiving agent; overrides the destination text."
+        "description": "Model: for the receiving agent of a handoff (overrides the destination text), or the agent runpane ask runs."
       },
       {
         "name": "--effort",
@@ -3004,6 +3163,11 @@
         "name": "--theme",
         "value": "<id>",
         "description": "A theme id to select: custom or one of the shipped themes."
+      },
+      {
+        "name": "--search",
+        "value": "<text>",
+        "description": "models only: keep models whose name contains this text."
       }
     ],
     "localBoolean": [
@@ -4923,6 +5087,36 @@
         "  runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md --push",
         "  runpane handoff \"codex gpt-5 high on parsa-devbox\" --note-file ~/handoff.md --dry-run"
       ],
+      "ask": [
+        "Usage:",
+        "  runpane ask --agent <claude|codex|cursor|opencode> (--prompt \"<question>\" | --prompt-file <path|->) [--model <model>] [--machine <name>] [--repo <selector> | --pane <pane-id>] [--timeout <duration>] [--json]",
+        "",
+        "Ask one agent one question and print its answer. The agent runs once, headless and read-only:",
+        "it can read files but not edit them or run shell commands. No tab is opened.",
+        "",
+        "--machine runs it on another machine in your workspace (runpane workspace list). --repo runs it in",
+        "that saved repository there (a WSL repository runs in WSL); --pane runs it in that Pane's worktree.",
+        "--model takes any name the agent accepts (runpane models lists them). --timeout defaults to 10m;",
+        "on another machine it is at most 9m. --json prints answer, agent, model, machine, environment,",
+        "durationMs and costUsd when the agent reports it.",
+        "",
+        "Examples:",
+        "  runpane ask --agent claude --model sonnet --prompt \"Is this migration safe to run twice?\" --repo Pane --json",
+        "  runpane ask --agent codex --machine parsa-devbox --repo \"Pane (win)\" --prompt \"Why does this test fail on Windows?\""
+      ],
+      "models": [
+        "Usage:",
+        "  runpane models [--agent <codex|claude|cursor|opencode|pi>] [--search <text>] [--machine <name> | --all] [--json]",
+        "",
+        "List the models each installed agent offers, from the agent's own list, with its sign-in in its own",
+        "words. --all covers this machine and every saved machine, and the WSL of a machine with a saved WSL",
+        "repository. A machine that does not answer shows one unreachable row; an agent whose list can't be",
+        "read shows list unavailable, and runpane ask still accepts any model name for it.",
+        "",
+        "Examples:",
+        "  runpane models --all --json",
+        "  runpane models --agent opencode --search deepseek"
+      ],
       "sessions pin": [
         "Usage:",
         "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
@@ -6827,6 +7021,20 @@
         "`runpane handoff` ships in the npm package and the Pane app, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest handoff"
       ],
+      "ask": [
+        "Usage:",
+        "  runpane ask --agent <claude|codex|cursor|opencode> (--prompt \"<question>\" | --prompt-file <path|->) [--model <model>] [--machine <name>] [--repo <selector> | --pane <pane-id>] [--timeout <duration>] [--json]",
+        "",
+        "`runpane ask` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest ask"
+      ],
+      "models": [
+        "Usage:",
+        "  runpane models [--agent <codex|claude|cursor|opencode|pi>] [--search <text>] [--machine <name> | --all] [--json]",
+        "",
+        "`runpane models` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest models"
+      ],
       "sessions pin": [
         "Usage:",
         "python -m runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
@@ -7286,6 +7494,8 @@
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
       "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
       "`runpane handoff` hands a task to another agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. When the sender is a Pane tab running a Claude, Codex, Cursor or OpenCode session and the receiver is the same agent, the handoff carries that session: on another machine its files are copied into that machine's agent store and the receiver resumes the same id; on this machine the receiver resumes a fork, because two agents never resume one session on one machine. The receiver starts with no prompt, and the CLI runs the continuity check and reports JSON `continuity.result` `continued`, `inconclusive` (exit 0; `next` gives a probe question) or `not-continued` (exit 1; the receiver is kept and `next` gives the `--note-only` command). `--note-only`, a different agent, or a tab with no carried session starts a fresh agent with the note (`fresh-agent`). JSON `continuity` is `{ carried, result, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }`: `sessionId` is the sender's session, `resumedId` the id the receiver resumes (the fork's on this machine), `checks` are the continuity checks (`historyLoaded` is null when there was nothing to compare; `originalUntouched` is set for forks), and a dry run sets `carried`, `sessionId`, `fork`, `files` and `bytes` with no `result`. After `continued` or `inconclusive` the sending agent ends its turn and makes no more changes on the branch. An OpenCode session travels as its export: `opencode export` on this machine, then `opencode import` inside the receiving repository there, and an OpenCode receiver is accepted only to continue an OpenCode session. A Cursor session is carried only to another machine, best effort since Cursor's store is undocumented: Cursor has no fork, and a copied chat still writes to the original, so on this machine the result is `not-continued` and nothing is started. A destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`); a copy already there is replaced only when the sender's holds all of it and no agent there runs it, otherwise nothing is copied and the result is `not-continued`. A destination Pane too old to resume a carried session is refused before anything is sent (`ERR_HANDOFF_RESUME_UNSUPPORTED`). From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead; a same-agent Session resumes the sender's conversation when first opened. The receiver reports back to the sender's panel.",
+      "`runpane ask --agent <agent> --prompt \"<question>\"` asks one agent one read-only question and prints its answer, with no tab left behind: the agent's own headless mode runs once, on this machine or another one (`--machine`), in a saved repository (`--repo`, a WSL repository runs in WSL) or a Pane's worktree (`--pane`), with any model it accepts (`--model`). It can read files but not edit them or run shell commands; an agent with no such mode is refused (`ERR_ASK_UNSUPPORTED`). A missing agent, a sign-in error, an unknown model and a timeout each fail with the agent's own words and the next step. Use it for a second opinion or a question to another model; work that edits files goes to a tab.",
+      "`runpane models` lists the models each installed agent offers, read from the agent's own list on every call, with its sign-in as the agent reports it. `--all` covers this machine, every saved machine and their WSL; `--agent` and `--search` narrow the rows. A machine that does not answer is one `unreachable` row; a list that can't be read is `list unavailable`.",
       "`runpane pr watch`: Register durable GitHub PR monitoring for a Pane.",
       "`runpane pr unwatch`: Remove a Pane’s explicit PR registration.",
       "`runpane pr list`: List PR registrations and stopped watches.",
@@ -17935,6 +18145,98 @@
         }
       },
       "additionalProperties": false
+    },
+    "askResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "answer",
+        "agent",
+        "machine",
+        "environment",
+        "durationMs"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "answer": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "native",
+            "wsl"
+          ]
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "costUsd": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "modelsResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "signInReportedBy",
+        "rows"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "signInReportedBy": {
+          "const": "agent"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "machine",
+              "environment"
+            ],
+            "properties": {
+              "machine": {
+                "type": "string"
+              },
+              "environment": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "signIn": {
+                "type": "string"
+              },
+              "note": {
+                "enum": [
+                  "unreachable",
+                  "list unavailable"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "agentContext": {
@@ -23006,6 +23308,121 @@
           "Model and effort become agent flags: claude --model/--effort, codex -m and -c model_reasoning_effort, cursor-agent --model. Cursor effort is not supported and is rejected before side effects.",
           "Run it from the checkout being handed off. On another machine the receiver works in a new Pane; on this machine, from the Pane that owns this checkout, it works in a new tab of that Pane (the result's receiver.route and receiver.reason say which). Either way it pushes back to your branch, so stop changing that branch yourself.",
           "JSON continuity: { carried, result: continued | inconclusive | not-continued | fresh-agent, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }; a dry run sets carried, sessionId, fork, files and bytes and no result. inconclusive exits 0 and next says to ask the receiver \"What were you last working on? Answer in one or two sentences.\"; not-continued exits 1, keeps the receiver and gives the --note-only command for the person to choose. After continued or inconclusive, the sender ends its turn and makes no more changes on the branch. From a Session the result is inconclusive until the new Session is opened. A Cursor session is carried only to another machine (best effort); on this machine the result is not-continued, since a copied Cursor chat still writes to the original. The destination's agent store is assumed at its default location (~/.claude, ~/.codex, ~/.cursor); a copy already there that holds history the sender's lacks, or that an agent there is running, is never overwritten (not-continued). checks.originalAppended is set when the running sender's own turn appended to its transcript during the fork; every byte it held before is unchanged. A destination Pane too old to resume a carried session is refused before anything is sent (ERR_HANDOFF_RESUME_UNSUPPORTED)."
+        ]
+      },
+      "ask": {
+        "name": "ask",
+        "summary": "Ask any agent and model one read-only question, on this or another machine, and get its answer: no tab is opened and nothing is left behind.",
+        "details": "Runs the agent's own headless mode once with flags that refuse edits and shell commands (Claude: -p with only Read, Grep and Glob and no MCP servers; Codex: exec -s read-only without the user's config, MCP servers or apps; Cursor: -p --mode ask; OpenCode: run --agent plan with edit, bash and every MCP tool denied), waits for it, and prints its final answer. Nothing is stored and no tab or Pane is created. On another machine it runs through that machine's Pane (runpane workspace); a WSL repository runs inside WSL. Use it for second opinions and questions to another model; anything that edits files or needs an approval goes to a tab (runpane panes create, with the model in --tool-command). Start several in parallel as background shell commands to ask several models at once.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--agent",
+            "value": "<claude|codex|cursor|opencode>",
+            "required": true,
+            "description": "The agent to ask. Pi has no read-only headless mode and is refused."
+          },
+          {
+            "name": "--prompt",
+            "value": "<text>",
+            "required": false,
+            "description": "The question. Required unless --prompt-file."
+          },
+          {
+            "name": "--prompt-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Read the question from a file; - reads stdin."
+          },
+          {
+            "name": "--model",
+            "value": "<model>",
+            "required": false,
+            "description": "Any model name the agent accepts (runpane models lists them). Omit for the agent's default."
+          },
+          {
+            "name": "--machine",
+            "value": "<name>",
+            "required": false,
+            "description": "Run on another machine in your workspace; defaults to this one."
+          },
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": false,
+            "description": "Run in this saved repository on that machine; a WSL repository runs in WSL."
+          },
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": false,
+            "description": "Run in this Pane's worktree on that machine, to ask about its branch."
+          },
+          {
+            "name": "--timeout",
+            "value": "<duration>",
+            "required": false,
+            "description": "Stop the run after this long (default 10m; at most 9m on another machine) and stop every process it started."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print { ok, answer, agent, model, machine, environment, durationMs, costUsd? }."
+          }
+        ],
+        "examples": [
+          "runpane ask --agent claude --model sonnet --prompt \"Review this plan for gaps\" --repo Pane --json",
+          "runpane ask --agent codex --machine parsa-devbox --repo \"Pane (win)\" --prompt \"Why does this test fail on Windows?\" --json",
+          "runpane ask --agent opencode --model openrouter/deepseek/deepseek-chat --machine parsa-devbox --repo experiments --prompt-file question.md --json"
+        ],
+        "notes": [
+          "Errors carry a code and next: ERR_ASK_AGENT_MISSING (install command), ERR_ASK_SIGNED_OUT (sign-in command), ERR_ASK_FAILED (the agent's own error, such as an unknown model), ERR_ASK_TIMEOUT, ERR_ASK_UNSUPPORTED."
+        ]
+      },
+      "models": {
+        "name": "models",
+        "summary": "List the models each installed agent offers, on this machine, another one, or every saved machine, with what each agent reports about its sign-in. Read live on every call.",
+        "details": "Runs each installed agent's own model list (codex debug models, cursor-agent models, opencode models; Claude takes the aliases fable, opus, sonnet and haiku or a full model name) and its sign-in status, in parallel per machine, and prints one row per model. Nothing is cached: an agent installed or removed shows on the next call.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--agent",
+            "value": "<codex|claude|cursor|opencode|pi>",
+            "required": false,
+            "description": "Only this agent's rows."
+          },
+          {
+            "name": "--search",
+            "value": "<text>",
+            "required": false,
+            "description": "Only models whose name contains this text."
+          },
+          {
+            "name": "--machine",
+            "value": "<name>",
+            "required": false,
+            "description": "List another machine in your workspace instead of this one."
+          },
+          {
+            "name": "--all",
+            "required": false,
+            "description": "This machine, every saved machine, and the WSL of each machine with a saved WSL repository."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print { ok, signInReportedBy: \"agent\", rows: [{ machine, environment, agent, model, signIn, note }] }."
+          }
+        ],
+        "examples": [
+          "runpane models --all --json",
+          "runpane models --agent opencode --search deepseek --json"
+        ],
+        "notes": [
+          "signIn is the agent's own report, not a check: an ask's own error is the proof.",
+          "note is unreachable (the machine did not answer) or list unavailable (the list could not be read)."
         ]
       },
       "sessions unpin": {

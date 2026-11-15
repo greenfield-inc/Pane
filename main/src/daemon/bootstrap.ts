@@ -65,6 +65,7 @@ import { BackgroundActivity } from '../services/backgroundActivity';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import { PhonePreviewHost } from './phonePreviews';
 import { createPreviewFiles } from './previewProxy';
+import { REMOTE_MEMBER_KINDS } from '../services/remoteMemberEvents';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { LoopManager } from '../services/loops/loopManager';
@@ -596,6 +597,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
+  // A member Pane's reports and exits go to every connected computer: one whose Session holds this
+  // Pane records them (`RemoteMemberEvents`). Entries recorded from another machine are not sent on.
+  workspaceJournal.subscribe(entry => {
+    if (REMOTE_MEMBER_KINDS.has(entry.kind) && !entry.machine) getPaneEventSink().send('workspace:entry', entry, workspaceJournal.epoch);
+  });
   if (duties.housekeeping) archiveCleanupManager.start();
 
   const { logsManager } = await import('../services/panels/logPanel/logsManager');

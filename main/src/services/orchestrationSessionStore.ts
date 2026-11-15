@@ -64,7 +64,32 @@ const associationSchema: BoundarySchema<OrchestrationAssociation> = boundary.obj
   paneId: boundary.nonEmptyString,
   panelIds: boundary.array(boundary.nonEmptyString),
   attachedAt: timestampSchema,
+  machine: boundary.optional(boundary.object({ id: boundary.nonEmptyString, label: boundary.nonEmptyString })),
+  name: boundary.optional(boundary.nonEmptyString),
 });
+
+/** Remote members by Session id, in their own file so a Pane from before remote members never reads or rewrites them. */
+const remoteCursorSchema = boundary.object({ epoch: boundary.nonEmptyString, gen: boundary.number });
+const remoteFileSchema = boundary.object({
+  associations: boundary.record(boundary.array(boundary.json)),
+  /** Per saved machine: the newest journal entry recorded from it, where its next catch-up starts. */
+  cursors: boundary.optional(boundary.record(remoteCursorSchema)),
+});
+
+/** Where a machine's next catch-up read starts: its journal epoch and the newest generation recorded from it. */
+export interface RemoteJournalCursor {
+  epoch: string;
+  gen: number;
+}
+
+/** A Session member on another saved machine, as the store knows it. */
+export interface RemoteMemberRecord {
+  sessionId: string;
+  archived: boolean;
+  paneId: string;
+  name: string;
+  machine: { id: string; label: string };
+}
 
 const activitySchema: BoundarySchema<OrchestrationActivity> = boundary.object({
   id: boundary.nonEmptyString,
@@ -129,12 +154,13 @@ export interface OrchestrationSessionMembership {
   internalSessionId: string;
   archived: boolean;
   panelIds: string[];
-  associations: Array<{ paneId: string; panelIds: string[] }>;
+  associations: Array<{ paneId: string; panelIds: string[]; machine?: OrchestrationAssociation['machine'] }>;
 }
 
 export class OrchestrationSessionStore {
   private loaded = false;
   private data: OrchestrationSessionStoreData = emptyStore();
+  private cursors: Record<string, RemoteJournalCursor> = {};
 
   constructor(
     private readonly filePath: string,
@@ -157,7 +183,11 @@ export class OrchestrationSessionStore {
       internalSessionId: session.internalSessionId,
       archived: session.archived === true,
       panelIds: Object.values(session.panelIds),
-      associations: session.associations.map(association => ({ paneId: association.paneId, panelIds: [...association.panelIds] })),
+      associations: session.associations.map(association => {
+        const member: OrchestrationSessionMembership['associations'][number] = { paneId: association.paneId, panelIds: [...association.panelIds] };
+        if (association.machine) member.machine = { ...association.machine };
+        return member;
+      }),
     }));
   }
 
@@ -171,15 +201,65 @@ export class OrchestrationSessionStore {
     const problems: string[] = [];
     const validated = sanitizeStore(next, problems);
     if (problems.length > 0) throw new Error(`Invalid orchestration Session store write: ${problems.join('; ')}`);
-    const temporaryPath = `${this.filePath}.tmp-${process.pid}-${randomUUID()}`;
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
-    try {
-      fs.writeFileSync(temporaryPath, `${JSON.stringify(validated, null, 2)}\n`, { mode: 0o600 });
-      fs.renameSync(temporaryPath, this.filePath);
-      this.data = cloneStore(validated);
-    } finally {
-      if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+    const remote: Record<string, OrchestrationAssociation[]> = {};
+    const local = {
+      ...validated,
+      sessions: validated.sessions.map(session => {
+        const members = session.associations.filter(association => association.machine);
+        if (members.length > 0) remote[session.id] = members;
+        return { ...session, associations: session.associations.filter(association => !association.machine) };
+      }),
+    };
+    if (Object.keys(remote).length > 0 || fs.existsSync(this.remoteFilePath)) writeAtomically(this.remoteFilePath, { associations: remote, cursors: this.cursors });
+    writeAtomically(this.filePath, local);
+    this.data = cloneStore(validated);
+  }
+
+  /**
+   * The remote member with this Pane id. Reads the in-memory snapshot without cloning it: Approvals
+   * asks once per waiting card on every sweep, and most Panes are not remote.
+   */
+  remoteMember(paneId: string): RemoteMemberRecord | undefined {
+    this.ensureLoaded();
+    for (const session of this.data.sessions) {
+      const association = session.associations.find(item => item.paneId === paneId && item.machine);
+      if (association?.machine) {
+        return { sessionId: session.id, archived: session.archived === true, paneId, name: association.name ?? paneId, machine: { ...association.machine } };
+      }
     }
+    return undefined;
+  }
+
+  /** Every remote member's Pane id on this saved machine, in Sessions that are not archived. */
+  remoteMemberPaneIds(machineId: string): string[] {
+    this.ensureLoaded();
+    return this.data.sessions.filter(session => session.archived !== true)
+      .flatMap(session => session.associations.filter(item => item.machine?.id === machineId).map(item => item.paneId));
+  }
+
+  remoteCursor(machineId: string): RemoteJournalCursor | undefined {
+    this.ensureLoaded();
+    const cursor = this.cursors[machineId];
+    return cursor ? { ...cursor } : undefined;
+  }
+
+  /** Saves where a machine's next catch-up starts, in the remote members' file. */
+  saveRemoteCursor(machineId: string, cursor: RemoteJournalCursor): void {
+    this.ensureLoaded();
+    this.cursors = { ...this.cursors, [machineId]: { ...cursor } };
+    const remote: Record<string, OrchestrationAssociation[]> = {};
+    for (const session of this.data.sessions) {
+      const members = session.associations.filter(association => association.machine);
+      if (members.length > 0) remote[session.id] = members;
+    }
+    fs.mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
+    writeAtomically(this.remoteFilePath, { associations: remote, cursors: this.cursors });
+  }
+
+  /** The remote members' file beside the store. */
+  private get remoteFilePath(): string {
+    return this.filePath.replace(/(\.json)?$/, '-remote.json');
   }
 
   /**
@@ -209,12 +289,66 @@ export class OrchestrationSessionStore {
       problems.push(`the file is not JSON (${error.message}); starting with no Sessions`);
       this.data = emptyStore();
     }
+    this.data = withRemoteMembers(this.data, this.readRemoteMembers(problems));
     if (problems.length > 0) {
       const backupPath = `${this.filePath}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
       fs.copyFileSync(this.filePath, backupPath);
       console.warn(`[OrchestrationSessionStore] Loaded ${this.filePath} with problems; the original is saved as ${backupPath}: ${problems.join('; ')}`);
     }
     this.loaded = true;
+  }
+
+  private readRemoteMembers(problems: string[]): Map<string, OrchestrationAssociation[]> {
+    const members = new Map<string, OrchestrationAssociation[]>();
+    let raw: string;
+    try {
+      raw = fs.readFileSync(this.remoteFilePath, 'utf8');
+    } catch (error) {
+      if (error instanceof Error && isFileMissing(error)) return members;
+      throw error;
+    }
+    const file = decodeOptionalBoundary(safeJson(raw), remoteFileSchema);
+    if (!file) {
+      problems.push(`${this.remoteFilePath} is not a remote members file; its members are left out`);
+      return members;
+    }
+    this.cursors = file.cursors ?? {};
+    for (const [sessionId, entries] of Object.entries(file.associations)) {
+      const valid = keepValidEntries(entries, associationSchema, `Session ${sessionId} remote members`, problems)
+        .map(entry => decodeBoundary(entry, associationSchema))
+        .filter(association => association.machine);
+      members.set(sessionId, valid);
+    }
+    return members;
+  }
+}
+
+function withRemoteMembers(data: OrchestrationSessionStoreData, members: Map<string, OrchestrationAssociation[]>): OrchestrationSessionStoreData {
+  if (members.size === 0) return data;
+  return {
+    ...data,
+    sessions: data.sessions.map(session => {
+      const remote = (members.get(session.id) ?? []).filter(member => !session.associations.some(association => association.paneId === member.paneId));
+      return remote.length > 0 ? { ...session, associations: [...session.associations, ...remote] } : session;
+    }),
+  };
+}
+
+function safeJson(raw: string): JsonValue | undefined {
+  try {
+    return decodeBoundary(JSON.parse(raw), boundary.json);
+  } catch {
+    return undefined;
+  }
+}
+
+function writeAtomically(filePath: string, value: OrchestrationSessionStoreData | { associations: Record<string, OrchestrationAssociation[]>; cursors: Record<string, RemoteJournalCursor> }): void {
+  const temporaryPath = `${filePath}.tmp-${process.pid}-${randomUUID()}`;
+  try {
+    fs.writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    fs.renameSync(temporaryPath, filePath);
+  } finally {
+    if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
   }
 }
 

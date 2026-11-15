@@ -242,6 +242,14 @@ Paths belong to the destination machine. `read` and `write` translate Windows an
 
 See [Workspaces setup, trust, and troubleshooting](docs/RUNPANE_WORKSPACES.md) for path examples and startup diagnostics. Remote Pane's [pairing codes](#remote-pane) remain the way to connect a desktop or browser UI.
 
+### Workers on your other machines
+
+A Session on this computer can run workers anywhere in your workspace. From the Session's agent, `runpane workspace devbox panes create --repo "Pane (win)" --tool-command "codex -m <model>" --prompt "..."` starts a worker on that machine (pick a saved WSL repository to run it in WSL), and it joins the Session: its reports, blocked questions and exits reach this computer's `runpane watch`, Approvals and phone, and your answers go back to its tab. The machine must be saved on this computer. See [Workers on another machine](docs/RUNPANE_WORKSPACES.md#workers-on-another-machine-join-your-session).
+
+### Ask another model
+
+`runpane ask --agent codex --model <model> --machine devbox --repo "Pane (win)" --prompt "Why does this fail on Windows?"` asks any agent and model one read-only question, on any of your machines, and prints the answer; nothing is left open. `runpane models --all` lists the models each installed agent offers on each machine. See [Ask another model a question](docs/RUNPANE_WORKSPACES.md#ask-another-model-a-question).
+
 ### Hand off a task
 
 “Continue this on my Windows machine with Codex.” `runpane handoff` starts the agent in a new Pane on the other machine (or a new tab in your Pane on this one), using your pushed branch and a note about the task. When the sending tab runs Claude, Codex, Cursor or OpenCode and the receiver is the same agent, it carries the agent's own session: another machine gets a copy of the session's files and resumes it, and this machine resumes a fork of it. The CLI then checks that the receiver continued the conversation, and reports `continued`, `inconclusive` (with a question to ask the receiver), or `not-continued` (the receiver is kept, never replaced). With `--note-only`, a different agent, or no session to carry, a fresh agent starts with the note instead, and the output says so. The note carries the goal, decisions, verified state, and next steps either way. Live processes stay on the original machine.
