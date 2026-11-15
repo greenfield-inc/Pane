@@ -4,10 +4,18 @@
  * or a paired device counts, the callers that may change "Show cards on".
  */
 const streams = new Map<string, number>();
+const arrivals = new Set<(machineId: string) => void>();
 
 export const readingMachines = {
   add(machineId: string): void {
-    streams.set(machineId, (streams.get(machineId) ?? 0) + 1);
+    const count = streams.get(machineId) ?? 0;
+    streams.set(machineId, count + 1);
+    if (count === 0) for (const listener of arrivals) listener(machineId);
+  },
+  /** Calls `listener` when a Pane install starts reading (its first stream opens). Returns the unsubscribe. */
+  onArrive(listener: (machineId: string) => void): () => void {
+    arrivals.add(listener);
+    return () => { arrivals.delete(listener); };
   },
   remove(machineId: string): void {
     const left = (streams.get(machineId) ?? 0) - 1;

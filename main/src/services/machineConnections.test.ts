@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigManager } from './configManager';
 import { MachineConnections, type CreateMachineClient, type MachineClient } from './machineConnections';
 import { SharedCredentialSync } from './sharedCredentialSync';
+import { readingMachines } from '../daemon/readingMachines';
 import { createDefaultRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 import type { MachineConnectionsEvent } from '../../../shared/types/machineConnections';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
@@ -177,6 +178,20 @@ describe('MachineConnections', () => {
     connect('build-box');
 
     expect(machines.list().find(machine => machine.id === 'build-box')).toMatchObject({ installId: 'c3d4-book', status: 'online', onlineSince: '2026-11-12T20:00:00.000Z' });
+  });
+
+  it('retries its offline machines at once when another Pane starts reading this computer, as a computer back from sleep does', () => {
+    const { client, connect } = setup(['devbox', 'mini']);
+    connect('mini');
+    client('devbox').options.onConnectionStateChange?.('reconnecting');
+
+    readingMachines.add('devbox-install');
+    readingMachines.add('devbox-install');
+    readingMachines.remove('devbox-install');
+    readingMachines.remove('devbox-install');
+
+    expect(client('devbox').retryNow).toHaveBeenCalledTimes(1);
+    expect(client('mini').retryNow).not.toHaveBeenCalled();
   });
 
   it('closes every saved machine\'s stream while this computer sleeps, and reopens them on wake', () => {
