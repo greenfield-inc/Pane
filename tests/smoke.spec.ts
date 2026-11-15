@@ -383,17 +383,13 @@ test('remote terminal ignores output that arrives after its panel is replaced', 
   const deliveries: Promise<void>[] = [];
   await page.route('**/invoke', async route => {
     const body = route.request().postDataJSON();
-    if (body.channel !== 'panels:get-output' || body.args[0] !== 'anim-panel-1') {
+    if (body.channel !== 'terminal:getState' || body.args[0] !== 'anim-panel-1') {
       await route.fallback();
       return;
     }
     reportOutputRequest();
     const delivery = outputGate.then(() => route.fulfill({
-      json: { ok: true, result: { success: true, data: [{
-        type: 'stdout',
-        data: 'Output from the replaced terminal\r\n'.repeat(50),
-        timestamp: new Date(0).toISOString(),
-      }] } },
+      json: { ok: true, result: { scrollbackBuffer: 'Output from the replaced terminal\r\n'.repeat(50) } },
     }));
     deliveries.push(delivery);
     await delivery;

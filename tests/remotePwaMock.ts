@@ -578,8 +578,8 @@ async function installRemoteHostRoute(
       case 'panels:checkInitialized':
         result = true;
         break;
-      case 'panels:get-output':
-        result = TERMINAL_SCROLLBACK;
+      case 'terminal:getState':
+        result = { scrollbackBuffer: TERMINAL_SCROLLBACK };
         break;
       default:
         // Panel mutations and terminal writes acknowledge without doing work;
