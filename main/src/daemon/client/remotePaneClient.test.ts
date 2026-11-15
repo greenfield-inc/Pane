@@ -4,6 +4,7 @@ import { type LookupFunction } from 'net';
 import { hostname as getOsHostname } from 'os';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
+import { primaryProfile } from '../../../../shared/types/remoteComputers';
 import type { PaneEventSink } from '../../core/eventSink';
 import { RemotePaneClient, RemotePaneClientController } from './remotePaneClient';
 import { boundary, decodeBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
@@ -1135,6 +1136,24 @@ describe('RemotePaneClientController', () => {
     expect(controller.getConnectionState()).toMatchObject({ activeRouteId: `public:${server.baseUrl}` });
     // The checklist names each route it tries.
     expect(checklistRoutes).toEqual(['Tailscale', 'Public URL']);
+  });
+
+  it('switches over the next route when the computer\'s Same network address is on another network', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    // 172.31.250.0/24 is on no interface of this computer, so the Same network route is skipped.
+    const lan = { id: 'lan:https://l172-31-250-9.k7xq2m4n8p3r5t6v.runpane.net:42138', kind: 'lan' as const, source: 'found' as const, baseUrl: 'https://l172-31-250-9.k7xq2m4n8p3r5t6v.runpane.net:42138', token: 'link-token' };
+    const remoteConfig = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [lan, { id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'link-token' }] };
+    remoteConfig.client.computers = [studio];
+    const controller = createController();
+    controller.initialize({ configManager: createConfigManagerStub(remoteConfig), rendererEventSink: { send() {} } });
+
+    await controller.activateProfile(primaryProfile(studio));
+
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(controller.getConnectionState()).toMatchObject({ activeRouteId: `public:${server.baseUrl}` });
+    await controller.switchToLocalMode();
   });
 
   it('opens the SSH tunnel of a computer whose only route is SSH before switching to it', async () => {

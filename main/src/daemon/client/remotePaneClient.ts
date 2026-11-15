@@ -1651,6 +1651,19 @@ export class RemotePaneClientController extends EventEmitter {
     }
   }
 
+  /**
+   * The routes to connect on. A computer saved with one route connects as `profile` (an imported
+   * code may carry a new token). A computer left with one route after Same network routes elsewhere
+   * are skipped connects on that route, never at the address `profile` names.
+   */
+  private routesToTry(profile: RemotePaneConnectionProfile): RemoteRouteCandidate[] {
+    const routes = this.routesFor(profile);
+    const saved = this.configManager
+      ? normalizeRemoteDaemonConfig(this.configManager.getConfig().remoteDaemon).client.computers.find((computer) => computer.id === profile.id)?.routes.length ?? 0
+      : 0;
+    return routes.length === 1 && saved <= 1 ? [{ ...routes[0], profile }] : routes;
+  }
+
   /** The saved computer's routes, nearest first; a profile that is no saved computer is its own one route. */
   routesFor(profile: RemotePaneConnectionProfile): RemoteRouteCandidate[] {
     const computers = this.configManager ? normalizeRemoteDaemonConfig(this.configManager.getConfig().remoteDaemon).client.computers : [];
@@ -1701,13 +1714,14 @@ export class RemotePaneClientController extends EventEmitter {
   ): Promise<void> {
     const generation = ++this.connectionGeneration;
     await this.disconnectActiveClient();
-    const routes = this.routesFor(savedProfile);
+    const routes = this.routesToTry(savedProfile);
+    const lone = routes.length === 1 ? routes[0].profile : null;
     // With one route, a Tailscale machine that cannot be found is the error; with more, the next route is tried.
-    const machine = routes.length === 1 ? tailnetMachineRef(savedProfile) : null;
-    let profile = savedProfile;
+    const machine = lone ? tailnetMachineRef(lone) : null;
+    let profile = lone ?? savedProfile;
     if (machine && this.resolveTailnetMachineUrl) {
       try {
-        profile = { ...savedProfile, baseUrl: await this.resolveTailnetMachineUrl(machine) };
+        profile = { ...profile, baseUrl: await this.resolveTailnetMachineUrl(machine) };
       } catch (error) {
         // Name the host, so the banner and machine list show which one Tailscale cannot find.
         if (generation === this.connectionGeneration) {
@@ -2006,10 +2020,9 @@ export class RemotePaneClientController extends EventEmitter {
       hostVersion: sighting?.version ?? null,
     };
     this.publishState();
-    const routes = this.routesFor(profile);
-    const candidates = routes.length > 1 ? routes : [{ ...routes[0], profile }];
+    const routes = this.routesToTry(profile);
     let nearest: RouteProbe | null = null;
-    for (const route of candidates) {
+    for (const route of routes) {
       const several = routes.length > 1;
       const probe = await this.probeRoute(id, route, several ? COMPUTER_ROUTE_LABELS[route.kind] : routeOf(route.profile), several);
       if (this.check?.id !== id) {
@@ -2027,7 +2040,7 @@ export class RemotePaneClientController extends EventEmitter {
       }
       nearest ??= probe;
     }
-    // SAFETY: `candidates` is never empty and every candidate either returned or set `nearest`.
+    // SAFETY: `routes` is never empty and every route either returned or set `nearest`.
     const { profile: failedProfile, route: failedRoute, outcome } = nearest as RouteProbe;
     const failed = outcome.rows.find((row) => row.status === 'failed');
     this.checkProfile = failedProfile;
