@@ -10,7 +10,6 @@ import { DESKTOP_WORKERS, openWorkerTab } from './desktopSessionWorkers';
 import { savedFilePath } from './chatAttachments';
 import type { ChatTurnActions } from './ChatTurns';
 import { SessionApprovalCards } from '../approvals/SessionApprovalCards';
-
 import ChatTabPanel from './ChatTabPanel';
 
 /** A path the agent reported, relative to the tab's worktree when it is inside it. */

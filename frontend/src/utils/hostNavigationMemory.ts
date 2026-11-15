@@ -6,7 +6,7 @@ import { API } from './api';
 import { focusChatSoon } from '../services/regionFocus';
 import { loadChatTabRoute } from '../components/panels/chatTabRouteModule';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
-import type { HostNavigationMemory, PaneNavigationView } from '../../../shared/types/hostNavigation';
+import type { HostNavigationMemory, LaunchChat, PaneNavigationView } from '../../../shared/types/hostNavigation';
 import type { RestoredNavigation } from '../../../shared/types/updater';
 import type { Project } from '../types/project';
 
@@ -170,11 +170,6 @@ async function readNavigationMemory(hostId: string | null): Promise<HostNavigati
   }
 }
 
-interface LaunchChat {
-  paneId: string;
-  panelId: string;
-}
-
 let launchChat: Promise<LaunchChat | null> | null = null;
 
 async function readLaunchChat(): Promise<LaunchChat | null> {
@@ -217,8 +212,9 @@ export async function restoreLaunchChat(): Promise<void> {
 
 /**
  * On launch the desktop opens a Pane only to reopen a chat (restoreLaunchChat),
- * and it returns to the Session it had selected on this host. Writes wait meanwhile, so the host's last-used Session
- * is never remembered as this desktop's own.
+ * and it returns to the Session it had selected on this host. Writes wait
+ * meanwhile, so the host's last-used Session is never remembered as this
+ * desktop's own.
  */
 export async function restoreSessionSelection(): Promise<void> {
   await withHostNavigationWritesPaused(async () => {

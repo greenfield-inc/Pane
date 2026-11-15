@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { DatabaseService } from '../database/database';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { decodeHostNavigationMemory } from '../../../shared/types/hostNavigation';
-import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { HostNavigationMemory, LaunchChat } from '../../../shared/types/hostNavigation';
 import { decodeSessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import { decodeSessionPanelLayout } from '../../../shared/types/panels';
@@ -37,12 +37,6 @@ type UiStateStore = Pick<DatabaseService, 'getUIState' | 'setUIState' | 'deleteU
 interface LaunchPanes {
   getSession(id: string): { archived?: boolean; worktree_path: string } | undefined;
   getPanel(id: string): { sessionId: string; type: string } | null;
-}
-
-/** The chat tab a launch reopens. */
-interface LaunchChat {
-  paneId: string;
-  panelId: string;
 }
 
 function groupTab(node: PanelLayoutNode, groupId: string | undefined): string | null {
