@@ -218,8 +218,9 @@ export class ChatTabManager {
 
   /**
    * Auto-pause: end these tabs' agents and mark them paused. Only a running tab with no work in flight
-   * pauses, so a pause never cuts off a turn, an approval, a question or a queued message. The
-   * conversation stays on screen and readable; opening the tab or sending to it resumes it.
+   * pauses, so a pause never cuts off a turn, an approval, a question or a queued message, and only when
+   * its agent can reopen the conversation. The conversation stays on screen and readable; opening the
+   * tab or sending to it resumes it.
    */
   async pause(panelIds: readonly string[], mark: TerminalPausedMark): Promise<PauseOutcome> {
     const outcome: PauseOutcome = { paused: [], failed: [] };
@@ -228,6 +229,8 @@ export class ChatTabManager {
       const tab = this.tabs.get(panelId);
       // Only a running agent pauses: a stopped tab keeps its problem, an unstarted one has nothing to stop.
       if (!state || !tab?.runtime?.isAlive() || state.status === 'stopped' || tab.pausing) continue;
+      // An agent that can't reopen a saved conversation would lose it, so it runs until the tab closes.
+      if (!tab.runtime.canLoad()) continue;
       if (this.busy(panelId)) {
         outcome.failed.push({ panelId, error: 'Its agent is working, waiting on an answer, or has messages queued, so it was left running. The next sweep tries again.' });
         continue;
