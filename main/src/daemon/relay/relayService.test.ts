@@ -93,7 +93,7 @@ describe('relay service', () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    expect(probesAtStart).toBe(3);
+    expect(probesAtStart).toBe(4);
     expect(probe.mock.calls.length).toBe(probesAtStart);
     await service.stop();
     probe.mockRestore();
