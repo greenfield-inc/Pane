@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import http from 'http';
 import os from 'os';
 import path from 'path';
@@ -162,14 +162,21 @@ describe('PaneMcpEndpoint', () => {
     expect(ran).toMatchObject({ agent: 'Claude', returnAfter: null });
   });
 
-  it("leaves out what Claude's CLAUDE.md block already says, and only while the block is there", async () => {
-    const claudeDir = mkdtempSync(path.join(os.tmpdir(), 'pane-mcp-claude-'));
-    vi.stubEnv('CLAUDE_CONFIG_DIR', claudeDir);
-    const grant = grantOf(start().grant(tab('panel-a')));
+  it("leaves out what the tab's CLAUDE.md block already says, and only while the block is there", async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), 'pane-mcp-claude-'));
+    const claudeDir = path.join(home, 'claude');
+    mkdirSync(claudeDir);
+    const grant = grantOf(start().grant(tab('panel-a', { CLAUDE_CONFIG_DIR: claudeDir })));
 
-    const without = await instructionsFor(grant);
-    syncNotifyInstructions(true, { homeSkill: true }, { CLAUDE_CONFIG_DIR: claudeDir });
-    const beside = await instructionsFor(grant);
+    let without: string;
+    let beside: string;
+    try {
+      without = await instructionsFor(grant);
+      syncNotifyInstructions(true, { homeSkill: true }, { CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: path.join(home, 'codex') }, home);
+      beside = await instructionsFor(grant);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
 
     expect(without).toContain('Scratch: in Pane');
     expect(without).toContain('`notify` asks the person');

@@ -44,6 +44,8 @@ const INSTRUCTIONS = [
 // to reach the person, so it gets those once, from there.
 const INSTRUCTIONS_BESIDE_CLAUDE_MD = TOOL_GUIDE.join('\n');
 // Claude Code names itself `claude-code` at initialize; Pane's HTTP endpoint names its tabs' agent by label.
+// Exact, unlike LONG_WAIT_CLIENTS: only Claude Code itself reads ~/.claude/CLAUDE.md, while any
+// client named after Claude Code or Codex holds a call open.
 const CLAUDE_CODE = /^(claude-code|claude)$/i;
 
 // The lists only change with a new runpane version, which restarts this server.
@@ -113,9 +115,10 @@ export interface PaneMcpServerOptions extends McpServerOptions {
    * Who the client is when the request doesn't say. Over stateless HTTP a 2025-era client names
    * itself only at `initialize`, so later calls arrive unnamed; Pane names them from the tab, and
    * says whether that agent holds a tool call open while `notify` waits for the person. The name
-   * also picks the server's instructions: Claude Code skips what its CLAUDE.md already says.
+   * also picks the server's instructions: Claude Code skips what its CLAUDE.md already says, read
+   * with `env` (the agent's environment) when given, else this server's own.
    */
-  clientFor?: (auth: AuthInfo | undefined) => { name: string; waitsLong: boolean } | undefined;
+  clientFor?: (auth: AuthInfo | undefined) => { name: string; waitsLong: boolean; env?: NodeJS.ProcessEnv } | undefined;
 }
 
 /**
@@ -170,11 +173,12 @@ export function paneMcpServerFactory(options: PaneMcpServerOptions): (context?: 
   };
 
   return (context) => {
+    const client = options.clientFor?.(context?.authInfo);
     const server = new Server(
       { name: 'pane', title: 'Pane', version: getWrapperVersion() },
       {
         capabilities: { tools: {}, resources: {} },
-        instructions: CLAUDE_CODE.test(options.clientFor?.(context?.authInfo)?.name ?? '') && claudeMdHasPaneGuidance() ? INSTRUCTIONS_BESIDE_CLAUDE_MD : INSTRUCTIONS,
+        instructions: CLAUDE_CODE.test(client?.name ?? '') && claudeMdHasPaneGuidance(client?.env) ? INSTRUCTIONS_BESIDE_CLAUDE_MD : INSTRUCTIONS,
         cacheHints: { 'tools/list': LIST_CACHE, 'resources/list': LIST_CACHE },
       },
     );
