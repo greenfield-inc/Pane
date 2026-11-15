@@ -22,7 +22,7 @@ import { sessionWorkspacePath } from '../sessionWorkspace';
 import { thisMachineName } from '../approvals/approvalStore';
 import { placeConversation, type PlacedConversation } from './conversations';
 import { addWorktree, applySnapshot, deleteRefs, importBundle, MoveGitError, placeBranch, snapshotMatches } from './gitSnapshot';
-import { moveManifestSchema, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveTab } from './manifest';
+import { moveManifestSchema, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
 import { buildPathMap, mapPath, rewriteText, type PathMap } from './pathMap';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
 import { isRegeneratedSessionFile, isTextFile } from './sessionFolder';
@@ -168,11 +168,13 @@ export class MoveImporter {
     return this.services.databaseService.getAllProjects();
   }
 
-  private async findProject(identity: string | null, root: string) {
+  /** This machine's project for a repository: same remote identity, else the same remote URL, else (no remote) the same folder. */
+  private async findProject(repo: Pick<MoveRepo, 'identity' | 'remote' | 'root'>) {
     for (const project of this.projects()) {
       const remote = await tryGit(project.path, ['remote', 'get-url', 'origin']);
-      if (identity && remote && repositoryIdentityFromRemote(remote) === identity) return project;
-      if (!identity && project.path === root) return project;
+      if (repo.identity && remote && repositoryIdentityFromRemote(remote) === repo.identity) return project;
+      if (repo.remote && remote === repo.remote) return project;
+      if (!repo.remote && project.path === repo.root) return project;
     }
     return undefined;
   }
@@ -200,7 +202,7 @@ export class MoveImporter {
       const repo = pane.repo!;
       const key = repo.identity ?? repo.root;
       if (repos.has(key)) continue;
-      const project = await this.findProject(repo.identity, repo.root);
+      const project = await this.findProject(repo);
       repos.set(key, { pane, found: !!project, path: project?.path });
       if (!project) {
         const suggested = path.join(home, repo.relativeToHome ?? path.join('repos', repo.name));
@@ -211,7 +213,7 @@ export class MoveImporter {
         }
         continue;
       }
-      if (repo.identity) checks.push({ id: `repo:${key}`, level: 'ok', title: `Repository ${repo.identity} found` });
+      checks.push({ id: `repo:${key}`, level: 'ok', title: `Repository ${repo.identity ?? repo.name} found` });
     }
     // Branches and worktree folders for each member Pane in a found repository.
     for (const pane of manifest.panes.filter(item => item.role === 'member' && item.repo)) {
@@ -372,7 +374,7 @@ export class MoveImporter {
     const placements = new Map<string, { projectId: number; projectPath: string; worktreePath: string }>();
     for (const pane of members) {
       if (!pane.repo) continue;
-      const project = await this.findProject(pane.repo.identity, pane.repo.root);
+      const project = await this.findProject(pane.repo);
       if (!project) throw new PaneError('ERR_MOVE_REPO_MISSING', `${pane.repo.identity ?? pane.repo.name} isn't on this machine.`, 'Clone it from the Move dialog, then move again.');
       const ctx = this.services.sessionManager.getProjectContextByProjectId(project.id);
       if (!ctx) throw new PaneError('ERR_MOVE_REPO_CONTEXT', `Pane can't open project ${project.name} here.`, 'Open the project in Pane once, then move again.');
@@ -631,35 +633,35 @@ export class MoveImporter {
     const failedTabs: string[] = [];
     let resumed = 0;
     const line = movedLine(manifest.source.machine, thisMachineName(), job.map!);
+    const orchestratorPanels = new Set(Object.values(decodeBoundary(manifest.session.panelIds ?? {}, boundary.jsonObject)));
+    const told: Array<{ panelId: string; title: string; input: string }> = [];
     for (const { tab } of job.tabs) {
       if (tab.type !== 'terminal' && tab.type !== 'chat') continue;
+      // Every agent tab starts on its conversation; a plain shell starts only if it was running there.
+      const isAgent = tab.type === 'chat' || !!readTabFields(tab.state).agentId;
       try {
-        if (!tab.running) {
-          // A tab that wasn't running there isn't started here either; it starts when opened.
-          if (tab.type === 'terminal') await terminalPanelManager.clearPaused([tab.id]);
-          else await getChatTabManager().clearMoveHold(tab.id);
-          resumed += 1;
+        if (!isAgent && !tab.running) {
+          await terminalPanelManager.clearPaused([tab.id]);
           continue;
         }
         await this.releaseTab(tab.id, tab.type);
-        if (tab.type === 'terminal') {
-          await this.registry.invoke('runpane:panels:resume', [{ panelId: tab.id, waitReady: true, readyTimeoutMs: 90_000 }]);
-        }
+        if (tab.type === 'terminal') await this.registry.invoke('runpane:panels:resume', [{ panelId: tab.id }]);
         const panel = panelManager.getPanel(tab.id);
         const want = tab.conversation?.id;
         const have = readTabFields(toJsonObject(panel?.state.customState ?? {})).conversationId;
-        if (!want || have === want) resumed += 1;
-        else failedTabs.push(tab.title);
-        const isOrchestrator = Object.values(decodeBoundary(manifest.session.panelIds ?? {}, boundary.jsonObject)).includes(tab.id);
-        if (isOrchestrator || tab.working) {
-          const input = `${line}${tab.interrupted ? ' Your last turn was interrupted by the move; pick it up where it stopped.' : ''}`;
-          await this.registry.invoke('runpane:panels:submit', [{ panelId: tab.id, input, source: 'agent' }]).catch(error => console.warn(`[SessionMove] The moved line didn't reach ${tab.title}:`, error));
+        if (isAgent && (!want || have === want)) resumed += 1;
+        else if (isAgent) failedTabs.push(tab.title);
+        if (orchestratorPanels.has(tab.id) || tab.working) {
+          told.push({ panelId: tab.id, title: tab.title, input: `${line}${tab.interrupted ? ' Your last turn was interrupted by the move; pick it up where it stopped.' : ''}` });
         }
       } catch (error) {
         console.warn(`[SessionMove] ${tab.title} couldn't resume after the move:`, error);
         failedTabs.push(tab.title);
       }
     }
+    // The moved line waits for each agent's composer, so it doesn't hold up the source's confirmation.
+    void Promise.all(told.map(({ panelId, title, input }) => this.registry.invoke('runpane:panels:submit', [{ panelId, input, source: 'agent' }])
+      .catch(error => console.warn(`[SessionMove] The moved line didn't reach ${title}:`, error))));
     await this.receiver.remove(job.status.moveId).catch(() => undefined);
     job.status = { ...job.status, stage: 'started', detail: undefined, resumed, failedTabs };
   }

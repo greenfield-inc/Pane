@@ -50,7 +50,7 @@ export interface MoveTab {
   buffers?: string;
 }
 
-interface MoveRepo {
+export interface MoveRepo {
   /** `git remote get-url origin`, or null for a repository with no origin. */
   remote: string | null;
   /** The remote normalised to host/owner/repo (`repositoryIdentityFromRemote`), for matching on the target. */
