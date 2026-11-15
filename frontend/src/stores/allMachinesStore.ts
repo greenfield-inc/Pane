@@ -36,10 +36,15 @@ const READERS = {
   projects: async (id: string) => answered((await window.electronAPI.machines.read(id, 'sessions:get-all-with-projects')).data) ?? [],
   sessions: async (id: string) => answered((await window.electronAPI.machines.read(id, 'orchestration-sessions:list')).data)?.sessions ?? [],
   statuses: async (id: string) => answered((await window.electronAPI.machines.read(id, 'panels:agent-statuses')).data) ?? [],
+  // A host too old to have Session activity shows its Sessions idle.
+  activity: async (id: string) => {
+    try { return answered((await window.electronAPI.machines.read(id, 'orchestration-sessions:activity-list')).data) ?? []; }
+    catch { return []; }
+  },
   notify: async (id: string) => (await window.electronAPI.machines.read(id, 'notify:remote-snapshot')).data ?? null,
   permissions: async (id: string) => answered((await window.electronAPI.machines.read(id, 'permission:getPending')).data) ?? [],
 } satisfies { [Key in ReadKey]: (machineId: string) => Promise<MachineSnapshot[Key]> };
-const ALL_READS: ReadKey[] = ['projects', 'sessions', 'statuses', 'notify', 'permissions'];
+const ALL_READS: ReadKey[] = ['projects', 'sessions', 'statuses', 'activity', 'notify', 'permissions'];
 
 /** Which of a machine's lists each event changes. */
 const READS_FOR_EVENT = {
@@ -53,7 +58,8 @@ const READS_FOR_EVENT = {
   'panel:agentStatus': ['statuses'],
   // Emitted with each panel:agentStatus, which already re-reads statuses.
   'panel:activityStatus': [],
-  'orchestration-sessions:changed': ['sessions'],
+  'orchestration-sessions:changed': ['sessions', 'activity'],
+  'orchestration-sessions:activity': ['activity'],
   'project:updated': ['projects'],
   'project:list-changed': ['projects'],
   'permission:request': ['permissions'],
@@ -215,7 +221,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-const EMPTY_SNAPSHOT: MachineSnapshot = { projects: [], sessions: [], statuses: [], notify: null, permissions: [] };
+const EMPTY_SNAPSHOT: MachineSnapshot = { projects: [], sessions: [], statuses: [], activity: [], notify: null, permissions: [] };
 
 /**
  * Keeps every machine's lists current while All machines is on: reads each machine once,

@@ -340,3 +340,16 @@ export interface OrchestrationAssociationInput {
   paneId: string;
   panelIds?: string[];
 }
+
+/**
+ * A Session's live activity, decided on the host that runs its agents (sessionActivity.ts):
+ * `working` while its orchestrator or one of its Panes is really mid-turn, else `idle`.
+ * Sent as `orchestration-sessions:activity` and read as a baseline with
+ * `orchestration-sessions:activity-list`. A host without them reads as idle.
+ */
+export interface SessionActivity {
+  sessionId: string;
+  state: 'working' | 'idle';
+  /** Panes of the Session with a tab working, for the "N working" label. */
+  workingPanes: number;
+}

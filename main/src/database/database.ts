@@ -5014,6 +5014,19 @@ export class DatabaseService {
       : this.db.prepare(`${columns} FROM tool_panels WHERE session_id = ? AND +type = 'terminal'`).all(sessionId)) as Array<{ session_id: string; paused: string | null }>;
   }
 
+  /** A Pane's tabs as ids and types only, for hot reads that need nothing else (the Session row's activity). */
+  getPanelTypesForSession(sessionId: string): Array<{ id: string; type: string }> {
+    // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
+    return this.db.prepare("SELECT id, type FROM tool_panels WHERE session_id = ?").all(sessionId) as Array<{ id: string; type: string }>;
+  }
+
+  /** Whether a Pane is archived, or undefined when there is no such Pane. */
+  isSessionArchived(id: string): boolean | undefined {
+    // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
+    const row = this.db.prepare("SELECT archived FROM sessions WHERE id = ?").get(id) as { archived: number | null } | undefined;
+    return row === undefined ? undefined : Boolean(row.archived);
+  }
+
   getPanelsForSession(sessionId: string): ToolPanel[] {
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
     const rows = this.db

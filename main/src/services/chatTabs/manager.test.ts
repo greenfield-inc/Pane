@@ -10,6 +10,7 @@ import type { PanelAgentStatusEvent } from '../../../../shared/types/agentStatus
 import { ChatTabManager, type ChatTabLauncher, type ChatTabManagerOptions, type ChatTabStore } from './manager';
 import { ChatTabNotifyBridge } from './notifyBridge';
 import { ChatTabRuntime } from './runtime';
+import { runpaneWaits } from '../agentStatus/midTurn';
 
 const AGENT = path.join(__dirname, 'testing', 'scriptedAgent.mjs');
 const cleanup: Array<() => Promise<void> | void> = [];
@@ -58,6 +59,59 @@ const turnEnds = (view: ChatTabView) => view.transcript?.messages.flatMap(messag
 const newTab = (cwd: string): ChatPanelState => ({ agent: 'claude', launch: { kind: 'agent' }, cwd, status: 'starting' });
 
 describe('chat tab manager', () => {
+  it('counts a turn as mid-turn while it streams or runs a tool, and not once it stalls or ends', { timeout: 30_000 }, async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    expect(manager.isMidTurn('p1')).toBe(false);
+    manager.send('p1', { operationId: 'op-hold', text: 'hold 1' });
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('working');
+    // A silent tool call keeps a turn counting however long it runs.
+    await expect.poll(() => manager.isMidTurn('p1', Date.now() + 60 * 60_000), { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => manager.receipt('p1', 'op-hold')?.state, { timeout: 10_000 }).toBe('completed');
+    expect(manager.isMidTurn('p1')).toBe(false);
+
+    manager.send('p1', { operationId: 'op-stall', text: 'stall' });
+    await expect.poll(() => replyText(manager.view('p1')).endsWith('Thinking'), { timeout: 10_000 }).toBe(true);
+    expect(manager.isMidTurn('p1')).toBe(true);
+    // No update and no tool running for 5 minutes: stalled.
+    expect(manager.isMidTurn('p1', Date.now() + 5 * 60_000 + 1)).toBe(false);
+    await manager.cancel('p1');
+  });
+
+  it('reads a chat waiting only while its running tool call is the runpane wait, not while a background wait is open (D-386)', { timeout: 30_000 }, async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    // A watch the agent sent to the background stays open for the tab, while it really works.
+    const background = runpaneWaits.begin('p1');
+    cleanup.push(background);
+    manager.send('p1', { operationId: 'op-work', text: 'hold 30' });
+    await expect.poll(() => manager.isMidTurn('p1', Date.now() + 60 * 60_000), { timeout: 10_000 }).toBe(true);
+    await manager.cancel('p1');
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('idle');
+
+    // A runpane wait in the foreground is the turn waiting, not working.
+    manager.send('p1', { operationId: 'op-wait', text: 'call runpane watch --session s1 --until-event --json' });
+    await expect.poll(() => manager.view('p1').transcript?.messages.some(message => message.parts.some(part => part.type === 'tool' && part.title.startsWith('runpane watch'))), { timeout: 10_000 }).toBe(true);
+    expect(manager.view('p1').status).toBe('working');
+    expect(manager.isMidTurn('p1')).toBe(false);
+    await manager.cancel('p1');
+  });
+
+  it('forgets a tool call its turn left open, so a later silent turn of the agent\'s own still stalls', { timeout: 30_000 }, async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-abandon', text: 'abandon' });
+    await expect.poll(() => manager.receipt('p1', 'op-abandon')?.state, { timeout: 10_000 }).not.toBe('accepted');
+    // The agent works on by itself, silently: the turn's open tool call no longer keeps it counting.
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('working');
+    expect(manager.isMidTurn('p1')).toBe(true);
+    expect(manager.isMidTurn('p1', Date.now() + 5 * 60_000 + 1)).toBe(false);
+    await manager.cancel('p1');
+  });
+
   it('starts on first view, sends a message and ends idle, with viewers able to follow by events alone', async () => {
     const { manager, store, directory, events } = harness();
     store.add('p1', newTab(directory));

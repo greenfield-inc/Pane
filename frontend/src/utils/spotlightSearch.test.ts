@@ -213,7 +213,7 @@ describe('matchedRanges', () => {
 });
 
 describe('search in All machines', () => {
-  const snapshot = (projects: Array<Project & { sessions: Session[] }>) => ({ projects, sessions: [], statuses: [], notify: null, permissions: [] });
+  const snapshot = (projects: Array<Project & { sessions: Session[] }>) => ({ projects, sessions: [], statuses: [], activity: [], notify: null, permissions: [] });
   const views = [
     { machine: { id: 'local', name: 'studio-mac', os: 'macOS' as const, slot: 0, letters: 'S' }, offline: false,
       snapshot: snapshot([{ ...project(1, 'acme-web'), sessions: [pane('p1', 'fix-checkout-race', 1)] }]) },
