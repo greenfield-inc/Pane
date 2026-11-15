@@ -28,7 +28,8 @@ type MachineOs = 'macOS' | 'Windows' | 'Linux';
 export interface TailnetMachine {
   name: string;
   dnsName: string;
-  os: MachineOs;
+  /** `unknown` for a saved computer that has not said and does not answer now. */
+  os: MachineOs | 'unknown';
   online: boolean;
   ips: string[];
   self: boolean;
@@ -191,6 +192,15 @@ function runTailscale(args: string[]): Promise<string | null> {
  * Finds a machine by name, MagicDNS name, Tailscale IP, any id it is saved under (Pane id, install
  * id, relay id), a route's host name, or a unique name prefix.
  */
+/** Machines' names, each with an id where two share a name. */
+function namesWithIds(machines: readonly TailnetMachine[]): string {
+  return machines.map((machine) => {
+    if (machines.filter((other) => other.name === machine.name).length === 1) return machine.name;
+    const id = machine.aliases?.find((alias) => alias !== machine.name && !alias.includes('.')) ?? machine.dnsName;
+    return `${machine.name} (${id})`;
+  }).join(', ');
+}
+
 export function resolveMachine(query: string, machines: readonly TailnetMachine[]): TailnetMachine {
   const wanted = query.trim().toLowerCase().replace(/\.$/, '');
   const exact = machines.filter((machine) => machine.name === wanted || machine.dnsName.toLowerCase() === wanted
@@ -200,8 +210,8 @@ export function resolveMachine(query: string, machines: readonly TailnetMachine[
   if (matches.length > 1) {
     throw new RunpaneError(
       'ERR_WORKSPACE_MACHINE_AMBIGUOUS',
-      `"${query}" matches several machines: ${matches.map((machine) => machine.name).join(', ')}. Nothing was sent.`,
-      'Use the full name, or the id `runpane workspace list --json` shows.',
+      `"${query}" matches several machines: ${namesWithIds(matches)}. Nothing was sent.`,
+      'Use the full name, or the id shown.',
     );
   }
   throw new RunpaneError(
@@ -221,7 +231,7 @@ function machinesForPath(
   platform: NodeJS.Platform = process.platform,
 ): TailnetMachine[] {
   const systems = foreignPathSystems(value, platform);
-  return machines.filter((machine) => machine.mine && !machine.self && systems.includes(machine.os));
+  return machines.filter((machine) => machine.mine && !machine.self && machine.os !== 'unknown' && systems.includes(machine.os));
 }
 
 /** The systems a path belongs to when its shape cannot exist on this platform; empty otherwise. */
@@ -242,7 +252,7 @@ function describeMachines(machines: readonly TailnetMachine[]): string {
 
 /** "name (OS, online)", plus the owner's login for someone else's machine. */
 function describeMachine(machine: TailnetMachine): string {
-  return `${machine.name} (${machine.os}, ${machine.online ? 'online' : 'offline'}${machine.mine ? '' : `, owner ${machine.owner}`})`;
+  return `${machine.name} (${machine.os === 'unknown' ? 'OS unknown' : machine.os}, ${machine.online ? 'online' : 'offline'}${machine.mine ? '' : `, owner ${machine.owner}`})`;
 }
 
 function tailscaleRoute(dnsName: string): RemoteRoute {
@@ -369,7 +379,7 @@ function computerMachine(computer: SavedComputer, peer: TailnetMachine | undefin
   return {
     name: peer?.name ?? computer.routes.find((route) => route.tailnetMachine)?.tailnetMachine?.toLowerCase() ?? machineSlug(computer.label),
     dnsName: peer?.dnsName ?? hostOf(computer.routes[0].baseUrl),
-    os: computer.os ?? peer?.os ?? 'Linux',
+    os: computer.os ?? peer?.os ?? 'unknown',
     // A route other than Tailscale may answer whether or not the tailnet sees it.
     online: Boolean(peer?.online) || computer.routes.some((route) => route.kind !== 'tailscale'),
     ips: peer?.ips ?? [],
@@ -605,7 +615,7 @@ export interface WorkspaceSummary {
   machine: string | null;
   reason?: string;
   fix?: string;
-  otherMachines: Array<{ name: string; os: MachineOs; online: boolean; owner: string; mine: boolean }>;
+  otherMachines: Array<{ name: string; os: MachineOs | 'unknown'; online: boolean; owner: string; mine: boolean }>;
   lines: string[];
 }
 

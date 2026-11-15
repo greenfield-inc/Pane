@@ -9477,7 +9477,8 @@ export const RUNPANE_CONTRACT = {
                 "enum": [
                   "macOS",
                   "Windows",
-                  "Linux"
+                  "Linux",
+                  "unknown"
                 ]
               },
               "online": {

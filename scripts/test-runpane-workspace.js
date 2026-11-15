@@ -374,6 +374,21 @@ test('a Pane older than computers still lists the computers it linked through th
   });
 });
 
+test('two saved computers with one name are told apart by relay id, and an unknown OS says so', posixOnly, async () => {
+  // Nothing listens on port 1, so neither computer can say which OS it runs.
+  const studio = (relayId) => ({ id: `relay-${relayId}`, label: 'Studio Mac', routes: [{
+    id: `relay:https://localhost:1/${relayId}`, kind: 'relay', source: 'link', baseUrl: `https://localhost:1/${relayId}`, token: 'link-token',
+    relay: { computerId: relayId, fingerprint: 'unused' },
+  }] });
+  await withComputer({ computers: () => ({ computers: [studio('k7xq2m4n8p3r5t6v'), studio('m2r9w4c6t8b1n3q5')] }) }, async (run) => {
+    const read = await run('workspace', 'studio-mac', 'read', '~/notes.md');
+    assert.notEqual(read.status, 0);
+    assert.match(read.output, /matches several machines: studio-mac \(relay-k7xq2m4n8p3r5t6v\), studio-mac \(relay-m2r9w4c6t8b1n3q5\)/);
+    const unknown = await run('workspace', 'nope', 'read', '~/notes.md');
+    assert.match(unknown.output, /studio-mac \(OS unknown, offline\)/);
+  });
+});
+
 test('when a route does not answer, the next one does, within 10 seconds', posixOnly, async () => {
   const computers = ({ laptop, silent, keys }) => ({
     computers: [travelLaptop([

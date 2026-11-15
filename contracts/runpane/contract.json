@@ -9475,7 +9475,8 @@
                 "enum": [
                   "macOS",
                   "Windows",
-                  "Linux"
+                  "Linux",
+                  "unknown"
                 ]
               },
               "online": {
