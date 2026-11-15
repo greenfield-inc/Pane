@@ -44,7 +44,8 @@ The app still accepts `pane-remote://` connection codes.
    Or paste the link into **Add a device › Computer › Or finish here** on the
    other computer.
 3. The first computer shows **Linked with &lt;computer&gt;**. If you don't
-   know that computer, choose **Not you? Unlink &lt;computer&gt;**.
+   know that computer, choose **Not you? Unlink &lt;computer&gt;**. That undoes
+   the whole link, including the links it made with the rest of your group.
 
 On a computer with no screen, run `runpane link '<link>'` instead. It asks
 before joining two groups of computers (see
@@ -115,8 +116,9 @@ them as "found automatically". A link's credential works on every route, so a
 found route needs no new pairing.
 
 Pane connects on the first route that answers. When the connection goes
-silent for 8 seconds and another route is left, Pane moves to the next one,
-before the "Can't reach" banner appears and without closing your Panes. While
+silent for 8 seconds, Pane checks the other routes and moves to the first that
+answers, before the "Can't reach" banner appears and without closing your
+Panes. When none answers, the banner shows after the usual 30 seconds. While
 on a farther route, Pane checks the nearer ones every minute, and when the
 network changes or the computer wakes, and moves back to the first that
 answers.
@@ -180,7 +182,8 @@ every computer it reached through yours.
   pair one phone with each of them.
 - **Unlink from all your computers**, in a linked computer's expanded row,
   removes that computer from every computer's and phone's list, and the
-  phones you paired through it lose access to it. A computer also on your
+  phones you paired through it lose access to it. The other computers in the
+  group stay linked with each other. A computer also on your
   tailnet stays as a Tailscale row.
 - **Forget**, on a computer with no Pane relay route, removes it from this
   computer's list only.
