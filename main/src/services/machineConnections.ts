@@ -9,6 +9,7 @@ import type { OrchestrationPanelOverview } from '../../../shared/types/orchestra
 import { configuredAgentSchema } from '../../../shared/agents';
 import { agentReportFields } from './workspaceJournalSchema';
 import type { RemoteMachineAccess } from './orchestrationSessionManager';
+import { readingMachines } from '../daemon/readingMachines';
 import {
   LOCAL_MACHINE_ID,
   MACHINE_EVENT_CHANNELS,
@@ -80,6 +81,7 @@ export class MachineConnections {
   private readonly listeners = new Set<(event: MachineConnectionsEvent) => void>();
   private readonly createClient: CreateMachineClient;
   private readonly onConfigUpdated = () => this.refresh();
+  private stopRetryOnArrival: (() => void) | null = null;
 
   constructor(private readonly deps: MachineConnectionsDeps) {
     this.createClient = deps.createClient ?? ((profile, options) => new RemotePaneClient(profile, options));
@@ -87,11 +89,16 @@ export class MachineConnections {
 
   start(): void {
     this.deps.configManager.on('config-updated', this.onConfigUpdated);
+    // A machine back from sleep reopens its streams to the machines it reads, this one among them,
+    // before this one's next retry would reach it: try every offline machine now.
+    this.stopRetryOnArrival = readingMachines.onArrive(() => this.retryOffline());
     this.refresh();
   }
 
   async stop(): Promise<void> {
     this.deps.configManager.off('config-updated', this.onConfigUpdated);
+    this.stopRetryOnArrival?.();
+    this.stopRetryOnArrival = null;
     const machines = [...this.machines.values()];
     this.machines.clear();
     await Promise.all(machines.map(machine => this.close(machine)));
@@ -167,6 +174,12 @@ export class MachineConnections {
   /** Runs one allowed command on the named machine. Anything outside the list is refused before it is sent. */
   async run(machineId: string, command: PaneCommandValue): Promise<MachineResult> {
     return { machineId, data: await this.invoke(machineId, toInvocation(command), { write: true }) };
+  }
+
+  private retryOffline(): void {
+    for (const [id, machine] of this.machines) {
+      if (machine.state.status === 'offline') void this.retry(id).catch(() => undefined);
+    }
   }
 
   /** Reconnects a saved machine now instead of waiting for its next retry. */
