@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync } from 'fs';
+import net from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { RelayService } from './relayService';
@@ -65,5 +66,36 @@ describe('relay service', () => {
     changed();
     await vi.waitFor(() => expect(service.getStatus().lastError ?? '').not.toMatch(/listener/u));
     await service.stop();
+  });
+
+  it("keeps Pane's own relay running through unrelated config changes", async () => {
+    // Every probe of Pane's relays goes to a closed local port, so the nearest-relay pick stays offline.
+    const connect = net.connect.bind(net);
+    const probe = vi.spyOn(net, 'connect').mockImplementation(() => connect({ host: '127.0.0.1', port: 9 }));
+    let changed = () => {};
+    const service = new RelayService({
+      settings: () => ({ enabled: true }),
+      onSettingsChanged: (onChange) => { changed = onChange; return () => {}; },
+      secrets: { read: async () => null, write: async () => {} },
+      dataDir: mkdtempSync(join(tmpdir(), 'pane-relay-service-')),
+      pairingListener: () => ({ port: 1 }),
+      previewPort: () => null,
+      displayName: () => 'Studio Mac',
+      addClient: async () => {},
+      env: { PANE_RELAY_CONNECT_HOST: '127.0.0.1' },
+    });
+    service.start();
+    await vi.waitFor(() => expect(service.getStatus().relay).toBe('us.relay.runpane.net'));
+    const probesAtStart = probe.mock.calls.length;
+
+    for (let i = 0; i < 3; i += 1) {
+      changed();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    expect(probesAtStart).toBe(3);
+    expect(probe.mock.calls.length).toBe(probesAtStart);
+    await service.stop();
+    probe.mockRestore();
   });
 });
