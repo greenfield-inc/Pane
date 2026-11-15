@@ -9,12 +9,12 @@ import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { AppServices } from './types';
 
-export const SSH_ROUTE_COMMANDS = {
+const SSH_ROUTE_COMMANDS = {
   hosts: 'ssh:route-hosts',
   connect: 'ssh:route-connect',
 } as const;
 
-export const SSH_ROUTE_PROGRESS_EVENT = 'ssh:route-progress';
+const SSH_ROUTE_PROGRESS_EVENT = 'ssh:route-progress';
 
 /** SSH config and installs on SSH hosts belong to the person at this computer, never a remote caller. */
 function onThisComputerOnly(): void {

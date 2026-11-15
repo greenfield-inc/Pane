@@ -213,7 +213,7 @@ export class RelayLinks {
   checkPeer(peer: RelayComputer): void {
     const self = this.deps.self();
     if (!self) {
-      throw new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so it was not linked.', 'Turn on phone access in Settings › Remote Access, then try the link again.');
+      throw new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so it was not linked.', 'Open Settings › Remote Access › Add a device on this computer, which turns phone access on, then try the link again.');
     }
     if (!relayKeyMatchesId(peer)) {
       throw new PaneError(

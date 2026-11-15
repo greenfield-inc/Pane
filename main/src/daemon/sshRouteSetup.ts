@@ -5,7 +5,7 @@ import { upsertComputer, withRoutes, type ComputerRoute, type RemoteComputer } f
 import type { ConfigManager } from '../services/configManager';
 import { lastLine, sshBatchOptions, type SshRunner, type SshTunnels } from './sshRoute';
 
-export type SshRouteStep = 'connecting' | 'checking-node' | 'installing' | 'starting' | 'linked' | 'failed';
+type SshRouteStep = 'connecting' | 'checking-node' | 'installing' | 'starting' | 'linked' | 'failed';
 
 export interface SshRouteProgress {
   host: string;

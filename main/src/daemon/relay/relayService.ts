@@ -115,14 +115,14 @@ export class RelayService {
 
   sendAlert(alert: RelayAlert): Promise<{ status: number; body: string }> {
     if (!this.agent) {
-      return Promise.reject(new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so the alert was not sent.', 'Turn on phone access in Settings › Remote Access.'));
+      return Promise.reject(new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so the alert was not sent.', 'Open Settings › Remote Access › Add a device on this computer, which turns phone access on.'));
     }
     return this.agent.sendAlert(alert);
   }
 
   requestGrant(request: RelayGrantRequest): Promise<{ status: number; body: string }> {
     if (!this.agent) {
-      return Promise.reject(new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so the phone could not confirm it for alerts.', 'Turn on phone access in Settings › Remote Access.'));
+      return Promise.reject(new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so the phone could not confirm it for alerts.', 'Open Settings › Remote Access › Add a device on this computer, which turns phone access on.'));
     }
     return this.agent.requestGrant(request);
   }
@@ -175,7 +175,7 @@ export class RelayService {
   private listenerError(): string | null {
     const listener = this.deps.pairingListener();
     if ('port' in listener) return null;
-    return `Phones can't connect: this computer's phone listener isn't running (${reasonOf(listener.error)}). In Settings › Remote Access › More › Advanced, turn on the host listener or give it a free port.`;
+    return `Phones can't connect: this computer's phone listener isn't running (${reasonOf(listener.error)}). In Settings › Remote Access › Tailscale › Advanced, turn on the host listener or give it a free port.`;
   }
 
   /** A one-time QR code or link, 10 minutes unless the link asks for longer. Throws while the relay is not ready. */

@@ -158,7 +158,7 @@ export class ComputerLinking {
     const link = this.parse(text);
     const self = this.deps.self();
     if (!self) {
-      throw new PaneError('ERR_RELAY_OFF', `Phone access is off on this computer, so it was not linked with ${link.name}.`, 'Turn on phone access in Settings › Remote Access, then open the link again.');
+      throw new PaneError('ERR_RELAY_OFF', `Phone access is off on this computer, so it was not linked with ${link.name}.`, 'Open Settings › Remote Access › Add a device on this computer, which turns phone access on, then open the link again.');
     }
     if (link.domain !== self.domain) {
       throw new PaneError('ERR_RELAY_LINK_OUTSIDE_DOMAIN', `${link.name} uses the relay ${link.domain} and this computer uses ${self.domain}, so they were not linked.`,
