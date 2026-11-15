@@ -2,6 +2,7 @@ import type { PaneChatAgent } from './paneChat';
 import type { VoiceTranscriptionMode } from './voiceTranscription';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import type { BoundarySchema, JsonObject, JsonValue } from '../validation/boundaryDecoder';
+import { convertProfiles, decodeComputers, type RemoteComputer } from './remoteComputers';
 
 export type RemoteDaemonTransport = 'http+sse';
 export type RemoteDaemonClientMode = 'local' | 'remote';
@@ -276,6 +277,15 @@ export interface RemoteMobilePushStatus {
 }
 
 export interface RemoteDaemonClientSettings {
+  /**
+   * Every computer this one can reach, one record each with its routes (D-51). `activeProfileId`
+   * names one of them.
+   */
+  computers: RemoteComputer[];
+  /**
+   * The entries saved before computers, one per route. Kept as read, so an older Pane still finds
+   * the pairings made before the upgrade; nothing reads or writes them except the conversion.
+   */
   profiles: RemotePaneConnectionProfile[];
   activeProfileId: string | null;
   mode: RemoteDaemonClientMode;
@@ -533,6 +543,7 @@ export function createDefaultRemoteDaemonConfig(): RemoteDaemonConfig {
         mobilePush: { registrations: [], attentionSequence: 0, panelStates: {} },
     },
     client: {
+      computers: [],
       profiles: [],
       activeProfileId: null,
       mode: 'local',
@@ -724,6 +735,13 @@ export function getActiveRemoteHostId(value: unknown): string | null {
   return client.mode === 'remote' ? client.activeProfileId : null;
 }
 
+/** A saved config whose client entries have not been converted to computers yet. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Reads the raw saved config before it is normalized.
+export function needsComputersConversion(value: unknown): boolean {
+  const client = readJsonObject(readJsonObject(value)?.client);
+  return client !== undefined && readJsonArray(client.profiles).length > 0 && !Array.isArray(client.computers);
+}
+
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary validates external data with its named schema before use.
 export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig {
   const defaults = createDefaultRemoteDaemonConfig();
@@ -753,8 +771,13 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
     }
   });
 
-  let activeProfileId = readOptionalString(client.activeProfileId) ?? null;
-  if (activeProfileId && !profiles.some((profile) => profile.id === activeProfileId)) {
+  // A config from before computers converts from its entries; the entries stay as they were.
+  const converted = Array.isArray(client.computers)
+    ? { computers: decodeComputers(client.computers), activeProfileId: readOptionalString(client.activeProfileId) ?? null }
+    : convertProfiles(profiles, readOptionalString(client.activeProfileId) ?? null);
+  const { computers } = converted;
+  let { activeProfileId } = converted;
+  if (activeProfileId && !computers.some((computer) => computer.id === activeProfileId)) {
     activeProfileId = null;
   }
 
@@ -779,6 +802,7 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
   const normalized: RemoteDaemonConfig = {
     host: hostSettings,
     client: {
+      computers,
       profiles: [...profiles],
       activeProfileId,
       mode: activeProfileId && client.mode === 'remote' ? 'remote' : 'local',

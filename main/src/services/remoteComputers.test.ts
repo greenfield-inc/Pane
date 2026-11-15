@@ -1,0 +1,144 @@
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ConfigManager } from './configManager';
+import { applyRoutesReport, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
+
+// Saved by v2.4.225: the same Mac once through Tailscale and once through the relay, plus a code host.
+const tailnetMac = {
+  id: 'tailnet-tail3c2c57.ts.net-parsas-macbook-pro',
+  label: 'parsas-macbook-pro',
+  baseUrl: 'https://parsas-macbook-pro.tail3c2c57.ts.net:8443',
+  token: '',
+  transport: 'http+sse',
+  tailnetMachine: 'parsas-macbook-pro',
+  tailnetDomain: 'tail3c2c57.ts.net',
+};
+const relayMac = {
+  id: 'relay-k7xq2m4n8p3r5t6v',
+  label: 'Parsas-MacBook-Pro',
+  baseUrl: 'https://k7xq2m4n8p3r5t6v.runpane.net',
+  token: 'link-token-mac',
+  transport: 'http+sse',
+  relay: { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp-mac', linkedBy: 'iPhone' },
+};
+const codeHost = {
+  id: 'remote-1',
+  label: 'build-box',
+  baseUrl: 'https://build.example.com',
+  token: 'code-token',
+  transport: 'http+sse',
+  tunnel: { kind: 'manual', selected: true },
+};
+
+describe('computers (D-51)', () => {
+  let paneDir: string;
+  let configPath: string;
+
+  beforeEach(async () => {
+    paneDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-computers-'));
+    process.env.PANE_DIR = paneDir;
+    configPath = path.join(paneDir, 'config.json');
+  });
+
+  afterEach(async () => {
+    delete process.env.PANE_DIR;
+    await fs.rm(paneDir, { recursive: true, force: true });
+  });
+
+  it('converts a v2.4.225 config to one computer per machine and leaves the old entries for a downgrade', async () => {
+    const saved = { machineId: 'this-mac', remoteDaemon: { client: { profiles: [tailnetMac, relayMac, codeHost], activeProfileId: tailnetMac.id, mode: 'remote' } } };
+    await fs.writeFile(configPath, JSON.stringify(saved));
+
+    const manager = new ConfigManager();
+    await manager.initialize();
+
+    const client = manager.getConfig().remoteDaemon!.client;
+    expect(client.computers.map((computer) => ({ id: computer.id, label: computer.label, routes: computer.routes.map((route) => route.kind) }))).toEqual([
+      { id: tailnetMac.id, label: 'Parsas-MacBook-Pro', routes: ['tailscale', 'relay'] },
+      { id: 'remote-1', label: 'build-box', routes: ['public'] },
+    ]);
+    expect(client.computers[0].linkedBy).toBe('iPhone');
+    expect(client).toMatchObject({ activeProfileId: tailnetMac.id, mode: 'remote' });
+
+    const onDisk = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    expect(onDisk.remoteDaemon.client.profiles).toEqual([tailnetMac, relayMac, codeHost]);
+    expect(onDisk.remoteDaemon.client.computers).toHaveLength(2);
+  });
+
+  it('keeps the relay entry\'s id when it was the active one', async () => {
+    await fs.writeFile(configPath, JSON.stringify({ remoteDaemon: { client: { profiles: [tailnetMac, relayMac], activeProfileId: relayMac.id, mode: 'remote' } } }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    const client = manager.getConfig().remoteDaemon!.client;
+    expect(client.computers.map((computer) => computer.id)).toEqual([relayMac.id]);
+    expect(client.activeProfileId).toBe(relayMac.id);
+  });
+
+  it('keeps two relay computers with the same name as two computers', async () => {
+    const twin = { ...relayMac, id: 'relay-aaaabbbbccccdddd', baseUrl: 'https://aaaabbbbccccdddd.runpane.net', relay: { computerId: 'aaaabbbbccccdddd', fingerprint: 'fp-2' } };
+    await fs.writeFile(configPath, JSON.stringify({ remoteDaemon: { client: { profiles: [relayMac, twin], activeProfileId: null, mode: 'local' } } }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().remoteDaemon!.client.computers).toHaveLength(2);
+  });
+
+  it('reads saved computers as they are, without converting again', async () => {
+    const computers: RemoteComputer[] = [{ id: 'c1', label: 'devbox', machineId: 'm1', routes: [{ id: 'relay:https://x.runpane.net', kind: 'relay', source: 'link', baseUrl: 'https://x.runpane.net', token: 't', relay: { computerId: 'x', fingerprint: 'f' } }] }];
+    await fs.writeFile(configPath, JSON.stringify({ remoteDaemon: { client: { computers, profiles: [tailnetMac], activeProfileId: 'c1', mode: 'remote' } } }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig().remoteDaemon!.client.computers).toEqual(computers);
+    expect(manager.getConfig().remoteDaemon!.client.activeProfileId).toBe('c1');
+  });
+});
+
+describe('merging computers', () => {
+  const relayRoute = { id: 'relay:https://odkk3nfdl5dsozxr.runpane.net', kind: 'relay' as const, source: 'link' as const, baseUrl: 'https://odkk3nfdl5dsozxr.runpane.net', token: 'tok', relay: { computerId: 'odkk3nfdl5dsozxr', fingerprint: 'fp' } };
+  const devbox: RemoteComputer = { id: 'relay-odkk3nfdl5dsozxr', label: 'parsa-devbox', machineId: 'devbox-install', routes: [relayRoute] };
+
+  it('never merges a Tailscale machine into a computer with a different install id, whatever its name', () => {
+    const { computers } = upsertComputer([devbox], {
+      machineId: 'other-install',
+      tailnetName: 'parsa-devbox',
+      label: 'parsa-devbox',
+      routes: [{ id: 'tailscale:https://parsa-devbox.t.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://parsa-devbox.t.ts.net:8443', token: '' }],
+    });
+    expect(computers).toHaveLength(2);
+  });
+
+  it('puts a Tailscale machine with no known id on the computer of the same name, nearest route first', () => {
+    const { computers, id } = upsertComputer([devbox], {
+      tailnetName: 'Parsa-Devbox',
+      label: 'parsa-devbox',
+      routes: [{ id: 'tailscale:https://parsa-devbox.t.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://parsa-devbox.t.ts.net:8443', token: '' }],
+    });
+    expect(id).toBe(devbox.id);
+    expect(computers[0].routes.map((route) => route.kind)).toEqual(['tailscale', 'relay']);
+  });
+
+  it('saves the routes a computer reports, all with the credential it was reached with', () => {
+    const { computers } = applyRoutesReport([devbox], devbox.id, relayRoute, {
+      machineId: 'devbox-install',
+      name: 'parsa-devbox',
+      os: 'Windows',
+      relay: { id: 'odkk3nfdl5dsozxr', address: 'https://odkk3nfdl5dsozxr.runpane.net', fingerprint: 'fp', local: ['https://l192-168-1-20.odkk3nfdl5dsozxr.runpane.net:42138'] },
+      tailnet: { dnsName: 'parsa-devbox.tail3c2c57.ts.net.', machine: 'parsa-devbox', domain: 'tail3c2c57.ts.net', port: 8443 },
+    });
+    expect(computers[0].os).toBe('Windows');
+    expect(computers[0].routes.map((route) => [route.kind, route.baseUrl, route.token, route.source])).toEqual([
+      ['lan', 'https://l192-168-1-20.odkk3nfdl5dsozxr.runpane.net:42138', 'tok', 'found'],
+      ['tailscale', 'https://parsa-devbox.tail3c2c57.ts.net:8443', 'tok', 'found'],
+      ['relay', 'https://odkk3nfdl5dsozxr.runpane.net', 'tok', 'link'],
+    ]);
+  });
+
+  it('moves a route that answers as a different computer onto that computer', () => {
+    const tailnetRoute = { id: 'tailscale:https://devbox.t.ts.net:8443', kind: 'tailscale' as const, source: 'found' as const, baseUrl: 'https://devbox.t.ts.net:8443', token: '' };
+    const both: RemoteComputer = { ...devbox, routes: [tailnetRoute, relayRoute] };
+    const { computers, id } = applyRoutesReport([both], devbox.id, tailnetRoute, { machineId: 'a-second-devbox', name: 'parsa-devbox' });
+    expect(computers.map((computer) => computer.routes.map((route) => route.kind))).toEqual([['relay'], ['tailscale']]);
+    expect(id).not.toBe(devbox.id);
+  });
+});

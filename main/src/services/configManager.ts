@@ -5,7 +5,7 @@ import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../shared/types/appearance';
 import { DEFAULT_AUTO_PAUSE_HOURS, DEFAULT_CHAT_RELEASE_MINUTES } from '../../../shared/types/autoPause';
 import { DEFAULT_BACKGROUND_ACTIVITY } from '../../../shared/types/backgroundActivity';
-import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import { createDefaultRemoteDaemonConfig, needsComputersConversion, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { customLinkSchema, type CustomLink } from '../../../shared/types/customLinks';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../shared/types/worktreeFileSync';
@@ -409,6 +409,8 @@ export class ConfigManager extends EventEmitter {
     }
     // A config from before install ids keeps the id this run created (the defaults' or the last read's).
     if (!loadedConfig.machineId) shouldPersistMigration = true;
+    // A config from before computers (D-51) saves its converted computers; the old entries stay beside them.
+    if (needsComputersConversion(loadedConfig.remoteDaemon)) shouldPersistMigration = true;
     if (!this.applyKeyboardShortcutOverrides(loadedConfig.keyboardShortcutOverrides)) {
       delete this.config.keyboardShortcutOverrides;
     }
