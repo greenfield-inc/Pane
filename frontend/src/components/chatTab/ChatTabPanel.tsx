@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
-  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
+  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore, type Attachment as ComposerAttachment,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
@@ -173,6 +173,12 @@ export interface ChatTabPanelProps {
   working?: readonly WorkingAgent[];
 }
 
+/**
+ * The attachments of each chat's unsent draft, kept with its viewer as the draft text is: the
+ * composer is rebuilt when the tab or its Pane is shown again, and they go back into it then.
+ */
+const draftAttachments = new WeakMap<ChatTabViewer, readonly ComposerAttachment[]>();
+
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
 const PASTE_LIMIT = 1024 * 1024;
 
@@ -318,7 +324,24 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       }));
     },
   });
-  useEffect(() => { runtime.thread.composer.setText(viewer.snapshot().draft); }, [runtime, viewer]);
+  /** The runtime the draft's attachments went back into: once, though development mode runs the effect twice. */
+  const restoredInto = useRef<typeof runtime | undefined>(undefined);
+  useEffect(() => {
+    const composer = runtime.thread.composer;
+    const saved = restoredInto.current === runtime ? [] : draftAttachments.get(viewer) ?? [];
+    restoredInto.current = runtime;
+    composer.setText(viewer.snapshot().draft);
+    // In their order: a file already copied to the chat's machine comes back with its path; an
+    // image (or a file still copying) is added again from the file itself.
+    void (async () => {
+      for (const { id, type, name, contentType, content, file } of saved) {
+        const restored = content ? { id, type, name, contentType, content } : file;
+        if (restored) await composer.addAttachment(restored).catch(() => undefined);
+      }
+    })();
+    // Sending empties the composer's attachments, and with them the saved ones.
+    return composer.subscribe(() => draftAttachments.set(viewer, composer.getState().attachments));
+  }, [runtime, viewer]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {

@@ -116,3 +116,33 @@ test('without a way to copy files, a chat attaches images and says why it refuse
   await expect(page.getByRole('alert')).toContainText('notes.pdf was not attached: this chat takes PNG, JPEG, WebP or GIF images here');
   await expect(chips(page)).toHaveCount(1);
 });
+
+test("a draft's attachments stay with it when you leave the chat and come back, and sending clears them", async ({ page }) => {
+  await open(page, 'files=1');
+  await drop(page, [{ name: 'one.png', type: 'image/png' }, { name: 'notes.pdf', type: 'application/pdf' }]);
+  const data = await transfer(page, [{ name: 'two.png', type: 'image/png' }]);
+  const box = page.getByRole('textbox', { name: 'Message Claude' });
+  await box.evaluate((input, clipboardData) => {
+    input.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+  }, data);
+  await box.fill('Compare these');
+  await expect(chips(page)).toHaveText(['one.png', 'notes.pdf', 'two.png']);
+
+  await page.evaluate(() => window.qaSwitchAway());
+  await expect(box).toHaveValue('Compare these');
+  await expect(chips(page)).toHaveText(['one.png', 'notes.pdf', 'two.png']);
+  await expect(chips(page).locator('img')).toHaveCount(2);
+
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect.poll(() => page.evaluate(() => window.qaSent.length)).toBe(1);
+  const sent = await page.evaluate(() => window.qaSent[0]);
+  expect(sent.text).toBe('Compare these\n/repo/.pane/files/notes.pdf');
+  expect(sent.images).toEqual([{ mimeType: 'image/png', data: PNG }, { mimeType: 'image/png', data: PNG }]);
+  // The file was copied to the chat's machine once, before the switch.
+  expect(await page.evaluate(() => window.qaCopied)).toEqual(['notes.pdf']);
+
+  await page.evaluate(() => window.qaSwitchAway());
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
+  await expect(box).toHaveValue('');
+  await expect(chips(page)).toHaveCount(0);
+});
