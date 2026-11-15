@@ -1,4 +1,5 @@
 import type { NotifyItem } from '../../../../shared/types/notify';
+import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 
 /** A document linked from an item, read from the machine that holds it. */
@@ -59,4 +60,13 @@ export function machineDocFailure(doc: MachineDoc, label: string, machine: strin
   if (doc.kind === 'missing') return `${label} isn't on ${machine} anymore`;
   if (doc.kind === 'unreachable') return `Couldn't reach ${machine}`;
   return undefined;
+}
+
+/**
+ * Where a linked file is read from: this computer's document viewer when the approval and the app
+ * are both here, otherwise the machine that holds the approval, over the Pane-to-Pane connection.
+ * That machine serves only files its own approvals link, read-only and under the same size limit.
+ */
+export function linkedFileReadsHere(item: Pick<NotifyItem, 'machineId'>, activeMachineId: string): boolean {
+  return (item.machineId ?? LOCAL_MACHINE_ID) === LOCAL_MACHINE_ID && activeMachineId === LOCAL_MACHINE_ID;
 }
