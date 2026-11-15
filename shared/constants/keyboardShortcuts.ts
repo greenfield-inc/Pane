@@ -21,7 +21,8 @@ export type ShortcutCategory =
   | 'tools'
   | 'machines'
   | 'debug'
-  | 'shortcuts';
+  | 'shortcuts'
+  | 'approvals';
 
 type Digit1to9 = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9';
 type CustomSlot = '0' | '1' | '2' | '3';
@@ -61,6 +62,8 @@ const STATIC_SHORTCUT_IDS = [
   'find-in-tab', 'find-next', 'find-previous',
   'switch-to-chat-pane', 'switch-to-chat-session',
   'open-machine-switcher', 'next-machine', 'previous-machine', 'toggle-all-machines',
+  'show-keyboard-shortcuts', 'toggle-approvals', 'open-session-approval',
+  'next-approval', 'previous-approval', 'approvals-group-by', 'send-approval',
 ] as const;
 
 export type StaticKeyboardShortcutId = typeof STATIC_SHORTCUT_IDS[number];
@@ -137,6 +140,17 @@ const APP_ENTRIES: readonly ShortcutCatalogEntry[] = [
   entry({ id: 'find-previous', label: 'Find Previous', category: 'tabs', scope: 'app', defaultChord: 'mod+shift+g', forwardFromWebview: false }),
   entry({ id: 'switch-to-chat-pane', label: 'Switch to chat', category: 'tabs', scope: 'app', defaultChord: null }),
   entry({ id: 'switch-to-chat-session', label: 'Switch to chat (Session)', category: 'tabs', scope: 'app', defaultChord: null }),
+  // ⌘/ works while typing; a focused, writable file editor keeps it for comments.
+  nav({ id: 'show-keyboard-shortcuts', label: 'Show Keyboard Shortcuts', category: 'shortcuts', scope: 'app', defaultChord: 'mod+/' }),
+  // In-app only: the system-wide answer-all key (notifyService.ts) is a separate setting.
+  nav({ id: 'toggle-approvals', label: 'Open or Close Approvals', category: 'approvals', scope: 'app', defaultChord: 'mod+shift+a' }),
+  // Ctrl+Alt+<letter> is AltGr on many layouts, so Windows and Linux get a two-step key.
+  nav({ id: 'open-session-approval', label: 'Open This Session\'s Approval', category: 'approvals', scope: 'app', defaultChord: 'mod+alt+a', defaultChordOther: 'mod+k mod+a' }),
+  nav({ id: 'next-approval', label: 'Next Approval', category: 'approvals', scope: 'app', defaultChord: null }),
+  nav({ id: 'previous-approval', label: 'Previous Approval', category: 'approvals', scope: 'app', defaultChord: null }),
+  entry({ id: 'approvals-group-by', label: 'Approvals: Group By', category: 'approvals', scope: 'app', defaultChord: null }),
+  // Only inside an open approval; the terminal and browser pages keep ⌘↩.
+  entry({ id: 'send-approval', label: 'Send Approval Answer', category: 'approvals', scope: 'app', defaultChord: 'mod+Enter', releaseFromTerminal: false, forwardFromWebview: false }),
 ];
 
 const SESSION_ENTRIES: readonly ShortcutCatalogEntry[] = [

@@ -40,6 +40,38 @@ describe('keyboard shortcut catalog', () => {
     }
   });
 
+  it('gives the sheet and approvals commands their keys, with no clash on any platform', () => {
+    const keys = (id: string) => {
+      const entry = getCatalogEntry(id);
+      expect(entry, id).toBeDefined();
+      return entry ? [defaultChordFor(entry, 'mac'), defaultChordFor(entry, 'other')] : [];
+    };
+    expect(keys('show-keyboard-shortcuts')).toEqual(['mod+/', 'mod+/']);
+    expect(keys('toggle-approvals')).toEqual(['mod+shift+a', 'mod+shift+a']);
+    expect(keys('open-session-approval')).toEqual(['mod+alt+a', 'mod+k mod+a']);
+    expect(keys('send-approval')).toEqual(['mod+Enter', 'mod+Enter']);
+    for (const id of ['next-approval', 'previous-approval', 'approvals-group-by']) expect(keys(id)).toEqual([null, null]);
+    for (const platform of ['mac', 'other'] as const) {
+      const seen = new Map<string, string>();
+      for (const entry of KEYBOARD_SHORTCUT_CATALOG) {
+        const chord = defaultChordFor(entry, platform);
+        if (!chord) continue;
+        const clash = seen.get(chord);
+        if (clash) expect(scopesOverlap(entry.scope, getCatalogEntry(clash)?.scope ?? 'app'), `${platform}: ${clash}/${entry.id}`).toBe(false);
+        seen.set(chord, entry.id);
+      }
+    }
+  });
+
+  it('keeps AltGr letters off the new defaults outside macOS', () => {
+    // Ctrl+Alt+<letter> is AltGr+<letter> on many Windows and Linux layouts.
+    for (const id of ['show-keyboard-shortcuts', 'toggle-approvals', 'open-session-approval', 'send-approval']) {
+      const entry = getCatalogEntry(id);
+      const chord = entry ? defaultChordFor(entry, 'other') ?? '' : '';
+      for (const step of chord.split(' ')) expect(/(^|\+)alt\+/.test(step) && /\+[a-z0-9]$/.test(step), `${id}: ${chord}`).toBe(false);
+    }
+  });
+
   it('keeps the menu\'s Actual Size key off every default, and ⌘0 for Focus Sidebar', async () => {
     const { RESET_ZOOM_ACCELERATOR } = await import('../services/nativeMenus');
     expect(RESET_ZOOM_ACCELERATOR).toBe('CmdOrCtrl+Shift+0');
@@ -60,9 +92,9 @@ describe('keyboard shortcut catalog', () => {
     const notReleasedFromTerminal = KEYBOARD_SHORTCUT_CATALOG
       .filter(entry => !entry.releaseFromTerminal)
       .map(entry => entry.id);
-    expect(notReleasedFromTerminal).toEqual(['usage-share']);
+    expect(notReleasedFromTerminal).toEqual(['send-approval', 'usage-share']);
     const notForwarded = KEYBOARD_SHORTCUT_CATALOG.filter(entry => !entry.forwardFromWebview).map(entry => entry.id).sort();
-    expect(notForwarded).toEqual(['find-in-tab', 'find-next', 'find-previous', 'split-down', 'split-right', 'usage-download', 'usage-share']);
+    expect(notForwarded).toEqual(['find-in-tab', 'find-next', 'find-previous', 'send-approval', 'split-down', 'split-right', 'usage-download', 'usage-share']);
     const releasedInTui = KEYBOARD_SHORTCUT_CATALOG
       .filter(entry => entry.releaseInTui)
       .map(entry => entry.id)
@@ -77,8 +109,8 @@ describe('keyboard shortcut catalog', () => {
       'cycle-tab-next-d', 'cycle-tab-prev-a',
       'focus-group-down', 'focus-group-left', 'focus-group-right', 'focus-group-up',
       'focus-next-region', 'focus-previous-region', 'focus-sidebar',
-      'minimize-region', 'next-machine', 'open-command-palette', 'open-machine-switcher',
-      'open-shortcut-settings',
+      'minimize-region', 'next-approval', 'next-machine', 'open-command-palette', 'open-machine-switcher',
+      'open-session-approval', 'open-shortcut-settings', 'previous-approval', 'show-keyboard-shortcuts', 'toggle-approvals',
       'panel-tab-1', 'panel-tab-2', 'panel-tab-3', 'panel-tab-4',
       'panel-tab-5', 'panel-tab-6', 'panel-tab-7', 'panel-tab-8', 'panel-tab-9',
       'previous-machine', 'split-down', 'split-right',

@@ -15,6 +15,7 @@ export const CATEGORY_ORDER: ShortcutCategory[] = [
   'navigation',
   'session',
   'tabs',
+  'approvals',
   'view',
   'machines',
   'tools',
@@ -31,6 +32,7 @@ export const CATEGORY_LABELS = {
   tools: 'Add Tool',
   shortcuts: 'Shortcuts',
   debug: 'Debug',
+  approvals: 'Approvals',
 } satisfies Record<ShortcutCategory, string>;
 
 const MAC_SYMBOLS = new Map([

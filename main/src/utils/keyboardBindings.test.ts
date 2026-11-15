@@ -83,8 +83,8 @@ describe('keyboard bindings', () => {
     expect(sets.bound.has('mod+alt+5')).toBe(true);
     expect(sets.bound.has('mod+alt+9')).toBe(true);
     expect(sets.bound.has('mod+k')).toBe(false);
-    expect([...(sets.sequences.get('mod+k') ?? [])].sort()).toEqual(['mod+m', 'mod+s']);
-    expect([...(sets.webviewSequences.get('mod+k') ?? [])].sort()).toEqual(['mod+m', 'mod+s']);
+    expect([...(sets.sequences.get('mod+k') ?? [])].sort()).toEqual(['mod+a', 'mod+m', 'mod+s']);
+    expect([...(sets.webviewSequences.get('mod+k') ?? [])].sort()).toEqual(['mod+a', 'mod+m', 'mod+s']);
     expect(sets.webviewForward.has('F6')).toBe(true);
     expect(sets.webviewForward.has('shift+ArrowUp')).toBe(false);
   });
