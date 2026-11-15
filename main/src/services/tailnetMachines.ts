@@ -236,7 +236,7 @@ export async function resolveTailnetMachineUrl(
   const tailnet = readTailnetPeers(await readStatus());
   if (!tailnet.ok) throw new Error(`${tailnet.reason}. ${tailnet.fix}`);
   if (tailnet.domain.toLowerCase() !== machine.domain.toLowerCase()) {
-    throw new Error(`${machine.name} was saved on another tailnet (${machine.domain}). This computer is now on ${tailnet.tailnet}; connect again from Settings › Remote Access › Switch to.`);
+    throw new Error(`${machine.name} was saved on another tailnet (${machine.domain}). This computer is now on ${tailnet.tailnet}; connect again from Settings › Remote Access › Computers.`);
   }
   return findMachineUrl(tailnet, machine.name);
 }
@@ -260,7 +260,7 @@ export async function lookupTailnetMachine(
       : { kind: 'tailscale-down', reason: tailnet.reason, fix: tailnet.fix };
   }
   if (tailnet.domain.toLowerCase() !== machine.domain.toLowerCase()) {
-    return { kind: 'not-found', reason: `${machine.name} was saved on another tailnet (${machine.domain}). This computer is now on ${tailnet.tailnet}; connect again from Settings › Remote Access › Switch to.` };
+    return { kind: 'not-found', reason: `${machine.name} was saved on another tailnet (${machine.domain}). This computer is now on ${tailnet.tailnet}; connect again from Settings › Remote Access › Computers.` };
   }
   const peer = tailnet.peers.find((candidate) => candidate.name.toLowerCase() === machine.name.toLowerCase());
   if (!peer) return { kind: 'not-found', reason: `${machine.name} is not on your current tailnet (${tailnet.tailnet}).` };

@@ -1322,7 +1322,7 @@ export class PaneRemoteHttpApiServer {
       if (origin) glasses.noteRefusedOrigin(origin);
       return refuse('origin', 403, 'ERR_GLASSES_ORIGIN_REFUSED',
         `This computer accepts glasses tokens only from the Even app; this request came from ${origin ?? 'no origin'}.`,
-        'Open Pane from the Even app. If this is the Even app, allow this origin on the computer in Settings › Remote Access › Devices.',
+        'Open Pane from the Even app. If this is the Even app, allow this origin on the computer in Settings › Remote Access › Phones and glasses.',
         `origin ${origin ?? 'none'}`);
     }
     if (new URL(rawUrl, 'http://localhost').searchParams.has('access_token')) {
@@ -1392,7 +1392,7 @@ export class PaneRemoteHttpApiServer {
       : glasses.allowsOrigin(getSingleHeaderValue(request.headers.origin) ?? undefined) && !this.funnelRefusesGlasses(glasses);
     if (!stillAdmitted) {
       refuse(403, 'ERR_GLASSES_ACCESS_WITHDRAWN', 'These glasses lost access to this computer while the request was arriving; it was not run.',
-        'Check Settings › Remote Access › Devices on the computer, then pair again if the glasses were revoked.');
+        'Check Settings › Remote Access › Phones and glasses on the computer, then pair again if the glasses were revoked.');
       return;
     }
 
@@ -1473,7 +1473,7 @@ export class PaneRemoteHttpApiServer {
       // The vouch takes seconds; glasses revoked meanwhile get none of the secrets it minted.
       if (!this.isStillAdmitted(glassesIdentity(client))) {
         refuse(403, 'ERR_GLASSES_ACCESS_WITHDRAWN', 'These glasses lost access to this computer while it asked your other computers for them; no pairing code was sent.',
-          'Check Settings › Remote Access › Devices on the computer, then pair again from the Pane phone app if the glasses were revoked.');
+          'Check Settings › Remote Access › Phones and glasses on the computer, then pair again from the Pane phone app if the glasses were revoked.');
         return;
       }
       this.writeJson(response, answer.statusCode, answer.payload, request);
@@ -1563,7 +1563,7 @@ export class PaneRemoteHttpApiServer {
       // Glasses tokens are admitted only on the workspace listener, with their narrow scope.
       remoteConfig.host.clients.filter((client) => client.kind !== 'glasses'),
     );
-    // Settings › Devices shows when each phone last reached this computer; the same throttled write records glasses.
+    // Settings › Phones and glasses shows when each phone last reached this computer; the same throttled write records glasses.
     if (auth.ok && auth.client) this.glasses?.touch(auth.client.id);
     return auth;
   }

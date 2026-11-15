@@ -175,7 +175,7 @@ export function registerRelayCommands(
     }));
   });
 
-  // Desktop only: Remote Access › Devices.
+  // Desktop only: Remote Access › Phones and glasses.
   registry.register(RELAY_DEVICE_COMMANDS.list, () => {
     onThisComputerOnly();
     return links.devices();

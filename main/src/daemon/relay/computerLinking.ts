@@ -152,7 +152,7 @@ export class ComputerLinking {
     }
     if (link.domain !== self.domain) {
       throw new PaneError('ERR_RELAY_LINK_OUTSIDE_DOMAIN', `${link.name} uses the relay ${link.domain} and this computer uses ${self.domain}, so they were not linked.`,
-        'Set the same Relay address in Settings › Remote Access on both computers, then copy a new link.');
+        'Set the same Relay address in Settings › Remote Access › Phones and glasses on both computers, then copy a new link.');
     }
     if (link.computerId === self.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'This is this computer\'s own link, so nothing was linked.', 'Open the link on another computer.');
     const { group } = await this.fetchPreview(link);

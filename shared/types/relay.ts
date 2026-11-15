@@ -134,7 +134,7 @@ export const RELAY_CLIENT_COMMANDS = {
   saveLink: 'relay:client:save-link',
 } as const;
 
-/** How Remote Access › Devices lists a paired phone or linked computer. */
+/** How Remote Access lists a paired phone (Phones and glasses) or linked computer (Computers). */
 export interface RelayDevice {
   /** The client record id on this computer. */
   clientId: string;

@@ -244,7 +244,7 @@ export class RelayLinks {
       throw new PaneError(
         'ERR_RELAY_LINK_OUTSIDE_DOMAIN',
         `${peer.name} is at ${peer.address}, outside this computer's relay domain ${self.domain}, so it was not linked.`,
-        `Link only computers that use the same relay: set the same Relay address in Settings › Remote Access on both, then link them again.`,
+        `Link only computers that use the same relay: set the same Relay address in Settings › Remote Access › Phones and glasses on both, then link them again.`,
       );
     }
     if (peer.id === self.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'A computer cannot link with itself.', 'Open the link on another computer.');
