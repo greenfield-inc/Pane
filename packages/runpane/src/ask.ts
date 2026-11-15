@@ -11,7 +11,7 @@ import { RUNPANE_CONTRACT } from './generated/contract';
 import { paneListResultSchema, repoListResultSchema } from './localControl';
 import { quote } from './handoff';
 import { windowsBatchCommand } from './secrets';
-import { readMachines, resolveMachine, workspaceTarget } from './workspace';
+import { requireTailnet, resolveMachine, workspaceTarget } from './workspace';
 
 /**
  * `runpane ask` runs one read-only agent turn headless and prints its answer; `runpane models`
@@ -168,8 +168,7 @@ const machineInfoSchema = boundary.object({ shell: boundary.string, os: boundary
 async function placeFor(machineName: string | undefined, paneDir: string | undefined, environment: Place['environment'] = 'native'): Promise<Place> {
   const here: Place = { machine: thisMachineName(), environment };
   if (!machineName) return here;
-  const tailnet = await readMachines(paneDir);
-  if (!tailnet.ok) throw new RunpaneError('ERR_ASK_MACHINE', `Can't reach ${machineName}: ${tailnet.reason}.`, tailnet.fix);
+  const tailnet = await requireTailnet(paneDir);
   const machine = resolveMachine(machineName, [tailnet.self, ...tailnet.machines]);
   if (machine.self) return here;
   const remote = workspaceTarget(machine);
