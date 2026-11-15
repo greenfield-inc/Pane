@@ -1321,7 +1321,7 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.message = value;
     return;
   }
-  if (flag === '--query') {
+  if (flag === '--query' || flag === '--search') {
     parsed.query = value;
     return;
   }

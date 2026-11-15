@@ -1172,19 +1172,29 @@ const PANEL_TYPE_LABELS = {
   browser: 'Page', editor: 'File', logs: 'Logs', notes: 'Notes', dashboard: 'Dashboard', 'setup-tasks': 'Setup tasks',
 } satisfies Record<ToolPanelType, string | null>;
 
+/** What a remote member's row adds after its machine's name. */
+const REMOTE_STATE_NOTES: Record<NonNullable<OrchestrationSessionOverview['panes'][number]['machine']>['state'], string> = {
+  online: '',
+  unreachable: ' · unreachable',
+  'older-pane': ' · older Pane: update it there for its reports to arrive',
+};
+
 function PaneOverviewCard({ pane }: { pane: OrchestrationSessionOverview['panes'][number] }) {
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const navigateToSessions = useNavigationStore(state => state.navigateToSessions);
+  // A Pane on another saved machine is read-only here; it opens from All machines.
+  const remote = pane.machine;
+  const readOnly = pane.missing || remote !== undefined;
   const openPane = () => {
-    if (pane.missing) return;
+    if (readOnly) return;
     setActiveSession(pane.paneId);
     navigateToSessions();
   };
   return (
     <div className="mt-2 rounded border border-border-primary bg-surface-secondary p-2">
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0"><p className="truncate font-medium text-text-primary">{pane.name}</p><p className="truncate text-[10px] text-text-muted">{pane.branch || 'Branch unknown'}{pane.archived ? ' · archived' : pane.missing ? ' · missing' : ''}</p></div>
-        {!pane.missing && <button type="button" onClick={openPane} className="flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] text-interactive hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive">Open Pane</button>}
+        <div className="min-w-0"><p className="truncate font-medium text-text-primary">{pane.name}</p><p className="truncate text-[10px] text-text-muted">{remote && `On ${remote.label} · `}{pane.branch || 'Branch unknown'}{pane.archived ? ' · archived' : pane.missing ? ' · missing' : ''}{remote && REMOTE_STATE_NOTES[remote.state]}</p></div>
+        {!readOnly && <button type="button" onClick={openPane} className="flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] text-interactive hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive">Open Pane</button>}
       </div>
       {pane.panels.length > 0 && <div className="-mx-1 mt-1">{pane.panels.map(panel => {
         const inspector = panel.type === 'explorer' || panel.type === 'diff' ? INSPECTOR_TABS[panel.type] : undefined;
@@ -1203,7 +1213,7 @@ function PaneOverviewCard({ pane }: { pane: OrchestrationSessionOverview['panes'
           }
         };
         return (
-          <button key={panel.panelId} type="button" disabled={pane.missing || panel.missing} onClick={openPanel}
+          <button key={panel.panelId} type="button" disabled={readOnly || panel.missing} onClick={openPanel}
             className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-[11px] enabled:hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive">
             <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center text-text-muted" aria-hidden="true">{panel.type && getPanelIcon(panel.type, { title: panel.title }, 'h-3.5 w-3.5')}</span>
             <span className="min-w-0 flex-1 truncate text-text-secondary">{inspector?.label ?? panel.title}</span>

@@ -78,6 +78,7 @@ export const workspaceEntrySchema: BoundarySchema<RunpaneWorkspaceEntry> = bound
   lastOutput: boundary.optional(boundary.string),
   lastOutputSource: boundary.optional(boundary.enumeration('transcript', 'screen')),
   expectedSince: boundary.optional(boundary.string),
+  machine: boundary.optional(boundary.object({ id: boundary.string, label: boundary.string, epoch: boundary.string, gen: boundary.number })),
   exitCode: boundary.optional(boundary.number),
   running: boundary.optional(boundary.boolean),
   baseline: boundary.optional(boundary.literal(true)),

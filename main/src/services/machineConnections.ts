@@ -5,6 +5,8 @@ import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '../../../shared/types/remoteDaemon';
+import type { OrchestrationPaneOverview } from '../../../shared/types/orchestrationSession';
+import type { RemoteMachineAccess } from './orchestrationSessionManager';
 import {
   LOCAL_MACHINE_ID,
   MACHINE_EVENT_CHANNELS,
@@ -123,6 +125,29 @@ export class MachineConnections {
     return [...this.machines.values()].map(machine => ({ id: machine.profile.id, invoke: (channel, args) => machine.client.invoke(channel, args) }));
   }
 
+  /** Runs any host channel on a saved machine, for main-process callers (Session members). Never reaches the renderer. */
+  async invokeOn(machineId: string, channel: string, args: PaneCommandValue[], timeoutMs?: number): Promise<PaneCommandValue> {
+    const machine = this.machines.get(machineId);
+    if (!machine) throw unknownMachine(machineId);
+    const call = machine.client.invoke(channel, args);
+    if (timeoutMs === undefined) return call;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new PaneError('ERR_MACHINE_TIMEOUT', `${machine.profile.label} did not answer within ${timeoutMs / 1000} s.`, `Check that Pane is running on ${machine.profile.label}.`)), timeoutMs);
+    });
+    try {
+      return await Promise.race([call, timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** A saved machine's current state, or undefined for an unknown id. */
+  machineState(machineId: string): MachineState | undefined {
+    const machine = this.machines.get(machineId);
+    return machine ? { ...machine.state } : undefined;
+  }
+
   /** An event raised on this computer; list events are forwarded as `LOCAL_MACHINE_ID`'s. */
   forwardLocal(channel: string, args: unknown[]): void {
     if (isMachineEventChannel(channel)) this.emit({ type: 'event', machineId: LOCAL_MACHINE_ID, channel, args });
@@ -202,7 +227,7 @@ export class MachineConnections {
         eventSink: { send: (channel, ...args) => { if (isCurrent() && isMachineEventChannel(channel)) this.emit({ type: 'event', machineId: id, channel, args }); } },
         onConnectionStateChange: (status, _error, metadata) => {
           if (!isCurrent()) return;
-          this.updateStatus(machine, status, metadata?.hostMachineId);
+          this.updateStatus(machine, status, metadata?.hostMachineId, metadata?.hostWorkspaceEntries);
           if (status === 'connected') clearRetry(machine);
           if (status === 'error' && !machine.retryTimer) {
             machine.retryTimer = setTimeout(() => {
@@ -223,10 +248,11 @@ export class MachineConnections {
     await machine.client.disconnect();
   }
 
-  private updateStatus(machine: RemoteMachine, status: RemotePaneConnectionStatus, hostMachineId?: string): void {
+  private updateStatus(machine: RemoteMachine, status: RemotePaneConnectionStatus, hostMachineId?: string, workspaceEntries?: boolean): void {
     const { state } = machine;
-    const before = `${state.status}|${state.offlineSince}|${state.installId}`;
+    const before = `${state.status}|${state.offlineSince}|${state.installId}|${state.workspaceEntries}`;
     if (hostMachineId) state.installId = hostMachineId;
+    if (workspaceEntries !== undefined) state.workspaceEntries = workspaceEntries;
     if (status === 'connected') {
       if (state.status !== 'online') state.onlineSince = new Date().toISOString();
       state.status = 'online';
@@ -237,7 +263,7 @@ export class MachineConnections {
       state.status = 'offline';
       delete state.onlineSince;
     }
-    if (`${state.status}|${state.offlineSince}|${state.installId}` !== before) this.emitMachines();
+    if (`${state.status}|${state.offlineSince}|${state.installId}|${state.workspaceEntries}` !== before) this.emitMachines();
   }
 
   private emitMachines(): void {
@@ -335,4 +361,27 @@ function unknownMachine(machineId: string): PaneError {
 
 function connectionKey(profile: RemotePaneConnectionProfile): string {
   return `${profile.baseUrl}\n${profile.token}`;
+}
+
+/** How long a Session overview waits for a member's machine before showing it unreachable. */
+const MEMBER_READ_TIMEOUT_MS = 4_000;
+const paneOverviewResultSchema = boundary.object({ pane: boundary.jsonObject });
+
+/** The Session manager's view of the saved machines: remote members' rows and whether each machine sends their reports. */
+export function remoteMachineAccess(machines: MachineConnections): RemoteMachineAccess {
+  return {
+    forwardsReports: machineId => machines.machineState(machineId)?.workspaceEntries,
+    readPane: async (machineId, paneId) => {
+      const state = machines.machineState(machineId);
+      if (!state || state.status === 'offline') return 'unreachable';
+      if (state.workspaceEntries === false) return 'older-pane';
+      try {
+        const result = decodeBoundary(await machines.invokeOn(machineId, 'runpane:panes:overview', [{ paneId }], MEMBER_READ_TIMEOUT_MS), paneOverviewResultSchema);
+        // SAFETY: the member's machine built this row with the same OrchestrationPaneOverview type.
+        return result.pane as unknown as OrchestrationPaneOverview;
+      } catch {
+        return 'unreachable';
+      }
+    },
+  };
 }

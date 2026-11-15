@@ -1,0 +1,64 @@
+{
+  "models": [
+    {
+      "slug": "gpt-6-astra",
+      "display_name": "GPT-6-Astra",
+      "visibility": "list"
+    },
+    {
+      "slug": "gpt-6.1-sol",
+      "display_name": "GPT-6.1-Sol",
+      "visibility": "list"
+    },
+    {
+      "slug": "gpt-6.1-terra",
+      "display_name": "GPT-6.1 Terra",
+      "visibility": "list"
+    },
+    {
+      "slug": "gpt-6-sol",
+      "display_name": "GPT-6-Sol",
+      "visibility": "list"
+    },
+    {
+      "slug": "gpt-6-luna",
+      "display_name": "GPT-6-Luna",
+      "visibility": "list"
+    },
+    {
+      "slug": "gpt-5.6-sol",
+      "display_name": "GPT-5.6-Sol",
+      "visibility": "list"
+    },
+    {
+      "slug": "gpt-5.6-terra",
+      "display_name": "GPT-5.6-Terra",
+      "visibility": "list"
+    },
+    {
+      "slug": "gpt-5.6-luna",
+      "display_name": "GPT-5.6-Luna",
+      "visibility": "list"
+    },
+    {
+      "slug": "gpt-daybreak-blue-latest",
+      "display_name": "Daybreak Blue",
+      "visibility": "hide"
+    },
+    {
+      "slug": "gpt-daybreak-red-latest",
+      "display_name": "Daybreak Red",
+      "visibility": "hide"
+    },
+    {
+      "slug": "gpt-5.5",
+      "display_name": "GPT-5.5",
+      "visibility": "list"
+    },
+    {
+      "slug": "codex-auto-review",
+      "display_name": "Codex Auto Review",
+      "visibility": "hide"
+    }
+  ]
+}
