@@ -215,6 +215,9 @@ async fn connection(
 ) {
     // A dual-stack listener reports IPv4 clients as ::ffff:a.b.c.d.
     let peer = SocketAddr::new(peer.ip().to_canonical(), peer.port());
+    // Without it the last segment of a TLS flight or a passed-through write waits for the
+    // peer's ACK: one extra round trip per handshake.
+    let _ = tcp.set_nodelay(true);
     let mut buf = Vec::with_capacity(2048);
     let read_hello = async {
         let mut chunk = [0u8; 4096];
@@ -290,7 +293,7 @@ async fn resync(state: Arc<State>) {
     loop {
         tokio::select! {
             _ = state.shutdown.cancelled() => return,
-            _ = tick.tick() => state.registry.resync(&state.connected_ids()),
+            _ = tick.tick() => state.registry.resync(&state.cfg.region, &state.connected_ids()),
         }
     }
 }

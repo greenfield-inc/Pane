@@ -2172,3 +2172,91 @@ async fn helpers_with_self_signed_certificates_take_each_others_acme_challenges(
         assert!(refused.contains("tls"), "{refused}");
     }
 }
+
+/// Posts `update` to `env`'s registry as another relay does.
+async fn post_update(env: &Env, update: Value) {
+    let body = update.to_string();
+    let (code, _) = env
+        .http(
+            "POST",
+            "/v1/registry",
+            "authorization: Bearer s3cret\r\n",
+            &body,
+        )
+        .await;
+    assert_eq!(code, 200);
+}
+
+#[tokio::test]
+async fn a_late_offline_from_the_region_a_computer_left_keeps_its_new_region() {
+    let us = helper("us").await;
+    let agent = Agent::connect(&us, &SigningKey::generate()).await;
+    let name = format!("{}.{D}.", agent.id);
+    let us_ip = Ipv4Addr::new(203, 0, 113, 10);
+    assert_eq!(resolves(us.dns(), name.clone()).await, vec![us_ip]);
+
+    // The ap relay posts that the computer left it after the computer is already on us.
+    post_update(
+        &us,
+        json!({"id": agent.id, "region": "ap", "local": [], "txt": null, "online": false}),
+    )
+    .await;
+
+    assert_eq!(resolves(us.dns(), name).await, vec![us_ip]);
+    assert_eq!(us.status(&agent.id).await["state"], "online");
+}
+
+#[tokio::test]
+async fn the_resync_restores_the_region_of_a_computer_connected_here() {
+    let (url, mut posts) = fake_helper(Some(Duration::ZERO)).await;
+    let us = Env::start(&[
+        "--region",
+        "us",
+        "--dns",
+        "127.0.0.1:0",
+        "--region-ip",
+        "us=203.0.113.10,ap=192.0.2.44",
+        "--registry-secret",
+        "s3cret",
+        "--registry-url",
+        &url,
+        "--registry-resync-secs",
+        "1",
+    ])
+    .await;
+    let agent = Agent::connect(&us, &SigningKey::generate()).await;
+
+    // A stale update from another relay lands after the computer connected here.
+    post_update(
+        &us,
+        json!({"id": agent.id, "region": "ap", "local": [], "txt": null, "online": true}),
+    )
+    .await;
+
+    // Within a resync, this relay answers its own region again...
+    let name = format!("{}.{D}.", agent.id);
+    let us_ip = Ipv4Addr::new(203, 0, 113, 10);
+    let deadline = Instant::now() + WAIT;
+    while resolves(us.dns(), name.clone()).await != vec![us_ip] && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(resolves(us.dns(), name).await, vec![us_ip]);
+
+    // ...and tells the other helpers the same.
+    while posts.try_recv().is_ok() {}
+    let body = tokio::time::timeout(WAIT, posts.recv())
+        .await
+        .expect("a resync")
+        .unwrap();
+    let ours = body
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|u| u["id"] == agent.id.as_str())
+        .cloned()
+        .expect("the resync names the computer");
+    assert_eq!(
+        (&ours["region"], &ours["online"]),
+        (&json!("us"), &json!(true))
+    );
+}

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPublicKey, createVerify, randomBytes } from 'crypto';
 import { readFileSync } from 'fs';
 import http from 'http';
@@ -24,6 +24,7 @@ async function startFakeRelay(options: { refuse?: string } = {}) {
   const agents: tls.TLSSocket[] = [];
   const waiting = new Map<string, net.Socket>();
   const hellos: JsonObject[] = [];
+  const link = { answerPings: true, pings: 0 };
   const dataSockets: tls.TLSSocket[] = [];
   const verified: boolean[] = [];
   const control = tls.createServer({ key: fixture('relay.key'), cert: fixture('relay.pem') }, (socket) => {
@@ -56,6 +57,9 @@ async function startFakeRelay(options: { refuse?: string } = {}) {
               }
               socket.write(`${JSON.stringify({ t: 'welcome', id: 'x', domain: DOMAIN, region: 'us' })}\n`);
               agents.push(socket);
+            } else if (frame.t === 'ping') {
+              link.pings += 1;
+              if (link.answerPings) socket.write(`${JSON.stringify({ t: 'pong' })}\n`);
             } else if (frame.t === 'txt') {
               socket.write(`${JSON.stringify({ t: 'ok', req: frame.req })}\n`);
             }
@@ -93,6 +97,8 @@ async function startFakeRelay(options: { refuse?: string } = {}) {
     frontPort: (front.address() as AddressInfo).port,
     hellos,
     verified,
+    /** Whether the relay answers pings, and how many it got. */
+    link,
     agentsConnected: () => agents.length,
     /** Resets every data connection, as the relay does when it drops a parked client. */
     resetData: () => {
@@ -108,9 +114,9 @@ afterEach(async () => {
 });
 
 async function waitFor(check: () => boolean, label: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
+  const deadline = performance.now() + 5_000;
   while (!check()) {
-    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${label}`);
+    if (performance.now() > deadline) throw new Error(`Timed out waiting for ${label}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
@@ -205,6 +211,46 @@ describe('relay agent', () => {
     await waitFor(() => streams[0].destroyed, 'the stream to close');
     expect(agent.getState().status).toBe('online');
   });
+
+  it('keeps a link the relay answers, through a stall, and redials about 10 s after the relay goes quiet', async () => {
+    const relay = await startFakeRelay();
+    cleanups.push(relay.close);
+    const key = await loadComputerKey({ read: async () => fixture('computer.key').toString(), write: async () => undefined });
+    // The ping clock is faked; sockets and the redial delay run in real time.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    cleanups.push(() => { vi.useRealTimers(); });
+    const agent = new RelayAgent({
+      relayHost: RELAY_HOST,
+      connectHost: '127.0.0.1',
+      relayPort: relay.controlPort,
+      key,
+      displayName: () => 'Studio Mac',
+      localAddresses: () => [],
+      ca: fixture('ca.pem'),
+      onClient: (stream) => stream.destroy(),
+    });
+    cleanups.push(() => agent.stop());
+    agent.start();
+    await waitFor(() => agent.getState().status === 'online', 'the agent to come online');
+    const ping = async () => {
+      const before = relay.link.pings;
+      vi.advanceTimersByTime(5_000);
+      await waitFor(() => relay.link.pings === before + 1 || relay.hellos.length > 1, 'a ping');
+    };
+
+    for (let i = 0; i < 6; i++) await ping();
+    // The process stalls for 30 s, as under a debugger; the relay's answer is not read until after.
+    vi.setSystemTime(Date.now() + 30_000);
+    await ping();
+    await ping();
+    expect(relay.hellos).toHaveLength(1);
+
+    relay.link.answerPings = false;
+    await ping();
+    expect(relay.hellos).toHaveLength(1);
+    vi.advanceTimersByTime(5_000);
+    await waitFor(() => relay.hellos.length === 2, 'the redial 10 s after the last answer');
+  }, 10_000);
 
   it('waits minutes, not seconds, before retrying a relay that refused this computer', async () => {
     const relay = await startFakeRelay({ refuse: 'full' });
