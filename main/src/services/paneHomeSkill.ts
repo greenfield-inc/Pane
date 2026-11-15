@@ -389,9 +389,11 @@ orchestrator that relayed a worker's question, else Autopilot.
 - **A worker in a Session** (\`PANE_SESSION_DIR\` is set and
   \`PANE_ORCHESTRATION_SESSION_ID\` isn't, or your brief names an orchestrator
   or a parent status file) doesn't call \`notify\`. Run
-  \`runpane report --state blocked --question "<question>"\` (with
-  \`--summary-file <status file>\` when you keep one, after writing the
-  question there). It shows at once in Approvals with an answer box, and it rings when
+  \`runpane report --state blocked --question "<question>"\`, with its options
+  as \`--choices '<json>'\` or \`--questions '<json>'\` (the JSON \`notify\`
+  takes), or with \`--summary-file <status file>\` when you keep one, after
+  writing the question in its \`needs_you\`. Never pack options into the
+  question as "(A / B)": Pane refuses that and shows nothing. It shows at once in Approvals with an answer box, and it rings when
   your orchestrator relays it or after 10 minutes. The answer reaches this tab as
   \`answer: Q-n → <answer> (by you)\`; \`closed: Q-n (by you)\` and
   \`correction: Q-n → <answer> (by you)\` are the person's word too. A typed
