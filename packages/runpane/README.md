@@ -59,10 +59,16 @@ npx --yes runpane@latest relay --domain relay.example.com --acme-cache /var/lib/
   --dns 0.0.0.0:53 --public-ip 203.0.113.10
 ```
 
-npm installs the binary as one optional dependency,
-`@runpane/relay-<platform>-<arch>`, on macOS, Linux and Windows (x64 and
-arm64). Pane's built-in `runpane` and the Python package do not include it.
-See [docs/SELF_HOSTED_RELAY.md](https://github.com/greenfield-inc/Pane/blob/main/docs/SELF_HOSTED_RELAY.md).
+It runs on macOS, Linux and Windows (x64 and arm64). npm installs the binary
+as one optional dependency, `@runpane/relay-<platform>-<arch>`, when that
+package is published; otherwise `runpane relay` downloads the binary for its
+own version from the GitHub release once, checks its SHA-256 against the
+release's `pane-relay-sha256.txt`, and caches it. The Python package does not
+include it.
+
+`runpane relay init --domain relay.example.com` prints the DNS records, start
+command and Pane setting a new relay needs, and checks each one. See
+[docs/SELF_HOSTED_RELAY.md](https://github.com/greenfield-inc/Pane/blob/main/docs/SELF_HOSTED_RELAY.md).
 
 ## Developing This Repository
 

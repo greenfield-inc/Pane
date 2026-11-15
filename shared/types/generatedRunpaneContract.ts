@@ -618,9 +618,10 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "relay",
-      "summary": "Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags.",
+      "summary": "Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags; init prints and checks the DNS records it needs.",
       "usage": [
-        "runpane relay [pane-relay flags...]"
+        "runpane relay [pane-relay flags...]",
+        "runpane relay init --domain <relay domain> [--public-ip <IPv4>] [--resolver <ip[:port]>]"
       ],
       "wrappers": [
         "npm"
@@ -19014,8 +19015,8 @@ export const RUNPANE_CONTRACT = {
       },
       "relay": {
         "name": "relay",
-        "summary": "Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags.",
-        "details": "For self-hosting the relay that gives computers addresses on your own domain for QR pairing (docs/SELF_HOSTED_RELAY.md). runpane passes every argument, stdio, signals and the exit code through to pane-relay, which npm installs as runpane's optional dependency @runpane/relay-<platform>-<arch>. It runs in the foreground until stopped.",
+        "summary": "Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags; init prints and checks the DNS records it needs.",
+        "details": "For self-hosting the relay that gives computers addresses on your own domain for QR pairing (docs/SELF_HOSTED_RELAY.md). runpane passes every argument, stdio, signals and the exit code through to pane-relay: the one npm installed as runpane's optional dependency @runpane/relay-<platform>-<arch>, or else the one the GitHub release for runpane's version carries, downloaded once, checked against the release's pane-relay-sha256.txt and cached. It runs in the foreground until stopped. `runpane relay init --domain <relay domain>` prints the DNS records, start command and Pane setting a new relay needs, then checks each record and the running relay; it exits 0 once every check passes.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -19026,12 +19027,13 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
+          "npx --yes runpane@latest relay init --domain relay.example.com --public-ip 203.0.113.10",
           "npx --yes runpane@latest relay --dev",
           "npx --yes runpane@latest relay --help"
         ],
         "notes": [
-          "Only the npm package includes it; Pane's built-in runpane and the Python package print how to run it with npx.",
-          "Fails with ERR_RELAY_NOT_INSTALLED when this platform has no prebuilt binary or npm skipped optional dependencies."
+          "The Python package prints how to run it with npx.",
+          "Fails with ERR_RELAY_DOWNLOAD_FAILED when the release has no binary for this platform or cannot be reached, and ERR_RELAY_CHECKSUM_MISMATCH when the download differs from pane-relay-sha256.txt; nothing is cached then."
         ]
       },
       "repos list": {

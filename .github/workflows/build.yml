@@ -184,7 +184,7 @@ jobs:
   # computes the checksums, then uploads and publishes. Dry runs stop after the
   # merge and checksums and keep them as an artifact to check.
   publish:
-    needs: [build, build-windows]
+    needs: [build, build-windows, build-relay]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -221,6 +221,27 @@ jobs:
         pattern: pane-ubuntu-*-${{ env.RELEASE_TAG }}
         path: release-files
         merge-multiple: true
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: pane-relay-*-${{ env.RELEASE_TAG }}
+        path: relay-bin
+        merge-multiple: true
+
+    # `runpane relay` downloads pane-relay-<platform> from the release when npm
+    # has no @runpane/relay-* package, and checks it against pane-relay-sha256.txt.
+    - name: Name the relay binaries for the release and list their SHA-256
+      run: |
+        mkdir -p relay-release
+        for dir in relay-bin/*/; do
+          platform="$(basename "$dir")"
+          for binary in "$dir"pane-relay*; do
+            cp "$binary" "relay-release/pane-relay-${platform}${binary##*pane-relay}"
+          done
+        done
+        cd relay-release
+        sha256sum pane-relay-* > pane-relay-sha256.txt
+        cat pane-relay-sha256.txt
+        test "$(wc -l < pane-relay-sha256.txt)" -eq 6
 
     - name: Merge macOS updater metadata
       run: |
@@ -274,13 +295,14 @@ jobs:
         path: |
           checksums/*
           release-files/*.yml
+          relay-release/pane-relay-sha256.txt
         if-no-files-found: error
         retention-days: ${{ env.ARTIFACT_DAYS }}
 
-    - name: Upload macOS and Windows assets and checksums
+    - name: Upload macOS, Windows and relay assets and checksums
       if: env.PUBLISH == 'true'
       run: |
-        gh release upload "$RELEASE_TAG" mac-release/* windows-release/* checksums/SHA256SUMS.txt checksums/continuity.json \
+        gh release upload "$RELEASE_TAG" mac-release/* windows-release/* checksums/SHA256SUMS.txt checksums/continuity.json relay-release/* \
           --repo "${{ github.repository }}" --clobber
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -327,6 +349,51 @@ jobs:
         path: relay-bin
         if-no-files-found: error
         retention-days: ${{ env.ARTIFACT_DAYS }}
+
+  # ghcr.io/greenfield-inc/pane-relay for linux/amd64 and linux/arm64, tagged with
+  # the version and latest, from the static Linux binaries build-relay made.
+  # Every build checks the image starts; only a publishing run pushes it.
+  relay-image:
+    needs: build-relay
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/pane-relay
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: pane-relay-linux-*-${{ env.RELEASE_TAG }}
+        path: relay-bin
+        merge-multiple: true
+    - name: Lay out the binaries by Docker architecture
+      run: |
+        mkdir -p relay-image/amd64 relay-image/arm64
+        cp relay-bin/linux-x64/pane-relay relay-image/amd64/
+        cp relay-bin/linux-arm64/pane-relay relay-image/arm64/
+    - name: Check that the amd64 image answers /healthz
+      run: |
+        docker build -f relay/release.Dockerfile -t pane-relay:check relay-image
+        docker run -d --name relay-check -p 8443:8443 pane-relay:check --dev --listen 0.0.0.0:8443
+        for _ in $(seq 30); do
+          if curl -fsSk https://127.0.0.1:8443/healthz; then exit 0; fi
+          sleep 1
+        done
+        docker logs relay-check
+        exit 1
+    - name: Push both architectures
+      if: env.PUBLISH == 'true'
+      run: |
+        version="${RELEASE_TAG#v}"
+        echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        docker buildx create --use
+        docker buildx build --platform linux/amd64,linux/arm64 -f relay/release.Dockerfile \
+          -t "$IMAGE:$version" -t "$IMAGE:latest" --push relay-image
+        docker buildx imagetools inspect "$IMAGE:$version"
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   validate-runpane-packages:
     if: github.ref_type == 'tag' || inputs.publish == true

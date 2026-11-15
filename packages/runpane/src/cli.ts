@@ -121,7 +121,7 @@ export async function main(argv: string[]): Promise<number> {
   if (hooked !== null) return hooked;
   assertSupportedCliRuntime(process.versions.node, process.versions.electron);
   if (argv[0] === '__update-runner' && argv.length === 2) return runUpdateHelper(argv[1]);
-  // Pane's built-in CLI has no relay binary; npm's runpane runs its own.
+  // runpane relay runs the relay of this runpane's own version, so it never hands off.
   const handedOff = argv[0] === 'relay' ? null : await handOffToManagedCli(argv);
   if (handedOff !== null) return handedOff;
   const telemetryContext = createInitialTelemetryContext(argv);

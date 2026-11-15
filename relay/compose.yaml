@@ -1,0 +1,24 @@
+# Run your own Pane relay: docs/SELF_HOSTED_RELAY.md
+# Put PANE_RELAY_DOMAIN, PANE_RELAY_PUBLIC_IP and PANE_RELAY_NS in .env beside
+# this file (`runpane relay init --domain <domain>` prints them), then run
+# `docker compose up -d`. Any other pane-relay setting can go in .env too, by
+# its environment variable (relay/README.md lists them).
+services:
+  relay:
+    image: ghcr.io/greenfield-inc/pane-relay:${PANE_RELAY_VERSION:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PANE_RELAY_LISTEN: 0.0.0.0:443
+      PANE_RELAY_DNS: 0.0.0.0:53
+      PANE_RELAY_DIRECT_QUIC: 0.0.0.0:7842
+      PANE_RELAY_ACME_CACHE: /var/lib/pane-relay/acme
+    ports:
+      - 443:443/tcp
+      - 53:53/udp
+      - 53:53/tcp
+      - 7842:7842/udp
+    volumes:
+      - pane-relay:/var/lib/pane-relay
+volumes:
+  pane-relay:
