@@ -55,12 +55,14 @@ exit code pass straight through:
 
 ```bash
 npx --yes runpane@latest relay --help
-npx --yes runpane@latest relay --domain relay.example.com --acme-cache /var/lib/pane-relay/acme \
-  --dns 0.0.0.0:53 --public-ip 203.0.113.10
+npx --yes runpane@latest relay init --domain relay.example.com --public-ip 203.0.113.10
+npx --yes runpane@latest relay --domain relay.example.com --public-ip 203.0.113.10 \
+  --ns relay-ns.example.com --dns 0.0.0.0:53 --direct-quic 0.0.0.0:7842 \
+  --acme-cache /var/lib/pane-relay/acme
 ```
 
 It runs on macOS, Linux and Windows (x64 and arm64). npm installs the binary
-as one optional dependency, `@runpane/relay-<platform>-<arch>`, when that
+as one optional dependency, `@pane/relay-<platform>-<arch>`, when that
 package is published; otherwise `runpane relay` downloads the binary for its
 own version from the GitHub release once, checks its SHA-256 against the
 release's `pane-relay-sha256.txt`, and caches it. The Python package does not
@@ -548,7 +550,7 @@ This package should be published through npm Trusted Publishing from GitHub
 Actions. Token-based `NPM_TOKEN` publishing is a fallback for first package
 reservation or manual publication only.
 
-The release publishes the six `@runpane/relay-<platform>-<arch>` packages first,
+The release publishes the six `@pane/relay-<platform>-<arch>` packages first,
 at runpane's version, then lists them as runpane's `optionalDependencies`
 (`scripts/runpane-relay-packages.js pin`) and publishes runpane. The committed
 `package.json` leaves them out, so this repository's pnpm install never asks

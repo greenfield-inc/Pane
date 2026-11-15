@@ -10,6 +10,9 @@ open-source binary, `pane-relay` ([`relay/`](../relay)); its wire protocol is
 
 ## Start one in five minutes
 
+This needs Pane 2.4.226 or later: that release is the first with the relay
+image, `compose.yaml` and `runpane relay init`.
+
 You need:
 
 - A Linux machine with a public IPv4 address and Docker with its Compose
@@ -60,7 +63,7 @@ You need:
    from step 2):
 
    ```sh
-   curl -fsSLO https://raw.githubusercontent.com/greenfield-inc/Pane/main/relay/compose.yaml
+   curl -fsSLO https://github.com/greenfield-inc/Pane/releases/latest/download/compose.yaml
    printf '%s\n' PANE_RELAY_DOMAIN=relay.example.com PANE_RELAY_PUBLIC_IP=203.0.113.10 PANE_RELAY_NS=relay-ns.example.com > .env
    docker compose up -d
    ```
@@ -92,9 +95,16 @@ You need:
 
 ## Keep it running
 
-The relay restarts with Docker. `docker compose pull && docker compose up -d`
-updates it to the latest release. To stay on one release, add
-`PANE_RELAY_VERSION=2.4.226` (any release number) to `.env`. Certificates
+The relay restarts with Docker. Each release's `compose.yaml` runs that
+release's image, so updating means downloading the new one and restarting:
+
+```sh
+curl -fsSLO https://github.com/greenfield-inc/Pane/releases/latest/download/compose.yaml
+docker compose up -d
+```
+
+`PANE_RELAY_VERSION` in `.env` picks another release instead, such as
+`PANE_RELAY_VERSION=2.4.226`; images start with 2.4.226. Certificates
 renew on their own, without a restart, and live in the `pane-relay` Docker
 volume.
 

@@ -109,30 +109,33 @@ build-windows (x64,  ──┘                        ├─ publish-npm   ┐
 Windows installers, and publishes the draft release. It also uploads each
 `pane-relay` binary as `pane-relay-<platform>-<arch>` (`.exe` on Windows) with
 `pane-relay-sha256.txt`; `runpane relay` downloads and checks these when npm
-has no relay package for it. `publish-npm` and `publish-pypi` each need both `publish` and
+has no relay package for it. It also attaches `relay/compose.yaml` with the
+image pinned to that release, which the self-hosted relay guide downloads. `publish-npm` and `publish-pypi` each need both `publish` and
 `validate-runpane-packages`.
 
 `build-relay` builds `pane-relay` (`relay/`) for each platform `runpane relay`
 supports; Linux binaries link musl statically. `validate-runpane-packages`
-packs each `@runpane/relay-<platform>-<arch>` package without publishing and
+packs each `@pane/relay-<platform>-<arch>` package without publishing and
 runs `runpane relay` on the Linux binary. `publish-npm` publishes those six
 packages first, skipping any this version already has, then lists the ones npm
 has as runpane's `optionalDependencies` and publishes runpane
 (`scripts/runpane-relay-packages.js`). A relay package npm refuses is a warning,
 not a failed release: runpane still publishes, and `runpane relay` downloads the
 binary from the GitHub release instead. The packages need the npm
-organisation `runpane`, and a trusted publisher (this repository, `build.yml`)
+organisation `pane`, and a trusted publisher (this repository, `build.yml`)
 on each package once it exists; the first publish needs `NPM_TOKEN` with
-rights on `@runpane`.
+rights on `@pane`.
 
 `relay-image` packs the two static Linux binaries into
 `ghcr.io/greenfield-inc/pane-relay` (`relay/release.Dockerfile`) for
 linux/amd64 and linux/arm64. Every run starts the amd64 image and checks
-`/healthz`; a publishing run pushes it tagged with the version and `latest`,
-with the workflow's `GITHUB_TOKEN`. GitHub creates a new container package as
-private, so once, after the first push, an organisation owner opens the
-package's **Package settings** and sets **Change visibility** to Public; later
-pushes keep it public.
+`/healthz`; a publishing run pushes it tagged with the version, with the
+workflow's `GITHUB_TOKEN`, and a tag push also moves `latest` (a recovery run
+of an older tag leaves it). GitHub creates a new container package as
+private, so after the first release that pushes it, an organisation owner
+opens the package's **Package settings** and sets **Change visibility** to
+Public; later pushes keep it public. Until then the self-hosted relay guide
+fails at `docker compose up` with `denied`, so make it part of that release.
 
 `publish-release` (`scripts/publish-github-release.sh`) fills an empty draft's
 notes from GitHub's generated notes and keeps a hand-written body. Either way it
@@ -149,8 +152,8 @@ git tag --points-at origin/main
 gh run list --limit 10
 gh release view vX.Y.Z
 npm view runpane version
-npm view @runpane/relay-linux-x64 version
-docker buildx imagetools inspect ghcr.io/greenfield-inc/pane-relay:X.Y.Z
+npm view @pane/relay-linux-x64 version
+docker logout ghcr.io; docker manifest inspect ghcr.io/greenfield-inc/pane-relay:X.Y.Z  # public: works signed out
 python3 -m pip index versions runpane
 ```
 

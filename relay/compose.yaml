@@ -1,4 +1,6 @@
 # Run your own Pane relay: docs/SELF_HOSTED_RELAY.md
+# Each release attaches this file as compose.yaml with its own version as the
+# image default; download that copy so the file and the image match.
 # Put PANE_RELAY_DOMAIN, PANE_RELAY_PUBLIC_IP and PANE_RELAY_NS in .env beside
 # this file (`runpane relay init --domain <domain>` prints them), then run
 # `docker compose up -d`. Any other pane-relay setting can go in .env too, by

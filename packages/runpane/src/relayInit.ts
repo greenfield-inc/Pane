@@ -1,13 +1,14 @@
 import { Resolver } from 'node:dns/promises';
 import https from 'node:https';
-import type { LookupFunction } from 'node:net';
+import { isIP, type LookupFunction } from 'node:net';
 import os from 'node:os';
 import { parseArgs } from 'node:util';
 import { RunpaneError } from './errors';
+import { getWrapperVersion } from './version';
 
 const USAGE = 'runpane relay init --domain <relay domain> [--public-ip <IPv4>] [--resolver <ip[:port]>]';
 const GUIDE = 'https://github.com/greenfield-inc/Pane/blob/main/docs/SELF_HOSTED_RELAY.md';
-const COMPOSE_URL = 'https://raw.githubusercontent.com/greenfield-inc/Pane/main/relay/compose.yaml';
+
 
 interface Check {
   label: string;
@@ -39,6 +40,9 @@ export async function runRelayInit(args: string[]): Promise<number> {
       ? `"${domain}" is not a subdomain such as relay.example.com; the relay answers DNS for every name under it, so it needs a name of its own`
       : '--domain is missing');
   }
+  if (values.resolver && !isIP(values.resolver.replace(/^\[(.*)\](:\d+)?$/u, '$1').replace(/^([^:]+):\d+$/u, '$1'))) {
+    throw usageError(`--resolver takes a DNS server's IP address, optionally with :port, such as 1.1.1.1 or 127.0.0.1:5353 ("${values.resolver}")`);
+  }
   const ip = values['public-ip'] ?? interfacePublicIp();
   if (!ip || !isIpv4(ip)) {
     throw new RunpaneError(
@@ -64,7 +68,7 @@ export async function runRelayInit(args: string[]): Promise<number> {
 3. Start the relay on the machine, in an empty folder. On Ubuntu and Debian, free port 53 first:
    ${GUIDE}#start-one-in-five-minutes
 
-     curl -fsSLO ${COMPOSE_URL}
+     curl -fsSLO ${composeUrl()}
      printf '%s\\n' PANE_RELAY_DOMAIN=${domain} PANE_RELAY_PUBLIC_IP=${ip} PANE_RELAY_NS=${nsHost} > .env
      docker compose up -d
 
@@ -151,4 +155,12 @@ function isPrivate(address: string): boolean {
 
 function usageError(why: string): RunpaneError {
   return new RunpaneError('ERR_RELAY_INIT_USAGE', `runpane relay init: ${why}. Nothing was checked.`, `Run: ${USAGE}`);
+}
+
+/** The compose file from runpane's own release, whose image default is that release's relay. */
+function composeUrl(): string {
+  const version = getWrapperVersion();
+  return /^\d+\.\d+\.\d+$/u.test(version)
+    ? `https://github.com/greenfield-inc/Pane/releases/download/v${version}/compose.yaml`
+    : 'https://github.com/greenfield-inc/Pane/releases/latest/download/compose.yaml';
 }

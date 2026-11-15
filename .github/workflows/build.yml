@@ -228,7 +228,7 @@ jobs:
         merge-multiple: true
 
     # `runpane relay` downloads pane-relay-<platform> from the release when npm
-    # has no @runpane/relay-* package, and checks it against pane-relay-sha256.txt.
+    # has no @pane/relay-* package, and checks it against pane-relay-sha256.txt.
     - name: Name the relay binaries for the release and list their SHA-256
       run: |
         mkdir -p relay-release
@@ -242,6 +242,9 @@ jobs:
         sha256sum pane-relay-* > pane-relay-sha256.txt
         cat pane-relay-sha256.txt
         test "$(wc -l < pane-relay-sha256.txt)" -eq 6
+        # The guide downloads compose.yaml from the latest release, pinned to that release's image.
+        sed "s/:-latest}/:-${RELEASE_TAG#v}}/" ../relay/compose.yaml > compose.yaml
+        grep -q "pane-relay:\${PANE_RELAY_VERSION:-${RELEASE_TAG#v}}" compose.yaml
 
     - name: Merge macOS updater metadata
       run: |
@@ -296,6 +299,7 @@ jobs:
           checksums/*
           release-files/*.yml
           relay-release/pane-relay-sha256.txt
+          relay-release/compose.yaml
         if-no-files-found: error
         retention-days: ${{ env.ARTIFACT_DAYS }}
 
@@ -314,7 +318,7 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # pane-relay for each platform runpane's npm package ships it on, one
-  # @runpane/relay-<platform>-<arch> package each (scripts/runpane-relay-packages.js).
+  # @pane/relay-<platform>-<arch> package each (scripts/runpane-relay-packages.js).
   # Runs on every build, so the release branch check catches a broken cross build.
   build-relay:
     strategy:
@@ -387,10 +391,13 @@ jobs:
       if: env.PUBLISH == 'true'
       run: |
         version="${RELEASE_TAG#v}"
+        tags=(-t "$IMAGE:$version")
+        # Only a tag push is the newest release; a recovery run of an older tag leaves latest alone.
+        if [ "$GITHUB_REF_TYPE" = tag ]; then tags+=(-t "$IMAGE:latest"); fi
         echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
         docker buildx create --use
         docker buildx build --platform linux/amd64,linux/arm64 -f relay/release.Dockerfile \
-          -t "$IMAGE:$version" -t "$IMAGE:latest" --push relay-image
+          "${tags[@]}" --push relay-image
         docker buildx imagetools inspect "$IMAGE:$version"
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -470,7 +477,7 @@ jobs:
             echo "$id is already on npm"
             continue
           fi
-          # A package npm refuses (no @runpane organisation or trusted publisher yet) must not stop
+          # A package npm refuses (no @pane organisation or trusted publisher yet) must not stop
           # runpane itself from publishing: pin lists only what npm has.
           if ! (cd "$dir" && npm publish --provenance --access public); then
             echo "::warning::$id did not publish; see RUNBOOK.md for the npm setup the relay packages need."
