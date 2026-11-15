@@ -22,6 +22,8 @@ const CHAT_WAIT_MS = 10_000;
 let held: { panelId: string; draft: LaunchDraft } | null = null;
 /** A mounted chat waiting for an IME composition in the box to end. */
 let waiting: (() => void) | null = null;
+/** Stops what revealApp set up to drop the outline. */
+let stopWatching = () => {};
 
 const outline = () => document.getElementById('pane-launch-outline');
 const launchBox = () => outline()?.querySelector<HTMLTextAreaElement>('textarea[data-launch-composer]') ?? null;
@@ -51,14 +53,14 @@ export function revealApp(): void {
   };
   const timer = setTimeout(dropLaunchOutline, CHAT_WAIT_MS);
   window.addEventListener('mousedown', leave, true);
-  root.addEventListener('launch-outline-removed', () => {
+  stopWatching = () => {
     clearTimeout(timer);
     window.removeEventListener('mousedown', leave, true);
-  }, { once: true });
+  };
 }
 
 function remove(root: HTMLElement): void {
-  root.dispatchEvent(new Event('launch-outline-removed'));
+  stopWatching();
   root.remove();
 }
 
