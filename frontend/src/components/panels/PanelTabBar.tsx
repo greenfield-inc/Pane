@@ -22,6 +22,7 @@ import { visibleAgentPresets } from '../../utils/agentPresets';
 import { PanelTabStrip } from './PanelTabStrip';
 import { getPanelIcon } from './panelIcon';
 import { PromoteChatButton } from './PromoteChatButton';
+import { focusChatSoon } from '../../services/regionFocus';
 import { SwitchToChatPaletteEntry } from './SwitchToChat';
 import { CustomCommandForm } from './CustomCommandForm';
 import { AgentFarmProfileDialog } from '../chatTab/AgentFarmProfileDialog';
@@ -622,7 +623,10 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                       className={menuItemClass}
                       onClick={() => {
                         setShowDropdown(false);
-                        void window.electronAPI.chatTab.create({ sessionId: session.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.label} chat`, error));
+                        // The new chat's message box takes focus once it shows, as Enter on a chat tab does.
+                        void window.electronAPI.chatTab.create({ sessionId: session.id, agent: agent.id })
+                          .then(({ panelId }) => focusChatSoon(panelId))
+                          .catch(error => showActionError(`Could not open a ${agent.label} chat`, error));
                       }}
                     >
                       {agentIcon(agent, 'w-3.5 h-3.5 flex-shrink-0')}

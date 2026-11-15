@@ -1,4 +1,4 @@
-import { lazy, useMemo } from 'react';
+import { useMemo } from 'react';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import { useActiveMachineStore } from '../../stores/activeMachineStore';
@@ -10,9 +10,7 @@ import { DESKTOP_WORKERS, openWorkerTab } from './desktopSessionWorkers';
 import { savedFilePath } from './chatAttachments';
 import type { ChatTurnActions } from './ChatTurns';
 import { SessionApprovalCards } from '../approvals/SessionApprovalCards';
-
-
-const ChatTabPanel = lazy(() => import('./ChatTabPanel'));
+import ChatTabPanel from './ChatTabPanel';
 
 /** A path the agent reported, relative to the tab's worktree when it is inside it. */
 function worktreeRelative(file: string, cwd: string | undefined): string {
