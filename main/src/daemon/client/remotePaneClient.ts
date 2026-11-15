@@ -1732,8 +1732,8 @@ export class RemotePaneClientController extends EventEmitter {
     const client = new RemotePaneClient(profile, {
       dnsLookup: this.dnsLookup,
       routes: routes.length === 1 ? [{ ...routes[0], profile }] : routes,
-      // One route was looked up above, as before computers; several are each readied when tried.
-      prepareRoute: routes.length > 1 ? (route) => this.prepareRoute(route) : undefined,
+      // Each route is readied when tried (an SSH route's tunnel opens), except a lone Tailscale route, looked up above.
+      prepareRoute: machine ? undefined : (route) => this.prepareRoute(route),
       eventSink: {
         send: (channel, ...args) => {
           if (this.activeClient !== client) return;
@@ -2001,7 +2001,7 @@ export class RemotePaneClientController extends EventEmitter {
     let nearest: RouteProbe | null = null;
     for (const route of candidates) {
       const several = routes.length > 1;
-      const probe = await this.probeRoute(id, route, several, several ? COMPUTER_ROUTE_LABELS[route.kind] : routeOf(route.profile));
+      const probe = await this.probeRoute(id, route, several ? COMPUTER_ROUTE_LABELS[route.kind] : routeOf(route.profile));
       if (this.check?.id !== id) {
         throw new PaneError('ERR_REMOTE_CHECK_SUPERSEDED', `The connection to ${profile.label} was replaced by a newer one.`, 'Wait for the newer connection to finish.');
       }
@@ -2028,14 +2028,14 @@ export class RemotePaneClientController extends EventEmitter {
   }
 
   /**
-   * Probes one route, showing it on the checklist. With several routes an SSH route's tunnel is
-   * opened first; a route that cannot be readied fails at "Host reachable".
+   * Probes one route, showing it on the checklist. An SSH route's tunnel is opened first; a route
+   * that cannot be readied fails at "Host reachable".
    */
-  private async probeRoute(id: number, route: RemoteRouteCandidate, prepare: boolean, label: RemoteConnectionCheck['route']): Promise<RouteProbe> {
+  private async probeRoute(id: number, route: RemoteRouteCandidate, label: RemoteConnectionCheck['route']): Promise<RouteProbe> {
     let profile = route.profile;
     this.updateCheck(id, { route: label, address: addressOf(profile), rows: initialRows(profile) });
     // A Tailscale route's probe looks the machine up itself.
-    if (prepare && !tailnetMachineRef(profile)) {
+    if (!tailnetMachineRef(profile)) {
       try {
         profile = await this.prepareRoute(route);
       } catch (error) {

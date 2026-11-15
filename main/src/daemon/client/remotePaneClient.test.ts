@@ -1137,6 +1137,28 @@ describe('RemotePaneClientController', () => {
     expect(checklistRoutes).toEqual(['Tailscale', 'Public URL']);
   });
 
+  it('opens the SSH tunnel of a computer whose only route is SSH before switching to it', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const sshRoute = { id: 'ssh:http://127.0.0.1:1', kind: 'ssh' as const, source: 'ssh' as const, baseUrl: 'http://127.0.0.1:1', token: 'link-token', ssh: { host: 'build-box', remotePort: 42137 } };
+    const remoteConfig = createDefaultRemoteDaemonConfig();
+    remoteConfig.client.computers = [{ id: 'build-box', label: 'build-box', routes: [sshRoute] }];
+    const opened: string[] = [];
+    const controller = createController();
+    controller.initialize({
+      configManager: createConfigManagerStub(remoteConfig),
+      rendererEventSink: { send() {} },
+      // The tunnel comes up on a new local port after a restart; the saved one is dead.
+      prepareSshRoute: async (route) => { opened.push(route.ssh?.host ?? ''); return server.baseUrl; },
+    });
+
+    await controller.activateProfile({ id: 'build-box', label: 'build-box', baseUrl: sshRoute.baseUrl, token: 'link-token', transport: 'http+sse' });
+
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(opened).toContain('build-box');
+    await controller.switchToLocalMode();
+  });
+
   it('restores the saved local state when a manual activation fails', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);
