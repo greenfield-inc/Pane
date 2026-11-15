@@ -188,6 +188,22 @@ test('an Enter on an empty box, or followed by more typing, sends nothing', asyn
   await expect(chatBox(page)).toHaveValue('hello');
 });
 
+test('the launch box refuses a paste over 1 MiB, as the chat\'s box does', async ({ page }) => {
+  await holdApp(page);
+  await installElectronApiMock(page, fixture);
+  await page.goto('/', { waitUntil: 'commit' });
+  await expect(launchBox(page)).toBeFocused();
+  const refused = (length: number) => launchBox(page).evaluate((box, size) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', 'x'.repeat(size));
+    const event = new ClipboardEvent('paste', { clipboardData: data, cancelable: true });
+    box.dispatchEvent(event);
+    return event.defaultPrevented;
+  }, length);
+  expect(await refused(1024 * 1024 + 1)).toBe(true);
+  expect(await refused(10)).toBe(false);
+});
+
 test('the outline gives way within 10 s when the app cannot read its Panes', async ({ page }) => {
   test.setTimeout(45_000);
   await installElectronApiMock(page, fixture);

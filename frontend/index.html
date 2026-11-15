@@ -164,6 +164,10 @@
             event.preventDefault();
             if (input.value.trim()) input.dataset.send = 'pending';
           });
+          // Megabytes of text stall the window: the chat's box refuses pastes over 1 MiB too (ChatTabPanel.tsx).
+          input.addEventListener('paste', (event) => {
+            if ((event.clipboardData?.getData('text/plain').length ?? 0) > 1024 * 1024) event.preventDefault();
+          });
           // An IME composition finishes here before the chat takes the text (src/utils/launchOutline.ts).
           input.addEventListener('compositionstart', () => { input.dataset.composing = 'true'; });
           input.addEventListener('compositionend', () => { delete input.dataset.composing; });
