@@ -4,6 +4,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { API } from './api';
 import { focusChatSoon } from '../services/regionFocus';
+import { loadChatTabRoute } from '../components/panels/chatTabRouteModule';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import type { HostNavigationMemory, PaneNavigationView } from '../../../shared/types/hostNavigation';
 import type { RestoredNavigation } from '../../../shared/types/updater';
@@ -169,6 +170,34 @@ async function readNavigationMemory(hostId: string | null): Promise<HostNavigati
   }
 }
 
+interface LaunchChat {
+  paneId: string;
+  panelId: string;
+}
+
+let launchChat: Promise<LaunchChat | null> | null = null;
+
+async function readLaunchChat(): Promise<LaunchChat | null> {
+  try {
+    const response = await window.electronAPI.uiState.getLaunchChat?.();
+    return response?.success ? response.data ?? null : null;
+  } catch (error) {
+    console.warn('[hostNavigationMemory] Failed to find the chat to reopen:', error);
+    return null;
+  }
+}
+
+/**
+ * Asks main, at app start, which chat a launch reopens, and loads the chat's code
+ * meanwhile, so the tab renders without a loading pause once its Pane opens.
+ */
+export function prepareLaunchChat(): void {
+  launchChat ??= readLaunchChat().then(chat => {
+    if (chat) void loadChatTabRoute().catch(() => undefined);
+    return chat;
+  });
+}
+
 /**
  * A launch whose last view was a chat tab reopens that chat with its message box
  * focused, so the person can type at once. Any other last view stays on Home
@@ -176,13 +205,8 @@ async function readNavigationMemory(hostId: string | null): Promise<HostNavigati
  * person or a pane:// link, wins; a dialog that holds focus keeps it.
  */
 export async function restoreLaunchChat(): Promise<void> {
-  let chat: { paneId: string; panelId: string } | null = null;
-  try {
-    const response = await window.electronAPI.uiState.getLaunchChat?.();
-    chat = response?.success ? response.data ?? null : null;
-  } catch (error) {
-    console.warn('[hostNavigationMemory] Failed to find the chat to reopen:', error);
-  }
+  prepareLaunchChat();
+  const chat = await launchChat;
   if (!chat) return;
   const sessions = useSessionStore.getState();
   if (sessions.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') return;

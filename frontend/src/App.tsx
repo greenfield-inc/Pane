@@ -46,7 +46,7 @@ import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
 import { onOpenFirstRunRequest } from './utils/openFirstRun';
-import { restoreHostNavigation, restoreLaunchChat, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { prepareLaunchChat, restoreHostNavigation, restoreLaunchChat, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { useRegionNavigation } from './hooks/useRegionNavigation';
 import { KeySequenceHint } from './components/KeySequenceHint';
 import { KeymapNotice } from './components/KeymapNotice';
@@ -351,6 +351,7 @@ function App() {
   useEffect(() => {
     const stopWrites = startHostNavigationMemoryWrites();
     void restoreSessionSelection();
+    prepareLaunchChat();
     return stopWrites;
   }, []);
 

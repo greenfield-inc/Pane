@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import { PanelContainerProps } from '../../types/panelComponents';
 import { ErrorBoundary } from 'react-error-boundary';
 import { PanelLoadingFallback } from './PanelLoadingFallback';
+import { loadChatTabRoute, loadedChatTabRoute } from './chatTabRouteModule';
 import { PausedTerminalView } from './PausedTabView';
 import { pausedMarkOf } from '../../../../shared/types/panels';
 import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
@@ -9,7 +10,7 @@ import { renderLog } from '../../utils/console';
 
 // Lazy load panel components for better performance
 const TerminalPanel = lazy(() => import('./TerminalPanel'));
-const ChatTabRoute = lazy(() => import('../chatTab/ChatTabRoute').then(module => ({ default: module.ChatTabRoute })));
+const LazyChatTabRoute = lazy(() => loadChatTabRoute().then(ChatTabRoute => ({ default: ChatTabRoute })));
 const DiffPanel = lazy(() => import('./diff/DiffPanel'));
 const FileEditorTabPanel = React.lazy(() => import('./editor/FileEditorTabPanel'));
 const ExplorerPanel = lazy(() => import('./editor/EditorPanel'));
@@ -104,8 +105,11 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
         const paused = pausedMarkOf(panel);
         return paused ? <PausedTerminalView panel={panel} mark={paused} /> : <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
       }
-      case 'chat':
+      case 'chat': {
+        // Already loaded (a launch preloads it), the chat renders without a loading fallback.
+        const ChatTabRoute = loadedChatTabRoute() ?? LazyChatTabRoute;
         return <ChatTabRoute panel={panel} />;
+      }
       case 'diff':
         return <DiffPanel panel={panel} isActive={isActive} sessionId={panel.sessionId} isMainRepo={isMainRepo} />;
       case 'explorer':
