@@ -1,8 +1,12 @@
 // `runpane relay` runs the pane-relay binary from its platform package, installed beside runpane the
-// way npm installs an optional dependency. PANE_RELAY_BIN names the binary; without it, cargo builds relay/.
+// way npm installs an optional dependency, or else downloads it from the release.
+// PANE_RELAY_BIN names the binary; without it, cargo builds relay/.
 const assert = require('node:assert/strict');
 const { execFileSync, spawn } = require('node:child_process');
+const crypto = require('node:crypto');
+const dgram = require('node:dgram');
 const fs = require('node:fs');
+const http = require('node:http');
 const https = require('node:https');
 const net = require('node:net');
 const os = require('node:os');
@@ -11,7 +15,7 @@ const { test } = require('node:test');
 
 const root = path.join(__dirname, '..');
 const exe = process.platform === 'win32' ? 'pane-relay.exe' : 'pane-relay';
-const relayPackage = `@runpane/relay-${process.platform}-${process.arch}`;
+const relayPackage = `@pane/relay-${process.platform}-${process.arch}`;
 
 function relayBinary() {
   if (process.env.PANE_RELAY_BIN) return process.env.PANE_RELAY_BIN;
@@ -41,9 +45,9 @@ function install(binary) {
   return path.join(runpane, 'dist', 'cli.js');
 }
 
-function run(cli, args) {
+function run(cli, args, env = {}) {
   const child = spawn(process.execPath, [cli, 'relay', ...args], {
-    env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' },
+    env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';
@@ -114,10 +118,127 @@ test("runpane relay exits with pane-relay's exit code", async () => {
   assert.match(stderr, /--no-such-flag/);
 });
 
-test('runpane relay says how to get pane-relay when its package is not installed', async () => {
+/** A release folder served over http, as GitHub serves a release's assets, and a fresh cache. */
+async function release(files) {
+  const server = http.createServer((request, response) => {
+    const body = files[path.basename(request.url)];
+    response.writeHead(body === undefined ? 404 : 200).end(body);
+  }).listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  return {
+    env: {
+      RUNPANE_RELAY_RELEASE_URL: `http://127.0.0.1:${server.address().port}/download/`,
+      XDG_CACHE_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-relay-cache-')),
+      LOCALAPPDATA: '',
+    },
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+}
+
+const asset = `pane-relay-${process.platform}-${process.arch}${process.platform === 'win32' ? '.exe' : ''}`;
+
+test('runpane relay downloads, verifies and caches the release binary when its package is not installed', async () => {
+  const binary = fs.readFileSync(relayBinary());
+  const sha = crypto.createHash('sha256').update(binary).digest('hex');
+  const served = await release({ [asset]: binary, 'pane-relay-sha256.txt': `${'0'.repeat(64)}  pane-relay-other\n${sha}  ${asset}\n` });
   const cli = install(null);
-  const { code, stderr } = await run(cli, ['--dev']).ended;
+  let first;
+  try {
+    first = await run(cli, ['--no-such-flag'], served.env).ended;
+  } finally {
+    await served.close();
+  }
+  // pane-relay itself ran and rejected the flag.
+  assert.equal(first.code, 2, first.stderr);
+  assert.match(first.stderr, /SHA-256 matches the release/);
+  assert.match(first.stderr, /--no-such-flag/);
+  // With the release gone, the cached binary runs.
+  const second = await run(cli, ['--no-such-flag'], served.env).ended;
+  assert.equal(second.code, 2, second.stderr);
+  assert.doesNotMatch(second.stderr, /downloading/);
+});
+
+test('runpane relay refuses a downloaded binary whose SHA-256 differs from the release list', async () => {
+  const served = await release({ [asset]: Buffer.from('not the relay'), 'pane-relay-sha256.txt': `${'a'.repeat(64)}  ${asset}\n` });
+  try {
+    const { code, stderr } = await run(install(null), ['--dev'], served.env).ended;
+    assert.equal(code, 1);
+    assert.match(stderr, new RegExp(`its SHA-256 is [0-9a-f]{64} and pane-relay-sha256\\.txt lists ${'a'.repeat(64)}\\. Nothing was saved or run\\.`));
+    assert.deepEqual(fs.readdirSync(served.env.XDG_CACHE_HOME, { recursive: true }).filter((name) => name.includes('pane-relay')), []);
+  } finally {
+    await served.close();
+  }
+});
+
+test('runpane relay says what failed when the release has no binary for it', async () => {
+  const served = await release({});
+  try {
+    const { code, stderr } = await run(install(null), ['--dev'], served.env).ended;
+    assert.equal(code, 1);
+    assert.match(stderr, /could not download pane-relay .* pane-relay-sha256\.txt: 404 Not Found\. Nothing was started or saved\./);
+    assert.match(stderr, /Next: .*ghcr\.io\/greenfield-inc\/pane-relay/);
+  } finally {
+    await served.close();
+  }
+});
+
+test('runpane relay init prints the records, settings and start command for a domain', async () => {
+  // Nothing answers DNS on this port, so every check fails and init exits 1.
+  const { code, stdout } = await run(install(null), ['init', '--domain', 'Relay.Example.com.', '--public-ip', '203.0.113.10', '--resolver', `127.0.0.1:${await freePort()}`]).ended;
   assert.equal(code, 1);
-  assert.match(stderr, new RegExp(`its package ${relayPackage} is not installed beside this runpane\\. Nothing was started\\.`));
-  assert.match(stderr, /Next: Run npx --yes runpane@latest relay <flags>/);
+  assert.match(stdout, /Add these two records at the DNS provider for example\.com:/);
+  assert.match(stdout, /^ +relay-ns\.example\.com +A +203\.0\.113\.10$/m);
+  assert.match(stdout, /^ +relay\.example\.com +NS +relay-ns\.example\.com$/m);
+  assert.match(stdout, /printf '%s\\n' PANE_RELAY_DOMAIN=relay\.example\.com PANE_RELAY_PUBLIC_IP=203\.0\.113\.10 PANE_RELAY_NS=relay-ns\.example\.com > \.env/);
+  assert.match(stdout, /Relay address: relay\.example\.com$/m);
+  assert.match(stdout, /✗ relay\.example\.com NS relay-ns\.example\.com: /);
+});
+
+/** A DNS server that answers A and NS questions from `records` ({ 'name A': ip, 'name NS': host }), else NXDOMAIN. */
+async function dnsStub(records) {
+  const encodeName = (name) => Buffer.concat([...name.split('.').map((label) => Buffer.concat([Buffer.from([label.length]), Buffer.from(label)])), Buffer.from([0])]);
+  const server = dgram.createSocket('udp4');
+  server.on('message', (query, from) => {
+    const labels = [];
+    let i = 12;
+    while (query[i]) { labels.push(query.subarray(i + 1, i + 1 + query[i]).toString().toLowerCase()); i += query[i] + 1; }
+    const question = query.subarray(12, i + 5);
+    const type = query.readUInt16BE(i + 1) === 2 ? 'NS' : 'A';
+    const value = records[`${labels.join('.')} ${type}`];
+    const header = Buffer.from(query.subarray(0, 12));
+    header.writeUInt16BE(value ? 0x8180 : 0x8183, 2);
+    header.writeUInt16BE(value ? 1 : 0, 6);
+    header.writeUInt16BE(0, 8);
+    header.writeUInt16BE(0, 10);
+    const data = !value ? null : type === 'A' ? Buffer.from(value.split('.').map(Number)) : encodeName(value);
+    const answer = data ? [Buffer.from([0xc0, 0x0c, 0, type === 'A' ? 1 : 2, 0, 1, 0, 0, 0, 60, data.length >> 8, data.length & 0xff]), data] : [];
+    server.send(Buffer.concat([header, question, ...answer]), from.port, from.address);
+  });
+  await new Promise((resolve) => server.bind(0, '127.0.0.1', resolve));
+  return { address: `127.0.0.1:${server.address().port}`, close: () => new Promise((resolve) => server.close(resolve)) };
+}
+
+test('runpane relay init passes the DNS checks once the records and the relay answer, and names a wrong address', async () => {
+  const dns = await dnsStub({
+    'relay-ns.example.test A': '203.0.113.10',
+    'relay.example.test NS': 'relay-ns.example.test',
+    'relay.example.test A': '198.51.100.7',
+  });
+  try {
+    const { code, stdout } = await run(install(null), ['init', '--domain', 'relay.example.test', '--public-ip', '203.0.113.10', '--resolver', dns.address]).ended;
+    assert.match(stdout, /✓ relay-ns\.example\.test A 203\.0\.113\.10$/m);
+    assert.match(stdout, /✓ relay\.example\.test NS relay-ns\.example\.test$/m);
+    assert.match(stdout, /✗ relay\.example\.test A 203\.0\.113\.10, answered by the relay: answers 198\.51\.100\.7; set PANE_RELAY_PUBLIC_IP=203\.0\.113\.10/);
+    // Nothing serves https here, so the health check fails and init does not call it ready.
+    assert.match(stdout, /✗ https:\/\/relay\.example\.test\/healthz: /);
+    assert.equal(code, 1);
+  } finally {
+    await dns.close();
+  }
+});
+
+test('runpane relay init refuses a domain with no name of its own', async () => {
+  const { code, stderr } = await run(install(null), ['init', '--domain', 'example.com', '--public-ip', '203.0.113.10']).ended;
+  assert.equal(code, 1);
+  assert.match(stderr, /"example\.com" is not a subdomain such as relay\.example\.com/);
 });

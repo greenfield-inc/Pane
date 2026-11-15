@@ -1924,6 +1924,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getNavigationMemory: (hostId: string | null) =>
           success(clone(navigationMemories.get(hostId ?? '') ?? null)),
+        getLaunchChat: () => success(null),
         saveNavigationMemory: (hostId: string | null, memory: JsonObject) => {
           navigationMemories.set(hostId ?? '', clone(memory));
           return success();

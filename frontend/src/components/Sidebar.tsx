@@ -625,6 +625,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
       <>
         <div
           data-testid="sidebar"
+          data-pane-part="sidebar"
           data-focus-region="sidebar"
           className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-secondary text-text-primary h-full flex flex-col flex-shrink-0"
           style={{ width: '48px' }}
@@ -960,6 +961,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
       <div
         ref={shellRef}
         data-testid="sidebar"
+        data-pane-part="sidebar"
         data-focus-region="sidebar"
         className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
         style={{ width: maximized ? '100%' : `${width}px` }}

@@ -26,6 +26,8 @@ export interface MachineState {
   installId?: string;
   /** The route a saved computer's connection is on (`ComputerRoute.id`): the dot on its pill. */
   routeId?: string;
+  /** Whether the machine's Pane sends its Session members' reports; absent until it first answers. */
+  workspaceEntries?: boolean;
 }
 
 /** The reads `machines:read` serves; each takes the arguments the same channel takes today. */
@@ -63,6 +65,7 @@ export const MACHINE_EVENT_CHANNELS = [
   'permission:resolved',
   'notify:shared-changed',
   'remote:settings-changed',
+  'workspace:entry',
 ] as const;
 export type MachineEventChannel = typeof MACHINE_EVENT_CHANNELS[number];
 

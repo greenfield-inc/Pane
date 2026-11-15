@@ -35,6 +35,8 @@ const DAEMON_EVENT_EXACT_CHANNELS = new Set<string>([
   'autopilot:changed',
   'ssh:route-progress',
   'git-status-loading',
+  // A member Pane's reports and exits, for a Session on another computer (`RemoteMemberEvents`).
+  'workspace:entry',
   'git-status-updated',
   'logs:output',
   'notes:changed',

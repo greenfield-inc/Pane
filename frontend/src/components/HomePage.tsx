@@ -13,6 +13,7 @@ import { AddProjectDialog } from './AddProjectDialog';
 import { CloneFromGitHubDialog } from './CloneFromGitHubDialog';
 import { formatDistanceToNow, isValidTimestamp } from '../utils/timestampUtils';
 import { ALL_THEME_OPTIONS, getThemeLabel } from '../utils/themeOptions';
+import { CUSTOM_THEME_ID } from '../../../shared/types/appearance';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import type { PreferredShell } from '../types/config';
@@ -236,7 +237,7 @@ function UsePhoneCard() {
 }
 
 export function HomePage() {
-  const { theme, setTheme } = useTheme();
+  const { theme, themeChoice, customTheme, setTheme } = useTheme();
   const { config, updateConfig } = useConfigStore();
   const sessions = useSessionStore(state => state.sessions);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
@@ -364,17 +365,20 @@ export function HomePage() {
                     type="button"
                     className="flex cursor-default items-center gap-2 rounded-md border border-border-secondary bg-surface-tertiary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
                   >
-                    <span>{getThemeLabel(theme)}</span>
+                    <span>{themeChoice === CUSTOM_THEME_ID ? `${customTheme.theme?.name ?? 'Custom'} (based on ${getThemeLabel(theme)})` : getThemeLabel(theme)}</span>
                     <ChevronDown className="w-3 h-3 text-text-tertiary" />
                   </button>
                 }
-                items={ALL_THEME_OPTIONS.map((option) => ({
+                items={[
+                  ...(customTheme.theme ? [{ id: CUSTOM_THEME_ID, label: customTheme.theme.name ?? 'Custom', description: `Made by an agent, based on ${getThemeLabel(customTheme.theme.base)}` }] : []),
+                  ...ALL_THEME_OPTIONS,
+                ].map((option) => ({
                   id: option.id,
                   label: option.label,
                   description: option.description,
                   onClick: () => { void setTheme(option.id).catch((error) => console.error('[HomePage] theme change failed', error)); },
                 }))}
-                selectedId={theme}
+                selectedId={themeChoice}
                 position="bottom-right"
                 width="lg"
               />

@@ -34,7 +34,13 @@ import { decodeListeningPortsSnapshot, type ListeningPortsSnapshot } from '../..
 import { localTargetOf } from '../../../../shared/utils/browserUrl';
 import { createPortTunnel, type PortTunnel } from './portTunnel';
 import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_WRITES_BUSY_CODE } from '../../../../shared/remoteClient/readChannels';
-import { RecoveryCycle, backoffDelayMs } from '../../../../shared/remoteClient/recoveryCycle';
+import {
+  RecoveryCycle,
+  RELAY_MAX_RECONNECT_DELAY_MS,
+  STALE_STREAM_TIMEOUT_MS,
+  backoffDelayMs,
+  relayRecoveryCycle,
+} from '../../../../shared/remoteClient/recoveryCycle';
 import { PaneError } from '../../../../shared/paneError';
 import type {
   RemoteConnectionCheck,
@@ -62,6 +68,8 @@ interface RemoteConnectionStateMetadata {
   hostVersion?: string;
   /** The host's install id from its ready event; absent before ready and from older hosts. */
   hostMachineId?: string;
+  /** Whether the host sends `workspace:entry` events; false from hosts before remote Session members. */
+  hostWorkspaceEntries?: boolean;
   /** What the host reported about itself on its ready event: its install id and routes. Older hosts omit it. */
   hostRoutes?: ComputerRoutesReport;
   /** The route the connection is on (`ComputerRoute.id`); absent for a connection with one route. */
@@ -155,6 +163,7 @@ interface RemoteReadyEventPayload {
   machineId?: string;
   /** `ComputerRoutesReport`, decoded where it is used. */
   computer?: JsonValue;
+  workspaceEntries?: boolean;
 }
 
 const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = boundary.union(
@@ -182,6 +191,7 @@ const remoteReadyEventSchema: BoundarySchema<RemoteReadyEventPayload> = boundary
   deduplicatesRequestIds: boundary.optional(boundary.boolean),
   machineId: boundary.optional(boundary.string),
   computer: boundary.optional(boundary.json),
+  workspaceEntries: boundary.optional(boundary.boolean),
 });
 const remoteHeartbeatSchema: BoundarySchema<RemoteDaemonHeartbeatPayload> = boundary.object({
   timestamp: boundary.nonEmptyString,
@@ -206,7 +216,6 @@ const REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS = 30_000;
 const REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS = 300_000;
 /** Answers that mean the request was cut off, not refused; only these are retried. */
 const INTERRUPTION_CODES = new Set(['ERR_REMOTE_TRANSPORT', 'ERR_REMOTE_DELIVERY_UNKNOWN', 'ERR_REMOTE_STALE_RESPONSE']);
-const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
 /**
  * With another route, a stream silent this long has the other routes checked: the host sends a
  * heartbeat every 5 s, so this is one missed heartbeat and margin. Moving to one that answers then
@@ -324,12 +333,17 @@ export class RemotePaneClient {
     this.initialHandshakeTimeoutMs = options.initialHandshakeTimeoutMs
       ?? REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS;
     this.heartbeatStaleTimeoutMs = options.heartbeatStaleTimeoutMs
-      ?? REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS;
+      ?? STALE_STREAM_TIMEOUT_MS;
     this.restoreTimeoutMs = options.restoreTimeoutMs ?? REMOTE_DAEMON_RESTORE_TIMEOUT_MS;
     this.requestTimeoutMs = options.requestTimeoutMs ?? REMOTE_DAEMON_REQUEST_TIMEOUT_MS;
-    this.maxRetryDelayMs = options.reconnectMaxDelayMs ?? REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS;
+    // A computer with a relay route retries as a relay connection does: often, and while Pane is open.
+    const viaRelay = this.routes.some((route) => route.kind === 'relay');
+    this.maxRetryDelayMs = options.reconnectMaxDelayMs
+      ?? (viaRelay ? RELAY_MAX_RECONNECT_DELAY_MS : REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS);
     this.writeResendBudgetMs = options.reconnectDurationMs ?? REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS;
-    this.recovery = new RecoveryCycle(Math.random, this.writeResendBudgetMs, this.maxRetryDelayMs);
+    this.recovery = viaRelay
+      ? relayRecoveryCycle(this.maxRetryDelayMs)
+      : new RecoveryCycle(Math.random, this.writeResendBudgetMs, this.maxRetryDelayMs);
     this.onConnectionStateChange = options.onConnectionStateChange;
     this.onResyncRequired = options.onResyncRequired;
     this.dnsLookup = options.dnsLookup ?? defaultLookup;
@@ -939,9 +953,10 @@ export class RemotePaneClient {
               this.markRemoteSeen();
               armTimeout(this.restoreTimeoutMs, `Workspace restoration timed out after ${this.restoreTimeoutMs}ms`);
               if (resolveOnReady && !settled) { settled = true; resolve(); }
-              const host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostRoutes'> = {
+              const host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostRoutes' | 'hostWorkspaceEntries'> = {
                 hostVersion: readyPayload.paneVersion,
                 hostMachineId: readyPayload.machineId,
+                hostWorkspaceEntries: readyPayload.workspaceEntries === true,
               };
               const hostRoutes = decodeComputerRoutesReport(readyPayload.computer);
               if (hostRoutes) host.hostRoutes = hostRoutes;
@@ -1109,7 +1124,7 @@ export class RemotePaneClient {
   }
 
   private armDeadline(): void {
-    if (this.deadlineTimer || this.recoveryStopped) return;
+    if (this.deadlineTimer || this.recoveryStopped || !Number.isFinite(this.recovery.remainingMs)) return;
     this.deadlineTimer = setTimeout(() => this.expireRecovery(), this.recovery.remainingMs);
   }
 
@@ -1148,7 +1163,7 @@ export class RemotePaneClient {
     status: RemotePaneConnectionStatus,
     reason: string,
     errorMessage: string | null = null,
-    host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostRoutes'> = {},
+    host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostRoutes' | 'hostWorkspaceEntries'> = {},
   ): void {
     const route = this.routes[this.routeIndex];
     console.info(`[Pane remote daemon] ${this.profile.label}: ${status}${this.routes.length > 1 ? ` on ${route.kind}` : ''} (${reason})`);

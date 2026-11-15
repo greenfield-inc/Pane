@@ -154,6 +154,8 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'permission:respond',
   'notify:remote-snapshot',
   'notify:remote-command',
+  // A Session on another computer types an owed answer into one of this computer's tabs.
+  'notify:type-into-tab',
   'notify:summary-page',
   'file:copy',
   'file:delete',

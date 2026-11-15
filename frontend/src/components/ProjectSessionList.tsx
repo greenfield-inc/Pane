@@ -1147,6 +1147,7 @@ function SessionRow({
 
   return (<>
     <div
+      data-pane-part="sidebar-pane"
       data-row-key={reorder ? session.id : undefined}
       {...reorder?.drag}
       onKeyDown={reorder?.onKeyDown}

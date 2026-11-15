@@ -67,7 +67,8 @@ import type {
 // The main build bundles this runtime dependency into preload.js; the sandbox
 // verification step rejects any remaining require other than Electron itself.
 import { boundary, decodeBoundary, type JsonObject } from '../../shared/validation/boundaryDecoder';
-import { decodeAppearanceSnapshotArg, type Theme } from '../../shared/types/appearance';
+import { decodeAppearanceSnapshotArg, type ThemeChoice } from '../../shared/types/appearance';
+import type { CustomThemeState } from '../../shared/types/customTheme';
 
 interface LogEntry {
   timestamp: string;
@@ -403,8 +404,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   appearanceSnapshot: decodeAppearanceSnapshotArg(process.argv),
   setTitleBarOverlay: (colors: WindowControlsOverlayColors): Promise<IPCResponse> =>
     invokeIpc('window:set-title-bar-overlay', colors),
-  setBackgroundColor: (payload: { theme: Theme; color: string }): Promise<IPCResponse> =>
+  setBackgroundColor: (payload: { theme: ThemeChoice; color: string }): Promise<IPCResponse> =>
     invokeIpc('window:set-background-color', payload),
+  // This machine's Custom theme (custom-theme.json); never the remote host's.
+  customTheme: {
+    get: (): Promise<IPCResponse<CustomThemeState>> => ipcRenderer.invoke('custom-theme:get'),
+    reset: (): Promise<IPCResponse> => ipcRenderer.invoke('custom-theme:reset'),
+  },
   // The window stays hidden until the first render with data; see createWindow.
   notifyRendererReady: (): void => ipcRenderer.send('window:renderer-ready'),
 
@@ -921,6 +927,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // can still be showing the outgoing host while main has switched runtimes.
     getNavigationMemory: (hostId: string | null): Promise<IPCResponse> => invokeIpc('ui-state:get-navigation-memory', hostId),
     saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory): Promise<IPCResponse> => invokeIpc('ui-state:save-navigation-memory', hostId, memory),
+    // The chat tab a launch reopens, or null for Home.
+    getLaunchChat: (): Promise<IPCResponse> => invokeIpc('ui-state:get-launch-chat'),
     // Per-host Session tiling, the layout counterpart of navigation memory.
     getSessionWorkspaceLayout: (hostId: string | null): Promise<IPCResponse> => invokeIpc('ui-state:get-session-workspace-layout', hostId),
     saveSessionWorkspaceLayout: (hostId: string | null, layout: SessionWorkspaceLayout | null): Promise<IPCResponse> => invokeIpc('ui-state:save-session-workspace-layout', hostId, layout),
@@ -932,6 +940,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Event listeners for real-time updates
   events: {
     /** Config changed in main (Settings, another window, or a hand edit of config.json). */
+    onCustomThemeUpdated: (callback: (state: CustomThemeState) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, state: CustomThemeState) => callback(state);
+      ipcRenderer.on('custom-theme:updated', wrappedCallback);
+      return () => ipcRenderer.removeListener('custom-theme:updated', wrappedCallback);
+    },
     onConfigUpdated: (callback: (config: AppConfig) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config);
       ipcRenderer.on('config:updated', wrappedCallback);

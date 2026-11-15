@@ -154,6 +154,8 @@ interface RemoteReadyEventPayload {
   machineId?: string;
   /** This host's routes (D-51), saved by the client as found automatically. Hosts before it omit it. */
   computer?: ComputerRoutesReport;
+  /** This host sends `workspace:entry` events, so a Session on another computer hears its members. Hosts before it omit it. */
+  workspaceEntries: true;
 }
 
 interface RemoteHealthPayload {
@@ -1175,6 +1177,7 @@ export class PaneRemoteHttpApiServer {
       resync: 'refetch-state-after-reconnect',
       timestamp: new Date().toISOString(),
       deduplicatesRequestIds: true,
+      workspaceEntries: true,
     };
     if (this.paneVersion) ready.paneVersion = this.paneVersion;
     const hostMachineId = this.configManager.getConfig().machineId;

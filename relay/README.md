@@ -95,7 +95,11 @@ Every flag also reads the environment variable in brackets.
 
 ## Deploy
 
-`docker build -t pane-relay relay/` builds a non-root distroless image. Binding
+Each release publishes the image `ghcr.io/greenfield-inc/pane-relay` for
+linux/amd64 and linux/arm64 (`release.Dockerfile`, from the release's static
+binaries) and attaches [compose.yaml](compose.yaml), pinned to that version, which runs it as
+[Run your own relay](../docs/SELF_HOSTED_RELAY.md) describes.
+`docker build -t pane-relay relay/` builds a non-root distroless image from source. Binding
 port 443 or 53 as non-root works with Docker's default network (it allows
 unprivileged low ports); with host networking, grant `CAP_NET_BIND_SERVICE` or
 listen on a high port behind a port forward. On SIGTERM the relay sends

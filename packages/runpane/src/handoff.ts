@@ -10,7 +10,7 @@ import { CURSOR_NO_FORK, forkNativeSession, isNativeAgent, lastMessageSnippet, l
 import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
-import { agentTerminalCommand } from './agents';
+import { agentModelArgs, agentTerminalCommand } from './agents';
 
 /**
  * The note's sections. They extend Codex's compaction prompt
@@ -362,7 +362,7 @@ function localDestination(name: string, paneDir?: string): Destination {
   };
 }
 
-function quote(value: string, shell: string): string {
+export function quote(value: string, shell: string): string {
   if (/^[\w./:@=+-]+$/.test(value)) return value;
   // PowerShell also ends a single-quoted string at a typographic single quote.
   return /(?:powershell|pwsh)(?:\.exe)?$/i.test(shell) ? `'${value.replace(/['\u2018\u2019\u201A\u201B]/g, '$&$&')}'` : `'${value.replace(/'/g, `'\\''`)}'`;
@@ -400,14 +400,7 @@ async function findRepo(destination: Destination, listed: ReturnType<typeof repo
 
 function agentCommand(destination: HandoffDestination, shell: string): string | undefined {
   if (!destination.model && !destination.effort) return undefined;
-  const base = agentTerminalCommand(destination.agent);
-  const { model, effort } = destination;
-  const flags = destination.agent === 'codex'
-    ? [model && `-m ${quote(model, shell)}`, effort && `-c ${quote(`model_reasoning_effort=${effort}`, shell)}`]
-    : destination.agent === 'claude'
-      ? [model && `--model ${quote(model, shell)}`, effort && `--effort ${quote(effort, shell)}`]
-      : [model && `--model ${quote(model, shell)}`];
-  return [base, ...flags].filter(Boolean).join(' ');
+  return [agentTerminalCommand(destination.agent), ...agentModelArgs(destination.agent, destination).map((arg) => quote(arg, shell))].join(' ');
 }
 
 function describeDestination(destination: HandoffDestination, machine: string): string {

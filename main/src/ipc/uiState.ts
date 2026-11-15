@@ -156,6 +156,21 @@ export function registerUIStateHandlers(services: AppServices) {
     }
   });
 
+  ipcMain.handle('ui-state:get-launch-chat', async () => {
+    try {
+      return {
+        success: true,
+        data: uiStateManager.getLaunchChat(services.databaseService)
+      };
+    } catch (error) {
+      console.error('Error finding the chat to reopen at launch:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  });
+
   ipcMain.handle('ui-state:get-session-workspace-layout', async (_, hostId: string | null) => {
     try {
       return {

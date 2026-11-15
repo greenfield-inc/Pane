@@ -46,15 +46,23 @@
           cached = parsed?.v === 1 ? parsed : undefined;
         } catch { cached = undefined; }
         const legacy = localStorage.getItem('theme');
-        const hasTheme = (value) => typeof value === 'string' && Object.prototype.hasOwnProperty.call(themeClasses, value);
+        const hasTheme = (value) => value === 'custom' || (typeof value === 'string' && Object.prototype.hasOwnProperty.call(themeClasses, value));
         const source = snapshot || cached || (hasTheme(legacy) ? { ...defaults, appearanceMode: 'fixed', theme: legacy } : defaults);
         const fixedTheme = hasTheme(source.theme) ? source.theme : defaults.theme;
         const lightTheme = hasTheme(source.systemLightTheme) ? source.systemLightTheme : defaults.systemLightTheme;
         const darkTheme = hasTheme(source.systemDarkTheme) ? source.systemDarkTheme : defaults.systemDarkTheme;
         const mode = source.appearanceMode === 'fixed' ? 'fixed' : 'system';
         const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
-        const resolved = mode === 'fixed' ? fixedTheme : (prefersDark ? darkTheme : lightTheme);
-        window.__paneBootstrapThemeClasses = themeClasses[resolved];
+        let resolved = mode === 'fixed' ? fixedTheme : (prefersDark ? darkTheme : lightTheme);
+        let custom = [];
+        if (resolved === 'custom') {
+          // The Custom theme shows as its base; its colours and CSS follow from the cache in src/utils/customTheme.ts.
+          let base;
+          try { base = JSON.parse(localStorage.getItem('pane.custom-theme.v1') || 'null')?.base; } catch { base = undefined; }
+          custom = Object.prototype.hasOwnProperty.call(themeClasses, base) ? ['pane-custom-theme'] : [];
+          resolved = custom.length ? base : (mode === 'system' && prefersDark ? defaults.systemDarkTheme : defaults.theme);
+        }
+        window.__paneBootstrapThemeClasses = [...themeClasses[resolved], ...custom];
         document.documentElement.classList.add(...window.__paneBootstrapThemeClasses);
         document.documentElement.style.colorScheme = themeClasses[resolved][0];
         if (localStorage.getItem('high-contrast') === 'true') document.documentElement.classList.add('high-contrast');

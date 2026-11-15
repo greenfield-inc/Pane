@@ -21,6 +21,8 @@ export function installApplicationMenu(options: {
   paneChords?: ReadonlySet<string>;
   /** Settings…'s key: Open Settings' binding, or null when it has none. */
   settingsAccelerator?: string | null;
+  /** View › Reset Custom Theme: the one way back in the app that custom CSS can't hide. Enabled while a Custom theme file exists. */
+  resetCustomTheme?: { enabled: boolean; onClick: () => void };
 }): void {
   if (process.platform !== 'darwin') {
     Menu.setApplicationMenu(null);
@@ -88,6 +90,10 @@ export function installApplicationMenu(options: {
         keyed({ role: 'zoomOut' }, 'mod+-', 'CmdOrCtrl+-'),
         { type: 'separator' },
         keyed({ role: 'togglefullscreen' }, 'mod+ctrl+f', 'Ctrl+Command+F'),
+        ...(options.resetCustomTheme ? [
+          { type: 'separator' } as const,
+          { label: 'Reset Custom Theme', enabled: options.resetCustomTheme.enabled, click: options.resetCustomTheme.onClick },
+        ] : []),
       ],
     },
     {

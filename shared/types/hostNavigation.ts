@@ -27,6 +27,12 @@ export interface HostNavigationMemory {
   orchestrationSessionId?: string | null;
 }
 
+/** The chat tab a launch reopens: the tab in front in the last Pane this computer showed. */
+export interface LaunchChat {
+  paneId: string;
+  panelId: string;
+}
+
 const hostNavigationMemorySchema: BoundarySchema<HostNavigationMemory> = boundary.object({
   view: boundary.enumeration(...PANE_NAVIGATION_VIEWS),
   projectId: boundary.nullable(boundary.number),

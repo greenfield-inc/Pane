@@ -1,5 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { DEFAULT_APPEARANCE, resolveAppearanceTheme, themeBase, THEME_CLASSES } from '../../../../shared/types/appearance';
+import { CUSTOM_THEME_CLASS, CUSTOM_THEME_ID, paletteForChoice, themeChoiceClasses } from '../../../../shared/types/customTheme';
+import { applyCustomThemeStyles, getCustomThemeState, subscribeCustomTheme } from '../../utils/customTheme';
 import { readAppearanceCache } from '../../utils/appearanceCache';
 import { runNotify, subscribeNotify, useNotifyStore } from '../../stores/notifyStore';
 import { cn } from '../../utils/cn';
@@ -17,15 +19,19 @@ const SHADOW_PADDING = 32;
 /** Main keeps the strip this far from the screen's edges. */
 const EDGE_GAP = 8;
 
-const ALL_THEME_CLASSES = [...new Set(Object.values(THEME_CLASSES).flat())];
+const ALL_THEME_CLASSES = [...new Set([...Object.values(THEME_CLASSES).flat(), CUSTOM_THEME_CLASS])];
 
 /** The same theme the main window shows: main passes its appearance in argv, as it does there. */
 function applyTheme(prefersDark: boolean): void {
   const appearance = window.electronAPI?.appearanceSnapshot ?? readAppearanceCache() ?? DEFAULT_APPEARANCE;
-  const theme = resolveAppearanceTheme(appearance, prefersDark);
+  const choice = resolveAppearanceTheme(appearance, prefersDark);
+  const custom = getCustomThemeState();
+  const slotDefault = appearance.appearanceMode === 'system' && prefersDark ? DEFAULT_APPEARANCE.systemDarkTheme : DEFAULT_APPEARANCE.systemLightTheme;
+  const theme = paletteForChoice(choice, custom.base, slotDefault);
+  applyCustomThemeStyles(choice === CUSTOM_THEME_ID ? custom.theme : null);
   for (const element of [document.documentElement, document.body]) {
     element.classList.remove(...ALL_THEME_CLASSES);
-    element.classList.add(...THEME_CLASSES[theme]);
+    element.classList.add(...themeChoiceClasses(choice, custom.base, slotDefault));
     element.classList.toggle('high-contrast', localStorage.getItem('high-contrast') === 'true');
     // The window is transparent; the card draws its own background and shadow.
     element.style.setProperty('background', 'transparent', 'important');
@@ -39,9 +45,11 @@ function watchTheme(): () => void {
   const refresh = () => applyTheme(query.matches);
   query.addEventListener('change', refresh);
   const unsubscribe = window.electronAPI?.events?.onNativeAppearanceUpdated?.(({ prefersDark }) => applyTheme(prefersDark));
+  const unsubscribeCustom = subscribeCustomTheme(refresh);
   return () => {
     query.removeEventListener('change', refresh);
     unsubscribe?.();
+    unsubscribeCustom();
   };
 }
 

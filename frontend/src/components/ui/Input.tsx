@@ -53,6 +53,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           )}
           <input
             ref={ref}
+            data-pane-part="input"
             id={inputId}
             className={cn(
               baseStyles,
@@ -128,6 +129,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         )}
         <textarea
           ref={ref}
+          data-pane-part="input"
           id={textareaId}
           className={cn(
             baseStyles,

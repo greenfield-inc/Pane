@@ -10,7 +10,7 @@ each computer its `runpane.net` address for QR pairing.
 
 | Surface | Workflow | Trigger | What it does |
 | --- | --- | --- | --- |
-| Stable release | `Build & Release` (`.github/workflows/build.yml`) | `v*` tag push | Builds macOS, Linux and Windows installers, publishes the GitHub release, uploads `SHA256SUMS.txt`, publishes `runpane` to npm and PyPI, and notifies the website repo |
+| Stable release | `Build & Release` (`.github/workflows/build.yml`) | `v*` tag push | Builds macOS, Linux and Windows installers, publishes the GitHub release, uploads `SHA256SUMS.txt` and the `pane-relay` binaries, pushes the relay image `ghcr.io/greenfield-inc/pane-relay`, publishes `runpane` to npm and PyPI, and notifies the website repo |
 | Release build check | `Build & Release` | push to the `release` branch | Builds the same installers as artifacts; publishes nothing |
 | Release recovery | `Build & Release` | manual, with `release_tag` and `publish` | Rebuilds and republishes an existing tag |
 | Nightly / canary | `Nightly / Canary Release` (`nightly-release.yml`) | manual, with `channel` and `source_ref` | Publishes a GitHub prerelease that is not marked Latest and has no update metadata, so auto-update never moves stable users onto it |
@@ -99,25 +99,43 @@ build (macOS arm64,   ─┐
                        ├─ publish ──────────────┼─ homebrew (after packaging)
 build-windows (x64,  ──┘                        ├─ publish-npm   ┐
   arm64)  build-relay ─ validate-runpane-packages ┴─ publish-pypi  ┘
+          build-relay ─ relay-image
 ```
+
+`publish` also needs `build-relay`.
 
 `publish` merges the macOS and Windows updater files, computes
 `SHA256SUMS.txt` and `continuity.json`, uploads them with the macOS and
-Windows installers, and publishes the draft release. `publish-npm` and `publish-pypi` each need both `publish` and
+Windows installers, and publishes the draft release. It also uploads each
+`pane-relay` binary as `pane-relay-<platform>-<arch>` (`.exe` on Windows) with
+`pane-relay-sha256.txt`; `runpane relay` downloads and checks these when npm
+has no relay package for it. It also attaches `relay/compose.yaml` with the
+image pinned to that release, which the self-hosted relay guide downloads. `publish-npm` and `publish-pypi` each need both `publish` and
 `validate-runpane-packages`.
 
 `build-relay` builds `pane-relay` (`relay/`) for each platform `runpane relay`
 supports; Linux binaries link musl statically. `validate-runpane-packages`
-packs each `@runpane/relay-<platform>-<arch>` package without publishing and
+packs each `@pane/relay-<platform>-<arch>` package without publishing and
 runs `runpane relay` on the Linux binary. `publish-npm` publishes those six
 packages first, skipping any this version already has, then lists the ones npm
 has as runpane's `optionalDependencies` and publishes runpane
 (`scripts/runpane-relay-packages.js`). A relay package npm refuses is a warning,
-not a failed release: runpane still publishes, and `runpane relay` says the
-binary is not installed on that platform. The packages need the npm
-organisation `runpane`, and a trusted publisher (this repository, `build.yml`)
+not a failed release: runpane still publishes, and `runpane relay` downloads the
+binary from the GitHub release instead. The packages need the npm
+organisation `pane`, and a trusted publisher (this repository, `build.yml`)
 on each package once it exists; the first publish needs `NPM_TOKEN` with
-rights on `@runpane`.
+rights on `@pane`.
+
+`relay-image` packs the two static Linux binaries into
+`ghcr.io/greenfield-inc/pane-relay` (`relay/release.Dockerfile`) for
+linux/amd64 and linux/arm64. Every run starts the amd64 image and checks
+`/healthz`; a publishing run pushes it tagged with the version, with the
+workflow's `GITHUB_TOKEN`, and a tag push also moves `latest` (a recovery run
+of an older tag leaves it). GitHub creates a new container package as
+private, so after the first release that pushes it, an organisation owner
+opens the package's **Package settings** and sets **Change visibility** to
+Public; later pushes keep it public. Until then the self-hosted relay guide
+fails at `docker compose up` with `denied`, so make it part of that release.
 
 `publish-release` (`scripts/publish-github-release.sh`) fills an empty draft's
 notes from GitHub's generated notes and keeps a hand-written body. Either way it
@@ -134,7 +152,8 @@ git tag --points-at origin/main
 gh run list --limit 10
 gh release view vX.Y.Z
 npm view runpane version
-npm view @runpane/relay-linux-x64 version
+npm view @pane/relay-linux-x64 version
+docker logout ghcr.io; docker manifest inspect ghcr.io/greenfield-inc/pane-relay:X.Y.Z  # public: works signed out
 python3 -m pip index versions runpane
 ```
 

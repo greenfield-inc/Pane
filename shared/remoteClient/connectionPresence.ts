@@ -47,7 +47,7 @@ export function connectionNotice(
     return { message: `${machine} removed this device. To use it again, scan a new code on ${machine}.`, canRetry: false, pairAgain: true };
   }
   if (relay?.asleepSince) return { message: `${machine}: Asleep since ${relay.asleepSince}`, canRetry: true };
-  if (state.status !== 'error') return { message: `Can't reach ${machine}. Retrying…`, canRetry: true };
+  if (state.status !== 'error') return { message: `Reconnecting to ${machine}…`, canRetry: true };
   // Anything else, such as a rejected connection code, explains itself.
   const { lastError } = state;
   const gaveUp = !lastError || lastError.startsWith('Could not reconnect within five minutes');

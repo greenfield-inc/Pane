@@ -49,6 +49,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <button
         ref={ref}
+        data-pane-part="button"
         className={cn(
           baseStyles,
           buttonVariants[variant],
@@ -126,6 +127,7 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
     return (
       <button
         ref={ref}
+        data-pane-part="button"
         className={cn(
           baseStyles,
           iconButtonVariants[variant],

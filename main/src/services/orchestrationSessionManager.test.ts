@@ -1844,6 +1844,28 @@ describe('OrchestrationSessionManager', () => {
     expect(fixture.sessionManager.createSessionWithId).toHaveBeenCalledTimes(1);
   });
 
+  it("shows a remote member with its machine, as its machine reports it or unreachable when it doesn't answer", async () => {
+    const fixture = createFixture();
+    const named = await fixture.manager.create({ name: 'Cross-machine', agent: 'claude' });
+    const machine = { id: 'tailnet-devbox', label: 'parsa-devbox' };
+    await fixture.manager.associateRemote({ sessionId: named.session.id }, { paneId: 'win-pane', name: 'Windows build', machine });
+    await fixture.manager.associateRemote({ sessionId: named.session.id }, { paneId: 'wsl-pane', name: 'WSL build', machine });
+    fixture.manager.setRemoteMachines({
+      forwardsReports: () => true,
+      readPane: async (_machineId, paneId) => (paneId === 'win-pane'
+        ? { paneId, name: 'Windows build', archived: false, missing: false, panels: [{ panelId: 'tab', title: 'Codex', type: 'terminal', state: 'blocked', initialized: true }] }
+        : 'unreachable'),
+    });
+
+    const overview = await fixture.manager.overview({ sessionId: named.session.id });
+
+    expect(overview.panes).toMatchObject([
+      { paneId: 'win-pane', machine: { label: 'parsa-devbox', state: 'online' }, panels: [{ state: 'blocked' }] },
+      { paneId: 'wsl-pane', name: 'WSL build', machine: { label: 'parsa-devbox', state: 'unreachable' }, panels: [] },
+    ]);
+    expect(overview.status).toBe('blocked');
+  });
+
   it('reports an archived member Pane as archived when the database stores the flag as 1', async () => {
     const fixture = createFixture();
     const pane = paneFixture(fixture, 'archived-member');

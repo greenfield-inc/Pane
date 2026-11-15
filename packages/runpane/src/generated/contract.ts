@@ -161,6 +161,35 @@ export const RUNPANE_CONTRACT = {
           "registryIds": [
             "claude-acp"
           ]
+        },
+        "models": {
+          "flag": "--model",
+          "effortFlag": "--effort",
+          "aliases": [
+            "fable",
+            "opus",
+            "sonnet",
+            "haiku"
+          ],
+          "status": {
+            "args": [
+              "auth",
+              "status"
+            ],
+            "format": "json-logged-in"
+          }
+        },
+        "ask": {
+          "args": [
+            "-p",
+            "--output-format",
+            "json",
+            "--permission-mode",
+            "default",
+            "--strict-mcp-config",
+            "--tools=Read,Grep,Glob"
+          ],
+          "output": "result-json"
         }
       },
       "codex": {
@@ -213,6 +242,38 @@ export const RUNPANE_CONTRACT = {
           "registryIds": [
             "codex-acp"
           ]
+        },
+        "models": {
+          "flag": "-m",
+          "effortConfig": "model_reasoning_effort",
+          "list": {
+            "args": [
+              "debug",
+              "models"
+            ],
+            "format": "json-models"
+          },
+          "status": {
+            "args": [
+              "login",
+              "status"
+            ],
+            "format": "text"
+          }
+        },
+        "ask": {
+          "args": [
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--ignore-user-config",
+            "--disable",
+            "apps",
+            "-s",
+            "read-only"
+          ],
+          "output": "codex-jsonl"
         }
       },
       "cursor": {
@@ -266,6 +327,32 @@ export const RUNPANE_CONTRACT = {
           "registryIds": [
             "cursor"
           ]
+        },
+        "models": {
+          "flag": "--model",
+          "list": {
+            "args": [
+              "models"
+            ],
+            "format": "dash-lines"
+          },
+          "status": {
+            "args": [
+              "status"
+            ],
+            "format": "text"
+          }
+        },
+        "ask": {
+          "args": [
+            "-p",
+            "--trust",
+            "--mode",
+            "ask",
+            "--output-format",
+            "json"
+          ],
+          "output": "result-json"
         }
       },
       "opencode": {
@@ -309,6 +396,35 @@ export const RUNPANE_CONTRACT = {
             "opencode",
             "opencode-v2"
           ]
+        },
+        "models": {
+          "flag": "--model",
+          "list": {
+            "args": [
+              "models"
+            ],
+            "format": "lines"
+          },
+          "status": {
+            "args": [
+              "auth",
+              "list"
+            ],
+            "format": "text"
+          }
+        },
+        "ask": {
+          "args": [
+            "run",
+            "--format",
+            "json",
+            "--agent",
+            "plan"
+          ],
+          "env": {
+            "OPENCODE_CONFIG_CONTENT": "{\"permission\":{\"edit\":\"deny\",\"bash\":\"deny\"},\"tools\":{\"*_*\":false}}"
+          },
+          "output": "opencode-jsonl"
         }
       },
       "pi": {
@@ -346,7 +462,10 @@ export const RUNPANE_CONTRACT = {
         },
         "transcriptDirs": [
           ".pi/agent/sessions"
-        ]
+        ],
+        "models": {
+          "flag": "--model"
+        }
       }
     }
   },
@@ -499,9 +618,10 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "relay",
-      "summary": "Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags.",
+      "summary": "Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags; init prints and checks the DNS records it needs.",
       "usage": [
-        "runpane relay [pane-relay flags...]"
+        "runpane relay [pane-relay flags...]",
+        "runpane relay init --domain <relay domain> [--public-ip <IPv4>] [--resolver <ip[:port]>]"
       ],
       "wrappers": [
         "npm"
@@ -675,6 +795,56 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "theme read",
+      "summary": "Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.",
+      "usage": [
+        "runpane theme read [--json] [--pane-dir <path>]"
+      ],
+      "wrappers": [
+        "npm"
+      ],
+      "toolsets": [
+        "core"
+      ],
+      "jsonSchemas": [
+        "themeReadResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "theme set",
+      "summary": "Restyle Pane itself, only when the person asks to change Pane's look: write the Custom theme (a base theme, colour tokens and CSS) and select it, or switch to another theme. Pane restyles within a second.",
+      "usage": [
+        "runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json] [--pane-dir <path>]",
+        "runpane theme set --theme <id> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ],
+      "toolsets": [
+        "core"
+      ],
+      "jsonSchemas": [
+        "themeSetResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "theme reset",
+      "summary": "Delete the Custom theme and go back to the theme it was built on.",
+      "usage": [
+        "runpane theme reset [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true
+    },
+    {
       "name": "panes list",
       "summary": "List Pane sessions in a saved repository.",
       "usage": [
@@ -835,6 +1005,46 @@ export const RUNPANE_CONTRACT = {
         "npm"
       ],
       "localControl": true
+    },
+    {
+      "name": "ask",
+      "summary": "Ask any agent and model one read-only question, on this or another machine, and get its answer: no tab is opened and nothing is left behind.",
+      "usage": [
+        "runpane ask --agent <claude|codex|cursor|opencode> (--prompt \"<question>\" | --prompt-file <path|->) [--model <model>] [--machine <name>] [--repo <selector> | --pane <pane-id>] [--timeout <duration>] [--json]"
+      ],
+      "mutates": false,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true,
+      "mcpName": "agents_ask",
+      "openWorld": true,
+      "toolsets": [
+        "core",
+        "agents"
+      ],
+      "jsonSchemas": [
+        "askResult"
+      ]
+    },
+    {
+      "name": "models",
+      "summary": "List the models each installed agent offers, on this machine, another one, or every saved machine, with what each agent reports about its sign-in. Read live on every call.",
+      "usage": [
+        "runpane models [--agent <codex|claude|cursor|opencode|pi>] [--search <text>] [--machine <name> | --all] [--json]"
+      ],
+      "mutates": false,
+      "wrappers": [
+        "npm"
+      ],
+      "localControl": true,
+      "openWorld": true,
+      "toolsets": [
+        "agents"
+      ],
+      "jsonSchemas": [
+        "modelsResult"
+      ]
     },
     {
       "name": "watch",
@@ -2757,12 +2967,12 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--machine",
         "value": "<name>",
-        "description": "Handoff destination machine; overrides the machine in the destination text."
+        "description": "Machine to run on: the handoff destination (overrides the destination text), or where ask and models run."
       },
       {
         "name": "--model",
         "value": "<model>",
-        "description": "Model for the receiving agent; overrides the destination text."
+        "description": "Model: for the receiving agent of a handoff (overrides the destination text), or the agent runpane ask runs."
       },
       {
         "name": "--effort",
@@ -2953,6 +3163,26 @@ export const RUNPANE_CONTRACT = {
         "name": "--because",
         "value": "<why>",
         "description": "autopilot answer only: why, recorded on the item: a D-n, a document or the person's words."
+      },
+      {
+        "name": "--colors",
+        "value": "<json>",
+        "description": "Colour token overrides as a JSON object; null removes one."
+      },
+      {
+        "name": "--css",
+        "value": "<text>",
+        "description": "CSS for the Custom theme; replaces the current CSS, and empty text removes it."
+      },
+      {
+        "name": "--theme",
+        "value": "<id>",
+        "description": "A theme id to select: custom or one of the shipped themes."
+      },
+      {
+        "name": "--search",
+        "value": "<text>",
+        "description": "models only: keep models whose name contains this text."
       }
     ],
     "localBoolean": [
@@ -3141,6 +3371,10 @@ export const RUNPANE_CONTRACT = {
         "  runpane secrets delete --project <project> --name <name> --yes",
         "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
         "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "  runpane theme read [--json]",
+        "  runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
+        "  runpane theme set --theme <id> [--json]",
+        "  runpane theme reset [--json]",
         "  runpane sessions list [--json] [--pane-dir <path>]",
         "  runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
         "  runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
@@ -3488,6 +3722,32 @@ export const RUNPANE_CONTRACT = {
         "  --reason <text>                What you need it for",
         "  --json                         Print machine-readable output",
         "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "theme": [
+        "  runpane theme <read|set|reset> [options]",
+        "Restyles Pane itself: one Custom theme, built on a shipped theme, with colour tokens and CSS. Pane restyles within a second.",
+        "Use it only when the person asks to change how Pane looks.",
+        "  runpane theme read [--json]",
+        "  runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
+        "  runpane theme set --theme <id> [--json]",
+        "  runpane theme reset [--json]"
+      ],
+      "theme read": [
+        "  runpane theme read [--json] [--pane-dir <path>]",
+        "Shows the selected theme, the Custom theme, each colour token and its current value, the stable selectors for CSS, and the guide."
+      ],
+      "theme set": [
+        "  runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
+        "  runpane theme set --theme <id> [--json]",
+        "Writes the Custom theme and selects it. Colours merge (null removes one); --css replaces the CSS. Nothing is written when a value is refused.",
+        "  --base <theme>                 Shipped theme to build on",
+        "  --colors <json>                {\"--color-border-primary\": \"#262b33\"}",
+        "  --css <text>                   CSS for [data-pane-part] selectors; no remote files",
+        "  --theme <id>                   Switch to this theme instead"
+      ],
+      "theme reset": [
+        "  runpane theme reset [--json] [--pane-dir <path>]",
+        "Deletes the Custom theme and selects the theme it was built on."
       ],
       "panes": [
         "Pane session commands.",
@@ -3855,15 +4115,18 @@ export const RUNPANE_CONTRACT = {
       ],
       "relay": [
         "Usage:",
+        "  runpane relay init --domain <relay domain> [--public-ip <IPv4>] [--resolver <ip[:port]>]",
         "  runpane relay [pane-relay flags...]",
         "",
         "Runs pane-relay, the open-source relay that gives your computers addresses on your own domain for QR pairing.",
-        "Flags, stdio, signals and the exit code pass through to pane-relay; `runpane relay --help` lists its flags.",
-        "npm installs the binary with runpane as an optional dependency (@runpane/relay-<platform>-<arch>) on macOS, Linux and Windows, x64 and arm64. Pane's built-in runpane does not include it; use npx.",
+        "`relay init` prints the two DNS records, the start command and the Pane setting a new relay needs, then checks each one; it exits 0 once every check passes.",
+        "Other flags, stdio, signals and the exit code pass through to pane-relay; `runpane relay --help` lists its flags.",
+        "On macOS, Linux and Windows (x64 and arm64), runpane runs the binary from its optional dependency @pane/relay-<platform>-<arch>, or else downloads it once from the GitHub release for its own version, checks its SHA-256 against pane-relay-sha256.txt and caches it. Pane's built-in runpane does the same.",
         "",
         "Examples:",
+        "  npx --yes runpane@latest relay init --domain relay.example.com --public-ip 203.0.113.10",
+        "  npx --yes runpane@latest relay --domain relay.example.com --public-ip 203.0.113.10 --ns relay-ns.example.com --dns 0.0.0.0:53 --direct-quic 0.0.0.0:7842 --acme-cache /var/lib/pane-relay/acme",
         "  npx --yes runpane@latest relay --dev",
-        "  npx --yes runpane@latest relay --domain relay.example.com --acme-cache /var/lib/pane-relay/acme --dns 0.0.0.0:53 --public-ip 203.0.113.10",
         "",
         "Guide: docs/SELF_HOSTED_RELAY.md"
       ],
@@ -4857,6 +5120,36 @@ export const RUNPANE_CONTRACT = {
         "  runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md --push",
         "  runpane handoff \"codex gpt-5 high on parsa-devbox\" --note-file ~/handoff.md --dry-run"
       ],
+      "ask": [
+        "Usage:",
+        "  runpane ask --agent <claude|codex|cursor|opencode> (--prompt \"<question>\" | --prompt-file <path|->) [--model <model>] [--machine <name>] [--repo <selector> | --pane <pane-id>] [--timeout <duration>] [--json]",
+        "",
+        "Ask one agent one question and print its answer. The agent runs once, headless and read-only:",
+        "it can read files but not edit them or run shell commands. No tab is opened.",
+        "",
+        "--machine runs it on another machine in your workspace (runpane workspace list). --repo runs it in",
+        "that saved repository there (a WSL repository runs in WSL); --pane runs it in that Pane's worktree.",
+        "--model takes any name the agent accepts (runpane models lists them). --timeout defaults to 10m;",
+        "on another machine it is at most 9m. --json prints answer, agent, model, machine, environment,",
+        "durationMs and costUsd when the agent reports it.",
+        "",
+        "Examples:",
+        "  runpane ask --agent claude --model sonnet --prompt \"Is this migration safe to run twice?\" --repo Pane --json",
+        "  runpane ask --agent codex --machine parsa-devbox --repo \"Pane (win)\" --prompt \"Why does this test fail on Windows?\""
+      ],
+      "models": [
+        "Usage:",
+        "  runpane models [--agent <codex|claude|cursor|opencode|pi>] [--search <text>] [--machine <name> | --all] [--json]",
+        "",
+        "List the models each installed agent offers, from the agent's own list, with its sign-in in its own",
+        "words. --all covers this machine and every saved machine, and the WSL of a machine with a saved WSL",
+        "repository. A machine that does not answer shows one unreachable row; an agent whose list can't be",
+        "read shows list unavailable, and runpane ask still accepts any model name for it.",
+        "",
+        "Examples:",
+        "  runpane models --all --json",
+        "  runpane models --agent opencode --search deepseek"
+      ],
       "sessions pin": [
         "Usage:",
         "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
@@ -5482,6 +5775,32 @@ export const RUNPANE_CONTRACT = {
         "  --reason <text>                What you need it for",
         "  --json                         Print machine-readable output",
         "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "theme": [
+        "  python -m runpane theme <read|set|reset> [options]",
+        "Restyles Pane itself: one Custom theme, built on a shipped theme, with colour tokens and CSS. Pane restyles within a second.",
+        "Use it only when the person asks to change how Pane looks.",
+        "  python -m runpane theme read [--json]",
+        "  python -m runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
+        "  python -m runpane theme set --theme <id> [--json]",
+        "  python -m runpane theme reset [--json]"
+      ],
+      "theme read": [
+        "  python -m runpane theme read [--json] [--pane-dir <path>]",
+        "Shows the selected theme, the Custom theme, each colour token and its current value, the stable selectors for CSS, and the guide."
+      ],
+      "theme set": [
+        "  python -m runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
+        "  python -m runpane theme set --theme <id> [--json]",
+        "Writes the Custom theme and selects it. Colours merge (null removes one); --css replaces the CSS. Nothing is written when a value is refused.",
+        "  --base <theme>                 Shipped theme to build on",
+        "  --colors <json>                {\"--color-border-primary\": \"#262b33\"}",
+        "  --css <text>                   CSS for [data-pane-part] selectors; no remote files",
+        "  --theme <id>                   Switch to this theme instead"
+      ],
+      "theme reset": [
+        "  python -m runpane theme reset [--json] [--pane-dir <path>]",
+        "Deletes the Custom theme and selects the theme it was built on."
       ],
       "panes": [
         "Pane session commands.",
@@ -6749,6 +7068,20 @@ export const RUNPANE_CONTRACT = {
         "`runpane handoff` ships in the npm package and the Pane app, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest handoff"
       ],
+      "ask": [
+        "Usage:",
+        "  runpane ask --agent <claude|codex|cursor|opencode> (--prompt \"<question>\" | --prompt-file <path|->) [--model <model>] [--machine <name>] [--repo <selector> | --pane <pane-id>] [--timeout <duration>] [--json]",
+        "",
+        "`runpane ask` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest ask"
+      ],
+      "models": [
+        "Usage:",
+        "  runpane models [--agent <codex|claude|cursor|opencode|pi>] [--search <text>] [--machine <name> | --all] [--json]",
+        "",
+        "`runpane models` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest models"
+      ],
       "sessions pin": [
         "Usage:",
         "python -m runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
@@ -7208,6 +7541,8 @@ export const RUNPANE_CONTRACT = {
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
       "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
       "`runpane handoff` hands a task to another agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. When the sender is a Pane tab running a Claude, Codex, Cursor or OpenCode session and the receiver is the same agent, the handoff carries that session: on another machine its files are copied into that machine's agent store and the receiver resumes the same id; on this machine the receiver resumes a fork, because two agents never resume one session on one machine. The receiver starts with no prompt, and the CLI runs the continuity check and reports JSON `continuity.result` `continued`, `inconclusive` (exit 0; `next` gives a probe question) or `not-continued` (exit 1; the receiver is kept and `next` gives the `--note-only` command). `--note-only`, a different agent, or a tab with no carried session starts a fresh agent with the note (`fresh-agent`). JSON `continuity` is `{ carried, result, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }`: `sessionId` is the sender's session, `resumedId` the id the receiver resumes (the fork's on this machine), `checks` are the continuity checks (`historyLoaded` is null when there was nothing to compare; `originalUntouched` is set for forks), and a dry run sets `carried`, `sessionId`, `fork`, `files` and `bytes` with no `result`. After `continued` or `inconclusive` the sending agent ends its turn and makes no more changes on the branch. An OpenCode session travels as its export: `opencode export` on this machine, then `opencode import` inside the receiving repository there, and an OpenCode receiver is accepted only to continue an OpenCode session. A Cursor session is carried only to another machine, best effort since Cursor's store is undocumented: Cursor has no fork, and a copied chat still writes to the original, so on this machine the result is `not-continued` and nothing is started. A destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`); a copy already there is replaced only when the sender's holds all of it and no agent there runs it, otherwise nothing is copied and the result is `not-continued`. A destination Pane too old to resume a carried session is refused before anything is sent (`ERR_HANDOFF_RESUME_UNSUPPORTED`). From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead; a same-agent Session resumes the sender's conversation when first opened. The receiver reports back to the sender's panel.",
+      "`runpane ask --agent <agent> --prompt \"<question>\"` asks one agent one read-only question and prints its answer, with no tab left behind: the agent's own headless mode runs once, on this machine or another one (`--machine`), in a saved repository (`--repo`, a WSL repository runs in WSL) or a Pane's worktree (`--pane`), with any model it accepts (`--model`). It can read files but not edit them or run shell commands; an agent with no such mode is refused (`ERR_ASK_UNSUPPORTED`). A missing agent, a sign-in error, an unknown model and a timeout each fail with the agent's own words and the next step. Use it for a second opinion or a question to another model; work that edits files goes to a tab.",
+      "`runpane models` lists the models each installed agent offers, read from the agent's own list on every call, with its sign-in as the agent reports it. `--all` covers this machine, every saved machine and their WSL; `--agent` and `--search` narrow the rows. A machine that does not answer is one `unreachable` row; a list that can't be read is `list unavailable`.",
       "`runpane pr watch`: Register durable GitHub PR monitoring for a Pane.",
       "`runpane pr unwatch`: Remove a Pane’s explicit PR registration.",
       "`runpane pr list`: List PR registrations and stopped watches.",
@@ -17734,6 +18069,294 @@ export const RUNPANE_CONTRACT = {
         }
       },
       "additionalProperties": false
+    },
+    "customTheme": {
+      "type": "object",
+      "required": [
+        "base",
+        "colors"
+      ],
+      "properties": {
+        "base": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "colors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "css": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "themeReadResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "selected",
+        "showing",
+        "showingPalette",
+        "custom",
+        "ignoredBecause",
+        "file",
+        "bases",
+        "tokens",
+        "parts",
+        "cssLimit",
+        "guide"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "selected": {
+          "type": "object",
+          "required": [
+            "appearanceMode",
+            "theme",
+            "systemLightTheme",
+            "systemDarkTheme"
+          ],
+          "properties": {
+            "appearanceMode": {
+              "enum": [
+                "system",
+                "fixed"
+              ]
+            },
+            "theme": {
+              "type": "string"
+            },
+            "systemLightTheme": {
+              "type": "string"
+            },
+            "systemDarkTheme": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "showing": {
+          "type": "string",
+          "description": "The theme on screen now: custom or a shipped id."
+        },
+        "showingPalette": {
+          "type": "string",
+          "description": "The shipped theme on screen, or the Custom theme's base."
+        },
+        "custom": {
+          "anyOf": [
+            {
+              "$ref": "#/jsonSchemas/customTheme"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ignoredBecause": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why Pane ignored custom-theme.json, or null."
+        },
+        "file": {
+          "type": "string"
+        },
+        "bases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tokens": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cssLimit": {
+          "type": "number"
+        },
+        "guide": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "themeSetResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "selected",
+        "custom"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "selected": {
+          "type": "string"
+        },
+        "custom": {
+          "anyOf": [
+            {
+              "$ref": "#/jsonSchemas/customTheme"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "file": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "themeResetResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "removed",
+        "selected",
+        "file"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "selected": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "file": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "askResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "answer",
+        "agent",
+        "machine",
+        "environment",
+        "durationMs"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "answer": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string"
+        },
+        "environment": {
+          "enum": [
+            "native",
+            "wsl"
+          ]
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "costUsd": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "modelsResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "signInReportedBy",
+        "rows"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "signInReportedBy": {
+          "const": "agent"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "machine",
+              "environment"
+            ],
+            "properties": {
+              "machine": {
+                "type": "string"
+              },
+              "environment": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "signIn": {
+                "type": "string"
+              },
+              "note": {
+                "enum": [
+                  "unreachable",
+                  "list unavailable"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "agentContext": {
@@ -18509,8 +19132,8 @@ export const RUNPANE_CONTRACT = {
       },
       "relay": {
         "name": "relay",
-        "summary": "Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags.",
-        "details": "For self-hosting the relay that gives computers addresses on your own domain for QR pairing (docs/SELF_HOSTED_RELAY.md). runpane passes every argument, stdio, signals and the exit code through to pane-relay, which npm installs as runpane's optional dependency @runpane/relay-<platform>-<arch>. It runs in the foreground until stopped.",
+        "summary": "Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags; init prints and checks the DNS records it needs.",
+        "details": "For self-hosting the relay that gives computers addresses on your own domain for QR pairing (docs/SELF_HOSTED_RELAY.md). runpane passes every argument, stdio, signals and the exit code through to pane-relay: the one npm installed as runpane's optional dependency @pane/relay-<platform>-<arch>, or else the one the GitHub release for runpane's version carries, downloaded once, checked against the release's pane-relay-sha256.txt and cached. It runs in the foreground until stopped. `runpane relay init --domain <relay domain>` prints the DNS records, start command and Pane setting a new relay needs, then checks each record and the running relay; it exits 0 once every check passes.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -18521,12 +19144,13 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
+          "npx --yes runpane@latest relay init --domain relay.example.com --public-ip 203.0.113.10",
           "npx --yes runpane@latest relay --dev",
           "npx --yes runpane@latest relay --help"
         ],
         "notes": [
-          "Only the npm package includes it; Pane's built-in runpane and the Python package print how to run it with npx.",
-          "Fails with ERR_RELAY_NOT_INSTALLED when this platform has no prebuilt binary or npm skipped optional dependencies."
+          "The Python package prints how to run it with npx.",
+          "Fails with ERR_RELAY_UNSUPPORTED_PLATFORM on a platform with no prebuilt binary, ERR_RELAY_DOWNLOAD_FAILED when the release cannot be reached or lists no binary for this platform, and ERR_RELAY_CHECKSUM_MISMATCH when the download differs from pane-relay-sha256.txt; nothing is cached then."
         ]
       },
       "link": {
@@ -22849,6 +23473,121 @@ export const RUNPANE_CONTRACT = {
           "JSON continuity: { carried, result: continued | inconclusive | not-continued | fresh-agent, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }; a dry run sets carried, sessionId, fork, files and bytes and no result. inconclusive exits 0 and next says to ask the receiver \"What were you last working on? Answer in one or two sentences.\"; not-continued exits 1, keeps the receiver and gives the --note-only command for the person to choose. After continued or inconclusive, the sender ends its turn and makes no more changes on the branch. From a Session the result is inconclusive until the new Session is opened. A Cursor session is carried only to another machine (best effort); on this machine the result is not-continued, since a copied Cursor chat still writes to the original. The destination's agent store is assumed at its default location (~/.claude, ~/.codex, ~/.cursor); a copy already there that holds history the sender's lacks, or that an agent there is running, is never overwritten (not-continued). checks.originalAppended is set when the running sender's own turn appended to its transcript during the fork; every byte it held before is unchanged. A destination Pane too old to resume a carried session is refused before anything is sent (ERR_HANDOFF_RESUME_UNSUPPORTED)."
         ]
       },
+      "ask": {
+        "name": "ask",
+        "summary": "Ask any agent and model one read-only question, on this or another machine, and get its answer: no tab is opened and nothing is left behind.",
+        "details": "Runs the agent's own headless mode once with flags that refuse edits and shell commands (Claude: -p with only Read, Grep and Glob and no MCP servers; Codex: exec -s read-only without the user's config, MCP servers or apps; Cursor: -p --mode ask; OpenCode: run --agent plan with edit, bash and every MCP tool denied), waits for it, and prints its final answer. Nothing is stored and no tab or Pane is created. On another machine it runs through that machine's Pane (runpane workspace); a WSL repository runs inside WSL. Use it for second opinions and questions to another model; anything that edits files or needs an approval goes to a tab (runpane panes create, with the model in --tool-command). Start several in parallel as background shell commands to ask several models at once.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--agent",
+            "value": "<claude|codex|cursor|opencode>",
+            "required": true,
+            "description": "The agent to ask. Pi has no read-only headless mode and is refused."
+          },
+          {
+            "name": "--prompt",
+            "value": "<text>",
+            "required": false,
+            "description": "The question. Required unless --prompt-file."
+          },
+          {
+            "name": "--prompt-file",
+            "value": "<path|->",
+            "required": false,
+            "description": "Read the question from a file; - reads stdin."
+          },
+          {
+            "name": "--model",
+            "value": "<model>",
+            "required": false,
+            "description": "Any model name the agent accepts (runpane models lists them). Omit for the agent's default."
+          },
+          {
+            "name": "--machine",
+            "value": "<name>",
+            "required": false,
+            "description": "Run on another machine in your workspace; defaults to this one."
+          },
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": false,
+            "description": "Run in this saved repository on that machine; a WSL repository runs in WSL."
+          },
+          {
+            "name": "--pane",
+            "value": "<pane-id>",
+            "required": false,
+            "description": "Run in this Pane's worktree on that machine, to ask about its branch."
+          },
+          {
+            "name": "--timeout",
+            "value": "<duration>",
+            "required": false,
+            "description": "Stop the run after this long (default 10m; at most 9m on another machine) and stop every process it started."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print { ok, answer, agent, model, machine, environment, durationMs, costUsd? }."
+          }
+        ],
+        "examples": [
+          "runpane ask --agent claude --model sonnet --prompt \"Review this plan for gaps\" --repo Pane --json",
+          "runpane ask --agent codex --machine parsa-devbox --repo \"Pane (win)\" --prompt \"Why does this test fail on Windows?\" --json",
+          "runpane ask --agent opencode --model openrouter/deepseek/deepseek-chat --machine parsa-devbox --repo experiments --prompt-file question.md --json"
+        ],
+        "notes": [
+          "Errors carry a code and next: ERR_ASK_AGENT_MISSING (install command), ERR_ASK_SIGNED_OUT (sign-in command), ERR_ASK_FAILED (the agent's own error, such as an unknown model), ERR_ASK_TIMEOUT, ERR_ASK_UNSUPPORTED."
+        ]
+      },
+      "models": {
+        "name": "models",
+        "summary": "List the models each installed agent offers, on this machine, another one, or every saved machine, with what each agent reports about its sign-in. Read live on every call.",
+        "details": "Runs each installed agent's own model list (codex debug models, cursor-agent models, opencode models; Claude takes the aliases fable, opus, sonnet and haiku or a full model name) and its sign-in status, in parallel per machine, and prints one row per model. Nothing is cached: an agent installed or removed shows on the next call.",
+        "requiresPaneDaemon": false,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--agent",
+            "value": "<codex|claude|cursor|opencode|pi>",
+            "required": false,
+            "description": "Only this agent's rows."
+          },
+          {
+            "name": "--search",
+            "value": "<text>",
+            "required": false,
+            "description": "Only models whose name contains this text."
+          },
+          {
+            "name": "--machine",
+            "value": "<name>",
+            "required": false,
+            "description": "List another machine in your workspace instead of this one."
+          },
+          {
+            "name": "--all",
+            "required": false,
+            "description": "This machine, every saved machine, and the WSL of each machine with a saved WSL repository."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print { ok, signInReportedBy: \"agent\", rows: [{ machine, environment, agent, model, signIn, note }] }."
+          }
+        ],
+        "examples": [
+          "runpane models --all --json",
+          "runpane models --agent opencode --search deepseek --json"
+        ],
+        "notes": [
+          "signIn is the agent's own report, not a check: an ask's own error is the proof.",
+          "note is unreachable (the machine did not answer) or list unavailable (the list could not be read)."
+        ]
+      },
       "sessions unpin": {
         "name": "sessions unpin",
         "summary": "Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.",
@@ -24192,6 +24931,131 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "Errors: AUTOPILOT_OFF (off), AUTOPILOT_ONLY (not Autopilot's tab), AUTOPILOT_CANNOT_ANSWER (a permission prompt: it stays the person's), ERR_APPROVALS_MACHINE_OFFLINE (the item's machine is offline; nothing is queued), ERR_APPROVALS_OWNER_TOO_OLD (its machine runs an older Pane).",
           "The result's id is the new item's. Put that one on the stack."
+        ]
+      },
+      "theme read": {
+        "name": "theme read",
+        "summary": "Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.",
+        "details": "Run this before `runpane theme set`. tokens lists every colour token, with its value in the main window when Pane is open; parts lists the selectors custom CSS may target; guide says how to write a theme. ignoredBecause says why a hand-edited custom-theme.json was ignored.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane theme read --json"
+        ],
+        "jsonSchemas": [
+          "themeReadResult"
+        ],
+        "notes": [
+          "Use it only when the person asks to change how Pane itself looks, not their project's styles."
+        ]
+      },
+      "theme set": {
+        "name": "theme set",
+        "summary": "Restyle Pane itself, only when the person asks to change Pane's look: write the Custom theme (a base theme, colour tokens and CSS) and select it, or switch to another theme. Pane restyles within a second.",
+        "details": "Writes custom-theme.json in Pane's data folder and selects Custom where the person sees it now; every Pane window restyles within a second with no restart. Colours merge into the current Custom theme (null removes one), --css replaces its CSS, and the base defaults to the theme on screen. Nothing is written when a value is refused. --theme switches to another theme and leaves the Custom theme on disk. You cannot see the result: make small changes, then ask the person how it looks.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--base",
+            "value": "<theme>",
+            "required": false,
+            "description": "The shipped theme to build on; defaults to the Custom theme's base, or the theme on screen."
+          },
+          {
+            "name": "--colors",
+            "value": "<json>",
+            "required": false,
+            "description": "Colour token overrides, such as {\"--color-border-primary\": \"#30363d\"}. Values are hex, rgb() or rgba(); null removes an override.",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          {
+            "name": "--css",
+            "value": "<text>",
+            "required": false,
+            "description": "CSS that targets the stable [data-pane-part] selectors, up to 20,000 characters. No @import, src(), image-set() or remote url(). Replaces the current CSS; empty text removes it."
+          },
+          {
+            "name": "--name",
+            "value": "<text>",
+            "required": false,
+            "description": "A name for the Custom theme, shown in Settings."
+          },
+          {
+            "name": "--theme",
+            "value": "<id>",
+            "required": false,
+            "description": "Switch to this theme instead: custom or a shipped theme id. Use it alone."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane theme set --colors '{\"--color-border-primary\": \"#262b33\"}' --json",
+          "runpane theme set --css '[data-pane-part=\"tab\"] { border-radius: 8px !important; }' --json",
+          "runpane theme set --theme dusk --json"
+        ],
+        "jsonSchemas": [
+          "themeSetResult"
+        ],
+        "notes": [
+          "Restyle Pane only when the person asks to change Pane's look. Requests about their project's styles edit the project instead."
+        ]
+      },
+      "theme reset": {
+        "name": "theme reset",
+        "summary": "Delete the Custom theme and go back to the theme it was built on.",
+        "details": "Deletes custom-theme.json and selects its base theme. Works from any shell while Pane runs, even when a theme made Pane unreadable.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane theme reset"
+        ],
+        "notes": [
+          "The person's way back from any Custom theme; an agent switches away with `runpane theme set --theme <id>` instead."
         ]
       }
     },

@@ -134,7 +134,8 @@ import { worktreePoolManager } from './services/worktreePoolManager';
 import { removePaneFsmonitorConfig } from './services/gitPerformanceConfig';
 import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
-import { MachineConnections } from './services/machineConnections';
+import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
+import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
@@ -474,20 +475,25 @@ async function createWindow() {
   const windowControlsOverlay = shouldEnableWindowControlsOverlay(process.platform, process.env);
   const appearance = normalizeAppearance(configManager.getConfig()).appearance;
   const osPrefersDark = resolveOsPrefersDark();
-  applyNativeThemeSource(appearance);
+  const customTheme = configManager.customTheme;
+  applyNativeThemeSource(appearance, customTheme.getState().base);
   // Appearance edits that arrive through the config file watcher (not the
   // config:update IPC) must re-point nativeTheme too, or System mode resolves
   // against a themeSource still pinned by a previous Fixed palette.
   if (!appearanceConfigSyncRegistered) {
     appearanceConfigSyncRegistered = true;
     configManager.on('config-updated', (updated: AppConfig) => {
-      applyNativeThemeSource(normalizeAppearance(updated).appearance);
+      applyNativeThemeSource(normalizeAppearance(updated).appearance, customTheme.getState().base);
+    });
+    customTheme.on('changed', () => {
+      applyNativeThemeSource(normalizeAppearance(configManager.getConfig()).appearance, customTheme.getState().base);
     });
   }
   const appearanceOptions = buildWindowAppearanceOptions(
     appearance,
     osPrefersDark,
     readStoredBackgroundColors(),
+    customTheme.getState().base,
   );
 
   // An icon path Electron cannot load is worse than none: on Windows it sets an
@@ -554,6 +560,9 @@ async function createWindow() {
       win.webContents.send(APP_MENU_ACTION_CHANNEL, pendingMenuAction);
       pendingMenuAction = null;
     }
+    // A pane:// link that launched Pane opens once the renderer can act on it.
+    paneLinksReady = true;
+    if (pendingPaneLink) openPaneLink(pendingPaneLink);
   };
   const onRendererReady = (event: IpcMainEvent) => {
     if (event.sender === win.webContents) revealWindow('renderer ready');
@@ -1214,6 +1223,17 @@ async function initializeServices() {
   powerMonitor.on('resume', () => machines.resume());
   // The Notify inbox, badge and tray count cover every saved machine, in any mode.
   followSavedMachines(machineConnections);
+  // A Session's members on saved machines: their reports reach this computer's journal and overview.
+  const sessionsManager = services.orchestrationSessionManager;
+  if (sessionsManager && services.workspaceJournal) {
+    const remoteMembers = new RemoteMemberEvents({
+      machines: { subscribe: listener => machines.subscribe(listener), invoke: (machineId, channel, args) => machines.invokeOn(machineId, channel, args) },
+      journal: services.workspaceJournal,
+      members: sessionsManager,
+    });
+    remoteMembers.start();
+    sessionsManager.setRemoteMachines(remoteMachineAccess(machines));
+  }
 
   // Read before the first identity lookup overwrites it, so the renderer can
   // tell when the desktop id changed since the last launch.
@@ -1368,6 +1388,10 @@ if (launchRemoteSetup) {
         onAction: sendMenuAction,
         paneChords: activePaneChords(config),
         settingsAccelerator: settingsMenuAccelerator(config),
+        resetCustomTheme: configManager ? {
+          enabled: configManager.customTheme.getState().theme !== null || configManager.customTheme.getState().error !== null,
+          onClick: () => void configManager.customTheme.reset().catch((error) => console.error('[CustomTheme] Reset failed:', error)),
+        } : undefined,
       });
     };
     installMenu({});
@@ -1388,6 +1412,7 @@ if (launchRemoteSetup) {
     await initializeServices();
     installMenu(configManager.getConfig());
     configManager.on('config-updated', () => installMenu(configManager.getConfig()));
+    configManager.customTheme.on('changed', () => installMenu(configManager.getConfig()));
     syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     void addRunpaneToUserPathBestEffort();
     if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') setTimeout(() => syncPaneMcpForApp({
@@ -1463,8 +1488,6 @@ if (launchRemoteSetup) {
 
   await createWindow();
   console.log('[Main] Window created successfully');
-  paneLinksReady = true;
-  if (pendingPaneLink) openPaneLink(pendingPaneLink);
 
   analyticsManager.startHeartbeat();
 

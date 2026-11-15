@@ -198,9 +198,9 @@ every computer it reached through yours.
   computer was reinstalled. Unlink it, then copy a new link.
 - **"&lt;computer&gt; uses the relay … and this computer uses …":** set both
   computers to the same relay.
-- **"Can't reach &lt;computer&gt;. Retrying…":** every route failed. The app
-  keeps retrying while it is open; **Retry now** retries at once. On the same Wi-Fi it
-  connects directly even when the internet is down.
+- **"Reconnecting to &lt;computer&gt;…":** every route failed. The app keeps
+  retrying, at least every 5 seconds, while it is open; nothing to do. On the
+  same Wi-Fi it connects directly even when the internet is down.
 - **"Asleep since 9:40":** the computer is asleep. Wake it, or turn on Keep
   Awake.
 - **A browser on a Wi-Fi with no internet** can't reach the computer: a
@@ -212,10 +212,12 @@ every computer it reached through yours.
 
 ## Use your own relay
 
-Set **Settings › Remote Access › Phones and glasses › Relay address** to a
-relay you run, and Pane connects there instead of Pane's servers. Computers
-link only with computers on the same relay. See
-[Run your own relay](SELF_HOSTED_RELAY.md).
+Run a relay on your own machine and domain in a few minutes with Docker
+([Run your own relay](SELF_HOSTED_RELAY.md)), then set **Settings › Remote
+Access › Phones and glasses › Relay address** to its domain. Pane connects
+there instead of Pane's servers, and everything above works the same, on the
+same Wi-Fi and from anywhere. Computers link only with computers on the same
+relay.
 
 ## Tailscale
 

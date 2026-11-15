@@ -1,6 +1,6 @@
 {
   "name": "Pane",
-  "version": "2.4.225",
+  "version": "2.4.226",
   "private": true,
   "description": "Pane - Terminal-first AI code assistant manager with Windows support",
   "author": {
@@ -50,6 +50,7 @@
     "test:runpane-mcp": "pnpm --filter runpane build && node --test scripts/test-runpane-mcp.js",
     "test:runpane-workspace": "pnpm --filter runpane build && node --test scripts/test-runpane-workspace.js",
     "test:runpane-handoff": "pnpm --filter runpane build && node --test scripts/test-runpane-handoff.js",
+    "test:runpane-ask": "pnpm --filter runpane build && node --test scripts/test-runpane-ask.js",
     "test:runpane-relay": "pnpm --filter runpane build && node --test scripts/test-runpane-relay.js",
     "test:runpane-managed-cli": "pnpm --filter runpane build && node --test scripts/test-runpane-managed-cli.js",
     "test:runpane-telemetry": "pnpm --filter runpane build && node --test scripts/test-runpane-telemetry.js",

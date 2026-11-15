@@ -17,6 +17,7 @@ import { cn } from '../../../utils/cn';
 import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { Dropdown } from '../../ui/Dropdown';
 import { computerRelayId } from '../../../../../shared/types/remoteComputers';
+import { relayCarrier } from '../../../utils/relayCarrier';
 import type { RemoteDaemonClientRecord } from '../../../../../shared/types/remoteDaemon';
 import type { RemoteAccessSubviewId, SettingSaveState, SettingsSettingId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
@@ -275,7 +276,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
             <RemoteGroup
               title="Devices"
               scope={scope}
-              footnote="On the same Wi-Fi a device connects directly. Anywhere else, Pane's servers carry the connection. Glasses pair from the Pane phone app."
+              footnote={`On the same Wi-Fi a device connects directly. Anywhere else, ${relayCarrier(controller.config.relay?.relayAddress)}. Glasses pair from the Pane phone app.`}
             >
               <PhoneRows controller={controller} here={here} />
               <GlassesRows />
@@ -584,6 +585,8 @@ function LinkedComputerRow({ computer, controller, onOutcome }: { computer: Remo
   );
 }
 
+const SELF_HOSTED_RELAY_GUIDE = 'https://github.com/greenfield-inc/Pane/blob/main/docs/SELF_HOSTED_RELAY.md';
+
 /** "Relay address": a self-hosted relay; empty uses Pane's servers. */
 function RelayAddressRow({ controller }: { controller: RemoteAccessController }) {
   const saved = controller.config.relay?.relayAddress ?? '';
@@ -606,11 +609,12 @@ function RelayAddressRow({ controller }: { controller: RemoteAccessController })
     <SettingRow
       settingId="remote-relay-address"
       label="Relay address"
-      description="Leave it empty to use Pane's servers. To run your own, enter its host name, such as relay.example.com, and press Enter."
+      description="Leave it empty to use Pane's servers. To use your own relay, enter its domain, such as relay.example.com, and press Enter."
       saveState={saveState}
       className={CARD_ROW}
     >
       <form
+        className="flex items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault();
           void save();
@@ -624,6 +628,15 @@ function RelayAddressRow({ controller }: { controller: RemoteAccessController })
           onChange={(event) => { setDraft(event.target.value); setSaveState({ state: 'idle' }); }}
           onBlur={() => void save()}
         />
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          icon={<ExternalLink className="h-4 w-4" />}
+          onClick={() => window.electronAPI.openExternal(SELF_HOSTED_RELAY_GUIDE)}
+        >
+          Run your own
+        </Button>
       </form>
     </SettingRow>
   );
