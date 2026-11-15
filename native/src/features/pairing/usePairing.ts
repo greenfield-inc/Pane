@@ -24,9 +24,9 @@ export function usePairing(onPaired?: () => void) {
         await addHost(profile);
         return profile;
       }
-      const [computer, ...linked] = await exchangeRelayLink(link);
-      if (!computer) throw new Error('The computer sent no pairing.');
       const before = useHostsStore.getState().profiles;
+      const [computer, ...linked] = await exchangeRelayLink(link, before);
+      if (!computer) throw new Error('The computer sent no pairing.');
       onPaired?.();
       await addHosts(linked, computer);
       void linkWithSavedComputers(computer, linked, before).catch((error: unknown) => console.info('[relay] linking failed', error));

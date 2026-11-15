@@ -133,7 +133,7 @@ export async function createRelayHost(deps: {
       exchange: async (request) => {
         const result = await relay.exchangeSecret(request);
         if (!result.ok) return result;
-        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, []) };
+        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, request.known ?? []) };
       },
       clientAddress: (remoteAddress, remotePort) => relay.clientAddress(remoteAddress, remotePort),
     },
