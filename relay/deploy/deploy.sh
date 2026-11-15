@@ -93,6 +93,9 @@ NS_IPS="ns1=${IP_us},ns2=${IP_eu}"
 
 # 3. The VMs. The startup script reads secrets from Secret Manager with the VM's
 #    own identity and (re)starts the container; rerunning it updates the image.
+#    gcloud reads it from a file: --metadata splits its value on commas.
+startup_file=$(mktemp)
+trap 'rm -f "$startup_file"' EXIT
 for line in "${RELAYS[@]}"; do
   read -r name region zone ns <<<"$line"
   # A helper updates itself in memory, so it lists only the other helper.
@@ -132,8 +135,9 @@ docker run -d --name pane-relay --restart always \
   --fcm-project $PROJECT \${apns} ${ANDROID_SHA:+--android-cert-sha256 $ANDROID_SHA}
 EOF
 )
+  printf '%s\n' "$startup" >"$startup_file"
   if exists compute instances describe "pane-relay-$name" --zone "$zone"; then
-    gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata "startup-script=$startup"
+    gc compute instances add-metadata "pane-relay-$name" --zone "$zone" --metadata-from-file "startup-script=$startup_file"
     gc compute instances reset "pane-relay-$name" --zone "$zone"
   else
     # Secret Manager accepts only the cloud-platform scope, so the scope stays
@@ -141,7 +145,7 @@ EOF
     gc compute instances create "pane-relay-$name" --zone "$zone" --machine-type "$MACHINE" \
       --image-family cos-stable --image-project cos-cloud --tags pane-relay \
       --address "pane-relay-$name" --service-account "$SA" --scopes cloud-platform \
-      --metadata "startup-script=$startup"
+      --metadata-from-file "startup-script=$startup_file"
   fi
 done
 
