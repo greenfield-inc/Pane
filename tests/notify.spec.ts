@@ -109,7 +109,18 @@ test.describe('Approvals in the main window', () => {
     await expect(column.getByTestId('approval-pager')).toHaveText('1 of 3');
     // Decide first, then Summary, each reference, and the chat where it was asked (D-224).
     await expect(column.getByTestId('approval-tab')).toHaveText(['Decide', 'Summary', 'plan.html', 'PR #812', "auth-refactor's tab"]);
+    // Nothing starts picked, recommended or not, and Send waits for a pick (D-385).
+    await expect(column.locator('[role="radio"][aria-checked="true"]')).toHaveCount(0);
+    await expect(column.getByTestId('approval-send')).toBeDisabled();
+    if (process.env.PANE_VERIFY_DIR) await column.screenshot({ path: `${process.env.PANE_VERIFY_DIR}/approval-column-open.png` });
     await column.getByRole('radio', { name: /Keep Redis/ }).click();
+    // The person's own pick survives paging away and back.
+    await queue.getByTestId('approvals-row').filter({ hasText: 'Apply migration 0042' }).click();
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    await expect(column.locator('[role="radio"][aria-checked="true"]')).toHaveCount(0);
+    await queue.getByTestId('approvals-row').filter({ hasText: 'Which session store' }).click();
+    await expect(column.getByRole('radio', { name: /Keep Redis/ })).toHaveAttribute('aria-checked', 'true');
+    if (process.env.PANE_VERIFY_DIR) await column.screenshot({ path: `${process.env.PANE_VERIFY_DIR}/approval-column-restored.png` });
     await column.getByTestId('approval-send').click();
 
     await queue.getByTestId('approvals-row').filter({ hasText: 'Apply migration 0042' }).click();

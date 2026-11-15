@@ -33,6 +33,10 @@ function show(item: NotifyItem, order: string[] = [item.id], closeLabel?: string
   );
 }
 
+function sendButton(markup: string): string {
+  return markup.match(/<button[^>]*data-testid="approval-send"[^>]*>/)?.[0] ?? '';
+}
+
 function text(markup: string): string {
   return markup.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 }
@@ -48,7 +52,13 @@ describe('ApprovalColumn', () => {
     expect(visible).toContain('Question 1 of 2');
     expect(visible).toContain('Question 2 of 2');
     expect(visible).toContain('Recommended');
-    expect(visible).toContain('Recommended picks are pre-selected; change any before you send.');
+    expect(visible).toContain('Pick an option, or reply in your own words');
+  });
+
+  it('opens with nothing picked, recommended or not, and Send off (D-385)', () => {
+    const markup = show(q20);
+    expect(markup).not.toContain('aria-checked="true"');
+    expect(sendButton(markup)).toContain('disabled');
   });
 
   it('Reading your reply…', () => {
