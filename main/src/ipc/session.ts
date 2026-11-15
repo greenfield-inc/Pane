@@ -1,5 +1,6 @@
 import { getChatTabManager } from '../services/chatTabs';
-import { reapplyMoveSnapshot } from '../services/sessionMove/restore';
+import { reapplyMoveSnapshot, releaseMoveHolds } from '../services/sessionMove/restore';
+import { bringBackIgnoredFiles } from '../services/sessionMove/ignoredFiles';
 /**
  * Session IPC handlers for Pane.
  * Note: "Sessions" are called "Panes" in the UI. Internally they remain
@@ -1745,6 +1746,7 @@ export function registerSessionHandlers(
           }
           // A Pane that moved to another machine kept its uncommitted work here for this.
           await reapplyMoveSnapshot(worktreePath, sessionId);
+          await bringBackIgnoredFiles(worktreePath, sessionId).catch(error => console.warn(`[Session IPC] ${sessionId}'s ignored files from before its move weren't put back:`, error));
         } catch (worktreeError) {
           const message = worktreeError instanceof Error ? worktreeError.message : String(worktreeError);
           console.error(`[Session IPC] Failed to recreate worktree while restoring session ${sessionId}:`, worktreeError);
@@ -1756,6 +1758,8 @@ export function registerSessionHandlers(
       if (!restored) {
         return { success: false, error: 'Session not found or already active' };
       }
+      // A Pane that moved to another machine and is restored here: its tabs leave the move's hold.
+      await releaseMoveHolds(sessionId);
       await clearScratchArchived(sessionId).catch(error => console.warn(`[Session IPC] could not clear ${sessionId}'s archive time:`, error));
       // Reload sessions so the frontend store updates
       const allSessions = sessionManager.getAllSessions();

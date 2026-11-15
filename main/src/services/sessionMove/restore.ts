@@ -2,6 +2,10 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getShellPath } from '../../utils/shellPath';
 import { applySnapshot } from './gitSnapshot';
+import { pausedMarkOf } from '../../../../shared/types/panels';
+import { panelManager } from '../panelManager';
+import { terminalPanelManager } from '../terminalPanelManager';
+import { getChatTabManager } from '../chatTabs';
 
 const run = promisify(execFile);
 
@@ -23,5 +27,16 @@ export async function reapplyMoveSnapshot(worktreePath: string, paneId: string):
   } catch (error) {
     console.warn(`[SessionMove] Pane ${paneId}'s uncommitted work from before its move wasn't reapplied:`, error);
     return false;
+  }
+}
+
+/**
+ * Restore here, after a Session moved away: its tabs still carry the move's hold, which only the
+ * move lifts. Lifts it without starting them; they start when opened, as any stopped tab does.
+ */
+export async function releaseMoveHolds(paneId: string): Promise<void> {
+  for (const panel of panelManager.getPanelsForSession(paneId)) {
+    if (pausedMarkOf(panel)?.by === 'move') await terminalPanelManager.clearPaused([panel.id]);
+    else if (panel.type === 'chat') await getChatTabManager().clearMoveHold(panel.id);
   }
 }

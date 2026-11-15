@@ -299,7 +299,7 @@ export class MoveImporter {
       for (const name of manifest.source.envNames) if (!here.has(name)) missing.add(name);
     }
     if (missing.size) {
-      checks.push({ id: 'env', level: 'warning', title: `${missing.size} env var${missing.size === 1 ? '' : 's'} aren't set on ${machine}`, detail: `${[...missing].join(', ')}. Tabs that need them will see them missing.` });
+      checks.push({ id: 'env', level: 'warning', title: `${missing.size === 1 ? '1 env var isn\'t' : `${missing.size} env vars aren't`} set on ${machine}`, detail: `${[...missing].join(', ')}. Tabs that need them will see them missing.` });
     }
     return { machine, checks, branchTips, home };
   }
@@ -470,6 +470,8 @@ export class MoveImporter {
         pane.baseCommit ?? undefined, pane.baseBranch ?? undefined, false,
       );
       job.cleanup.push({ label: `Pane ${pane.name}`, undo: () => this.removePane(created.id) });
+      // Shown at once, the way a new Pane is (no reload), without taking focus.
+      this.services.sessionManager.emitSessionCreated(created, { activateOnCreate: false });
       if (pane.layout) sessionsDb.setSessionPanelLayout(pane.id, rewriteText(map, pane.layout));
       const ctx = this.services.sessionManager.getProjectContextByProjectId(placement.projectId);
       const project = this.projects().find(item => item.id === placement.projectId);
@@ -477,6 +479,8 @@ export class MoveImporter {
         job.status.detail = `${pane.name}: setup`;
         await this.services.taskQueue.runWorktreeSetup(created, project, placement.worktreePath, ctx);
       }
+      // Set up and waiting for its tabs, as a new Pane is once its setup ends.
+      await this.services.sessionManager.updateSession(created.id, { status: 'stopped', statusMessage: undefined });
       job.status.panesDone += 1;
     }));
 
@@ -521,8 +525,14 @@ export class MoveImporter {
     const arriving = JSON.parse(rewriteText(map, JSON.stringify(record))) as OrchestrationSessionRecord;
     arriving.move = arrivingMark;
     arriving.associations = arriving.associations.filter(association => !association.machine);
-    // The old owner Pane of a copy that moved away earlier is replaced with the arriving one.
-    if (existing) await this.removePane(existing.internalSessionId).catch(() => undefined);
+    // Moving back: the copy that moved away keeps its owner Pane (archiving and recreating a live
+    // Pane would let its teardown remove the arriving tabs); only its old tabs give way.
+    if (existing) {
+      for (const panel of panelManager.getPanelsForSession(existing.internalSessionId)) {
+        if (terminalPanelManager.isTerminalInitialized(panel.id)) await terminalPanelManager.destroyTerminal(panel.id).catch(() => undefined);
+        await panelManager.deletePanel(panel.id).catch(() => undefined);
+      }
+    }
     await manager.importArriving(arriving);
     job.cleanup.push({ label: 'Session record', undo: () => manager.removeArriving(sessionId, job.replacedSession) });
 

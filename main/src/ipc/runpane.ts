@@ -1704,6 +1704,9 @@ export function registerRunpaneHandlers(
           return { ...result, ...pointerResultFields(pointer) };
         } catch (error) { if (expected) services.expectedReportTracker?.cancelPending(panel.id, expected); throw error; }
       }
+      // A tab its Session's move stopped says so, rather than that it isn't running.
+      const moving = pausedMarkOf(panel);
+      if (moving?.by === 'move') throw sessionMovingError(moving);
       if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }

@@ -461,9 +461,12 @@ interface PaneSummary {
 
 interface PausedMark {
   at: string;
-  by: 'manual' | 'auto';
+  by: 'manual' | 'auto' | 'move';
   idleHours?: number;
   runScript?: boolean;
+  machine?: string;
+  arriving?: boolean;
+  interrupted?: boolean;
 }
 
 interface PauseResult {
@@ -1220,9 +1223,12 @@ const repoAddPreviewSchema: BoundarySchema<RepoAddPreview> = boundary.object({
 });
 const pausedMarkSchema: BoundarySchema<PausedMark> = boundary.object({
   at: boundary.string,
-  by: boundary.enumeration('manual', 'auto'),
+  by: boundary.enumeration('manual', 'auto', 'move'),
   idleHours: boundary.optional(boundary.number),
   runScript: boundary.optional(boundary.boolean),
+  machine: boundary.optional(boundary.string),
+  arriving: boundary.optional(boundary.boolean),
+  interrupted: boundary.optional(boundary.boolean),
 });
 const pauseResultSchema: BoundarySchema<PauseResult> = boundary.object({
   ok: boundary.boolean,

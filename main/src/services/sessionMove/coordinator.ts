@@ -39,6 +39,7 @@ import { locateConversation } from './conversations';
 import { createBundle, createSnapshot, ignoredPaths } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
 import { agentFarmProfileOf } from './rules';
+import { keepIgnoredFiles } from './ignoredFiles';
 import { runpaneWaits } from '../agentStatus/midTurn';
 import { readTabFields, sessionMoveCheckSchema, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveTab, type PackageFile } from './manifest';
 import { resolvePeer, type MovePeer } from './peer';
@@ -318,7 +319,8 @@ export class MoveCoordinator {
         checks.push({ id: `diverged:${pane.id}`, level: 'block', title: `Branch ${pane.branch} has diverged on ${target}`, detail: `It exists there with ${count ?? 'some'} commit${count === '1' ? '' : 's'} this machine doesn't have. Push or delete branch ${pane.branch} on ${target}, then check again.` });
       }
     }
-    const tabCount = manifest.panes.reduce((sum, pane) => sum + pane.tabs.length, 0);
+    // Tabs as the person counts them: terminals and chats (Explorer and Diff come along on their own).
+    const tabCount = manifest.panes.reduce((sum, pane) => sum + pane.tabs.filter(tab => tab.type === 'terminal' || tab.type === 'chat').length, 0);
     const bytes = await this.estimate(manifest);
     return { target, ready: !checks.some(check => check.level === 'block'), checks, paneCount: manifest.panes.filter(pane => pane.role === 'member').length, tabCount, bytes };
   }
@@ -494,7 +496,7 @@ export class MoveCoordinator {
     this.touch(job, {
       phase: 'done', error: undefined,
       summary: {
-        panes: job.paneIds.length - 1, tabs: job.tabs.length, resumed: status.resumed ?? 0, failedTabs: status.failedTabs ?? [],
+        panes: job.paneIds.length - 1, tabs: job.tabs.filter(tab => tab.kind === 'chat' || !!readTabFields(toJsonObject(tab.panel.state.customState ?? {})).agentId).length, resumed: status.resumed ?? 0, failedTabs: status.failedTabs ?? [],
         approvals: status.approvals ?? built?.approvals ?? 0, leftBehind: status.leftBehind ?? built?.leftBehind ?? [], missingEnv: status.missingEnv ?? built?.missingEnv ?? [],
       },
     });
@@ -504,8 +506,13 @@ export class MoveCoordinator {
   private async retire(job: SourceJob): Promise<void> {
     const manager = this.manager();
     await manager.setMoveMark(job.record.id, { state: 'moved', machine: job.progress.target, moveId: job.progress.moveId, at: new Date().toISOString() }, `Moved to ${job.progress.target}.`);
-    // Archiving removes the worktrees; the snapshot refs stay in each repository for Restore.
+    // Archiving removes the worktrees; the snapshot refs stay in each repository for Restore, and
+    // ignored files (which never travel) are kept beside them.
     for (const paneId of job.paneIds.slice(1)) {
+      const worktree = this.services.sessionManager.getSession(paneId)?.worktreePath;
+      if (worktree && fs.existsSync(worktree)) {
+        await keepIgnoredFiles(worktree, paneId, await ignoredPaths(worktree).catch(() => [])).catch(error => console.warn(`[SessionMove] Pane ${paneId}'s ignored files weren't kept:`, error));
+      }
       try {
         await this.registry.invoke('sessions:delete', [paneId]);
       } catch (error) {
@@ -558,6 +565,8 @@ export class MoveCoordinator {
     for (;;) {
       this.checkCancelled(job);
       const waiting: SessionMoveWaitingTab[] = [];
+      // First who is still working, so the dialog shows it at once; then the rest stop together.
+      const idle: Array<{ tab: MovedTab; interrupted: boolean }> = [];
       for (const tab of job.tabs.filter(item => !item.stopped)) {
         // A tab only waiting in `runpane watch`, `panels wait` or Notify is idle (P2, D-386).
         const busy = tab.running && (tab.kind === 'terminal'
@@ -568,9 +577,13 @@ export class MoveCoordinator {
           tab.working = true;
           tab.since ??= new Date().toISOString();
           waiting.push({ panelId: tab.panel.id, title: tab.panel.title, paneName: tab.paneName, since: tab.since });
-          continue;
+        } else {
+          idle.push({ tab, interrupted: busy && !watching && job.stopNow });
         }
-        const interrupted = busy && !watching && job.stopNow;
+      }
+      // Nobody to wait for: the dialog moves on to the steps while the tabs stop.
+      this.touch(job, waiting.length === 0 ? { waiting, phase: 'moving' } : { waiting });
+      await Promise.all(idle.map(async ({ tab, interrupted }) => {
         try {
           if (tab.kind === 'terminal') {
             // A tab that isn't running is only marked, so nothing starts it during the move.
@@ -585,7 +598,8 @@ export class MoveCoordinator {
           console.warn(`[SessionMove] ${tab.panel.title} didn't stop yet:`, error);
           waiting.push({ panelId: tab.panel.id, title: tab.panel.title, paneName: tab.paneName, since: tab.since });
         }
-      }
+        this.touch(job, { stoppedTabs: job.tabs.filter(item => item.stopped).length });
+      }));
       this.touch(job, { waiting, stoppedTabs: job.tabs.filter(tab => tab.stopped).length });
       if (waiting.length === 0) break;
       await new Promise(resolve => setTimeout(resolve, POLL_MS));
@@ -600,8 +614,12 @@ export class MoveCoordinator {
   }
 
   /** Before the freeze: restarts the stopped tabs here and removes whatever the target made. */
-  private async restartHere(job: SourceJob): Promise<void> {
-    await job.peer.invoke(SESSION_MOVE_TARGET_CHANNELS.abort, [{ moveId: job.progress.moveId }], boundary.json, CALL_TIMEOUT_MS).catch(error => console.warn('[SessionMove] The target could not be told to clean up:', error));
+  /** Returns whether the target confirmed it removed what it had set up. */
+  private async restartHere(job: SourceJob): Promise<boolean> {
+    const cleaned = await job.peer.invoke(SESSION_MOVE_TARGET_CHANNELS.abort, [{ moveId: job.progress.moveId }], boundary.json, CALL_TIMEOUT_MS).then(() => true, error => {
+      console.warn('[SessionMove] The target could not be told to clean up:', error);
+      return false;
+    });
     for (const tab of job.tabs.filter(item => item.stopped)) {
       try {
         if (tab.kind === 'terminal') {
@@ -622,6 +640,7 @@ export class MoveCoordinator {
     }
     await restartRunScripts(this.registry, job.scripts);
     await fs.promises.rm(job.outDir, { recursive: true, force: true }).catch(() => undefined);
+    return cleaned;
   }
 
   private async fail(job: SourceJob, error: Error): Promise<void> {
@@ -632,12 +651,15 @@ export class MoveCoordinator {
       this.touch(job, { phase: 'confirming', error: { message: reasonOf(error), next: `The Session stays paused here so it never runs twice. Check again, or open it on ${job.progress.target}.` } });
       return;
     }
-    await this.restartHere(job);
+    const cleaned = await this.restartHere(job);
     const running = job.progress.steps.find(step => step.state === 'running');
     if (running) this.setStep(job, running.id, 'failed');
+    const there = cleaned
+      ? `${job.progress.target} removed everything it had set up.`
+      : `${job.progress.target} didn't answer; it removes what it had set up on its own once the move stops arriving.`;
     const failure = error instanceof PaneError
-      ? { message: `${error.message} ${job.progress.target} removed everything it had set up. The Session is running here again, unchanged.`, next: error.next ?? 'Try again.' }
-      : { message: `${reasonOf(error)}. ${job.progress.target} removed everything it had set up. The Session is running here again, unchanged.`, next: 'Try again.' };
+      ? { message: `${error.message} ${there} The Session is running here again, unchanged.`, next: error.next ?? 'Try again.' }
+      : { message: `${reasonOf(error)}. ${there} The Session is running here again, unchanged.`, next: 'Try again.' };
     this.touch(job, cancelled ? { phase: 'cancelled', error: undefined } : { phase: 'failed', error: failure });
   }
 }

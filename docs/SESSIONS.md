@@ -473,7 +473,8 @@ Pane then packs, sends and rebuilds the Session:
   machine creates the worktree on the same branch (upstream set when origin has
   it), puts the work back so staged stays staged, checks it, then runs the
   Pane's normal setup. Ignored files such as `.env` or `node_modules` aren't
-  copied; setup rebuilds them there, and the done screen lists what stayed;
+  copied; setup rebuilds them there, and the done screen lists what stayed
+  behind on this machine;
 - conversations (Claude, Codex and Cursor tabs, and chat tabs) are copied byte
   for byte into that machine's agent stores, never edited. A copy there that was
   continued after an earlier move is never overwritten: the move stops instead;
@@ -491,9 +492,10 @@ shows the problem there; the move isn't undone.
 
 This machine then archives the Session as "Moved to <machine>", with its Panes
 archived and their worktrees removed. The uncommitted work stays in each
-repository (`refs/pane/move/<pane id>`), so **Restore here** from the archived
-list brings back the Session and its Panes with their work while the archive
-lasts. Restore only when the other machine no longer runs it. Moving the
+repository (`refs/pane/move/<pane id>`), and the ignored files that stayed
+behind move into the repository's `.git/pane-moved/<pane id>/` first, so
+**Restore here** from the archived list brings back the Session and its Panes
+with their work and those files while the archive lasts. Restore only when the other machine no longer runs it. Moving the
 Session back later replaces that archived copy.
 
 If anything fails before the other machine starts the tabs, it removes

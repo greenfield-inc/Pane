@@ -75,6 +75,7 @@ import { paneChatFirstPrompt } from './paneChatMigrateOffer';
 import { applyTerminalInput, sessionNameFromMessage } from './sessionAutoName';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import type { SessionMoveMark } from '../../../shared/types/sessionMove';
+import { releaseMoveHolds } from './sessionMove/restore';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
 
@@ -516,6 +517,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         nextRecord.reportAcceptedAt = undefined;
       }
       this.trimActivity(nextRecord);
+      // Restore here after a move away: the orchestrator's tabs leave the move's hold first.
+      if (input.archived === false && current.move?.state === 'moved') await releaseMoveHolds(current.internalSessionId);
       if (nextRecord.archived !== true) await this.ensurePanelForAgent(nextRecord);
       if (current.archived !== true && nextRecord.archived === true) nextRecord.archivedAt = new Date().toISOString();
       if (nextRecord.archived !== true) delete nextRecord.archivedAt;
