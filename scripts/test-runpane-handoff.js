@@ -388,7 +388,9 @@ function windowsHost(f, options={}) {
  if(/^(runpane|npx)(?: |$)/.test(command))return decode(schema,{os:'Windows',shell:${JSON.stringify(options.shell??'bash.exe')},exitCode:127,stdout:'',stderr:'runpane: command not found'});
  if(command.includes('remote -v'))stdout='origin '+${JSON.stringify(f.git('remote','get-url','origin'))}+' (fetch)';
  return decode(schema,{os:'Windows',shell:${JSON.stringify(options.shell??'bash.exe')},exitCode:0,stdout,stderr:''});};
- global.fetch=async(url,options)=>{const request=JSON.parse(options.body);const result=await require(${JSON.stringify(path.join(dist,'daemonClient.js'))}).invokeRemoteDaemon({machine:'windows-host',routes:[{kind:'tailscale',baseUrl:url}]},request.channel,request.args,require(${JSON.stringify(path.join(dist,'boundaryDecoder.js'))}).boundary.json);return {status:200,text:async()=>JSON.stringify({ok:true,result})};};`);
+ const {EventEmitter}=require('node:events');require('node:https').request=(url,options,reply)=>{let body='';const request=new EventEmitter();request.write=(chunk)=>{body+=chunk;};request.destroy=()=>{};
+ request.end=(chunk)=>{if(chunk)body+=chunk;const call=JSON.parse(body);require(${JSON.stringify(path.join(dist,'daemonClient.js'))}).invokeRemoteDaemon({machine:'windows-host',routes:[{kind:'tailscale',baseUrl:String(url)}]},call.channel,call.args,require(${JSON.stringify(path.join(dist,'boundaryDecoder.js'))}).boundary.json)
+  .then((result)=>{const response=new EventEmitter();response.statusCode=200;response.setEncoding=()=>{};reply(response);response.emit('data',JSON.stringify({ok:true,result}));response.emit('end');},(error)=>request.emit('error',error));};return request;};`);
  f.env.NODE_OPTIONS=`--require=${JSON.stringify(preload)}`; f.env.WSL_DISTRO_NAME='HermeticWSL'; delete f.env.PANE_DIR;
  return ()=>fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse):[];
 }
