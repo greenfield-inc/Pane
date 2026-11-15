@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Creates or updates Pane's three relays on Google Compute Engine.
+# Creates or updates Pane's relays (RELAYS below) on Google Compute Engine.
 # Prints every command and changes nothing unless --apply is given.
 # See relay/deploy/RUNBOOK.md for what each step needs.
 #
@@ -40,6 +40,7 @@ RELAYS=(
   "us us-central1 us-central1-a ns1"
   "eu europe-west1 europe-west1-b ns2"
   "asia asia-southeast1 asia-southeast1-a "
+  "west us-west1 us-west1-a "
 )
 
 run() {
@@ -76,20 +77,26 @@ if ! exists compute firewall-rules describe pane-relay; then
 fi
 
 # 2. One static IPv4 per region. Without --apply the addresses are unknown, so
-#    the flags below show placeholders.
+#    the flags below show placeholders. The lists every relay is started with
+#    cover every entry in RELAYS; the DNS helpers are the entries with an ns name.
+REGION_IPS="" RELAY_HOSTS="" NS_IPS="" HELPERS=()
 for line in "${RELAYS[@]}"; do
-  read -r name region _zone _ns <<<"$line"
+  read -r name region _zone ns <<<"$line"
   if ! exists compute addresses describe "pane-relay-$name" --region "$region"; then
     gc compute addresses create "pane-relay-$name" --region "$region"
   fi
   ip=$(gcloud --project "$PROJECT" compute addresses describe "pane-relay-$name" --region "$region" --format='value(address)' 2>/dev/null || true)
-  printf -v "IP_$name" '%s' "${ip:-<$name-ip>}"
+  ip="${ip:-<$name-ip>}"
+  printf -v "IP_$name" '%s' "$ip"
+  REGION_IPS+="${REGION_IPS:+,}$name=$ip"
+  RELAY_HOSTS+="${RELAY_HOSTS:+,}$name=$name.relay.$DOMAIN"
+  if [ -n "$ns" ]; then
+    NS_IPS+="${NS_IPS:+,}$ns=$ip"
+    HELPERS+=("$name")
+  fi
 done
-
 # shellcheck disable=SC2154 # IP_<region> is set with printf -v above.
-REGION_IPS="us=${IP_us},eu=${IP_eu},asia=${IP_asia}"
-RELAY_HOSTS="us=us.relay.$DOMAIN,eu=eu.relay.$DOMAIN,asia=asia.relay.$DOMAIN"
-NS_IPS="ns1=${IP_us},ns2=${IP_eu}"
+US_IP="$IP_us" EU_IP="$IP_eu"
 
 # 3. The VMs. The startup script reads secrets from Secret Manager with the VM's
 #    own identity and (re)starts the container; rerunning it updates the image.
@@ -98,13 +105,11 @@ startup_file=$(mktemp)
 trap 'rm -f "$startup_file"' EXIT
 for line in "${RELAYS[@]}"; do
   read -r name region zone ns <<<"$line"
-  # A helper updates itself in memory, so it lists only the other helper.
-  dns_flag=""
-  case "$name" in
-    us) helpers="https://eu.relay.$DOMAIN/v1/registry" ;;
-    eu) helpers="https://us.relay.$DOMAIN/v1/registry" ;;
-    *) helpers="https://us.relay.$DOMAIN/v1/registry,https://eu.relay.$DOMAIN/v1/registry" ;;
-  esac
+  # A helper updates itself in memory, so it lists only the other helpers.
+  dns_flag="" helpers=""
+  for helper in "${HELPERS[@]}"; do
+    if [ "$helper" != "$name" ]; then helpers+="${helpers:+,}https://$helper.relay.$DOMAIN/v1/registry"; fi
+  done
   if [ -n "$ns" ]; then dns_flag="--dns 0.0.0.0:53"; fi
   startup=$(cat <<EOF
 #!/bin/bash
@@ -144,7 +149,7 @@ docker run -d --name pane-relay --restart always \
   -e PANE_RELAY_REGISTRY_SECRET="\$(cat /var/lib/pane-relay/registry-secret)" \
   "$IMAGE" \
   --domain $DOMAIN --region $name --listen 0.0.0.0:443 \
-  --relays $RELAY_HOSTS --region-ip $REGION_IPS --public-ip ${IP_us} \
+  --relays $RELAY_HOSTS --region-ip $REGION_IPS --public-ip ${US_IP} \
   --ns-ip $NS_IPS --registry-url $helpers $dns_flag \
   --direct-quic 0.0.0.0:7842 \
   --acme-email $ACME_EMAIL --acme-cache /data/acme \
@@ -182,4 +187,4 @@ for line in "${RELAYS[@]}"; do
 done
 
 echo
-echo "Registrar for $DOMAIN: name servers ns1.$DOMAIN (${IP_us}) and ns2.$DOMAIN (${IP_eu}), with glue records."
+echo "Registrar for $DOMAIN: name servers ns1.$DOMAIN (${US_IP}) and ns2.$DOMAIN (${EU_IP}), with glue records."
