@@ -40,10 +40,15 @@ function setState(next: CustomThemeState): void {
 function connect(): void {
   if (connected || !window.electronAPI?.customTheme) return;
   connected = true;
-  window.electronAPI.events.onCustomThemeUpdated?.(setState);
-  void window.electronAPI.customTheme.get()
-    .then((response) => { if (response.success && response.data) setState(response.data); })
-    .catch((error) => console.warn('[customTheme] Could not read the Custom theme:', error));
+  // A failure here leaves the cached theme in place; it must never stop the window from rendering.
+  try {
+    window.electronAPI.events.onCustomThemeUpdated?.(setState);
+    void Promise.resolve(window.electronAPI.customTheme.get())
+      .then((response) => { if (response?.success && response.data) setState(response.data); })
+      .catch((error) => console.warn('[customTheme] Could not read the Custom theme:', error));
+  } catch (error) {
+    console.warn('[customTheme] Could not follow the Custom theme:', error);
+  }
 }
 
 function subscribe(listener: () => void): () => void {
