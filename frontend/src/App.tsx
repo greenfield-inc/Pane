@@ -47,7 +47,7 @@ import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
 import { onOpenFirstRunRequest } from './utils/openFirstRun';
-import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { prepareLaunchChat, restoreHostNavigation, restoreLaunchChat, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { useRegionNavigation } from './hooks/useRegionNavigation';
 import { KeySequenceHint } from './components/KeySequenceHint';
 import { KeymapNotice } from './components/KeymapNotice';
@@ -353,6 +353,7 @@ function App() {
   useEffect(() => {
     const stopWrites = startHostNavigationMemoryWrites();
     void restoreSessionSelection();
+    prepareLaunchChat();
     return stopWrites;
   }, []);
 
@@ -591,6 +592,10 @@ function App() {
     document.documentElement.classList.toggle('window-blurred', !windowFocused);
   }, [windowVisible, windowFocused]);
 
+  useEffect(() => {
+    window.electronAPI.window?.reportVisibility?.(windowVisible);
+  }, [windowVisible]);
+
   // Check if onboarding should be shown after analytics defaults are resolved.
   useEffect(() => {
     if (hasCheckedOnboarding || onboardingCheckStarted.current || !hasCheckedAnalyticsDefault) return;
@@ -777,7 +782,8 @@ function App() {
   // Check for resumable sessions on startup and on each host switch (auto-resume feature).
   // A reconnect to the same host does not prompt again. The launch after a restart to
   // update skips the prompt: main has already resumed every agent, so reopen the
-  // remembered Pane and say what came back instead.
+  // remembered Pane and say what came back instead. Any other launch reopens the
+  // last chat when a chat tab was the last thing shown.
   useEffect(() => {
     if (!isLoaded) return;
     let cancelled = false;
@@ -804,6 +810,8 @@ function App() {
           if (!cancelled) await restoreHostNavigation(() => true, restored.navigation);
           // Panes whose agents could not resume stay interrupted; offer them as on any launch.
           if (cancelled || restored.panesFailed === 0) return;
+        } else {
+          void restoreLaunchChat();
         }
       }
       let sessions: ResumableSession[] = [];
@@ -968,7 +976,7 @@ function App() {
 
   return (
     <ContextMenuProvider>
-      <div className="pane-app-shell relative h-screen flex flex-col overflow-hidden bg-bg-primary">
+      <div data-pane-part="app" className="pane-app-shell relative h-screen flex flex-col overflow-hidden bg-bg-primary">
         <div className={isSettingsOpen ? 'hidden' : 'contents'}>
           <WindowTitleBar projects={projects} sidebarWidth={sidebarWidth} sidebarCollapsed={sidebarCollapsed} controlsSlotRef={setTitleBarControlsSlot} />
           {/* Settings draws its own title-bar spacer, which the window controls overlap. */}

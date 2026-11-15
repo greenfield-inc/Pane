@@ -196,7 +196,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
         exchange: async (request) => {
           const result = await service.exchangeSecret(request);
           if (!result.ok) return result;
-          return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, []) };
+          return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, request.known ?? []) };
         },
         clientAddress: (remoteAddress, remotePort) => service.clientAddress(remoteAddress, remotePort),
       },
@@ -327,5 +327,31 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     expect(laptop.config().host.clients.some((client) => client.kind === 'computer')).toBe(false);
     // Ana's own pairings stay.
     expect((await invoke(b.host, tokenB, 'sessions:get-all-with-projects')).status).toBe(200);
+  }, 90_000);
+
+  it('keeps a phone\'s token on a linked computer when it scans the other computer again', async () => {
+    const a = await pair(studio, 'Cy’s iPhone', 'phone-cy');
+    const b = await pair(laptop, 'Cy’s iPhone', 'phone-cy');
+    const studioInfo = decodeBoundary(a.paired.json.computer, relayComputerSchema);
+    const laptopInfo = decodeBoundary(b.paired.json.computer, relayComputerSchema);
+    const tokenA = String(a.paired.json.token);
+    const tokenB = String(b.paired.json.token);
+    const laptopForStudio = decodeBoundary((await invoke(b.host, tokenB, 'relay:client:mint-link', [{ peer: studioInfo }])).json.result, tokenSchema);
+    const studioForLaptop = decodeBoundary((await invoke(a.host, tokenA, 'relay:client:mint-link', [{ peer: laptopInfo }])).json.result, tokenSchema);
+    await invoke(a.host, tokenA, 'relay:client:save-link', [{ peer: laptopInfo, token: laptopForStudio.token }]);
+    await invoke(b.host, tokenB, 'relay:client:save-link', [{ peer: studioInfo, token: studioForLaptop.token }]);
+
+    // Cy scans the laptop's code again; the app says it already has the studio.
+    const qr = new URLSearchParams(new URL(laptop.service.createPairingCode().url).hash.slice(1));
+    const again = await phoneRequest(b.host, 'POST', '/pair/exchange', { secret: qr.get('s'), label: 'Cy’s iPhone', phoneId: 'phone-cy', known: [studioInfo.id] });
+    expect(again.status).toBe(200);
+    expect(again.json.linked).toEqual([]);
+    expect((await invoke(a.host, tokenA, 'sessions:get-all-with-projects')).status).toBe(200);
+
+    // The app then offers to link the laptop with the studio it already has; they are linked, so nothing is replaced.
+    const studioToLaptop = studio.config().client.profiles.find((profile) => profile.relay?.computerId === laptopInfo.id)?.token;
+    const relink = await invoke(b.host, String(again.json.token), 'relay:client:mint-link', [{ peer: studioInfo }]);
+    expect(relink.json).toMatchObject({ ok: false, error: { code: 'ERR_RELAY_ALREADY_LINKED' } });
+    expect((await invoke(b.host, String(studioToLaptop), 'sessions:get-all-with-projects')).status).toBe(200);
   }, 90_000);
 });

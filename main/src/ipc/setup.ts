@@ -42,6 +42,7 @@ export function registerSetupHandlers(ipcMain: IpcMain, { app, configManager, da
     const projectById = new Map(databaseService.getAllProjects().map(project => [project.id, project]));
     return {
       config: configManager.getConfig(),
+      customBase: configManager.customTheme.getState().base,
       preferences,
       projects: [...projectById.values()],
       async readOrigin(project) {

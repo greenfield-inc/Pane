@@ -64,6 +64,8 @@ function present(profile: RemotePaneConnectionProfile, result: PushSetupResult |
   if (!result) return { summary: 'Checking…', color: 'neutral' };
   switch (result.state) {
     case 'registered':
+      // Through Pane's servers, alerts start once this phone hands the computer its grant.
+      if (result.status.code === 'PUSH_AWAITING_PHONE') return { summary: result.status.message, color: 'warning', onPress: () => explain(profile, result.status.message) };
       return { summary: 'On', color: 'success' };
     case 'denied':
       return { summary: `Notifications are off in ${SYSTEM_SETTINGS}`, color: 'danger', onPress: () => void Linking.openSettings() };

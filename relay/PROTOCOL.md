@@ -26,6 +26,12 @@ id = lowercase base32 (RFC 4648, no padding) of the first 10 bytes of
 That gives 16 characters from `a-z2-7`. Only the key holder can use the id,
 so the relay needs no name registration and no database of owners.
 
+The key fingerprint the Pane apps pin is base64url `sha256(SubjectPublicKeyInfo
+DER)`, so its first 80 bits are the id. Apps and computers refuse a computer
+whose fingerprint does not start with its id (`relayKeyMatchesId`), so a pin
+saved from a scanned id always names that computer's own key, even if someone
+else holds a certificate for `<id>.<D>`.
+
 | Name | Resolves to | Served by |
 | --- | --- | --- |
 | `<D>` | relay apex addresses | relay API, pairing landing page, app-link files |
@@ -35,6 +41,8 @@ so the relay needs no name registration and no database of owners.
 | `files.<id>.<D>` | same | the computer's preview files |
 | `l<a>-<b>-<c>-<d>.<id>.<D>` | `a.b.c.d` (private ranges only) | the computer's local https listener |
 | `_acme-challenge.<id>.<D>` TXT | values the computer set | Let's Encrypt DNS-01 |
+| `<D>` CAA | `issue` the CA, `issuewild ;` | no certificate for all of `*.<D>` |
+| `<id>.<D>` CAA | `issue` and `issuewild` the CA, `validationmethods=dns-01` | the computer's certificate only |
 
 The computer's certificate covers `<id>.<D>` and `*.<id>.<D>`.
 
@@ -75,8 +83,8 @@ Over the per-address control connection limit, the relay sends that
 `over-limit` error in place of the challenge.
 
 After `full`, `over-limit` or `blocked`, as an error or a `close`, Pane waits
-5 minutes before connecting again; after any other failure it retries within
-10 seconds.
+5 minutes before connecting again. After any other failure it redials within
+250 ms, then backs off to at most 10 seconds.
 
 A second control connection for the same id replaces the first, which gets
 `{"t":"close","code":"replaced"}`.
@@ -90,20 +98,60 @@ A second control connection for the same id replaces the first, which gets
 | relay | `{"t":"ok","req":"<n>"}` / `{"t":"error","req":"<n>","code","message"}` | Answer to a request frame carrying `req`. |
 | computer | `{"t":"local","local":["..."]}` | The computer's private addresses changed. |
 | computer | `{"t":"sleep"}` | The computer is about to sleep; the relay reports it as asleep until it reconnects. |
+| computer | `{"t":"grant","req":"<n>","platform":"ios"\|"android","token":"<device token>","hostProfileId":"<id>"}` | Push the phone a grant for this computer; see [Alerts](#alerts). |
 | computer | `{"t":"alert","req":"<n>",...}` | Deliver a push alert with the Pane app's keys; see [Alerts](#alerts). |
-| either | `{"t":"ping"}` / `{"t":"pong"}` | Keepalive. The computer pings every 25 s; the relay closes a control connection silent for 75 s. |
+| either | `{"t":"ping"}` / `{"t":"pong"}` | Keepalive. The computer pings every 5 s and redials when the relay has not answered for 8 s; the relay closes a control connection silent for 75 s. |
 | relay | `{"t":"close","code":"<code>","message":"<text>"}` | The relay is cutting the computer off (`replaced`, `blocked`, `over-limit`, `shutdown`). |
 
 ## Alerts
 
 A computer without the Pane app's push keys sends its phones' alerts through
-the relay, which holds the keys. The computer builds the payload exactly as it
-would send it itself:
+the relay, which holds the keys. A computer alerts only a phone that confirmed
+it, with a grant:
 
-- iOS: `{"t":"alert","req":"<n>","platform":"ios","token":"<APNs device token>","pushType":"alert"|"background","collapseId":"<id>","payload":{...}}`.
+1. When a phone registers its device token, the computer sends `grant` with
+   that token and the phone's id for the computer (`hostProfileId`). The phone
+   registers on every connect, so while it waits the computer asks again for
+   the same registration and token only 20 to 30 minutes (a random wait) after
+   it last asked.
+2. The relay pushes the token a silent message holding the grant,
+   `<computer id>.<day>.<base64url HMAC-SHA256 over "<id>\n<platform>\n<token>\n<day>">`,
+   where `<day>` is the issue day in whole days since the Unix epoch (UTC):
+   on iOS a `background` push with `{"aps":{"content-available":1},"paneGrant":"<grant>","hostProfileId":"<id>"}`,
+   on Android a high-priority data message with `paneGrant` and `hostProfileId`.
+3. The Pane app hands the grant to the saved computer `hostProfileId` names
+   (`mobile:push-grant`). That computer keeps it only if it starts with its
+   own id, and sends it with every alert to that token.
+4. A grant works for 30 days after its issue day. Once a grant is over 15
+   days old, the computer asks for a fresh one when the phone registers or an
+   alert goes out, with the same 20 to 30 minute wait between asks, and keeps
+   sending the old one until the phone hands back the new one. A phone that
+   stays paired and opens Pane, or gets an alert, within those 15 days
+   renews without the person seeing anything.
+
+Only the phone receives the grant, and it hands it only to a computer it is
+paired with, so someone holding a leaked device token can't alert it, and a
+computer the phone signed out of stops reaching it within 30 days. The
+grant key comes from `--registry-secret`, so every relay that shares the
+secret accepts the same grants and a computer keeps its grants when it moves
+to another region. A relay without the secret makes a random key at start,
+and its grants end when it restarts. An alert whose grant is missing, wrong,
+over 30 days old or dated after tomorrow is refused with `unbound`; the computer then drops the grant and asks for a
+new one when the phone next registers. Until it holds a grant, the computer
+tells the phone it is waiting (`PUSH_AWAITING_PHONE`) instead of ready.
+Each computer may send each phone at most 3 grant pushes an hour, so a
+computer key asking for a leaked token spends only its own hour and never
+blocks the phone's real computers. Each computer sends at most
+`--limit-alerts-per-hour` grant pushes an hour in all. Grant pushes are
+counted apart from alerts.
+
+The computer builds the alert payload exactly as it would send it itself,
+and adds `"grant":"<grant>"` to the frame:
+
+- iOS: `{"t":"alert","req":"<n>","platform":"ios","token":"<APNs device token>","pushType":"alert"|"background","collapseId":"<id>","payload":{...},"grant":"<grant>"}`.
   The relay sends it to APNs with the app's topic, production first and the
   sandbox once on `BadDeviceToken`.
-- Android: `{"t":"alert","req":"<n>","platform":"android","message":{...}}`, an
+- Android: `{"t":"alert","req":"<n>","platform":"android","message":{...},"grant":"<grant>"}`, an
   FCM v1 `message` (with its `token`), sent with the app's sender account:
   a service account key file, or with no key the service account attached to
   the relay's Google Compute Engine VM (`--fcm-project`). A
@@ -125,19 +173,13 @@ The relay accepts only the fields Pane sends, and each string at most
 
 The relay answers `{"t":"ok","req":"<n>","status":<provider HTTP status>,"body":"<provider body, at most 2 KiB>"}`
 when the provider answered, whatever its status, or
-`{"t":"error","req":"<n>","code":"throttled"|"unconfigured"|"bad-request"|"provider","message":"..."}`.
+`{"t":"error","req":"<n>","code":"throttled"|"unconfigured"|"unbound"|"bad-request"|"provider","message":"..."}`.
+A `grant` frame gets the same answers, except `unbound`.
 Each computer may send 60 alerts an hour (`--limit-alerts-per-hour`), and
 each device token may get 30 an hour from all computers together
 (`--limit-alerts-per-token-per-hour`). Past either, the relay answers
-`throttled` and logs one line per computer or device per hour. Payloads and
-device tokens are never logged.
-
-The relay does not check that a computer was paired with the device it
-alerts. Pairing runs end to end between the phone and the computer, so the
-relay never sees it, and proving it would need the phone to sign a grant
-the relay can check. The per-device limit bounds what any number of
-computers can send one phone, and the per-address limit on new computers
-bounds how many ids one sender can make.
+`throttled` and logs one line per computer or device per hour. Payloads,
+device tokens and grants are never logged.
 
 ## Data connection
 
@@ -201,24 +243,35 @@ relay sends each update to every helper in its `--registry-url` list with
 body is one update, `{"id","region","local":[...],"txt":[...]|null,"online":true|false}` (TXT
 values as the `txt` frame allows), or a JSON array of up to 5,000 of them (at most 4 MiB); `"txt":null` leaves
 the TXT values as they are. The helper answers `200 {"ok":true}`, or `400`
-and applies nothing when any update is malformed.
+and applies nothing when any update is malformed. A helper skips an offline
+update from one region for a computer it has online in another: when a
+computer moves relays, its old relay's offline update can arrive after its
+new relay's online one.
 
 Each relay keeps one queue per helper and sends it from its own task, so a
 slow helper delays nothing else. Updates for the same id merge while they
 wait. A computer's TXT update goes first, in a request of its own; the rest
 go out together as one array. Every 60 s the relay queues all its connected
-computers again, so a helper that restarts relearns them within a minute. A
-TXT update succeeds as soon as one helper has it, and fails only when every
-helper failed.
+computers again, online in its own region, so a helper that restarts relearns
+them and a stale entry is put right within a minute. A
+TXT update (a computer's or the relay's own ACME value) succeeds once every
+helper has it, or 2 s after the first one does, because the CA may ask any
+helper. It fails only when every helper failed.
 A helper updates its own registry in memory and lists only the other
 helpers, so both helpers answer the same records.
 
 A relay with `--acme-cache` gets its own certificate for `<D>` and
 `<region>.relay.<D>` with DNS-01. It sets each challenge value on every
-helper with `POST /v1/registry/acme` (same bearer secret), body
+helper with `POST /v1/registry/acme`, body
 `{"name":"_acme-challenge.<region>.relay.<D>","values":["..."]}` (the same
 2 values of at most 64 bytes), and clears
-it with `"values":[]` when the CA is done. Helpers accept only
+it with `"values":[]` when the CA is done. On a first deploy no relay has a
+real certificate yet, so these posts accept any certificate from the helper
+and send no secret. Instead they carry
+`authorization: Pane-HMAC <unix secs> <base64url HMAC-SHA256 with the registry secret over "pane registry acme v1\n<secs>\n<path>\n<body>">`,
+which the helper accepts within 5 minutes of its clock. The helper also
+still accepts the bearer secret here. Computer updates always verify the
+helper's certificate. Helpers accept only
 `_acme-challenge.<D>` and `_acme-challenge.<region>.relay.<D>` for a region
 they know. A helper relay sets its own values in memory as well.
 

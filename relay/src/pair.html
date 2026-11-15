@@ -19,6 +19,8 @@ p { margin: 0 0 24px; color: var(--muted); }
 a.btn { display: block; padding: 12px 16px; margin-top: 12px; border-radius: 10px; border: 1px solid var(--line);
   color: var(--fg); text-decoration: none; font-weight: 500; }
 a.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+p.note { margin: 24px 0 0; font-size: 14px; }
+p.note a { color: var(--fg); font-weight: 500; }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -29,6 +31,7 @@ a.btn.primary { background: var(--primary); border-color: var(--primary); color:
   <div id="actions" hidden>
     <a class="btn primary" id="app" href="#">Open in Pane app</a>
     <a class="btn" id="web" href="#">Continue in browser</a>
+    <p class="note">No Pane app yet? It's in TestFlight.<br><a href="https://discord.gg/BdMyubeAZn" target="_blank" rel="noopener">Ask to join on Discord</a></p>
   </div>
 </main>
 <script>

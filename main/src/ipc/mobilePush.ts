@@ -12,6 +12,7 @@ const registrationSchema = boundary.object({
   notifyButtons: boundary.optional(boundary.boolean),
 });
 const installationSchema = boundary.object({ platform: platformSchema, installationId: boundary.nonEmptyString });
+const grantSchema = boundary.object({ platform: platformSchema, installationId: boundary.nonEmptyString, grant: boundary.nonEmptyString });
 const controlsSchema = boundary.object({ platform: platformSchema, installationId: boundary.nonEmptyString, needsInputEnabled: boundary.optional(boundary.boolean), completedEnabled: boundary.optional(boundary.boolean) });
 
 /** HTTP appends the trusted client id: a paired client's, or `tailnet:<login>` for this computer's owner. */
@@ -34,7 +35,11 @@ export function registerMobilePushHandlers(ipcMain: IpcMain, services: AppServic
     await sender.revoke(clientIdFrom(trusted), request.platform, request.installationId);
     return { ok: true };
   });
-  commandRegistry.bindChannels(ipcMain, ['mobile:push-status', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke']);
+  // The phone hands back the grant the relay pushed it for this computer (relay/PROTOCOL.md, Alerts).
+  commandRegistry.register('mobile:push-grant', async (input: PaneCommandValue, trusted: PaneCommandValue) => {
+    return sender.confirmGrant(clientIdFrom(trusted), decodeBoundary(input, grantSchema));
+  });
+  commandRegistry.bindChannels(ipcMain, ['mobile:push-status', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke', 'mobile:push-grant']);
 }
 
 function clientIdFrom(value: PaneCommandValue): string {

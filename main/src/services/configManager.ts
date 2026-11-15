@@ -4,6 +4,7 @@ import type { AnalyticsIdentity, AppConfig } from '../types/config';
 import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared/types/paneChat';
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../shared/types/appearance';
 import { DEFAULT_AUTO_PAUSE_HOURS, DEFAULT_CHAT_RELEASE_MINUTES } from '../../../shared/types/autoPause';
+import { DEFAULT_BACKGROUND_ACTIVITY } from '../../../shared/types/backgroundActivity';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { customLinkSchema, type CustomLink } from '../../../shared/types/customLinks';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
@@ -15,6 +16,8 @@ import { randomUUID } from 'crypto';
 import { isDeepStrictEqual } from 'util';
 import { HOME_GIT_SCAN_WARNING, isHomeDirectory } from '../utils/gitScanSafety';
 import { getAppDirectory } from '../utils/appDirectory';
+import { CustomThemeManager } from './customThemeManager';
+import { CUSTOM_THEME_FILE } from '../../../shared/types/customTheme';
 import { clearShellPathCache } from '../utils/shellPath';
 import { restampCardsOn, restampNotifySwitch, restampSharedCredentials } from './sharedCredentials';
 import {
@@ -35,7 +38,7 @@ import type { MachineMarkOverride, MachineMarkOverrides } from '../../../shared/
 import {
   AppearanceValidationError,
   DEFAULT_APPEARANCE,
-  isTheme,
+  isThemeChoice,
   normalizeAppearance,
 } from '../../../shared/types/appearance';
 
@@ -129,6 +132,8 @@ export class ConfigManager extends EventEmitter {
   private configPath: string;
   private configDir: string;
   private fileWatcher: FSWatcher | null = null;
+  /** custom-theme.json, which lives beside config.json and rides the same folder watch. */
+  readonly customTheme: CustomThemeManager;
   private lastConfigJson: string = '';
   private saveConfigQueue: Promise<void> = Promise.resolve();
   private hasReadConfigFile = false;
@@ -144,6 +149,7 @@ export class ConfigManager extends EventEmitter {
     super();
     this.configDir = getAppDirectory();
     this.configPath = path.join(this.configDir, 'config.json');
+    this.customTheme = new CustomThemeManager(this.configDir, this);
     this.config = {
       machineId: randomUUID(),
       gitRepoPath: defaultGitPath || '',
@@ -172,6 +178,7 @@ export class ConfigManager extends EventEmitter {
       keepAwakeWhileSessionsActive: true,
       keepAwakeWhilePluggedIn: false,
       keepAwakeOnBattery: false,
+      backgroundActivity: DEFAULT_BACKGROUND_ACTIVITY,
       resumePausedOnOpen: false,
       autoPauseEnabled: true,
       autoPauseAfterHours: DEFAULT_AUTO_PAUSE_HOURS,
@@ -244,6 +251,8 @@ export class ConfigManager extends EventEmitter {
     const { restamped } = await this.enqueueConfigWrite(() => this.initializeFromDisk(true));
     // Lets key sharing pick up a key edited by hand.
     if (restamped) this.emit('config-updated', this.config);
+    this.customTheme.loadSync();
+    await this.customTheme.deselectIfSelected();
   }
 
   /**
@@ -504,6 +513,7 @@ export class ConfigManager extends EventEmitter {
     try {
       // The directory, not the file: an atomic replace (tmp + rename) swaps the file's inode.
       this.fileWatcher = watch(this.configDir, { persistent: false }, (_eventType, changed) => {
+        if (changed === null || changed === CUSTOM_THEME_FILE) this.customTheme.scheduleReload();
         if (changed !== null && changed !== fileName) return;
         this.scheduleDiskCheck(WATCH_DEBOUNCE_MS);
       });
@@ -515,6 +525,7 @@ export class ConfigManager extends EventEmitter {
   }
 
   stopWatching(): void {
+    this.customTheme.dispose();
     if (this.diskCheckTimer) clearTimeout(this.diskCheckTimer);
     this.diskCheckTimer = null;
     if (this.fileWatcher) {
@@ -729,13 +740,13 @@ export class ConfigManager extends EventEmitter {
     if ('appearanceMode' in updates && updates.appearanceMode !== 'system' && updates.appearanceMode !== 'fixed') {
       throw new AppearanceValidationError('appearanceMode must be system or fixed');
     }
-    if ('theme' in updates && !isTheme(updates.theme)) {
+    if ('theme' in updates && !isThemeChoice(updates.theme)) {
       throw new AppearanceValidationError('theme must be a valid palette');
     }
-    if ('systemLightTheme' in updates && !isTheme(updates.systemLightTheme)) {
+    if ('systemLightTheme' in updates && !isThemeChoice(updates.systemLightTheme)) {
       throw new AppearanceValidationError('systemLightTheme must be a valid palette');
     }
-    if ('systemDarkTheme' in updates && !isTheme(updates.systemDarkTheme)) {
+    if ('systemDarkTheme' in updates && !isThemeChoice(updates.systemDarkTheme)) {
       throw new AppearanceValidationError('systemDarkTheme must be a valid palette');
     }
   }

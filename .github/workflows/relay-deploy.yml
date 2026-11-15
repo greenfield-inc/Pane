@@ -1,6 +1,6 @@
 name: Deploy Pane relays
 
-# Manual only: creates or updates the three relay VMs on Google Compute Engine.
+# Manual only: creates or updates the relay VMs on Google Compute Engine.
 # It spends money and changes production, so run it only with Parsa's go-ahead.
 # Runbook: relay/deploy/RUNBOOK.md
 on:
@@ -36,6 +36,16 @@ jobs:
     environment: production
     timeout-minutes: 40
     steps:
+      - name: Deploy only as parsakhaz
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          if [ "$ACTOR" != parsakhaz ] || [ "$TRIGGERING_ACTOR" != parsakhaz ]; then
+            echo "::error::Only parsakhaz runs relay deploys; this run was started by ${TRIGGERING_ACTOR} as ${ACTOR}."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
 
       - name: Apply only from main

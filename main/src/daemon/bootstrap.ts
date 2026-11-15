@@ -22,6 +22,7 @@ import { CliToolRegistry } from '../services/cliToolRegistry';
 import type { AbstractCliManager } from '../services/panels/cli/AbstractCliManager';
 import { GitDiffManager } from '../services/gitDiffManager';
 import { GitStatusManager } from '../services/gitStatusManager';
+import { onFetch } from '../services/worktreeBaseRefresh';
 import { ExecutionTracker } from '../services/executionTracker';
 import { WorktreeNameGenerator } from '../services/worktreeNameGenerator';
 import { RunCommandManager } from '../services/runCommandManager';
@@ -60,9 +61,11 @@ import { panelManager } from '../services/panelManager';
 import { pausedMarkOf, type TerminalPanelState } from '../../../shared/types/panels';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { createListeningPortMonitor } from '../services/listeningPorts';
+import { BackgroundActivity } from '../services/backgroundActivity';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import { PhonePreviewHost } from './phonePreviews';
 import { createPreviewFiles } from './previewProxy';
+import { REMOTE_MEMBER_KINDS } from '../services/remoteMemberEvents';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { LoopManager } from '../services/loops/loopManager';
@@ -248,7 +251,15 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     skipValidation: true,
   });
   const gitDiffManager = new GitDiffManager(logger, analyticsManager);
+  // Desktop only: a headless host has no window or person to wait for, so it keeps today's behaviour.
+  const backgroundActivity = mode === 'desktop' ? new BackgroundActivity(configManager, { logger }) : null;
   const gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, logger, databaseService);
+  // Every fetch into a project (Fetch button, dashboard, branch list, new worktree, an agent's own) updates its Panes' ahead/behind.
+  onFetch(projectPath => {
+    gitStatusManager.refreshProjectAfterFetch(projectPath).catch(error => {
+      logger.warn(`[GitStatus] Could not update ${projectPath} after a fetch: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
   const executionTracker = new ExecutionTracker(sessionManager, gitDiffManager);
   const worktreeNameGenerator = new WorktreeNameGenerator(configManager);
   const runCommandManager = new RunCommandManager(databaseService);
@@ -424,6 +435,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     loopManager,
     workspaceCursorStore,
     namedLockService,
+    backgroundActivity: backgroundActivity ?? undefined,
   };
 
   const services: AppServices = {
@@ -478,8 +490,14 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       void phonePreviews.update(snapshot);
     },
   });
-  // Every listed port is forwarded to signed-in clients, Pane's own included.
-  const isForwardedPort = (port: number) => listeningPortMonitor.snapshot().ports.some(listed => listed.port === port);
+  // Ports pause while nobody is looking and catch up the moment someone is.
+  backgroundActivity?.on('change', (away: boolean) => listeningPortMonitor.setPaused(away));
+  listeningPortMonitor.setPaused(backgroundActivity?.isAway() ?? false);
+  // Every listed port is forwarded to signed-in clients, Pane's own included. While polling is
+  // paused the list can be old, so a port missing from it is read once before it is refused.
+  const isListed = (port: number) => listeningPortMonitor.snapshot().ports.some(listed => listed.port === port);
+  const isForwardedPort = async (port: number) => isListed(port)
+    || (listeningPortMonitor.isPaused() && (await listeningPortMonitor.refresh()).ports.some(listed => listed.port === port));
   // On by default only for the desktop Pane that owns ~/.pane; other data dirs opt in through config.
   const workspaceHost = new PaneWorkspaceHostController(
     commandRegistry,
@@ -520,7 +538,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       commandRegistry,
       configManager,
       dataDir: getAppDirectory(),
-      isForwardedPort,
+      // A relay phone's open event stream keeps port reads running, so the snapshot is current.
+      isForwardedPort: isListed,
       files: phonePreviewFiles,
       log: line => logger.info(line),
     }).catch((cause: unknown) => {
@@ -579,6 +598,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
+  // A member Pane's reports and exits go to every connected computer: one whose Session holds this
+  // Pane records them (`RemoteMemberEvents`). Entries recorded from another machine are not sent on.
+  workspaceJournal.subscribe(entry => {
+    if (REMOTE_MEMBER_KINDS.has(entry.kind) && !entry.machine) getPaneEventSink().send('workspace:entry', entry, workspaceJournal.epoch);
+  });
   if (duties.housekeeping) archiveCleanupManager.start();
 
   const { logsManager } = await import('../services/panels/logPanel/logsManager');
@@ -639,8 +663,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       setPaneMcpEndpoint(undefined);
       paneMcpEndpoint.detachAll();
       await tabListener.stop();
-      resourceMonitorService.stop();
       listeningPortMonitor.stop();
+      backgroundActivity?.dispose();
       await spotlightManager.disableAll();
       await sessionManager.cleanup();
       await runCommandManager.stopAllRunCommands();

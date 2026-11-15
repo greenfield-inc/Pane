@@ -316,6 +316,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   return (
     <div
       ref={stripRef}
+      data-pane-part="tab-bar"
       className={cn(
         "flex items-center overflow-x-auto scrollbar-none min-w-0",
         !compact && "panel-tab-strip",
@@ -367,6 +368,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
             id={tabId}
             type="button"
             role="tab"
+            data-pane-part="tab"
             aria-selected={isActive}
             data-panel-id={panel.id}
             data-panel-type={panel.type}

@@ -52,8 +52,9 @@ import { blockedPromptKey, blockedScreenLines, detectAgentState } from './agentS
 import { getManifestForAgent } from './agentStatus/manifests';
 import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { PaneEventArgument } from '../core/eventSink';
+import { STREAM_FRAME_MS } from '../../../shared/constants/streamCadence';
 
-const OUTPUT_BATCH_INTERVAL = 32; // ms (~30fps) — wider window reduces TUI flicker
+const OUTPUT_BATCH_INTERVAL = STREAM_FRAME_MS; // wider window reduces TUI flicker
 const OUTPUT_BATCH_INTERVAL_INTERACTIVE = 8;
 /** Output after a quiet spell goes out once reads pause this long: in the app, the reads of one `less` or `vim` redraw arrive up to ~2 ms apart. */
 const OUTPUT_SETTLE_MS = 3;
@@ -140,7 +141,7 @@ import { agentConfig, agentLabel } from '../../../shared/agents';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import { withClaudePromptHooks } from './claudePrompts';
 import { forgetTab } from './tabListener';
-import { grantPaneMcp, terminalUsesPaneMcp, withPaneMcpConfig } from './paneMcpEndpoint';
+import { grantPaneMcp, paneMcpTabSettings, terminalUsesPaneMcp, withPaneMcpConfig } from './paneMcpEndpoint';
 import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
 import {
   bracketedPaste,
@@ -547,7 +548,7 @@ export class TerminalPanelManager extends EventEmitter {
     const state = resolution.customState;
     const direct = resolution.isCliCommand && !isWSL && !state.sshHost && state.launchMode !== 'wrapped' && !state.preserveLaunchCommand;
     if (direct && state.agentType === 'claude') {
-      resolution.commandToRun = withClaudePromptHooks(panelId, resolution.commandToRun, state.cwd ?? process.cwd(), shellType) ?? resolution.commandToRun;
+      resolution.commandToRun = withClaudePromptHooks(panelId, resolution.commandToRun, state.cwd ?? process.cwd(), shellType, paneMcpTabSettings(panelId, state.agentType)) ?? resolution.commandToRun;
     }
     // Only a tab that holds a live token gets the flag: a relaunch in a shell spawned without one stays on stdio.
     if (direct) resolution.commandToRun = withPaneMcpConfig(panelId, state.agentType, resolution.commandToRun, shellType);

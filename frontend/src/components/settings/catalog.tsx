@@ -36,18 +36,18 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'general',
     label: 'General',
-    description: 'Startup, application updates, feedback, pausing idle Panes, and opening files.',
+    description: 'Startup, application updates, feedback, power, pausing idle Panes, and opening files.',
     icon: Settings,
-    settingIds: ['automatic-updates', 'check-updates-now', 'send-feedback', 'start-on-login', 'keep-awake', 'resume-paused-on-open', 'auto-pause', 'html-file-open-mode'],
-    aliases: ['startup', 'updates', 'feedback', 'bug report', 'feature request', 'github issue', 'login', 'sleep', 'caffeinate', 'awake', 'power', 'battery', 'plugged in', 'lid', 'pause', 'paused', 'resume', 'idle', 'auto-pause', 'html', 'preview', 'open html', 'explorer', 'source'],
+    settingIds: ['automatic-updates', 'check-updates-now', 'send-feedback', 'start-on-login', 'keep-awake', 'background-activity', 'resume-paused-on-open', 'auto-pause', 'html-file-open-mode'],
+    aliases: ['startup', 'updates', 'feedback', 'bug report', 'feature request', 'github issue', 'login', 'sleep', 'caffeinate', 'awake', 'power', 'battery', 'plugged in', 'lid', 'background', 'low power', 'battery saver', 'ports', 'usage', 'pause', 'paused', 'resume', 'idle', 'auto-pause', 'html', 'preview', 'open html', 'explorer', 'source'],
   },
   {
     id: 'appearance',
     label: 'Appearance',
     description: 'Theme, scale, and sidebar presentation.',
     icon: Monitor,
-    settingIds: ['appearance-mode', 'theme', 'system-light-theme', 'system-dark-theme', 'high-contrast', 'ui-scale', 'sidebar-pane-rows'],
-    aliases: ['theme', 'display', 'sidebar', 'zoom', 'contrast', 'accessibility'],
+    settingIds: ['appearance-mode', 'theme', 'system-light-theme', 'system-dark-theme', 'custom-theme', 'high-contrast', 'ui-scale', 'sidebar-pane-rows'],
+    aliases: ['theme', 'display', 'sidebar', 'zoom', 'contrast', 'accessibility', 'custom theme', 'css', 'restyle', 'colors'],
   },
   {
     id: 'terminal',

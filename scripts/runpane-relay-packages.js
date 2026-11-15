@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Ships pane-relay (relay/) inside runpane the way esbuild ships its binary: one small npm package
-// per platform, @runpane/relay-<platform>-<arch>, each limited by `os` and `cpu`, listed as runpane's
+// per platform, @pane/relay-<platform>-<arch>, each limited by `os` and `cpu`, listed as runpane's
 // optionalDependencies so npm installs only the matching one. `runpane relay`
 // (packages/runpane/src/relay.ts) runs it. Every package takes runpane's version, so they move in lockstep.
 //
@@ -26,7 +26,7 @@ const TARGETS = {
   'win32-x64': 'x86_64-pc-windows-msvc',
 };
 
-const packageName = (platform) => `@runpane/relay-${platform}`;
+const packageName = (platform) => `@pane/relay-${platform}`;
 const binaryName = (platform) => (platform.startsWith('win32-') ? 'pane-relay.exe' : 'pane-relay');
 const runpaneVersion = () => JSON.parse(fs.readFileSync(RUNPANE_MANIFEST, 'utf8')).version;
 

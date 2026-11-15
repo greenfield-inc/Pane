@@ -1,7 +1,8 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { PanelContainerProps } from '../../types/panelComponents';
 import { ErrorBoundary } from 'react-error-boundary';
 import { PanelLoadingFallback } from './PanelLoadingFallback';
+import { loadChatTabRoute, loadedChatTabRoute } from './chatTabRouteModule';
 import { PausedTerminalView } from './PausedTabView';
 import { pausedMarkOf } from '../../../../shared/types/panels';
 import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
@@ -9,7 +10,17 @@ import { renderLog } from '../../utils/console';
 
 // Lazy load panel components for better performance
 const TerminalPanel = lazy(() => import('./TerminalPanel'));
-const ChatTabRoute = lazy(() => import('../chatTab/ChatTabRoute').then(module => ({ default: module.ChatTabRoute })));
+const LazyChatTabRoute = lazy(() => loadChatTabRoute().then(ChatTabRoute => ({ default: ChatTabRoute })));
+
+/**
+ * A chat tab renders its code directly once loaded (a launch preloads it), so it
+ * shows without a loading fallback. The component is picked once per mount:
+ * switching from the lazy wrapper to the loaded component would remount the chat.
+ */
+function ChatTabHost({ panel }: { panel: React.ComponentProps<typeof LazyChatTabRoute>['panel'] }) {
+  const [ChatTabRoute] = useState(() => loadedChatTabRoute() ?? LazyChatTabRoute);
+  return <ChatTabRoute panel={panel} />;
+}
 const DiffPanel = lazy(() => import('./diff/DiffPanel'));
 const FileEditorTabPanel = React.lazy(() => import('./editor/FileEditorTabPanel'));
 const ExplorerPanel = lazy(() => import('./editor/EditorPanel'));
@@ -105,7 +116,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
         return paused ? <PausedTerminalView panel={panel} mark={paused} /> : <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
       }
       case 'chat':
-        return <ChatTabRoute panel={panel} />;
+        return <ChatTabHost panel={panel} />;
       case 'diff':
         return <DiffPanel panel={panel} isActive={isActive} sessionId={panel.sessionId} isMainRepo={isMainRepo} />;
       case 'explorer':

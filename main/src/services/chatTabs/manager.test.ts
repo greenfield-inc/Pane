@@ -720,6 +720,15 @@ describe('chat tab manager', () => {
     expect(store.state('p1')?.paused).toBeUndefined();
   });
 
+  it('never pauses a tab whose agent cannot reopen a saved conversation', async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_NO_LOAD: '1' });
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    expect(await manager.pause(['p1'], MARK)).toEqual({ paused: [], failed: [] });
+    expect(manager.isRunning('p1')).toBe(true);
+    expect(store.state('p1')?.paused).toBeUndefined();
+  });
+
   it('never pauses a tab with a message waiting in its queue', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));

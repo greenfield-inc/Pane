@@ -66,6 +66,8 @@ const READS_FOR_EVENT = {
   'permission:resolved': ['permissions'],
   'notify:shared-changed': ['notify'],
   'remote:settings-changed': [],
+  // A Session member's report, for the main process's Session journal; nothing to refresh here.
+  'workspace:entry': [],
 } satisfies Record<MachineEventChannel, ReadKey[]>;
 
 /** A machine as the pill menu knows it, plus whether the app is on it. */

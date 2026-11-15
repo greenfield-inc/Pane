@@ -7,6 +7,17 @@ export function backoffDelayMs(attempt: number, random: () => number = Math.rand
   return Math.min(maxDelayMs, Math.round(Math.min(base, maxDelayMs) * (0.8 + random() * 0.4)));
 }
 
+/** The host sends a heartbeat every 5 s; a stream silent this long (two missed, with room for a slow one) is dead. */
+export const STALE_STREAM_TIMEOUT_MS = 12_000;
+
+/** A computer behind Pane's relay is retried this often at most, so it is back within seconds of an outage ending. */
+export const RELAY_MAX_RECONNECT_DELAY_MS = 5_000;
+
+/** A computer reached through a relay is never given up on while the app is open (D-15); only a revoked token stops it. */
+export function relayRecoveryCycle(maxDelayMs = RELAY_MAX_RECONNECT_DELAY_MS): RecoveryCycle {
+  return new RecoveryCycle(Math.random, Number.POSITIVE_INFINITY, maxDelayMs);
+}
+
 /** One outage budget. A handshake never resets it; only completed restoration does. */
 export class RecoveryCycle {
   private deadline: number | null = null;

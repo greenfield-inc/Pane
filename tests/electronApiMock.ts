@@ -965,6 +965,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return Promise.resolve(detected);
         },
         isFocused: () => Promise.resolve(mockOptions.initialWindowFocused !== false),
+        reportVisibility: () => {},
       },
       getPlatform: () => Promise.resolve(mockOptions.platform ?? 'linux'),
       windowControlsOverlayEnabled: mockOptions.windowControlsOverlayEnabled === true,
@@ -1398,8 +1399,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       resourceMonitor: namespace({
         getSnapshot: () => success(null),
-        startActive: () => success(),
-        stopActive: () => success(),
       }),
       loops: namespace({
         list: () => success(clone(mockLoops)),
@@ -1868,6 +1867,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getNavigationMemory: (hostId: string | null) =>
           success(clone(navigationMemories.get(hostId ?? '') ?? null)),
+        getLaunchChat: () => success(null),
         saveNavigationMemory: (hostId: string | null, memory: JsonObject) => {
           navigationMemories.set(hostId ?? '', clone(memory));
           return success();

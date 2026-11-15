@@ -1,6 +1,7 @@
 import http from 'http';
 import zlib from 'zlib';
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
+import type { AddressInfo } from 'net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRemoteDaemonConfig, NATIVE_APP_WEBSOCKET_ORIGIN, type RemoteDaemonClientRecord, type RemoteDaemonConfig, type RemoteInvokeRequest } from '../../../shared/types/remoteDaemon';
 import { PaneCommandRegistry, teammatePaneCaller } from './commandRegistry';
@@ -18,6 +19,7 @@ import { RelayService } from './relay/relayService';
 import { RELAY_DEVICE_COMMANDS } from '../../../shared/types/relay';
 import type { AppConfig } from '../types/config';
 import { readingMachines } from './readingMachines';
+import { remoteEventStreams } from './remoteEventStreams';
 import { PaneError } from '../../../shared/paneError';
 
 interface ConfigManagerStub {
@@ -350,6 +352,37 @@ describe('PaneRemoteHttpApiServer', () => {
     });
   });
 
+  describe('with "Require pairing" turned off', () => {
+    async function startUnpaired(relayEnabled: boolean) {
+      const registry = new PaneCommandRegistry();
+      registry.register('sessions:get-all', async () => [{ id: 'session-1' }]);
+      const config = createEnabledRemoteConfig({ pairingRequired: false });
+      config.relay = { enabled: relayEnabled };
+      const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config));
+      activeServers.push(server);
+      await server.start();
+      return server;
+    }
+    const call = { channel: 'sessions:get-all', args: [] };
+
+    it('still requires a token while phone access through the relay is on, since the relay forwards the internet to this listener', async () => {
+      const server = await startUnpaired(true);
+      await expect(requestJson(server, 'POST', '/invoke', call)).resolves.toMatchObject({ statusCode: 401, body: { ok: false } });
+      await expect(requestJson(server, 'POST', '/invoke', call, 'secret-token')).resolves.toMatchObject({ statusCode: 200 });
+    });
+
+    it('answers a local caller without a token, but refuses a web page on another site and a rebound host name', async () => {
+      const server = await startUnpaired(false);
+      const port = server.getAddress()?.port;
+      await expect(requestJson(server, 'POST', '/invoke', call)).resolves.toMatchObject({ statusCode: 200 });
+      await expect(requestJson(server, 'POST', '/invoke', call, undefined, { Origin: `http://127.0.0.1:${port}` })).resolves.toMatchObject({ statusCode: 200 });
+      await expect(requestJson(server, 'POST', '/invoke', call, undefined, { Origin: 'https://evil.example' }))
+        .resolves.toMatchObject({ statusCode: 401, body: { ok: false, error: { code: 'ERR_REMOTE_DAEMON_AUTH_REQUIRED' } } });
+      await expect(requestJson(server, 'POST', '/invoke', call, undefined, { Host: `evil.example:${port}`, Origin: `http://evil.example:${port}` }))
+        .resolves.toMatchObject({ statusCode: 401 });
+    });
+  });
+
   it.each(['credentials:shared:get', 'credentials:shared:apply'])(
     'refuses %s when the host does not require pairing, so no unpaired caller reads keys', async channel => {
       const registry = new PaneCommandRegistry();
@@ -421,6 +454,50 @@ describe('PaneRemoteHttpApiServer', () => {
       .resolves.toEqual({ statusCode: 200, body: { ok: true, result: { hostname: 'travel-laptop' } } });
     await expect(requestJson(server, 'POST', '/invoke', { channel: 'runpane:machine:info', args: [] }, 'secret-token'))
       .resolves.toMatchObject({ statusCode: 403, body: { ok: false, error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } } });
+  });
+
+  describe('a paired device removed while its streams are open', () => {
+    async function startWithRemovableClient(options: { deepgramListenEndpoint?: string } = {}) {
+      const registry = new PaneCommandRegistry();
+      let config = createEnabledRemoteConfig();
+      const server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) }, { heartbeatIntervalMs: 50, ...options });
+      activeServers.push(server);
+      await server.start();
+      const remove = () => { config = { ...config, host: { ...config.host, clients: [] } }; };
+      return { server, remove };
+    }
+
+    it('loses its event stream within a heartbeat, even when no event is sent', async () => {
+      const { server, remove } = await startWithRemovableClient();
+      const stream = await openEventStream(server, 'secret-token');
+      await stream.nextEvent();
+      remove();
+      await expect(Promise.race([stream.ended.then(() => 'ended'), new Promise((resolve) => setTimeout(() => resolve('still open'), 1000))])).resolves.toBe('ended');
+    });
+
+    it('loses its voice stream within a heartbeat', async () => {
+      const upstream = new WebSocketServer({ port: 0 });
+      let upstreamClosed = false;
+      upstream.on('connection', (socket) => socket.once('close', () => { upstreamClosed = true; }));
+      await new Promise<void>((resolve) => upstream.once('listening', resolve));
+      vi.stubEnv('DEEPGRAM_API_KEY', 'test-key-0123456789abcdef');
+      try {
+        // SAFETY: a TCP server that is listening reports an AddressInfo.
+        const { server, remove } = await startWithRemovableClient({ deepgramListenEndpoint: `ws://127.0.0.1:${(upstream.address() as AddressInfo).port}` });
+        const socket = new WebSocket(`ws://127.0.0.1:${server.getAddress()?.port}/voice/deepgram-stream?access_token=secret-token`);
+        let closed = false;
+        socket.once('close', () => { closed = true; });
+        await new Promise<void>((resolve, reject) => {
+          socket.once('open', () => resolve());
+          socket.once('error', reject);
+        });
+        remove();
+        await vi.waitFor(() => expect([closed, upstreamClosed]).toEqual([true, true]), { timeout: 1000 });
+      } finally {
+        vi.unstubAllEnvs();
+        await new Promise<void>((resolve) => upstream.close(() => resolve()));
+      }
+    });
   });
 
   it('records when a paired phone last reached this computer, saving it at most once a minute', async () => {
@@ -762,7 +839,6 @@ describe('PaneRemoteHttpApiServer', () => {
       deviceLabel: 'Parsas MacBook Air',
       remoteAddress: expect.any(String),
       connectedAt: expect.any(String),
-      lastSeenAt: expect.any(String),
     }]);
 
     server.getEventSink().send('session:created', {
@@ -815,6 +891,26 @@ describe('PaneRemoteHttpApiServer', () => {
 
     stream.close();
     await waitFor(() => !readingMachines.has('book-install'));
+  });
+
+  it('counts a phone\'s stream as someone looking at this computer, and a saved machine\'s Notify stream not', async () => {
+    const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+    const before = remoteEventStreams.count();
+
+    const savedMachine = await openEventStream(server, 'secret-token', { 'X-Pane-Machine-Id': 'book-install' });
+    await savedMachine.nextEvent();
+    expect(remoteEventStreams.count()).toBe(before);
+
+    const phone = await openEventStream(server, 'secret-token', { 'X-Pane-Remote-Runtime-Id': 'phone-runtime' });
+    await phone.nextEvent();
+    expect(remoteEventStreams.count()).toBe(before + 1);
+
+    savedMachine.close();
+    phone.close();
+    await waitFor(() => server.getConnectedClients().length === 0);
+    expect(remoteEventStreams.count()).toBe(before);
   });
 
   it('gzips the event stream for clients that accept it and still delivers each event immediately', async () => {
@@ -899,7 +995,6 @@ describe('PaneRemoteHttpApiServer', () => {
       label: 'Mac mini',
       remoteAddress: expect.any(String),
       connectedAt: expect.any(String),
-      lastSeenAt: expect.any(String),
     }]);
 
     stream.close();
@@ -985,10 +1080,11 @@ describe('PaneRemoteHttpApiServer', () => {
 });
 
 describe('QR-paired phones and linked computers', () => {
-  const STUDIO = { id: 'studiostudiostud', name: 'Studio Mac', domain: 'runpane.net', address: 'https://studiostudiostud.runpane.net', local: [], fingerprint: 'studio-key' };
-  const ROGUE = { id: 'roguerogueroguer', name: 'Totally your laptop', domain: 'runpane.net', address: 'https://roguerogueroguer.runpane.net', local: [], fingerprint: 'rogue-key' };
-  const BUILD_BOX = { id: 'buildboxbuildbox', name: 'Build Box', domain: 'runpane.net', address: 'https://buildboxbuildbox.runpane.net', local: [], fingerprint: 'build-key' };
-  const LAPTOP = { id: 'laptoplaptoplapt', name: 'Travel Laptop', domain: 'runpane.net', address: 'https://laptoplaptoplapt.runpane.net', local: [], fingerprint: 'laptop-key' };
+  // Real computer ids and key fingerprints: the id is the first 80 bits of the fingerprint, in base32.
+  const STUDIO = { id: 'kqyutsssbsalgvyf', name: 'Studio Mac', domain: 'runpane.net', address: 'https://kqyutsssbsalgvyf.runpane.net', local: [], fingerprint: 'VDFJylIMgLNXBfifCTjEhM6xs4EiuRSX7-xqISiCiWk' };
+  const ROGUE = { id: 'jkbgxxed5x35pv6o', name: 'Totally your laptop', domain: 'runpane.net', address: 'https://jkbgxxed5x35pv6o.runpane.net', local: [], fingerprint: 'SoJr3IPt99fXzhVYcdF9L_FH_TlSBJ7Rv-Xy_e5b-1g' };
+  const BUILD_BOX = { id: 'q5j35n3lgltya74u', name: 'Build Box', domain: 'runpane.net', address: 'https://q5j35n3lgltya74u.runpane.net', local: [], fingerprint: 'h1O-t2sy54B_lBiz16e7PmqNnHCkiRt-_yW5pJDj4C8' };
+  const LAPTOP = { id: 'dohp3zsqmo4uk2kn', name: 'Travel Laptop', domain: 'runpane.net', address: 'https://dohp3zsqmo4uk2kn.runpane.net', local: [], fingerprint: 'G4795lBjuUVpTRcds0IPBq5CcLguVvcUvt3LbgEP4j0' };
 
   /**
    * This computer, with a QR-paired phone (`phone-token`) and Studio Mac linked by an earlier scan
@@ -1086,8 +1182,8 @@ describe('QR-paired phones and linked computers', () => {
   });
 
   it.each([
-    ['another relay domain', { ...ROGUE, domain: 'evil.example', address: 'https://roguerogueroguer.evil.example' }],
-    ['an address outside its id', { ...ROGUE, address: 'https://studiostudiostud.runpane.net' }],
+    ['another relay domain', { ...ROGUE, domain: 'evil.example', address: 'https://jkbgxxed5x35pv6o.evil.example' }],
+    ['an address outside its id', { ...ROGUE, address: 'https://kqyutsssbsalgvyf.runpane.net' }],
     ['an address off the relay', { ...ROGUE, address: 'https://evil.example' }],
   ])('refuses to link a peer at %s, and changes nothing', async (_case, peer) => {
     const computer = await startComputer();
@@ -1101,6 +1197,26 @@ describe('QR-paired phones and linked computers', () => {
       expect.objectContaining({ label: 'Ana’s iPhone' }),
       expect.objectContaining({ label: 'Studio Mac' }),
     ]);
+  });
+
+  it('refuses to link a peer whose key fingerprint is not the one its id names, so a phone cannot swap the pinned key', async () => {
+    const computer = await startComputer();
+    const swapped = { ...STUDIO, fingerprint: ROGUE.fingerprint };
+
+    for (const [channel, request] of [['relay:client:mint-link', { peer: { ...ROGUE, fingerprint: STUDIO.fingerprint } }], ['relay:client:save-link', { peer: swapped, token: 'stolen' }]] as const) {
+      await expect(computer.invoke('phone-token', channel, request))
+        .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_LINK_KEY_MISMATCH' } } });
+    }
+    await expect(computer.registry.invoke('relay:linked-computers', [])).resolves.toEqual([expect.objectContaining({ name: 'Studio Mac' })]);
+  });
+
+  it('hands out tokens on its linked computers only to a paired phone, never to a linked computer, whose own removal would not revoke them', async () => {
+    const computer = await startComputer({ phoneId: 'pane-native-ana' });
+
+    await expect(computer.invoke('studio-token', 'relay:client:computers', { known: [] }))
+      .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_PHONE_ONLY' } } });
+    expect(computer.call).not.toHaveBeenCalled();
+    await expect(computer.invoke('phone-token', 'relay:client:computers', { known: [] })).resolves.toMatchObject({ statusCode: 200 });
   });
 
   it('names the computers an unlinked computer was removed from, never the unlinked computer itself', async () => {

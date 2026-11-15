@@ -74,7 +74,7 @@ function configOptions(session) {
 const app = agent()
   .onRequest(methods.agent.initialize, ({ params }) => {
     clientCapabilities = params.clientCapabilities ?? {};
-    return { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: { close: {}, list: {} } } };
+    return { protocolVersion: 1, agentCapabilities: { loadSession: process.env.SCRIPTED_AGENT_NO_LOAD !== '1', promptCapabilities: { image: true }, sessionCapabilities: { close: {}, list: {} } } };
   })
   .onRequest(methods.agent.session.new, async ({ params, client }) => {
     if (process.env.SCRIPTED_AGENT_SIGNED_OUT === '1') throw RequestError.authRequired();

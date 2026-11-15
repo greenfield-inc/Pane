@@ -5,15 +5,10 @@
  * wires it to the daemon client and the xterm WebView.
  */
 
+import { terminalSnapshotText, type HostTerminalSnapshot } from '@shared/remoteClient';
+
 type Invoke = (channel: string, args: unknown[]) => Promise<unknown>;
 
-/** What `terminal:getState` returns (a subset of `TerminalPanelState`). */
-interface HostTerminalState {
-  scrollbackBuffer?: string | string[];
-  alternateScreenBuffer?: string;
-  isAlternateScreen?: boolean;
-  serializedBuffer?: string;
-}
 
 interface TerminalSink {
   /** Replace everything on screen with `data`. */
@@ -77,9 +72,9 @@ export class TerminalSession {
       // the width this screen shows.
       await invoke('terminal:resize', [panelId, cols(), rows()]);
       await invoke('terminal:setVisibility', [panelId, true, viewerId]);
-      const state = await invoke('terminal:getState', [panelId]) as HostTerminalState | null;
+      const state = await invoke('terminal:getState', [panelId]) as HostTerminalSnapshot | null;
       if (generation !== this.generation) return;
-      sink.reset(snapshotText(state));
+      sink.reset(terminalSnapshotText(state));
       this.live = true;
       if (state?.isAlternateScreen) {
         // A restored full-screen app frame can't be trusted at a new size; a
@@ -157,14 +152,6 @@ export class TerminalSession {
   }
 }
 
-function snapshotText(state: HostTerminalState | null): string {
-  if (!state) return '';
-  if (state.isAlternateScreen) return state.serializedBuffer ?? state.alternateScreenBuffer ?? '';
-  const scrollback = Array.isArray(state.scrollbackBuffer)
-    ? state.scrollbackBuffer.join('')
-    : state.scrollbackBuffer ?? '';
-  return scrollback || state.serializedBuffer || '';
-}
 
 function isOutputPayload(value: unknown): value is { panelId: string; output: string } {
   if (typeof value !== 'object' || value === null) return false;

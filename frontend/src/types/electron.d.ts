@@ -7,7 +7,7 @@ import type { Project } from './project';
 import type { Folder } from './folder';
 import type { AppConfig, UpdateConfigRequest } from './config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
-import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { HostNavigationMemory, LaunchChat } from '../../../shared/types/hostNavigation';
 import type { TestNotificationResult } from '../../../shared/types/notifications';
 import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import type {
@@ -158,7 +158,11 @@ interface ElectronAPI {
   windowControlsOverlayEnabled: boolean;
   appearanceSnapshot?: import('../../../shared/types/appearance').AppearanceSnapshot;
   setTitleBarOverlay: (colors: { color: string; symbolColor: string }) => Promise<IPCResponse>;
-  setBackgroundColor: (payload: { theme: import('../../../shared/types/appearance').Theme; color: string }) => Promise<IPCResponse>;
+  setBackgroundColor: (payload: { theme: import('../../../shared/types/appearance').ThemeChoice; color: string }) => Promise<IPCResponse>;
+  customTheme?: {
+    get: () => Promise<IPCResponse<import('../../../shared/types/customTheme').CustomThemeState>>;
+    reset: () => Promise<IPCResponse>;
+  };
   notifyRendererReady: () => void;
 
   // Version checking
@@ -563,6 +567,7 @@ interface ElectronAPI {
     saveExpandedArchivedProjects: (projectIds: number[]) => Promise<IPCResponse>;
     getNavigationMemory: (hostId: string | null) => Promise<IPCResponse<HostNavigationMemory | null>>;
     saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory) => Promise<IPCResponse>;
+    getLaunchChat: () => Promise<IPCResponse<LaunchChat | null>>;
     getSessionWorkspaceLayout: (hostId: string | null) => Promise<IPCResponse<SessionWorkspaceLayout | null>>;
     saveSessionWorkspaceLayout: (hostId: string | null, layout: SessionWorkspaceLayout | null) => Promise<IPCResponse>;
     getPaneLayout: (hostId: string | null, paneId: string) => Promise<IPCResponse<SessionPanelLayout | null>>;
@@ -662,6 +667,7 @@ interface ElectronAPI {
     // Terminal font config events
     onTerminalFontUpdated: (callback: (data: { terminalFontFamily: string; terminalFontSize: number }) => void) => () => void;
     onNativeAppearanceUpdated: (callback: (data: { prefersDark: boolean }) => void) => () => void;
+    onCustomThemeUpdated?: (callback: (state: import('../../../shared/types/customTheme').CustomThemeState) => void) => () => void;
 
     removeAllListeners: (channel: string) => void;
   };
@@ -770,8 +776,6 @@ interface ElectronAPI {
   // Resource monitor
   resourceMonitor: {
     getSnapshot: () => Promise<IPCResponse>;
-    startActive: () => Promise<IPCResponse>;
-    stopActive: () => Promise<IPCResponse>;
   };
 
   // Agent subscription usage
@@ -822,6 +826,8 @@ interface ElectronAPI {
   window: {
     consumeUncleanShutdown: () => Promise<boolean>;
     isFocused: () => Promise<boolean>;
+    /** Tells main whether the window is on screen, so Pane knows when nobody is looking. */
+    reportVisibility: (visible: boolean) => void;
     /** Raises the window and opens a pane:// link, like one opened from the OS. */
     openPaneLink: (link: string) => Promise<void>;
   };

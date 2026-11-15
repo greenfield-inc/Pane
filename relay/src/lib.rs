@@ -10,7 +10,7 @@ mod direct;
 mod dns;
 pub mod id;
 mod io;
-mod registry;
+pub mod registry;
 mod sni;
 mod state;
 mod tls;
@@ -59,6 +59,24 @@ impl Relay {
 }
 
 /// Binds the listeners and starts serving.
+/// Binds DNS over UDP and TCP on one port. For port 0 the UDP socket picks the port, and
+/// another socket may already hold it over TCP, so it tries another free port.
+async fn bind_dns(addr: SocketAddr) -> std::io::Result<(UdpSocket, TcpListener)> {
+    let mut tries = 0;
+    loop {
+        let udp = UdpSocket::bind(addr).await?;
+        match TcpListener::bind(udp.local_addr()?).await {
+            Ok(tcp) => return Ok((udp, tcp)),
+            Err(e)
+                if addr.port() == 0 && e.kind() == std::io::ErrorKind::AddrInUse && tries < 32 =>
+            {
+                tries += 1;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 pub async fn start(cfg: Config) -> Result<Relay, Error> {
     let domain = cfg.domain()?;
     let mut acme = None;
@@ -100,12 +118,7 @@ pub async fn start(cfg: Config) -> Result<Relay, Error> {
     let listener = TcpListener::bind(cfg.listen_addr()).await?;
     let https_addr = listener.local_addr()?;
     let dns_sockets = match cfg.dns {
-        Some(addr) => {
-            let udp = UdpSocket::bind(addr).await?;
-            let addr = udp.local_addr()?;
-            let tcp = TcpListener::bind(addr).await?;
-            Some((udp, tcp))
-        }
+        Some(addr) => Some(bind_dns(addr).await?),
         None => None,
     };
     let dns_addr = dns_sockets
@@ -202,6 +215,9 @@ async fn connection(
 ) {
     // A dual-stack listener reports IPv4 clients as ::ffff:a.b.c.d.
     let peer = SocketAddr::new(peer.ip().to_canonical(), peer.port());
+    // Without it the last segment of a TLS flight or a passed-through write waits for the
+    // peer's ACK: one extra round trip per handshake.
+    let _ = tcp.set_nodelay(true);
     let mut buf = Vec::with_capacity(2048);
     let read_hello = async {
         let mut chunk = [0u8; 4096];
@@ -277,7 +293,7 @@ async fn resync(state: Arc<State>) {
     loop {
         tokio::select! {
             _ = state.shutdown.cancelled() => return,
-            _ = tick.tick() => state.registry.resync(&state.connected_ids()),
+            _ = tick.tick() => state.registry.resync(&state.cfg.region, &state.connected_ids()),
         }
     }
 }

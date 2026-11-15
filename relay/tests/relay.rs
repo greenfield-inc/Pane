@@ -505,6 +505,50 @@ fn a_records(m: &Message) -> Vec<Ipv4Addr> {
 }
 
 #[tokio::test]
+async fn caa_lets_only_lets_encrypt_issue_and_no_wildcard_for_the_whole_domain() {
+    let env = Env::start(&["--dns", "127.0.0.1:0", "--public-ip", "203.0.113.10"]).await;
+    let agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let id = agent.id.clone();
+    let dns = env.dns();
+    let caa = |name: String| async move {
+        let mut values: Vec<String> = dns_query(dns, name, RecordType::CAA, false)
+            .await
+            .answers
+            .iter()
+            .map(|r| r.data.to_string())
+            .collect();
+        values.sort();
+        values
+    };
+    // A certificate for *.<D> would cover every computer's name.
+    assert_eq!(
+        caa(format!("{D}.")).await,
+        vec!["0 issue \"letsencrypt.org\"", "0 issuewild \";\""]
+    );
+    // Each computer's own names, *.<id>.<D> included, only through DNS-01 at Let's Encrypt.
+    assert_eq!(
+        caa(format!("{id}.{D}.")).await,
+        vec![
+            "0 issue \"letsencrypt.org; validationmethods=dns-01\"",
+            "0 issuewild \"letsencrypt.org; validationmethods=dns-01\"",
+        ]
+    );
+
+    // A self-hosted relay on another CA names it, or serves none.
+    let other = Env::start(&[
+        "--dns",
+        "127.0.0.1:0",
+        "--public-ip",
+        "203.0.113.10",
+        "--caa-issuer",
+        "",
+    ])
+    .await;
+    let none = dns_query(other.dns(), format!("{D}."), RecordType::CAA, false).await;
+    assert!(none.answers.is_empty());
+}
+
+#[tokio::test]
 async fn dns_answers_for_computer_names() {
     let env = Env::start(&[
         "--dns",
@@ -682,6 +726,34 @@ async fn txt_values_are_limited_to_what_acme_needs() {
         .http("POST", "/v1/registry/acme", auth, &acme.to_string())
         .await;
     assert_eq!(code, 400);
+}
+
+#[tokio::test]
+async fn an_unsigned_acme_post_is_refused_before_its_body_arrives() {
+    let env = Env::start(&["--registry-secret", "s3cret"]).await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // A stale MAC, and a fresh one announcing a body far larger than any challenge post:
+    // neither waits for the 4 MB that never comes.
+    for (auth, length) in [
+        (format!("Pane-HMAC {} x", now - 3_600), 100),
+        (format!("Pane-HMAC {now} x"), 4 * 1024 * 1024),
+    ] {
+        let mut s = env.connect_relay(D).await;
+        let head = format!(
+            "POST /v1/registry/acme HTTP/1.1\r\nhost: {D}\r\nauthorization: {auth}\r\ncontent-length: {length}\r\n\r\n"
+        );
+        s.write_all(head.as_bytes()).await.unwrap();
+        let mut out = vec![0u8; 12];
+        tokio::time::timeout(Duration::from_secs(2), s.read_exact(&mut out))
+            .await
+            .expect("answered without waiting for the body")
+            .unwrap();
+        let status = String::from_utf8_lossy(&out[9..12]).to_string();
+        assert!(status == "401" || status == "413", "{auth}: {status}");
+    }
 }
 
 #[tokio::test]
@@ -885,6 +957,26 @@ async fn a_txt_update_succeeds_when_one_helper_never_answers() {
     // The computer gives up after 20 s; the healthy helper answers at once.
     assert!(
         started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn an_acme_challenge_waits_for_a_slower_helper() {
+    use pane_relay::registry::{AcmeTxt, Registry};
+    // A relay near one helper and far from the other: the CA may ask either.
+    let (near, _) = fake_helper(Some(Duration::ZERO)).await;
+    let (far, _) = fake_helper(Some(Duration::from_millis(700))).await;
+    let client = Registry::new(&[near, far], Some("s3cret".into()), None, 10).unwrap();
+    let started = Instant::now();
+    let challenge = AcmeTxt {
+        name: format!("_acme-challenge.{D}"),
+        values: vec!["token-1".into()],
+    };
+    client.publish_acme(challenge).await.unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(700),
         "{:?}",
         started.elapsed()
     );
@@ -1322,6 +1414,36 @@ fn unix_now() -> i64 {
         .as_secs() as i64
 }
 
+/// Asks the relay to send phone `token` a grant for `agent`, as a computer does when a phone
+/// registers; returns the grant the phone receives and every request the provider got.
+async fn grant(
+    agent: &mut Agent,
+    provider: &mut Provider,
+    platform: &str,
+    token: &str,
+) -> (String, Vec<Received>) {
+    agent
+        .send(
+            json!({"t": "grant", "req": "g", "platform": platform, "token": token,
+            "hostProfileId": "h1"}),
+        )
+        .await;
+    assert_eq!(agent.next().await["t"], "ok");
+    let mut sent = vec![provider.next().await];
+    while let Ok(r) = provider.received.try_recv() {
+        sent.push(r);
+    }
+    let found = sent.iter().find_map(|r| {
+        let body: Value = serde_json::from_slice(&r.body).ok()?;
+        let g = match platform {
+            "ios" => &body["paneGrant"],
+            _ => &body["message"]["data"]["paneGrant"],
+        };
+        g.as_str().map(String::from)
+    });
+    (found.expect("a grant push"), sent)
+}
+
 /// Starts a relay with APNs keys pointing at `apns` (sandbox at `<url>/sandbox`); returns it
 /// with the key the relay signs with.
 async fn apns_env(apns: &Provider) -> (Env, SigningKey) {
@@ -1356,13 +1478,25 @@ async fn ios_alerts_reach_apns_with_a_signed_provider_token() {
     let (env, key) = apns_env(&apns).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
 
+    // The grant reaches the phone as a silent push it hands to this computer.
+    let (g, sent) = grant(&mut agent, &mut apns, "ios", "abcdef0123").await;
+    assert!(g.starts_with(&format!("{}.", agent.id)), "{g}");
+    let r = &sent[0];
+    assert_eq!(r.path, "/3/device/abcdef0123");
+    assert_eq!(header(r, "apns-push-type"), Some("background"));
+    assert_eq!(header(r, "apns-priority"), Some("5"));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&r.body).unwrap(),
+        json!({"aps": {"content-available": 1}, "paneGrant": g, "hostProfileId": "h1"})
+    );
+
     // A Notify clear, as Pane sends it (mobilePushSender.ts).
     let payload = json!({"aps": {"content-available": 1}, "notifyClear": true,
         "eventId": "e1", "hostProfileId": "h1", "notifyId": "n1"});
     agent
         .send(
             json!({"t": "alert", "req": "7", "platform": "ios", "token": "abcdef0123",
-            "pushType": "background", "collapseId": "session-1", "payload": payload}),
+            "pushType": "background", "collapseId": "session-1", "payload": payload, "grant": g}),
         )
         .await;
     assert_eq!(
@@ -1393,7 +1527,8 @@ async fn ios_alerts_reach_apns_with_a_signed_provider_token() {
     agent
         .send(
             json!({"t": "alert", "req": "8", "platform": "ios", "token": "abcdef0123",
-            "pushType": "alert", "payload": {"aps": {"alert": {"title": "Build", "body": "Build is blocked"}}}}),
+            "pushType": "alert", "payload": {"aps": {"alert": {"title": "Build", "body": "Build is blocked"}}},
+            "grant": g}),
         )
         .await;
     assert_eq!(agent.next().await["t"], "ok");
@@ -1416,11 +1551,13 @@ async fn bad_device_token_retries_the_apns_sandbox_once() {
     .await;
     let (env, _) = apns_env(&apns).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let (beef, _) = grant(&mut agent, &mut apns, "ios", "beef").await;
+    let (dead, _) = grant(&mut agent, &mut apns, "ios", "dead").await;
 
     agent
         .send(
             json!({"t": "alert", "req": "1", "platform": "ios", "token": "beef",
-            "pushType": "alert", "payload": {"aps": {}}}),
+            "pushType": "alert", "payload": {"aps": {}}, "grant": beef}),
         )
         .await;
     assert_eq!(
@@ -1434,7 +1571,7 @@ async fn bad_device_token_retries_the_apns_sandbox_once() {
     agent
         .send(
             json!({"t": "alert", "req": "2", "platform": "ios", "token": "dead",
-            "pushType": "alert", "payload": {"aps": {}}}),
+            "pushType": "alert", "payload": {"aps": {}}, "grant": dead}),
         )
         .await;
     assert_eq!(
@@ -1511,12 +1648,16 @@ async fn fcm_env(extra: &[&str]) -> (Env, Provider) {
 async fn android_alerts_reach_fcm_with_an_access_token() {
     let (env, mut fcm) = fcm_env(&[]).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let (g, sent) = grant(&mut agent, &mut fcm, "android", "fcm-device-token").await;
 
     let message = json!({"token": "fcm-device-token", "data": {"eventId": "e1", "notifyClear": "1"},
         "android": {"priority": "high"}});
     for req in ["1", "2"] {
         agent
-            .send(json!({"t": "alert", "req": req, "platform": "android", "message": message}))
+            .send(
+                json!({"t": "alert", "req": req, "platform": "android", "message": message,
+                "grant": g}),
+            )
             .await;
         assert_eq!(
             agent.next().await,
@@ -1525,10 +1666,10 @@ async fn android_alerts_reach_fcm_with_an_access_token() {
         );
     }
 
-    // One token request (cached for the second alert), then the two sends.
-    let t = fcm.next().await;
+    // One token request (cached for every later send), the grant push, then the two sends.
+    let t = &sent[0];
     assert_eq!(t.path, "/token");
-    let form = String::from_utf8(t.body).unwrap();
+    let form = String::from_utf8(t.body.clone()).unwrap();
     let assertion = form
         .strip_prefix("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=")
         .unwrap();
@@ -1552,6 +1693,11 @@ async fn android_alerts_reach_fcm_with_an_access_token() {
     )
     .verify(input.as_bytes(), &sig)
     .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&sent[1].body).unwrap(),
+        json!({"message": {"token": "fcm-device-token", "android": {"priority": "high"},
+            "data": {"paneGrant": g, "hostProfileId": "h1"}}})
+    );
 
     for _ in 0..2 {
         let send = fcm.next().await;
@@ -1612,15 +1758,16 @@ async fn android_alerts_without_a_key_use_the_metadata_server_token() {
     ])
     .await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let (g, _) = grant(&mut agent, &mut fcm, "android", "fcm-device-token").await;
     for req in ["1", "2"] {
         agent
             .send(json!({"t": "alert", "req": req, "platform": "android",
-                "message": {"token": "fcm-device-token", "data": {}}}))
+                "message": {"token": "fcm-device-token", "data": {}}, "grant": g}))
             .await;
         assert_eq!(agent.next().await["status"], 200);
     }
 
-    // One metadata request (the token is cached for the second alert).
+    // One metadata request (the token is cached for the alerts).
     let head = tokio::time::timeout(WAIT, metadata.recv())
         .await
         .unwrap()
@@ -1646,9 +1793,10 @@ async fn android_alerts_without_a_key_use_the_metadata_server_token() {
 async fn alerts_past_the_hourly_limit_are_throttled() {
     let (env, mut fcm) = fcm_env(&["--limit-alerts-per-hour", "2"]).await;
     let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let (g, _) = grant(&mut agent, &mut fcm, "android", "fcm-device-token").await;
     let alert = |req: &str| {
         json!({"t": "alert", "req": req, "platform": "android",
-        "message": {"token": "fcm-device-token", "data": {}}})
+        "message": {"token": "fcm-device-token", "data": {}}, "grant": g})
     };
     for req in ["1", "2"] {
         agent.send(alert(req)).await;
@@ -1661,8 +1809,8 @@ async fn alerts_past_the_hourly_limit_are_throttled() {
         (Some("3"), Some("throttled"))
     );
 
-    // A token request and two sends; the throttled alert never reached FCM.
-    for _ in 0..3 {
+    // Two sends; the throttled alert never reached FCM.
+    for _ in 0..2 {
         fcm.next().await;
     }
     assert!(fcm.received.try_recv().is_err());
@@ -1670,22 +1818,211 @@ async fn alerts_past_the_hourly_limit_are_throttled() {
 
 #[tokio::test]
 async fn alerts_to_one_device_are_capped_across_computers() {
-    let (env, _fcm) = fcm_env(&["--limit-alerts-per-token-per-hour", "2"]).await;
+    let (env, mut fcm) = fcm_env(&["--limit-alerts-per-token-per-hour", "2"]).await;
     let mut a = Agent::connect(&env, &SigningKey::generate()).await;
     let mut b = Agent::connect(&env, &SigningKey::generate()).await;
-    let alert = |req: &str, token: &str| {
+    let (a1, _) = grant(&mut a, &mut fcm, "android", "phone-1").await;
+    let (b1, _) = grant(&mut b, &mut fcm, "android", "phone-1").await;
+    let (b2, _) = grant(&mut b, &mut fcm, "android", "phone-2").await;
+    let alert = |req: &str, token: &str, grant: &str| {
         json!({"t": "alert", "req": req, "platform": "android",
-        "message": {"token": token, "data": {"eventId": "e1"}}})
+        "message": {"token": token, "data": {"eventId": "e1"}}, "grant": grant})
     };
     for req in ["1", "2"] {
-        a.send(alert(req, "phone-1")).await;
+        a.send(alert(req, "phone-1", &a1)).await;
         assert_eq!(a.next().await["t"], "ok");
     }
     // Another computer, same phone: over the phone's limit.
-    b.send(alert("3", "phone-1")).await;
+    b.send(alert("3", "phone-1", &b1)).await;
     assert_eq!(b.next().await["code"], "throttled");
-    b.send(alert("4", "phone-2")).await;
+    b.send(alert("4", "phone-2", &b2)).await;
     assert_eq!(b.next().await["t"], "ok");
+}
+
+#[tokio::test]
+async fn alerts_need_the_grant_the_phone_received_for_that_computer() {
+    let (env, mut fcm) = fcm_env(&[]).await;
+    let mut a = Agent::connect(&env, &SigningKey::generate()).await;
+    let mut b = Agent::connect(&env, &SigningKey::generate()).await;
+    let alert = |token: &str, grant: Option<&str>| {
+        let mut v = json!({"t": "alert", "req": "1", "platform": "android",
+            "message": {"token": token, "data": {"eventId": "e1"}}});
+        if let Some(g) = grant {
+            v["grant"] = json!(g);
+        }
+        v
+    };
+
+    // No grant yet: refused before anything reaches FCM.
+    a.send(alert("phone-1", None)).await;
+    assert_eq!(a.next().await["code"], "unbound");
+    assert!(fcm.received.try_recv().is_err());
+
+    let (g, _) = grant(&mut a, &mut fcm, "android", "phone-1").await;
+    a.send(alert("phone-1", Some(&g))).await;
+    assert_eq!(a.next().await["t"], "ok");
+
+    // A grant works only for the computer and the phone it names.
+    let at = g.rfind('.').unwrap() + 1;
+    let flipped = if &g[at..=at] == "A" { "B" } else { "A" };
+    let forged = format!("{}{flipped}{}", &g[..at], &g[at + 1..]);
+    b.send(alert("phone-1", Some(&g))).await;
+    assert_eq!(b.next().await["code"], "unbound");
+    for (token, grant) in [
+        ("phone-2", g.as_str()),
+        ("phone-1", &forged),
+        ("phone-1", "garbage"),
+    ] {
+        a.send(alert(token, Some(grant))).await;
+        assert_eq!(a.next().await["code"], "unbound", "{token} {grant}");
+    }
+}
+
+#[tokio::test]
+async fn a_grant_is_good_only_for_the_platform_it_names() {
+    // One fake provider answers for both APNs and FCM.
+    let mut both = Provider::start(|path, _| match path {
+        "/token" => (
+            200,
+            r#"{"access_token":"ya29.test","expires_in":3600}"#.to_string(),
+        ),
+        _ => (200, "{}".to_string()),
+    })
+    .await;
+    let kp = rcgen::KeyPair::generate().unwrap();
+    let key_path = both.ca.with_file_name("apns.p8");
+    std::fs::write(&key_path, kp.serialize_pem()).unwrap();
+    let sa = json!({"type": "service_account", "project_id": "pane-test",
+        "private_key": FCM_KEY, "client_email": "sender@pane-test.iam.gserviceaccount.com"});
+    let sa_path = both.ca.with_file_name("sa.json");
+    std::fs::write(&sa_path, sa.to_string()).unwrap();
+    let token_url = format!("{}/token", both.url);
+    let env = Env::start(&[
+        "--apns-key-path",
+        key_path.to_str().unwrap(),
+        "--apns-key-id",
+        "KEY1234567",
+        "--apns-team-id",
+        "TEAM123456",
+        "--apns-url",
+        &both.url,
+        "--fcm-service-account",
+        sa_path.to_str().unwrap(),
+        "--fcm-url",
+        &both.url,
+        "--fcm-token-url",
+        &token_url,
+        "--provider-ca",
+        both.ca.to_str().unwrap(),
+    ])
+    .await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+
+    // A hex token is valid on both platforms; the Android grant must not work for iOS.
+    let (g, _) = grant(&mut agent, &mut both, "android", "abcdef01").await;
+    agent
+        .send(
+            json!({"t": "alert", "req": "1", "platform": "ios", "token": "abcdef01",
+            "pushType": "alert", "payload": {"aps": {}}, "grant": g}),
+        )
+        .await;
+    assert_eq!(agent.next().await["code"], "unbound");
+    agent
+        .send(json!({"t": "alert", "req": "2", "platform": "android",
+            "message": {"token": "abcdef01", "data": {}}, "grant": g}))
+        .await;
+    assert_eq!(agent.next().await["t"], "ok");
+}
+
+#[tokio::test]
+async fn grants_hold_on_every_relay_that_shares_the_registry_secret() {
+    let key = SigningKey::generate();
+    let (first, mut fcm) = fcm_env(&["--registry-secret", "shared"]).await;
+    let mut agent = Agent::connect(&first, &key).await;
+    let (g, _) = grant(&mut agent, &mut fcm, "android", "phone-1").await;
+    let alert = json!({"t": "alert", "req": "1", "platform": "android",
+        "message": {"token": "phone-1", "data": {}}, "grant": g});
+
+    // The computer moves to another region's relay.
+    let (second, _fcm2) = fcm_env(&["--registry-secret", "shared"]).await;
+    let mut moved = Agent::connect(&second, &key).await;
+    moved.send(alert.clone()).await;
+    assert_eq!(moved.next().await["t"], "ok");
+
+    let (other, _fcm3) = fcm_env(&["--registry-secret", "other"]).await;
+    let mut elsewhere = Agent::connect(&other, &key).await;
+    elsewhere.send(alert).await;
+    assert_eq!(elsewhere.next().await["code"], "unbound");
+}
+
+#[tokio::test]
+async fn grant_pushes_are_capped_per_computer_and_phone_apart_from_alerts() {
+    let (env, mut fcm) = fcm_env(&["--limit-alerts-per-token-per-hour", "1"]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let ask = json!({"t": "grant", "req": "g", "platform": "android", "token": "phone-1",
+        "hostProfileId": "h1"});
+    let (g, _) = grant(&mut agent, &mut fcm, "android", "phone-1").await;
+    for _ in 1..3 {
+        agent.send(ask.clone()).await;
+        assert_eq!(agent.next().await["t"], "ok");
+    }
+    agent.send(ask.clone()).await;
+    assert_eq!(agent.next().await["code"], "throttled");
+
+    // Another computer key asking for the same phone spends only its own hour.
+    let mut other = Agent::connect(&env, &SigningKey::generate()).await;
+    other.send(ask).await;
+    assert_eq!(other.next().await["t"], "ok");
+
+    // The phone's alert hour is untouched by its grants.
+    agent
+        .send(json!({"t": "alert", "req": "1", "platform": "android",
+            "message": {"token": "phone-1", "data": {}}, "grant": g}))
+        .await;
+    assert_eq!(agent.next().await["t"], "ok");
+}
+
+#[tokio::test]
+async fn grants_name_their_issue_day_and_expire_after_30_days() {
+    let (env, mut fcm) = fcm_env(&["--registry-secret", "shared"]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let (g, _) = grant(&mut agent, &mut fcm, "android", "phone-1").await;
+    let today = unix_now() / 86_400;
+    let parts: Vec<&str> = g.split('.').collect();
+    assert_eq!(parts[..2], [agent.id.as_str(), today.to_string().as_str()]);
+
+    // The grant key as PROTOCOL.md defines it: HMAC(secret, "pane alert grant v1").
+    let derived = ring::hmac::sign(
+        &ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b"shared"),
+        b"pane alert grant v1",
+    );
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, derived.as_ref());
+    let id = agent.id.clone();
+    let issued = |day: i64| {
+        let tag = ring::hmac::sign(&key, format!("{id}\nandroid\nphone-1\n{day}").as_bytes());
+        format!("{id}.{day}.{}", BASE64URL_NOPAD.encode(tag.as_ref()))
+    };
+    assert_eq!(issued(today), g);
+    let alert = |grant: String| {
+        json!({"t": "alert", "req": "1", "platform": "android",
+            "message": {"token": "phone-1", "data": {}}, "grant": grant})
+    };
+    for (day, answer) in [
+        (today - 30, "ok"),
+        (today - 31, "unbound"),
+        (today + 2, "unbound"),
+    ] {
+        agent.send(alert(issued(day))).await;
+        let got = agent.next().await;
+        let got = got["code"].as_str().unwrap_or(got["t"].as_str().unwrap());
+        assert_eq!(got, answer, "issued on day {day}, today {today}");
+    }
+
+    // The day is signed: moving it forward breaks the grant.
+    agent
+        .send(alert(format!("{}.{}.{}", parts[0], today + 1, parts[2])))
+        .await;
+    assert_eq!(agent.next().await["code"], "unbound");
 }
 
 #[tokio::test]
@@ -1794,5 +2131,132 @@ async fn alerts_without_keys_or_with_bad_frames_are_refused() {
     assert_eq!(
         (answer["req"].as_str(), answer["code"].as_str()),
         (Some("3"), Some("bad-request"))
+    );
+}
+
+#[tokio::test]
+async fn helpers_with_self_signed_certificates_take_each_others_acme_challenges() {
+    use pane_relay::registry::{AcmeTxt, Registry, Update};
+    // A first deploy: both helpers still serve self-signed certificates, which no
+    // relay trusts (no --provider-ca), and each needs the other's challenge.
+    let (us, eu) = (helper("us").await, helper("eu").await);
+    let url = |env: &Env| format!("https://127.0.0.1:{}/v1/registry", env.addr().port());
+    for (to, region) in [(&eu, "us"), (&us, "eu")] {
+        let client = Registry::new(&[url(to)], Some("s3cret".into()), None, 10).unwrap();
+        let name = format!("_acme-challenge.{region}.relay.{D}");
+        let challenge = AcmeTxt {
+            name: name.clone(),
+            values: vec!["token-1".into()],
+        };
+        client.publish_acme(challenge.clone()).await.unwrap();
+        let txt = dns_query(to.dns(), format!("{name}."), RecordType::TXT, false).await;
+        assert_eq!(
+            txt.answers.len(),
+            1,
+            "{region}'s challenge on the other helper"
+        );
+
+        // Only a relay with the secret may set one.
+        let stranger = Registry::new(&[url(to)], Some("wrong".into()), None, 10).unwrap();
+        assert!(stranger.publish_acme(challenge).await.is_err());
+
+        // Computer updates, which carry local addresses, still need a trusted certificate.
+        let update = Update {
+            id: "bbbbbbbbbbbbbbbb".into(),
+            region: region.into(),
+            local: vec![Ipv4Addr::new(192, 168, 1, 2)],
+            txt: Some(vec!["x".into()]),
+            online: true,
+        };
+        let refused = client.publish(update).await.unwrap_err();
+        assert!(refused.contains("tls"), "{refused}");
+    }
+}
+
+/// Posts `update` to `env`'s registry as another relay does.
+async fn post_update(env: &Env, update: Value) {
+    let body = update.to_string();
+    let (code, _) = env
+        .http(
+            "POST",
+            "/v1/registry",
+            "authorization: Bearer s3cret\r\n",
+            &body,
+        )
+        .await;
+    assert_eq!(code, 200);
+}
+
+#[tokio::test]
+async fn a_late_offline_from_the_region_a_computer_left_keeps_its_new_region() {
+    let us = helper("us").await;
+    let agent = Agent::connect(&us, &SigningKey::generate()).await;
+    let name = format!("{}.{D}.", agent.id);
+    let us_ip = Ipv4Addr::new(203, 0, 113, 10);
+    assert_eq!(resolves(us.dns(), name.clone()).await, vec![us_ip]);
+
+    // The ap relay posts that the computer left it after the computer is already on us.
+    post_update(
+        &us,
+        json!({"id": agent.id, "region": "ap", "local": [], "txt": null, "online": false}),
+    )
+    .await;
+
+    assert_eq!(resolves(us.dns(), name).await, vec![us_ip]);
+    assert_eq!(us.status(&agent.id).await["state"], "online");
+}
+
+#[tokio::test]
+async fn the_resync_restores_the_region_of_a_computer_connected_here() {
+    let (url, mut posts) = fake_helper(Some(Duration::ZERO)).await;
+    let us = Env::start(&[
+        "--region",
+        "us",
+        "--dns",
+        "127.0.0.1:0",
+        "--region-ip",
+        "us=203.0.113.10,ap=192.0.2.44",
+        "--registry-secret",
+        "s3cret",
+        "--registry-url",
+        &url,
+        "--registry-resync-secs",
+        "1",
+    ])
+    .await;
+    let agent = Agent::connect(&us, &SigningKey::generate()).await;
+
+    // A stale update from another relay lands after the computer connected here.
+    post_update(
+        &us,
+        json!({"id": agent.id, "region": "ap", "local": [], "txt": null, "online": true}),
+    )
+    .await;
+
+    // Within a resync, this relay answers its own region again...
+    let name = format!("{}.{D}.", agent.id);
+    let us_ip = Ipv4Addr::new(203, 0, 113, 10);
+    let deadline = Instant::now() + WAIT;
+    while resolves(us.dns(), name.clone()).await != vec![us_ip] && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(resolves(us.dns(), name).await, vec![us_ip]);
+
+    // ...and tells the other helpers the same.
+    while posts.try_recv().is_ok() {}
+    let body = tokio::time::timeout(WAIT, posts.recv())
+        .await
+        .expect("a resync")
+        .unwrap();
+    let ours = body
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|u| u["id"] == agent.id.as_str())
+        .cloned()
+        .expect("the resync names the computer");
+    assert_eq!(
+        (&ours["region"], &ours["online"]),
+        (&json!("us"), &json!(true))
     );
 }

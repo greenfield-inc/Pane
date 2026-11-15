@@ -61,6 +61,7 @@ Every flag also reads the environment variable in brackets.
 | `--acme-cache` [`PANE_RELAY_ACME_CACHE`] | | Get the certificate from an ACME CA with DNS-01 and keep the account, key and certificate in this folder (mode 0600); renewed with a third of its lifetime left, without a restart |
 | `--acme-email` [`PANE_RELAY_ACME_EMAIL`] | | Contact email for the ACME account |
 | `--acme-directory` [`PANE_RELAY_ACME_DIRECTORY`] | Let's Encrypt production | ACME directory URL; staging is `https://acme-staging-v02.api.letsencrypt.org/directory` |
+| `--caa-issuer` [`PANE_RELAY_CAA_ISSUER`] | `letsencrypt.org` | Helper role: the CA named in CAA records. `<D>` allows it and no wildcard; each `<id>.<D>` allows it, wildcard included, through DNS-01 only. Set it to your CA's domain with `--acme-directory`, or empty to serve no CAA |
 | `--dev` [`PANE_RELAY_DEV`] | off | Generate a self-signed certificate when `--cert`/`--key` are absent |
 | `--relays` [`PANE_RELAY_RELAYS`] | this region | `us=us.relay.D,eu=eu.relay.D` for `GET /v1/relays` |
 | `--public-ip` [`PANE_RELAY_PUBLIC_IP`] | | IPv4 that DNS returns for `<D>` and for regions without `--region-ip` |
@@ -69,7 +70,7 @@ Every flag also reads the environment variable in brackets.
 | `--dns-responses-per-sec` | 50 | UDP answers a second per client /24 (IPv6 /56); past it answers are truncated (TC=1) so resolvers retry over TCP |
 | `--ns` [`PANE_RELAY_NS`] | `ns1.<D>,ns2.<D>` | Name servers for the zone's NS and SOA records |
 | `--ns-ip` [`PANE_RELAY_NS_IP`] | | `ns1=1.2.3.4,ns2=5.6.7.8`: each name server's IPv4 by its first label; others get `--public-ip` |
-| `--registry-secret` [`PANE_RELAY_REGISTRY_SECRET`] | | Bearer secret for `POST /v1/registry` |
+| `--registry-secret` [`PANE_RELAY_REGISTRY_SECRET`] | | Bearer secret for `POST /v1/registry`, and the key that signs relays' ACME challenge posts to helpers; also the key for alert grants, so relays that share it accept each other's grants (without it, grants end when the relay restarts) |
 | `--registry-url` [`PANE_RELAY_REGISTRY_URL`] | | Comma-separated `https://<host>/v1/registry` of every helper other than this relay; each gets every update and a full re-post every 60 s |
 | `--direct-quic` [`PANE_RELAY_DIRECT_QUIC`] | off | UDP address for QUIC address discovery on direct paths; clients expect port 7842, such as `0.0.0.0:7842` |
 | `--blocklist` [`PANE_RELAY_BLOCKLIST`] | | File of blocked ids, one per line, reread every 5 s when it changes |
@@ -94,7 +95,11 @@ Every flag also reads the environment variable in brackets.
 
 ## Deploy
 
-`docker build -t pane-relay relay/` builds a non-root distroless image. Binding
+Each release publishes the image `ghcr.io/greenfield-inc/pane-relay` for
+linux/amd64 and linux/arm64 (`release.Dockerfile`, from the release's static
+binaries) and attaches [compose.yaml](compose.yaml), pinned to that version, which runs it as
+[Run your own relay](../docs/SELF_HOSTED_RELAY.md) describes.
+`docker build -t pane-relay relay/` builds a non-root distroless image from source. Binding
 port 443 or 53 as non-root works with Docker's default network (it allows
 unprivileged low ports); with host networking, grant `CAP_NET_BIND_SERVICE` or
 listen on a high port behind a port forward. On SIGTERM the relay sends

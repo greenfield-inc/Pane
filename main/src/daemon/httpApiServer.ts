@@ -18,10 +18,11 @@ import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type
 export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
 import { readingMachines } from './readingMachines';
+import { remoteEventStreams } from './remoteEventStreams';
 import {
   GLASSES_CHANNELS,
   GLASSES_EVENT_CHANNELS,
-  glassesKeyInput,
+  glassesKeyInput, glassesSubmitInput,
   glassesSessionInput,
   glassesSource,
   type GlassesAccess,
@@ -77,9 +78,13 @@ interface ConnectedRemoteEventClient {
   remoteRuntimeId: string | null;
   /** The Pane install reading this computer's cards on this stream (`readingMachines`); null for anything else. */
   readerMachineId: string | null;
+  /**
+   * Whether the stream shows this computer to a person (`remoteEventStreams`). A saved machine's
+   * stream, which names its install (`X-Pane-Machine-Id`), only follows Notify and does not.
+   */
+  shown: boolean;
   remoteAddress: string | null;
   connectedAt: string;
-  lastSeenAt: string;
   heartbeatTimer: NodeJS.Timeout;
   /** What a workspace client signed in with, checked again before each event it receives. */
   workspaceCredentials: WorkspaceCredentials | null;
@@ -145,6 +150,8 @@ interface RemoteReadyEventPayload {
   deduplicatesRequestIds: true;
   /** This host's install id (`AppConfig.machineId`), which "Show cards on" names it by. Hosts before it omit it. */
   machineId?: string;
+  /** This host sends `workspace:entry` events, so a Session on another computer hears its members. Hosts before it omit it. */
+  workspaceEntries: true;
 }
 
 interface RemoteHealthPayload {
@@ -246,7 +253,7 @@ interface PaneRemoteHttpApiServerOptions {
   /** Serve workspaces on loopback behind Tailscale Serve, trusting the Tailscale logins `access` allows. */
   workspace?: WorkspaceIdentityOptions;
   /** Whether a port is in the host's forwarded list; port streams reach only those. Without it, none. */
-  isForwardedPort?(port: number): boolean;
+  isForwardedPort?(port: number): boolean | Promise<boolean>;
   /** Where the voice proxy reaches Deepgram's streaming API; Deepgram's own by default. */
   deepgramListenEndpoint?: string;
   /** Sent to signed-in clients on the ready event. */
@@ -265,6 +272,8 @@ interface PairingRequest {
   secret: string;
   label: string;
   phoneId?: string;
+  /** Computer ids the phone already has a token for. */
+  known?: string[];
   /** The caller's IP address; wrong secrets lock out only this source. */
   source: string;
 }
@@ -284,6 +293,7 @@ const pairingBodySchema = boundary.object({
   secret: boundary.optional(boundary.json),
   label: boundary.optional(boundary.json),
   phoneId: boundary.optional(boundary.json),
+  known: boundary.optional(boundary.json),
 });
 
 interface WorkspaceIdentityOptions {
@@ -330,6 +340,24 @@ class RemoteDaemonBadRequestError extends Error {
   }
 }
 
+/**
+ * "Require pairing" off lets callers in without a token, but never while phone access is on: the relay
+ * and the same-network port forward the internet and the LAN to this listener.
+ */
+function pairingWaived(remoteConfig: RemoteDaemonConfig): boolean {
+  return !remoteConfig.host.config.pairingRequired && remoteConfig.relay?.enabled !== true;
+}
+
+const LOOPBACK_HOST_NAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+/** A caller addressing this computer by a loopback name, and no web page from another origin (cross-site requests and DNS rebinding). */
+function isLoopbackBrowserCaller(request: IncomingMessage): boolean {
+  const host = request.headers.host ?? '';
+  if (!LOOPBACK_HOST_NAMES.has(host.replace(/:\d+$/u, '').toLowerCase())) return false;
+  const origin = request.headers.origin;
+  return origin === undefined || origin === `http://${host}`;
+}
+
 export class PaneRemoteHttpApiServer {
   private server: http.Server | null = null;
   private voiceDeepgramWss: WebSocketServer | null = null;
@@ -346,7 +374,7 @@ export class PaneRemoteHttpApiServer {
   private readonly heartbeatIntervalMs: number;
   private readonly analyticsSink?: RemotePaneAnalyticsSink;
   private readonly workspace?: WorkspaceIdentityOptions;
-  private readonly isForwardedPort: (port: number) => boolean;
+  private readonly isForwardedPort: (port: number) => boolean | Promise<boolean>;
   private readonly deepgramListenEndpoint: string;
   private readonly glassesAdmissions = new WeakMap<IncomingMessage, GlassesAdmission>();
   private readonly glasses?: GlassesAccess;
@@ -572,7 +600,10 @@ export class PaneRemoteHttpApiServer {
     }
     const portMatch = PORT_STREAM_PATH.exec(url.pathname);
     if (portMatch) {
-      this.handlePortStreamUpgrade(request, socket, head, Number(portMatch[1]), url);
+      void this.handlePortStreamUpgrade(request, socket, head, Number(portMatch[1]), url).catch(error => {
+        console.error(`[Pane remote daemon] Port ${portMatch[1]} stream failed before it opened; closed the connection:`, error);
+        socket.destroy();
+      });
       return;
     }
     if (url.pathname !== VOICE_DEEPGRAM_STREAM_PATH) {
@@ -580,8 +611,8 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
-    const auth = glasses ? { ok: true as const } : this.authenticateRequest(request, url.searchParams.get('access_token'));
-    if (!auth.ok) {
+    const auth = glasses ? null : this.authenticateRequest(request, url.searchParams.get('access_token'));
+    if (auth && !auth.ok) {
       writeRawHttpError(socket, auth.statusCode, auth.error.message);
       return;
     }
@@ -598,9 +629,10 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
+    const glassesClient = glasses?.client;
+    const identity = glassesClient ? glassesIdentity(glassesClient) : auth?.ok ? this.admittedIdentity(request, auth, url) : null;
     wss.handleUpgrade(request, socket, head, (client) => {
-      const glassesClient = glasses?.client;
-      if (glassesClient) this.trackAdmittedSocket(client, glassesIdentity(glassesClient));
+      if (identity) this.trackAdmittedSocket(client, identity);
       this.handleDeepgramProxySocket(client, deepgramApiKey);
     });
   }
@@ -609,13 +641,24 @@ export class PaneRemoteHttpApiServer {
    * Connects an authenticated client to a host loopback port in the forwarded list and copies raw
    * bytes both ways, one WebSocket per TCP connection the client accepted.
    */
-  private handlePortStreamUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, port: number, url: URL): void {
+  private async handlePortStreamUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer, port: number, url: URL): Promise<void> {
     const auth = this.authenticateRequest(request, url.searchParams.get('access_token'));
     if (!auth.ok) {
       writeRawHttpError(socket, auth.statusCode, auth.error.message, auth.error.code);
       return;
     }
-    if (!this.isForwardedPort(port)) {
+    // Node drops its own error listener on upgrade; a client that resets during the read would
+    // otherwise throw in main.
+    const ignoreReset = () => socket.destroy();
+    socket.on('error', ignoreReset);
+    let forwarded: boolean;
+    try {
+      forwarded = await this.isForwardedPort(port);
+    } finally {
+      socket.removeListener('error', ignoreReset);
+    }
+    if (socket.destroyed) return;
+    if (!forwarded) {
       writeRawHttpError(socket, 403, `Port ${port} is not forwarded from this host`, 'ERR_PORT_NOT_FORWARDED');
       return;
     }
@@ -624,17 +667,7 @@ export class PaneRemoteHttpApiServer {
       writeRawHttpError(socket, 503, 'Port forwarding is not available');
       return;
     }
-    const identity: AdmittedIdentity = {
-      remoteClientId: auth.client?.id ?? null,
-      remoteClientTokenHash: auth.client?.tokenHash ?? null,
-      workspaceCredentials: this.workspace
-        ? {
-          login: request.headers['tailscale-user-login'],
-          authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
-        }
-        : null,
-      glassesOrigin: null,
-    };
+    const identity = this.admittedIdentity(request, auth, url);
     wss.handleUpgrade(request, socket, head, (client) => {
       this.trackAdmittedSocket(client, identity);
       // By name, so a service on either IPv4 or IPv6 loopback answers.
@@ -646,6 +679,21 @@ export class PaneRemoteHttpApiServer {
       });
       client.once('close', () => upstream.destroy());
     });
+  }
+
+  /** Who an admitted WebSocket belongs to, so a later revoke or narrower access closes it. */
+  private admittedIdentity(request: IncomingMessage, auth: Extract<RemoteRequestAuthResult, { ok: true }>, url: URL): AdmittedIdentity {
+    return {
+      remoteClientId: auth.client?.id ?? null,
+      remoteClientTokenHash: auth.client?.tokenHash ?? null,
+      workspaceCredentials: this.workspace
+        ? {
+          login: request.headers['tailscale-user-login'],
+          authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
+        }
+        : null,
+      glassesOrigin: null,
+    };
   }
 
   /**
@@ -849,6 +897,8 @@ export class PaneRemoteHttpApiServer {
     const exchangeRequest: PairingRequest = { secret, label: decodeOptionalBoundary(body.label, boundary.string) ?? '', source: this.sourceAddress(request) };
     const phoneId = decodeOptionalBoundary(body.phoneId, boundary.string);
     if (phoneId) exchangeRequest.phoneId = phoneId;
+    const known = decodeOptionalBoundary(body.known, boundary.array(boundary.string));
+    if (known) exchangeRequest.known = known.slice(0, 100);
     const result = await pairing.exchange(exchangeRequest);
     if (!result.ok) {
       this.writeJson(response, result.status, { ok: false, error: { code: result.code, message: result.message } });
@@ -1078,6 +1128,7 @@ export class PaneRemoteHttpApiServer {
       resync: 'refetch-state-after-reconnect',
       timestamp: new Date().toISOString(),
       deduplicatesRequestIds: true,
+      workspaceEntries: true,
     };
     if (this.paneVersion) ready.paneVersion = this.paneVersion;
     const hostMachineId = this.configManager.getConfig().machineId;
@@ -1098,9 +1149,9 @@ export class PaneRemoteHttpApiServer {
       deviceLabel: getClientDeviceLabelFromHeaders(request),
       remoteRuntimeId: getRemoteRuntimeIdFromRequest(request, url.searchParams.get('runtime_id')),
       readerMachineId: glassesClient ? null : this.readerMachineId(request, auth),
+      shown: !getSingleHeaderValue(request.headers['x-pane-machine-id'])?.trim(),
       remoteAddress: getRemoteAddress(request),
       connectedAt,
-      lastSeenAt: connectedAt,
       heartbeatTimer,
       workspaceCredentials: this.workspace && !glassesClient
         ? {
@@ -1112,6 +1163,7 @@ export class PaneRemoteHttpApiServer {
     };
     this.eventClients.set(clientConnectionId, connectedClient);
     if (connectedClient.readerMachineId) readingMachines.add(connectedClient.readerMachineId);
+    if (connectedClient.shown) remoteEventStreams.add();
     if (connectedClient.remoteRuntimeId && connectedClient.deviceLabel) {
       // A phone answers from an alert button with no stream open; it keeps the name it gave here.
       this.deviceLabelsByRuntime.set(connectedClient.remoteRuntimeId, connectedClient.deviceLabel);
@@ -1321,6 +1373,17 @@ export class PaneRemoteHttpApiServer {
       }
       args = [key];
     }
+    if (channel === 'runpane:panels:submit') {
+      const submit = invokeRequest.args.length === 1 ? glassesSubmitInput(invokeRequest.args[0]) : null;
+      if (!submit) {
+        // Logged without the input, which could be anything the request carried.
+        this.glassesRefused(glasses, admission.source, 'submit');
+        refuse(400, 'ERR_GLASSES_SUBMIT_REFUSED', 'Glasses can send only a panel and the text they dictated. Nothing was sent.',
+          'Update the Pane glasses app, then try again.');
+        return;
+      }
+      args = [submit];
+    }
     if (channel === 'orchestration-sessions:create') {
       const input = invokeRequest.args.length === 1 ? glassesSessionInput(invokeRequest.args[0]) : null;
       if (!input) {
@@ -1430,7 +1493,7 @@ export class PaneRemoteHttpApiServer {
       };
     }
 
-    if (!remoteConfig.host.config.pairingRequired) {
+    if (pairingWaived(remoteConfig) && isLoopbackBrowserCaller(request)) {
       return {
         ok: true,
         client: null,
@@ -1535,7 +1598,7 @@ export class PaneRemoteHttpApiServer {
       return false;
     }
 
-    if (!remoteConfig.host.config.pairingRequired) {
+    if (pairingWaived(remoteConfig)) {
       return true;
     }
 
@@ -1561,6 +1624,7 @@ export class PaneRemoteHttpApiServer {
     );
     this.eventClients.delete(clientConnectionId);
     if (client.readerMachineId) readingMachines.remove(client.readerMachineId);
+    if (client.shown) remoteEventStreams.remove();
     if (!client.stream.writableEnded) {
       client.stream.end();
     }
@@ -1574,7 +1638,7 @@ export class PaneRemoteHttpApiServer {
       return;
     }
     // A revoked device loses its stream within one heartbeat, even when no event is sent.
-    if (client.glassesOrigin !== null && !this.isStillAdmitted(client)) {
+    if (!this.isStillAdmitted(client)) {
       this.dropEventClient(clientConnectionId);
       return;
     }
@@ -1584,12 +1648,11 @@ export class PaneRemoteHttpApiServer {
       writeSseEvent(client.stream, 'heartbeat', {
         timestamp,
       } satisfies RemoteDaemonHeartbeatPayload);
-      client.lastSeenAt = timestamp;
       terminalPanelManager.pruneVisibilityViewersByPrefix(
         this.getRemoteVisibilityViewerPrefix(client.remoteClientId, client.remoteClientTokenHash, client.remoteRuntimeId),
         REMOTE_VISIBILITY_VIEWER_STALE_MS,
       );
-      this.publishConnectedClients();
+      // The published client list changes only on connect and disconnect, so a heartbeat doesn't republish it.
     } catch {
       this.dropEventClient(clientConnectionId);
     }
@@ -1609,7 +1672,6 @@ export class PaneRemoteHttpApiServer {
       deviceLabel: client.deviceLabel,
       remoteAddress: client.remoteAddress,
       connectedAt: client.connectedAt,
-      lastSeenAt: client.lastSeenAt,
     }));
   }
 

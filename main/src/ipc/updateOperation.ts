@@ -43,7 +43,10 @@ export function registerUpdateOperationHandlers(services: AppServices, registry:
   };
   registry.register('runpane:update:host', async () => {
     const all = panels();
-    const remote = (services.configManager.getConfig().remoteDaemon ?? createDefaultRemoteDaemonConfig()).host;
+    const remoteDaemon = services.configManager.getConfig().remoteDaemon ?? createDefaultRemoteDaemonConfig();
+    const remote = remoteDaemon.host;
+    // With phone access on, the listener requires a token even when "Require pairing" is off.
+    const tokenRequired = remote.config.pairingRequired || remoteDaemon.relay?.enabled === true;
     let remoteHealthy = !remote.config.enabled;
     if (remote.config.enabled && remoteHostRuntimeStateStore.getState().status === 'live') {
       try {
@@ -51,7 +54,7 @@ export function registerUpdateOperationHandlers(services: AppServices, registry:
         const base = `http://${listenHost}:${remote.config.listenPort}`;
         const health = await fetch(`${base}/health`, { signal: AbortSignal.timeout(2000) });
         const auth = await fetch(`${base}/invoke`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channel: 'panels:list', args: ['update-auth-probe'] }), signal: AbortSignal.timeout(2000) });
-        remoteHealthy = health.ok && (remote.config.pairingRequired ? auth.status === 401 || auth.status === 403 : auth.ok);
+        remoteHealthy = health.ok && (tokenRequired ? auth.status === 401 || auth.status === 403 : auth.ok);
         await Promise.all([health.body?.cancel(), auth.body?.cancel()]);
       } catch { /* A listening/authentication failure keeps the health gate closed. */ }
     }

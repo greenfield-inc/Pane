@@ -1,4 +1,5 @@
 import { createHash, X509Certificate } from 'node:crypto';
+import fs from 'node:fs';
 import https from 'node:https';
 import net from 'node:net';
 import os from 'node:os';
@@ -70,6 +71,8 @@ export interface PaneDaemonEndpoint {
 
 interface InvokeOptions {
   paneDir?: string;
+  /** Ask this machine's Pane even while `runpane workspace <machine>` routes calls elsewhere. */
+  thisMachine?: boolean;
   /** `Infinity` waits as long as the call takes, for requests that wait on a person. */
   timeoutMs?: number;
   eventInclude?: string[] | null;
@@ -228,10 +231,17 @@ const remoteInvokeResponseSchema = boundary.union(
 );
 
 let routedTarget: RemoteDaemonTarget | null = null;
+let routedToSelf = false;
 
 /** Sends every later daemon call in this process to another machine (`runpane workspace <machine> <command>`). */
-export function routeDaemonCallsTo(target: RemoteDaemonTarget | null): void {
+export function routeDaemonCallsTo(target: RemoteDaemonTarget | null, self = false): void {
   routedTarget = target;
+  routedToSelf = self;
+}
+
+/** The other machine daemon calls go to, or null when they stay on this one (this machine named by its own name included). */
+export function routedOtherMachine(): string | null {
+  return routedTarget && !routedToSelf ? routedTarget.machine : null;
 }
 
 export async function invokeRemoteDaemon<T>(
@@ -300,7 +310,7 @@ export async function invokeDaemon<T>(
   resultSchema: BoundarySchema<T>,
   options: InvokeOptions = {},
 ): Promise<T> {
-  if (routedTarget) {
+  if (routedTarget && !options.thisMachine) {
     return invokeRemoteDaemon(routedTarget, channel, args, resultSchema, options.timeoutMs);
   }
   const appDirectory = resolvePaneDirectory(options.paneDir);
@@ -393,7 +403,10 @@ export async function invokeDaemon<T>(
           `Could not connect to Pane daemon at ${endpoint.path} (${error.code ?? error.message}). Pane is not running for ${appDirectory}, or it was started with a different PANE_DIR. Nothing was changed.`,
           code,
           true,
-          `Open Pane on this machine, then check the connection with ${doctorCommand(options.paneDir)}.`,
+          // Pane creates its data folder on first launch, so without one Pane has never run here.
+          fs.existsSync(appDirectory)
+            ? `Open Pane on this machine, then check the connection with ${doctorCommand(options.paneDir)}.`
+            : `Pane has not run on this machine yet. Install Pane from https://runpane.com (free), open it, then restart this agent session so its Pane tools connect.`,
         ) });
     });
 

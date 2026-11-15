@@ -69,7 +69,17 @@ fn client_config(roots: &[CertificateDer<'static>]) -> Arc<rustls::ClientConfig>
 
 /// Pebble's issuing root, from its management interface.
 async fn pebble_root(mgmt: u16, minica: &CertificateDer<'static>) -> CertificateDer<'static> {
-    let tcp = TcpStream::connect(("127.0.0.1", mgmt)).await.unwrap();
+    // Pebble logs "Listening on" for its ACME port; its management port may open a moment later.
+    let started = Instant::now();
+    let tcp = loop {
+        match TcpStream::connect(("127.0.0.1", mgmt)).await {
+            Ok(tcp) => break tcp,
+            Err(_) if started.elapsed() < Duration::from_secs(10) => {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(e) => panic!("pebble's management port {mgmt} never opened: {e}"),
+        }
+    };
     let name = ServerName::try_from("localhost").unwrap();
     let mut s = tokio_rustls::TlsConnector::from(client_config(std::slice::from_ref(minica)))
         .connect(name, tcp)

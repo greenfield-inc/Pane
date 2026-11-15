@@ -119,7 +119,12 @@ export async function createRelayHost(deps: {
   relay.onPaired((event) => getPaneEventSink().send('relay:paired', event));
   relay.start();
   // A computer without the Pane app's push keys sends its phones' alerts through its relay.
-  setRelayPushChannel({ available: () => relay.isOnline(), send: (alert) => relay.sendAlert(alert) });
+  setRelayPushChannel({
+    available: () => relay.isOnline(),
+    id: () => relay.computerId(),
+    send: (alert) => relay.sendAlert(alert),
+    grant: (request) => relay.requestGrant(request),
+  });
   return {
     service: relay,
     previews,
@@ -128,7 +133,7 @@ export async function createRelayHost(deps: {
       exchange: async (request) => {
         const result = await relay.exchangeSecret(request);
         if (!result.ok) return result;
-        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, []) };
+        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, request.known ?? []) };
       },
       clientAddress: (remoteAddress, remotePort) => relay.clientAddress(remoteAddress, remotePort),
     },

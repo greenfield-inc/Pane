@@ -80,6 +80,10 @@ export interface ParsedArgs {
   only?: string[];
   secretFiles?: string[];
   reason?: string;
+  /** `runpane theme set`: --theme, --colors (JSON text) and --css. --base arrives as baseBranch. */
+  themeId?: string;
+  themeColors?: string;
+  themeCss?: string;
   timeoutMs?: number;
   waitReady?: boolean;
   readyTimeoutMs?: number;
@@ -283,6 +287,9 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--deny', ['autopilot answer']],
   ['--because', ['autopilot answer']],
   ['--reason', ['secrets request', 'autopilot close']],
+  ['--theme', ['theme set']],
+  ['--colors', ['theme set']],
+  ['--css', ['theme set']],
   ['--conversation', ['panels conversation']],
   ['--hook', ['panels conversation']],
 ]);
@@ -449,7 +456,8 @@ function invalidAgentError(value: string): Error {
 const WAIT_FOR_RESULT_COMMANDS: ReadonlySet<string> = new Set(['panels submit', 'panels create', 'panes create']);
 
 function validateWaitForResultArgs(parsed: ParsedArgs): void {
-  if (parsed.waitTimeoutMs !== undefined && !parsed.waitForResult) {
+  // `ask` bounds its one agent turn with --timeout.
+  if (parsed.waitTimeoutMs !== undefined && !parsed.waitForResult && parsed.command !== 'ask') {
     throw new Error('--timeout only applies with --wait.');
   }
   if (!parsed.waitForResult) return;
@@ -1156,6 +1164,18 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.reason = value;
     return;
   }
+  if (flag === '--theme') {
+    parsed.themeId = value;
+    return;
+  }
+  if (flag === '--colors') {
+    parsed.themeColors = value;
+    return;
+  }
+  if (flag === '--css') {
+    parsed.themeCss = value;
+    return;
+  }
   if (flag === '--timeout-ms') {
     const timeoutMs = parsed.command === 'watch' ? parseWatchDuration(flag, value) : Number(value);
     if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || (timeoutMs === 0 && parsed.command !== 'watch')) {
@@ -1302,7 +1322,7 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.message = value;
     return;
   }
-  if (flag === '--query') {
+  if (flag === '--query' || flag === '--search') {
     parsed.query = value;
     return;
   }

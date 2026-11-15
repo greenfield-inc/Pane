@@ -1,11 +1,13 @@
 import { isValidAutoPauseHours, isValidChatReleaseMinutes } from '../../../shared/types/autoPause';
+import { BACKGROUND_ACTIVITY_PROFILES } from '../../../shared/types/backgroundActivity';
 import { isDeepStrictEqual } from 'node:util';
 import type { AppConfig } from '../types/config';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import { PaneError } from '../../../shared/paneError';
 import { AGENT_LAUNCH_PRESETS } from '../../../shared/constants/agentLaunchPresets';
 import { normalizePaneChatAgent } from '../../../shared/types/paneChat';
-import { isTheme, normalizeAppearance, type Theme } from '../../../shared/types/appearance';
+import { DEFAULT_APPEARANCE, isTheme, normalizeAppearance, type Theme, type ThemeChoice } from '../../../shared/types/appearance';
+import { paletteForChoice } from '../../../shared/types/customTheme';
 import { customCommandResumeSchema } from '../../../shared/types/customCommandResume';
 import { boundary, decodeBoundary, BoundaryDecodeError, formatBoundaryPath, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import {
@@ -55,6 +57,8 @@ export interface SetupSources {
   home: string;
   platform: string;
   appVersion: string;
+  /** The Custom theme's base: a setup file carries shipped palettes only, so Custom travels as its base. */
+  customBase?: Theme | null;
 }
 
 const SETUP_FILE_MAX_BYTES = 1024 * 1024;
@@ -73,7 +77,7 @@ const PREFERENCE_CONFIG_KEYS = [
   'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'keyboardShortcutOverrides',
   'kittyKeyboardEnabled', 'terminalCopyOnSelect', 'terminalReferencesEnabled',
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
-  'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'terminalPowerMode',
+  'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'backgroundActivity', 'terminalPowerMode',
   'resumePausedOnOpen', 'autoPauseEnabled', 'autoPauseAfterHours', 'chatIdleReleaseMinutes',
   'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'notesEnabled',
   'sessionCreationPreferences',
@@ -127,6 +131,7 @@ const FIELD_LABELS = {
   keepAwakeWhileSessionsActive: 'Keep awake',
   keepAwakeWhilePluggedIn: 'Keep awake when plugged in',
   keepAwakeOnBattery: 'Keep awake on battery',
+  backgroundActivity: 'Background checks',
   resumePausedOnOpen: 'Resume paused Panes when opened',
   autoPauseEnabled: 'Auto-pause idle Panes',
   autoPauseAfterHours: 'Auto-pause after',
@@ -356,7 +361,7 @@ export async function exportSetup(
   if (included.has('worktreeFileSync')) {
     built.worktreeFileSync = (config.worktreeFileSync ?? []).filter(entry => isRelativePath(entry.path)).map(entry => ({ ...entry }));
   }
-  if (included.has('appearance')) built.appearance = pickDefined(config, APPEARANCE_KEYS);
+  if (included.has('appearance')) built.appearance = shippedPalettes(pickDefined(config, APPEARANCE_KEYS), sources.customBase);
   if (included.has('preferences')) built.preferences = exportPreferences(sources);
 
   const sectionsInOrder: SetupSections = {};
@@ -385,10 +390,30 @@ function exportRows(sources: SetupSources, built: SetupSections, leftOut: SetupL
     if (id === 'skills') row.skills = { homeSkill: built.skills?.homeSkill === true, registerMcp: built.skills?.registerMcp === true };
     if (id === 'appearance') {
       const { appearance } = normalizeAppearance(sources.config);
-      row.appearance = { mode: appearance.appearanceMode, theme: appearance.theme, light: appearance.systemLightTheme, dark: appearance.systemDarkTheme };
+      const palette = (choice: ThemeChoice, fallback: Theme) => paletteForChoice(choice, sources.customBase, fallback);
+      row.appearance = {
+        mode: appearance.appearanceMode,
+        theme: palette(appearance.theme, DEFAULT_APPEARANCE.theme),
+        light: palette(appearance.systemLightTheme, DEFAULT_APPEARANCE.systemLightTheme),
+        dark: palette(appearance.systemDarkTheme, DEFAULT_APPEARANCE.systemDarkTheme),
+      };
     }
     return row;
   });
+}
+
+/** Each slot's palette, with Custom replaced by its base. Slots the source leaves out stay out. */
+function shippedPalettes<T extends { theme?: ThemeChoice; systemLightTheme?: ThemeChoice; systemDarkTheme?: ThemeChoice }>(
+  appearance: T,
+  customBase: Theme | null | undefined,
+): Omit<T, 'theme' | 'systemLightTheme' | 'systemDarkTheme'> & { theme?: Theme; systemLightTheme?: Theme; systemDarkTheme?: Theme } {
+  const { theme, systemLightTheme, systemDarkTheme, ...rest } = appearance;
+  return {
+    ...rest,
+    ...(theme && { theme: paletteForChoice(theme, customBase) }),
+    ...(systemLightTheme && { systemLightTheme: paletteForChoice(systemLightTheme, customBase, DEFAULT_APPEARANCE.systemLightTheme) }),
+    ...(systemDarkTheme && { systemDarkTheme: paletteForChoice(systemDarkTheme, customBase, DEFAULT_APPEARANCE.systemDarkTheme) }),
+  };
 }
 
 function sectionCount(sections: SetupSections, id: SetupSectionId): number {
@@ -478,6 +503,7 @@ const sectionSchemas = {
     keepAwakeWhileSessionsActive: booleanField,
     keepAwakeWhilePluggedIn: booleanField,
     keepAwakeOnBattery: booleanField,
+    backgroundActivity: boundary.optional(boundary.enumeration(...BACKGROUND_ACTIVITY_PROFILES)),
     resumePausedOnOpen: booleanField,
     autoPauseEnabled: booleanField,
     autoPauseAfterHours: boundary.optional(boundary.refine(boundary.number, isValidAutoPauseHours, 'expected whole hours from 1 to 720')),
@@ -843,7 +869,7 @@ export async function previewSetupImport(file: SetupFile, fileName: string, sour
   }
 
   if (incoming.appearance) {
-    const local: SetupAppearance = { ...pickDefined(config, APPEARANCE_KEYS), ...normalizeAppearance(config).appearance };
+    const local: SetupAppearance = shippedPalettes({ ...pickDefined(config, APPEARANCE_KEYS), ...normalizeAppearance(config).appearance }, sources.customBase);
     const { section, changed } = previewValues('appearance', incoming.appearance, local);
     const mode = incoming.appearance.appearanceMode ?? local.appearanceMode;
     if (changed.theme && mode === 'fixed') section.theme = changed.theme;

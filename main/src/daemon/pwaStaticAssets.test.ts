@@ -44,6 +44,19 @@ describe('Remote PWA static assets', () => {
     expect(assetResponse.body?.toString()).toContain('remote asset');
   });
 
+  it('serves every app file so no other site can frame it or add scripts to it', async () => {
+    const distRoot = createRemoteDist();
+    for (const pathname of ['/app/', '/app/assets/remote.js', '/app/sessions/session-1']) {
+      const { headers } = await getRemotePwaAssetResponse(pathname, { distRoot });
+      expect(headers).toMatchObject({
+        'Content-Security-Policy': "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        'X-Frame-Options': 'DENY',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
+      });
+    }
+  });
+
   it('falls back to the entrypoint for app routes', async () => {
     const response = await getRemotePwaAssetResponse('/app/sessions/session-1', { distRoot: createRemoteDist() });
 

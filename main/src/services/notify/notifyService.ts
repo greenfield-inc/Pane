@@ -76,6 +76,8 @@ export interface NotifyServiceDependencies {
   sessionsById?: () => Map<string, NotifySession>;
   /** A Session's name and state, archived too; undefined once it's gone. */
   sessionRecord?: (sessionId: string) => { name: string; paneId: string; archived: boolean } | undefined;
+  /** The saved machine a Session member's Pane runs on, when it isn't this computer. */
+  memberMachine?: (paneId: string) => string | undefined;
   /** Hears Session changes, which can end their items. */
   onSessionsChanged?: (listener: () => void) => () => void;
   /** Every Session's unacknowledged worker reports; a blocked one's question is a card. */
@@ -100,7 +102,7 @@ export interface NotifyServiceDependencies {
 
 /** A computer rings only if used in the last 2 minutes (D-144). */
 const IN_USE_SECONDS = 120;
-/** How often Pane re-reads that, while something waits. */
+/** How often Pane re-reads that, while it matters (`inUseMatters`). */
 const IN_USE_POLL_MS = 5_000;
 const SWEEP_MS = 60_000;
 /** Bursts of Pane and Session events settle before one sweep. */
@@ -137,6 +139,7 @@ export class NotifyService {
   private readonly stoppers: Array<() => void> = [];
   private readonly timers: Array<ReturnType<typeof setInterval>> = [];
   private sweepTimer?: ReturnType<typeof setTimeout>;
+  private inUseTimer?: ReturnType<typeof setInterval>;
   /** Autopilot's chat tab while it's on (set once Autopilot starts): it reads replies no one else can. */
   private autopilotReader?: () => { panelId: string } | undefined;
   /** When each item last came back ready again, as the phone was last told. */
@@ -191,7 +194,10 @@ export class NotifyService {
       openInbox: () => this.navigate('inbox'),
       openSettings: () => this.navigate('settings'),
     });
-    this.queue.on('change', () => this.scheduleBroadcast());
+    this.queue.on('change', () => {
+      this.scheduleBroadcast();
+      this.syncInUsePoll();
+    });
     this.queue.on('chime', () => this.sendToMainWindow('notify:chime'));
     deps.configManager.on('config-updated', (config: AppConfig) => {
       const homeSkill = isPaneHomeSkillEnabled(config);
@@ -200,6 +206,8 @@ export class NotifyService {
       const instructionsChanged = this.applySettings(notifySettings(config));
       // "Show cards on" moves the strip and the chime at once, not on the next poll.
       this.queue.pollInUse();
+      // Turning Approvals back on can bring back a saved card with no queue change.
+      this.syncInUsePoll();
       // The block names the `pane` skill only while it is installed.
       if (homeSkillChanged && !instructionsChanged && this.lastSettings.enabled) this.syncInstructions(true);
       // The floating windows read the palette when they load, so a new palette recreates them.
@@ -225,7 +233,6 @@ export class NotifyService {
       if (stop) this.stoppers.push(stop);
     }
     this.timers.push(setInterval(() => this.queue.sweep(), SWEEP_MS));
-    this.timers.push(setInterval(() => this.queue.pollInUse(), IN_USE_POLL_MS));
     for (const timer of this.timers) timer.unref?.();
     this.queue.sweep();
     this.scheduleBroadcast();
@@ -251,7 +258,9 @@ export class NotifyService {
       // D-81: the worker's status file, which its report named, opens beside the card.
       const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
       const links = [...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)].slice(0, NOTIFY_LINKS_MAX);
-      const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: entry.paneName, agent: agentName(entry.agentType) };
+      // A worker on another machine names it: the card says where to go to see its tab.
+      const machine = this.deps.memberMachine?.(entry.paneId);
+      const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: machine ? `${entry.paneName} on ${machine}` : entry.paneName, agent: agentName(entry.agentType) };
       if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };
       this.queue.addWorkerQuestion({
         id: entry.id,
@@ -284,6 +293,21 @@ export class NotifyService {
       if (session.archived) return 'Session archived';
     }
     return this.deps.askerPaneGone?.(item);
+  }
+
+  /** Polls in use only while it changes what shows, starting from the state as it is now. */
+  private syncInUsePoll(): void {
+    const wanted = this.queue.inUseMatters();
+    if (wanted === (this.inUseTimer !== undefined)) return;
+    if (!wanted) {
+      clearInterval(this.inUseTimer);
+      this.inUseTimer = undefined;
+      return;
+    }
+    this.inUseTimer = setInterval(() => this.queue.pollInUse(), IN_USE_POLL_MS);
+    this.inUseTimer.unref?.();
+    // The person may have come or gone while nothing polled.
+    this.queue.pollInUse();
   }
 
   private scheduleSweep(): void {
@@ -513,6 +537,7 @@ export class NotifyService {
     for (const stop of this.stoppers) stop();
     for (const timer of this.timers) clearInterval(timer);
     clearTimeout(this.sweepTimer);
+    clearInterval(this.inUseTimer);
     for (const timer of this.pushTimers.values()) clearTimeout(timer);
     this.queue.dispose();
     if (this.shortcut) globalShortcut.unregister(this.shortcut);

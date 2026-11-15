@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { UIStateManager } from './uiStateManager';
 
 function createUiStateDb() {
@@ -151,5 +154,53 @@ describe('UIStateManager Pane layout memory', () => {
 
     db.setUIState('paneLayout.pane-p', JSON.stringify({ ...single, version: 2 }));
     expect(manager.getPaneLayout(null, 'pane-p')).toBeNull();
+  });
+});
+
+describe('UIStateManager launch chat', () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'pane-launch-chat-'));
+  const panels = new Map([
+    ['chat', { sessionId: 'pane-1', type: 'chat' }],
+    ['shell', { sessionId: 'pane-1', type: 'terminal' }],
+  ]);
+
+  function setUp(options: { tab?: string; archived?: boolean; worktreePath?: string; view?: 'sessions' | 'project'; paneId?: string | null; remoteHostId?: string } = {}) {
+    const manager = new UIStateManager(createUiStateDb(), () => options.remoteHostId ?? null);
+    manager.saveNavigationMemory(null, { view: options.view ?? 'sessions', projectId: null, paneId: options.paneId === undefined ? 'pane-1' : options.paneId });
+    manager.savePaneLayout(null, 'pane-1', {
+      version: 1,
+      root: { type: 'split', id: 's', direction: 'row', sizes: [50, 50], children: [
+        { type: 'group', id: 'left', panelIds: ['shell'], activePanelId: 'shell' },
+        { type: 'group', id: 'right', panelIds: ['chat', 'shell'], activePanelId: options.tab ?? 'chat' },
+      ] },
+      focusedGroupId: 'right',
+    });
+    const panes = {
+      getSession: (id: string) => id === 'pane-1' ? { archived: options.archived ?? false, worktree_path: options.worktreePath ?? worktree } : undefined,
+      getPanel: (id: string) => panels.get(id) ?? null,
+    };
+    return manager.getLaunchChat(panes);
+  }
+
+  it('reopens the chat tab that was in front in the last Pane shown', () => {
+    expect(setUp()).toEqual({ paneId: 'pane-1', panelId: 'chat' });
+  });
+
+  it('stays on Home when the last tab in front was a terminal', () => {
+    expect(setUp({ tab: 'shell' })).toBeNull();
+  });
+
+  it('stays on Home when the last view was not a Pane', () => {
+    expect(setUp({ paneId: null })).toBeNull();
+    expect(setUp({ view: 'project' })).toBeNull();
+  });
+
+  it('stays on Home when the Pane was archived or its folder is gone', () => {
+    expect(setUp({ archived: true })).toBeNull();
+    expect(setUp({ worktreePath: join(worktree, 'deleted') })).toBeNull();
+  });
+
+  it('stays on Home while another computer is the active host', () => {
+    expect(setUp({ remoteHostId: 'host-b' })).toBeNull();
   });
 });

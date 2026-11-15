@@ -11,8 +11,16 @@ computer, on any network. No account, no Tailscale, no port forwarding.
 3. Tap the link. It opens the Pane app, or Pane in the phone's browser when
    the app is not installed.
 
+The iPhone app is in TestFlight. To get it, ask to join on
+[Discord](https://discord.gg/BdMyubeAZn); the dialog and the pairing page
+link there.
+
 The phone shows the computer's sessions a few seconds later. The code works
 once and expires after 10 minutes; the dialog shows a new one after each use.
+
+Opening the dialog turns phone access on. If you close it before a code ever
+appears (for example after "Can't reach ..."), Pane turns phone access back
+off, so it doesn't keep retrying in the background.
 
 Inside the Pane app you can also scan from **Settings › Add a machine**.
 The app still accepts `pane-remote://` connection codes.
@@ -32,9 +40,10 @@ certificate. The computer holds the private key; it never leaves the
 computer.
 
 - **Same Wi-Fi:** the Pane app connects to the computer directly.
-- **Anywhere else:** Pane's servers in the US, EU and Asia pass the encrypted
-  connection along without reading it. The Pane app and desktop also find a
-  direct internet path when both networks allow it, the way Tailscale does.
+- **Anywhere else:** Pane's servers in the central and western US, the EU
+  and Asia pass the encrypted connection along without reading it. The Pane
+  app and desktop also find a direct internet path when both networks allow
+  it, the way Tailscale does.
 
 Pane's servers see which computer a connection is for, IP addresses, timing
 and byte counts. They never see what you type, what your agents print, your
@@ -91,9 +100,9 @@ of every computer it reached through yours.
 
 - **"This code was already used" or "This code expired":** scan the new code
   the computer shows.
-- **"Can't reach <computer>. Retrying…":** the app keeps retrying while it is
-  open; nothing to do. On the same Wi-Fi it connects directly even when the
-  internet is down.
+- **"Reconnecting to <computer>…":** the app keeps retrying, at least every
+  5 seconds, while it is open; nothing to do. On the same Wi-Fi it connects
+  directly even when the internet is down.
 - **"Asleep since 9:40":** the computer is asleep. Wake it, or turn on Keep
   Awake.
 - **A browser on a Wi-Fi with no internet** can't reach the computer: a
@@ -105,10 +114,11 @@ of every computer it reached through yours.
 
 ## Use your own relay
 
-Set **Settings › Remote Access › More › Relay address** to a relay you run,
-and Pane connects there instead of Pane's servers. Computers link only with
-computers on the same relay. See
-[Run your own relay](SELF_HOSTED_RELAY.md).
+Run a relay on your own machine and domain in a few minutes with Docker
+([Run your own relay](SELF_HOSTED_RELAY.md)), then set **Settings › Remote
+Access › More › Relay address** to its domain. Pane connects there instead of
+Pane's servers, and everything above works the same, on the same Wi-Fi and
+from anywhere. Computers link only with computers on the same relay.
 
 ## Use Tailscale instead
 

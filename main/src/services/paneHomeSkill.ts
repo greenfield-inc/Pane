@@ -10,6 +10,7 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { linuxToUNCPath } from '../utils/wslUtils';
 import { APPROVALS_RULES } from './approvalsRules';
 import { agentsIntroForInstructions, scratchRule } from '../../../packages/runpane/src/paneIntro';
+import { isPanePluginEnabled } from './claudePanePlugin';
 
 /**
  * A user-level skill that teaches any agent in a Pane terminal how to reach
@@ -107,7 +108,14 @@ async function syncPaneHomeSkillNow(
   wslDistros: string[],
 ): Promise<PaneHomeSkillResult[]> {
   const enabled = isPaneHomeSkillEnabled(config);
-  const results = enabled ? await installPaneHomeSkill(dirs) : await removePaneHomeSkill(dirs);
+  // Pane's Claude plugin carries this skill, so Claude's copy steps aside while the plugin is on.
+  const claudeDir = paneHomeSkillDirs()[0];
+  const claudeSettings = path.join(path.dirname(path.dirname(claudeDir)), 'settings.json');
+  const retired = enabled && dirs.includes(claudeDir) && await isPanePluginEnabled(claudeSettings) ? claudeDir : undefined;
+  const results: PaneHomeSkillResult[] = [];
+  for (const dir of dirs) {
+    results.push(...(enabled && dir !== retired ? await installPaneHomeSkill([dir]) : await removePaneHomeSkill([dir])));
+  }
   if (process.platform !== 'win32') return results;
 
   const recorded = await readWslDistroRecord();
@@ -319,6 +327,17 @@ full working rules.
 - Workers end with \`runpane report --state <ready|blocked|failed|done> --summary-file <path>\`
   (\`--question\` when blocked, \`--pr\` and \`--head\` when there is a PR).
 
+## With the pane MCP tools
+
+When the \`pane\` MCP tools are loaded, use them for the jobs above:
+\`agents_start\` starts an agent on a task, \`agents_status\` checks on it, and
+\`agents_send\` sends it a follow-up, each in one call. Answer a menu in an
+agent's terminal with \`panels_input\` \`keys\`, then check \`agents_status\`.
+Show the user a page or file with \`panels_open\` rather than the system
+browser. Before guessing how Pane works, call \`docs_search\`, then
+\`docs_read\`. When you need the person, use \`notify\` as the next section says
+rather than asking in the terminal.
+
 ${APPROVALS_RULES}
 
 ### Posting an approval card
@@ -393,6 +412,15 @@ For an API key, token or password, call the \`secrets_request\` tool (or
 never \`ask\`. Pane saves the value as a Pane secret and returns only saved or
 declined; run commands with it through \`runpane secrets exec\`. If it returns
 \`unavailable\`, ask the person to save it in Pane under Settings > Secrets.
+
+## Restyle Pane
+
+Only when the person asks to change how Pane itself looks: call \`theme_read\`
+(or \`runpane theme read\`) for the tokens, current values, stable selectors and
+guide, then \`theme_set\` (\`runpane theme set --colors <json> --css <text>\`).
+Pane restyles within a second. You can't see the result: make small changes,
+then ask the person how it looks. A request about their project's styles edits
+the project, not Pane.
 
 ## When something looks missing
 

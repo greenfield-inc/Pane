@@ -4,9 +4,11 @@ import { AppState, Platform } from 'react-native';
 
 import { loadHosts } from '@/auth/hosts';
 import { secureStore } from '@/auth/secureStore';
-import { CLIENT_LABEL, DEVICE_LABEL, getRuntimeId, streamingFetch } from '@/daemon/createClient';
-import { parseNotifyPush, type NotifyPush } from '@/features/links/links';
-import { clearPaneNotifications, dismissNotifyAlerts } from '@/features/notifications/device';
+import { CLIENT_LABEL, createDaemonClient, DEVICE_LABEL, getRuntimeId, streamingFetch } from '@/daemon/createClient';
+import { invokeChannel } from '@/daemon/invoke';
+import { parseGrantPush, parseNotifyPush, type NotifyPush } from '@/features/links/links';
+import { clearPaneNotifications, devicePush, dismissNotifyAlerts, getInstallationId } from '@/features/notifications/device';
+import { requestPushRegistration } from '@/features/notifications/usePushSetup';
 
 import { commandForAction, IOS_BUTTONS_OPEN_APP, NOTIFY_CATEGORY, notifyCategories, optionsCategory, sendNotifyCommand, type NotifySendResult } from './notifyActions';
 
@@ -14,7 +16,8 @@ import { commandForAction, IOS_BUTTONS_OPEN_APP, NOTIFY_CATEGORY, notifyCategori
  * Notify's alert buttons, loaded from the app entry (index.ts) before the router so a background
  * launch runs it too. A button press reaches this code through the response listener (iPhone, and
  * Android while Pane is open) or the background task (Android otherwise). The task also takes
- * Android's data-only question messages, which it draws as alerts, and both platforms' silent clears.
+ * Android's data-only question messages, which it draws as alerts, both platforms' silent clears,
+ * and the relay's grants, which go back to the computer they name.
  */
 
 const TASK = 'pane-notify-background';
@@ -46,9 +49,11 @@ Notifications.addNotificationResponseReceivedListener(response => {
 const launchResponse = Notifications.getLastNotificationResponse();
 if (launchResponse) void answerFromAlert(launchResponse);
 
-// iPhone while Pane is open: the alert itself arrives here, not in the task.
+// iPhone while Pane is open: the alert itself arrives here, not in the task. An Android grant may
+// arrive here or in the task; handing it back twice is harmless.
 Notifications.addNotificationReceivedListener(notification => {
   if (Platform.OS === 'ios') void receive(notification.request);
+  else void handBackGrant(notification.request);
 });
 
 async function answerFromAlert(response: Notifications.NotificationResponse): Promise<void> {
@@ -89,6 +94,7 @@ async function postNotice(push: NotifyPush, title: string | null, result: Exclud
 }
 
 async function receive(payload: unknown): Promise<void> {
+  if (await handBackGrant(payload)) return;
   const push = parseNotifyPush(payload);
   if (!push) return;
   if (push.clear) {
@@ -99,6 +105,23 @@ async function receive(payload: unknown): Promise<void> {
   // One alert per question replaces the Pane's "is blocked" alert, which the host can't remove.
   if (push.paneId) await clearPaneNotifications(push.paneId);
   if (Platform.OS === 'android' && push.title) await showAndroidAlert(push);
+}
+
+/**
+ * Hands the relay's grant to the saved computer it names, which then sends this phone's alerts
+ * through Pane's servers. True when `payload` was a grant push.
+ */
+async function handBackGrant(payload: unknown): Promise<boolean> {
+  const push = parseGrantPush(payload);
+  if (!push) return false;
+  const profile = (await loadHosts(secureStore).catch(() => null))?.profiles.find(candidate => candidate.id === push.host);
+  if (!profile) return true;
+  const request = { platform: devicePush.platform, installationId: await getInstallationId(), grant: push.grant };
+  // Best effort: a grant that doesn't arrive is asked for again the next time the phone connects.
+  const kept = await invokeChannel<{ ok: boolean }>(createDaemonClient(profile), 'mobile:push-grant', [request]).catch(() => null);
+  // With Pane open, refresh Settings › Notifications so the computer's row turns On.
+  if (kept?.ok && AppState.currentState === 'active') requestPushRegistration();
+  return true;
 }
 
 /** Android: draw the question's alert, with its buttons, from the data-only message. */

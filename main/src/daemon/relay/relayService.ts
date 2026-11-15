@@ -13,12 +13,12 @@ import { ComputerCertificate, LETS_ENCRYPT_DIRECTORY } from './computerCertifica
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
 import { computerHost, localAddressHost } from './computerNames';
 import { PairingExchange, type PairedEvent, type PairingExchangeRequest, type PairingExchangeResult } from './pairingExchange';
-import { RelayAgent, type RelayAgentState, type RelayAlert } from './relayAgent';
+import { RelayAgent, type RelayAgentState, type RelayAlert, type RelayGrantRequest } from './relayAgent';
 import { findPaneDirect, PaneDirectProcess } from './paneDirect';
 import { DEFAULT_RELAY_DOMAIN } from '../../../../shared/remoteClient/relay';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 
-const PANE_RELAYS = ['us', 'eu', 'asia'].map((region) => `${region}.relay.${DEFAULT_RELAY_DOMAIN}`);
+const PANE_RELAYS = ['us', 'eu', 'asia', 'west'].map((region) => `${region}.relay.${DEFAULT_RELAY_DOMAIN}`);
 /** The port same-network phones reach this computer on; another free port when it is taken. */
 const LOCAL_PORT = 42138;
 const RENEW_CHECK_MS = 12 * 60 * 60_000;
@@ -63,6 +63,8 @@ export class RelayService {
   private localPort: number | null = null;
   private domain: string | null = null;
   private relayHost: string | null = null;
+  /** The target the running relay was started for: `''` means Pane's nearest relay. */
+  private relayTarget: string | null = null;
   private agentState: RelayAgentState = { status: 'stopped' };
   private lastError: string | null = null;
   private renewTimer: NodeJS.Timeout | null = null;
@@ -120,6 +122,18 @@ export class RelayService {
       return Promise.reject(new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so the alert was not sent.', 'Turn on phone access in Settings › Remote Access.'));
     }
     return this.agent.sendAlert(alert);
+  }
+
+  requestGrant(request: RelayGrantRequest): Promise<{ status: number; body: string }> {
+    if (!this.agent) {
+      return Promise.reject(new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so the phone could not confirm it for alerts.', 'Turn on phone access in Settings › Remote Access.'));
+    }
+    return this.agent.requestGrant(request);
+  }
+
+  /** This computer's relay id, once its key exists. */
+  computerId(): string | null {
+    return this.key?.id ?? null;
   }
 
   /** Before the computer sleeps: phones show "Asleep since …". */
@@ -222,7 +236,7 @@ export class RelayService {
       const want = settings?.enabled === true ? this.targetRelay(settings) : null;
       if (want === null) {
         await this.shutdown();
-      } else if (want !== this.relayHost || !this.agent) {
+      } else if (want !== this.relayTarget || !this.agent) {
         await this.shutdown();
         await this.startup(want);
       }
@@ -262,6 +276,7 @@ export class RelayService {
     const key = this.key;
     const { host, port } = target ? parseHostPort(target) : { host: await nearestRelay(PANE_RELAYS), port: 443 };
     this.relayHost = target || host;
+    this.relayTarget = target;
     const ca = readOptionalFile(this.env.PANE_RELAY_CA);
     this.relayApi = { host, port, connectHost: this.env.PANE_RELAY_CONNECT_HOST, ca };
 
@@ -463,6 +478,7 @@ export class RelayService {
     this.terminator = null;
     this.localPort = null;
     this.relayHost = null;
+    this.relayTarget = null;
   }
 }
 

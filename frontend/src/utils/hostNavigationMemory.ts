@@ -3,8 +3,10 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { API } from './api';
+import { focusChatSoon } from '../services/regionFocus';
+import { loadChatTabRoute } from '../components/panels/chatTabRouteModule';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
-import type { HostNavigationMemory, PaneNavigationView } from '../../../shared/types/hostNavigation';
+import type { HostNavigationMemory, LaunchChat, PaneNavigationView } from '../../../shared/types/hostNavigation';
 import type { RestoredNavigation } from '../../../shared/types/updater';
 import type { Project } from '../types/project';
 
@@ -168,10 +170,56 @@ async function readNavigationMemory(hostId: string | null): Promise<HostNavigati
   }
 }
 
+let launchChat: Promise<LaunchChat | null> | null = null;
+
+async function readLaunchChat(): Promise<LaunchChat | null> {
+  try {
+    const response = await window.electronAPI.uiState.getLaunchChat?.();
+    return response?.success ? response.data ?? null : null;
+  } catch (error) {
+    console.warn('[hostNavigationMemory] Failed to find the chat to reopen:', error);
+    return null;
+  }
+}
+
 /**
- * On launch the desktop opens no Pane, but it returns to the Session it had
- * selected on this host. Writes wait meanwhile, so the host's last-used Session
- * is never remembered as this desktop's own.
+ * Asks main, at app start, which chat a launch reopens, and loads the chat's code
+ * meanwhile, so the tab renders without a loading pause once its Pane opens.
+ */
+export function prepareLaunchChat(): void {
+  launchChat ??= readLaunchChat().then(chat => {
+    if (chat) void loadChatTabRoute().catch(() => undefined);
+    return chat;
+  });
+}
+
+/**
+ * A launch whose last view was a chat tab reopens that chat with its message box
+ * focused, so the person can type at once. Any other last view stays on Home
+ * (main decides, `ui-state:get-launch-chat`). Anything opened first, by the
+ * person or a pane:// link, wins; a dialog that holds focus keeps it.
+ */
+export async function restoreLaunchChat(): Promise<void> {
+  prepareLaunchChat();
+  const chat = await launchChat;
+  if (!chat) return;
+  const sessions = useSessionStore.getState();
+  if (sessions.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') return;
+  if (!sessions.sessions.some(session => session.id === chat.paneId)) return;
+  // The Pane opens once the chat's code is in, so the tab renders without a
+  // loading fallback (and its 300 ms reveal throttle).
+  await loadChatTabRoute().catch(() => undefined);
+  const now = useSessionStore.getState();
+  if (now.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') return;
+  focusChatSoon(chat.panelId, { untilInput: true });
+  await now.setActiveSession(chat.paneId);
+}
+
+/**
+ * On launch the desktop opens a Pane only to reopen a chat (restoreLaunchChat),
+ * and it returns to the Session it had selected on this host. Writes wait
+ * meanwhile, so the host's last-used Session is never remembered as this
+ * desktop's own.
  */
 export async function restoreSessionSelection(): Promise<void> {
   await withHostNavigationWritesPaused(async () => {

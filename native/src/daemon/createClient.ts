@@ -46,8 +46,6 @@ export function createDaemonClient(profile: RemotePaneConnectionProfile): Remote
     runtimeId: getRuntimeId,
     clientLabel: CLIENT_LABEL,
     deviceLabel: DEVICE_LABEL,
-    // Mobile networks drop idle sockets silently; the host heartbeats every 5 s.
-    staleStreamTimeoutMs: 20_000,
   });
 }
 

@@ -41,6 +41,7 @@ import {
   type OrchestrationAssociation,
   type OrchestrationAssociationInput,
   type OrchestrationLink,
+  type OrchestrationMemberMachine,
   type OrchestrationPaneOverview,
   type OrchestrationPanelOverview,
   type OrchestrationPanelReport,
@@ -66,7 +67,7 @@ import {
 } from '../../../shared/types/paneChat';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import { OrchestrationSessionStore, type RemoteJournalCursor, type RemoteMemberRecord } from './orchestrationSessionStore';
 import { SessionActivityService, type SessionActivityMembers } from './sessionActivity';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { agentReportData, readPanelAgentReport } from './agentReport';
@@ -75,6 +76,14 @@ import { applyTerminalInput, sessionNameFromMessage } from './sessionAutoName';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
+
+/** The desktop's saved machines, as the Session manager reads remote members through them. */
+export interface RemoteMachineAccess {
+  /** A remote member's row from its machine, or why it could not be read. */
+  readPane(machineId: string, paneId: string): Promise<OrchestrationPaneOverview | 'unreachable' | 'older-pane'>;
+  /** Whether the machine's Pane sends its reports here; undefined until it has connected once. */
+  forwardsReports(machineId: string): boolean | undefined;
+}
 import { CONFIGURED_AGENT_IDS, agentConfig, agentTerminalCommand, configuredAgent, isConfiguredAgent } from '../../../shared/agents';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
@@ -108,6 +117,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       return type === 'terminal' && terminalPanelManager.isMidTurn(panelId, now);
     },
   });
+  private remoteMachines: RemoteMachineAccess | undefined;
 
   constructor(
     private readonly configManager: ConfigManager,
@@ -564,6 +574,72 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
+  /**
+   * Adds a Pane on another saved machine. This computer can't see that Pane, so the caller names it;
+   * its reports reach this Session over the machine's connection (`RemoteMemberEvents`).
+   */
+  async associateRemote(selector: OrchestrationSessionSelector, member: { paneId: string; name: string; panelIds?: string[]; machine: OrchestrationMemberMachine }): Promise<OrchestrationSessionRecord> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const current = this.findSession(data, selector);
+      const owner = data.sessions.find(other => other.id !== current.id && other.associations.some(association => association.paneId === member.paneId));
+      if (owner) {
+        throw new PaneError('ERR_PANE_ALREADY_ASSOCIATED',
+          `Pane ${member.name} on ${member.machine.label} is already associated with Session ${owner.name}`,
+          `It stays with ${owner.name}. To move it, detach it there first with \`runpane sessions detach --session ${owner.id} --pane ${member.paneId}\`, then associate it.`);
+      }
+      const joined = !current.associations.some(item => item.paneId === member.paneId);
+      const association: OrchestrationAssociation = {
+        paneId: member.paneId,
+        panelIds: [...new Set(member.panelIds ?? [])],
+        attachedAt: new Date().toISOString(),
+        machine: { id: member.machine.id, label: member.machine.label },
+        name: member.name,
+      };
+      const nextRecord = {
+        ...current,
+        associations: [...current.associations.filter(item => item.paneId !== member.paneId), association],
+        revision: current.revision + 1,
+        updatedAt: new Date().toISOString(),
+        activity: [...current.activity, this.activity('associated', `Associated Pane “${member.name}” on ${member.machine.label}.`, 'user', member.paneId)],
+      };
+      this.trimActivity(nextRecord);
+      this.store.write(replaceSession(data, nextRecord));
+      this.emitChanged(nextRecord, 'associated', false, joined ? [member.paneId] : []);
+      return this.withPaused(clone(nextRecord));
+    });
+  }
+
+  /** The remote member with this Pane id, and its Session; reads the in-memory store without the lock or a copy. */
+  remoteMember(paneId: string): RemoteMemberRecord | undefined {
+    return this.store.remoteMember(paneId);
+  }
+
+  /** The Pane ids of this saved machine's members in Sessions that are not archived. */
+  remoteMemberPaneIds(machineId: string): string[] {
+    return this.store.remoteMemberPaneIds(machineId);
+  }
+
+  /** Where the next catch-up read of a saved machine's journal starts, kept beside the remote members. */
+  remoteCursor(machineId: string): RemoteJournalCursor | undefined {
+    return this.store.remoteCursor(machineId);
+  }
+
+  saveRemoteCursor(machineId: string, cursor: RemoteJournalCursor): void {
+    this.store.saveRemoteCursor(machineId, cursor);
+  }
+
+  /** Reads remote members from their machines; set by the desktop, which holds the machine connections. */
+  setRemoteMachines(access: RemoteMachineAccess | undefined): void {
+    this.remoteMachines = access;
+  }
+
+  /** False when the saved machine's Pane predates remote members; undefined when that isn't known yet. */
+  remoteMachineForwardsReports(machineId: string): boolean | undefined {
+    return this.remoteMachines?.forwardsReports(machineId);
+  }
+
   async detach(selector: OrchestrationSessionSelector, paneId?: string): Promise<OrchestrationSessionRecord> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
@@ -651,8 +727,9 @@ export class OrchestrationSessionManager extends EventEmitter {
     const sessions = this.store.read().sessions;
     const own = sessions.find(session => session.internalSessionId === paneId);
     if (own) return { title: own.name, groupPaneId: paneId };
-    const paneName = this.sessionManager.getSession(paneId)?.name ?? '';
     const parent = sessions.find(session => session.associations.some(association => association.paneId === paneId));
+    const paneName = this.sessionManager.getSession(paneId)?.name
+      ?? parent?.associations.find(association => association.paneId === paneId)?.name ?? '';
     if (!parent) return { title: paneName, groupPaneId: paneId };
     return { title: paneName ? `${parent.name} › ${paneName}` : parent.name, groupPaneId: parent.internalSessionId };
   }
@@ -694,6 +771,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     if (!record) return undefined;
     return {
       panes: new Map(record.associations.filter(association => {
+        if (association.machine) return true;
         const pane = this.sessionManager.getSession(association.paneId);
         return pane !== undefined && !pane.archived;
       }).map(association => [association.paneId, association.panelIds])),
@@ -1353,6 +1431,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   private async readPaneOverview(association: OrchestrationAssociation): Promise<OrchestrationPaneOverview> {
+    if (association.machine) return this.readRemotePaneOverview(association, association.machine);
     const pane = this.sessionManager.getSession(association.paneId);
     if (!pane) {
       return {
@@ -1419,6 +1498,27 @@ export class OrchestrationSessionManager extends EventEmitter {
     };
     if (report) overview.report = report;
     return overview;
+  }
+
+  /** A Pane's own row, as its machine reports it to a Session on another computer. */
+  async paneOverview(paneId: string): Promise<OrchestrationPaneOverview> {
+    return this.readPaneOverview({ paneId, panelIds: [], attachedAt: new Date().toISOString() });
+  }
+
+  private async readRemotePaneOverview(association: OrchestrationAssociation, machine: OrchestrationMemberMachine): Promise<OrchestrationPaneOverview> {
+    const known: OrchestrationPaneOverview = {
+      paneId: association.paneId,
+      name: association.name ?? association.paneId,
+      archived: false,
+      missing: false,
+      panels: [],
+      machine: { ...machine, state: 'unreachable' },
+    };
+    const read = await this.remoteMachines?.readPane(machine.id, association.paneId).catch(() => undefined);
+    if (!read || read === 'unreachable') return known;
+    if (read === 'older-pane') return { ...known, machine: { ...machine, state: 'older-pane' } };
+    const panels = association.panelIds.length === 0 ? read.panels : read.panels.filter(panel => association.panelIds.includes(panel.panelId));
+    return { ...read, panels, machine: { ...machine, state: 'online' } };
   }
 
   private async readCurrentBranch(pane: Session): Promise<string | undefined> {

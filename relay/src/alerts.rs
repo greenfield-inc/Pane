@@ -1,12 +1,15 @@
 //! Push alerts that computers send through the relay with the Pane app's keys
 //! (PROTOCOL.md, Alerts): APNs over HTTP/2 with an ES256 token, FCM v1 with an
 //! OAuth2 token from a service account key or, keyless, from the GCE metadata server.
+//! Each alert carries a grant: a MAC over (computer, platform, token, issue day) that the relay
+//! pushed to that token, so only a computer the phone handed it to can alert the phone, for 30 days.
 
 use crate::Error;
 use crate::config::Config;
 use bytes::Bytes;
 use data_encoding::BASE64URL_NOPAD;
 use p256::ecdsa::signature::Signer;
+use ring::hmac;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use serde_json::{Value, json};
@@ -24,6 +27,11 @@ const FCM_SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
 const FCM_DEFAULT_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const MAX_ANSWER_BODY: usize = 2048;
 const MAX_READ_BODY: usize = 64 * 1024;
+/// Grant pushes one computer may send one phone an hour, apart from its alerts.
+const GRANTS_PER_COMPUTER_AND_TOKEN_PER_HOUR: usize = 3;
+/// Days a grant works after the day the relay issued it.
+const GRANT_DAYS: u64 = 30;
+const DAY_SECS: u64 = 86_400;
 
 pub struct Alerts {
     apns: Option<Apns>,
@@ -31,7 +39,9 @@ pub struct Alerts {
     http: Http,
     limit: usize,
     token_limit: usize,
-    /// Sliding hours by `id <id>` and `token <device token>`.
+    /// Signs grants; relays that share the registry secret share it.
+    grant_key: hmac::Key,
+    /// Sliding hours by computer, by device, and for grants by computer and device.
     windows: Mutex<HashMap<String, Window>>,
 }
 
@@ -153,14 +163,15 @@ fn android_message_ok(message: &Value) -> bool {
     })
 }
 
+fn ios_token_ok(token: &str) -> bool {
+    !token.is_empty() && token.len() <= 200 && token.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 fn parse(v: &Value) -> Result<Request<'_>, Value> {
     match v["platform"].as_str() {
         Some("ios") => {
             let token = v["token"].as_str().unwrap_or("");
-            if token.is_empty()
-                || token.len() > 200
-                || !token.bytes().all(|b| b.is_ascii_hexdigit())
-            {
+            if !ios_token_ok(token) {
                 return Err(bad("token must be an APNs device token in hex"));
             }
             let push_type = v["pushType"].as_str().unwrap_or("alert");
@@ -305,13 +316,71 @@ impl Alerts {
                 })
             }
         };
+        // Without a registry secret this relay stands alone: its grants last until it restarts.
+        let grant_key = match &cfg.registry_secret {
+            Some(secret) => {
+                let derived = hmac::sign(
+                    &hmac::Key::new(hmac::HMAC_SHA256, secret.as_bytes()),
+                    b"pane alert grant v1",
+                );
+                hmac::Key::new(hmac::HMAC_SHA256, derived.as_ref())
+            }
+            None => hmac::Key::generate(hmac::HMAC_SHA256, &ring::rand::SystemRandom::new())
+                .map_err(|_| "generating the grant key failed")?,
+        };
         Ok(Alerts {
             apns,
             fcm,
             http: Http::new(cfg.provider_ca.as_deref())?,
             limit: cfg.limit_alerts_per_hour,
             token_limit: cfg.limit_alerts_per_token_per_hour,
+            grant_key,
             windows: Mutex::default(),
+        })
+    }
+
+    /// `<id>.<issue day>.<tag>`, the day counted in whole days since the Unix epoch.
+    fn grant(&self, id: &str, platform: &str, token: &str) -> String {
+        let day = now_secs() / DAY_SECS;
+        let tag = hmac::sign(
+            &self.grant_key,
+            format!("{id}\n{platform}\n{token}\n{day}").as_bytes(),
+        );
+        format!("{id}.{day}.{}", BASE64URL_NOPAD.encode(tag.as_ref()))
+    }
+
+    /// Accepts a grant signed for this computer, platform and token, issued within the last
+    /// 30 days (and no later than tomorrow, for relays whose clocks differ).
+    fn granted(&self, id: &str, platform: &str, token: &str, grant: &str) -> bool {
+        let Some((day, tag)) = grant
+            .strip_prefix(id)
+            .and_then(|g| g.strip_prefix('.'))
+            .and_then(|g| g.split_once('.'))
+        else {
+            return false;
+        };
+        let Ok(issued) = day.parse::<u64>() else {
+            return false;
+        };
+        let today = now_secs() / DAY_SECS;
+        if issued > today + 1 || today.saturating_sub(issued) > GRANT_DAYS {
+            return false;
+        }
+        let Ok(tag) = BASE64URL_NOPAD.decode(tag.as_bytes()) else {
+            return false;
+        };
+        let message = format!("{id}\n{platform}\n{token}\n{issued}");
+        hmac::verify(&self.grant_key, message.as_bytes(), &tag).is_ok()
+    }
+
+    fn unconfigured(&self, platform: &str) -> Option<Value> {
+        let configured = match platform {
+            "ios" => self.apns.is_some(),
+            _ => self.fcm.is_some(),
+        };
+        (!configured).then(|| {
+            json!({"t": "error", "code": "unconfigured",
+                "message": format!("This relay has no {platform} push keys.")})
         })
     }
 
@@ -321,21 +390,83 @@ impl Alerts {
             Ok(r) => r,
             Err(answer) => return answer,
         };
-        let (platform, configured, token) = match &request {
-            Request::Ios { token, .. } => ("ios", self.apns.is_some(), *token),
-            Request::Android { message } => (
-                "android",
-                self.fcm.is_some(),
-                message["token"].as_str().unwrap_or(""),
-            ),
+        let (platform, token) = match &request {
+            Request::Ios { token, .. } => ("ios", *token),
+            Request::Android { message } => ("android", message["token"].as_str().unwrap_or("")),
         };
-        if !configured {
-            return json!({"t": "error", "code": "unconfigured",
-                "message": format!("This relay has no {platform} push keys.")});
+        if let Some(answer) = self.unconfigured(platform) {
+            return answer;
         }
-        if let Err(message) = self.admit(id, &format!("{platform} {token}")) {
+        let grant = frame["grant"].as_str().unwrap_or("");
+        if !self.granted(id, platform, token, grant) {
+            tracing::info!(id, platform, "alert refused: no valid grant");
+            return json!({"t": "error", "code": "unbound",
+                "message": "This phone has not confirmed this computer, or its confirmation is over 30 days old. It confirms again when it next connects to the computer."});
+        }
+        let checks = [
+            (format!("id {id}"), self.limit, "computer"),
+            (
+                format!("token {platform} {token}"),
+                self.token_limit,
+                "device",
+            ),
+        ];
+        if let Err(message) = self.admit(id, "alerts", &checks) {
             return json!({"t": "error", "code": "throttled", "message": message});
         }
+        self.send(id, platform, "alert", request).await
+    }
+
+    /// Answers one `grant` frame from computer `id`: pushes the phone a grant for this computer,
+    /// which the phone hands only to a computer it is paired with. Returns the answer frame without `req`.
+    pub async fn send_grant(&self, id: &str, frame: &Value) -> Value {
+        let platform = frame["platform"].as_str().unwrap_or("");
+        let token = frame["token"].as_str().unwrap_or("");
+        let token_ok = match platform {
+            "ios" => ios_token_ok(token),
+            "android" => !token.is_empty() && token.len() <= MAX_FIELD,
+            _ => return bad("platform must be ios or android"),
+        };
+        if !token_ok {
+            return bad("token must be the phone's APNs (hex) or FCM device token");
+        }
+        let host = &frame["hostProfileId"];
+        if !host.as_str().is_some_and(|h| !h.is_empty()) || !short_str(host) {
+            return bad("hostProfileId must be a string of at most 1024 bytes");
+        }
+        if let Some(answer) = self.unconfigured(platform) {
+            return answer;
+        }
+        let checks = [
+            (format!("grants id {id}"), self.limit, "computer"),
+            // Keyed by computer too, so a computer key asking for a leaked token spends only its own hour.
+            (
+                format!("grants {id} {platform} {token}"),
+                GRANTS_PER_COMPUTER_AND_TOKEN_PER_HOUR,
+                "computer and device",
+            ),
+        ];
+        if let Err(message) = self.admit(id, "grants", &checks) {
+            return json!({"t": "error", "code": "throttled", "message": message});
+        }
+        let grant = self.grant(id, platform, token);
+        let payload =
+            json!({"aps": {"content-available": 1}, "paneGrant": grant, "hostProfileId": host});
+        let message = json!({"token": token, "android": {"priority": "high"},
+            "data": {"paneGrant": grant, "hostProfileId": host}});
+        let request = match platform {
+            "ios" => Request::Ios {
+                token,
+                push_type: "background",
+                collapse_id: None,
+                payload: &payload,
+            },
+            _ => Request::Android { message: &message },
+        };
+        self.send(id, platform, "grant", request).await
+    }
+
+    async fn send(&self, id: &str, platform: &str, kind: &str, request: Request<'_>) -> Value {
         let sent = tokio::time::timeout(TIMEOUT, async {
             match request {
                 Request::Ios {
@@ -358,7 +489,7 @@ impl Alerts {
         .unwrap_or_else(|_| Err("the push provider did not answer in 10 s".into()));
         match sent {
             Ok((status, body)) => {
-                tracing::info!(id, platform, status, "alert sent");
+                tracing::info!(id, platform, kind, status, "push sent");
                 let text = String::from_utf8_lossy(&body);
                 let mut end = text.len().min(MAX_ANSWER_BODY);
                 while !text.is_char_boundary(end) {
@@ -367,22 +498,18 @@ impl Alerts {
                 json!({"t": "ok", "status": status, "body": &text[..end]})
             }
             Err(e) => {
-                tracing::warn!(id, platform, error = %e, "alert failed");
+                tracing::warn!(id, platform, kind, error = %e, "push failed");
                 json!({"t": "error", "code": "provider", "message": e})
             }
         }
     }
 
-    /// Counts an alert against the computer's and the device's sliding hours;
-    /// an error names the limit it is over, and nothing is counted then.
-    fn admit(&self, id: &str, device: &str) -> Result<(), String> {
+    /// Counts a push against each of `checks`' sliding hours; an error names the
+    /// limit it is over, and nothing is counted then.
+    fn admit(&self, id: &str, kind: &str, checks: &[(String, usize, &str)]) -> Result<(), String> {
         let now = Instant::now();
         let mut windows = self.windows.lock().unwrap();
-        let checks = [
-            (format!("id {id}"), self.limit, "computer"),
-            (format!("token {device}"), self.token_limit, "device"),
-        ];
-        for (key, limit, what) in &checks {
+        for (key, limit, what) in checks {
             let w = windows.entry(key.clone()).or_default();
             while w.sent.front().is_some_and(|t| now - *t >= HOUR) {
                 w.sent.pop_front();
@@ -390,12 +517,12 @@ impl Alerts {
             if w.sent.len() >= *limit {
                 if w.logged.is_none_or(|t| now - t >= HOUR) {
                     w.logged = Some(now);
-                    tracing::warn!(id, limit, per = what, "alerts throttled");
+                    tracing::warn!(id, limit, per = what, kind, "pushes throttled");
                 }
-                return Err(format!("At most {limit} alerts an hour per {what}."));
+                return Err(format!("At most {limit} {kind} an hour per {what}."));
             }
         }
-        for (key, _, _) in &checks {
+        for (key, _, _) in checks {
             windows.entry(key.clone()).or_default().sent.push_back(now);
         }
         Ok(())

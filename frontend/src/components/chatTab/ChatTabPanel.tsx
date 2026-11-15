@@ -471,7 +471,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         {view && <ChatStatusBar context={view.context} tasks={view.tasks}
           queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
-        <ComposerPrimitive.Root className="chat-composer">
+        <ComposerPrimitive.Root className="chat-composer" data-pane-part="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
           <ComposerPrimitive.Input data-chat-composer={panelId} readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? 'Ask anything'} rows={1}

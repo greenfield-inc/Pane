@@ -8,6 +8,13 @@ import defaultTheme from 'tailwindcss/defaultTheme.js';
  */
 const ATTENTION_PULSES = 3;
 
+/**
+ * A working agent's spinner turns this many times when the agent starts working,
+ * then holds still. 6 turns of 1 s settle at the same moment as the attention
+ * pulse (3 x 2 s), so every status dot on a surface rests together.
+ */
+const WORKING_TURNS = 6;
+
 /** @type {import('tailwindcss').Config} */
 const config = {
   darkMode: 'class',
@@ -283,6 +290,8 @@ const config = {
         shimmer: 'shimmer 2s linear infinite',
         // Tailwind's `animate-pulse`, run a set number of times instead of forever.
         'attention-pulse': defaultTheme.animation.pulse.replace('infinite', String(ATTENTION_PULSES)),
+        // Tailwind's `animate-spin`, run a set number of turns instead of forever.
+        'working-spin': defaultTheme.animation.spin.replace('infinite', String(WORKING_TURNS)),
         'status-working': 'status-working-sweep 1.4s ease-in-out infinite alternate',
         'in': 'in 0.2s ease-out',
         'fade-in': 'fade-in 0.2s ease-out',

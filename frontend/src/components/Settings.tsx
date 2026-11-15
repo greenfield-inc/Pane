@@ -245,7 +245,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
 
   return (
     <>
-      <div data-testid="settings-page" className="flex h-full min-h-0 w-full flex-col bg-bg-primary">
+      <div data-testid="settings-page" data-pane-part="settings" className="flex h-full min-h-0 w-full flex-col bg-bg-primary">
         <div className="pane-drag-area h-[38px] flex-shrink-0 bg-surface-secondary" />
         {!persistence.config && (persistence.isLoading || persistence.configError) ? (
           <div className="relative flex min-h-0 flex-1 items-center justify-center">

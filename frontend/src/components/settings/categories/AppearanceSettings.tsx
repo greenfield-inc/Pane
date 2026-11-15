@@ -1,5 +1,5 @@
 import { Minus, Plus } from 'lucide-react';
-import { IconButton } from '../../ui/Button';
+import { Button, IconButton } from '../../ui/Button';
 import {
   Select,
   SelectContent,
@@ -14,14 +14,26 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { useTheme } from '../../../contexts/ThemeContext';
-import { isTheme, type AppearanceMode, type Theme } from '../../../../../shared/types/appearance';
-import { THEME_OPTION_GROUPS } from '../../../utils/themeOptions';
+import { isThemeChoice, type AppearanceMode, type ThemeChoice } from '../../../../../shared/types/appearance';
+import { CUSTOM_THEME_ID, type CustomThemeState } from '../../../../../shared/types/customTheme';
+import { getThemeLabel, THEME_OPTION_GROUPS } from '../../../utils/themeOptions';
 
-const paletteSelect = (label: string, value: Theme, onChange: (theme: Theme) => void) => (
+const EXAMPLE_PROMPT = 'Tone down Pane\'s borders.';
+
+const customLabel = (custom: CustomThemeState): string =>
+  `${custom.theme?.name ?? 'Custom'} (based on ${custom.base ? getThemeLabel(custom.base) : 'the default'})`;
+
+const paletteSelect = (label: string, value: ThemeChoice, custom: CustomThemeState, onChange: (theme: ThemeChoice) => void) => (
   <div className="w-full min-w-[220px] sm:w-60">
-    <Select value={value} onValueChange={(next) => { if (isTheme(next)) onChange(next); }}>
+    <Select value={value} onValueChange={(next) => { if (isThemeChoice(next)) onChange(next); }}>
       <SelectTrigger aria-label={label}><SelectValue /></SelectTrigger>
       <SelectContent>
+        {(custom.theme || value === CUSTOM_THEME_ID) && (
+          <SelectGroup>
+            <SelectLabel>Custom</SelectLabel>
+            <SelectItem value={CUSTOM_THEME_ID} description="Made by an agent with runpane theme">{customLabel(custom)}</SelectItem>
+          </SelectGroup>
+        )}
         {THEME_OPTION_GROUPS.map((group) => (
           <SelectGroup key={group.family}>
             <SelectLabel>{group.family}</SelectLabel>
@@ -38,12 +50,17 @@ const paletteSelect = (label: string, value: Theme, onChange: (theme: Theme) => 
 export function AppearanceSettings({ persistence }: { persistence: SettingsPersistence }) {
   const config = persistence.config!;
   const scale = config.uiScale ?? 1;
-  const { appearance, activeSystemSlot, setAppearance } = useTheme();
+  const { appearance, activeSystemSlot, setAppearance, customTheme } = useTheme();
 
   const saveScale = (value: number) => persistence.saveConfig('ui-scale', { uiScale: value });
   const saveAppearance = (settingId: 'appearance-mode' | 'theme' | 'system-light-theme' | 'system-dark-theme', patch: Parameters<typeof setAppearance>[0]) => {
     return persistence.runSave(settingId, () => setAppearance(patch));
   };
+  const hasCustomFile = customTheme.theme !== null || customTheme.error !== null;
+  const resetCustomTheme = () => persistence.runSave('custom-theme', async () => {
+    const response = await window.electronAPI.customTheme?.reset();
+    if (response && !response.success) throw new Error(response.error ?? 'Could not reset the Custom theme');
+  });
 
   return (
     <SettingsPage title="Appearance" description="Application-wide interface and sidebar presentation.">
@@ -64,7 +81,7 @@ export function AppearanceSettings({ persistence }: { persistence: SettingsPersi
               description={activeSystemSlot === 'light' ? 'Active now' : 'Saved for when the system switches'}
               saveState={persistence.saveStates['system-light-theme']}
             >
-              {paletteSelect('Light palette', appearance.systemLightTheme, (theme) => {
+              {paletteSelect('Light palette', appearance.systemLightTheme, customTheme, (theme) => {
                 void saveAppearance('system-light-theme', { systemLightTheme: theme });
               })}
             </SettingRow>
@@ -74,16 +91,36 @@ export function AppearanceSettings({ persistence }: { persistence: SettingsPersi
               description={activeSystemSlot === 'dark' ? 'Active now' : 'Saved for when the system switches'}
               saveState={persistence.saveStates['system-dark-theme']}
             >
-              {paletteSelect('Dark palette', appearance.systemDarkTheme, (theme) => {
+              {paletteSelect('Dark palette', appearance.systemDarkTheme, customTheme, (theme) => {
                 void saveAppearance('system-dark-theme', { systemDarkTheme: theme });
               })}
             </SettingRow>
           </>
         ) : (
           <SettingRow settingId="theme" label="Theme" description="Choose Pane's color and surface treatment." saveState={persistence.saveStates.theme}>
-            {paletteSelect('Theme', appearance.theme, (theme) => { void saveAppearance('theme', { theme }); })}
+            {paletteSelect('Theme', appearance.theme, customTheme, (theme) => { void saveAppearance('theme', { theme }); })}
           </SettingRow>
         )}
+        <SettingRow
+          settingId="custom-theme"
+          label="Custom theme"
+          description={customTheme.theme && !customTheme.error
+            ? `${customLabel(customTheme)}. Reset deletes it and returns to its base.`
+            : 'Ask your coding agent to restyle Pane. It writes a Custom theme that applies at once.'}
+          details={(
+            <div className="space-y-1 text-xs leading-relaxed text-text-tertiary">
+              {customTheme.error && (
+                <p className="text-status-error">{customTheme.error} Pane shows the base theme until the file is fixed or reset.</p>
+              )}
+              <p>Try: <span className="select-text font-mono text-text-secondary">"{EXAMPLE_PROMPT}"</span></p>
+            </div>
+          )}
+          saveState={persistence.saveStates['custom-theme']}
+        >
+          <Button type="button" variant="secondary" size="sm" className="w-20" disabled={!hasCustomFile} onClick={() => void resetCustomTheme()}>
+            Reset
+          </Button>
+        </SettingRow>
         <SettingRow
           settingId="high-contrast"
           label="High contrast"

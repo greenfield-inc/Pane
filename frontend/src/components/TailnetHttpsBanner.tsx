@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { ExternalLink, X } from 'lucide-react';
 import { API } from '../utils/api';
+import { useWindowActive } from '../hooks/useWindowActive';
 import { TAILNET_HTTPS_OFF_REASON, TAILSCALE_DNS_ADMIN_URL } from '../../../shared/types/workspaceAccess';
 
-/** Main re-reads Tailscale every minute; reading its cached status this often is cheap. */
+/** Main re-reads Tailscale every minute; reading its cached status this often, while the window is on screen, is cheap. */
 const POLL_MS = 15_000;
 
 /**
@@ -13,9 +14,11 @@ const POLL_MS = 15_000;
 export function TailnetHttpsBanner() {
   const [certificatesOff, setCertificatesOff] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const { visible } = useWindowActive();
 
   useEffect(() => {
-    if (dismissed) return;
+    // Hidden, nothing shows it; coming back on screen reads it at once.
+    if (dismissed || !visible) return;
     let cancelled = false;
     const read = () => {
       API.remoteDaemon.getWorkspaceAccess()
@@ -30,7 +33,7 @@ export function TailnetHttpsBanner() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [dismissed]);
+  }, [dismissed, visible]);
 
   if (!certificatesOff || dismissed) return null;
 

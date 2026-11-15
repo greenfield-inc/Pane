@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
-import { fetchNewRelayProfiles, linkRelayComputers, relayProfile, type RelayLinkPeer } from '@shared/remoteClient';
+import { fetchNewRelayProfiles, linkRelayComputers, relayProfile, RemoteRequestError, type RelayLinkPeer } from '@shared/remoteClient';
 import type { RelayComputer } from '@shared/types/relay';
 
+/** Real computer ids and their keys' fingerprints: an id is the first 80 bits of its fingerprint, in base32. */
+const FINGERPRINTS = {
+  '6cphy4hwgmwpp4nl': '8J58cPYzLPfxq98gpeqRTxP3zkp1kARV_p2rKUkdeTM',
+  'kqyutsssbsalgvyf': 'VDFJylIMgLNXBfifCTjEhM6xs4EiuRSX7-xqISiCiWk',
+  'jkbgxxed5x35pv6o': 'SoJr3IPt99fXzhVYcdF9L_FH_TlSBJ7Rv-Xy_e5b-1g',
+  'q5j35n3lgltya74u': 'h1O-t2sy54B_lBiz16e7PmqNnHCkiRt-_yW5pJDj4C8',
+  'dohp3zsqmo4uk2kn': 'G4795lBjuUVpTRcds0IPBq5CcLguVvcUvt3LbgEP4j0',
+} as const;
+
 function computer(id: string): RelayComputer {
-  return { id, name: id, domain: 'runpane.net', address: `https://${id}.runpane.net`, local: [], fingerprint: `fp-${id}` };
+  return { id, name: id, domain: 'runpane.net', address: `https://${id}.runpane.net`, local: [], fingerprint: (id in FINGERPRINTS ? FINGERPRINTS[id as keyof typeof FINGERPRINTS] : `fp-${id}`) };
 }
 
 /** A computer that mints `<self>-for-<peer>` tokens and records the links it saves. */
-function fakeComputer(id: string, { offline = false } = {}) {
+function fakeComputer(id: string, { offline = false, linkedWith = [] as string[] } = {}) {
   const saved: Array<{ peer: string; token: string }> = [];
   const peer: RelayLinkPeer = {
     computer: computer(id),
@@ -16,6 +25,7 @@ function fakeComputer(id: string, { offline = false } = {}) {
       async invoke<T>(channel: string, args: unknown[] = []): Promise<T> {
         if (offline) throw new TypeError('Network request failed');
         const [arg] = args as [{ peer: RelayComputer; token?: string }];
+        if (channel === 'relay:client:mint-link' && linkedWith.includes(arg.peer.id)) throw new RemoteRequestError(`${arg.peer.id} is already linked`, 409, 'ERR_RELAY_ALREADY_LINKED');
         if (channel === 'relay:client:mint-link') return { token: `${id}-for-${arg.peer.id}` } as T;
         if (channel === 'relay:client:save-link') { saved.push({ peer: arg.peer.id, token: arg.token ?? '' }); return null as T; }
         throw new Error(`unexpected ${channel}`);
@@ -48,6 +58,15 @@ describe('linking a newly paired computer with the phone’s others', () => {
     expect(added.saved).toEqual([{ peer: 'a', token: 'a-for-new' }]);
   });
 
+  it('leaves a pair that is already linked as it is, and counts it as linked', async () => {
+    const added = fakeComputer('new', { linkedWith: ['a'] });
+    const a = fakeComputer('a', { linkedWith: ['new'] });
+
+    expect(await linkRelayComputers(added.peer, [a.peer])).toEqual([]);
+    expect(added.saved).toEqual([]);
+    expect(a.saved).toEqual([]);
+  });
+
   it('never links a computer with itself', async () => {
     const added = fakeComputer('new');
     expect(await linkRelayComputers(added.peer, [fakeComputer('new').peer])).toEqual([]);
@@ -56,15 +75,16 @@ describe('linking a newly paired computer with the phone’s others', () => {
 });
 
 describe('"Your computers"', () => {
-  it('adds only computers at <id>.<domain> on the asking computer’s domain', async () => {
-    const from = relayProfile({ computer: computer('studio'), token: 'tok-studio' });
+  it('adds only computers at <id>.<domain> on the asking computer’s domain, with the key their id names', async () => {
+    const from = relayProfile({ computer: computer('dohp3zsqmo4uk2kn'), token: 'tok-studio' });
     const grants = [
-      { computer: computer('build'), token: 'tok-build' },
+      { computer: computer('q5j35n3lgltya74u'), token: 'tok-build' },
+      { computer: { ...computer('kqyutsssbsalgvyf'), fingerprint: FINGERPRINTS.jkbgxxed5x35pv6o }, token: 'swapped key' },
       { computer: { ...computer('evil'), domain: 'evil.test', address: 'https://evil.evil.test' }, token: 'x' },
       { computer: { ...computer('spoof'), address: 'https://evil.test' }, token: 'y' },
     ];
     const client = { invoke: async <T>() => grants as T };
     const added = await fetchNewRelayProfiles(client, from, [from]);
-    expect(added.map(p => p.baseUrl)).toEqual(['https://build.runpane.net']);
+    expect(added.map(p => p.baseUrl)).toEqual(['https://q5j35n3lgltya74u.runpane.net']);
   });
 });

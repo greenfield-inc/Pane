@@ -15,6 +15,8 @@ const IOS_APP_ID: &str = "FBM5YSF467.com.dcouple.pane.mobile";
 const ANDROID_PACKAGE: &str = "com.dcouple.pane.mobile";
 /// A registry batch: up to 5,000 updates of a few hundred bytes each.
 const MAX_BODY: usize = 4 * 1024 * 1024;
+/// The largest ACME challenge post: a name and at most two short values.
+const MAX_ACME_BODY: usize = 4 * 1024;
 
 pub async fn serve(state: Arc<State>, mut s: BoxStream, peer: IpAddr) {
     let Ok(Ok((req, rest))) =
@@ -184,34 +186,53 @@ async fn registry_post(
     s: &mut BoxStream,
     acme: bool,
 ) -> std::io::Result<()> {
-    let authorized = match (&state.cfg.registry_secret, req.header("authorization")) {
-        (Some(secret), Some(auth)) => auth
-            .strip_prefix("Bearer ")
-            .is_some_and(|given| constant_time_eq(given.as_bytes(), secret.as_bytes())),
-        _ => false,
-    };
-    if !authorized {
+    let secret = state.cfg.registry_secret.as_deref();
+    let auth = req.header("authorization").unwrap_or("");
+    let bearer = secret.is_some_and(|secret| {
+        auth.strip_prefix("Bearer ")
+            .is_some_and(|given| constant_time_eq(given.as_bytes(), secret.as_bytes()))
+    });
+    // ACME challenge posts may instead carry a MAC over the request, checked once the
+    // body is read (registry.rs, `post`).
+    let signed = acme && secret.is_some() && auth.starts_with("Pane-HMAC ");
+    if !bearer && !signed {
         return respond_json(s, 401, &json!({"error": "bad or missing registry secret"})).await;
     }
     let len: usize = req
         .header("content-length")
         .and_then(|l| l.parse().ok())
         .unwrap_or(0);
-    if len > MAX_BODY {
+    // A signed post is unauthenticated until its MAC is checked over the body: refuse a stale
+    // one, or one too large to be a challenge, before reading anything.
+    if !bearer && crate::registry::acme_mac_fresh(auth).is_none() {
+        return respond_json(s, 401, &json!({"error": "bad or missing registry secret"})).await;
+    }
+    if len > MAX_BODY || (!bearer && len > MAX_ACME_BODY) {
         return respond_json(s, 413, &json!({"error": "body too large"})).await;
     }
     let mut chunk = vec![0u8; 64 * 1024];
-    while body.len() < len {
-        let want = chunk.len().min(len - body.len());
-        let n = tokio::time::timeout(Duration::from_secs(10), s.read(&mut chunk[..want]))
-            .await
-            .unwrap_or(Ok(0))?;
-        if n == 0 {
-            break;
+    // One deadline for the whole body, so a sender can't hold the connection a byte at a time.
+    let read = async {
+        while body.len() < len {
+            let want = chunk.len().min(len - body.len());
+            let n = s.read(&mut chunk[..want]).await?;
+            if n == 0 {
+                break;
+            }
+            body.extend_from_slice(&chunk[..n]);
         }
-        body.extend_from_slice(&chunk[..n]);
-    }
+        Ok::<(), std::io::Error>(())
+    };
+    tokio::time::timeout(Duration::from_secs(10), read)
+        .await
+        .unwrap_or(Ok(()))?;
     body.truncate(len);
+    if !bearer
+        && !secret
+            .is_some_and(|secret| crate::registry::acme_mac_ok(secret, auth, &req.path, &body))
+    {
+        return respond_json(s, 401, &json!({"error": "bad or missing registry secret"})).await;
+    }
     if acme {
         return match serde_json::from_slice::<AcmeTxt>(&body) {
             Ok(t) if crate::dns::is_relay_acme_name(state, &t.name) && valid_txt(&t.values) => {

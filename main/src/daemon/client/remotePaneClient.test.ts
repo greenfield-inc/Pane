@@ -417,6 +417,43 @@ describe('RemotePaneClient', () => {
     await client.disconnect();
   });
 
+  it('never gives up on a computer reached through a relay, and reconnects when it answers again', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const connectionStates: string[] = [];
+
+    const client = new RemotePaneClient({
+      id: 'profile-relay-outage',
+      label: 'Studio Mac',
+      baseUrl: server.baseUrl,
+      token: 'secret-token',
+      transport: 'http+sse',
+      relay: { computerId: 'studio', fingerprint: 'unused-over-http' },
+    }, {
+      heartbeatStaleTimeoutMs: 20,
+      reconnectMaxDelayMs: 20,
+      reconnectDurationMs: 100,
+      onConnectionStateChange(status) {
+        connectionStates.push(status);
+      },
+    });
+
+    await client.connect({ retryOnInitialFailure: false });
+    server.setEventsReady(false);
+
+    // Well past the outage budget a tailnet profile gives up at, it is still retrying.
+    await sleep(400);
+    expect(connectionStates).not.toContain('error');
+    const attempts = server.getEventRequestCount();
+    await sleep(100);
+    expect(server.getEventRequestCount()).toBeGreaterThan(attempts);
+
+    server.setEventsReady(true);
+    await waitFor(() => connectionStates.at(-1) === 'connected');
+
+    await client.disconnect();
+  });
+
   it('stays quiet while suspended for system sleep and reconnects on resume', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);

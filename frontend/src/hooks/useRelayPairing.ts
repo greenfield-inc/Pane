@@ -15,7 +15,7 @@ const SETUP_FAILED = "Pane's servers didn't answer";
 /**
  * Phone pairing while `open`: turns phone access on if it is off, waits for this computer to be
  * ready, then keeps one current pairing code. A used code (`relay:paired`) or an expired one is
- * replaced at once.
+ * replaced at once. Phone access it turned on is turned off again if it closes before ever being ready.
  */
 export function useRelayPairing(open: boolean) {
   const [status, setStatus] = useState<RelayStatus | null>(null);
@@ -29,6 +29,9 @@ export function useRelayPairing(open: boolean) {
   // Bumped per request and on close, so a late answer never lands on a newer state.
   const generation = useRef(0);
   const requesting = useRef(false);
+  /** Set when this opening turned phone access on: whether the host listener was already on. */
+  const turnedOn = useRef<{ hostWasOn: boolean } | null>(null);
+  const reachedReady = useRef(false);
 
   /** Reads the status and turns phone access on when it is off, or always when `restart` is set. */
   const prepare = useCallback(async (restart: boolean) => {
@@ -36,6 +39,10 @@ export function useRelayPairing(open: boolean) {
     setFailure(null);
     try {
       let next: RelayStatus = await window.electronAPI.invoke('relay:status');
+      if (!next.enabled && !turnedOn.current) {
+        const config = await window.electronAPI.remoteDaemon.getConfig();
+        turnedOn.current = { hostWasOn: config.data?.host.config.enabled === true };
+      }
       if (restart || !next.enabled) next = await window.electronAPI.invoke('relay:set-enabled', true);
       if (asked === generation.current) setStatus(next);
     } catch (cause) {
@@ -62,11 +69,16 @@ export function useRelayPairing(open: boolean) {
       requesting.current = false;
       offStatus();
       offPaired();
+      const undo = reachedReady.current ? null : turnedOn.current;
+      turnedOn.current = null;
+      reachedReady.current = false;
+      if (undo) void turnOff(undo.hostWasOn);
     };
   }, [open, prepare]);
 
   const ready = open && status?.phase === 'ready';
   useEffect(() => {
+    if (ready) reachedReady.current = true;
     if (!ready || code || failure || requesting.current) return;
     requesting.current = true;
     const asked = ++generation.current;
@@ -114,5 +126,15 @@ export function useRelayPairing(open: boolean) {
   else if (renewal === 'expired' && status?.phase === 'ready') view = { step: 'renewing' };
   else view = { step: 'preparing' };
 
-  return { view, paired, renewal, retry };
+  return { view, paired, renewal, retry, relay: status?.relay ?? null };
+}
+
+/** Undoes a pairing attempt that never got ready, so later launches don't keep retrying the relay. */
+async function turnOff(hostWasOn: boolean): Promise<void> {
+  try {
+    await window.electronAPI.invoke('relay:set-enabled', false);
+    if (!hostWasOn) await window.electronAPI.remoteDaemon.updateHostConfig({ enabled: false });
+  } catch (cause) {
+    console.warn('[relay] Could not turn phone access back off:', cause);
+  }
 }

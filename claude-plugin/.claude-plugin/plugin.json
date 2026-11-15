@@ -1,0 +1,24 @@
+{
+  "name": "pane",
+  "displayName": "Pane",
+  "version": "1.0.0",
+  "description": "Start, check on and message coding agents in Pane, the desktop app that runs Claude Code, Codex and Cursor in parallel git worktrees. Requires the free Pane app.",
+  "author": {
+    "name": "Dcouple",
+    "url": "https://runpane.com"
+  },
+  "homepage": "https://runpane.com",
+  "repository": "https://github.com/greenfield-inc/Pane",
+  "license": "AGPL-3.0",
+  "keywords": ["agents", "worktrees", "orchestration", "codex", "cursor"],
+  "icon": "./assets/icon.png",
+  "documentationUrl": "https://runpane.com/docs/claude-plugin",
+  "supportUrl": "https://github.com/greenfield-inc/Pane/issues",
+  "privacyPolicyUrl": "https://runpane.com/privacy#claude-plugin",
+  "mcpServers": {
+    "pane": {
+      "command": "npx",
+      "args": ["-y", "runpane@2.4.221", "mcp", "--toolsets", "plugin"]
+    }
+  }
+}

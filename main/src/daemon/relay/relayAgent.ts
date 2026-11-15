@@ -53,12 +53,18 @@ export class RelayRequestError extends Error {
   }
 }
 
-export type RelayAlert =
+/** An alert as the computer builds it for the provider (relay/PROTOCOL.md, Alerts). */
+export type RelayAlertPayload =
   | { platform: 'ios'; token: string; pushType: 'alert' | 'background'; collapseId?: string; payload: object }
   | { platform: 'android'; message: object };
+/** `grant`: what the phone handed back from the relay's grant push for this computer and token. */
+export type RelayAlert = RelayAlertPayload & { grant: string };
+
+/** Asks the relay to push the phone a grant for this computer; `hostProfileId` tells the phone which computer it is for. */
+export interface RelayGrantRequest { platform: 'ios' | 'android'; token: string; hostProfileId: string }
 
 /** A request to the relay; its answer is an `ok` or `error` frame with the same `req`. */
-type RelayRequest = { t: 'txt'; values: string[] } | ({ t: 'alert' } & RelayAlert);
+type RelayRequest = { t: 'txt'; values: string[] } | ({ t: 'alert' } & RelayAlert) | ({ t: 'grant' } & RelayGrantRequest);
 
 /** A frame the computer sends to the relay (relay/PROTOCOL.md). */
 type ComputerFrame =
@@ -67,14 +73,16 @@ type ComputerFrame =
   | { t: 'hello'; v: 1; spki: string; sig: string; local: string[]; name: string }
   | (RelayRequest & { req: string });
 
-const PING_INTERVAL_MS = 25_000;
-const SILENCE_TIMEOUT_MS = 75_000;
+/** The relay answers each ping at once, so a link with no answer for SILENCE_TIMEOUT_MS is dead: noticed within about 10 s. */
+const PING_INTERVAL_MS = 5_000;
+const SILENCE_TIMEOUT_MS = 8_000;
 const MAX_FRAME_BYTES = 64 * 1024;
 /**
  * Reconnect delays, each jittered down to half so computers spread out after a relay restart. The
- * 10 s cap has every computer back well inside the 30 s phones get to reconnect.
+ * first redial is almost immediate; the 10 s cap has every computer back well inside the 30 s
+ * phones get to reconnect.
  */
-const RETRY_MS = [1_000, 2_000, 4_000, 8_000, 10_000];
+const RETRY_MS = [250, 1_000, 2_000, 4_000, 8_000, 10_000];
 /** After the relay refuses this computer (full, over its limits, blocked), wait this long before asking again. */
 const REFUSED_RETRY_MS = 5 * 60_000;
 const REFUSAL_CODES = new Set(['full', 'over-limit', 'blocked']);
@@ -93,6 +101,7 @@ export class RelayAgent {
   private retryTimer: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
   private lastHeard = 0;
+  private lastTick = 0;
   private nextRequest = 1;
   private readonly requests = new Map<string, { resolve(frame: RelayFrame): void; reject(error: Error): void }>();
   private state: RelayAgentState = { status: 'stopped' };
@@ -144,6 +153,12 @@ export class RelayAgent {
   /** Delivers a push alert with the Pane app's keys held by the relay (relay/PROTOCOL.md, Alerts). */
   async sendAlert(alert: RelayAlert): Promise<{ status: number; body: string }> {
     const answer = await this.request({ t: 'alert', ...alert });
+    return { status: answer.status ?? 0, body: answer.body ?? '' };
+  }
+
+  /** Has the relay push the phone a grant for this computer, which the phone hands back with `mobile:push-grant`. */
+  async requestGrant(request: RelayGrantRequest): Promise<{ status: number; body: string }> {
+    const answer = await this.request({ t: 'grant', ...request });
     return { status: answer.status ?? 0, body: answer.body ?? '' };
   }
 
@@ -285,8 +300,14 @@ export class RelayAgent {
 
   private startPings(): void {
     if (this.pingTimer) clearInterval(this.pingTimer);
+    this.lastTick = Date.now();
     this.pingTimer = setInterval(() => {
-      if (Date.now() - this.lastHeard > SILENCE_TIMEOUT_MS) {
+      const now = Date.now();
+      // A late tick means this process was stalled (sleep, a debugger): the relay's answer may be
+      // waiting unread, so the link gets one more ping before it is judged.
+      if (now - this.lastTick > 2 * PING_INTERVAL_MS) this.lastHeard = now;
+      this.lastTick = now;
+      if (now - this.lastHeard > SILENCE_TIMEOUT_MS) {
         this.control?.destroy(new Error('The relay stopped answering.'));
         return;
       }
@@ -317,7 +338,8 @@ export class RelayAgent {
 
   private scheduleRetry(reason: string): void {
     if (this.stopped || this.retryTimer) return;
-    const delay = this.refused ? REFUSED_RETRY_MS : RETRY_MS[Math.min(this.attempt, RETRY_MS.length) - 1] ?? RETRY_MS[RETRY_MS.length - 1];
+    // `attempt` is 0 when a link that was online dropped: that redial gets the shortest delay.
+    const delay = this.refused ? REFUSED_RETRY_MS : RETRY_MS[Math.min(Math.max(this.attempt, 1), RETRY_MS.length) - 1];
     this.refused = false;
     this.setState({ status: 'connecting', attempt: this.attempt, lastError: reason });
     this.retryTimer = setTimeout(() => {

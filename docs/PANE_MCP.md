@@ -40,13 +40,22 @@ Claude Code and Claude chat tabs that Pane starts reach the same tools over HTTP
 - Settings apply at once. With **Register Pane tools** off, new tabs get no token, and a running tab's calls get `403` until it restarts on stdio. A toolsets change applies to the next request.
 - Serving is stateless. A call ends, and its `runpane` process stops, when the agent drops the request; a separate `notifications/cancelled` message has no request to cancel. An agent that names itself only at `initialize` is named after the tab's agent, so `notify` keeps its long wait.
 
+## Claude plugin
+
+Pane's Claude plugin (the [`claude-plugin/`](../claude-plugin/README.md) folder) gives Claude Code and Cowork the `pane` and `pane-manage-and-message-agents` skills and this server, started as `npx -y runpane@<pinned version> mcp --toolsets plugin`. The pinned runpane hands each call to the installed Pane's own CLI when that one is newer, so the tools follow the installed Pane.
+
+While the plugin is on in Claude Code's user settings (`enabledPlugins` has `pane@<marketplace>` set to `true`), Pane steps aside so Claude sees one Pane server and one copy of each skill:
+
+- On launch, Pane removes its own `pane` entry from Claude Code's user config and its own Claude copies of the two skills. If Pane is already running when you turn the plugin on, restart Pane so it removes them. After you turn the plugin off, restart Pane to bring them back. Codex and Cursor registration is unchanged.
+- Claude terminal tabs that Pane points at its HTTP server also deny the plugin's server (`deniedMcpServers`, `plugin:pane:pane`). Claude keeps only the last `--settings`, so the deny goes into the one settings file Pane already gives each Claude tab for its prompt hooks, merged with any settings the command passes (such as a Session's folder access). Chat tabs get the same deny in their session settings.
+
 ## Toolsets
 
 A server that offers dozens of tools makes models, especially smaller ones, worse at choosing the right one. So by default the server serves a lean `core` toolset, and everything else is opt-in:
 
 | Toolset | Tools |
 |---|---|
-| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `panels_open` (show a page or file beside the agent), `repos_list`, `repos_add`, `repos_rename`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_adopt`, `panes_rename`, `panes_archive`, `panes_restore`, `sessions_create`, `sessions_associate`, `sessions_pin`, `links_create`, `docs_search`, `docs_read`, `doctor`, `notify` (ask the person and wait for the answer), `secrets_request` (ask the person for a secret, saved as a [Pane secret](PANE_SECRETS.md); the value never comes back), the four `workspace` tools, and the seven loop tools (`loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete`) |
+| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `panels_open` (show a page or file beside the agent), `repos_list`, `repos_add`, `repos_rename`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_adopt`, `panes_rename`, `panes_archive`, `panes_restore`, `sessions_create`, `sessions_associate`, `sessions_pin`, `links_create`, `docs_search`, `docs_read`, `doctor`, `notify` (ask the person and wait for the answer), `secrets_request` (ask the person for a secret, saved as a [Pane secret](PANE_SECRETS.md); the value never comes back), `theme_read` and `theme_set` (restyle Pane itself with a [Custom theme](APPEARANCE.md#custom-theme), only when the person asks), the four `workspace` tools, and the seven loop tools (`loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete`) |
 | `agents` | the three agent tasks, `workspace_state`, `watch` |
 | `panes` | create, adopt, list, archive, restore, pin, unpin, rename, focus, pause, resume, cost, run and stop the run script, move to a folder, `folders_list`, `folders_create` |
 | `panels` | create, open, list, output, screen, input, submit, submit-composer, wait, pause, resume, last-message, close |
@@ -58,9 +67,10 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 | `repos` | the repository tools, including `repos_get` and `repos_update` (a repo's Project Settings: build, run and archive scripts, worktree folder) |
 | `secrets` | `secrets_list`, `secrets_delete`. No tool sets or reads a value: agents use secrets through `runpane secrets exec` ([Pane secrets](PANE_SECRETS.md)) |
 | `docs`, `links`, `admin` | documentation, deep-link, and diagnostic tools |
+| `plugin` | `core` without the four `workspace` tools: what the [Claude plugin](#claude-plugin) serves |
 | `all` / `read` | every tool / every read-only tool |
 
-Choose with `runpane mcp --toolsets core,git` (comma-separated). `--read-only` keeps only read-only tools from whatever is selected. The Pane app registers `core` by default; **Settings → AI & Agents → Pane tools to register** switches it to `all`. Each command's toolsets live in the contract's `toolsets` field.
+Choose with `runpane mcp --toolsets core,git` (comma-separated). `--read-only` keeps only read-only tools from whatever is selected. The Pane app registers `core` by default; **Settings → AI & Agents → Pane tools to register** switches it to `all`. Each command's toolsets live in the contract's `toolsets` field. A command's `cliOnlyFlags` stay out of its tool: over MCP, `doctor` diagnoses only, and `--fix` and `--report` run from the CLI.
 
 ## The three agent jobs
 
@@ -191,7 +201,7 @@ A few flags are left out. `--json` is always passed. `--follow` and `--until-eve
 
 ## Confirmation
 
-Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `secrets_request`, `report`, and the `sessions_*` and lock tools have no `yes`. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
+Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `secrets_request`, `theme_set`, `report`, and the `sessions_*` and lock tools have no `yes`. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
 
 ## Agent guidance
 

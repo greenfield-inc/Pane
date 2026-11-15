@@ -88,7 +88,7 @@ const GLASSES_RATE_LIMITS = { vouch: 5 * 60_000, session: 30_000 } as const;
 type GlassesRateLimitedAction = keyof typeof GLASSES_RATE_LIMITS;
 const COUNTED_FAILURES: ReadonlySet<GlassesFailureReason> = new Set(['token', 'pairing-secret', 'identity', 'credential-in-url']);
 
-export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key' | 'vouch' | 'session';
+export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key' | 'submit' | 'vouch' | 'session';
 
 const { up, down, enter, escape, tab } = RUNPANE_CONTRACT.terminalKeys;
 /** The keys the glasses may send, one per request: ↑ ↓ Enter Esc Tab, and a menu choice's number. */
@@ -102,6 +102,17 @@ const keyRequestSchema = boundary.object({ panelId: boundary.nonEmptyString, inp
 export function glassesKeyInput(request: JsonValue | undefined): { panelId: string; input: string; source: 'user' } | null {
   const key = decodeOptionalBoundary(request, keyRequestSchema);
   return key && GLASSES_KEYS.has(key.input) ? { panelId: key.panelId, input: key.input, source: 'user' } : null;
+}
+
+const submitRequestSchema = boundary.object({ panelId: boundary.nonEmptyString, input: boundary.nonEmptyString });
+
+/**
+ * The `runpane:panels:submit` request the glasses may run: one panel and the text they dictated, sent
+ * as the user. Every other field (attachments, file pointers, interrupts) is dropped. Null when malformed.
+ */
+export function glassesSubmitInput(request: JsonValue | undefined): { panelId: string; input: string; source: 'user' } | null {
+  const submit = decodeOptionalBoundary(request, submitRequestSchema);
+  return submit ? { panelId: submit.panelId, input: submit.input, source: 'user' } : null;
 }
 
 const MAX_SESSION_NAME_LENGTH = 120;

@@ -294,6 +294,10 @@ Commands with a contract `daemonAction` (the `panes` git, script, restore, and m
 
 `runpane handoff` hands a task to another agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. When the sender is a Pane tab running a Claude, Codex, Cursor or OpenCode session and the receiver is the same agent, the handoff carries that session: on another machine its files are copied into that machine's agent store and the receiver resumes the same id; on this machine the receiver resumes a fork, because two agents never resume one session on one machine. The receiver starts with no prompt, and the CLI runs the continuity check and reports JSON `continuity.result` `continued`, `inconclusive` (exit 0; `next` gives a probe question) or `not-continued` (exit 1; the receiver is kept and `next` gives the `--note-only` command). `--note-only`, a different agent, or a tab with no carried session starts a fresh agent with the note (`fresh-agent`). JSON `continuity` is `{ carried, result, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }`: `sessionId` is the sender's session, `resumedId` the id the receiver resumes (the fork's on this machine), `checks` are the continuity checks (`historyLoaded` is null when there was nothing to compare; `originalUntouched` is set for forks), and a dry run sets `carried`, `sessionId`, `fork`, `files` and `bytes` with no `result`. After `continued` or `inconclusive` the sending agent ends its turn and makes no more changes on the branch. An OpenCode session travels as its export: `opencode export` on this machine, then `opencode import` inside the receiving repository there, and an OpenCode receiver is accepted only to continue an OpenCode session. A Cursor session is carried only to another machine, best effort since Cursor's store is undocumented: Cursor has no fork, and a copied chat still writes to the original, so on this machine the result is `not-continued` and nothing is started. A destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`); a copy already there is replaced only when the sender's holds all of it and no agent there runs it, otherwise nothing is copied and the result is `not-continued`. A destination Pane too old to resume a carried session is refused before anything is sent (`ERR_HANDOFF_RESUME_UNSUPPORTED`). From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead; a same-agent Session resumes the sender's conversation when first opened. The receiver reports back to the sender's panel.
 
+`runpane ask --agent <agent> --prompt "<question>"` asks one agent one read-only question and prints its answer, with no tab left behind: the agent's own headless mode runs once, on this machine or another one (`--machine`), in a saved repository (`--repo`, a WSL repository runs in WSL) or a Pane's worktree (`--pane`), with any model it accepts (`--model`). It can read files but not edit them or run shell commands; an agent with no such mode is refused (`ERR_ASK_UNSUPPORTED`). A missing agent, a sign-in error, an unknown model and a timeout each fail with the agent's own words and the next step. Use it for a second opinion or a question to another model; work that edits files goes to a tab.
+
+`runpane models` lists the models each installed agent offers, read from the agent's own list on every call, with its sign-in as the agent reports it. `--all` covers this machine, every saved machine and their WSL; `--agent` and `--search` narrow the rows. A machine that does not answer is one `unreachable` row; a list that can't be read is `list unavailable`.
+
 `runpane pr watch`: Register durable GitHub PR monitoring for a Pane.
 
 `runpane pr unwatch`: Remove a Pane’s explicit PR registration.
@@ -316,7 +320,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `agents doctor`: Diagnose whether a built-in agent command is available in a Pane repository environment.
 - `agent-context`: Print token-efficient Pane command context for coding agents.
 - `mcp`: Run the Pane MCP server over stdio so coding agents can call runpane commands as tools.
-- `relay`: Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags.
+- `relay`: Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags; init prints and checks the DNS records it needs.
 - `repos list`: List repositories saved in the running Pane app.
 - `repos add`: Register an existing git repository with the running Pane app.
 - `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
@@ -327,6 +331,9 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `secrets delete`: Delete a Pane secret from this machine and, through sync, from your other machines.
 - `secrets exec`: Run a command with Pane secrets in its environment. Nothing prints a value.
 - `secrets request`: Ask the person for a secret on a masked card. Pane saves what they type as a Pane secret and never returns it.
+- `theme read`: Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.
+- `theme set`: Restyle Pane itself, only when the person asks to change Pane's look: write the Custom theme (a base theme, colour tokens and CSS) and select it, or switch to another theme. Pane restyles within a second.
+- `theme reset`: Delete the Custom theme and go back to the theme it was built on.
 - `panes list`: List Pane sessions in a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `workspace state`: Read one workspace snapshot of every Pane and CLI panel.
@@ -337,6 +344,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `workspace write`: Write --content or stdin to a file on a machine on your tailnet, creating parent folders.
 - `workspace exec`: Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.
 - `handoff`: Hand your task to another agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it. A same-agent handoff from a Pane tab carries and resumes your own session (a fork on this machine) and checks it continued; otherwise a fresh agent starts with the note. From a Session's terminal, create the Session on another machine instead.
+- `ask`: Ask any agent and model one read-only question, on this or another machine, and get its answer: no tab is opened and nothing is left behind.
+- `models`: List the models each installed agent offers, on this machine, another one, or every saved machine, with what each agent reports about its sign-in. Read live on every call.
 - `watch`: Wait for workspace agent and Pane transitions using a daemon-held cursor.
 - `panes create`: Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.
 - `panes adopt`: Adopt an existing externally managed git worktree as a Pane without changing the worktree.
@@ -438,6 +447,7 @@ runpane agent-context [--json]
 runpane agent-context --command <command> [--json]
 runpane mcp [--toolsets <name,...>] [--read-only]
 runpane relay [pane-relay flags...]
+runpane relay init --domain <relay domain> [--public-ip <IPv4>] [--resolver <ip[:port]>]
 runpane repos list [--json] [--pane-dir <path>]
 runpane repos add --path <path> [--name <name>] [--json] [--yes] [--pane-dir <path>]
 runpane repos get [--repo <selector>] [--json] [--pane-dir <path>]
@@ -448,6 +458,10 @@ runpane secrets set --project <project> --name <name> --yes [--json] [--pane-dir
 runpane secrets delete --project <project> --name <name> --yes [--json] [--pane-dir <path>]
 runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... [--pane-dir <path>] -- <command>...
 runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json] [--pane-dir <path>]
+runpane theme read [--json] [--pane-dir <path>]
+runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json] [--pane-dir <path>]
+runpane theme set --theme <id> [--json] [--pane-dir <path>]
+runpane theme reset [--json] [--pane-dir <path>]
 runpane panes list [--repo <selector>] [--json] [--pane-dir <path>]
 runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json] [--pane-dir <path>]
 runpane workspace state [--repo <selector>] [--json] [--pane-dir <path>]
@@ -459,6 +473,8 @@ runpane workspace [<machine>] write <path> [--content <text>] [--json]
 runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>
 runpane handoff --template
 runpane handoff "<destination>" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode|pi>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]
+runpane ask --agent <claude|codex|cursor|opencode> (--prompt "<question>" | --prompt-file <path|->) [--model <model>] [--machine <name>] [--repo <selector> | --pane <pane-id>] [--timeout <duration>] [--json]
+runpane models [--agent <codex|claude|cursor|opencode|pi>] [--search <text>] [--machine <name> | --all] [--json]
 runpane watch [--follow|--until-event] [--session <id|name>|--pane <id>] [--json] [overrides]
 runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor|opencode|pi> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]
 runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor|opencode|pi>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]
@@ -757,6 +773,10 @@ These flags are consumed by local daemon-control commands:
 --decision <D-n>
 --choice <label>
 --because <why>
+--colors <json>
+--css <text>
+--theme <id>
+--search <text>
 --json
 --wait-ready
 --no-focus
