@@ -103,7 +103,6 @@ export function takeLaunchDraft(panelId: string, chatBox: () => HTMLElement | nu
   }
   let frame = 0;
   let observer: ResizeObserver | null = null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
   const stop = () => {
     if (waiting === handOver) waiting = null;
     cancelAnimationFrame(frame);
@@ -137,6 +136,8 @@ export function takeLaunchDraft(panelId: string, chatBox: () => HTMLElement | nu
     check();
     if (waiting === handOver) frame = requestAnimationFrame(everyFrame);
   };
+  // Created first: a handover from the first check below clears it.
+  const timer = setTimeout(() => { if (box.dataset.composing !== 'true') handOver(); }, SETTLE_MS);
   waiting = handOver;
   check();
   if (waiting !== handOver) return () => undefined;
@@ -148,6 +149,5 @@ export function takeLaunchDraft(panelId: string, chatBox: () => HTMLElement | nu
   frame = requestAnimationFrame(everyFrame);
   // After the input method's own handler (index.html), so the text is final.
   box.addEventListener('compositionend', check);
-  timer = setTimeout(() => { if (box.dataset.composing !== 'true') handOver(); }, SETTLE_MS);
   return stop;
 }
