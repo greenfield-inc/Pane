@@ -16,7 +16,7 @@ import { QueuedBodies } from './queuedBodies';
 import { agentConfig, agentLabel } from '../../../../shared/agents';
 import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
-import { CHAT_STALL_MS, chatMidTurn, runpaneWaits } from '../agentStatus/midTurn';
+import { CHAT_STALL_MS, chatMidTurn, isRunpaneWait } from '../agentStatus/midTurn';
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
 export interface ResolvedLaunch {
@@ -111,8 +111,8 @@ interface Tab {
   resuming?: boolean;
   /** When the agent last sent an update or was sent a message, in ms since the epoch. */
   activeAt?: number;
-  /** Tool calls of the current turn that are pending or in progress, for the Session's stall test. */
-  toolsRunning?: Set<string>;
+  /** Tool calls of the current turn that are pending or in progress, each true when it is a runpane wait, for the Session's test. */
+  toolsRunning?: Map<string, boolean>;
 }
 
 const DEFAULT_VIEW_LIMIT = 200;
@@ -195,11 +195,15 @@ export class ChatTabManager {
     const state = this.options.store.state(panelId);
     const tab = this.tabs.get(panelId);
     if (!state || !tab) return false;
+    // Waiting only while the calls it runs are runpane waits: one sent to the background
+    // returns at once, so it never hides real work (D-386).
+    const running = [...tab.toolsRunning?.values() ?? []];
+    const toolRunning = running.some(wait => !wait);
     return chatMidTurn({
       status: this.status(state, tab),
       lastUpdateAt: tab.activeAt,
-      toolRunning: (tab.toolsRunning?.size ?? 0) > 0,
-      waiting: runpaneWaits.isWaiting(panelId),
+      toolRunning,
+      waiting: !toolRunning && running.length > 0,
     }, now, chatStallMs());
   }
 
@@ -1053,12 +1057,15 @@ function withTurnTime(state: ChatPanelState, sessionId: string, turn: ChatTurnTi
   return { sessionId, turns: [...turns, turn].slice(-TURN_TIMES_LIMIT) };
 }
 
-/** Follow the turn's tool calls: pending or in progress keeps a silent turn counting. */
+/** Follow the turn's tool calls: pending or in progress keeps a silent turn counting, unless the call is a runpane wait. */
 function trackToolCall(tab: Tab, update: SessionUpdate): void {
   if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return;
   const status = update.status;
   if (status === 'pending' || status === 'in_progress' || (update.sessionUpdate === 'tool_call' && status == null)) {
-    (tab.toolsRunning ??= new Set()).add(update.toolCallId);
+    const known = tab.toolsRunning?.get(update.toolCallId);
+    // An update may bring the call's input later; until then it keeps what it was first read as.
+    const wait = update.rawInput !== undefined || update.title ? isRunpaneWait(update) : known ?? false;
+    (tab.toolsRunning ??= new Map()).set(update.toolCallId, wait);
   } else if (status === 'completed' || status === 'failed') {
     tab.toolsRunning?.delete(update.toolCallId);
   }

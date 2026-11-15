@@ -324,14 +324,20 @@ wake-up never shows. Mid-turn is stricter than a Pane's own status dot:
   spinner stops counting.
 - A chat tab needs an open turn that sent an update in the last 5 minutes, or a
   tool call still running.
-- A tab waiting on `runpane watch`, `runpane panels wait` or `runpane notify`
-  is waiting, not working.
+- A tab waiting on `runpane watch`, `runpane panels wait`, `runpane notify` or
+  `runpane secrets request` is waiting, not working. A chat tab counts as
+  waiting only while the tool call it is running is that wait; one sent to the
+  background doesn't hide its real turns. A terminal tab counts as waiting
+  while any such call from it is open, so an orchestrator in a terminal tab
+  with a background watch or card open doesn't spin the Session on its own;
+  its workers do.
 - A permission prompt, a menu, a usage-limit screen, a plain shell, and anything
   Pane cannot tell, read as idle.
 
 The host that runs the agents decides this once and tells every client, so the
 sidebar, All machines (each machine's Sessions by that machine) and the web and
-phone apps agree; a reconnect reads it again. "N working" counts the Panes with
+phone apps agree; while a client can't reach the host it shows the Session
+idle, and a reconnect reads it again. "N working" counts the Panes with
 a working tab by the same rule. A machine that is offline, or too old to report
 it, shows its Sessions idle.
 

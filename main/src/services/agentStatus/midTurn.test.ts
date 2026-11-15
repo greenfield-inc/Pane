@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatMidTurn, RunpaneWaits, terminalMidTurn, SCREEN_FRESH_MS, CHAT_STALL_MS } from './midTurn';
+import { chatMidTurn, isRunpaneWait, RunpaneWaits, terminalMidTurn, SCREEN_FRESH_MS, CHAT_STALL_MS } from './midTurn';
 import type { AgentDetectionResult } from '../../../../shared/types/agentStatus';
 
 const detection = (partial: Partial<AgentDetectionResult>): AgentDetectionResult => ({
@@ -82,6 +82,38 @@ describe('chatMidTurn', () => {
   it('does not count a turn that has sent no update yet as stalled before the limit', () => {
     expect(chatMidTurn({ ...base, lastUpdateAt: undefined, turnStartedAt: 0 }, 1_000)).toBe(true);
     expect(chatMidTurn({ ...base, lastUpdateAt: undefined, turnStartedAt: 0 }, CHAT_STALL_MS)).toBe(false);
+  });
+});
+
+describe('isRunpaneWait', () => {
+  it('knows a foreground runpane wait by its command, however runpane is reached', () => {
+    for (const command of [
+      'runpane watch --session s1 --until-event',
+      'runpane watch --session s1 --follow --json',
+      'runpane panels wait --panel p2 --json',
+      'runpane notify --ui options --title "Pick one" --json',
+      'runpane secrets request --name OPENAI_API_KEY',
+      '"$PANE_RUNPANE_BIN" notify --ui approve --title Ship',
+      '/Users/someone/.pane/bin/runpane watch --session s1',
+      'npx --yes runpane@latest notify --ui ask --title Name',
+      'cd repo && runpane panels wait --panel p2',
+    ]) expect(isRunpaneWait({ rawInput: { command } }), command).toBe(true);
+    expect(isRunpaneWait({ rawInput: { command: ['/bin/zsh', '-lc', 'runpane watch --session s1'] } })).toBe(true);
+  });
+
+  it('knows the pane MCP tools that wait', () => {
+    for (const title of ['mcp__pane__notify', 'mcp__pane__watch', 'mcp__pane__panels_wait', 'mcp__pane__secrets_request', 'pane.notify']) {
+      expect(isRunpaneWait({ title }), title).toBe(true);
+    }
+  });
+
+  it('does not count other commands, other runpane commands, or a wait sent to the background', () => {
+    for (const command of ['pnpm test', 'runpane panels list --json', 'runpane report --state done', 'grep "runpane notify" docs/SESSIONS.md', 'sleep 40']) {
+      expect(isRunpaneWait({ rawInput: { command } }), command).toBe(false);
+    }
+    expect(isRunpaneWait({ rawInput: { command: 'runpane watch --session s1 --follow', run_in_background: true } })).toBe(false);
+    expect(isRunpaneWait({ title: 'mcp__pane__panels_list' })).toBe(false);
+    expect(isRunpaneWait({ title: 'Read README.md', rawInput: { file_path: 'README.md' } })).toBe(false);
   });
 });
 
