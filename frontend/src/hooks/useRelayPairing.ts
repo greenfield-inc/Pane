@@ -126,7 +126,7 @@ export function useRelayPairing(open: boolean) {
   else if (renewal === 'expired' && status?.phase === 'ready') view = { step: 'renewing' };
   else view = { step: 'preparing' };
 
-  return { view, paired, renewal, retry, domain: status?.domain ?? null };
+  return { view, paired, renewal, retry, relay: status?.relay ?? null };
 }
 
 /** Undoes a pairing attempt that never got ready, so later launches don't keep retrying the relay. */

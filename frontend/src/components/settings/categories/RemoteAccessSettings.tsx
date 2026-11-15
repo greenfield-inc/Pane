@@ -164,7 +164,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
             Pair a phone
           </Button>
         )}
-        footnote={`On the same Wi-Fi a device connects directly. Anywhere else, ${relayCarrier(controller.config.relay?.relayAddress?.replace(/:\d+$/u, '') ?? null)}. Glasses pair from the Pane phone app.`}
+        footnote={`On the same Wi-Fi a device connects directly. Anywhere else, ${relayCarrier(controller.config.relay?.relayAddress)}. Glasses pair from the Pane phone app.`}
       >
         <PhoneRows controller={controller} here={here} />
         <GlassesRows />

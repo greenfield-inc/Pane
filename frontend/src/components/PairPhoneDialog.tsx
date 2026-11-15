@@ -95,7 +95,7 @@ function Caption({ view, renewed }: { view: PairingView; renewed: boolean }) {
  * turns phone access on; a used or expired code is replaced at once.
  */
 export function PairPhoneDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
-  const { view, paired, renewal, retry, domain } = useRelayPairing(isOpen);
+  const { view, paired, renewal, retry, relay } = useRelayPairing(isOpen);
 
   const openTailscaleSetup = () => {
     onClose();
@@ -161,7 +161,7 @@ export function PairPhoneDialog({ isOpen, onClose }: { isOpen: boolean; onClose:
             </div>
             <p className="flex gap-2 text-xs text-text-tertiary">
               <ShieldCheck className="mt-px h-3.5 w-3.5 flex-none" aria-hidden="true" />
-              On the same Wi-Fi your phone connects directly. Anywhere else, {relayCarrier(domain)}.
+              On the same Wi-Fi your phone connects directly. Anywhere else, {relayCarrier(relay)}.
             </p>
           </div>
         </div>
