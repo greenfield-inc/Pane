@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ConfigManager } from './configManager';
-import { applyRoutesReport, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
+import { applyRoutesReport, decodeComputers, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
 
 // Saved by v2.4.225: the same Mac once through Tailscale and once through the relay, plus a code host.
 const tailnetMac = {
@@ -94,6 +94,23 @@ describe('computers (D-51)', () => {
   });
 });
 
+describe('reading saved computers', () => {
+  it('drops only a route or OS it can\'t read, keeps the computer and its link, and says what it dropped', () => {
+    const link = { id: 'relay:https://x.runpane.net', kind: 'relay', source: 'link', baseUrl: 'https://x.runpane.net', token: 't', relay: { computerId: 'x', fingerprint: 'f' } };
+    const lines: string[] = [];
+    const computers = decodeComputers([
+      { id: 'c1', label: 'devbox', os: 'Plan 9', routes: [{ id: 'mesh:a', kind: 'mesh', source: 'found', baseUrl: 'https://a', token: 't' }, link] },
+      { id: 'c2', label: 'nas', routes: [{ id: 'mesh:b', kind: 'mesh', source: 'found', baseUrl: 'https://b', token: 't' }] },
+    ], (line) => lines.push(line));
+    expect(computers).toEqual([{ id: 'c1', label: 'devbox', routes: [link] }]);
+    expect(lines).toEqual([
+      expect.stringContaining('devbox: dropped a route'),
+      expect.stringContaining('nas: dropped a route'),
+      expect.stringContaining('dropped nas: none of its routes'),
+    ]);
+  });
+});
+
 describe('merging computers', () => {
   const relayRoute = { id: 'relay:https://k7xq2m4n8p3r5t6v.runpane.net', kind: 'relay' as const, source: 'link' as const, baseUrl: 'https://k7xq2m4n8p3r5t6v.runpane.net', token: 'tok', relay: { computerId: 'k7xq2m4n8p3r5t6v', fingerprint: 'fp' } };
   const devbox: RemoteComputer = { id: 'relay-k7xq2m4n8p3r5t6v', label: 'devbox', machineId: 'devbox-install', routes: [relayRoute] };
@@ -134,11 +151,49 @@ describe('merging computers', () => {
     ]);
   });
 
+  it('saves only https addresses a computer reports, so its token never goes out in the clear', () => {
+    const { computers } = applyRoutesReport([devbox], devbox.id, relayRoute, {
+      machineId: 'devbox-install',
+      name: 'devbox',
+      relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: ['http://10.0.0.5', 'https://user:pw@10.0.0.6', 'not an address'] },
+      publicUrl: 'http://pane.example.com',
+    });
+    expect(computers[0].routes.map((route) => route.baseUrl)).toEqual(['https://k7xq2m4n8p3r5t6v.runpane.net']);
+  });
+
   it('moves a route that answers as a different computer onto that computer', () => {
     const tailnetRoute = { id: 'tailscale:https://devbox.t.ts.net:8443', kind: 'tailscale' as const, source: 'found' as const, baseUrl: 'https://devbox.t.ts.net:8443', token: '' };
     const both: RemoteComputer = { ...devbox, routes: [tailnetRoute, relayRoute] };
     const { computers, id } = applyRoutesReport([both], devbox.id, tailnetRoute, { machineId: 'a-second-devbox', name: 'devbox' });
     expect(computers.map((computer) => computer.routes.map((route) => route.kind))).toEqual([['relay'], ['tailscale']]);
     expect(id).not.toBe(devbox.id);
+  });
+
+  describe('a host that reports another saved computer\'s install id', () => {
+    const teammateRoute = { id: 'tailscale:https://teammate.t.ts.net:8443', kind: 'tailscale' as const, source: 'manual' as const, baseUrl: 'https://teammate.t.ts.net:8443', token: '' };
+    const studio: RemoteComputer = { ...devbox, label: 'Studio Mac', machineId: 'studio-install' };
+    const claimsStudio = { machineId: 'studio-install', name: 'Studio Mac' };
+
+    it('keeps its route on its own record and leaves that computer as it was', () => {
+      const teammate: RemoteComputer = { id: 'tailnet-teammate', label: 'teammate', machineId: 'teammate-install', routes: [teammateRoute] };
+      const { computers } = applyRoutesReport([studio, teammate], teammate.id, teammateRoute, claimsStudio);
+      expect(computers.find((computer) => computer.id === studio.id)).toEqual(studio);
+      expect(computers.find((computer) => computer.id === teammate.id)?.routes).toEqual([teammateRoute]);
+    });
+
+    it('never folds that computer into a record with no install id yet', () => {
+      const teammate: RemoteComputer = { id: 'tailnet-teammate', label: 'teammate', routes: [teammateRoute] };
+      const { computers } = applyRoutesReport([studio, teammate], teammate.id, teammateRoute, claimsStudio);
+      expect(computers).toEqual([studio, teammate]);
+    });
+
+    it('folds the two records together when it also names that computer\'s relay id and key', () => {
+      const tailnet: RemoteComputer = { id: 'tailnet-studio', label: 'studio-mac', routes: [teammateRoute] };
+      const { computers } = applyRoutesReport([studio, tailnet], tailnet.id, teammateRoute, {
+        ...claimsStudio,
+        relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
+      });
+      expect(computers.map((computer) => [computer.id, computer.machineId, computer.routes.map((route) => route.kind)])).toEqual([['tailnet-studio', 'studio-install', ['tailscale', 'relay']]]);
+    });
   });
 });

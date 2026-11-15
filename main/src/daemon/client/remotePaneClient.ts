@@ -1673,9 +1673,12 @@ export class RemotePaneClientController extends EventEmitter {
         const computer = remote.client.computers.find((candidate) => candidate.id === computerId);
         const via = computer?.routes.find((route) => route.id === routeId) ?? computer?.routes[0];
         if (!computer || !via) return {};
-        const { computers } = applyRoutesReport(remote.client.computers, computerId, via, report);
+        const { computers, id } = applyRoutesReport(remote.client.computers, computerId, via, report);
         if (JSON.stringify(computers) === JSON.stringify(remote.client.computers)) return {};
-        return { remoteDaemon: { ...remote, client: { ...remote.client, computers } } };
+        // A record that moved or folded away hands "active" to where its route went.
+        const active = remote.client.activeProfileId;
+        const activeProfileId = active !== null && !computers.some((saved) => saved.id === active) ? id : active;
+        return { remoteDaemon: { ...remote, client: { ...remote.client, computers, activeProfileId } } };
       });
     } catch (error) {
       console.warn(`[Pane remote daemon] could not save the routes ${report.name} reported: ${getErrorMessage(error, 'unknown error')}`);

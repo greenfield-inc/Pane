@@ -1,4 +1,4 @@
-import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '../validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../validation/boundaryDecoder';
 import type { PaneRemoteConnectionImportPayload, RemotePaneConnectionProfile, RemoteRelayProfile } from './remoteDaemon';
 
 /**
@@ -90,14 +90,17 @@ const routeSchema: BoundarySchema<ComputerRoute> = boundary.object({
   ssh: boundary.optional(boundary.object({ host: boundary.nonEmptyString, remotePort: boundary.number })),
 });
 
-const computerSchema: BoundarySchema<RemoteComputer> = boundary.object({
+/** A saved computer with its routes and OS read separately, so a route or OS a later Pane added drops alone. */
+const computerSchema = boundary.object({
   id: boundary.nonEmptyString,
   label: boundary.nonEmptyString,
   machineId: boundary.optional(boundary.nonEmptyString),
-  os: boundary.optional(boundary.enumeration('macOS', 'Windows', 'Linux')),
+  os: boundary.optional(boundary.json),
   linkedBy: boundary.optional(boundary.nonEmptyString),
-  routes: boundary.array(routeSchema),
+  routes: boundary.array(boundary.json),
 });
+
+const osSchema = boundary.enumeration('macOS', 'Windows', 'Linux');
 
 const reportSchema: BoundarySchema<ComputerRoutesReport> = boundary.object({
   machineId: boundary.nonEmptyString,
@@ -118,17 +121,47 @@ const reportSchema: BoundarySchema<ComputerRoutesReport> = boundary.object({
   publicUrl: boundary.optional(boundary.nonEmptyString),
 });
 
-/** Saved computers that decode; a record that does not is dropped, the rest load. */
-export function decodeComputers(value: JsonValue | undefined): RemoteComputer[] {
+/**
+ * Saved computers that decode. A route that does not decode (a route kind a later Pane added, or a
+ * hand edit) is dropped and logged, and its computer keeps the rest; a computer left with no route,
+ * or whose own fields do not decode, is dropped and logged.
+ */
+export function decodeComputers(value: JsonValue | undefined, log: (line: string) => void = logOnce): RemoteComputer[] {
   if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
+  return value.flatMap((entry, index) => {
+    let saved: ReturnType<typeof computerSchema.decode>;
     try {
-      const computer = decodeBoundary(entry, computerSchema);
-      return computer.routes.length ? [computer] : [];
-    } catch {
+      saved = decodeBoundary(entry, computerSchema);
+    } catch (error) {
+      log(`[computers] dropped saved computer ${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
+    const { os, routes: savedRoutes, ...fields } = saved;
+    const routes = savedRoutes.flatMap((route) => {
+      try {
+        return [decodeBoundary(route, routeSchema)];
+      } catch (error) {
+        log(`[computers] ${saved.label}: dropped a route Pane can't read: ${error instanceof Error ? error.message : String(error)}`);
+        return [];
+      }
+    });
+    if (!routes.length) {
+      log(`[computers] dropped ${saved.label}: none of its routes can be read`);
+      return [];
+    }
+    const computer: RemoteComputer = { ...fields, routes };
+    const known = decodeOptionalBoundary(os, osSchema);
+    if (known) computer.os = known;
+    return [computer];
   });
+}
+
+const logged = new Set<string>();
+/** Config is read often; each drop is logged once per run. */
+function logOnce(line: string): void {
+  if (logged.has(line)) return;
+  logged.add(line);
+  console.warn(line);
 }
 
 export function decodeComputerRoutesReport(value: JsonValue | undefined): ComputerRoutesReport | undefined {
@@ -318,31 +351,47 @@ function newComputerId(identity: ComputerIdentity, computers: readonly RemoteCom
   return id;
 }
 
-/** The routes a host reports for itself, all reached with the credential this computer already holds there. */
+/** An `https:` address with no credentials, query or fragment, without a trailing slash; anything else is undefined. */
+function httpsOrigin(address: string): string | undefined {
+  try {
+    const url = new URL(address);
+    const plain = url.protocol === 'https:' && url.hostname && !url.username && !url.password && !url.search && !url.hash;
+    return plain ? `${url.origin}${url.pathname.replace(/\/+$/u, '')}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The routes a host reports for itself, all reached with the credential this computer already holds
+ * there. Only `https:` addresses are kept, so the token never goes out in the clear.
+ */
 export function foundRoutes(report: ComputerRoutesReport, token: string): ComputerRoute[] {
   if (!token) return [];
   const routes: ComputerRoute[] = [];
   const relay = report.relay;
+  const relayAddress = relay && httpsOrigin(relay.address);
+  const pin = relay && { computerId: relay.id, fingerprint: relay.fingerprint };
   for (const address of relay?.local ?? []) {
-    routes.push({ id: routeId('lan', address), kind: 'lan', source: 'found', baseUrl: address, token, relay: { computerId: relay!.id, fingerprint: relay!.fingerprint } });
+    const baseUrl = httpsOrigin(address);
+    if (baseUrl && pin) routes.push({ id: routeId('lan', baseUrl), kind: 'lan', source: 'found', baseUrl, token, relay: pin });
   }
-  if (report.tailnet) {
-    const baseUrl = `https://${report.tailnet.dnsName.replace(/\.$/u, '')}:${report.tailnet.port}`;
-    routes.push({ id: routeId('tailscale', baseUrl), kind: 'tailscale', source: 'found', baseUrl, token, tailnetMachine: report.tailnet.machine, tailnetDomain: report.tailnet.domain });
+  const tailnet = report.tailnet && httpsOrigin(`https://${report.tailnet.dnsName.replace(/\.$/u, '')}:${report.tailnet.port}`);
+  if (report.tailnet && tailnet) {
+    routes.push({ id: routeId('tailscale', tailnet), kind: 'tailscale', source: 'found', baseUrl: tailnet, token, tailnetMachine: report.tailnet.machine, tailnetDomain: report.tailnet.domain });
   }
-  if (report.publicUrl) {
-    routes.push({ id: routeId('public', report.publicUrl), kind: 'public', source: 'found', baseUrl: report.publicUrl.replace(/\/+$/u, ''), token });
-  }
-  if (relay) {
-    routes.push({ id: routeId('relay', relay.address), kind: 'relay', source: 'found', baseUrl: relay.address.replace(/\/+$/u, ''), token, relay: { computerId: relay.id, fingerprint: relay.fingerprint } });
-  }
+  const publicUrl = report.publicUrl && httpsOrigin(report.publicUrl);
+  if (publicUrl) routes.push({ id: routeId('public', publicUrl), kind: 'public', source: 'found', baseUrl: publicUrl, token });
+  if (relayAddress && pin) routes.push({ id: routeId('relay', relayAddress), kind: 'relay', source: 'found', baseUrl: relayAddress, token, relay: pin });
   return routes;
 }
 
 /**
  * Applies what a computer reported on connecting over `via`: its install id, OS, and found routes.
- * Found routes it no longer reports are dropped. When the computer reports a different install id
- * than the one saved, the route belongs to another computer: it moves to that computer's record.
+ * Found routes it no longer reports are dropped. An install id is the host's own claim, so it moves
+ * a route onto another saved record, or folds that record in, only when the report's relay id and
+ * key are that record's too. A route that answers with an install id no record holds moves to a new
+ * record; one that answers with an id another record holds unconfirmed stays where it is.
  */
 export function applyRoutesReport(
   computers: readonly RemoteComputer[],
@@ -353,7 +402,9 @@ export function applyRoutesReport(
   const computer = computers.find((candidate) => candidate.id === computerId);
   if (!computer) return { computers: [...computers], id: computerId };
   const found = foundRoutes(report, via.token);
-  if (computer.machineId && computer.machineId !== report.machineId) {
+  const holder = computers.find((candidate) => candidate.id !== computerId && candidate.machineId === report.machineId);
+  const confirmed = holder !== undefined && reportNamesKeyOf(holder, report);
+  if (computer.machineId && computer.machineId !== report.machineId && (!holder || confirmed)) {
     const remaining = computers.map((candidate) => (candidate.id === computerId
       ? { ...candidate, routes: candidate.routes.filter((route) => route.id !== via.id) }
       : candidate)).filter((candidate) => candidate.routes.length > 0);
@@ -361,15 +412,22 @@ export function applyRoutesReport(
   }
   const reported = new Set(found.map((route) => route.id));
   const kept = computer.routes.filter((route) => route.source !== 'found' || reported.has(route.id) || route.id === via.id);
-  const updated: RemoteComputer = { ...computer, machineId: report.machineId, routes: withRoutes(kept, found) };
+  const updated: RemoteComputer = { ...computer, routes: withRoutes(kept, found) };
+  if (!holder || confirmed) updated.machineId = report.machineId;
   if (report.os) updated.os = report.os;
-  // Another saved record with this install id is the same computer: fold it in.
-  const twin = computers.find((candidate) => candidate.id !== computerId && candidate.machineId === report.machineId);
+  // Another saved record with this install id and the same key is the same computer: fold it in.
+  const twin = confirmed ? holder : undefined;
   if (twin) updated.routes = withRoutes(updated.routes, twin.routes);
   return {
     computers: computers.filter((candidate) => candidate !== twin).map((candidate) => (candidate.id === computerId ? updated : candidate)),
     id: computerId,
   };
+}
+
+/** Whether a report's relay id and key fingerprint are the ones a saved record pins. */
+function reportNamesKeyOf(computer: RemoteComputer, report: ComputerRoutesReport): boolean {
+  const relay = report.relay;
+  return relay !== undefined && computer.routes.some((route) => route.relay?.computerId === relay.id && route.relay.fingerprint === relay.fingerprint);
 }
 
 /** Computers converted from entries saved before them, and the active one's id among them. */
