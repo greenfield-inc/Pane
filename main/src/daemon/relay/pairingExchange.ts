@@ -71,14 +71,6 @@ function sha256(value: string): Buffer {
   return createHash('sha256').update(value).digest();
 }
 
-function safeJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-}
-
 function cleanLabel(label: string, fallback: string): string {
   const clean = label.replace(/[\p{Cc}\p{Cf}]/gu, '').trim().slice(0, MAX_LABEL_LENGTH);
   return clean || fallback;
@@ -98,14 +90,14 @@ export class PairingExchange {
 
   constructor(private readonly deps: PairingExchangeDeps) {
     this.now = deps.now ?? Date.now;
-    let text: string | null = null;
+    let saved: Array<{ hash: string; lifetime: RelayLinkLifetime; expiresAt: number; spentAt: number | null }> = [];
     try {
-      text = deps.store?.read() ?? null;
+      const text = deps.store?.read() ?? null;
+      saved = (text === null ? undefined : decodeOptionalBoundary(JSON.parse(text), savedSchema)) ?? [];
     } catch (error) {
       deps.log?.(`[pairing] could not read the waiting links, so links made before this start won't work: ${error instanceof Error ? error.message : String(error)}`);
     }
-    const saved = text === null ? undefined : decodeOptionalBoundary(safeJson(text), savedSchema);
-    for (const entry of saved ?? []) this.pending.push({ ...entry, hash: Buffer.from(entry.hash, 'hex') });
+    for (const entry of saved) this.pending.push({ ...entry, hash: Buffer.from(entry.hash, 'hex') });
   }
 
   /** Keeps the waiting and recently used links, so a link made before Pane restarts still works after. */
