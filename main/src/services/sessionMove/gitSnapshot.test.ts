@@ -58,7 +58,8 @@ function setupRepos(branch = 'spike-x') {
   write(path.join(a, 'doomed.txt'), 'delete me\n');
   write(path.join(a, 'script.sh'), '#!/bin/sh\necho hi\n');
   write(path.join(a, 'ünïcode name.txt'), 'unicode\n');
-  fs.symlinkSync('other.txt', path.join(a, 'link'));
+  // Windows checks symlinks out as plain files (core.symlinks false); the move targets macOS and Linux.
+  if (process.platform !== 'win32') fs.symlinkSync('other.txt', path.join(a, 'link'));
   git(a, ['add', '-A']);
   git(a, ['commit', '-qm', 'base']);
   git(a, ['push', '-q', 'origin', 'main']);
@@ -197,7 +198,7 @@ describe('gitSnapshot', () => {
     expect(fs.existsSync(path.join(target, 'ignored.log'))).toBe(false);
     expect(fs.existsSync(path.join(target, 'build'))).toBe(false);
     expect(fs.existsSync(path.join(target, 'doomed.txt'))).toBe(false);
-    expect(fs.readlinkSync(path.join(target, 'link'))).toBe('other.txt');
+    if (process.platform !== 'win32') expect(fs.readlinkSync(path.join(target, 'link'))).toBe('other.txt');
     expect(await snapshotMatches(target, snap.commit)).toBe(true);
 
     expect(fingerprint(a)).toEqual(before);
