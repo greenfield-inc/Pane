@@ -5,7 +5,8 @@ import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
-import { invokeDaemon, invokeRemoteDaemon, PaneDaemonClientError, type RemoteDaemonTarget } from './daemonClient';
+import { answeringRoute, invokeDaemon, invokeRemoteDaemon, PaneDaemonClientError, routeLabel, type RemoteDaemonTarget, type RemoteRoute } from './daemonClient';
+import { RunpaneError } from './errors';
 
 /**
  * Tailnet port where each joined machine's Pane serves workspaces. Pane reads PANE_WORKSPACES_PORT
@@ -35,8 +36,10 @@ export interface TailnetMachine {
   owner: string;
   /** Signed in to this machine's own login. Other people's machines let in only who their visibility allows. */
   mine: boolean;
-  /** A computer linked through QR pairing: reached at its relay address with its link token, Tailscale or not. */
-  linked?: { baseUrl: string; token: string; fingerprint: string };
+  /** A computer saved in Pane: its routes in the order they are tried. A Tailscale machine Pane has not saved has none. */
+  routes?: RemoteRoute[];
+  /** Other names it answers to, lowercased: its Pane id, install id, relay id, and route host names. */
+  aliases?: string[];
 }
 
 export type Tailnet =
@@ -184,18 +187,28 @@ function runTailscale(args: string[]): Promise<string | null> {
 
 // ---------------------------------------------------------------- machine selection
 
-/** Finds a machine by Tailscale name, MagicDNS name, Tailscale IP, or unique name prefix. */
+/**
+ * Finds a machine by name, MagicDNS name, Tailscale IP, any id it is saved under (Pane id, install
+ * id, relay id), a route's host name, or a unique name prefix.
+ */
 export function resolveMachine(query: string, machines: readonly TailnetMachine[]): TailnetMachine {
   const wanted = query.trim().toLowerCase().replace(/\.$/, '');
-  const exact = machines.find((machine) =>
-    machine.name === wanted || machine.dnsName.toLowerCase() === wanted || machine.ips.includes(wanted));
-  if (exact) return exact;
-  const prefixed = machines.filter((machine) => machine.name.startsWith(wanted));
-  if (prefixed.length === 1) return prefixed[0];
-  if (prefixed.length > 1) {
-    throw new Error(`"${query}" matches several machines: ${prefixed.map((machine) => machine.name).join(', ')}. Use the full name.`);
+  const exact = machines.filter((machine) => machine.name === wanted || machine.dnsName.toLowerCase() === wanted
+    || machine.ips.includes(wanted) || machine.aliases?.includes(wanted));
+  const matches = exact.length ? exact : machines.filter((machine) => machine.name.startsWith(wanted));
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new RunpaneError(
+      'ERR_WORKSPACE_MACHINE_AMBIGUOUS',
+      `"${query}" matches several machines: ${matches.map((machine) => machine.name).join(', ')}. Nothing was sent.`,
+      'Use the full name, or the id `runpane workspace list --json` shows.',
+    );
   }
-  throw new Error(`No machine on your tailnet is called "${query}". Machines: ${describeMachines(machines) || 'none'}.`);
+  throw new RunpaneError(
+    'ERR_WORKSPACE_MACHINE_UNKNOWN',
+    `No machine on your tailnet or saved in Pane is called "${query}". Machines: ${describeMachines(machines) || 'none'}. Nothing was sent.`,
+    'Pick a name from `runpane workspace list`, or link the computer first: runpane link <link>.',
+  );
 }
 
 /**
@@ -229,14 +242,35 @@ function describeMachines(machines: readonly TailnetMachine[]): string {
 
 /** "name (OS, online)", plus the owner's login for someone else's machine. */
 function describeMachine(machine: TailnetMachine): string {
-  return `${machine.name} (${machine.linked && !machine.online ? 'linked' : machine.os}, ${machine.online ? 'online' : 'offline'}${machine.mine ? '' : `, owner ${machine.owner}`})`;
+  return `${machine.name} (${machine.os}, ${machine.online ? 'online' : 'offline'}${machine.mine ? '' : `, owner ${machine.owner}`})`;
 }
 
+function tailscaleRoute(dnsName: string): RemoteRoute {
+  return { kind: 'tailscale', baseUrl: `https://${dnsName}:${workspaceHttpsPort()}` };
+}
+
+/** A saved computer's routes in order; a Tailscale machine Pane has not saved is reached by its MagicDNS name and login. */
 export function workspaceTarget(machine: TailnetMachine): RemoteDaemonTarget {
-  if (machine.linked) return { machine: machine.name, ...machine.linked };
-  return { machine: machine.name, baseUrl: `https://${machine.dnsName}:${workspaceHttpsPort()}` };
+  return { machine: machine.name, routes: machine.routes ?? [tailscaleRoute(machine.dnsName)] };
 }
 
+/** The CLI's copy of what it reads from `RemoteComputer` in shared/types/remoteComputers.ts, which this package cannot import. */
+const savedComputerSchema = boundary.object({
+  id: boundary.nonEmptyString,
+  label: boundary.nonEmptyString,
+  machineId: boundary.optional(boundary.nonEmptyString),
+  os: boundary.optional(boundary.enumeration('macOS', 'Windows', 'Linux')),
+  routes: boundary.array(boundary.object({
+    kind: boundary.string,
+    baseUrl: boundary.nonEmptyString,
+    token: boundary.string,
+    relay: boundary.optional(boundary.object({ computerId: boundary.nonEmptyString, fingerprint: boundary.nonEmptyString })),
+    tailnetMachine: boundary.optional(boundary.nonEmptyString),
+  })),
+});
+type SavedComputer = ReturnType<typeof savedComputerSchema.decode>;
+
+/** What a Pane older than computers answers: one entry per computer linked through the relay. */
 const linkedComputersSchema = boundary.array(boundary.object({
   id: boundary.string,
   name: boundary.string,
@@ -250,83 +284,172 @@ function machineSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'computer';
 }
 
-/**
- * Computers linked with this one through QR pairing (Settings › Remote Access), from the local
- * Pane. Each answers runpane workspace at its relay address; its OS comes from asking it.
- */
-async function readLinkedMachines(paneDir?: string): Promise<TailnetMachine[]> {
-  let linked: ReturnType<typeof linkedComputersSchema.decode>;
-  try {
-    linked = await invokeDaemon('relay:linked-computers', [], linkedComputersSchema, { paneDir, timeoutMs: LOCAL_STATUS_TIMEOUT_MS });
-  } catch {
-    return [];
-  }
-  return Promise.all(linked.map(async (computer): Promise<TailnetMachine> => {
-    const machine: TailnetMachine = {
-      name: machineSlug(computer.name),
-      dnsName: new URL(computer.address).hostname,
-      os: 'Linux',
-      online: false,
-      ips: [],
-      self: false,
-      owner: 'you',
-      mine: true,
-      linked: { baseUrl: computer.address, token: computer.token, fingerprint: computer.fingerprint },
-    };
-    try {
-      const info = await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS);
-      return { ...machine, os: info.os, online: true };
-    } catch {
-      return machine;
-    }
-  }));
+/** How a relay name and a Tailscale name compare, as Pane compares them: lowercased, first label, spaces as dashes. */
+function machineNameKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\.local$/u, '').split('.')[0].replace(/[\s_]+/gu, '-');
 }
 
 /**
- * The machines runpane workspace can reach: the tailnet's, plus computers linked through QR
- * pairing, which work without Tailscale. Linked computers already on the tailnet keep their
- * Tailscale entry.
+ * The computers saved in this machine's Pane (Settings › Remote Access › Computers), one record
+ * each with its routes in order. A Pane older than computers lists its relay links instead.
+ */
+async function readSavedComputers(paneDir?: string): Promise<SavedComputer[]> {
+  const options = { paneDir, timeoutMs: LOCAL_STATUS_TIMEOUT_MS };
+  let saved: JsonValue[];
+  try {
+    saved = await invokeDaemon('computers:list', [], boundary.array(boundary.json), options);
+  } catch (error) {
+    if (!(error instanceof PaneDaemonClientError && (error.code === 'ERR_UNKNOWN_CHANNEL' || error.message.includes('No Pane daemon command registered')))) return [];
+    try {
+      const linked = await invokeDaemon('relay:linked-computers', [], linkedComputersSchema, options);
+      return linked.map((computer) => ({
+        id: `relay-${computer.id}`,
+        label: computer.name,
+        machineId: undefined,
+        os: undefined,
+        routes: [{
+          kind: 'relay', baseUrl: computer.address, token: computer.token,
+          relay: { computerId: computer.id, fingerprint: computer.fingerprint }, tailnetMachine: undefined,
+        }],
+      }));
+    } catch {
+      return [];
+    }
+  }
+  // A record this runpane cannot read is left out; the rest still work.
+  return saved.flatMap((entry) => {
+    try {
+      const computer = decodeBoundary(entry, savedComputerSchema);
+      return computer.routes.length ? [computer] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/** The tailnet machine a saved computer is: by its Tailscale route, else by a name no other saved computer has. */
+function peerOf(computer: SavedComputer, computers: readonly SavedComputer[], peers: readonly TailnetMachine[]): TailnetMachine | undefined {
+  const tailnetName = computer.routes.find((route) => route.tailnetMachine)?.tailnetMachine?.toLowerCase();
+  const hosts = new Set(computer.routes.map((route) => hostOf(route.baseUrl)));
+  const byRoute = peers.find((peer) => peer.name === tailnetName || hosts.has(peer.dnsName.toLowerCase()));
+  if (byRoute || computer.routes.some((route) => route.kind === 'tailscale')) return byRoute;
+  const key = machineNameKey(computer.label);
+  if (computers.filter((other) => machineNameKey(other.label) === key).length > 1) return undefined;
+  return peers.find((peer) => peer.name === key);
+}
+
+const ROUTE_ORDER = ['lan', 'tailscale', 'ssh', 'public', 'relay'];
+
+/** One saved computer as one machine, merged with its tailnet entry when it is on the tailnet. */
+function computerMachine(computer: SavedComputer, peer: TailnetMachine | undefined): TailnetMachine {
+  const routes: RemoteRoute[] = computer.routes.map((route) => {
+    const remote: RemoteRoute = { kind: route.kind, baseUrl: route.baseUrl };
+    if (route.token) remote.token = route.token;
+    if (route.relay) remote.fingerprint = route.relay.fingerprint;
+    return remote;
+  });
+  // On the tailnet without a saved Tailscale route: reach it there too, before the routes that are farther.
+  if (peer && !routes.some((route) => route.kind === 'tailscale')) {
+    const after = routes.findIndex((route) => ROUTE_ORDER.indexOf(route.kind) > ROUTE_ORDER.indexOf('tailscale'));
+    routes.splice(after < 0 ? routes.length : after, 0, tailscaleRoute(peer.dnsName));
+  }
+  // The tailnet says it is offline there (Tailscale signed out on it): try Tailscale last.
+  if (peer && !peer.online) routes.sort((left, right) => Number(left.kind === 'tailscale') - Number(right.kind === 'tailscale'));
+  const aliases = [computer.id, computer.machineId, machineNameKey(computer.label),
+    ...computer.routes.flatMap((route) => [route.relay?.computerId, route.tailnetMachine, hostOf(route.baseUrl)])]
+    .filter((alias): alias is string => Boolean(alias)).map((alias) => alias.toLowerCase());
+  return {
+    name: peer?.name ?? computer.routes.find((route) => route.tailnetMachine)?.tailnetMachine?.toLowerCase() ?? machineSlug(computer.label),
+    dnsName: peer?.dnsName ?? hostOf(computer.routes[0].baseUrl),
+    os: computer.os ?? peer?.os ?? 'Linux',
+    // A route other than Tailscale may answer whether or not the tailnet sees it.
+    online: Boolean(peer?.online) || computer.routes.some((route) => route.kind !== 'tailscale'),
+    ips: peer?.ips ?? [],
+    self: false,
+    owner: peer?.owner ?? 'you',
+    mine: true,
+    routes,
+    aliases: [...new Set(aliases)],
+  };
+}
+
+/** Asks a saved computer without a known OS for it, as the list and path routing need one. */
+async function withOs(machine: TailnetMachine, known: boolean): Promise<TailnetMachine> {
+  if (known) return machine;
+  try {
+    const info = await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS);
+    return { ...machine, os: info.os, online: true };
+  } catch {
+    return { ...machine, online: false };
+  }
+}
+
+/**
+ * The machines runpane workspace can reach, one entry per computer: those saved in Pane, each with
+ * its routes, and the tailnet's other machines. A saved computer on the tailnet is one entry.
  */
 export async function readMachines(paneDir?: string): Promise<Tailnet> {
-  const [tailnet, linked] = await Promise.all([readTailnet(), readLinkedMachines(paneDir)]);
-  if (tailnet.ok) {
-    const names = new Set(tailnet.machines.map((machine) => machine.name));
-    return { ...tailnet, machines: [...tailnet.machines, ...linked.filter((machine) => !names.has(machine.name))] };
-  }
-  if (!linked.length) return tailnet;
+  const [tailnet, computers] = await Promise.all([readTailnet(), readSavedComputers(paneDir)]);
+  const peers = tailnet.ok ? tailnet.machines : [];
+  const merged = new Set<TailnetMachine>();
+  const saved = await Promise.all(computers.map((computer) => {
+    const peer = peerOf(computer, computers, peers);
+    if (peer) merged.add(peer);
+    return withOs(computerMachine(computer, peer), Boolean(computer.os ?? peer?.os));
+  }));
+  const machines = [...saved, ...peers.filter((peer) => !merged.has(peer))]
+    .sort((left, right) => Number(right.mine) - Number(left.mine) || Number(right.online) - Number(left.online)
+      || left.name.localeCompare(right.name));
+  if (tailnet.ok) return { ...tailnet, machines };
+  if (!saved.length) return tailnet;
   const hostname = os.hostname().replace(/\.local$/i, '');
   const self: TailnetMachine = {
     name: machineSlug(hostname), dnsName: hostname, os: process.platform === 'darwin' ? 'macOS' : process.platform === 'win32' ? 'Windows' : 'Linux',
     online: true, ips: [], self: true, owner: 'you', mine: true,
   };
-  return { ok: true, self, machines: linked, httpsCertificates: true };
+  return { ok: true, self, machines, httpsCertificates: true };
 }
 
 const NOT_ANSWERING = 'Pane is not answering there; it needs a Pane with workspaces running and signed in to Tailscale';
 /** With the tailnet-wide setting off, no machine can answer, so name the setting instead of the machine. */
 const CERTIFICATES_OFF = 'this tailnet has HTTPS certificates turned off. Fix: Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns.';
 
-async function probeMachine(machine: TailnetMachine, notAnswering = NOT_ANSWERING): Promise<{ info?: MachineInfo; error?: string }> {
+async function probeMachine(machine: TailnetMachine, target = workspaceTarget(machine), notAnswering = NOT_ANSWERING): Promise<{ info?: MachineInfo; error?: string }> {
   if (!machine.online) return { error: 'offline' };
   try {
-    return { info: await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS) };
+    return { info: await invokeRemoteDaemon(target, 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS) };
   } catch (error) {
-    if (error instanceof PaneDaemonClientError && (error.code === 'ERR_WORKSPACE_UNREACHABLE' || error.code === 'ERR_WORKSPACE_TIMEOUT')) {
+    // A saved computer's error names each route it tried.
+    if (!machine.routes && error instanceof PaneDaemonClientError && (error.code === 'ERR_WORKSPACE_UNREACHABLE' || error.code === 'ERR_WORKSPACE_TIMEOUT')) {
       return { error: notAnswering };
     }
     return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 
-async function requireTailnet(): Promise<Extract<Tailnet, { ok: true }>> {
-  const tailnet = await readMachines();
-  if (!tailnet.ok) throw new Error(`runpane workspace needs Tailscale or a computer linked by QR pairing: ${tailnet.reason}. ${tailnet.fix}`);
+export async function requireTailnet(paneDir?: string): Promise<Extract<Tailnet, { ok: true }>> {
+  const tailnet = await readMachines(paneDir);
+  if (!tailnet.ok) {
+    throw new RunpaneError(
+      'ERR_WORKSPACE_NO_MACHINES',
+      `runpane workspace needs Tailscale or a computer saved in Pane, and this machine has neither: ${tailnet.reason}. Nothing was sent.`,
+      `${tailnet.fix} Or link a computer: runpane link <link>.`,
+    );
+  }
   return tailnet;
 }
 
 /** Picks the machine for a path that is not on this machine, or explains which names to choose from. */
-async function routePath(value: string, verb: string): Promise<TailnetMachine> {
-  const tailnet = await requireTailnet();
+async function routePath(value: string, verb: string, paneDir?: string): Promise<TailnetMachine> {
+  const tailnet = await requireTailnet(paneDir);
   const candidates = machinesForPath(value, tailnet.machines).filter((machine) => machine.online);
   const probes = await Promise.all(candidates.map(async (machine) => ({ machine, probe: await probeMachine(machine) })));
   const joined = probes.filter(({ probe }) => probe.info).map(({ machine }) => machine);
@@ -344,24 +467,26 @@ async function routePath(value: string, verb: string): Promise<TailnetMachine> {
 // ---------------------------------------------------------------- commands
 
 export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
-  const tailnet = await requireTailnet();
+  const tailnet = await requireTailnet(parsed.paneDir);
   const local = await readLocalStatus(parsed.paneDir);
   // Offline machines need no probe, so only online ones count toward the limit; mine come first.
   const probed = new Set(tailnet.machines.filter((machine) => machine.online).slice(0, MAX_PROBED_MACHINES));
-  const rows = await Promise.all(tailnet.machines.map(async (machine) => ({
-    machine,
-    probe: probed.has(machine) || !machine.online
-      ? await probeMachine(machine, tailnet.httpsCertificates ? NOT_ANSWERING : CERTIFICATES_OFF)
-      : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` },
-  })));
+  const rows = await Promise.all(tailnet.machines.map(async (machine) => {
+    const target = workspaceTarget(machine);
+    const probe = probed.has(machine) || !machine.online
+      ? await probeMachine(machine, target, tailnet.httpsCertificates || machine.routes ? NOT_ANSWERING : CERTIFICATES_OFF)
+      : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` };
+    return { machine, probe, route: answeringRoute(target) };
+  }));
   if (parsed.json) {
     console.log(JSON.stringify({
       ok: true,
       self: { ...tailnet.self, workspace: local },
-      // A linked computer's token stays internal: the list names where it is and which key it holds.
-      machines: rows.map(({ machine: { linked, ...machine }, probe }) => ({
+      // Route tokens stay internal: the list names where each route goes and which key it holds.
+      machines: rows.map(({ machine: { routes, aliases, ...machine }, probe, route }) => ({
         ...machine,
-        linked: linked && { baseUrl: linked.baseUrl, fingerprint: linked.fingerprint },
+        ids: aliases,
+        routes: routes?.map((candidate) => ({ kind: candidate.kind, baseUrl: candidate.baseUrl, fingerprint: candidate.fingerprint, answered: candidate === route })),
         joined: Boolean(probe.info),
         info: probe.info,
         error: probe.error,
@@ -370,9 +495,11 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
     return 0;
   }
   console.log(`${tailnet.self.name} (this machine, ${tailnet.self.os}): ${local ? describeLocalStatus(local) : 'off (Pane is not running)'}`);
-  for (const { machine, probe } of rows) {
-    const state = probe.info ? `joined, shell ${probe.info.shell}` : `not reachable: ${probe.error}`;
-    console.log(`${describeMachine(machine)}: ${machine.online ? state : 'offline'}`);
+  for (const { machine, probe, route } of rows) {
+    const through = route && machine.routes ? ` through ${routeLabel(route.kind)}` : '';
+    const state = probe.info ? `joined${through}, shell ${probe.info.shell}` : `not reachable: ${probe.error}`;
+    const routes = machine.routes ? ` [${machine.routes.map((candidate) => routeLabel(candidate.kind)).join(', ')}]` : '';
+    console.log(`${describeMachine(machine)}${routes}: ${machine.online ? state : 'offline'}`);
   }
   console.log(REACH_LINE);
   return 0;
@@ -414,10 +541,10 @@ export async function runWorkspaceExec(parsed: ParsedArgs): Promise<number> {
   if (!command) throw new Error('runpane workspace exec needs a command: runpane workspace <machine> exec -- <command>');
   let machine: TailnetMachine;
   if (parsed.workspaceMachine) {
-    const tailnet = await requireTailnet();
+    const tailnet = await requireTailnet(parsed.paneDir);
     machine = resolveMachine(parsed.workspaceMachine, [tailnet.self, ...tailnet.machines]);
   } else if (parsed.cwd && foreignPathSystems(parsed.cwd, process.platform).length > 0) {
-    machine = await routePath(parsed.cwd, `exec --cwd ${quoteArg(parsed.cwd)} --`);
+    machine = await routePath(parsed.cwd, `exec --cwd ${quoteArg(parsed.cwd)} --`, parsed.paneDir);
   } else {
     throw new Error('runpane workspace exec needs a machine: runpane workspace <machine> exec -- <command>. List machines with: runpane workspace list');
   }
@@ -452,10 +579,10 @@ function requirePath(parsed: ParsedArgs, verb: string): string {
  */
 async function pickMachine(parsed: ParsedArgs, target: string, verb: string): Promise<TailnetMachine | null> {
   if (parsed.workspaceMachine) {
-    const tailnet = await requireTailnet();
+    const tailnet = await requireTailnet(parsed.paneDir);
     return resolveMachine(parsed.workspaceMachine, [tailnet.self, ...tailnet.machines]);
   }
-  return foreignPathSystems(target, process.platform).length > 0 ? routePath(target, verb) : null;
+  return foreignPathSystems(target, process.platform).length > 0 ? routePath(target, verb, parsed.paneDir) : null;
 }
 
 /** Another machine's Pane over the tailnet, or this machine's own Pane; both resolve paths the same way. */

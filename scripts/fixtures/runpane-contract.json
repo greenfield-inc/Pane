@@ -1534,6 +1534,12 @@
       "--questions",
       "[{\"title\":\"A\",\"choices\":[{\"label\":\"x\"}]},{\"title\":\"B\",\"choices\":[{\"label\":\"y\"}]}]",
       "--json"
+    ],
+    [
+      "link",
+      "https://runpane.net/pair#s=secret&c=odkk3nfdl5dsozxr&n=parsa-devbox",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

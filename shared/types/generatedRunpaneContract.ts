@@ -3534,7 +3534,7 @@ export const RUNPANE_CONTRACT = {
         "  --json                         Print machine-readable output"
       ],
       "workspace": [
-        "Workspace commands: this machine's Panes, and your other machines over Tailscale.",
+        "Workspace commands: this machine's Panes, and your other machines over Tailscale or the routes Pane saved for them.",
         "",
         "Usage:",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -5528,7 +5528,7 @@ export const RUNPANE_CONTRACT = {
         "  --json"
       ],
       "workspace": [
-        "Workspace commands: this machine's Panes, and your other machines over Tailscale.",
+        "Workspace commands: this machine's Panes, and your other machines over Tailscale or the routes Pane saved for them.",
         "",
         "Usage:",
         "  runpane workspace state [--repo <selector>] [--json]",

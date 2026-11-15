@@ -41,7 +41,7 @@ test('unclear destinations fail with a message that says what to fix', () => {
   assert.throws(() => parseDestination('opus on parsas-macbook-pro', machines), /Name the agent: .*claude.*pi\./);
   assert.throws(() => parseDestination('pi high on parsas-macbook-pro', machines), /Pi effort is not supported/);
   assert.throws(() => parseDestination('claude codex on build-server', machines), /names two agents: claude and codex/);
-  assert.throws(() => parseDestination('claude on toaster', machines), /No machine on your tailnet is called "toaster"/);
+  assert.throws(() => parseDestination('claude on toaster', machines), /No machine on your tailnet or saved in Pane is called "toaster"/);
   assert.throws(() => parseDestination('claude high low on build-server', machines), /names two efforts: high and low/);
 });
 
@@ -388,7 +388,7 @@ function windowsHost(f, options={}) {
  if(/^(runpane|npx)(?: |$)/.test(command))return decode(schema,{os:'Windows',shell:${JSON.stringify(options.shell??'bash.exe')},exitCode:127,stdout:'',stderr:'runpane: command not found'});
  if(command.includes('remote -v'))stdout='origin '+${JSON.stringify(f.git('remote','get-url','origin'))}+' (fetch)';
  return decode(schema,{os:'Windows',shell:${JSON.stringify(options.shell??'bash.exe')},exitCode:0,stdout,stderr:''});};
- global.fetch=async(url,options)=>{const request=JSON.parse(options.body);const result=await require(${JSON.stringify(path.join(dist,'daemonClient.js'))}).invokeRemoteDaemon({machine:'windows-host',baseUrl:url},request.channel,request.args,require(${JSON.stringify(path.join(dist,'boundaryDecoder.js'))}).boundary.json);return {status:200,text:async()=>JSON.stringify({ok:true,result})};};`);
+ global.fetch=async(url,options)=>{const request=JSON.parse(options.body);const result=await require(${JSON.stringify(path.join(dist,'daemonClient.js'))}).invokeRemoteDaemon({machine:'windows-host',routes:[{kind:'tailscale',baseUrl:url}]},request.channel,request.args,require(${JSON.stringify(path.join(dist,'boundaryDecoder.js'))}).boundary.json);return {status:200,text:async()=>JSON.stringify({ok:true,result})};};`);
  f.env.NODE_OPTIONS=`--require=${JSON.stringify(preload)}`; f.env.WSL_DISTRO_NAME='HermeticWSL'; delete f.env.PANE_DIR;
  return ()=>fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse):[];
 }
@@ -772,7 +772,7 @@ function remoteMachine(f, options = {}) {
   fs.appendFileSync(path.join(f.root, '.git', 'isolated-tailnet.cjs'), [
     `const workspace = require(${JSON.stringify(path.join(dist, 'workspace.js'))});`,
     `workspace.readTailnet = async () => ({ ok: true, self: ${JSON.stringify(self)}, machines: [${JSON.stringify(remote)}] });`,
-    `workspace.workspaceTarget = (machine) => ({ machine: machine.name, baseUrl: 'http://127.0.0.1:${port}' });`,
+    `workspace.workspaceTarget = (machine) => ({ machine: machine.name, routes: [{ kind: 'tailscale', baseUrl: 'http://127.0.0.1:${port}' }] });`,
     '',
   ].join('\n'));
   const calls = () => fs.readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));

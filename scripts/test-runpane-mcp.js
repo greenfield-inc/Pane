@@ -734,7 +734,7 @@ test('a remote machine that drops the reply after the request arrived does not c
   const server = http.createServer((request) => { received += 1; request.socket.destroy(); });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
-    const target = { machine: 'qa-box', baseUrl: `http://127.0.0.1:${server.address().port}` };
+    const target = { machine: 'qa-box', routes: [{ kind: 'public', baseUrl: `http://127.0.0.1:${server.address().port}` }] };
     const error = await invokeRemoteDaemon(target, 'runpane:panes:create', [], boundary.json, 5_000).then(() => null, (cause) => cause);
     assert.equal(received, 1);
     assert.doesNotMatch(error.message, /Nothing was changed/);
