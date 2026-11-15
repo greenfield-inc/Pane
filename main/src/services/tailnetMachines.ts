@@ -45,7 +45,13 @@ export type WorkspaceCallResult =
   | { kind: 'answered'; statusCode: number; ok: false; code?: string; message?: string }
   | { kind: 'unreachable'; detail: string };
 
-export type WorkspaceCall = (machine: TailnetCandidate, channel: string, args: JsonValue[], secret?: string) => Promise<WorkspaceCallResult>;
+/** A longer call than a probe: a Session move sends 8 MiB chunks and waits for setup on the other machine. */
+interface WorkspaceCallOptions {
+  timeoutMs?: number;
+  maxResponseBytes?: number;
+}
+
+export type WorkspaceCall = (machine: TailnetCandidate, channel: string, args: JsonValue[], secret?: string, options?: WorkspaceCallOptions) => Promise<WorkspaceCallResult>;
 
 interface DiscoveryDependencies {
   /** `tailscale status --json`, or null when Tailscale is not installed. */
@@ -264,6 +270,16 @@ export async function lookupTailnetMachine(
   return { kind: 'found', peer: { dnsName: peer.dnsName, ip: peer.ip, online: peer.online, os: peer.os } };
 }
 
+/** A machine by name on the current tailnet, as a candidate to call, with whether it is on this machine's own login. */
+export async function locateTailnetCandidate(name: string, readStatus: () => Promise<string | null>): Promise<{ candidate: TailnetCandidate; domain: string; mine: boolean; online: boolean }> {
+  const tailnet = readTailnetPeers(await readStatus());
+  if (!tailnet.ok) throw new Error(`${tailnet.reason}. ${tailnet.fix}`);
+  const peer = tailnet.peers.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
+  if (!peer) throw new Error(`${name} is not on your current tailnet (${tailnet.tailnet}).`);
+  if (!peer.ip) throw new Error(`${name} has no Tailscale address right now.`);
+  return { candidate: { name: peer.name, dnsName: peer.dnsName, ip: peer.ip }, domain: tailnet.domain, mine: peer.mine, online: peer.online };
+}
+
 /** The address of a machine by name on the current tailnet, and that tailnet's domain. */
 export async function locateTailnetMachine(name: string, readStatus: () => Promise<string | null>): Promise<{ url: string; domain: string }> {
   const tailnet = readTailnetPeers(await readStatus());
@@ -306,7 +322,8 @@ const descriptionSchema = boundary.object({
  * directly, so it works where the system resolver does not know MagicDNS, while TLS still checks
  * the name. Serve on that machine signs the request with this machine's Tailscale login.
  */
-export const callWorkspace: WorkspaceCall = (machine, channel, args, secret) => new Promise((resolve) => {
+export const callWorkspace: WorkspaceCall = (machine, channel, args, secret, options = {}) => new Promise((resolve) => {
+  const maxResponseBytes = options.maxResponseBytes ?? MAX_PROBE_RESPONSE_BYTES;
   let settled = false;
   const finish = (result: WorkspaceCallResult) => {
     if (settled) return;
@@ -334,7 +351,7 @@ export const callWorkspace: WorkspaceCall = (machine, channel, args, secret) => 
     response.on('data', (chunk: Buffer) => {
       size += chunk.length;
       // A describe or glasses answer is a few kilobytes; anything this large is not Pane.
-      if (size > MAX_PROBE_RESPONSE_BYTES) {
+      if (size > maxResponseBytes) {
         request.destroy();
         finish({ kind: 'unreachable', detail: 'response too large' });
         return;
@@ -348,7 +365,7 @@ export const callWorkspace: WorkspaceCall = (machine, channel, args, secret) => 
   const deadline = setTimeout(() => {
     request.destroy();
     finish({ kind: 'unreachable', detail: 'timed out' });
-  }, PROBE_TIMEOUT_MS);
+  }, options.timeoutMs ?? PROBE_TIMEOUT_MS);
   request.on('error', (error) => finish({ kind: 'unreachable', detail: error.message }));
   request.end(body);
 });

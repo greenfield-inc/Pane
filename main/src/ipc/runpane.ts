@@ -78,6 +78,7 @@ import { classifyWorktree } from '../services/worktreeTrash';
 import { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
+import { sessionMovingError } from '../../../shared/types/sessionMove';
 import { pausedMarkOf, type TerminalPausedMark, type BrowserPanelState, type CreatePanelRequest, type EditorPanelState, type PanelOpener, type TerminalAgentReport, type TerminalExpectedReport, type TerminalPanelState, type ToolPanel, type ToolPanelMetadata } from '../../../shared/types/panels';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { withSessionFolderAccess } from '../services/agents/sessionFolderAccess';
@@ -1729,6 +1730,8 @@ export function registerRunpaneHandlers(
   });
 
   async function submitToPanel(normalized: RunpanePanelSubmitRequest, panel: ToolPanel, reserve: (screen: RunpanePanelScreenResult) => void, deliver: () => void): Promise<RunpanePanelSubmitResult> {
+    const moving = pausedMarkOf(panel);
+    if (moving?.by === 'move') throw sessionMovingError(moving);
     // An owed answer goes only to an agent: re-read the foreground right before each write, since the
     // agent may have quit back to the shell since Notify checked (F-7).
     const shellTookOver = () => agentOnlySubmits.has(panel.id) && terminalPanelManager.getForegroundProcess(panel.id)?.isShell === true;
@@ -3537,6 +3540,8 @@ async function resumeTerminalPanel(
     await panelManager.updatePanel(panel.id, { state: { ...panel.state, customState: { ...heldState, updateResumeHold: undefined, updateResumeId: undefined } } });
     panel = panelManager.getPanel(panel.id) ?? panel;
   }
+  // A Session move holds its tabs; only the move starts them again.
+  if (heldState?.paused?.by === 'move') throw sessionMovingError(heldState.paused);
   // An explicit resume is the one start a paused tab accepts.
   if (heldState?.paused) {
     await terminalPanelManager.clearPaused([panel.id]);

@@ -1,4 +1,5 @@
 import { getChatTabManager } from '../services/chatTabs';
+import { reapplyMoveSnapshot } from '../services/sessionMove/restore';
 /**
  * Session IPC handlers for Pane.
  * Note: "Sessions" are called "Panes" in the UI. Internally they remain
@@ -1742,6 +1743,8 @@ export function registerSessionHandlers(
           if (worktreePath !== dbSession.worktree_path) {
             databaseService.updateSession(sessionId, { worktree_path: worktreePath });
           }
+          // A Pane that moved to another machine kept its uncommitted work here for this.
+          await reapplyMoveSnapshot(worktreePath, sessionId);
         } catch (worktreeError) {
           const message = worktreeError instanceof Error ? worktreeError.message : String(worktreeError);
           console.error(`[Session IPC] Failed to recreate worktree while restoring session ${sessionId}:`, worktreeError);

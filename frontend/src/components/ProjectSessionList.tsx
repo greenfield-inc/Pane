@@ -30,6 +30,7 @@ import { paneHasWaitingQuestion, useNotifyStore } from '../stores/notifyStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { AutopilotNavRow } from './autopilot/AutopilotNavRow';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
+import { MovedSessionRow } from './MovedSessionRow';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
@@ -44,6 +45,7 @@ import {
   useOrchestrationSessionStore,
 } from '../stores/orchestrationSessionStore';
 import type { SidebarNavigationScope } from '../stores/navigationStore';
+import { restoreArchivedPanes } from './orchestrationSessionActions';
 import {
   createProjectById,
   flattenSessionsByProjects,
@@ -1331,10 +1333,13 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
   const handleRestoreOrchestrationSession = async (sessionId: string) => {
     setOrchestrationRestoreError(null);
     try {
+      const moved = archivedOrchestrationSessions.find(session => session.id === sessionId && session.move?.state === 'moved');
       await updateOrchestrationSession(
         { sessionId },
         { archived: false },
       );
+      // A Session that moved away archived its Panes; Restore here brings them back, uncommitted work included.
+      if (moved) await restoreArchivedPanes(moved.associations.filter(association => !association.machine).map(association => association.paneId));
       // Keep the current Session selected when a historical Session is restored.
       await refreshOrchestrationSessions();
     } catch (cause) {
@@ -1451,7 +1456,9 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
               <div data-testid="archived-orchestration-sessions" className="pb-1">
                 <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Sessions</p>
                 {archivedOrchestrationSessions.length === 0 && <p className="px-5 py-2 text-xs text-text-tertiary">No archived Sessions</p>}
-                {archivedOrchestrationSessions.map(session => (
+                {archivedOrchestrationSessions.map(session => session.move?.state === 'moved' ? (
+                  <MovedSessionRow key={`archived-orchestration-${session.id}`} session={session} mark={session.move} onRestore={handleRestoreOrchestrationSession} />
+                ) : (
                   <div
                     key={`archived-orchestration-${session.id}`}
                     data-testid={`archived-orchestration-session-${session.id}`}

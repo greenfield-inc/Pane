@@ -14,6 +14,7 @@ import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestr
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears, SYNC_END } from './syncBlockClearFilter';
+import { sessionMovingError } from '../../../shared/types/sessionMove';
 import { ToolPanel, TerminalPanelState, pausedMarkOf, type TerminalConversationReport, type TerminalPausedMark } from '../../../shared/types/panels';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
 import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
@@ -1279,6 +1280,11 @@ export class TerminalPanelManager extends EventEmitter {
     getPaneDaemonEventSink().send(channel, ...args);
   }
 
+  /** The PTY process of a running terminal tab, or undefined when it isn't running. */
+  getPanelPid(panelId: string): number | undefined {
+    return this.terminals.get(panelId)?.pty.pid;
+  }
+
   /**
    * Returns a map of sessionId → array of PTY PIDs for that session.
    * Used by resource monitoring to discover which processes belong to which session.
@@ -1893,6 +1899,7 @@ export class TerminalPanelManager extends EventEmitter {
       await panelManager.updatePanel(panel.id, { state });
       panel = { ...panel, state };
     }
+    if (heldState.paused?.by === 'move') throw sessionMovingError(heldState.paused);
     if (heldState.paused) {
       throw new PaneError('ERR_PANEL_PAUSED', `Tab ${panel.title} is paused, so it was not started.`, `Resume it from the tab, or run \`runpane panels resume --panel ${panel.id} --yes\`.`);
     }

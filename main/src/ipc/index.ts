@@ -39,6 +39,7 @@ import { registerPaneChatHandlers } from './paneChat';
 import { registerSshHostHandlers } from './sshHosts';
 import { registerUsageHandlers } from './usage';
 import { registerSessionImportHandlers } from './sessionImport';
+import { registerSessionMoveHandlers } from './sessionMove';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerExportHandlers } from './export';
 import { registerSetupHandlers } from './setup';
@@ -159,6 +160,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerAutopilotHandlers(services, commandRegistry, notify);
   registerUsageHandlers(ipcMain, commandRegistry);
   registerSessionImportHandlers(ipcMain, services, commandRegistry);
+  registerSessionMoveHandlers(ipcMain, services, commandRegistry);
   if (services.loopManager) registerLoopHandlers(ipcMain, services.loopManager, commandRegistry);
   registerMissionControlHandlers(ipcMain, services, commandRegistry);
   registerOnboardingHandlers(ipcMain, services);

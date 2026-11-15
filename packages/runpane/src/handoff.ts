@@ -8,6 +8,8 @@ import { PaneDaemonClientError, resolvePaneDirectory, invokeDaemon, invokeRemote
 import { buildPaneCreateRequest, buildPanelCreateRequest, paneCreateResultSchema, panelCreateResultSchema, paneListResultSchema, panelListResultSchema, panelScreenResultSchema, panelSubmitResultSchema, repoListResultSchema, runpaneSessionListResultSchema, runpaneSessionResultSchema } from './localControl';
 import { CURSOR_NO_FORK, forkNativeSession, isNativeAgent, lastMessageSnippet, locateNativeSession, openCodeMessagesMissing, originalChanges, screenShows, sha256, snapshotOriginal, type NativeAgent, type NativeSession, type OriginalSnapshot } from './nativeSession';
 import { RunpaneError } from './errors';
+// Machine writes go through one request each; larger files go in parts joined on the destination.
+import { divergedCopy, WRITE_CHUNK_BYTES, type FileDigest } from './checkedCopy';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
 import { agentModelArgs, agentTerminalCommand } from './agents';
@@ -586,8 +588,6 @@ function describeCarry(carry: Carry, fork: boolean): ContinuityReport {
   };
 }
 
-/** Machine writes go through one request each; larger files go in parts joined on the destination. */
-const WRITE_CHUNK_BYTES = 8 * 1024 * 1024;
 
 /**
  * Where the session's main file already is in the destination's store, as a path under home,
@@ -615,11 +615,6 @@ async function existingCopy(destination: Destination, session: NativeSession): P
 function quoted(value: string, windows: boolean): string {
   // PowerShell also ends a single-quoted string at a typographic single quote.
   return windows ? `'${value.replace(/['‘’‚‛]/g, '$&$&')}'` : `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-interface FileDigest {
-  bytes: number;
-  sha256: string;
 }
 
 /** Size and sha256 of each file on the destination (paths under home), by index; missing files are left out. */
@@ -675,7 +670,7 @@ async function placeSession(destination: Destination, session: NativeSession, re
     const there = await destinationDigests(destination, placements.map(placement => placement.target));
     const diverged = placements.filter((placement, index) => {
       const digest = there.get(index);
-      return digest !== undefined && (digest.bytes > placement.bytes.length || sha256(placement.bytes.subarray(0, digest.bytes)) !== digest.sha256);
+      return digest !== undefined && divergedCopy(digest, placement.bytes.length, sha256(placement.bytes.subarray(0, digest.bytes)));
     });
     if (diverged.length) {
       throw new Error(`${destination.name}'s copy of ${session.agent} session ${session.id} has history this machine's copy doesn't (${diverged.map(placement => placement.target).join(', ')}): it was continued there after an earlier handoff. Nothing was copied, so that history is kept. Continue it on ${destination.name}, or hand it off from there back to here`);

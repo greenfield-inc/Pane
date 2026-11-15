@@ -16,6 +16,7 @@ import { QueuedBodies } from './queuedBodies';
 import { agentConfig, agentLabel } from '../../../../shared/agents';
 import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
+import { sessionMovingError } from '../../../../shared/types/sessionMove';
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
 export interface ResolvedLaunch {
@@ -270,6 +271,9 @@ export class ChatTabManager {
 
   /** Starts the tab's agent once; concurrent callers share the same start. */
   ensure(panelId: string): Promise<void> {
+    const moving = this.options.store.state(panelId)?.paused;
+    // Only the move itself starts a tab it stopped (`releaseMove`).
+    if (moving?.by === 'move') return Promise.reject(sessionMovingError(moving));
     const tab = this.tab(panelId);
     if (tab.runtime?.isAlive()) return Promise.resolve();
     // A send or open during a pause starts the agent once the pause has stopped it.
@@ -290,6 +294,35 @@ export class ChatTabManager {
       this.drain(panelId);
     });
     return tab.starting;
+  }
+
+  /** A Session move: stops the tab (interrupting its turn when `interrupt`) and marks it moving. */
+  async pauseForMove(panelId: string, mark: TerminalPausedMark, interrupt: boolean): Promise<void> {
+    const state = this.options.store.state(panelId);
+    const tab = this.tabs.get(panelId);
+    if (!state) return;
+    if (interrupt && this.busy(panelId)) await this.cancel(panelId).catch(() => undefined);
+    if (!tab?.runtime?.isAlive()) {
+      this.update(panelId, current => ({ ...current, paused: mark }));
+      this.publish(panelId);
+      return;
+    }
+    await this.stopForPause(panelId, tab, mark);
+  }
+
+  /** Ends a move's hold on a tab that wasn't running, without starting it. */
+  async clearMoveHold(panelId: string): Promise<void> {
+    if (this.options.store.state(panelId)?.paused?.by !== 'move') return;
+    this.update(panelId, current => ({ ...current, paused: undefined }));
+    this.publish(panelId);
+  }
+
+  /** Ends a move's hold on the tab and starts it again (cancelled move, or arrived on this machine). */
+  async releaseMove(panelId: string): Promise<void> {
+    if (this.options.store.state(panelId)?.paused?.by !== 'move') return;
+    this.update(panelId, current => ({ ...current, paused: undefined }));
+    this.publish(panelId);
+    await this.ensure(panelId);
   }
 
   async restart(panelId: string): Promise<void> {
@@ -322,6 +355,7 @@ export class ChatTabManager {
     if (request.images?.some(image => !/^image\/(png|jpeg|webp|gif)$/.test(image.mimeType) || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.data))) {
       throw new PaneError('CHAT_IMAGE_UNSUPPORTED', 'An attachment is not a PNG, JPEG, WebP or GIF image. Nothing was sent.', 'Attach a supported image, or send text only.');
     }
+    if (state.paused?.by === 'move') throw sessionMovingError(state.paused);
     if (state.status === 'stopped') {
       throw new PaneError('CHAT_STOPPED', `This chat is stopped${state.problem ? `: ${state.problem.message}` : '.'} Nothing was sent.`, state.problem?.next ?? 'Press Restart to start it again.');
     }

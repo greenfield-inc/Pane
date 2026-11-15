@@ -318,7 +318,8 @@ const GLASSES_OWNER_REQUIRED = {
  * Commands that act on the whole machine. On the paired listener, only a linked computer runs
  * machine commands, and only a paired phone or linked computer manages glasses.
  */
-const WORKSPACE_ONLY_CHANNEL_PREFIXES = ['runpane:machine:', 'runpane:glasses:'];
+// A Session move (`runpane:move:`) reaches a machine only from the owner's own machines, never a paired phone or code.
+const WORKSPACE_ONLY_CHANNEL_PREFIXES = ['runpane:machine:', 'runpane:glasses:', 'runpane:move:'];
 
 const WORKSPACE_LISTEN_HOST = '127.0.0.1';
 

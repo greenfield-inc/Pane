@@ -1,3 +1,4 @@
+import type { JsonObject } from '../validation/boundaryDecoder';
 import type { NotifyRemoteCommand } from './notify';
 import type { OrchestrationSessionCreateInput } from './orchestrationSession';
 import type { PanePermissionResponse } from './permissions';
@@ -89,7 +90,9 @@ export type MachineCommand =
   | { type: 'preview-switch-to-chat'; sessionId: string }
   | { type: 'switch-to-chat'; sessionId: string; panelIds: string[] }
   /** Sends `input` to an agent tab as the person's message (`runpane panels submit`); Move to machine… uses it. */
-  | { type: 'submit-to-agent'; panelId: string; input: string };
+  | { type: 'submit-to-agent'; panelId: string; input: string }
+  /** The Move dialog's calls on the machine the Session lives on (`SESSION_MOVE_CHANNELS`). */
+  | { type: 'move-session'; channel: string; request: JsonObject };
 
 /** A read's or command's answer, exactly as the machine gave it, tagged with that machine. */
 export interface MachineResult {

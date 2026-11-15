@@ -369,9 +369,10 @@ export interface RunpaneRepoListResult {
  * What this Pane's daemon supports beyond its channel list, so a newer runpane can tell an older
  * Pane apart before relying on a field an older one would drop. `resume-on-create`: panes create,
  * panels create and sessions create honour `resume`, launching the agent's own resume for that id
- * and recording it as the tab's conversation.
+ * and recording it as the tab's conversation. `session-move`: this Pane can receive a whole Session
+ * from another of the owner's machines (the `runpane:move:` calls, docs/SESSIONS.md).
  */
-export const RUNPANE_DAEMON_FEATURES = ['resume-on-create'] as const;
+export const RUNPANE_DAEMON_FEATURES = ['resume-on-create', 'session-move'] as const;
 
 export interface RunpaneDoctorResult {
   ok: true;
