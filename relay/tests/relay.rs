@@ -2041,3 +2041,42 @@ async fn alerts_without_keys_or_with_bad_frames_are_refused() {
         (Some("3"), Some("bad-request"))
     );
 }
+
+#[tokio::test]
+async fn helpers_with_self_signed_certificates_take_each_others_acme_challenges() {
+    use pane_relay::registry::{AcmeTxt, Registry, Update};
+    // A first deploy: both helpers still serve self-signed certificates, which no
+    // relay trusts (no --provider-ca), and each needs the other's challenge.
+    let (us, eu) = (helper("us").await, helper("eu").await);
+    let url = |env: &Env| format!("https://127.0.0.1:{}/v1/registry", env.addr().port());
+    for (to, region) in [(&eu, "us"), (&us, "eu")] {
+        let client = Registry::new(&[url(to)], Some("s3cret".into()), None, 10).unwrap();
+        let name = format!("_acme-challenge.{region}.relay.{D}");
+        let challenge = AcmeTxt {
+            name: name.clone(),
+            values: vec!["token-1".into()],
+        };
+        client.publish_acme(challenge.clone()).await.unwrap();
+        let txt = dns_query(to.dns(), format!("{name}."), RecordType::TXT, false).await;
+        assert_eq!(
+            txt.answers.len(),
+            1,
+            "{region}'s challenge on the other helper"
+        );
+
+        // Only a relay with the secret may set one.
+        let stranger = Registry::new(&[url(to)], Some("wrong".into()), None, 10).unwrap();
+        assert!(stranger.publish_acme(challenge).await.is_err());
+
+        // Computer updates, which carry local addresses, still need a trusted certificate.
+        let update = Update {
+            id: "bbbbbbbbbbbbbbbb".into(),
+            region: region.into(),
+            local: vec![Ipv4Addr::new(192, 168, 1, 2)],
+            txt: Some(vec!["x".into()]),
+            online: true,
+        };
+        let refused = client.publish(update).await.unwrap_err();
+        assert!(refused.contains("tls"), "{refused}");
+    }
+}

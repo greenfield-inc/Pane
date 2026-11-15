@@ -10,7 +10,7 @@ mod direct;
 mod dns;
 pub mod id;
 mod io;
-mod registry;
+pub mod registry;
 mod sni;
 mod state;
 mod tls;
