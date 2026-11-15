@@ -801,6 +801,10 @@
         "secrets delete",
         "secrets exec",
         "secrets request",
+        "theme",
+        "theme read",
+        "theme set",
+        "theme reset",
         "panes",
         "panes list",
         "panes cost",
@@ -959,6 +963,18 @@
           "$ref": "#/$defs/helpLines"
         },
         "secrets request": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "theme": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "theme read": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "theme set": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "theme reset": {
           "$ref": "#/$defs/helpLines"
         },
         "panes": {

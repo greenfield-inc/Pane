@@ -80,6 +80,10 @@ export interface ParsedArgs {
   only?: string[];
   secretFiles?: string[];
   reason?: string;
+  /** `runpane theme set`: --theme, --colors (JSON text) and --css. --base arrives as baseBranch. */
+  themeId?: string;
+  themeColors?: string;
+  themeCss?: string;
   timeoutMs?: number;
   waitReady?: boolean;
   readyTimeoutMs?: number;
@@ -283,6 +287,9 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--deny', ['autopilot answer']],
   ['--because', ['autopilot answer']],
   ['--reason', ['secrets request', 'autopilot close']],
+  ['--theme', ['theme set']],
+  ['--colors', ['theme set']],
+  ['--css', ['theme set']],
   ['--conversation', ['panels conversation']],
   ['--hook', ['panels conversation']],
 ]);
@@ -1154,6 +1161,18 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--reason') {
     parsed.reason = value;
+    return;
+  }
+  if (flag === '--theme') {
+    parsed.themeId = value;
+    return;
+  }
+  if (flag === '--colors') {
+    parsed.themeColors = value;
+    return;
+  }
+  if (flag === '--css') {
+    parsed.themeCss = value;
     return;
   }
   if (flag === '--timeout-ms') {
