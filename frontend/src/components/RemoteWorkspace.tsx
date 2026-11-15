@@ -36,6 +36,7 @@ export function RemoteWorkspace({ dimmed, covered = false, children }: {
   return (
     <div
       ref={ref}
+      data-pane-part="main"
       data-focus-region="main"
       inert={dimmed || covered}
       aria-busy={dimmed || undefined}

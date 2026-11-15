@@ -40,6 +40,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         )}
         
         <textarea
+          data-pane-part="input"
           id={textareaId}
           aria-describedby={describedBy}
           aria-invalid={ariaInvalid ?? !!error}

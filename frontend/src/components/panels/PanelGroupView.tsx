@@ -237,6 +237,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
               key={panel.id}
               id={getPanelTabPanelId(panelTabNamespace, panel.id)}
               role="tabpanel"
+              data-pane-part="panel"
               aria-labelledby={getPanelTabId(panelTabNamespace, panel.id)}
               aria-hidden={!isActiveTab}
               inert={!isActiveTab ? true : undefined}
