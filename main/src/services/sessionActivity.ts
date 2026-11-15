@@ -154,7 +154,7 @@ export class SessionActivityService extends EventEmitter {
     return this.rollup.snapshot();
   }
 
-  /** A Session was created, archived, or gained or lost a Pane: read the members on the next tick. */
+  /** A Session was created, archived or restored, or gained or lost a Pane: read the members on the next tick. */
   invalidateMembers(): void {
     this.members = null;
   }

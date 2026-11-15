@@ -1914,6 +1914,40 @@ describe('OrchestrationSessionManager', () => {
     expect((await fixture.manager.overview({ sessionId: named.session.id })).status).toBe('idle');
   });
 
+  it('counts only the agent tabs of Panes that exist and are not archived for the Session row\'s activity', async () => {
+    const fixture = createFixture();
+    const whole = paneFixture(fixture, 'activity-whole', { name: 'Whole' });
+    await seedPanel(createPanel('activity-whole-agent', whole.id, 'Claude Code'));
+    await panelManager.createPanel({ id: 'activity-whole-chat', sessionId: whole.id, type: 'chat', title: 'Codex', initialState: { customState: { agent: 'codex', launch: { kind: 'agent' }, cwd: '/tmp', status: 'idle' } }, activate: false });
+    await panelManager.createPanel({ id: 'activity-whole-page', sessionId: whole.id, type: 'browser', title: 'localhost:5173' });
+    const scoped = paneFixture(fixture, 'activity-scoped', { name: 'Scoped' });
+    await seedPanel(createPanel('activity-scoped-agent', scoped.id, 'Codex'));
+    await seedPanel(createPanel('activity-scoped-other', scoped.id, 'Shell'));
+    const shelved = paneFixture(fixture, 'activity-shelved', { name: 'Shelved' });
+    await seedPanel(createPanel('activity-shelved-agent', shelved.id, 'Claude Code'));
+    const named = await fixture.manager.create({ name: 'Activity members' });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: whole.id });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: scoped.id, panelIds: ['activity-scoped-agent'] });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: shelved.id });
+    databaseService.getDb().prepare('UPDATE sessions SET archived = 1 WHERE id = ?').run(shelved.id);
+
+    const members = fixture.manager.activityMembers().find(member => member.sessionId === named.session.id);
+
+    // The orchestrator's tabs that were created; a Session keeps an id for every agent it could run.
+    expect(members?.orchestratorPanelIds).toEqual([named.panel.id]);
+    expect(members?.panes).toEqual([
+      { paneId: whole.id, panelIds: ['activity-whole-agent', 'activity-whole-chat'] },
+      { paneId: scoped.id, panelIds: ['activity-scoped-agent'] },
+    ]);
+
+    // Archiving the Session drops it, and re-reads the members at once rather than on the 2 s refresh.
+    const invalidate = vi.spyOn(fixture.manager.liveActivity, 'invalidateMembers');
+    await fixture.manager.update({ sessionId: named.session.id }, { archived: true, report: { summary: 'Shipped', status: 'reported', evidence: [createLink('PR')], reportedAt: '2026-11-15T12:00:00.000Z', provenance: 'test' } });
+    expect(invalidate).toHaveBeenCalled();
+    expect(fixture.manager.activityMembers().find(member => member.sessionId === named.session.id)).toBeUndefined();
+    invalidate.mockRestore();
+  });
+
   it('enforces exclusive Pane ownership, validates tab membership, and permits reassignment after detach', async () => {
     const fixture = createFixture();
     const pane = paneFixture(fixture, 'pane-1', { name: 'Feature Pane' });

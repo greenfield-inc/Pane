@@ -432,6 +432,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         selectedSessionId,
       };
       this.store.write(nextData);
+      // An archive or restore can come with a report, whose change kind does not re-read the members.
+      if ((current.archived === true) !== (nextRecord.archived === true)) this.liveActivity.invalidateMembers();
       this.emitChanged(nextRecord, input.report ? 'report' : 'updated', selectedSessionId !== data.selectedSessionId);
       return this.withPaused(clone(nextRecord));
     });
@@ -752,25 +754,23 @@ export class OrchestrationSessionManager extends EventEmitter {
    */
   activityMembers(): SessionActivityMembers[] {
     const types = new Map<string, 'chat' | 'terminal'>();
-    const counted = (panels: Array<ToolPanel | undefined>, paneId?: string) => panels.flatMap(panel => {
-      if (!panel || (paneId !== undefined && panel.sessionId !== paneId)) return [];
+    const counted = (panels: Array<{ id: string; type: string; sessionId?: string } | undefined>, paneId?: string) => panels.flatMap(panel => {
+      if (!panel || (paneId !== undefined && panel.sessionId !== undefined && panel.sessionId !== paneId)) return [];
       if (panel.type !== 'terminal' && panel.type !== 'chat') return [];
       types.set(panel.id, panel.type);
       return [panel.id];
     });
+    // Read every 2 s for every open Session, so only the columns it needs: the Pane's archived
+    // flag and its tabs' ids and types, never whole rows with their parsed state.
     const members = this.store.memberships().filter(session => !session.archived).map(session => ({
       sessionId: session.id,
       // Only tabs that exist: a Session keeps a panel id for each agent, most never created.
       orchestratorPanelIds: counted(session.panelIds.map(panelId => panelManager.getPanel(panelId))),
-      // The Pane's row alone (one read): getSession also converts it and reads its pause marks.
-      panes: session.associations.filter(association => {
-        const pane = databaseService.getSession(association.paneId);
-        return pane !== undefined && !pane.archived;
-      }).map(association => ({
+      panes: session.associations.filter(association => databaseService.isSessionArchived(association.paneId) === false).map(association => ({
         paneId: association.paneId,
-        panelIds: counted(association.panelIds.length > 0
-          ? association.panelIds.map(panelId => panelManager.getPanel(panelId))
-          : panelManager.getPanelsForSession(association.paneId), association.paneId),
+        panelIds: association.panelIds.length > 0
+          ? counted(association.panelIds.map(panelId => panelManager.getPanel(panelId)), association.paneId)
+          : counted(databaseService.getPanelTypesForSession(association.paneId)),
       })),
     }));
     this.activityPanelTypes = types;
