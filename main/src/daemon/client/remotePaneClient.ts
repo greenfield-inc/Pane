@@ -3,13 +3,13 @@ import { pinnedServerIdentity } from '../relay/keyPinning';
 import { DirectPath } from '../relay/directPath';
 import { findPaneDirect } from '../relay/paneDirect';
 import { RELAY_CLIENT_COMMANDS } from '../../../../shared/types/relay';
-import { COMPUTER_ROUTE_LABELS, applyRoutesReport, decodeComputerRoutesReport, primaryProfile, routeProfile, type ComputerRoute, type ComputerRouteKind, type ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
+import { COMPUTER_ROUTE_LABELS, applyRoutesReport, decodeComputerRoutesReport, primaryProfile, routeProfile, routesReachableHere, type ComputerRoute, type ComputerRouteKind, type ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
 import { EventEmitter } from 'events';
 import { lookup as defaultLookup, Resolver } from 'dns';
 import http, { type IncomingMessage, type RequestOptions } from 'http';
 import https from 'https';
 import { isIP, type LookupFunction } from 'net';
-import { hostname as getOsHostname } from 'os';
+import { hostname as getOsHostname, networkInterfaces } from 'os';
 import WebSocket, { type ClientOptions } from 'ws';
 import { Readable } from 'stream';
 import { noopPaneEventSink, type PaneEventSink } from '../../core/eventSink';
@@ -1647,7 +1647,8 @@ export class RemotePaneClientController extends EventEmitter {
     const computers = this.configManager ? normalizeRemoteDaemonConfig(this.configManager.getConfig().remoteDaemon).client.computers : [];
     const computer = computers.find((candidate) => candidate.id === profile.id);
     if (!computer?.routes.length) return [{ routeId: '', kind: profile.relay ? 'relay' : 'public', profile }];
-    return computer.routes.map((route) => ({ routeId: route.id, kind: route.kind, profile: routeProfile(computer, route) }));
+    return routesReachableHere(computer.routes, Object.values(networkInterfaces()).flatMap((entries) => entries ?? []))
+      .map((route) => ({ routeId: route.id, kind: route.kind, profile: routeProfile(computer, route) }));
   }
 
   /** A Tailscale route's address is looked up again; an SSH route's tunnel is opened. */

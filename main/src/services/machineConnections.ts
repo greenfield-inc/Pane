@@ -1,6 +1,6 @@
 import os from 'os';
 import { RemotePaneClient, type RemoteRouteCandidate } from '../daemon/client/remotePaneClient';
-import { primaryProfile, routeProfile, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
+import { primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import type { ConfigManager } from './configManager';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../shared/paneError';
@@ -226,7 +226,8 @@ export class MachineConnections {
     const profile = primaryProfile(computer);
     const id = profile.id;
     const isCurrent = (): boolean => this.machines.get(id) === machine;
-    const routes = computer.routes.map((route) => ({ routeId: route.id, kind: route.kind, profile: routeProfile(computer, route) }));
+    const routes = routesReachableHere(computer.routes, Object.values(os.networkInterfaces()).flatMap((entries) => entries ?? []))
+      .map((route) => ({ routeId: route.id, kind: route.kind, profile: routeProfile(computer, route) }));
     const machine: RemoteMachine = {
       key: connectionKey(computer),
       profile,

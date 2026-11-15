@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ConfigManager } from './configManager';
-import { applyRoutesReport, decodeComputers, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
+import { applyRoutesReport, decodeComputers, routesReachableHere, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
 
 // Saved by v2.4.225: the same Mac once through Tailscale and once through the relay, plus a code host.
 const tailnetMac = {
@@ -195,5 +195,25 @@ describe('merging computers', () => {
       });
       expect(computers.map((computer) => [computer.id, computer.machineId, computer.routes.map((route) => route.kind)])).toEqual([['tailnet-studio', 'studio-install', ['tailscale', 'relay']]]);
     });
+  });
+});
+
+describe('routes worth trying from here', () => {
+  const lan = (address: string) => ({ kind: 'lan' as const, baseUrl: `https://l${address.replace(/\./g, '-')}.k7xq2m4n8p3r5t6v.runpane.net:42138` });
+  const relay = { kind: 'relay' as const, baseUrl: 'https://k7xq2m4n8p3r5t6v.runpane.net' };
+  // A Mac on its home Wi-Fi, 192.168.1.0/24.
+  const mac = [
+    { address: '127.0.0.1', netmask: '255.0.0.0', family: 'IPv4', internal: true },
+    { address: '192.168.1.5', netmask: '255.255.255.0', family: 'IPv4', internal: false },
+  ];
+
+  it('tries only Same network addresses on one of this computer\'s subnets', () => {
+    // A Windows PC on another home network, with WSL and Docker adapters, and one on the Mac's own Wi-Fi.
+    const routes = [lan('192.168.0.20'), lan('172.20.240.1'), lan('172.17.0.1'), lan('192.168.1.30'), relay];
+    expect(routesReachableHere(routes, mac)).toEqual([lan('192.168.1.30'), relay]);
+  });
+
+  it('keeps every route when none is left to try', () => {
+    expect(routesReachableHere([lan('10.0.0.4')], mac)).toEqual([lan('10.0.0.4')]);
   });
 });

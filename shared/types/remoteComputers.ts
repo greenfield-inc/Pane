@@ -176,6 +176,49 @@ function routeId(kind: ComputerRouteKind, baseUrl: string): string {
   return `${kind}:${baseUrl.replace(/\/+$/u, '')}`;
 }
 
+/** A network interface as `os.networkInterfaces()` lists it. */
+export interface LocalInterface {
+  address: string;
+  netmask: string;
+  family: string | number;
+  internal: boolean;
+}
+
+function ipv4Number(address: string): number | undefined {
+  const parts = address.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return undefined;
+  return parts.reduce((value, part) => value * 256 + part, 0);
+}
+
+/**
+ * The routes worth trying from here. A Same network route (`https://l<a-b-c-d>.<id>.<domain>`) is
+ * kept only when its address is on one of this computer's own subnets, so the addresses of another
+ * home network, or of WSL, Docker or VM adapters on the computer, cost no timeouts. When that leaves
+ * nothing, every route is kept.
+ */
+export function routesReachableHere<Route extends Pick<ComputerRoute, 'kind' | 'baseUrl'>>(routes: readonly Route[], interfaces: readonly LocalInterface[]): Route[] {
+  const subnets = interfaces.flatMap((entry) => {
+    const address = entry.family === 'IPv4' || entry.family === 4 ? ipv4Number(entry.address) : undefined;
+    const mask = ipv4Number(entry.netmask);
+    return entry.internal || address === undefined || mask === undefined ? [] : [{ address, mask }];
+  });
+  const sameNetwork = (baseUrl: string) => {
+    let host: string;
+    try {
+      host = new URL(baseUrl).hostname;
+    } catch {
+      return false;
+    }
+    const encoded = /^l(\d+-\d+-\d+-\d+)\./u.exec(host)?.[1];
+    const address = encoded === undefined ? undefined : ipv4Number(encoded.replace(/-/gu, '.'));
+    if (address === undefined) return true;
+    // Bitwise AND works on signed 32-bit ints; `>>> 0` reads both sides as unsigned.
+    return subnets.some((subnet) => ((address & subnet.mask) >>> 0) === ((subnet.address & subnet.mask) >>> 0));
+  };
+  const kept = routes.filter((route) => route.kind !== 'lan' || sameNetwork(route.baseUrl));
+  return kept.length ? kept : [...routes];
+}
+
 /** The route a saved entry from before computers (one entry per route) stands for. */
 export function routeFromProfile(profile: RemotePaneConnectionProfile, source?: ComputerRouteSource): ComputerRoute {
   const kind: ComputerRouteKind = profile.relay ? 'relay'

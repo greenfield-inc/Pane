@@ -358,9 +358,32 @@ function peerOf(computer: SavedComputer, computers: readonly SavedComputer[], pe
 
 const ROUTE_ORDER = ['lan', 'tailscale', 'ssh', 'public', 'relay'];
 
+function ipv4Number(address: string): number | undefined {
+  const parts = address.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return undefined;
+  return parts.reduce((value, part) => value * 256 + part, 0);
+}
+
+/**
+ * Whether a Same network route (`https://l<a-b-c-d>.<id>.<domain>`) is on one of this computer's
+ * subnets, as `routesReachableHere` in shared/types/remoteComputers.ts decides for desktop Pane.
+ */
+function onThisNetwork(baseUrl: string): boolean {
+  const encoded = /^l(\d+-\d+-\d+-\d+)\./u.exec(hostOf(baseUrl))?.[1];
+  const address = encoded === undefined ? undefined : ipv4Number(encoded.replace(/-/gu, '.'));
+  if (address === undefined) return true;
+  return Object.values(os.networkInterfaces()).flatMap((entries) => entries ?? []).some((entry) => {
+    const own = entry.family === 'IPv4' && !entry.internal ? ipv4Number(entry.address) : undefined;
+    const mask = ipv4Number(entry.netmask);
+    return own !== undefined && mask !== undefined && ((own & mask) >>> 0) === ((address & mask) >>> 0);
+  });
+}
+
 /** One saved computer as one machine, merged with its tailnet entry when it is on the tailnet. */
 function computerMachine(computer: SavedComputer, peer: TailnetMachine | undefined): TailnetMachine {
-  const routes: RemoteRoute[] = computer.routes.map((route) => {
+  // Same network routes on another network (or WSL, Docker and VM adapters) would only cost timeouts.
+  const nearby = computer.routes.filter((route) => route.kind !== 'lan' || onThisNetwork(route.baseUrl));
+  const routes: RemoteRoute[] = (nearby.length ? nearby : computer.routes).map((route) => {
     const remote: RemoteRoute = { kind: route.kind, baseUrl: route.baseUrl };
     if (route.token) remote.token = route.token;
     if (route.relay) remote.fingerprint = route.relay.fingerprint;
