@@ -3,10 +3,10 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { RemotePaneConnectionStatus } from '../../../../shared/types/remoteDaemon';
-import type { SessionOutput } from '../../types/session';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { hydrateRemoteTerminalSnapshot } from '../runtime/terminalSnapshot';
+import { terminalSnapshotText } from '../../../../shared/remoteClient/terminalSnapshot';
 import { terminalOutputByteLength } from '../../utils/terminalRestore';
 import { useCaretResting } from '../../services/caretRest';
 import { useCommittedRef } from '../../hooks/useCommittedRef';
@@ -78,10 +78,17 @@ export function useRemoteTerminal({
     terminalRef.current?.scrollToBottom();
   }, []);
 
-  const hydrateTerminal = useCallback((terminal: Terminal, owns: () => boolean) =>
-    hydrateRemoteTerminalSnapshot(terminal, async () =>
-      (await adapter.getPanelOutput(panel.id)).map(formatSessionOutput).join(''),
-    () => terminalRef.current === terminal && owns()), [adapter, panel.id]);
+  const hydrateTerminal = useCallback(async (terminal: Terminal, owns: () => boolean) => {
+    let fullScreen = false;
+    const hydrated = await hydrateRemoteTerminalSnapshot(terminal, async () => {
+      const state = await adapter.getTerminalState(panel.id);
+      fullScreen = state?.isAlternateScreen === true;
+      return terminalSnapshotText(state);
+    }, () => terminalRef.current === terminal && owns());
+    // A full-screen app's frame was drawn for the host's size; a forced resize makes the app repaint at this one.
+    if (hydrated && fullScreen) await adapter.resizeTerminal(panel.id, terminal.cols, terminal.rows, { force: true });
+    return hydrated;
+  }, [adapter, panel.id]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -237,10 +244,6 @@ export function useRemoteTerminal({
   }, [adapter, connectionStatus, panel.id]);
 
   return { containerRef, statusText, focusTerminal, sendInput, resetTerminal, scrollLines, scrollToBottom };
-}
-
-function formatSessionOutput(output: SessionOutput): string {
-  return output.type === 'json' ? `${JSON.stringify(output.data)}\r\n` : String(output.data);
 }
 
 function getTerminalViewerId(): string {
