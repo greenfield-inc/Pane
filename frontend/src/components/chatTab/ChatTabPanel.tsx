@@ -334,10 +334,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   useLayoutEffect(() => {
     const composer = runtime.thread.composer;
     const save = () => draftAttachments.set(viewer, composer.getState().attachments);
-    let current = restore.current;
-    if (!current || current.runtime !== runtime) {
-      const restoring = { runtime, done: false, mounted: 0 };
-      current = restore.current = restoring;
+    if (restore.current?.runtime !== runtime) {
+      const restoring: NonNullable<typeof restore.current> = { runtime, done: false, mounted: 0 };
+      restore.current = restoring;
       composer.setText(viewer.snapshot().draft);
       const saved = draftAttachments.get(viewer) ?? [];
       // In their order: a file already copied to the chat's machine comes back with its path; an
@@ -361,7 +360,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         if (restoring.mounted > 0) save();
       })();
     }
-    const run = current;
+    const run = restore.current;
     run.mounted += 1;
     // Sending empties the composer's attachments, and with them the saved ones.
     const unsubscribe = composer.subscribe(() => { if (run.done) save(); });
