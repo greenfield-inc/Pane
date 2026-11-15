@@ -39,6 +39,17 @@ interface Computer {
  * route, `/invoke` checks the token against the callee's clients and runs the command as that
  * client, as the listener does.
  */
+/** A computer key's fingerprint and the id it names: the first 80 bits of the key's SHA-256 in base32 (relay/PROTOCOL.md). */
+function relayIdentity(seed: string): { id: string; fingerprint: string } {
+  const digest = createHash('sha256').update(seed).digest();
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
+  let bits = '';
+  for (const byte of digest.subarray(0, 10)) bits += byte.toString(2).padStart(8, '0');
+  let id = '';
+  for (let at = 0; at < 80; at += 5) id += alphabet[Number.parseInt(bits.slice(at, at + 5), 2)];
+  return { id, fingerprint: digest.toString('base64url') };
+}
+
 function network() {
   let now = Date.parse('2026-11-15T09:00:00Z');
   const computers = new Map<string, Computer>();
@@ -81,8 +92,9 @@ function network() {
     }
   };
 
-  function add(name: string, id: string, report: Omit<ComputerRoutesReport, 'name' | 'relay'> = { machineId: `${id}-install` }): Computer {
-    const info: RelayComputer = { id, name, domain: DOMAIN, address: `https://${id}.${DOMAIN}`, local: [], fingerprint: `key-of-${id}` };
+  function add(name: string, seed: string, report: Omit<ComputerRoutesReport, 'name' | 'relay'> = { machineId: `${seed}-install` }): Computer {
+    const { id, fingerprint } = relayIdentity(seed);
+    const info: RelayComputer = { id, name, domain: DOMAIN, address: `https://${id}.${DOMAIN}`, local: [], fingerprint };
     let config = createDefaultRemoteDaemonConfig();
     const configManager = {
       getConfig: () => ({ remoteDaemon: config }),
@@ -174,7 +186,7 @@ describe('linking computers with a one-time link', () => {
     expect(mac.paired).toEqual([{ kind: 'computer', label: 'Windows', computerId: saved.id }]);
     // The redeemer told the maker its install id.
     expect(saved.machineId).toBe('winwinwinwinwin0-install');
-    expect(mac.config().host.clients).toEqual([expect.objectContaining({ kind: 'computer', computerId: 'winwinwinwinwin0', label: 'Windows' })]);
+    expect(mac.config().host.clients).toEqual([expect.objectContaining({ kind: 'computer', computerId: windows.info.id, label: 'Windows' })]);
   });
 
   it('previews without spending the link, and a second use is refused', async () => {
@@ -274,7 +286,7 @@ describe('linking computers with a one-time link', () => {
     impostor.info.fingerprint = 'another-key';
     const link = await mac.link();
 
-    await expect(impostor.redeem(link)).rejects.toMatchObject({ code: 'ERR_RELAY_KEY_CHANGED' });
+    await expect(impostor.redeem(link)).rejects.toMatchObject({ code: 'ERR_RELAY_LINK_KEY_MISMATCH' });
     expect(await net.reaches(windows, mac)).toBe(true);
     const linux = net.add('Linux', 'linlinlinlinlin0');
     await expect(linux.redeem(link)).resolves.toMatchObject({ linked: expect.arrayContaining(['Mac']) });

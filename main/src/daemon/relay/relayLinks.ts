@@ -185,6 +185,14 @@ export class RelayLinks {
     return record;
   }
 
+  private callerPhone(clientId: string): RemoteDaemonClientRecord {
+    const record = this.caller(clientId);
+    if (record.kind !== undefined) {
+      throw new PaneError('ERR_RELAY_PHONE_ONLY', 'Only a paired phone can ask for this.', 'Open Pane on your phone and refresh its computers there.');
+    }
+    return record;
+  }
+
   private callerComputer(clientId: string): RemoteDaemonClientRecord & { computerId: string } {
     const record = this.caller(clientId);
     if (record.kind !== 'computer' || !record.computerId) {

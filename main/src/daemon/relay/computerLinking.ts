@@ -80,16 +80,6 @@ export function createPairingRoute(deps: {
       } catch (error) {
         return { ok: false, status: 400, code: error instanceof PaneError ? error.code : 'ERR_PAIRING_BAD_REQUEST', message: reasonOf(error) };
       }
-      // A computer already linked here keeps its key: another key claiming its id would cut it off.
-      const saved = links.linked().find((profile) => profile.relay.computerId === offer.computer.id);
-      if (saved && saved.relay.fingerprint !== offer.computer.fingerprint) {
-        return {
-          ok: false,
-          status: 409,
-          code: 'ERR_RELAY_KEY_CHANGED',
-          message: `${saved.label} is already linked here with a different key, so the code was not used. If it was reinstalled, unlink it here first, then copy a new link.`,
-        };
-      }
       const result = await host.exchangeSecret({ ...request, label: offer.computer.name, computerId: offer.computer.id });
       if (!result.ok) return result;
       const computerId = await links.saveComputer({ computer: offer.computer, token: offer.token, routes: decodeComputerRoutesReport(offer.routes) });
