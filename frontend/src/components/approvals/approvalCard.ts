@@ -198,12 +198,6 @@ export function firstToOpen(items: readonly NotifyItem[]): NotifyItem | undefine
   return ready[0] ?? items.find(item => !isBeingRead(item)) ?? items[0];
 }
 
-/** The picks a fresh card starts with: each question's recommended option, '' where none is. */
-export function recommendedPicks(item: NotifyItem): string[] {
-  if (item.agentPrompt) return [];
-  return questionsOf(item).map(question => question.choices.find(choice => choice.recommended)?.label ?? '');
-}
-
 /**
  * The approvals a chat's compact card pages through (P5, P6): waiting on the person, not the
  * chat's own bridged question (AskUserQuestion or a permission prompt from that same chat, which

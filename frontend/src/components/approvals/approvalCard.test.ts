@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { bridgedFrom, canSend, cardChip, cardTabs, dockApprovals, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, recommendedPicks, replyLine, sessionApprovals } from './approvalCard';
+import { bridgedFrom, canSend, cardChip, cardTabs, dockApprovals, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals } from './approvalCard';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -80,10 +80,6 @@ describe('the approval card', () => {
     // --update clears the reply it answered: the line still says it came back ready again.
     const ready = { ...q20, id: 'd', readyAgain: 30 };
     expect(latestReplied([reading, taken, ready], 's1', new Set())?.id).toBe('d');
-  });
-
-  it('recommended picks start selected', () => {
-    expect(recommendedPicks(q20)).toEqual(['', 'One train']);
   });
 
   it('Send needs a pick per question, or something typed', () => {

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, CornerDownLeft, X } from 'lucide-react';
 import type { NotifyAnswer, NotifyCommand, NotifyItem, NotifySnapshot } from '../../../../shared/types/notify';
+import { useDraftChoice } from '../../stores/approvalColumnStore';
 import { cn } from '../../utils/cn';
 import { askedBy, cardAnswer, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
 import { ShortcutCap, UnreachableNotice } from './NotifyCard';
@@ -97,8 +98,12 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
   const secret = item.ui === 'secret';
   // A secret takes typed text like a free-text question, but masked and without suggestions or a note.
   const ask = item.ui === 'ask' || secret;
-  // Approvals start with nothing chosen: Y or N is required.
-  const [selected, setSelected] = useState(() => (approval || ask) ? -1 : Math.max(0, rows.findIndex((row) => row.recommended)));
+  // Nothing starts chosen, recommended or not (D-385): Y, N or a pick is required, and Enter sends
+  // only what the person picked. A pick on an approval or options card is kept in its draft.
+  const [draftPick, setDraftPick] = useDraftChoice(item, ask ? [] : rows.map((row) => row.label));
+  const [askPick, setAskPick] = useState(-1);
+  const selected = ask ? askPick : draftPick;
+  const setSelected = ask ? setAskPick : setDraftPick;
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState('');
   const [text, setText] = useState('');
@@ -134,10 +139,10 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
 
   // Read the latest state from the key handler without re-binding it each render.
   const sendRef = useRef(send);
-  const stateRef = useRef({ selected, noteOpen });
+  const stateRef = useRef({ selected, noteOpen, setSelected });
   useLayoutEffect(() => {
     sendRef.current = send;
-    stateRef.current = { selected, noteOpen };
+    stateRef.current = { selected, noteOpen, setSelected };
   });
 
   useEffect(() => {
@@ -166,26 +171,27 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
         return;
       }
       if (approval) {
-        if (event.key === 'y' || event.key === 'Y') setSelected(0);
-        if (event.key === 'n' || event.key === 'N') setSelected(1);
+        if (event.key === 'y' || event.key === 'Y') stateRef.current.setSelected(0);
+        if (event.key === 'n' || event.key === 'N') stateRef.current.setSelected(1);
         return;
       }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         const step = event.key === 'ArrowDown' ? 1 : -1;
         const current = stateRef.current.selected;
-        setSelected(current < 0 ? 0 : (current + step + rows.length) % rows.length);
+        stateRef.current.setSelected(current < 0 ? 0 : (current + step + rows.length) % rows.length);
         return;
       }
       const digit = Number.parseInt(event.key, 10);
-      if (digit >= 1 && digit <= rows.length) setSelected(digit - 1);
+      if (digit >= 1 && digit <= rows.length) stateRef.current.setSelected(digit - 1);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [approval, ask, item.id, onCommand, rows.length]);
 
   const canSend = ask ? text.trim().length > 0 : selected >= 0;
-  const action = approval && selected < 0 ? 'Press Y or N' : secret ? 'Save securely' : `Send to ${item.source.agent}`;
+  const unpicked = !ask && selected < 0;
+  const action = approval && unpicked ? 'Press Y or N' : unpicked ? 'Pick a choice' : secret ? 'Save securely' : `Send to ${item.source.agent}`;
 
   return (
     <div className="w-[700px] overflow-hidden rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary" data-testid="notify-round">
@@ -316,7 +322,7 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
             className="inline-flex items-center gap-[7px] font-medium text-text-primary disabled:cursor-default"
           >
             {action}
-            {!(approval && selected < 0) && <ShortcutCap><CornerDownLeft className="inline h-3 w-3" /></ShortcutCap>}
+            {!unpicked && <ShortcutCap><CornerDownLeft className="inline h-3 w-3" /></ShortcutCap>}
           </button>
         </div>
       </div>

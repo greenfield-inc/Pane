@@ -6,7 +6,7 @@ import { cn } from '../../utils/cn';
 import { runNotify, sendNotify, useNotifyStore } from '../../stores/notifyStore';
 import { leadingQn } from '../../../../shared/autopilotDecision';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
-import { useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
+import { draftKey as draftKeyOf, useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
 import { AutopilotDocument, AutopilotWebPage } from '../autopilot/AutopilotDocument';
 import { isLightTheme, useTheme } from '../../contexts/ThemeContext';
 import { sentenceStart } from '../../../../shared/approvalStatus';
@@ -18,7 +18,7 @@ import { relayReadOnlyLine } from './approvalGroups';
 import { relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import {
-  askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, recommendedPicks, replyLine,
+  askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, replyLine,
   type CardChip, type CardQuestion, type CardTab, type ReplyLine,
 } from './approvalCard';
 
@@ -257,13 +257,12 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
   const now = useNow();
   const questions = useMemo(() => markedQuestions(item), [item]);
   // The draft lives in the store, so it survives paging away and a refused Send (F-4).
-  const draftKey = `${item.id}:${item.version ?? 1}`;
+  const draftKey = draftKeyOf(item);
   const draft = useApprovalColumnStore((state) => state.drafts[draftKey]);
   const setDraft = useApprovalColumnStore((state) => state.setDraft);
   const clearSentDraft = useApprovalColumnStore((state) => state.clearSentDraft);
-  // Recommended picks start selected (D-345); the person changes any before sending.
-  const preselected = useMemo(() => recommendedPicks(item), [item]);
-  const picks = draft?.picks ?? (item.state === 'waiting' ? preselected : NO_PICKS);
+  // Nothing starts selected, recommended or not (D-385): only the person's own picks show.
+  const picks = draft?.picks ?? NO_PICKS;
   const text = draft?.text ?? '';
   const setPicks = (update: (current: string[]) => string[]) => setDraft(draftKey, { picks: update(picks), text });
   const setText = (value: string) => setDraft(draftKey, { picks, text: value });
@@ -455,7 +454,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
               <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary">
                 {item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
                   : replyBeingRead(item) ? `${sentenceStart(item.reply?.reader?.name ?? item.source.name)} is reading your last reply. You can send another once it says how it took it, or pick an option now.`
-                    : preselected.some(Boolean) ? 'Recommended picks are pre-selected; change any before you send.' : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
+                    : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
               </p>
               {!item.agentPrompt && (
                 <button type="button" onClick={() => setClosing(true)} className="shrink-0 text-[12.5px] text-text-tertiary hover:text-text-primary" data-testid="approval-close-item">Close…</button>

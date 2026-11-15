@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type R
 import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, ShieldCheck, X } from 'lucide-react';
 import type { NotifyAnswer, NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
 import { showActionError } from '../../stores/errorStore';
+import { useDraftChoice } from '../../stores/approvalColumnStore';
 import { canClose, canCopyAnswer, canOverride, canReopen, decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { cn } from '../../utils/cn';
 import { askedBy, cardAnswer, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
@@ -412,12 +413,14 @@ interface ChipProps {
   label: string;
   detail?: string;
   shaded?: boolean;
+  /** Marked "Recommended" on a tall chip; never selected for the person (D-385). */
+  recommended?: boolean;
   onClick: () => void;
   tall?: boolean;
   inbox?: boolean;
 }
 
-function Chip({ keyLabel, label, detail, shaded, onClick, tall, inbox }: ChipProps) {
+function Chip({ keyLabel, label, detail, shaded, recommended, onClick, tall, inbox }: ChipProps) {
   return (
     <button
       type="button"
@@ -435,6 +438,7 @@ function Chip({ keyLabel, label, detail, shaded, onClick, tall, inbox }: ChipPro
       {tall ? (
         <span className="min-w-0">
           <span className="block break-words">{label}</span>
+          {recommended && <span className="block text-[12px] font-normal text-status-success-on-tint">Recommended</span>}
           {detail && <span className="block text-[12px] font-normal leading-snug text-text-tertiary">{detail}</span>}
         </span>
       ) : <span className="min-w-0 truncate">{label}</span>}
@@ -525,7 +529,8 @@ function QuestionCard({
   // Details: the choices with notes, or an approval's detail.
   const [expanded, setExpanded] = useState(form === 'docked' || (form === 'strip' && Boolean(showDetails)));
   const choices = item.choices ?? [];
-  const [selected, setSelected] = useState(() => recommendedIndex(choices));
+  // Nothing starts selected, recommended or not (D-385); the person's own pick is kept in the draft.
+  const [selected, setSelected] = useDraftChoice(item, choices.map((choice) => choice.label));
   const [note, setNote] = useState('');
   const [denying, setDenying] = useState(false);
   const [text, setText] = useState('');
@@ -611,6 +616,7 @@ function QuestionCard({
               label={choice.label}
               detail={choice.detail}
               shaded={index === selected}
+              recommended={choice.recommended}
               onClick={() => setSelected(index)}
             />
           ))}
@@ -640,7 +646,6 @@ function QuestionCard({
             key={choice.label}
             keyLabel={String(index + 1)}
             label={choice.label}
-            shaded={choice.recommended}
             inbox={form === 'inbox'}
             onClick={() => answerChoice(index)}
           />
@@ -654,7 +659,7 @@ function QuestionCard({
             {more}
           </button>
         )}
-        {recommended >= 0 && form !== 'inbox' && (
+        {recommended >= 0 && (
           <span className="ml-auto pr-2 text-[13px] text-text-tertiary">{recommended + 1} is recommended</span>
         )}
       </div>
