@@ -204,6 +204,8 @@ export interface RemoteDaemonTarget {
  * bound: nothing comes after it.
  */
 const ROUTE_CONNECT_TIMEOUT_MS = 2_500;
+/** A computer on this network connects in milliseconds; an address that only looks local waits on ARP. */
+const LAN_ROUTE_CONNECT_TIMEOUT_MS = 1_500;
 
 /**
  * A certificate check that also requires the linked computer's own key, so a certificate issued
@@ -337,7 +339,7 @@ export async function invokeRemoteDaemon<T>(
     const headers: InvokeHeaders = { 'Content-Type': 'application/json' };
     if (route.token) headers.Authorization = `Bearer ${route.token}`;
     const last = index === routes.length - 1;
-    const outcome = await postRoute(route, target.machine, headers, text, timeoutMs, last ? undefined : ROUTE_CONNECT_TIMEOUT_MS);
+    const outcome = await postRoute(route, target.machine, headers, text, timeoutMs, last ? undefined : route.kind === 'lan' ? LAN_ROUTE_CONNECT_TIMEOUT_MS : ROUTE_CONNECT_TIMEOUT_MS);
     const answer = readRouteOutcome(target.machine, route, channel, timeoutMs, outcome);
     if ('result' in answer) {
       answeredRoutes.set(target, route);

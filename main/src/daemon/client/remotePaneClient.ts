@@ -226,6 +226,15 @@ const INTERRUPTION_CODES = new Set(['ERR_REMOTE_TRANSPORT', 'ERR_REMOTE_DELIVERY
 const ROUTE_FAILOVER_STALE_TIMEOUT_MS = 8_000;
 /** How long one route gets to answer before the next is tried. */
 const ROUTE_ATTEMPT_TIMEOUT_MS = 4_000;
+/**
+ * A Same network route's limit: a computer on this network answers in milliseconds, while an
+ * address that only looks local (another home on the same 192.168.1.0/24) waits on ARP for seconds.
+ */
+const LAN_ROUTE_ATTEMPT_TIMEOUT_MS = 1_500;
+
+function routeAttemptTimeout(kind: ComputerRouteKind): number {
+  return kind === 'lan' ? LAN_ROUTE_ATTEMPT_TIMEOUT_MS : ROUTE_ATTEMPT_TIMEOUT_MS;
+}
 /** While a farther route carries the connection, how often the nearer ones are checked. */
 const ROUTE_RECHECK_MS = 60_000;
 const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
@@ -410,7 +419,7 @@ export class RemotePaneClient {
       }
       if (this.closedByClient || this.suspended) return;
       try {
-        await this.openEventStream(isReconnect, resolveOnReady, final ? undefined : ROUTE_ATTEMPT_TIMEOUT_MS, final);
+        await this.openEventStream(isReconnect, resolveOnReady, final ? undefined : routeAttemptTimeout(this.routes[index].kind), final);
         return;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
@@ -443,7 +452,7 @@ export class RemotePaneClient {
         } catch {
           continue;
         }
-        const health = await this.checkHealthAt(prepared, ROUTE_ATTEMPT_TIMEOUT_MS);
+        const health = await this.checkHealthAt(prepared, routeAttemptTimeout(route.kind));
         if (health.kind !== 'running' || this.status !== 'connected' || this.closedByClient) continue;
         console.info(`[Pane remote daemon] ${this.currentProfile.label}: moving back to ${route.kind}`);
         await this.moveToRoute(index);
@@ -1218,7 +1227,7 @@ export class RemotePaneClient {
       } catch {
         continue;
       }
-      const health = await this.checkHealthAt(prepared, ROUTE_ATTEMPT_TIMEOUT_MS);
+      const health = await this.checkHealthAt(prepared, routeAttemptTimeout(this.routes[index].kind));
       if (generation !== this.streamGeneration || this.status !== 'connected' || this.closedByClient || this.suspended) return;
       if (health.kind !== 'running') continue;
       console.info(`[Pane remote daemon] ${this.currentProfile.label}: ${this.routes[current]?.kind} went silent; moving to ${this.routes[index].kind}`);
@@ -2002,7 +2011,7 @@ export class RemotePaneClientController extends EventEmitter {
     let nearest: RouteProbe | null = null;
     for (const route of candidates) {
       const several = routes.length > 1;
-      const probe = await this.probeRoute(id, route, several ? COMPUTER_ROUTE_LABELS[route.kind] : routeOf(route.profile));
+      const probe = await this.probeRoute(id, route, several ? COMPUTER_ROUTE_LABELS[route.kind] : routeOf(route.profile), several);
       if (this.check?.id !== id) {
         throw new PaneError('ERR_REMOTE_CHECK_SUPERSEDED', `The connection to ${profile.label} was replaced by a newer one.`, 'Wait for the newer connection to finish.');
       }
@@ -2032,7 +2041,7 @@ export class RemotePaneClientController extends EventEmitter {
    * Probes one route, showing it on the checklist. An SSH route's tunnel is opened first; a route
    * that cannot be readied fails at "Host reachable".
    */
-  private async probeRoute(id: number, route: RemoteRouteCandidate, label: RemoteConnectionCheck['route']): Promise<RouteProbe> {
+  private async probeRoute(id: number, route: RemoteRouteCandidate, label: RemoteConnectionCheck['route'], several: boolean): Promise<RouteProbe> {
     let profile = route.profile;
     this.updateCheck(id, { route: label, address: addressOf(profile), rows: initialRows(profile) });
     // A Tailscale route's probe looks the machine up itself.
@@ -2046,7 +2055,12 @@ export class RemotePaneClientController extends EventEmitter {
         return { profile, route: label, outcome: { rows, failedCheck: 'host_unreachable', hostVersion: null, address: addressOf(profile), hostFixes: new Map() } };
       }
     }
-    const outcome = await probeHost(profile, new RemotePaneClient(profile, { dnsLookup: this.dnsLookup }), this.checkDependencies, (rows) => this.updateCheck(id, { rows }));
+    const client = new RemotePaneClient(profile, { dnsLookup: this.dnsLookup });
+    // With another route to try, a Same network address gets its short limit here too.
+    const probes = several && route.kind === 'lan'
+      ? { checkHealth: () => client.checkHealth(LAN_ROUTE_ATTEMPT_TIMEOUT_MS), checkSignIn: () => client.checkSignIn() }
+      : client;
+    const outcome = await probeHost(profile, probes, this.checkDependencies, (rows) => this.updateCheck(id, { rows }));
     return { profile, route: label, outcome };
   }
 
