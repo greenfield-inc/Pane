@@ -82,7 +82,8 @@ export function draftKey(item: Pick<NotifyItem, 'id' | 'version'>): string {
  * A one-question card's pick (an options card or an approval's Approve/Deny), as an index into
  * `labels`: -1 until the person picks one. Nothing starts selected, recommended or not (D-385); a
  * pick the person made is kept in the approval's draft, so it comes back after paging and remounts
- * and on any other surface showing the same approval.
+ * and on any other surface in the same window. The draft store is per window: Notify's round runs
+ * in its own window, so a pick made there doesn't reach the main window's column.
  */
 export function useDraftChoice(item: Pick<NotifyItem, 'id' | 'version'>, labels: readonly string[]): [number, (index: number) => void] {
   const key = draftKey(item);
