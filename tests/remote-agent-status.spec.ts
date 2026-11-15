@@ -125,6 +125,20 @@ test('a turn that ended while the phone was offline reads idle once it reconnect
   await expect(sessionIcon(page, 'Release prep')).toHaveAttribute('data-state', 'idle', { timeout: 2_000 });
 });
 
+test('a Session reads idle while the phone is offline, not its last state, and working again on reconnect (review F-2)', async ({ page }) => {
+  const host = await connect(page, { orchestrationSessionNames: ['Release prep'], sessionActivity: [] });
+  host.sessionActivity = [{ sessionId: host.sessions[0].id, state: 'working', workingPanes: 1 }];
+  await emitRemoteEvent(page, 'orchestration-sessions:activity', host.sessionActivity[0]);
+  await openDrawer(page);
+  await expect(sessionIcon(page, 'Release prep')).toHaveAttribute('data-state', 'working');
+
+  await dropRemoteConnection(page);
+  await expect(sessionIcon(page, 'Release prep')).toHaveAttribute('data-state', 'idle', { timeout: 2_000 });
+  await page.screenshot({ path: test.info().outputPath('f2-phone-offline-idle.png') });
+  await restoreRemoteConnection(page);
+  await expect(sessionIcon(page, 'Release prep')).toHaveAttribute('data-state', 'working', { timeout: 2_000 });
+});
+
 test('a host too old to send Session activity shows idle rings and no error (J15)', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
