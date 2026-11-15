@@ -506,8 +506,8 @@ export function findExecutableInPath(executable: string): string | null {
       const fullPath = path.join(dir, execName);
       searchedPaths++;
       try {
-        // A file check, not `test -x` in a shell: one spawn per PATH directory blocked
-        // main for about 70 ms on every agent start. Windows has no execute bit.
+        // A file check: a `test -x` shell per PATH directory blocked the main process
+        // on every agent start. Windows has no execute bit.
         fs.accessSync(fullPath, isWindows ? fs.constants.F_OK : fs.constants.X_OK);
         console.log(`[ShellPath] Found executable at: ${fullPath}`);
         return fullPath;
