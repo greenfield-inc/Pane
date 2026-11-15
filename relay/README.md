@@ -61,6 +61,7 @@ Every flag also reads the environment variable in brackets.
 | `--acme-cache` [`PANE_RELAY_ACME_CACHE`] | | Get the certificate from an ACME CA with DNS-01 and keep the account, key and certificate in this folder (mode 0600); renewed with a third of its lifetime left, without a restart |
 | `--acme-email` [`PANE_RELAY_ACME_EMAIL`] | | Contact email for the ACME account |
 | `--acme-directory` [`PANE_RELAY_ACME_DIRECTORY`] | Let's Encrypt production | ACME directory URL; staging is `https://acme-staging-v02.api.letsencrypt.org/directory` |
+| `--caa-issuer` [`PANE_RELAY_CAA_ISSUER`] | `letsencrypt.org` | Helper role: the CA named in CAA records. `<D>` allows it and no wildcard; each `<id>.<D>` allows it, wildcard included, through DNS-01 only. Set it to your CA's domain with `--acme-directory`, or empty to serve no CAA |
 | `--dev` [`PANE_RELAY_DEV`] | off | Generate a self-signed certificate when `--cert`/`--key` are absent |
 | `--relays` [`PANE_RELAY_RELAYS`] | this region | `us=us.relay.D,eu=eu.relay.D` for `GET /v1/relays` |
 | `--public-ip` [`PANE_RELAY_PUBLIC_IP`] | | IPv4 that DNS returns for `<D>` and for regions without `--region-ip` |

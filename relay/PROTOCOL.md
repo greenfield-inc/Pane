@@ -41,6 +41,8 @@ else holds a certificate for `<id>.<D>`.
 | `files.<id>.<D>` | same | the computer's preview files |
 | `l<a>-<b>-<c>-<d>.<id>.<D>` | `a.b.c.d` (private ranges only) | the computer's local https listener |
 | `_acme-challenge.<id>.<D>` TXT | values the computer set | Let's Encrypt DNS-01 |
+| `<D>` CAA | `issue` the CA, `issuewild ;` | no certificate for all of `*.<D>` |
+| `<id>.<D>` CAA | `issue` and `issuewild` the CA, `validationmethods=dns-01` | the computer's certificate only |
 
 The computer's certificate covers `<id>.<D>` and `*.<id>.<D>`.
 

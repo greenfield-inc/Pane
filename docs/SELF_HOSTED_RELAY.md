@@ -46,7 +46,8 @@ the binary yourself, run `cargo build --release` in `relay/`.
 The first start serves a stand-in certificate for a few seconds while Let's
 Encrypt checks the relay's DNS; renewals swap the new certificate in without
 a restart. `--acme-directory` points at another CA, such as Let's Encrypt
-staging while you try things out.
+staging while you try things out. The relay's DNS publishes CAA records that
+allow only Let's Encrypt; with another CA, set `--caa-issuer` to its domain.
 
 `--direct-quic` is optional. It helps phones and computers find a direct
 path to each other; without it they still connect.

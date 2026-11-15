@@ -505,6 +505,50 @@ fn a_records(m: &Message) -> Vec<Ipv4Addr> {
 }
 
 #[tokio::test]
+async fn caa_lets_only_lets_encrypt_issue_and_no_wildcard_for_the_whole_domain() {
+    let env = Env::start(&["--dns", "127.0.0.1:0", "--public-ip", "203.0.113.10"]).await;
+    let agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let id = agent.id.clone();
+    let dns = env.dns();
+    let caa = |name: String| async move {
+        let mut values: Vec<String> = dns_query(dns, name, RecordType::CAA, false)
+            .await
+            .answers
+            .iter()
+            .map(|r| r.data.to_string())
+            .collect();
+        values.sort();
+        values
+    };
+    // A certificate for *.<D> would cover every computer's name.
+    assert_eq!(
+        caa(format!("{D}.")).await,
+        vec!["0 issue \"letsencrypt.org\"", "0 issuewild \";\""]
+    );
+    // Each computer's own names, *.<id>.<D> included, only through DNS-01 at Let's Encrypt.
+    assert_eq!(
+        caa(format!("{id}.{D}.")).await,
+        vec![
+            "0 issue \"letsencrypt.org; validationmethods=dns-01\"",
+            "0 issuewild \"letsencrypt.org; validationmethods=dns-01\"",
+        ]
+    );
+
+    // A self-hosted relay on another CA names it, or serves none.
+    let other = Env::start(&[
+        "--dns",
+        "127.0.0.1:0",
+        "--public-ip",
+        "203.0.113.10",
+        "--caa-issuer",
+        "",
+    ])
+    .await;
+    let none = dns_query(other.dns(), format!("{D}."), RecordType::CAA, false).await;
+    assert!(none.answers.is_empty());
+}
+
+#[tokio::test]
 async fn dns_answers_for_computer_names() {
     let env = Env::start(&[
         "--dns",
@@ -682,6 +726,34 @@ async fn txt_values_are_limited_to_what_acme_needs() {
         .http("POST", "/v1/registry/acme", auth, &acme.to_string())
         .await;
     assert_eq!(code, 400);
+}
+
+#[tokio::test]
+async fn an_unsigned_acme_post_is_refused_before_its_body_arrives() {
+    let env = Env::start(&["--registry-secret", "s3cret"]).await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // A stale MAC, and a fresh one announcing a body far larger than any challenge post:
+    // neither waits for the 4 MB that never comes.
+    for (auth, length) in [
+        (format!("Pane-HMAC {} x", now - 3_600), 100),
+        (format!("Pane-HMAC {now} x"), 4 * 1024 * 1024),
+    ] {
+        let mut s = env.connect_relay(D).await;
+        let head = format!(
+            "POST /v1/registry/acme HTTP/1.1\r\nhost: {D}\r\nauthorization: {auth}\r\ncontent-length: {length}\r\n\r\n"
+        );
+        s.write_all(head.as_bytes()).await.unwrap();
+        let mut out = vec![0u8; 12];
+        tokio::time::timeout(Duration::from_secs(2), s.read_exact(&mut out))
+            .await
+            .expect("answered without waiting for the body")
+            .unwrap();
+        let status = String::from_utf8_lossy(&out[9..12]).to_string();
+        assert!(status == "401" || status == "413", "{auth}: {status}");
+    }
 }
 
 #[tokio::test]
