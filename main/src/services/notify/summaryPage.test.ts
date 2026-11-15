@@ -46,6 +46,22 @@ describe("an approval's Summary page", () => {
     expect(html.indexOf('Content-Security-Policy')).toBeLessThan(html.indexOf('<script>'));
   });
 
+  it('puts the policy ahead of all page content, however the page hides its head', () => {
+    const policy = `<meta http-equiv="Content-Security-Policy" content="${NOTIFY_SUMMARY_CSP}">`;
+    const served = (source: string) => {
+      const file = path.join(dir, 'hostile.html');
+      fs.writeFileSync(file, source);
+      const page = summaryPage({ ...q80, summaryPage: file });
+      return page.kind === 'page' ? page.html : '';
+    };
+    // A commented-out head used to capture the policy, leaving the real head without it.
+    expect(served('<!doctype html><!-- <head> --><html><head><script>alert(1)</script></head><body>x</body></html>'))
+      .toBe(`<!doctype html>${policy}<!-- <head> --><html><head><script>alert(1)</script></head><body>x</body></html>`);
+    expect(served('<script>var s = "<head>";</script><p>no head</p>')).toBe(`<!doctype html>${policy}<script>var s = "<head>";</script><p>no head</p>`);
+    expect(served('<html data-x="<head>"><script>alert(1)</script></html>')).toBe(`<!doctype html>${policy}<html data-x="<head>"><script>alert(1)</script></html>`);
+    expect(served('\uFEFF  <!DOCTYPE html>\n<html><head></head></html>')).toBe(`  <!DOCTYPE html>${policy}\n<html><head></head></html>`);
+  });
+
   it("falls back to the template, saying so, when the asker's page is gone", () => {
     const page = summaryPage({ ...q80, summaryPage: path.join(dir, 'removed.html') });
     expect(page.kind).toBe('template');

@@ -29,12 +29,17 @@ function escape(text: string): string {
   return text.replace(/[&<>"']/gu, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
 }
 
-/** The policy as the page's first element, so it holds before anything else in it loads. */
+/**
+ * The policy ahead of all page content, so it holds before anything in the page loads. Only a
+ * leading doctype stays in front: the parser then opens the real head for the policy itself, and a
+ * `<head>` hidden in a comment, a script or an attribute can't capture it.
+ */
 function withPolicy(html: string): string {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${NOTIFY_SUMMARY_CSP}">`;
-  const head = /<head(\s[^>]*)?>/iu.exec(html);
-  if (head) return `${html.slice(0, head.index + head[0].length)}${meta}${html.slice(head.index + head[0].length)}`;
-  return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
+  const page = html.replace(/^\uFEFF/u, '');
+  const doctype = /^\s*<!doctype[^>]*>/iu.exec(page)?.[0];
+  if (doctype) return `${doctype}${meta}${page.slice(doctype.length)}`;
+  return `<!doctype html>${meta}${page}`;
 }
 
 /** The worker's step and checks, from its status file, when it can be read. */
