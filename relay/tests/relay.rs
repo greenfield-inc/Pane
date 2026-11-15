@@ -588,13 +588,24 @@ async fn dns_answers_for_computer_names() {
             .response_code,
         ResponseCode::NXDomain
     );
+    // A computer the relay doesn't know (asleep and forgotten, or never seen) answers as if it
+    // were here, briefly: a cached "no such name" outlasts its return, on macOS by up to an hour.
+    let unknown = a(format!("aaaaaaaaaaaaaaaa.{D}.")).await;
+    assert_eq!(a_records(&unknown), vec![us]);
+    assert_eq!(unknown.answers[0].ttl, 10);
     assert_eq!(
-        a(format!("aaaaaaaaaaaaaaaa.{D}."))
-            .await
-            .metadata
-            .response_code,
-        ResponseCode::NXDomain
+        a_records(&a(format!("p5173.aaaaaaaaaaaaaaaa.{D}.")).await),
+        vec![us]
     );
+    assert_eq!(a(format!("{id}.{D}.")).await.answers[0].ttl, 60);
+    let caa = dns_query(
+        env.dns(),
+        format!("aaaaaaaaaaaaaaaa.{D}."),
+        RecordType::CAA,
+        false,
+    )
+    .await;
+    assert_eq!(caa.answers.len(), 2, "unknown ids keep the dns-01-only CAA");
     assert_eq!(
         a(format!("www.{D}.")).await.metadata.response_code,
         ResponseCode::NXDomain
@@ -788,12 +799,15 @@ async fn udp_answers_past_the_rate_limit_are_truncated() {
 }
 
 /// Polls `server` until `name` has A records, then returns them.
+/// The addresses `name` resolves to once the registry knows it: a name the registry doesn't know
+/// answers this relay's address for 10 s.
 async fn resolves(server: SocketAddr, name: String) -> Vec<Ipv4Addr> {
     let deadline = Instant::now() + WAIT;
     loop {
-        let ips = a_records(&dns_query(server, name.clone(), RecordType::A, false).await);
-        if !ips.is_empty() || Instant::now() > deadline {
-            return ips;
+        let m = dns_query(server, name.clone(), RecordType::A, false).await;
+        let known = m.answers.first().is_some_and(|r| r.ttl == 60);
+        if known || Instant::now() > deadline {
+            return a_records(&m);
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -1101,29 +1115,30 @@ async fn a_full_registry_makes_room_by_forgetting_its_oldest_offline_computer() 
         "203.0.113.10",
     ])
     .await;
-    let dns = env.dns();
-    let rcode = |id: String| async move {
-        let m = dns_query(dns, format!("{id}.{D}."), RecordType::A, false).await;
-        m.metadata.response_code
+    let env = &env;
+    // A name the registry knows answers for 60 s; a forgotten one answers this relay for 10 s.
+    let known = |id: String| async move {
+        let m = dns_query(env.dns(), format!("{id}.{D}."), RecordType::A, false).await;
+        m.answers[0].ttl == 60
     };
-    let oldest = Agent::connect(&env, &SigningKey::generate()).await;
-    let older = Agent::connect(&env, &SigningKey::generate()).await;
+    let oldest = Agent::connect(env, &SigningKey::generate()).await;
+    let older = Agent::connect(env, &SigningKey::generate()).await;
     let (oldest_id, older_id) = (oldest.id.clone(), older.id.clone());
     oldest.close().await;
-    wait_state(&env, &oldest_id, "offline").await;
+    wait_state(env, &oldest_id, "offline").await;
     older.close().await;
-    wait_state(&env, &older_id, "offline").await;
-    let _online = Agent::connect(&env, &SigningKey::generate()).await;
+    wait_state(env, &older_id, "offline").await;
+    let _online = Agent::connect(env, &SigningKey::generate()).await;
 
     // Full: a new computer takes the place of the one offline longest.
-    let _new = Agent::connect(&env, &SigningKey::generate()).await;
-    assert_eq!(rcode(oldest_id.clone()).await, ResponseCode::NXDomain);
-    assert_eq!(rcode(older_id.clone()).await, ResponseCode::NoError);
-    let _newer = Agent::connect(&env, &SigningKey::generate()).await;
-    assert_eq!(rcode(older_id).await, ResponseCode::NXDomain);
+    let _new = Agent::connect(env, &SigningKey::generate()).await;
+    assert!(!known(oldest_id.clone()).await);
+    assert!(known(older_id.clone()).await);
+    let _newer = Agent::connect(env, &SigningKey::generate()).await;
+    assert!(!known(older_id).await);
 
     // Every entry online: refused.
-    assert_eq!(connect_code(&env, &SigningKey::generate()).await, "full");
+    assert_eq!(connect_code(env, &SigningKey::generate()).await, "full");
 }
 
 #[tokio::test]
@@ -1147,16 +1162,12 @@ async fn computers_that_never_set_txt_are_forgotten_soon_after_going_offline() {
     proven.close().await;
     unproven.close().await;
 
-    let a = |id: String| dns_query(env.dns(), format!("{id}.{D}."), RecordType::A, false);
     let deadline = Instant::now() + Duration::from_secs(10);
-    while a(unproven_id.clone()).await.metadata.response_code != ResponseCode::NXDomain {
+    while !env.status(&unproven_id).await["since"].is_null() {
         assert!(Instant::now() < deadline, "a computer with no TXT was kept");
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    assert_eq!(
-        a_records(&a(proven_id).await),
-        vec![Ipv4Addr::new(203, 0, 113, 10)]
-    );
+    assert!(!env.status(&proven_id).await["since"].is_null());
 }
 
 #[tokio::test]
@@ -1224,19 +1235,17 @@ async fn offline_computers_lose_their_txt_values_then_their_names() {
     let a = || dns_query(env.dns(), format!("{id}.{D}."), RecordType::A, false);
     assert_eq!(a_records(&a().await), vec![Ipv4Addr::new(203, 0, 113, 10)]);
 
-    // Then the whole entry and its status.
+    // Then the whole entry and its status; its name answers like an unknown computer's.
     let deadline = Instant::now() + Duration::from_secs(16);
-    while a().await.metadata.response_code != ResponseCode::NXDomain {
+    while !env.status(&id).await["since"].is_null() {
         assert!(
             Instant::now() < deadline,
             "offline computer was never forgotten"
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    assert_eq!(
-        env.status(&id).await,
-        json!({"state": "offline", "since": null})
-    );
+    assert_eq!(env.status(&id).await["state"], "offline");
+    assert_eq!(a().await.answers[0].ttl, 10);
 }
 
 #[tokio::test]
