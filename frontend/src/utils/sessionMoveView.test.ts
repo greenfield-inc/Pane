@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SessionMovePreflight, SessionMoveProgress } from '../../../shared/types/sessionMove';
 import type { TerminalPausedMark } from '../../../shared/types/panels';
 import {
-  TEAMMATE_REASON, doneView, formatMoveBytes, isMoveRunning, moveIntro, moveMarkLabel, movedBannerLine, needsFixLine, progressHeading,
+  TEAMMATE_REASON, doneView, formatMoveBytes, isMoveRunning, moveIntro, moveMarkLabel, movedBannerLine, needsFixLine, progressHeading, shownProgress,
   targetCheckLabel, waitingLine, wholeMoveTargets, workingFor,
 } from './sessionMoveView';
 import { pauseOffersResume, pausedLabel, pausedReason } from './pause';
@@ -135,5 +135,16 @@ describe('move marks', () => {
     expect(pauseOffersResume(moving)).toBe(false);
     expect(pauseOffersResume({ at: moving.at, by: 'manual' })).toBe(true);
     expect(pausedReason(moving)).toMatch(/move/);
+  });
+});
+
+describe('shownProgress', () => {
+  it('shows the steps once no tab is left working', () => {
+    expect(shownProgress(progress({ phase: 'waiting', waiting: [] })).phase).toBe('moving');
+  });
+
+  it('keeps the wait while a tab is still working', () => {
+    const working = progress({ phase: 'waiting', waiting: [{ panelId: 'p', title: 'reviewer', paneName: 'review-1' }] });
+    expect(shownProgress(working).phase).toBe('waiting');
   });
 });

@@ -11,7 +11,7 @@ import {
   type SessionMoveWhere,
 } from '../utils/sessionMoveClient';
 import {
-  blockingChecks, confirmingLine, doneView, isMoveRunning, moveIntro, needsFixLine, progressHeading, targetCheckLabel, waitingLine,
+  blockingChecks, confirmingLine, doneView, isMoveRunning, moveIntro, needsFixLine, progressHeading, shownProgress, targetCheckLabel, waitingLine,
   wholeMoveTargets, workingFor,
 } from '../utils/sessionMoveView';
 import type { SessionMoveCheck, SessionMovePreflight, SessionMoveProgress, SessionMoveStep } from '../../../shared/types/sessionMove';
@@ -164,7 +164,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
     let cancelled = false;
     setMode('move'); setTargets(null); setPeers([]); setSelected(null); setPreflight(null); setError(null); setProgress(null); setStatusKnown(false);
     void sessionMoveStatus(where, sessionId).then(
-      status => { if (!cancelled) { setProgress(isMoveRunning(status) ? status : null); setStatusKnown(true); } },
+      status => { if (!cancelled) { setProgress(isMoveRunning(status) ? shownProgress(status) : null); setStatusKnown(true); } },
       // A host that can't say (an older Pane) has no move running.
       () => { if (!cancelled) setStatusKnown(true); },
     );
@@ -225,7 +225,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
     let cancelled = false;
     const timer = window.setInterval(() => {
       void sessionMoveStatus(where, sessionId).then(
-        status => { if (!cancelled && status && status.moveId === progressRef.current?.moveId) setProgress(status); },
+        status => { if (!cancelled && status && status.moveId === progressRef.current?.moveId) setProgress(shownProgress(status)); },
         () => undefined,
       );
     }, POLL_MS);
@@ -235,7 +235,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
   const act = useCallback((run: () => Promise<SessionMoveProgress | null>, failure: string) => {
     setBusy(true); setError(null);
     void run().then(
-      next => { if (next) setProgress(next); },
+      next => { if (next) setProgress(shownProgress(next)); },
       cause => setError(`${failure}: ${messageOf(cause, 'the Session’s machine did not answer')}.`),
     ).finally(() => setBusy(false));
   }, []);

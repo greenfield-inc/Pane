@@ -166,3 +166,11 @@ export function movedBannerLine(mark: Pick<SessionMoveMark, 'machine' | 'at'>): 
 export function restoreHereWarning(machine: string): string {
   return `Restore it here only if ${machine} no longer runs it: otherwise two copies of the Session run at once.`;
 }
+
+/**
+ * What the dialog shows for a progress: a move with no tab left working is already on its steps,
+ * even before the source's next update says so (no "Waiting for 0 agents").
+ */
+export function shownProgress(progress: SessionMoveProgress): SessionMoveProgress {
+  return progress.phase === 'waiting' && progress.waiting.length === 0 ? { ...progress, phase: 'moving' } : progress;
+}

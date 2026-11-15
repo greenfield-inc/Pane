@@ -1339,7 +1339,11 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
         { archived: false },
       );
       // A Session that moved away archived its Panes; Restore here brings them back, uncommitted work included.
-      if (moved) await restoreArchivedPanes(moved.associations.filter(association => !association.machine).map(association => association.paneId));
+      if (moved) {
+        await restoreArchivedPanes(moved.associations.filter(association => !association.machine).map(association => association.paneId));
+        // Restored Panes leave the Archived list now, not on the next reload.
+        await loadArchivedSessions();
+      }
       // Keep the current Session selected when a historical Session is restored.
       await refreshOrchestrationSessions();
     } catch (cause) {

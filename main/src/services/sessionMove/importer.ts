@@ -604,6 +604,11 @@ export class MoveImporter {
         }
       }
     }
+    // The incoming refs did their job once the branches are placed; the snapshot refs stay for Restore.
+    for (const pane of members) {
+      const placement = placements.get(pane.id);
+      if (placement) await deleteRefs(placement.projectPath, `refs/pane/move-incoming/${pane.id}`).catch(() => undefined);
+    }
     job.status = { ...job.status, stage: 'built', detail: undefined, approvals, leftBehind, missingEnv: manifest.source.envNames.filter(name => !this.envNamesHere().has(name)) };
   }
 
