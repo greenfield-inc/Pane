@@ -26,7 +26,7 @@ interface PromptMarker {
 export const useSessionView = (
   activeSession: Session | undefined,
 ) => {
-  const { theme } = useTheme();
+  const { theme, themeRevision } = useTheme();
   const activeSessionId = activeSession?.id;
   const activeSessionStatus = activeSession?.status;
   const activeSessionOutputLength = activeSession?.output?.length ?? 0;
@@ -623,7 +623,7 @@ export const useSessionView = (
     }, 50); // Small delay to ensure CSS updates have propagated
     
     return () => clearTimeout(timer);
-  }, [theme]);
+  }, [themeRevision]);
 
   useEffect(() => {
     if (!activeSessionStatus) return;

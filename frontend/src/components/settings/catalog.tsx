@@ -46,8 +46,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Appearance',
     description: 'Theme, scale, and sidebar presentation.',
     icon: Monitor,
-    settingIds: ['appearance-mode', 'theme', 'system-light-theme', 'system-dark-theme', 'high-contrast', 'ui-scale', 'sidebar-pane-rows'],
-    aliases: ['theme', 'display', 'sidebar', 'zoom', 'contrast', 'accessibility'],
+    settingIds: ['appearance-mode', 'theme', 'system-light-theme', 'system-dark-theme', 'custom-theme', 'high-contrast', 'ui-scale', 'sidebar-pane-rows'],
+    aliases: ['theme', 'display', 'sidebar', 'zoom', 'contrast', 'accessibility', 'custom theme', 'css', 'restyle', 'colors'],
   },
   {
     id: 'terminal',

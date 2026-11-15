@@ -1,19 +1,21 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   DEFAULT_APPEARANCE,
-  isTheme,
+  isThemeChoice,
   normalizeAppearance,
   resolveAppearanceTheme,
   themeBase,
   type AppearanceConfig,
-  type Theme,
+  type ThemeChoice,
 } from '../../../shared/types/appearance';
+import { CUSTOM_THEME_CLASS, CUSTOM_THEME_ID, paletteForChoice, themeChoiceClasses } from '../../../shared/types/customTheme';
+import { applyCustomThemeStyles, useCustomThemeState } from '../utils/customTheme';
 import { useConfigStore } from '../stores/configStore';
 import { readAppearanceCache, readLegacyThemeAsFixed, writeAppearanceCache } from '../utils/appearanceCache';
 import { isWindowControlsOverlayEnabled, readThemeTokenHex, readTitleBarOverlayColors } from '../utils/titleBarOverlay';
 import { THEME_CLASSES, ThemeContext } from './themeContextValue';
 
-const ALL_THEME_CLASSES = [...new Set(Object.values(THEME_CLASSES).flat())];
+const ALL_THEME_CLASSES = [...new Set([...Object.values(THEME_CLASSES).flat(), CUSTOM_THEME_CLASS])];
 const mediaQuery = (): MediaQueryList => window.matchMedia('(prefers-color-scheme: dark)');
 const initialAppearance = (): AppearanceConfig =>
   window.electronAPI?.appearanceSnapshot
@@ -22,11 +24,11 @@ const initialAppearance = (): AppearanceConfig =>
   ?? DEFAULT_APPEARANCE;
 
 function validatePatch(patch: Partial<AppearanceConfig>): void {
-  if (patch.theme !== undefined && !isTheme(patch.theme)) throw new Error('theme must be a valid palette');
-  if (patch.systemLightTheme !== undefined && !isTheme(patch.systemLightTheme)) {
+  if (patch.theme !== undefined && !isThemeChoice(patch.theme)) throw new Error('theme must be a valid palette');
+  if (patch.systemLightTheme !== undefined && !isThemeChoice(patch.systemLightTheme)) {
     throw new Error('systemLightTheme must be a valid palette');
   }
-  if (patch.systemDarkTheme !== undefined && !isTheme(patch.systemDarkTheme)) {
+  if (patch.systemDarkTheme !== undefined && !isThemeChoice(patch.systemDarkTheme)) {
     throw new Error('systemDarkTheme must be a valid palette');
   }
 }
@@ -38,7 +40,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const deferConfigAppearanceSyncRef = useRef(false);
   const [prefersDark, setPrefersDark] = useState(() => mediaQuery().matches);
   const [highContrast, setHighContrast] = useState(() => localStorage.getItem('high-contrast') === 'true');
-  const resolvedTheme = resolveAppearanceTheme(appearance, prefersDark);
+  const customTheme = useCustomThemeState();
+  const themeChoice = resolveAppearanceTheme(appearance, prefersDark);
+  const slotDefault = appearance.appearanceMode === 'system' && prefersDark ? DEFAULT_APPEARANCE.systemDarkTheme : DEFAULT_APPEARANCE.systemLightTheme;
+  // Custom shows as its base palette, so everything that reads `theme` keeps working; the revision changes with its contents.
+  const resolvedTheme = paletteForChoice(themeChoice, customTheme.base, slotDefault);
+  const shownCustomTheme = themeChoice === CUSTOM_THEME_ID ? customTheme.theme : null;
+  const themeRevision = useMemo(() => `${resolvedTheme}:${shownCustomTheme ? JSON.stringify(shownCustomTheme) : ''}`, [resolvedTheme, shownCustomTheme]);
+  const themeClasses = themeChoiceClasses(themeChoice, customTheme.base, slotDefault).join(' ');
   const activeSystemSlot = appearance.appearanceMode === 'system' ? (prefersDark ? 'dark' : 'light') : undefined;
   const configAppearanceMode = config?.appearanceMode;
   const configTheme = config?.theme;
@@ -92,17 +101,18 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const body = document.body;
     root.classList.remove(...ALL_THEME_CLASSES);
     body.classList.remove(...ALL_THEME_CLASSES);
-    root.classList.add(...THEME_CLASSES[resolvedTheme]);
-    body.classList.add(...THEME_CLASSES[resolvedTheme]);
+    root.classList.add(...themeClasses.split(' '));
+    body.classList.add(...themeClasses.split(' '));
     root.style.colorScheme = themeBase(resolvedTheme);
     root.classList.toggle('high-contrast', highContrast);
     body.classList.toggle('high-contrast', highContrast);
-  }, [resolvedTheme, highContrast]);
+    applyCustomThemeStyles(shownCustomTheme);
+  }, [themeClasses, resolvedTheme, shownCustomTheme, highContrast]);
 
   useEffect(() => {
     const color = readThemeTokenHex('--color-bg-primary');
     if (!color) return;
-    void window.electronAPI?.setBackgroundColor({ theme: resolvedTheme, color })
+    void window.electronAPI?.setBackgroundColor({ theme: themeChoice, color })
       .then((response) => {
         if (!response.success) {
           console.error('Failed to apply window background colour:', response.error);
@@ -111,7 +121,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       .catch((error) => {
         console.error('Failed to apply window background colour:', error);
       });
-  }, [resolvedTheme, highContrast]);
+  }, [themeChoice, themeRevision, highContrast]);
 
   useEffect(() => {
     if (!isWindowControlsOverlayEnabled()) return;
@@ -126,7 +136,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       .catch((error) => {
         console.error('Failed to apply title bar overlay colors:', error);
       });
-  }, [resolvedTheme, highContrast]);
+  }, [themeRevision, highContrast]);
 
   const setAppearance = useCallback(async (patch: Partial<AppearanceConfig>): Promise<void> => {
     validatePatch(patch);
@@ -169,14 +179,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [updateConfig]);
 
-  const setTheme = useCallback((theme: Theme): Promise<void> => {
+  const setTheme = useCallback((theme: ThemeChoice): Promise<void> => {
     if (appearanceRef.current.appearanceMode === 'fixed') return setAppearance({ theme });
     return setAppearance(prefersDark ? { systemDarkTheme: theme } : { systemLightTheme: theme });
   }, [prefersDark, setAppearance]);
 
   return (
     <ThemeContext.Provider value={{
-      theme: resolvedTheme, appearance, prefersDark, activeSystemSlot,
+      theme: resolvedTheme, themeChoice, themeRevision, customTheme, appearance, prefersDark, activeSystemSlot,
       setTheme, setAppearance, highContrast,
     }}>
       {children}

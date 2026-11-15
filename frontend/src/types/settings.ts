@@ -40,6 +40,7 @@ export type SettingsSettingId =
   | 'system-light-theme'
   | 'system-dark-theme'
   | 'high-contrast'
+  | 'custom-theme'
   | 'ui-scale'
   | 'sidebar-pane-rows'
   | 'attention-inbox'

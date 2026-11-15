@@ -470,7 +470,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const sessionContext = useSession();
   const sessionId = sessionContext?.sessionId;
   const workingDirectory = sessionContext?.workingDirectory;
-  const { theme, highContrast } = useTheme();
+  const { themeRevision, highContrast } = useTheme();
   
   if (sessionContext) {
     devLog.debug('[TerminalPanel] Session context:', sessionContext);
@@ -2171,7 +2171,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         setShowScrollDown(true);
       }
     }
-  }, [theme, highContrast]);
+  }, [themeRevision, highContrast]);
 
 
   // Handle missing session context (show after all hooks have been called)
@@ -2187,6 +2187,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   return (
     <div
       ref={setTerminalSurfaceRef}
+      data-pane-part="terminal"
       className="h-full w-full relative group/terminal"
       onMouseMove={onMouseMove}
     >
