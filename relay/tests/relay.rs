@@ -525,14 +525,17 @@ async fn caa_lets_only_lets_encrypt_issue_and_no_wildcard_for_the_whole_domain()
         caa(format!("{D}.")).await,
         vec!["0 issue \"letsencrypt.org\"", "0 issuewild \";\""]
     );
-    // Each computer's own names, *.<id>.<D> included, only through DNS-01 at Let's Encrypt.
-    assert_eq!(
-        caa(format!("{id}.{D}.")).await,
-        vec![
-            "0 issue \"letsencrypt.org; validationmethods=dns-01\"",
-            "0 issuewild \"letsencrypt.org; validationmethods=dns-01\"",
-        ]
-    );
+    // Each computer's own names, *.<id>.<D> included, only through DNS-01 at Let's Encrypt,
+    // whether or not the relay knows the id.
+    for name in [format!("{id}.{D}."), format!("aaaaaaaaaaaaaaaa.{D}.")] {
+        assert_eq!(
+            caa(name).await,
+            vec![
+                "0 issue \"letsencrypt.org; validationmethods=dns-01\"",
+                "0 issuewild \"letsencrypt.org; validationmethods=dns-01\"",
+            ]
+        );
+    }
 
     // A self-hosted relay on another CA names it, or serves none.
     let other = Env::start(&[
@@ -598,14 +601,23 @@ async fn dns_answers_for_computer_names() {
         vec![us]
     );
     assert_eq!(a(format!("{id}.{D}.")).await.answers[0].ttl, 60);
-    let caa = dns_query(
+    assert_eq!(
+        a_records(&a(format!("files.aaaaaaaaaaaaaaaa.{D}.")).await),
+        vec![us]
+    );
+    assert_eq!(
+        a_records(&a(format!("l192-168-1-20.aaaaaaaaaaaaaaaa.{D}.")).await),
+        vec![Ipv4Addr::new(192, 168, 1, 20)]
+    );
+    let txt = dns_query(
         env.dns(),
-        format!("aaaaaaaaaaaaaaaa.{D}."),
-        RecordType::CAA,
+        format!("_acme-challenge.aaaaaaaaaaaaaaaa.{D}."),
+        RecordType::TXT,
         false,
     )
     .await;
-    assert_eq!(caa.answers.len(), 2, "unknown ids keep the dns-01-only CAA");
+    assert_eq!(txt.metadata.response_code, ResponseCode::NoError);
+    assert!(txt.answers.is_empty());
     assert_eq!(
         a(format!("www.{D}.")).await.metadata.response_code,
         ResponseCode::NXDomain
@@ -798,9 +810,8 @@ async fn udp_answers_past_the_rate_limit_are_truncated() {
     assert_eq!(a_records(&m), vec![Ipv4Addr::new(203, 0, 113, 10)]);
 }
 
-/// Polls `server` until `name` has A records, then returns them.
-/// The addresses `name` resolves to once the registry knows it: a name the registry doesn't know
-/// answers this relay's address for 10 s.
+/// Polls `server` until the registry knows `name`, then returns its addresses: a name the
+/// registry doesn't know answers this relay's address for 10 s.
 async fn resolves(server: SocketAddr, name: String) -> Vec<Ipv4Addr> {
     let deadline = Instant::now() + WAIT;
     loop {
@@ -1287,6 +1298,24 @@ async fn one_address_has_a_limit_across_all_computers() {
     still_connected(&mut a).await;
     still_connected(&mut b).await;
     assert!(timed(&b, env.addr_v6(), &host_b).await.unwrap() < SLOWED);
+}
+
+#[tokio::test]
+async fn connections_for_a_computer_that_is_not_here_count_against_their_address() {
+    let env = Env::start(&["--listen", "[::]:0", "--limit-ip-conns-per-min", "2"]).await;
+    let agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let host = format!("{}.{D}", agent.id);
+
+    // A Pane retrying a computer that is gone: each attempt is refused, and each one counts.
+    for _ in 0..4 {
+        assert!(
+            timed(&agent, env.addr(), &format!("aaaaaaaaaaaaaaaa.{D}"))
+                .await
+                .is_err()
+        );
+    }
+    assert!(timed(&agent, env.addr(), &host).await.is_err());
+    assert!(timed(&agent, env.addr_v6(), &host).await.unwrap() < SLOWED);
 }
 
 #[tokio::test]

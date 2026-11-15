@@ -49,10 +49,10 @@ The computer's certificate covers `<id>.<D>` and `*.<id>.<D>`.
 Local address names answer only for RFC 1918 (`10/8`, `172.16/12`,
 `192.168/16`) and CGNAT (`100.64/10`) addresses; anything else is NXDOMAIN.
 
-Answers last 60 s. The names of an id the registry does not know (a
-computer that was forgotten, or never connected) answer as if it were on the
-answering relay, for 10 s, and that relay refuses its clients until the
-computer connects. A "no such name" answer would stay cached after the
+A and CAA answers last 60 s and TXT answers 10 s. The names of an id the
+registry does not know (a computer that was forgotten, or never connected)
+answer as if it were on the answering relay, for 10 s, and that relay refuses
+its clients until the computer connects. A "no such name" answer would stay cached after the
 computer comes back: macOS doubles that cache time on each repeated miss,
 up to more than an hour.
 
@@ -302,7 +302,8 @@ computer and its other clients carry on.
 - Per computer and client address: 50 MB and 100 new client connections a
   minute (`--limit-bytes-per-min`, `--limit-conns-per-min`).
 - Per client address across all computers: 200 MB and 400 new connections a
-  minute (`--limit-ip-bytes-per-min`, `--limit-ip-conns-per-min`).
+  minute (`--limit-ip-bytes-per-min`, `--limit-ip-conns-per-min`). Connections
+  for a computer that is not connected count too.
 - Per client address on the iroh relay: 50 MB and 100 new connections a
   minute (the per-computer flags).
 - Per computer, its own control connection: past 1,200 frames a minute the
