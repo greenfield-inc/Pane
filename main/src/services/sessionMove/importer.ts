@@ -470,8 +470,8 @@ export class MoveImporter {
         pane.baseCommit ?? undefined, pane.baseBranch ?? undefined, false,
       );
       job.cleanup.push({ label: `Pane ${pane.name}`, undo: () => this.removePane(created.id) });
-      // Shown at once, the way a new Pane is (no reload), without taking focus.
-      this.services.sessionManager.emitSessionCreated(created, { activateOnCreate: false });
+      // Shown at once, the way a new Pane is (no reload), without taking focus; its own tabs follow.
+      this.services.sessionManager.emitSessionCreated(created, { activateOnCreate: false, createDefaultTerminalOnCreate: false });
       if (pane.layout) sessionsDb.setSessionPanelLayout(pane.id, rewriteText(map, pane.layout));
       const ctx = this.services.sessionManager.getProjectContextByProjectId(placement.projectId);
       const project = this.projects().find(item => item.id === placement.projectId);
