@@ -206,8 +206,13 @@ export async function restoreLaunchChat(): Promise<void> {
   const sessions = useSessionStore.getState();
   if (sessions.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') return;
   if (!sessions.sessions.some(session => session.id === chat.paneId)) return;
+  // The Pane opens once the chat's code is in, so the tab renders without a
+  // loading fallback (and its 300 ms reveal throttle).
+  await loadChatTabRoute().catch(() => undefined);
+  const now = useSessionStore.getState();
+  if (now.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') return;
   focusChatSoon(chat.panelId, { untilInput: true });
-  await sessions.setActiveSession(chat.paneId);
+  await now.setActiveSession(chat.paneId);
 }
 
 /**
