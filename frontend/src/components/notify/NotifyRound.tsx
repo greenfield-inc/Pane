@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { ArrowRight, CornerDownLeft, X } from 'lucide-react';
 import type { NotifyAnswer, NotifyCommand, NotifyItem, NotifySnapshot } from '../../../../shared/types/notify';
 import { useDraftChoice } from '../../stores/approvalColumnStore';
+import { canReplyAlone } from '../approvals/approvalCard';
 import { cn } from '../../utils/cn';
 import { askedBy, cardAnswer, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
 import { ShortcutCap, UnreachableNotice } from './NotifyCard';
@@ -98,8 +99,8 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
   const secret = item.ui === 'secret';
   // A secret takes typed text like a free-text question, but masked and without suggestions or a note.
   const ask = item.ui === 'ask' || secret;
-  // Nothing starts chosen, recommended or not (D-385): Y, N or a pick is required, and Enter sends
-  // only what the person picked. A pick on an approval or options card is kept in its draft.
+  // Nothing starts chosen, recommended or not (D-385): Enter sends only what the person picked, or a
+  // note typed with no pick as a reply. A pick on an approval or options card is kept in its draft.
   const [draftPick, setDraftPick] = useDraftChoice(item, ask ? [] : rows.map((row) => row.label));
   const [askPick, setAskPick] = useState(-1);
   const selected = ask ? askPick : draftPick;
@@ -128,7 +129,11 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
       sendAnswer(cardAnswer(item, null, (index >= 0 ? rows[index]?.label : text) ?? ''));
       return;
     }
-    if (index < 0) return;
+    if (index < 0) {
+      // Words with no pick are a reply on their own: an answer or a question (D-245).
+      if (trimmedNote && canReplyAlone(item)) sendAnswer(cardAnswer(item, null, trimmedNote));
+      return;
+    }
     if (approval) {
       sendAnswer(cardAnswer(item, { approved: index === 0 }, trimmedNote));
       return;
@@ -189,8 +194,9 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [approval, ask, item.id, onCommand, rows.length]);
 
-  const canSend = ask ? text.trim().length > 0 : selected >= 0;
-  const unpicked = !ask && selected < 0;
+  const replyAlone = !ask && selected < 0 && note.trim().length > 0 && canReplyAlone(item);
+  const canSend = ask ? text.trim().length > 0 : selected >= 0 || replyAlone;
+  const unpicked = !ask && !canSend;
   const action = approval && unpicked ? 'Press Y or N' : unpicked ? 'Pick a choice' : secret ? 'Save securely' : `Send to ${item.source.agent}`;
 
   return (
@@ -297,7 +303,7 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
             ref={noteRef}
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            placeholder={approval ? `Reason for ${item.source.agent} (optional)` : `Add a note for ${item.source.agent} (optional)`}
+            placeholder={approval ? `Reason for ${item.source.agent}, or a reply on its own` : `Add a note for ${item.source.agent}, or reply on its own`}
             aria-label="Note"
             className="h-[42px] w-full rounded-xl bg-surface-tertiary px-3.5 text-[14.5px] text-text-primary outline-none placeholder:text-text-muted focus:ring-[1.5px] focus:ring-inset focus:ring-border-hover"
           />

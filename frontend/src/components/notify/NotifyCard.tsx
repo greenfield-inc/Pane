@@ -3,6 +3,7 @@ import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, ShieldCheck, X } from 
 import type { NotifyAnswer, NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
 import { showActionError } from '../../stores/errorStore';
 import { useDraftChoice } from '../../stores/approvalColumnStore';
+import { canReplyAlone } from '../approvals/approvalCard';
 import { canClose, canCopyAnswer, canOverride, canReopen, decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { cn } from '../../utils/cn';
 import { askedBy, cardAnswer, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
@@ -553,6 +554,13 @@ function QuestionCard({
   };
   const answerApproval = (approved: boolean, reason?: string) => sendAnswer(cardAnswer(item, { approved }, reason ?? ''));
   const answerText = (value: string) => sendAnswer(cardAnswer(item, null, value));
+  // An options card sends its pick (with any note), or the note alone as a reply (D-245).
+  const replyAlone = selected < 0 && note.trim().length > 0 && canReplyAlone(item);
+  const canSendChoice = selected >= 0 || replyAlone;
+  const sendChoiceOrNote = () => {
+    if (selected >= 0) answerChoice(selected, note);
+    else if (replyAlone) answerText(note);
+  };
   // A secret is sent as typed, and leaves this card's state at once.
   const saveSecret = () => {
     if (!text) return;
@@ -625,8 +633,8 @@ function QuestionCard({
           <TextField
             value={note}
             onChange={setNote}
-            onSubmit={() => { if (selected >= 0) answerChoice(selected, note); }}
-            placeholder={`Add a note for ${item.source.agent} (optional)`}
+            onSubmit={sendChoiceOrNote}
+            placeholder={`Add a note for ${item.source.agent}, or reply on its own`}
             onFieldFocusRequest={onFieldFocusRequest}
           />
         </div>
@@ -790,8 +798,8 @@ function QuestionCard({
   const send = (
     <button
       type="button"
-      disabled={selected < 0}
-      onClick={() => answerChoice(selected, note)}
+      disabled={!canSendChoice}
+      onClick={sendChoiceOrNote}
       className="h-[30px] rounded-[10px] bg-interactive px-3 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50"
     >
       Send
@@ -800,7 +808,7 @@ function QuestionCard({
   if (form !== 'inbox' && item.ui === 'options' && expanded) {
     footer = (
       <CardFooter
-        left={<span>Click a choice, then Send</span>}
+        left={<span>Click a choice or type a reply, then Send</span>}
         right={(
           <>
             <FooterLink onClick={() => showDetailsChange(false)}>Hide details</FooterLink>
@@ -865,7 +873,7 @@ function QuestionCard({
       ) : (
         <div className="flex items-center gap-3 px-3.5 pb-3 text-[12.5px] text-text-tertiary">
           {sendInRow && <FooterLink onClick={() => showDetailsChange(false)}>Hide details</FooterLink>}
-          {sendInRow && selected < 0 && <span className="min-w-0 truncate">Pick a choice</span>}
+          {sendInRow && !canSendChoice && <span className="min-w-0 truncate">Pick a choice</span>}
           {item.snoozedUntil !== undefined && <span className="min-w-0 truncate">{snoozedLabel(item.snoozedUntil)}</span>}
           <div className="ml-auto flex shrink-0 items-center gap-3">
             {item.source.paneId && !item.elsewhere && (!item.source.autopilot || onOpenInPane) && (

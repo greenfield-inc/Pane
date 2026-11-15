@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { bridgedFrom, canSend, cardChip, cardTabs, dockApprovals, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals } from './approvalCard';
+import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals } from './approvalCard';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -80,6 +80,15 @@ describe('the approval card', () => {
     // --update clears the reply it answered: the line still says it came back ready again.
     const ready = { ...q20, id: 'd', readyAgain: 30 };
     expect(latestReplied([reading, taken, ready], 's1', new Set())?.id).toBe('d');
+  });
+
+  it('words typed with no pick go on their own, except on a prompt, an options-only question or while a reply is read (F-1)', () => {
+    expect(canReplyAlone(q20)).toBe(true);
+    expect(canSend(q20, [], 'Which one is reversible?')).toBe(true);
+    expect(canReplyAlone({ ...q20, optionsOnly: true })).toBe(false);
+    expect(canReplyAlone({ ...q20, agentPrompt: { yes: 'Yes', no: 'No' } })).toBe(false);
+    expect(canReplyAlone({ ...q20, reply: { id: 'r', text: 'why?', at: 1, state: 'reading', deliveredAt: 2 } })).toBe(false);
+    expect(canReplyAlone({ ...q20, state: 'answered' })).toBe(false);
   });
 
   it('Send needs a pick per question, or something typed', () => {

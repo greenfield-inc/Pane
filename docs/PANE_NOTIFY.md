@@ -273,7 +273,8 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   selected.
 - **The round**: press ⌃⇧Space (Ctrl+Shift+Space on Windows and Linux) from
   any other app for a centered panel that works through the queue by
-  keyboard: number keys or arrows choose, ↵ sends, → skips, Tab adds a note,
+  keyboard: nothing starts chosen; number keys or arrows choose, ↵ sends,
+  → skips, Tab adds a note (a note with no pick goes as a reply on its own),
   Esc closes.
 - **The menu bar or tray icon** shows an amber dot while questions wait. Its
   menu lists them and holds Show outside Pane, Pause for 1 hour, a way into
