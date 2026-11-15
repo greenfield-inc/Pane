@@ -26,9 +26,16 @@ describe('joining two groups of computers', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('pairs without asking when the link’s group already holds one of this device’s computers', async () => {
+  it('asks even when the maker says its group holds one of this device’s computers, since the maker writes that answer', async () => {
     const fetch = host({ status: 200, body: { ok: true, group: [{ id: 'buildbox', name: 'Build Box' }, { id: 'studio', name: 'Studio Mac' }], expiresAt: '2026-11-15T10:00:00Z' } });
-    expect(await relayLinkJoin(fetch, LINK, [relayComputer('studio', 'Studio Mac')])).toBeNull();
+    expect(await relayLinkJoin(fetch, LINK, [relayComputer('studio', 'Studio Mac')]))
+      .toEqual({ maker: 'Build Box', makerGroup: ['Build Box', 'Studio Mac'], here: ['Studio Mac'] });
+  });
+
+  it('pairs without asking when this device reaches the link’s computer already', async () => {
+    const fetch = host({ status: 200, body: { ok: true, group: [{ id: 'buildbox', name: 'Build Box' }], expiresAt: '2026-11-15T10:00:00Z' } });
+    expect(await relayLinkJoin(fetch, LINK, [relayComputer('buildbox', 'Build Box')])).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('names both sides when the link would join a second group', async () => {

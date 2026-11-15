@@ -12,7 +12,7 @@ function useMarks(names: string[]) {
   return useMemo(() => assignMachineLetters(key.split('\n')), [key]);
 }
 
-/** "Link this computer with <maker>": every computer on both sides, before two groups join. */
+/** "Link this computer with <maker>": every computer on both sides, before the maker can run agents here. */
 function ConfirmLink({ flow }: { flow: Extract<LinkFlow, { step: 'confirm' }> }) {
   const { preview, here } = flow;
   const { confirmLink, cancelLink } = useAddDeviceStore();
@@ -35,7 +35,7 @@ function ConfirmLink({ flow }: { flow: Extract<LinkFlow, { step: 'confirm' }> })
       </div>
       <div className="space-y-1">
         <h2 className="text-heading-1 text-text-primary">Link this computer with {preview.maker}</h2>
-        <p className="text-sm text-text-secondary">{here} joins your computers. Each can run agents on the others.</p>
+        <p className="text-sm text-text-secondary">Linking lets {preview.maker} run agents on {here}. Each computer below can run agents on the others.</p>
       </div>
       <ul className="w-full max-w-md divide-y divide-border-primary overflow-hidden rounded-lg border border-border-primary text-left" aria-label="Computers on both sides">
         {rows.map(({ name, tag }) => (

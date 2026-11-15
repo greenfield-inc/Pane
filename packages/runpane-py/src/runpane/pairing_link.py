@@ -26,7 +26,10 @@ def run_link(parsed: Any, stdin: Optional[TextIO] = None, stdout: Optional[TextI
     if preview.get("needsConfirm") and not parsed.yes:
         joins = (
             f"This link joins your computers ({names(list(preview['here']))}) with {maker}'s "
-            f"({names(list(preview['makerGroup']))}), and each can then reach the others."
+            f"({names(list(preview['makerGroup']))}), and each can then run agents on the others."
+            if preview["here"]
+            else f"This link lets {maker}'s computers ({names(list(preview['makerGroup']))}) run agents on this computer, "
+            "and this computer run agents on them."
         )
         if parsed.json or not (stdin.isatty() and stdout.isatty()):
             raise RunpaneError(

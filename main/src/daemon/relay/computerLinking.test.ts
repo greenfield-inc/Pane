@@ -178,13 +178,13 @@ function network() {
 }
 
 describe('linking computers with a one-time link', () => {
-  it('pairs a computer with nothing linked silently, both ways, with the maker naming it', async () => {
+  it('asks before linking a computer with nothing linked, then links both ways, with the maker naming it', async () => {
     const net = network();
     const mac = net.add('Mac', 'macmacmacmacmac0');
     const windows = net.add('Windows', 'winwinwinwinwin0');
     const link = await mac.link('1h');
 
-    expect(await windows.preview(link)).toMatchObject({ maker: 'Mac', makerGroup: ['Mac'], here: [], needsConfirm: false });
+    expect(await windows.preview(link)).toMatchObject({ maker: 'Mac', makerGroup: ['Mac'], here: [], needsConfirm: true });
     expect(await windows.redeem(link)).toEqual({ linked: ['Mac'] });
 
     expect(mac.listed()).toEqual(['Windows']);
@@ -241,7 +241,7 @@ describe('linking computers with a one-time link', () => {
       expect(from.listed()).toEqual(all.filter((other) => other !== from).map((other) => other.name).sort());
       for (const to of all) if (to !== from) expect(await net.reaches(from, to), `${from.name} reaches ${to.name}`).toBe(true);
     }
-    // Now one group: another link from it asks nothing.
+    // NAS reaches Linux now, so another link from Linux asks nothing.
     expect(await nas.preview(await linux.link())).toMatchObject({ needsConfirm: false });
   });
 

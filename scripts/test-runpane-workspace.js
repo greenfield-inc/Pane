@@ -481,9 +481,13 @@ async function withLinkPane(preview, check) {
 
 const joinsGroups = { maker: 'parsa-devbox', makerGroup: ['parsa-devbox', 'build-box'], here: ['studio-mac'], needsConfirm: true };
 
-test('runpane link on a computer with nothing linked links without asking', posixOnly, async () => {
-  await withLinkPane({ maker: 'parsa-devbox', makerGroup: ['parsa-devbox', 'build-box'], here: [], needsConfirm: false }, async (run, requests) => {
-    const linked = await run(LINK);
+test('runpane link on a computer with nothing linked asks too, naming who could run agents here', posixOnly, async () => {
+  await withLinkPane({ maker: 'parsa-devbox', makerGroup: ['parsa-devbox', 'build-box'], here: [], needsConfirm: true }, async (run, requests) => {
+    const refused = await run(LINK, '--json');
+    assert.equal(refused.status, 1);
+    assert.match(JSON.parse(refused.stdout).error.message, /lets parsa-devbox's computers \(parsa-devbox and build-box\) run agents on this computer/);
+    requests.length = 0;
+    const linked = await run(LINK, '--yes');
     assert.equal(linked.status, 0, linked.stderr);
     assert.equal(linked.stdout, 'Linked with parsa-devbox and build-box. List them with: runpane workspace list\n');
     assert.deepEqual(requests.map(({ channel }) => channel), ['relay:link-preview', 'relay:redeem-link']);

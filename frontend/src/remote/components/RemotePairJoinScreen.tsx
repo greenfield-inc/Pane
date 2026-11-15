@@ -7,7 +7,7 @@ interface RemotePairJoinScreenProps {
 }
 
 /**
- * A pairing link that would join this browser's computers with another group: names both sides
+ * A pairing link for a computer this browser doesn't reach yet, opened where it reaches others: names both sides
  * and pairs only on "Link". Cancelling leaves the link unused.
  */
 export function RemotePairJoinScreen({ join, onLink, onCancel }: RemotePairJoinScreenProps) {
@@ -16,7 +16,7 @@ export function RemotePairJoinScreen({ join, onLink, onCancel }: RemotePairJoinS
       <section className="w-full max-w-md text-center" aria-labelledby="pair-join-title">
         <h1 id="pair-join-title" className="text-xl font-semibold text-text-primary">Link with {join.maker}</h1>
         <p className="mt-2 text-sm leading-5 text-text-secondary">
-          {join.maker} isn’t linked with your computers yet. Linking adds its computers to this browser.
+          Linking adds {join.maker} and the computers linked with it to this browser.
         </p>
         <JoinSide title="From this link" names={join.makerGroup} maker={join.maker} />
         <JoinSide title="In this browser" names={join.here} />

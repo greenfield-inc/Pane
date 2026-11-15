@@ -13,9 +13,9 @@ import { usePairing } from './usePairing';
 
 /**
  * A pairing QR opened from the phone's camera or the browser landing. A phone that reaches no
- * computers yet, or reaches one in the link's group, pairs at once. A phone that would join a
- * second group of computers asks first, naming both sides; cancelling spends nothing. A link
- * through another relay domain always waits for a tap.
+ * computers yet, or reaches the link's computer already, pairs at once. A phone that would link
+ * its computers with the link's computer asks first, naming both sides; cancelling spends nothing.
+ * A link through another relay domain always waits for a tap.
  */
 export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: RelayPairingLink; onPaired?: () => void }) {
   const pairing = usePairing(onPaired);
@@ -48,7 +48,7 @@ export function RelayPairPrompt({ code, link, onPaired }: { code: string; link: 
       <View style={styles.container} testID="relay-pair-join">
         <Text variant="title">{`Link this phone with ${join.maker}`}</Text>
         <Text variant="callout" tone="secondary">
-          {`${join.maker} isn’t linked with your computers yet. Linking joins both groups, and each computer can run agents on the others.`}
+          {`Pairing links ${join.maker} with the computers on this phone, and each computer can run agents on the others.`}
         </Text>
         {!ownDomain ? <DomainNote domain={link.domain} /> : null}
         <ListSection title="From this link">

@@ -16,7 +16,8 @@ const JOINING_TWO_GROUPS: LinkPreview = {
   expiresAt: '2026-11-15T10:00:00Z',
 };
 
-const NOTHING_HERE: LinkPreview = { ...JOINING_TWO_GROUPS, here: [], needsConfirm: false };
+const NOTHING_HERE: LinkPreview = { ...JOINING_TWO_GROUPS, here: [] };
+const LINKED_ALREADY: LinkPreview = { ...JOINING_TWO_GROUPS, needsConfirm: false };
 
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 /** What the dialog or the full page shows for the store's current link (server rendering reads a store's initial state). */
@@ -97,7 +98,7 @@ describe('Add a device › Computer: pasting a link', () => {
     expect(useAddDeviceStore.getState().flow.step).toBe('confirm');
     const markup = renderFlow();
     expect(text(markup)).toContain('Link this computer with Studio Mac');
-    expect(text(markup)).toContain('Build Box joins your computers.');
+    expect(text(markup)).toContain('Linking lets Studio Mac run agents on Build Box.');
     for (const name of ['Studio Mac made this link', 'Travel Laptop', 'Old iMac', 'Lab PC linked with Build Box']) {
       expect(text(markup)).toContain(name);
     }
@@ -124,7 +125,7 @@ describe('Add a device › Computer: pasting a link', () => {
     ['ERR_PAIRING_CODE_EXPIRED', 'This code expired. Scan the new code on the computer.', 'This code expired'],
     ['ERR_PAIRING_CODE_USED', 'This code was already used. Scan the new code on the computer.', 'This code was already used'],
   ])('shows a %s refusal in today\'s words', async (code, message, shown) => {
-    preview = NOTHING_HERE;
+    preview = LINKED_ALREADY;
     redeem = async () => { throw new Error(`Error invoking remote method 'relay:redeem-link': Error [${code}]: ${message}`); };
 
     await useAddDeviceStore.getState().startLink(LINK, 'paste');
@@ -141,12 +142,15 @@ describe('Add a device › Computer: pasting a link', () => {
 });
 
 describe('A pane://pair link opened on this computer', () => {
-  it('links without asking when nothing is linked here, and shows the result full page', async () => {
+  it('asks even when nothing is linked here, naming who could run agents here, then shows the result full page', async () => {
     preview = NOTHING_HERE;
     redeem = async () => ({ linked: ['Studio Mac', 'Travel Laptop', 'Old iMac'] });
 
     emitOpened({ link: LINK });
-    await vi.waitFor(() => expect(useAddDeviceStore.getState().flow.step).toBe('linked'));
+    await vi.waitFor(() => expect(useAddDeviceStore.getState().flow.step).toBe('confirm'));
+    expect(text(renderFlow())).toContain('Linking lets Studio Mac run agents on Build Box.');
+    expect(callsTo('relay:redeem-link')).toEqual([]);
+    await useAddDeviceStore.getState().confirmLink();
 
     expect(callsTo('relay:redeem-link')).toEqual([[{ link: LINK }]]);
     expect(useAddDeviceStore.getState().flow).toMatchObject({ source: 'opened' });

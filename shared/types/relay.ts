@@ -97,7 +97,7 @@ export interface LinkPreview {
   makerGroup: string[];
   /** This device's linked computers; empty when it has none. */
   here: string[];
-  /** Both groups are non-empty and not already one group, so the person confirms before they join. */
+  /** This computer doesn't reach the maker yet, so the person confirms before it can run agents here. */
   needsConfirm: boolean;
   expiresAt: string;
 }

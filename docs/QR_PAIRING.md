@@ -49,8 +49,8 @@ The app still accepts `pane-remote://` connection codes.
    and each group stays as it was before.
 
 On a computer with no screen, run `runpane link '<link>'` instead. It asks
-before joining two groups of computers (see
-[When a link asks first](#when-a-link-asks-first)); in a script, pass `--yes`.
+before linking (see [When a link asks first](#when-a-link-asks-first)); in a
+script, pass `--yes`.
 
 Both computers need Pane open with phone access on, and the same relay.
 Opening **Add a device › Computer** on each turns phone access on. The same
@@ -91,10 +91,13 @@ computer's browser app keeps its own list.
 
 ## When a link asks first
 
-Opening a link or scanning a code asks first when it would join two groups:
-the device already reaches computers, and the link comes from a computer
-outside them. The prompt names the computers on both sides. A device that
-reaches no computers yet pairs without asking.
+A computer always asks before it uses a link, unless it already reaches the
+computer that made the link: once linked, that computer can run agents on it.
+A phone or browser asks when it already reaches computers and the link comes
+from a computer it doesn't reach yet. A phone or browser that reaches no
+computers yet pairs without asking, since pairing gives it access and nothing
+back. The prompt names the computers on both sides. The link's computer sends
+its own list, so that list never skips the prompt.
 
 This holds on desktop Pane, the phone app, a browser and `runpane link`.
 **Not mine, cancel** links nothing, and the link stays unused for another

@@ -41,7 +41,9 @@ export async function runLink(parsed: ParsedArgs, terminal: Terminal = { input: 
   const options = { paneDir: parsed.paneDir };
   const preview = await invokeDaemon('relay:link-preview', [{ link }], linkPreviewSchema, options);
   if (preview.needsConfirm && !parsed.yes) {
-    const joins = `This link joins your computers (${names(preview.here)}) with ${preview.maker}'s (${names(preview.makerGroup)}), and each can then reach the others.`;
+    const joins = preview.here.length
+      ? `This link joins your computers (${names(preview.here)}) with ${preview.maker}'s (${names(preview.makerGroup)}), and each can then run agents on the others.`
+      : `This link lets ${preview.maker}'s computers (${names(preview.makerGroup)}) run agents on this computer, and this computer run agents on them.`;
     if (parsed.json || !terminal.input.isTTY || !terminal.output.isTTY) {
       throw new RunpaneError(
         'ERR_LINK_NEEDS_CONFIRM',

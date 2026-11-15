@@ -19,11 +19,12 @@ const previewSchema = boundary.object({
 });
 
 /**
- * Whether opening a pairing link joins this device's computers with another group, which the
+ * Whether opening a pairing link links this device's computers with the link's computer, which the
  * device confirms first (D-16 changed). Null when it pairs without asking: it reaches no relay
- * computer yet, or the link's group already holds one of its computers. Reads the group from
- * `POST https://<id>.<domain>/pair/preview`, which doesn't spend the secret. When the preview
- * can't be read (an older Pane, or no answer), it asks, naming only the link's computer.
+ * computer yet, or it reaches the link's computer already. Reads the maker's group from
+ * `POST https://<id>.<domain>/pair/preview`, which doesn't spend the secret, only to name it: the
+ * maker writes that answer, so it never skips the confirm. When the preview can't be read (an older
+ * Pane, or no answer), it asks, naming only the link's computer.
  */
 export async function relayLinkJoin(
   fetch: RemoteFetch,
@@ -35,9 +36,6 @@ export async function relayLinkJoin(
   const here = mine.map(profile => profile.label);
   const preview = await readPreview(fetch, link);
   if (!preview?.group.length) return { maker: link.name, makerGroup: [link.name], here };
-  // A computer this device already reaches in the maker's group means it is one group already.
-  const ids = new Set(mine.map(profile => profile.relay.computerId));
-  if (preview.group.some(computer => ids.has(computer.id))) return null;
   return { maker: preview.group[0].name, makerGroup: preview.group.map(computer => computer.name), here };
 }
 

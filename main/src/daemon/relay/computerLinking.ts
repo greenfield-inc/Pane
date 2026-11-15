@@ -133,12 +133,12 @@ export class ComputerLinking {
   async preview(text: string): Promise<LinkPreview> {
     const { group, expiresAt } = await this.fetchPreview(this.parse(text));
     const here = this.deps.links.linked();
-    const ours = new Set([this.deps.self()?.id, ...here.map((profile) => profile.relay.computerId)]);
     return {
       maker: group[0].name,
       makerGroup: group.map((member) => member.name),
       here: here.map((profile) => profile.label),
-      needsConfirm: here.length > 0 && group.some((member) => !ours.has(member.id)),
+      // Linking lets the maker run agents here, so it asks unless this computer reaches the maker already. The maker writes `group`, so it never decides this.
+      needsConfirm: !here.some((profile) => profile.relay.computerId === group[0].id),
       expiresAt,
     };
   }
