@@ -250,8 +250,9 @@ slow helper delays nothing else. Updates for the same id merge while they
 wait. A computer's TXT update goes first, in a request of its own; the rest
 go out together as one array. Every 60 s the relay queues all its connected
 computers again, so a helper that restarts relearns them within a minute. A
-TXT update succeeds as soon as one helper has it, and fails only when every
-helper failed.
+TXT update (a computer's or the relay's own ACME value) succeeds once every
+helper has it, or 2 s after the first one does, because the CA may ask any
+helper. It fails only when every helper failed.
 A helper updates its own registry in memory and lists only the other
 helpers, so both helpers answer the same records.
 
