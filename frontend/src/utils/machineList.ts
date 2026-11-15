@@ -244,6 +244,13 @@ function listMachines({ connectionState, computers, tailnet, localName, localOs,
   return [local, ...saved, ...discovered];
 }
 
+/** How a computer agents do not run on now shows in a list. */
+interface IdleState {
+  presence: MachinePresence;
+  stateText: string;
+  action: MachineAction;
+}
+
 /** A saved computer agents do not run on now: what All machines or the Tailscale listing says of it. */
 function idleState({ machine, state, needsLink, tailscaleOnly, tailnetListed }: {
   machine: TailnetMachine | undefined;
@@ -252,7 +259,7 @@ function idleState({ machine, state, needsLink, tailscaleOnly, tailnetListed }: 
   state: MachineState | undefined;
   needsLink: boolean;
   tailscaleOnly: boolean;
-}): { presence: MachinePresence; stateText: string; action: MachineAction } {
+}): IdleState {
   if (needsLink) return { presence: 'dimmed', stateText: SIGNED_OUT, action: 'none' };
   if (state?.status === 'online') return { presence: 'solid', stateText: 'Online', action: 'switch' };
   if (state?.status === 'offline') {

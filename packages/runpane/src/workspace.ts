@@ -396,7 +396,7 @@ async function withOs(machine: TailnetMachine, known: boolean): Promise<TailnetM
  * The machines runpane workspace can reach, one entry per computer: those saved in Pane, each with
  * its routes, and the tailnet's other machines. A saved computer on the tailnet is one entry.
  */
-export async function readMachines(paneDir?: string): Promise<Tailnet> {
+async function readMachines(paneDir?: string): Promise<Tailnet> {
   const [tailnet, computers] = await Promise.all([readTailnet(), readSavedComputers(paneDir)]);
   const peers = tailnet.ok ? tailnet.machines : [];
   const merged = new Set<TailnetMachine>();

@@ -772,6 +772,7 @@ test.describe('Settings', () => {
 
       await row.getByRole('button', { name: /^Move Same network/ }).press('ArrowDown');
       await expect(routes).toHaveText([/^Tailscale/, /^Same network/, /^Pane relay/]);
+      // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
       const calls = await page.evaluate(() => (window as typeof window & { __paneTestElectronMock: SettingsMock }).__paneTestElectronMock.getInvokeCalls('computers:reorder-routes'));
       expect(calls.map((call) => call.args)).toEqual([[{
         computerId: 'build-box',
@@ -806,6 +807,27 @@ test.describe('Settings', () => {
       await expect(here.getByRole('button', { name: 'Clear' })).toBeVisible();
       await expect(field).toHaveValue('https://pane.example.com');
       await expect(here).toContainText('Linked computers find it automatically.');
+    });
+
+    test('a link to a setting on another tab opens that tab and focuses the setting', async ({ page }) => {
+      const content = await openRemoteAccess(page);
+      await expect(content.getByRole('tab', { name: /^Computers/ })).toHaveAttribute('aria-selected', 'true');
+      const openSetting = (setting: string) => page.evaluate((detail) => {
+        window.dispatchEvent(new CustomEvent('pane:open-settings', { detail }));
+      }, { category: 'remote-access', setting });
+
+      await openSetting('remote-relay-address');
+      await expect(content.getByRole('tab', { name: /^Phones and glasses/ })).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#settings-remote-relay-address')).toBeFocused();
+
+      await openSetting('remote-visibility');
+      await expect(content.getByRole('tab', { name: 'Tailscale' })).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#settings-remote-visibility')).toBeFocused();
+
+      await content.getByRole('tab', { name: /^Computers/ }).click();
+      await openSetting('remote-add-code');
+      await expect(content.getByRole('tab', { name: 'Tailscale' })).toHaveAttribute('aria-selected', 'true');
+      await expect(content.getByRole('textbox', { name: 'Connection Code' })).toBeFocused();
     });
   });
 });

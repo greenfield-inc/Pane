@@ -22,7 +22,7 @@ import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/
 import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
-import type { ComputerRoute, RemoteComputer } from '../shared/types/remoteComputers';
+import type { ComputerRoute, ComputerRoutesReport, RemoteComputer } from '../shared/types/remoteComputers';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -814,7 +814,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (url === null) delete remoteDaemonConfig.host.publicUrl;
         else remoteDaemonConfig.host.publicUrl = url;
         syncRemoteDaemonConfig();
-        return Promise.resolve({ machineId: 'install-devbox', name: 'devbox', ...(url ? { publicUrl: url } : {}) });
+        const report: ComputerRoutesReport = { machineId: 'install-devbox', name: 'devbox' };
+        if (url) report.publicUrl = url;
+        return Promise.resolve(report);
       }
       if (channel === 'computers:reorder-routes') {
         // SAFETY: the renderer sends { computerId, routeIds } to this command.

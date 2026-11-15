@@ -18,7 +18,7 @@ import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { Dropdown } from '../../ui/Dropdown';
 import { computerRelayId } from '../../../../../shared/types/remoteComputers';
 import type { RemoteDaemonClientRecord } from '../../../../../shared/types/remoteDaemon';
-import type { RemoteAccessSubviewId, SettingSaveState } from '../../../types/settings';
+import type { RemoteAccessSubviewId, SettingSaveState, SettingsSettingId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
 
 /** Machines come and go, and a tailnet switch changes the whole list; refresh while it is on screen. */
@@ -29,17 +29,37 @@ type RemoteAccessTab = 'computers' | 'devices' | 'tailscale';
 /** The tab last shown, so coming back from Set Up Host or a computer's details returns to it. */
 let shownTab: RemoteAccessTab = 'computers';
 
+/** The tab that holds a setting a link can open; the header's settings show on every tab. */
+function tabHolding(setting: SettingsSettingId): RemoteAccessTab | undefined {
+  switch (setting) {
+    case 'remote-machines':
+    case 'remote-linked-computers':
+      return 'computers';
+    case 'remote-glasses':
+    case 'remote-relay-address':
+      return 'devices';
+    case 'remote-visibility':
+    case 'remote-address':
+    case 'remote-password':
+    case 'remote-pane':
+    case 'remote-add-code':
+      return 'tailscale';
+    default:
+      return undefined;
+  }
+}
+
 interface RemoteAccessSettingsProps {
   controller: RemoteAccessController;
   onOpenSubview: (subview: RemoteAccessSubviewId) => void;
   onOpenMachine: (machineId: string) => void;
-  /** Changes each time something asks for the connection code box open. */
-  addCodeRequest?: number;
+  /** A setting a link asked for; the nonce changes per request. `remote-add-code` also opens the connection code box. */
+  settingRequest?: { setting: SettingsSettingId; nonce: number };
   /** Opens this Tailscale machine's password field; the nonce changes per request. */
   passwordRequest?: { machine: string; nonce: number };
 }
 
-export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine, addCodeRequest, passwordRequest }: RemoteAccessSettingsProps) {
+export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine, settingRequest, passwordRequest }: RemoteAccessSettingsProps) {
   const { connectionState } = controller;
   const { machines, tailnet, listError, refreshing, refresh, select, switchingId } = useMachines({
     connectionState,
@@ -48,18 +68,20 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
   });
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const openAddDevice = useAddDeviceStore((state) => state.open);
-  // A connection code lives with the Tailscale and host setup rows.
-  const [tab, setShownTab] = useState<RemoteAccessTab>(addCodeRequest !== undefined ? 'tailscale' : shownTab);
+  const requestedTab = settingRequest && tabHolding(settingRequest.setting);
+  const [tab, setShownTab] = useState<RemoteAccessTab>(requestedTab ?? shownTab);
   const setTab = (next: RemoteAccessTab) => {
     shownTab = next;
     setShownTab(next);
   };
+  const addCodeRequest = settingRequest?.setting === 'remote-add-code' ? settingRequest.nonce : undefined;
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selectError, setSelectError] = useState<string | null>(null);
   const [password, setPassword] = useState<{ id: string; value: string } | null>(null);
   // Kept here: an unlinked computer's row is gone after the reload, but its outcome may ask the person to finish elsewhere.
   const [unlinkOutcome, setUnlinkOutcome] = useState<string | null>(null);
   const handledPasswordRequest = useRef<number | null>(null);
+  const handledSettingRequest = useRef<number | null>(null);
 
   const local = machines[0];
   const here = local.name === THIS_COMPUTER ? 'this computer' : local.name;
@@ -73,6 +95,13 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
   const devices = controller.config.host.clients.filter((client) => client.kind !== 'computer').length;
   const tailnetName = tailnet?.ok ? tailnet.tailnet : null;
   const tailscaleSignedOut = tailnet?.ok === false;
+
+  // A link to a setting opens its tab; Settings then focuses it.
+  useEffect(() => {
+    if (!settingRequest || handledSettingRequest.current === settingRequest.nonce) return;
+    handledSettingRequest.current = settingRequest.nonce;
+    if (requestedTab) setTab(requestedTab);
+  }, [requestedTab, settingRequest]);
 
   // A machine routed here for its password opens its field once the listing shows it.
   useEffect(() => {

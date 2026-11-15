@@ -3,13 +3,13 @@ import type { RoutePill } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
 
 /** The pill of the route in use, by kind: its tint and its dot. */
-const IN_USE: Record<ComputerRouteKind, { pill: string; dot: string }> = {
+const IN_USE = {
   lan: { pill: 'border-status-success/40 bg-status-success/10 text-status-success', dot: 'bg-status-success' },
   tailscale: { pill: 'border-border-primary bg-surface-secondary text-text-primary', dot: 'bg-text-secondary' },
   ssh: { pill: 'border-autopilot-border bg-autopilot-subtle text-autopilot-on-tint', dot: 'bg-autopilot' },
   public: { pill: 'border-status-warning/40 bg-status-warning/10 text-status-warning', dot: 'bg-status-warning' },
   relay: { pill: 'border-interactive/40 bg-interactive/10 text-interactive-text', dot: 'bg-interactive' },
-};
+} as const satisfies Record<ComputerRouteKind, { pill: string; dot: string }>;
 
 /**
  * One pill per route, in the order Pane tries them; a dot marks the one in use, and a route that

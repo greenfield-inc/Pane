@@ -40,10 +40,11 @@ const cloudVm: RemoteComputer = {
 };
 
 const local = createDefaultRemotePaneConnectionState();
-const on = (computerId: string, status: RemotePaneConnectionState['status'], activeRouteId?: string): RemotePaneConnectionState => ({
-  ...local, mode: 'remote', status, activeProfileId: computerId, activeProfileLabel: computerId, activeBaseUrl: null,
-  ...(activeRouteId ? { activeRouteId } : {}),
-});
+const on = (computerId: string, status: RemotePaneConnectionState['status'], activeRouteId?: string): RemotePaneConnectionState => {
+  const state: RemotePaneConnectionState = { ...local, mode: 'remote', status, activeProfileId: computerId, activeProfileLabel: computerId, activeBaseUrl: null };
+  if (activeRouteId) state.activeRouteId = activeRouteId;
+  return state;
+};
 
 const listing = (machines: TailnetMachine[]): TailnetMachineList => ({ ok: true, tailnet: 'demo.github', domain: 'tail1234.ts.net', machines });
 const signedOut: TailnetMachineList = { ok: false, reason: 'Tailscale is signed out', fix: 'Open Tailscale and sign in.' };

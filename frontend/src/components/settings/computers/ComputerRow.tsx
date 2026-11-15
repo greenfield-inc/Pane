@@ -253,7 +253,7 @@ interface PasswordFormProps {
 }
 
 /** Asks for a machine's password, then connects with it. */
-export function PasswordForm({ name, value, busy, onChange, onSubmit, onCancel }: PasswordFormProps) {
+function PasswordForm({ name, value, busy, onChange, onSubmit, onCancel }: PasswordFormProps) {
   return (
     <form
       className="flex items-center gap-2"

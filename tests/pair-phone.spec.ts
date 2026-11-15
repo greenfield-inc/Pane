@@ -41,25 +41,27 @@ async function openHome(page: Page, options: ElectronApiMockOptions = {}, theme:
   await expect(page.getByRole('heading', { name: 'Use Pane on your phone' })).toBeVisible();
 }
 
+/** Home's "Pair a phone" opens Add a device on its Phone tab. */
 async function openPairDialog(page: Page) {
   await page.getByRole('button', { name: 'Pair a phone' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Pair a phone' });
+  const dialog = page.getByRole('dialog', { name: 'Add a device' });
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('tab', { name: 'Phone' })).toHaveAttribute('aria-selected', 'true');
   return dialog;
 }
 
-const qr = (page: Page) => page.getByRole('dialog', { name: 'Pair a phone' }).getByRole('img', { name: 'Pairing code' });
+const qr = (page: Page) => page.getByRole('dialog', { name: 'Add a device' }).getByRole('img', { name: 'Pairing code' });
 
 for (const theme of ['light', 'dark'] as const) {
-  test(`Home's card opens Pair a phone, which turns phone access on and shows a code (${theme})`, async ({ page }) => {
+  test(`Home's card opens Add a device on Phone, which turns phone access on and shows a code (${theme})`, async ({ page }) => {
     await openHome(page, {}, theme);
     await shot(page, `home-card-${theme}`);
     const dialog = await openPairDialog(page);
     await expect(qr(page)).toHaveAttribute('data-url', 'https://pane.example/pair#s=secret-1&c=k7q2m9&n=devbox');
-    await expect(dialog).toContainText(/Expires in (10:00|9:5\d) · works once/);
+    await expect(dialog).toContainText(/Works once · (10:00|9:5\d)/);
     expect(await calls(page, 'relay:set-enabled')).toEqual([[true]]);
     await shot(page, `dialog-code-${theme}`);
-    await dialog.getByRole('button', { name: 'Done' }).click();
+    await dialog.getByRole('button', { name: 'Close modal' }).click();
     await expect(dialog).toBeHidden();
     expect(await calls(page, 'relay:set-enabled')).toEqual([[true]]);
   });
@@ -73,7 +75,7 @@ test('a used code shows who paired and a new code', async ({ page }) => {
   await page.evaluate(() => (window as PairTestWindow).__paneTestElectronMock.emitRelayPaired('phone-1', "Sam's iPhone"));
   await expect(dialog).toContainText("Paired with Sam's iPhone");
   await expect(qr(page)).toHaveAttribute('data-url', /secret-2/);
-  await expect(dialog).toContainText(/New code · expires in/);
+  await expect(dialog).toContainText(/New code · (10:00|9:5\d)/);
   await shot(page, 'dialog-paired-dark');
 });
 
@@ -82,7 +84,7 @@ test('an expired code is replaced by a new one', async ({ page }) => {
   await openPairDialog(page);
   await expect(qr(page)).toHaveAttribute('data-url', /secret-1/);
   await expect(qr(page)).toHaveAttribute('data-url', /secret-2/, { timeout: 5_000 });
-  await expect(page.getByRole('dialog', { name: 'Pair a phone' })).toContainText(/New code · expires in 0:0\d/);
+  await expect(page.getByRole('dialog', { name: 'Add a device' })).toContainText(/New code · 0:0\d/);
 });
 
 test('waits while this computer gets ready, then shows the code', async ({ page }) => {
@@ -102,7 +104,7 @@ test('a computer that cannot reach the relay says why and retries', async ({ pag
   await shot(page, 'dialog-error-dark');
   await dialog.getByRole('button', { name: 'Try again' }).click();
   await expect.poll(async () => (await calls(page, 'relay:set-enabled')).length).toBe(2);
-  await dialog.getByRole('button', { name: 'Done' }).click();
+  await dialog.getByRole('button', { name: 'Close modal' }).click();
   await expect.poll(() => calls(page, 'relay:set-enabled')).toEqual([[true], [true], [false]]);
 });
 
@@ -116,12 +118,26 @@ async function openRemoteAccess(page: Page, options: ElectronApiMockOptions = {}
   await expect(page.getByRole('heading', { name: 'Remote Access', exact: true })).toBeVisible();
 }
 
+const remoteTab = (page: Page, name: string | RegExp) => page.getByRole('tablist', { name: 'Remote Access' }).getByRole('tab', { name });
+
+/** Phones, glasses and the relay address live on Remote Access › Phones and glasses. */
+async function openPhonesTab(page: Page) {
+  await remoteTab(page, /^Phones and glasses/).click();
+  await expect(page.getByRole('heading', { name: 'Devices' })).toBeVisible();
+}
+
 for (const theme of ['light', 'dark'] as const) {
-  test(`Remote Access lists phones and linked computers (${theme})`, async ({ page }) => {
+  test(`Remote Access lists linked computers under Computers and phones under Phones and glasses (${theme})`, async ({ page }) => {
     await openRemoteAccess(page, {}, theme);
-    await expect(page.getByText("Sam's iPhone").first()).toBeVisible();
+    await expect(remoteTab(page, /^Computers/)).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('heading', { name: 'Also linked' })).toBeVisible();
     await expect(page.getByTestId('linked-Travel Laptop')).toContainText("Linked by Sam's iPhone");
-    await page.getByRole('heading', { name: 'Devices' }).evaluate((heading) => heading.scrollIntoView({ block: 'start' }));
+    await expect(page.getByRole('button', { name: "Remove Sam's iPhone" })).toHaveCount(0);
+    await shot(page, `settings-computers-${theme}`);
+    await expect(remoteTab(page, 'Phones and glasses · 1')).toBeVisible();
+    await openPhonesTab(page);
+    await expect(page.getByRole('button', { name: "Remove Sam's iPhone" })).toBeVisible();
+    await expect(page.getByTestId('linked-Travel Laptop')).toHaveCount(0);
     await shot(page, `settings-devices-${theme}`);
     await page.getByRole('button', { name: "Remove Sam's iPhone" }).click();
     await expect(page.getByRole('menuitem', { name: /Remove from all your computers/ })).toBeVisible();
@@ -129,24 +145,28 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
-test('Devices follows changes made from another computer or a phone without reopening Settings', async ({ page }) => {
+test('Remote Access follows changes made from another computer or a phone without reopening Settings', async ({ page }) => {
   await openRemoteAccess(page);
-  await expect(page.getByRole('button', { name: "Remove Sam's iPhone" })).toBeVisible();
   await expect(page.getByTestId('linked-Travel Laptop')).toBeVisible();
+  await openPhonesTab(page);
+  await expect(page.getByRole('button', { name: "Remove Sam's iPhone" })).toBeVisible();
 
   const BUILD_BOX: RemoteDaemonClientRecord = { id: 'computer-2', label: 'Build Box', createdAt: '2026-11-03T10:00:00Z', tokenHash: 'h3', kind: 'computer', computerId: 'b6y1k3', linkedBy: "Ana's Pixel" };
   // SAFETY: installElectronApiMock installs __paneTestElectronMock before navigation.
   await page.evaluate((clients) => (window as PairTestWindow).__paneTestElectronMock.emitHostClientsChanged(clients), [BUILD_BOX]);
 
   await expect(page.getByRole('button', { name: "Remove Sam's iPhone" })).toHaveCount(0);
+  await expect(remoteTab(page, 'Phones and glasses · 0')).toBeVisible();
+  await shot(page, 'settings-devices-changed-elsewhere-dark');
+  await remoteTab(page, /^Computers/).click();
   await expect(page.getByTestId('linked-Travel Laptop')).toHaveCount(0);
   await expect(page.getByTestId('linked-Build Box')).toContainText("Linked by Ana's Pixel");
-  await page.getByRole('heading', { name: 'Devices' }).evaluate((heading) => heading.scrollIntoView({ block: 'start' }));
-  await shot(page, 'settings-devices-changed-elsewhere-dark');
+  await shot(page, 'settings-computers-changed-elsewhere-dark');
 });
 
 test('Remove from all your computers removes the phone everywhere and says where it could not', async ({ page }) => {
   await openRemoteAccess(page, { relay: { everywhere: { removed: ['devbox', 'Travel Laptop'], notReached: ['Build Box'] } } });
+  await openPhonesTab(page);
   await page.getByRole('button', { name: "Remove Sam's iPhone" }).click();
   await page.getByRole('menuitem', { name: /Remove from all your computers/ }).click();
   await expect(page.getByRole('status').filter({ hasText: "Removed Sam's iPhone from devbox and Travel Laptop." })).toContainText("Build Box didn't answer");
@@ -180,6 +200,7 @@ test('Unlinking a computer that is off says to finish on that computer', async (
 
 test('Relay address saves on Enter or leaving the field, and a bad one says how to fix it', async ({ page }) => {
   await openRemoteAccess(page);
+  await openPhonesTab(page);
   const field = page.getByRole('textbox', { name: 'Relay address' });
   await field.evaluate((input) => input.scrollIntoView({ block: 'center' }));
   await field.fill('not a host!');
@@ -193,7 +214,7 @@ test('Relay address saves on Enter or leaving the field, and a bad one says how 
   await shot(page, 'settings-more-dark');
 });
 
-test('first run ends on "Take your agents with you", which opens Pair a phone', async ({ page }) => {
+test('first run ends on "Take your agents with you", whose Pair a phone opens Add a device on Phone', async ({ page }) => {
   await installElectronApiMock(page, {
     initialProjects: [],
     initialSessions: [],
